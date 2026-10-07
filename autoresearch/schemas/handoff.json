@@ -31,6 +31,11 @@
         "changed_existing": {"type": "array", "items": {"type": "string"}}
       }
     },
+    "merge_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "follow_up_request": {"type": "string", "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "overlap": {"type": "array", "items": {"type": "string"}},
+    "conflicts": {"type": "array", "items": {"type": "string"}},
+    "superseded_by": {"type": "string", "minLength": 1},
     "state": {
       "enum": ["committed", "validated", "merged", "published", "repair", "reconcile", "superseded"]
     },
@@ -42,5 +47,13 @@
         "properties": {"state": {"type": "string"}, "at": {"type": "string"}}
       }
     }
-  }
+  },
+  "allOf": [
+    {"if": {"properties": {"state": {"enum": ["merged", "published"]}}},
+     "then": {"required": ["merge_sha"]}},
+    {"if": {"properties": {"state": {"enum": ["repair", "reconcile", "superseded"]}}},
+     "then": {"required": ["follow_up_request"]}},
+    {"if": {"properties": {"state": {"const": "superseded"}}},
+     "then": {"required": ["superseded_by"]}}
+  ]
 }

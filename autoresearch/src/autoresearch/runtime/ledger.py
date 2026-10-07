@@ -6,6 +6,7 @@ the functions in this package must not already hold it.
 """
 
 import datetime
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -35,6 +36,14 @@ def commit(canonical: Path, paths: list[Path], message: str) -> str | None:
     """Commit exactly ``paths`` (absolute, under canonical); call under the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
     return gitops.commit_paths(canonical, relative, message)
+
+
+def committed_json(canonical: Path, path: Path) -> dict | None:
+    """``path`` (absolute, under canonical) as committed at canonical HEAD, or None if absent.
+    The ledger's truth is git: a file written but not committed (a crash before the commit)
+    does not count."""
+    content = gitops.show(canonical, "HEAD", Path(path).relative_to(canonical).as_posix())
+    return None if content is None else json.loads(content)
 
 
 def now_iso() -> str:

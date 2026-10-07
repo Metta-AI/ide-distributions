@@ -47,6 +47,13 @@ def test_plan_file_and_handoff(canonical):
     assert handoff.path == ".supervisor/ledger/handoffs/K-1/r-1.json"
 
 
+def test_missing_handoff_resolves_to_the_orphan_marker(canonical):
+    write_json(canonical.layout.ledger / "orphans" / "K-1-r-2.json", {"task_id": "K-1"})
+    gitops.commit_all(canonical.root, "orphan marker")
+    resolved = resolve(canonical.root, "ar://handoff/K-1/r-2#missing")
+    assert resolved.path == ".supervisor/ledger/orphans/K-1-r-2.json"
+
+
 def test_anchor_resolves_the_document(canonical):
     resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}#d1")
     assert b"Creep damage" in resolved.content

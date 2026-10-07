@@ -14,7 +14,6 @@ returned as is and step 5 is redone. A record written but not committed (crash b
 commit) is rewritten with its receipt and committed. A new run id of the same task writes a second record.
 """
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,7 +32,13 @@ from autoresearch.runtime.handoff import (
     validate_at,
     write_handoff,
 )
-from autoresearch.runtime.ledger import canonical_lock, commit, ledger_of, now_iso
+from autoresearch.runtime.ledger import (
+    canonical_lock,
+    commit,
+    committed_json,
+    ledger_of,
+    now_iso,
+)
 
 OUTCOMES = ("done", "partial", "failed", "blocked")
 # Receipt states from which a handoff may be recorded: a first run, or a retry after an
@@ -74,13 +79,6 @@ def _checked_context(ctx: RunContext, outcome: str) -> tuple[Path, str, str]:
     return ctx.worker, ctx.card_id, ctx.run_id
 
 
-def _committed_json(canonical: Path, path: Path) -> dict | None:
-    """``path`` as committed at canonical HEAD (None if absent). The ledger's truth is git:
-    a file written but not committed (a crash before the commit) does not count."""
-    content = gitops.show(canonical, "HEAD", path.relative_to(canonical).as_posix())
-    return None if content is None else json.loads(content)
-
-
 def _load_card_meta(path: Path, task_id: str) -> tuple[dict, CardSpec]:
     if not path.exists():
         raise FinishUsageError(f"no card metadata for {task_id} at {path}")
@@ -98,7 +96,7 @@ def _load_card_meta(path: Path, task_id: str) -> tuple[dict, CardSpec]:
 def _committed_receipt(canonical: Path, request_id: str, task_id: str) -> tuple[Path, dict]:
     """The request receipt at canonical HEAD, checked to accept a handoff of ``task_id``."""
     path = receipt_path(ledger_of(canonical), request_id)
-    receipt = _committed_json(canonical, path)
+    receipt = committed_json(canonical, path)
     if receipt is None:
         raise FinishUsageError(f"request {request_id} has no committed receipt")
     if receipt["state"] not in HANDOFF_FROM_STATES:
@@ -135,7 +133,7 @@ def finish(ctx: RunContext, outcome: str) -> FinishResult:
     meta_path = card_file(ctx, task_id)
     meta, spec = _load_card_meta(meta_path, task_id)
     record_path = handoff_path(ctx.canonical, task_id, run_id)
-    existing = _committed_json(ctx.canonical, record_path)
+    existing = committed_json(ctx.canonical, record_path)
     if existing is not None:
         _mark_finished(meta_path)
         return FinishResult(ok=True, record=existing, existing=True)
@@ -166,7 +164,7 @@ def finish(ctx: RunContext, outcome: str) -> FinishResult:
         "history": [{"state": "committed", "at": now_iso()}],
     }
     with canonical_lock(ctx.canonical):
-        committed = _committed_json(ctx.canonical, record_path)
+        committed = committed_json(ctx.canonical, record_path)
         if committed is not None:  # a concurrent call for the same run won the race
             record = committed
         else:  # also repairs a pair written but left uncommitted by a crash

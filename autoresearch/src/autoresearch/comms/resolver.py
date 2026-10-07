@@ -1,7 +1,8 @@
 """Resolve ``ar://`` references against a commit of a workspace repo (never its working tree).
 
 Minimal resolver (Task 3.2): core record types ``ar://<type>/<id>`` for the types in
-``CORE_TYPES`` (claims also from ``kb/archive``), ``ar://plan``, ``ar://file/<path>`` and ``ar://handoff/<task>/<run>``. A
+``CORE_TYPES`` (claims also from ``kb/archive``), ``ar://plan``, ``ar://file/<path>`` and ``ar://handoff/<task>/<run>`` (the handoff record, or
+for a completed run that left none, the runtime's ``orphans/<task>-<run>.json`` marker). A
 ``#fragment`` is ignored here and the whole document is returned. Task 3.5 extends this with
 anchors and game-declared reference types.
 """
@@ -27,6 +28,7 @@ CORE_TYPES = (
     "evidence",
 )
 HANDOFFS_DIR = ".supervisor/ledger/handoffs"
+ORPHANS_DIR = ".supervisor/ledger/orphans"
 
 # Layout with an empty root: its properties are paths relative to the repository root.
 _RELATIVE = Layout(Path())
@@ -61,7 +63,12 @@ def _path_for(repo: Path, sha: str, uri: str, kind: str, rest: str) -> str:
     if kind == "file" and rest:
         return rest
     if kind == "handoff" and rest.count("/") == 1 and all(rest.split("/")):
-        return f"{HANDOFFS_DIR}/{rest}.json"
+        path = f"{HANDOFFS_DIR}/{rest}.json"
+        if gitops.show(repo, sha, path) is None:
+            task_id, run_id = rest.split("/")
+            orphan = f"{ORPHANS_DIR}/{task_id}-{run_id}.json"
+            return orphan if gitops.show(repo, sha, orphan) is not None else path
+        return path
     if kind in CORE_TYPES and rest and "/" not in rest:
         return _record_path(repo, sha, kind, rest)
     raise ResolveError(f"unknown or malformed reference {uri!r}")

@@ -113,7 +113,8 @@ def admit(
     return []
 
 
-def _board_epoch(ledger: Path) -> str:
+def board_epoch(ledger: Path) -> str:
+    """The current board epoch from ``ledger/board.json`` (C1, C12)."""
     path = ledger / "board.json"
     return read_json(path)["epoch"] if path.exists() else DEFAULT_BOARD_EPOCH
 
@@ -191,7 +192,7 @@ def admit_and_create(
             "request_id": spec.request_id,
             "state": "admitted",
             "mode": spec.mode,
-            "tasks": [{"task_id": task_id, "board_epoch": _board_epoch(ledger)}],
+            "tasks": [{"task_id": task_id, "board_epoch": board_epoch(ledger)}],
             "history": [{"state": "admitted", "at": now_iso()}],
         }
         with canonical_lock(canonical):
