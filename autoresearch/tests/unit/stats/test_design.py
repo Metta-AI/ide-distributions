@@ -73,3 +73,16 @@ def test_to_dict_validates():
     object.__setattr__(bad, "delta", {"nope": 1.0})
     with pytest.raises(DesignError):
         bad.to_dict()
+
+
+def test_design_without_primary_metric_is_rejected():
+    no_primary = EvaluationDesign.from_dict(DESIGN.to_dict())
+    object.__setattr__(no_primary, "metrics", DESIGN.metrics[1:])
+    with pytest.raises(DesignError, match="primary"):
+        no_primary.validate()
+    data = DESIGN.to_dict()
+    data["metrics"] = data["metrics"][1:]
+    with pytest.raises(DesignError):
+        EvaluationDesign.from_dict(data)
+    with pytest.raises(ValidationError):
+        validate(data, load_schema("evaluation_design.json"))

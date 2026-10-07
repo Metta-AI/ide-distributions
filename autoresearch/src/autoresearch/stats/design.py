@@ -47,9 +47,11 @@ class EvaluationDesign:
     noise_rev: str
 
     def validate(self) -> None:
-        """Raise DesignError unless metric names are unique, every delta key names a
-        performance metric, and baseline_version is non-empty."""
+        """Raise DesignError unless there is at least one primary metric, metric names are
+        unique, every delta key names a performance metric, and baseline_version is non-empty."""
         problems = []
+        if not any(metric.role == "primary" for metric in self.metrics):
+            problems.append("no primary metric")
         names = [metric.name for metric in self.metrics]
         for name in sorted({n for n in names if names.count(n) > 1}):
             problems.append(f"duplicate metric name {name!r}")

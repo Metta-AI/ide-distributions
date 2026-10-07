@@ -14,6 +14,7 @@ The candidate is eligible only when every check passes:
 - ``performance_slip_without_significance:<name>`` - a performance metric slipped (within
   delta) but no primary metric is significant, so no slip is allowed.
 - ``baseline_not_champion`` - ``design.baseline_version`` is not the current champion.
+- ``no_primary_metric`` - the design has no primary metric, so nothing can justify promotion.
 
 With no pairs at all only ``n_short`` (and possibly ``baseline_not_champion``) is reported.
 """
@@ -49,8 +50,9 @@ def _threshold(spec: MetricSpec, design: EvaluationDesign) -> float:
     if spec.role == "primary":
         return spec.min_effect or 0.0
     if spec.role == "agent_guardrail":
-        return -(spec.tolerance or 0.0)
-    return -design.delta.get(spec.name, 0.0)
+        return -spec.tolerance if spec.tolerance else 0.0
+    # A performance metric without a delta allows no slip at all.
+    return -design.delta[spec.name] if design.delta.get(spec.name) else 0.0
 
 
 def evaluate(
@@ -67,6 +69,8 @@ def evaluate(
     if any(candidate.policy_version != candidate_platform_id for _, candidate in pairs):
         raise ValueError(f"pairs contain a candidate other than {candidate_platform_id!r}")
     failures = []
+    if not any(spec.role == "primary" for spec in design.metrics):
+        failures.append("no_primary_metric")
     if len(pairs) < design.n_min:
         failures.append(f"n_short:{len(pairs)}<{design.n_min}")
 

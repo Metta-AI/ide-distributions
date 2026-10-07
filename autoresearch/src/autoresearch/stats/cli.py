@@ -10,11 +10,15 @@ Files under the workspace root:
   ``stats ingest`` creates or replaces the file.
 - ``stats/metric-noise.yaml``: the noise record (``stats noise``).
 - ``stats/outcomes/<E-id>.json``: the last ``stats evaluate`` outcome, with the champion and
-  candidate it was evaluated against. The promotion check reads it.
+  candidate it was evaluated against, ``rows_sha256`` (of the rows file) and ``design_sha256``
+  (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
+  detect a stale outcome by recomputing both hashes.
 """
 
 import argparse
+import hashlib
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 
@@ -32,6 +36,14 @@ from autoresearch.stats.noise import compute_noise, write_noise
 # games/ lives at the autoresearch project root, next to schemas/.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAMPION_UNKNOWN = "champion unknown: pass --champion until promotion lands"
+# A league id becomes a file name under stats/rows/, so no path separators or leading dots.
+_LEAGUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _check_league(league: str) -> str:
+    if not _LEAGUE_ID.fullmatch(league) or ".." in league:
+        raise BadArguments(f"invalid league id {league!r}: use letters, digits, '.', '_', '-'")
+    return league
 
 
 def _rows_path(layout: Layout, name: str) -> Path:
@@ -45,11 +57,22 @@ def _parse_row(line: str, where: str) -> EpisodeRow:
     except (json.JSONDecodeError, TypeError) as error:
         raise BadArguments(f"{where}: not an EpisodeRow: {error}") from None
     row.seats, row.opponents = tuple(row.seats), tuple(row.opponents)
+    if not isinstance(row.metrics, dict):
+        raise BadArguments(f"{where}: metrics must be an object")
+    for name, value in row.metrics.items():
+        # A well-formed row with a bad value is bad data, not a bad argument: ValueError is
+        # what the shared CLI runner maps to exit 1.
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"{where}: metric {name!r} is not a number: {value!r}")  # noqa: TRY004
     return row
 
 
 def _read_rows(path: Path, label: str) -> list[EpisodeRow]:
-    lines = path.read_text(encoding="utf-8").splitlines()
+    return _parse_rows(path.read_text(encoding="utf-8"), label)
+
+
+def _parse_rows(text: str, label: str) -> list[EpisodeRow]:
+    lines = text.splitlines()
     return [
         _parse_row(line, f"{label} line {number}")
         for number, line in enumerate(lines, start=1)
@@ -69,10 +92,17 @@ def _load_design(store: RecordStore, experiment: str) -> tuple[dict, EvaluationD
     return meta, EvaluationDesign.from_dict(meta["evaluation_design"])
 
 
+def _design_sha256(design: EvaluationDesign) -> str:
+    canonical = json.dumps(design.to_dict(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 # --- handlers ---
 
 
 def _ingest(args, store: RecordStore) -> int:
+    if args.league is not None:
+        _check_league(args.league)
     try:
         rows = _read_rows(Path(args.rows), args.rows)
     except OSError as error:
@@ -97,7 +127,7 @@ def _ingest(args, store: RecordStore) -> int:
 
 
 def _noise(args, store: RecordStore) -> int:
-    path = _rows_path(store.layout, args.league)
+    path = _rows_path(store.layout, _check_league(args.league))
     if not path.exists():
         raise ValueError(f"no rows for league {args.league}; run stats ingest --league first")
     metrics = [name for name in args.metrics.split(",") if name]
@@ -110,13 +140,20 @@ def _noise(args, store: RecordStore) -> int:
 
 
 def _resolve_champion(args, store: RecordStore) -> str:
-    if args.champion:
-        return args.champion
+    """The promotion module's champion when it exists (``--champion`` must then agree),
+    else ``--champion``."""
     try:
         from autoresearch.runtime.promotion import current_champion
     except ImportError:
-        raise BadArguments(CHAMPION_UNKNOWN) from None
-    return current_champion(store.layout)
+        if not args.champion:
+            raise BadArguments(CHAMPION_UNKNOWN) from None
+        return args.champion
+    champion = current_champion(store.layout)
+    if args.champion and args.champion != champion:
+        raise ValueError(
+            f"champion mismatch: --champion {args.champion} but the current champion is {champion}"
+        )
+    return champion
 
 
 def _evaluate(args, store: RecordStore) -> int:
@@ -131,13 +168,16 @@ def _evaluate(args, store: RecordStore) -> int:
             f"no rows for {args.experiment}; run stats ingest --experiment {args.experiment}"
         )
     champion = _resolve_champion(args, store)
-    pairs = pair(_read_rows(path, str(path)), design, candidate)
+    rows_bytes = path.read_bytes()
+    pairs = pair(_parse_rows(rows_bytes.decode("utf-8"), str(path)), design, candidate)
     outcome = evaluate(design, pairs, candidate, champion)
     stored = {
         "experiment": args.experiment,
         "champion": champion,
         "candidate_platform_id": candidate,
         "noise_rev": design.noise_rev,
+        "rows_sha256": hashlib.sha256(rows_bytes).hexdigest(),
+        "design_sha256": _design_sha256(design),
         **outcome.to_dict(),
     }
     _atomic_write_text(

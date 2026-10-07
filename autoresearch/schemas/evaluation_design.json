@@ -12,6 +12,7 @@
     "seeds": {"type": "array", "items": {"type": "integer"}},
     "metrics": {
       "type": "array",
+      "contains": {"type": "object", "required": ["role"], "properties": {"role": {"const": "primary"}}},
       "items": {
         "type": "object",
         "additionalProperties": false,

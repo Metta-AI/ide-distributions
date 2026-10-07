@@ -1,14 +1,17 @@
 """``autoresearch stats ...`` through the real entry point (subprocess)."""
 
+import hashlib
 import json
 import subprocess
 import sys
+import types
 from dataclasses import asdict
 
 import pytest
 import yaml
 from records.fixtures import EXP_DESIGNED
 
+from autoresearch.cli import main
 from autoresearch.paths import Layout
 from autoresearch.records.store import RecordStore
 from autoresearch.stats.design import EvaluationDesign, MetricSpec
@@ -166,6 +169,10 @@ def test_ingest_experiment_then_evaluate(tmp_path, experiment):
     stored = json.loads((root / "stats" / "outcomes" / f"{experiment}.json").read_text())
     assert stored["promote_eligible"] is True and stored["champion"] == BASE
     assert stored["candidate_platform_id"] == CAND
+    rows_bytes = (root / "stats" / "rows" / f"{experiment}.jsonl").read_bytes()
+    assert stored["rows_sha256"] == hashlib.sha256(rows_bytes).hexdigest()
+    canonical = json.dumps(design_dict(), sort_keys=True, separators=(",", ":"))
+    assert stored["design_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
 
     code, env = stats(root, "evaluate", experiment, "--champion", "pv-other")
     assert code == 0 and env["ok"] is True
@@ -224,3 +231,74 @@ def test_malformed_rows_file_is_bad_arguments(tmp_path):
         "fakegame",
     )
     assert code == 2 and "line 1" in env["error"]["message"]
+
+
+@pytest.mark.parametrize("league", ["../escape", "a/b", "..", ".hidden", ""])
+def test_league_id_with_path_parts_is_bad_arguments(tmp_path, league):
+    rows_file = write_rows(tmp_path / "rows.jsonl", league_rows())
+    code, env = stats(
+        tmp_path,
+        "ingest",
+        "--rows",
+        str(rows_file),
+        "--league",
+        league,
+        "--game-version",
+        "65",
+        "--game",
+        "fakegame",
+    )
+    assert code == 2 and "league" in env["error"]["message"]
+    code, env = stats(
+        tmp_path, "noise", "--league", league, "--game-version", "65", "--metrics", "score"
+    )
+    assert code == 2 and "league" in env["error"]["message"]
+    assert not (tmp_path / "stats").exists()
+
+
+def test_non_numeric_metric_is_failure_envelope(tmp_path):
+    rows = league_rows()
+    rows[0].metrics["score"] = "lots"
+    rows_file = write_rows(tmp_path / "rows.jsonl", rows)
+    code, env = stats(
+        tmp_path,
+        "ingest",
+        "--rows",
+        str(rows_file),
+        "--league",
+        "L1",
+        "--game-version",
+        "65",
+        "--game",
+        "fakegame",
+    )
+    assert code == 1 and env["ok"] is False
+    assert "score" in env["error"]["message"] and "line 1" in env["error"]["message"]
+
+
+@pytest.fixture
+def promotion(monkeypatch):
+    """A stand-in for autoresearch.runtime.promotion that names BASE as champion."""
+    module = types.ModuleType("autoresearch.runtime.promotion")
+    module.current_champion = lambda layout: BASE
+    monkeypatch.setitem(sys.modules, "autoresearch.runtime.promotion", module)
+
+
+def run_in_process(capsys, root, *argv):
+    code = main(["stats", *argv, "--root", str(root)])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_champion_from_promotion_and_mismatch(tmp_path, experiment, promotion, capsys):
+    root = tmp_path / "ws"
+    rows_file = write_rows(tmp_path / "rows.jsonl", experiment_rows())
+    code, env = run_in_process(
+        capsys, root, "ingest", "--rows", str(rows_file), "--experiment", experiment
+    )
+    assert code == 0, env
+    code, env = run_in_process(capsys, root, "evaluate", experiment)
+    assert code == 0 and env["data"]["champion"] == BASE and env["data"]["promote_eligible"]
+    code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
+    assert code == 0
+    code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", "pv-other")
+    assert code == 1 and "champion mismatch" in env["error"]["message"]
