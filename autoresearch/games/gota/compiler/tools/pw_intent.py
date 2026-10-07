@@ -123,13 +123,15 @@ V2_KEYS = {
 
 
 def parse_v2_line(line: str, mapping: dict) -> dict:
-    """Validate a v2 line against its build's code table, including vector lengths."""
+    """Validate numeric v2 telemetry or goal-aware PWD v3 against the exact build map."""
     import re
     parts = line.strip().split()
     if not parts or parts[0] not in V2_KEYS:
         raise IntentError("not a telemetry v2 line")
     kind = parts[0]
-    keys = ("v", *V2_KEYS[kind])
+    decision_version = mapping.get("telemetry", {}).get("decision_version", 2)
+    expected_version = decision_version if kind == "PWD" else 2
+    keys = ("v", "g", *V2_KEYS[kind]) if kind == "PWD" and decision_version == 3 else ("v", *V2_KEYS[kind])
     if len(parts) != len(keys) + 1:
         raise IntentError(f"{kind}: wrong field count")
     values = {}
@@ -139,6 +141,14 @@ def parse_v2_line(line: str, mapping: dict) -> dict:
         key, text = token.split("=", 1)
         if key != expected:
             raise IntentError(f"{kind}: expected {expected}, got {key}")
+        if key == "g":
+            goals = [] if text == "-" else text.split(",")
+            if any(goal not in mapping.get("goals", {}) for goal in goals):
+                raise IntentError("PWD.g: unknown or malformed goal id")
+            if len(goals) != len(set(goals)):
+                raise IntentError("PWD.g: duplicate goal ids")
+            values[key] = goals
+            continue
         vector = (kind == "PWD" and key in ("i", "f")) or (kind in ("PWB", "PWC") and key == "d")
         entries = text.split(",") if vector else [text]
         if any(not re.fullmatch(r"-?[0-9]+", entry) for entry in entries):
@@ -147,7 +157,7 @@ def parse_v2_line(line: str, mapping: dict) -> dict:
         if any(not -(2**31) <= number < 2**31 for number in numbers):
             raise IntentError(f"{kind}.{key}: int32 overflow")
         values[key] = numbers if vector else numbers[0]
-    if values["v"] != 2 or values["t"] < 0:
+    if values["v"] != expected_version or values["t"] < 0:
         raise IntentError("invalid version or tick")
     codes = mapping["codes"]
 
@@ -174,6 +184,11 @@ def parse_v2_line(line: str, mapping: dict) -> dict:
         expected_cap = codes["capability"][rule["capability"]] if rule else 0
         if values["c"] != expected_cap:
             raise IntentError("PWD: capability does not match rule")
+        if decision_version == 3:
+            expected_goals = rule["goal_refs"] if rule else []
+            if values["g"] != expected_goals:
+                raise IntentError("PWD: goals do not match rule")
+            values["goal_refs"] = list(values["g"])
     elif kind == "PWP":
         code("a", "adaptation", True)
         code("r", "rule")
@@ -250,7 +265,8 @@ def validate_v2_logs(root: Path, mapping: dict) -> dict:
     codec = bool(mapping.get("comms"))
     all_seen = set()
     message_counts = {key: {"sent": 0, "received": 0} for key in mapping["codes"].get("message", {})}
-    required = {"PWD." + key for key in V2_KEYS["PWD"]}
+    line_keys = mapping.get("telemetry", {}).get("lines", V2_KEYS)
+    required = {"PWD." + key for key in line_keys["PWD"]}
     for component in mapping["components"].values():
         for check in component.get("checks", []):
             required.update(item.replace("`", "") for item in check.get("reads", []) if item != "replay")
@@ -300,7 +316,7 @@ def validate_v2_logs(root: Path, mapping: dict) -> dict:
                         kinds[event["kind"]] += 1
                         if event["kind"] == "PWP" and event["a"] == 0 and event["p"] == 0:
                             snapshots.add(event["r"])
-                        seen.update(event["kind"] + "." + key for key in V2_KEYS[event["kind"]])
+                        seen.update(event["kind"] + "." + key for key in line_keys[event["kind"]])
                         if event["kind"] in ("PWB", "PWC"):
                             table, code_key = ("knowledge", "k") if event["kind"] == "PWB" else ("message", "m")
                             component = next(key for key, value in mapping["codes"][table].items() if value == event[code_key])

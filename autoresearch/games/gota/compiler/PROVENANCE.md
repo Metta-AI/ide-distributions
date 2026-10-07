@@ -52,3 +52,50 @@ Original unchanged baseline: 62 passed, 2 failed, 5 skipped with isolated pandas
 Ruff on the four-file test suite and copied Python modules finds **116 inherited diagnostics** under the destination configuration, exactly matching the same source-file set at the pin, with identical per-rule counts. Source executable modes are preserved; 14 EXE001 diagnostics also exist in pinned files with mode 100644. The new `test_vendor_layout.py` passes Ruff. No suppression or lint configuration changes were made. Source/destination diagnostic JSON was retained in `/tmp/ide-mvp-codex-task-2.1-ruff-{source,destination}.json`. The gate body is hash-verified unchanged.
 
 The copied policy-surface, AGENT, LESSONS, config, runtime, semantic evaluators, and reference are Paintbot inputs. Adaptation remains for later tasks. The original dispatcher catalog includes unsupported unrelated commands; only the focused strategy pipeline closure is vendored. No agent invocation, credential, remote action, or native execution was performed in Task 2.1.
+
+## Task 2.2 destination extension: descriptive goals
+
+Base `03bba60`; original source pin and original SHA-256 inventory above remain
+unchanged. Destination changes add `## Goals` components, rule `FOR G.id,...`, and
+rename rule roles to `AS set=role,...`; adaptation Effect FOR duration is unchanged.
+Claim, Priority (integer 0..1000), Provenance, and Status are required structured
+goal fields. Evidence, Rationale, and Checks are optional metadata. Goals compile
+no units, constants, globals, or arrays and never arbitrate gameplay.
+
+Approved wire choice: when rules carry goal annotations, PWD uses v3 with ordered
+literal `g=G.id,...` before t; unannotated rules and idle use `g=-`. No annotated
+rules means unchanged PWD v2. Rule-specific branches merge labels into the initial
+PRINT item and account for their actual item/event count and worst-case bytes.
+Longest labels participate in the existing telemetry lint bound. No new PRINT
+events are added. Other wire formats, runtime BASIC, and selection are unchanged.
+The map stores goal metadata, rule goal_refs, and an explicit decision_version;
+the strict reader validates labels against that map. Audit loading checks the map
+against committed source; reconstruction and check evidence retain attribution.
+Goal claims and G Checks have no evaluator and remain explicitly unmeasurable.
+
+C1 mechanical ruling: the pinned reader and audit closure, rather than only the
+plan's two parser/generator filenames, require destination edits to carry labels
+through real PRINT, reading, and evidence attribution. Source lab/archive inputs
+were not modified. Detailed grammar, wire schema, invariants, and limits are in
+[`docs/goal-layer.md`](docs/goal-layer.md); rulings are in
+[`compiler-goal-layer.md`](../../../docs/plans/findings/compiler-goal-layer.md).
+
+TDD: initial focused run had 23 failures and 3 passes before implementation.
+Final focused goal suite: **31 passed**. Full GotA regression before the last
+additional independent PRINT-accounting test: **182 passed, 5 skipped**;
+the five existing native-engine tests skip because the handoff binary is absent.
+Commands: `uv run --locked --with pandas pytest tests/unit/gota -q` and
+`uv run --locked --with pandas pytest tests/unit/gota/compiler/test_goal_layer.py -q`.
+The pandas overlay remains provisional; no shared dependency files were edited.
+
+Independent local comparison against `03bba60` preserves generated full policy
+bytes and all budgets for both unannotated trivial and role-bearing RICH fixtures
+(old FOR spelling at base, AS spelling in destination). Only RICH's ST.rules map
+hash changes with source spelling. Evidence is
+`/tmp/ide-mvp-codex-task-2.2-pin-v2.json`. Ruff retains the exact **116 inherited
+diagnostic identities**, with zero additions/removals or suppressions; new goal
+tests pass Ruff. Diagnostic evidence is
+`/tmp/ide-mvp-codex-task-2.2-ruff.json`. Pure tests inspect full-policy generated
+PRINT branches, bounds, maps, readers, and synthetic audit events. No engine,
+model, semantic gameplay, hosted, or policy-equivalence qualification is claimed;
+Task 2.4 remains required. Task 2.3 waits for independent review.

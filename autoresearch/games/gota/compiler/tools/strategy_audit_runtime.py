@@ -74,7 +74,8 @@ def reconstruct(strategy, mapping, events, states, seat, end_tick):
         coverage = bool(decision and t - decision['t'] < 24 and snapshot_ok)
         if not coverage:
             issues.append({'reason': 'telemetry_gap', 't': t})
-            rows.append({'t': t, 'status': 'unmeasurable', 'reason': 'telemetry_gap', 'decision': decision})
+            rows.append({'t': t, 'status': 'unmeasurable', 'reason': 'telemetry_gap', 'decision': decision,
+                         'goal_refs': []})
             last_alive = t
             continue
         transitions = []
@@ -132,7 +133,7 @@ def reconstruct(strategy, mapping, events, states, seat, end_tick):
                      'reason': None, 'selection_ok': selection_ok, 'events_ok': event_ok,
                      'priority_ok': priority_ok, 'role_ok': role_ok, 'expected_rule': expected.rule,
                      'expected_held': expected.held, 'decision': decision, 'flags': flags,
-                     'transitions': transitions})
+                     'transitions': transitions, 'goal_refs': list(decision.get('goal_refs', []))})
         # Window boundaries follow recorded activations, independently of expected selection.
         for event in cap_events:
             if event['e'] in (2, 3, 4, 5) and window:
@@ -148,7 +149,8 @@ def reconstruct(strategy, mapping, events, states, seat, end_tick):
                     if window['end'] is None:
                         window.update(end=t, end_reason='missing_end')
                     windows.append(window)
-                window = {'start': t, 'end': None, 'capability': event['c'], 'end_reason': None}
+                window = {'start': t, 'end': None, 'capability': event['c'], 'end_reason': None,
+                          'rule': decision['r'], 'goal_refs': list(decision.get('goal_refs', []))}
         if window and (t + 1, seat) in states and states[t + 1, seat]['hp'] <= 0:
             window.update(end=t + 1, end_reason='died')
         if finishes:

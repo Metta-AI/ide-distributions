@@ -151,7 +151,7 @@ RICH = TRIVIAL.replace("""- Log: x, y every 24 ticks
 - Roles half:
   - low = seats 0,1,2,3,4,5,6,7
   - high = seats 8,9,10,11,12,13,14,15""").replace("""- `R.idle` [100]: ALWAYS DO `C.idle`(hold=`C.idle`.speed)""",
-                                               """- `R.home` [500]: WHEN `S.even_phase` DO `C.home` FOR half=low
+                                               """- `R.home` [500]: WHEN `S.even_phase` DO `C.home` AS half=low
 - `R.idle` [100]: ALWAYS DO `C.idle`(hold=`C.idle`.speed)""").replace("""  - min_hold = 0 ticks -- hand-set
   - preempt_margin = 0 -- hand-set
   - interrupt_at = 1001 -- hand-set, off""", """  - min_hold = 20 ticks [0, 48, 4] -- hand-set

@@ -149,6 +149,9 @@ def audit_seat(ep, seat, states, events, runtime, issues, strategy, mapping, ref
     for key, check in evidence.checks.items():
         component = check['component']
         comp = strategy.components[component]
+        if comp.kind == 'G':
+            evidence.add(key, eid, seat, None, 'unmeasurable', 'no_evaluator_for_goal_claim')
+            continue
         if mapping.get('comms') and comp.kind == 'COM':
             continue  # Codec checks have their own source-bound evaluator.
         supported = semantics_match(component, strategy, mapping, reference) and any(binding(component, c) == check['binding']

@@ -515,13 +515,17 @@ def _print_statement(items: list[tuple]) -> str:
     return "PRINT " + "; ".join(f'"{item[1]}"' if item[0] == "lit" else item[1] for item in items)
 
 
-def pwd_items(strategy: sf.Strategy) -> list[tuple]:
+def pwd_items(strategy: sf.Strategy, goal_refs: tuple[str, ...] = ()) -> list[tuple]:
     """The PWD print items. Inputs fold to the literal 0,0,0 when no rule capability has inputs
     (st__bind then zeroes rt__in0..2 every tick) and the priority version folds to 0 when there
-    are no Adaptations (only rt__recompute changes it): the printed text is unchanged."""
+    are no Adaptations (only rt__recompute changes it). Goal-aware builds merge literal IDs
+    into the prefix, adding bytes but no PRINT items or stored state."""
     caps = len(strategy.of_kind("C"))
     folded_inputs = not any(strategy.components[r.capability].inputs for r in strategy.rules)
-    items = [("lit", "PWD v=2 t="), ("val", "worldTick", INT_BYTES),
+    prefix = "PWD v=2 t="
+    if strategy.decision_version() == 3:
+        prefix = f"PWD v=3 g={','.join(goal_refs) or '-'} t="
+    items = [("lit", prefix), ("val", "worldTick", INT_BYTES),
              ("lit", " r="), ("val", "rt__rule", _digits(len(strategy.rules))),
              ("lit", " c="), ("val", "rt__cap", _digits(caps))]
     if folded_inputs:
@@ -622,7 +626,8 @@ def log_offsets(strategy: sf.Strategy) -> tuple[dict[str, int], tuple[int, int]]
 def telemetry_worst_case(strategy: sf.Strategy) -> dict:
     """Static worst-case telemetry per tick (events, bytes), against half the engine's limits.
     The initial PWP snapshot is excluded: the runtime prints it only into leftover room."""
-    pwd = line_cost(pwd_items(strategy))
+    costs = [line_cost(pwd_items(strategy, refs)) for refs in [(), *(r.goal_refs for r in strategy.rules)]]
+    pwd = (max(cost[0] for cost in costs), max(cost[1] for cost in costs))
     plain, end = pwe_costs(strategy)  # worst tick: died or preempted, start, then done/abort
     adapt = len(strategy.of_kind("A"))
     pwp = pwp_cost(strategy)
@@ -891,9 +896,19 @@ def generate_tables(strategy: sf.Strategy, unit_subs: dict[str, dict[str, int]])
             f'PRINT "PWB v=2 t="; worldTick; " k={comp.code} d="; {_print_values(values)}',
             f"rt__pe = rt__pe + {ev}", f"rt__pb = rt__pb + {by}"])
     out += _sub("st__beliefs", beliefs)
-    items = pwd_items(strategy)
-    ev, by = line_cost(items)
-    out += _sub("st__pwd_print", [_print_statement(items), f"rt__pe = rt__pe + {ev}", f"rt__pb = rt__pb + {by}"])
+    def print_decision(goal_refs=()):
+        items = pwd_items(strategy, goal_refs)
+        ev, by = line_cost(items)
+        return [_print_statement(items), f"rt__pe = rt__pe + {ev}", f"rt__pb = rt__pb + {by}"]
+
+    decision_print = print_decision()
+    if strategy.decision_version() == 3:
+        # Labels are literals on the selected rule's branch; no strings or goal state persist.
+        decision_print = []
+        for rule in strategy.rules:
+            decision_print += _if(f"rt__rule = {rule.code}", print_decision(rule.goal_refs) + ["EXIT SUB"])
+        decision_print += print_decision()  # No selected rule.
+    out += _sub("st__pwd_print", decision_print)
     out += _sub("st__flush", flush)  # after rt__snapshot: the comms batch line (empty for legacy builds)
     return "\n".join(out).rstrip() + "\n"
 
@@ -988,6 +1003,11 @@ def build_map(strategy: sf.Strategy, units: dict[str, str], build_id: str, sourc
             entry["log_every"] = comp.log.every or None
             entry["log_offset"] = offsets.get(comp.id)
         components[comp.id] = entry
+    goal_metadata = {c.id: {"claim": c.fields["Claim"], "priority": int(c.fields["Priority"]),
+                          "provenance": c.fields["Provenance"], "status": c.status,
+                          "status_date": c.status_date, "evidence": c.fields.get("Evidence", ""),
+                          "rationale": c.fields.get("Rationale", "")}
+                     for c in strategy.of_kind("G")}
     return {
         "schema": "pw-strategy-map/1", "build_id": build_id, "source_commit": source_commit,
         "components": components, "codes": strategy.codes(),
@@ -996,14 +1016,18 @@ def build_map(strategy: sf.Strategy, units: dict[str, str], build_id: str, sourc
                    "args": {k: ({"int": a.value} if a.kind == "int" else {"ref": a.ref, "name": a.name})
                             for k, a in r.args.items()},
                    "roles": list(r.roles[1]) if r.roles else None, "role_set": r.roles[0] if r.roles else None,
-                   "condition": sf.condition_text(r.condition)} for r in strategy.rules],
+                   "condition": sf.condition_text(r.condition),
+                   **({"goal_refs": list(r.goal_refs)} if strategy.decision_version() == 3 else {})}
+                  for r in strategy.rules],
+        **({"goals": goal_metadata} if goal_metadata else {}),
         "priorities": {r.id: r.priority for r in strategy.rules},
         "adaptations": [{"id": c.id, "code": c.code, "rule": c.effect.rule, "op": c.effect.op,
                          "amount": c.effect.amount, "duration": c.effect.duration} for c in strategy.of_kind("A")],
         "commitment": dict(strategy.commitment),
         "roles": {s: {r: list(seats) for r, seats in m.items()} for s, m in strategy.roles.items()},
         "flag_words": flag_words(strategy),
-        "telemetry": {"version": 2, "lines": {k: list(v) for k, v in sf.TELEMETRY_KEYS.items()},
+        "telemetry": {"version": 2, "lines": {k: list(v) for k, v in strategy.telemetry_keys().items()},
+                      **({"decision_version": 3} if strategy.decision_version() == 3 else {}),
                       "list_keys": {"PWD": ["i", "f"], "PWB": ["d"], "PWC": ["d"]},
                       "worst_case": budget["telemetry"]},
         "runtime": {"files": {name: _sha(units[name]) for name in (*RUNTIME_FILES, COMMS_RUNTIME[0]) if name in units}},

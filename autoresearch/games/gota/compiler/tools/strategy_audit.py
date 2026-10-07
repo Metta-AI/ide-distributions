@@ -72,6 +72,11 @@ def load_build(build_id):
     for key in ('rules', 'roles', 'commitment', 'codes', 'adaptations'):
         if mapping[key] != expected[key]:
             raise pw_cli.UsageError(f'build map disagrees with committed source: {key}')
+    if mapping.get('goals', {}) != expected.get('goals', {}):
+        raise pw_cli.UsageError('build map disagrees with committed source: goals')
+    for key in ('decision_version', 'lines'):
+        if mapping['telemetry'].get(key) != expected['telemetry'].get(key):
+            raise pw_cli.UsageError(f'build map disagrees with committed source: telemetry.{key}')
     for key, comp in expected['components'].items():
         if mapping['components'][key]['checks'] != comp['checks'] or mapping['components'][key]['text_hash'] != comp['text_hash']:
             raise pw_cli.UsageError(f'build map disagrees with committed source: {key}')
@@ -168,8 +173,19 @@ class Evidence:
                        for component, entry in mapping['components'].items()
                        for i, check in enumerate(entry['checks'], 1)}
         self.rows = []
+        self.goal_refs = {}
+        self.goal_build = bool(mapping.get('goals'))
+
+    def attach_runtime(self, episode, seat, runtime):
+        """Index traced labels for check attribution, without interpreting a goal's claim."""
+        for row in runtime['ticks']:
+            self.goal_refs[episode, seat, row['t']] = list(row.get('goal_refs', []))
 
     def add(self, check, episode, seat, t, status, reason=None, **detail):
+        if self.goal_build:
+            component = self.checks[check]['component']
+            refs = [component] if component.startswith('G.') else self.goal_refs.get((episode, seat, t), [])
+            detail.setdefault('goal_refs', list(refs))
         self.rows.append({'check': check, 'episode': episode, 'seat': seat, 't': t,
                           'status': status, 'reason': reason, **detail})
 
@@ -200,6 +216,22 @@ class Evidence:
                            'reasons': dict(Counter(row['reason'] for row in rows if row['reason'])),
                            'samples': sorted(rows, key=lambda r: r['status'] == 'pass')[:5]})
         return result
+
+
+def goal_traces(mapping, runtime, issues):
+    """Attribute decision evidence to goals. Labels never prove a gameplay predicate."""
+    incomplete = bool(issues or runtime['issues'] or any(
+        row['status'] == 'unmeasurable' for row in runtime['ticks']))
+    result = {}
+    for goal, metadata in mapping.get('goals', {}).items():
+        rows = [row for row in runtime['ticks'] if goal in row.get('goal_refs', [])]
+        result[goal] = {
+            **metadata, 'decision_ticks': len(rows),
+            'rules': sorted({row['decision']['r'] for row in rows}),
+            'trace_status': 'unmeasurable' if incomplete else ('measured' if rows else 'not_exercised'),
+            'claim_status': 'unmeasurable', 'reason': 'no_evaluator_for_goal_claim',
+        }
+    return result
 
 
 def select_checks(evidence, check=None, level=None):
@@ -310,6 +342,7 @@ def run(args, report):
             seat_logs = {seat: (data[0], data[1]) for seat, data in seat_data.items()}
             for seat, (events, issues, runtime) in seat_data.items():
                 # A malformed stream cannot establish unchanged fields between its lines.
+                evidence.attach_runtime(ep.episode_id, seat, runtime)
                 raw.extend(audit_seat(ep, seat, states, events, runtime, issues, strategy, mapping, reference, evidence))
                 transport = None
                 if mapping.get('comms'):
@@ -328,7 +361,8 @@ def run(args, report):
                 summaries.append({'runtime_status': 'unmeasurable' if issues else ('fail' if runtime_counts['fail'] else 'pass'),
                                   'runtime_counts': dict(runtime_counts), 'seat': seat, 'lines': len(events), 'issues': issues,
                                   'decision_ticks': len(runtime['ticks']), 'activations': len(runtime['windows']),
-                                  'communication_transport': transport})
+                                  'communication_transport': transport,
+                                  **({'goals': goal_traces(mapping, runtime, issues)} if mapping.get('goals') else {})})
             inputs.extend({'path': str(p), 'sha256': builds.digest(p)} for p in sorted(set(paths)))
             episodes.append({'id': ep.episode_id, 'engine': ep.meta['engine_release'], 'rules': ep.meta['rules'],
                              'verified': True, 'ticks': ep.summary['ticks'], 'seats': summaries,

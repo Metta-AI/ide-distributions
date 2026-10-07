@@ -6,7 +6,8 @@ The format is defined in docs/designs/2026-09-30-strategy-file-format.md. This m
 Markdown into a typed model (`Strategy`, `Component`, `Rule`) and checks everything the compile
 loop depends on: IDs, references and layering, the machine fields that Python compiles (Params,
 Inputs, Outputs, Log, Done/Abort, Effect, Roles, rules, commitment), checks' `Reads:` coverage,
-and the telemetry v2 print budget. Python-facing contract:
+and the numeric/goal-aware telemetry print budget. The destination goal grammar and wire
+extension are documented in docs/goal-layer.md. Python-facing contract:
 docs/strategy-compiler-maintainers.md (source model and hashes).
 
     import strategy_format as sf
@@ -28,7 +29,7 @@ from pathlib import Path
 
 SECTIONS = {  # section heading -> component kind allowed in it
     "Primitives": "P", "Knowledge": "K", "Situations": "S", "Skills": "SK", "Capabilities": "C",
-    "Strategy": "ST", "Adaptations": "A", "Communication": "COM", "Open questions": None,
+    "Strategy": "ST", "Adaptations": "A", "Communication": "COM", "Goals": "G", "Open questions": None,
 }
 LLM_KINDS = ("K", "S", "C", "A", "COM")
 ST_IDS = ("ST.roles", "ST.rules", "ST.commitment")
@@ -36,13 +37,14 @@ COMMITMENT_PARAMS = ("min_hold", "preempt_margin", "interrupt_at")
 # What each kind may reference (design §3). "R" = rule IDs.
 LAYERS = {
     "P": set(), "K": {"P", "COM"}, "S": {"K"}, "SK": {"P", "K", "S"}, "C": {"K", "S", "SK"},
-    "A": {"K", "S", "R"}, "ST": {"P", "K", "S", "SK", "C", "A", "R"},
+    "A": {"K", "S", "R"}, "ST": {"P", "K", "S", "SK", "C", "A", "R", "G"}, "G": set(),
     "COM": {"P", "K", "S", "SK", "C", "A", "R", "ST"},
 }
 # Fields allowed per kind. Metadata fields (Evidence, Status, Rationale) are never compiled.
 COMMON = {"Summary", "Spec", "Uses", "Checks", "Evidence", "Status", "Rationale", "Accepts"}
 FIELDS = {
     "P": {"Summary", "Spec", "Evidence", "Status", "Rationale"},
+    "G": {"Claim", "Priority", "Provenance", "Checks", "Evidence", "Status", "Rationale"},
     "K": COMMON | {"Sources", "Memory", "Log", "Params", "Outputs"},
     "S": COMMON | {"Params", "Outputs"},
     "SK": COMMON | {"Params", "Outputs", "Code"},
@@ -67,8 +69,8 @@ DIRECTIONS = {"send": ("send",), "receive": ("recv",), "both": ("recv", "send")}
 SEATS = 16
 
 SNAKE = r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*"
-ID_RE = re.compile(rf"^(?:(?P<kind>K|S|SK|C|A|COM|ST|R)\.(?P<name>{SNAKE})|P\.(?P<pname>[A-Za-z][A-Za-z0-9_]*))$")
-REF_RE = re.compile(r"`((?:P|K|S|SK|C|A|COM|ST|R)\.[A-Za-z0-9_]+)`")
+ID_RE = re.compile(rf"^(?:(?P<kind>K|S|SK|C|A|COM|ST|R|G)\.(?P<name>{SNAKE})|P\.(?P<pname>[A-Za-z][A-Za-z0-9_]*))$")
+REF_RE = re.compile(r"`((?:P|K|S|SK|C|A|COM|ST|R|G)\.[A-Za-z0-9_]+)`")
 FIELD_RE = re.compile(r"^- (?P<name>[A-Z][A-Za-z ]*?):(?:\s+(?P<text>.*))?$")
 SUB_BULLET_RE = re.compile(r"^\s{2,}- (?P<text>.*)$")
 PARAM_RE = re.compile(
@@ -83,7 +85,9 @@ EFFECT_RE = re.compile(
 ROLE_RE = re.compile(rf"^(?P<name>{SNAKE})\s*=\s*seats\s+(?P<seats>\d+(?:\s*,\s*\d+)*)$")
 RULE_RE = re.compile(
     rf"^- `(?P<id>R\.{SNAKE})` \[(?P<prio>-?\d+)\]:\s*(?P<cond>.*?)\s+DO\s+`(?P<cap>C\.{SNAKE})`"
-    rf"(?:\((?P<args>[^)]*)\))?(?:\s+FOR\s+(?P<set>{SNAKE})\s*=\s*(?P<roles>{SNAKE}(?:\s*,\s*{SNAKE})*))?\s*$")
+    rf"(?:\((?P<args>[^)]*)\))?(?:\s+AS\s+(?P<set>{SNAKE})\s*=\s*(?P<roles>{SNAKE}(?:\s*,\s*{SNAKE})*))?"
+    rf"(?:\s+FOR\s+(?P<goals>(?:`[A-Z]+\.{SNAKE}`|[A-Z]+\.{SNAKE})"
+    rf"(?:\s*,\s*(?:`[A-Z]+\.{SNAKE}`|[A-Z]+\.{SNAKE}))*))?\s*$")
 STATUS_RE = re.compile(r"^(?P<status>[a-z]+)(?:\s*\((?P<date>\d{4}-\d{2}-\d{2})\))?\s*$")
 GUESS_RE = re.compile(r"^G-(?:K|S|SK|C|A|COM|ST)\.[a-z0-9_]+-\d+$")
 READ_RE = re.compile(rf"^(?:(?P<kind>PWD|PWP|PWE|PWC)\.(?P<key>[a-z0-9]+)|`(?P<comp>(?:K|COM)\.{SNAKE})`\.(?P<field>{SNAKE})|replay)$")
@@ -178,6 +182,7 @@ class Rule:
     roles: tuple | None
     line: int
     code: int
+    goal_refs: tuple[str, ...] = ()
 
 
 @dataclass
@@ -231,6 +236,15 @@ class Strategy:
 
     def llm_components(self) -> list[Component]:
         return [c for c in self.components.values() if c.llm]
+
+    def decision_version(self) -> int:
+        return 3 if any(r.goal_refs for r in self.rules) else 2
+
+    def telemetry_keys(self) -> dict:
+        keys = dict(TELEMETRY_KEYS)
+        if self.decision_version() == 3:
+            keys["PWD"] = ("g", *keys["PWD"])
+        return keys
 
     def codes(self) -> dict:
         """Telemetry code tables (maintainer guide: source model and hashes). 0 means none in every space."""
@@ -394,8 +408,8 @@ class _Parser:
     def fields(self, comp: Component) -> None:
         f = comp.fields
         line = comp.field_lines
-        required = ["Summary", "Status", "Spec"]
-        if comp.kind != "P":
+        required = ["Claim", "Priority", "Provenance", "Status"] if comp.kind == "G" else ["Summary", "Status", "Spec"]
+        if comp.kind not in ("P", "G"):
             required.append("Checks")
         if comp.kind == "SK":
             required.append("Code")
@@ -404,6 +418,11 @@ class _Parser:
         for name in required:
             if not f.get(name, "").strip():
                 self.error("missing-field", f"required field `{name}` is missing or empty", comp.id, comp.line)
+        if comp.kind == "G" and "Priority" in f:
+            priority = f["Priority"]
+            if not re.fullmatch(r"[0-9]+", priority) or not 0 <= int(priority) <= 1000:
+                self.error("goal-priority", "goal Priority must be an integer 0..1000 (descriptive only)",
+                           comp.id, line["Priority"])
         if "Status" in f:
             m = STATUS_RE.match(f["Status"])
             if not m or m.group("status") not in STATUSES:
@@ -587,7 +606,7 @@ class _Parser:
             m = RULE_RE.match(raw.strip())
             if not m:
                 self.error("rule-syntax", "expected - `R.id` [P]: WHEN <cond>|ALWAYS DO `C.x`(input=arg, ...) "
-                           f"[FOR set=role,...]: {raw.strip()!r}", comp.id, line_no)
+                           f"[AS set=role,...] [FOR G.id, G.id]: {raw.strip()!r}", comp.id, line_no)
                 continue
             priority = int(m.group("prio"))
             if not 0 <= priority <= 1000:
@@ -620,7 +639,9 @@ class _Parser:
             if any(r.id == m.group("id") for r in self.strategy.rules):
                 self.error("duplicate-id", f"{m.group('id')} is defined twice", comp.id, line_no)
             self.strategy.rules.append(Rule(m.group("id"), priority, condition, m.group("cap"), args, roles,
-                                            line_no, len(self.strategy.rules) + 1))
+                                            line_no, len(self.strategy.rules) + 1,
+                                            tuple(g.strip().strip("`") for g in (m.group("goals") or "").split(",")
+                                                  if g.strip())))
 
     def number_codes(self) -> None:
         for kind in ("K", "S", "C", "A", "COM"):
@@ -707,8 +728,11 @@ def condition_text(cond: Cond) -> str:
 
 def compiled_text(comp: Component, rule_lines: list[tuple[int, str]]) -> str:
     """Exactly what the compiler agent sees and what the hash covers: the ID and every
-    field except metadata, in source order; Checks contributes only its Reads lists."""
+    field except metadata, in source order; Checks contributes only its Reads lists.
+    A descriptive Goal contributes its identity only; the source/map bind its metadata."""
     out = [f"### {comp.id}"]
+    if comp.kind == "G":
+        return out[0] + "\n"  # Descriptive metadata is bound by map/source, never compiled into gameplay.
     for name, text in comp.fields.items():
         if name in METADATA_FIELDS:
             continue
@@ -800,8 +824,8 @@ def lint_strategy(strategy: Strategy) -> list[Diagnostic]:
                 if not m:
                     error("reads-syntax", f"Reads item {item!r}: use PWD.key, PWE.key, PWP.key, `K.id`.field or replay",
                           comp.id, comp.line)
-                elif m.group("kind") and m.group("key") not in TELEMETRY_KEYS[m.group("kind")]:
-                    error("reads-syntax", f"{item}: {m.group('kind')} keys are {', '.join(TELEMETRY_KEYS[m.group('kind')])}",
+                elif m.group("kind") and m.group("key") not in strategy.telemetry_keys()[m.group("kind")]:
+                    error("reads-syntax", f"{item}: {m.group('kind')} keys are {', '.join(strategy.telemetry_keys()[m.group('kind')])}",
                           comp.id, comp.line)
                 elif m.group("comp"):
                     target = comps.get(m.group("comp"))
@@ -843,6 +867,13 @@ def lint_strategy(strategy: Strategy) -> list[Diagnostic]:
         if required not in comps:
             error("missing-component", f"{required} is required")
     for rule in strategy.rules:
+        if len(set(rule.goal_refs)) != len(rule.goal_refs):
+            error("rule-goals", f"{rule.id}: duplicate goal references", "ST.rules", rule.line)
+        for goal in rule.goal_refs:
+            if not goal.startswith("G."):
+                error("rule-goals", f"{rule.id}: `{goal}` is not a Goal", "ST.rules", rule.line)
+            elif goal not in comps:
+                error("unresolved-ref", f"{rule.id}: goal `{goal}` does not exist", "ST.rules", rule.line)
         cap = comps.get(rule.capability)
         if cap is None or cap.kind != "C":
             error("unresolved-ref", f"{rule.id}: `{rule.capability}` is not a Capability", "ST.rules", rule.line)
