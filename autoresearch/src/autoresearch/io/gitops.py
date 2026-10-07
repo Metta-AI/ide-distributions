@@ -55,6 +55,9 @@ def merge_no_ff(repo: Path, sha: str, message: str) -> tuple[bool, list[str]]:
     result = _run(repo, "merge", "--no-ff", "-m", message, sha, check=False)
     if result.returncode == 0:
         return True, []
+    if _run(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode != 0:
+        # No merge in progress: this was not a conflict (bad sha, dirty tree, ...).
+        raise GitError(("merge", sha), result.stderr.decode(errors="replace"))
     conflicts = sorted(git(repo, "diff", "--name-only", "--diff-filter=U").splitlines())
     git(repo, "merge", "--abort")
     return False, conflicts
@@ -62,7 +65,10 @@ def merge_no_ff(repo: Path, sha: str, message: str) -> tuple[bool, list[str]]:
 
 def contains(repo: Path, sha: str) -> bool:
     """True if sha is an ancestor of (or equal to) HEAD."""
-    return _run(repo, "merge-base", "--is-ancestor", sha, "HEAD", check=False).returncode == 0
+    result = _run(repo, "merge-base", "--is-ancestor", sha, "HEAD", check=False)
+    if result.returncode not in (0, 1):
+        raise GitError(("merge-base", "--is-ancestor", sha), result.stderr.decode(errors="replace"))
+    return result.returncode == 0
 
 
 def push(repo: Path, remote: str, refspecs: list[str]) -> bool:

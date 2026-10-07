@@ -87,3 +87,15 @@ def test_push_success_and_failure(repo, tmp_path):
     gitops.git(repo, "remote", "add", "origin", str(remote))
     assert gitops.push(repo, "origin", ["main"]) is True
     assert gitops.push(repo, "origin", ["nonexistent-ref"]) is False
+
+
+def test_merge_no_ff_non_conflict_failure_raises_with_stderr(repo):
+    with pytest.raises(gitops.GitError) as excinfo:
+        gitops.merge_no_ff(repo, "deadbeef" * 5, "m")
+    assert "deadbeef" in excinfo.value.stderr
+    assert gitops.git(repo, "status", "--porcelain") == ""
+
+
+def test_contains_unknown_sha_raises(repo):
+    with pytest.raises(gitops.GitError):
+        gitops.contains(repo, "deadbeef" * 5)
