@@ -23,3 +23,112 @@ python3 autoresearch/games/gota/tools/count_globals.py autoresearch/tests/fixtur
 
 See `../../docs/plans/findings/gota-globals-budget.md` for submitted identity,
 source-match limits, the pinned PW runtime inventory, and the packing requirement.
+
+## Task 1.2 toolkit source manifest
+
+| File | Source path | Source commit |
+| --- | --- | --- |
+| `tools/replay_stats.py` | `gods_of_the_arena_lab/tools/replay_stats.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/compare.py` | `gods_of_the_arena_lab/tools/compare.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/miner_rows.py` | `gods_of_the_arena_lab/tools/miner_rows.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/features.py` | `gods_of_the_arena_lab/tools/features.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/lasthit_eval.py` | `gods_of_the_arena_lab/tools/lasthit_eval.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/gota_episodes.py` | `gods_of_the_arena_lab/tools/gota_episodes.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/expand_replay.nim` | `gods_of_the_arena_lab/tools/expand_replay.nim` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/build_nim.sh` | `gods_of_the_arena_lab/tools/build_expand_replay.sh` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/ab_stats.py` | `.claude/skills/coworld-ab/scripts/ab_stats.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/variance_miner.py` | `.claude/skills/coworld-hypothesis-miner/scripts/variance_miner.py` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `tools/gota_verify.nim` | `players/users/relh/co-gas/polyworld-basic/tools/gota_verify.nim` | `6742feb08f8b119591d09261cadc581065fa698b` |
+| `tools/gota_audit.nim` | `players/users/relh/co-gas/polyworld-basic/tools/gota_audit.nim` | `6742feb08f8b119591d09261cadc581065fa698b` |
+| `tools/gota_policy_replay.nim` | `players/users/relh/co-gas/polyworld-basic/tools/gota_policy_replay.nim` | `6742feb08f8b119591d09261cadc581065fa698b` |
+| `docs/game-guide.md` | `gods_of_the_arena_lab/docs/wiki/game-guide.md` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `docs/mechanics.md` | `gods_of_the_arena_lab/docs/wiki/mechanics.md` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `docs/policy-surface.md` | `gods_of_the_arena_lab/docs/wiki/policy-and-host-surface.md` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+| `docs/replay-format.md` | `gods_of_the_arena_lab/docs/replay-format.md` | `07dc6f94760fae3cf2de36877e0b6186cfd1dc63` |
+
+## Live replay adaptation and proof
+
+The starting sources above are adapted to **Polyworld 5287c437 replay API**
+(full commit `5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd`), the verified source of
+GotA `2026.10.6.1`. The live league resolves to
+`cow_162aa34f-f447-4c5d-8db3-480ec83e98f4`.
+
+- Cast kinds are `ActionCastTarget` and `ActionCastPoint`; the ability index is
+  `action.slot` (`replays.nim:24-25,119-130`). The expander and audit use that slot.
+  Audit snapshots expose live `spellsReady`; the obsolete `manualSpells` field
+  is removed. The policy replay reader already used the live slot representation.
+- The build script requires the exact recording commit and accepts a tool target.
+  It compiles with `-d:replayEvents`, root import paths, and separate target caches.
+- The expander reads engine `XpGained` and `GoldGained` events and checks their
+  per-tick and final totals against simulation state. Lane last hits and structure
+  kills use reward source identities. Nearby/shared creep XP and 200-XP structures
+  invalidate the historical `25*LH + 150*kills + 100*buildings` identity.
+  Inventory events come from the engine rather than inferred command effects.
+  Teleport scrolls are consumed when the channel starts (`sim.nim:4480-4492`).
+  Diagnostic action-prefix probes preserve the authoritative event buffer.
+- Platform results scores use `scores.nim` Emmett's Glory, while `win` remains 0/1.
+  All recorded state hashes and results XP/Glory are checked before statistics
+  are accepted. Combat victim ambiguity remains explicit; missing policy identity
+  stays unknown. Cast requests include rejected requests; they are distinct from
+  successful cast events and damage or healing.
+- `raw_spell_counts.nim` is new code based on the live replay API. It decodes the
+  tape and counts cast requests without importing the expander or re-simulating.
+  Its optional prefix export drops CPU telemetry rather than inventing truncated
+  CPU rates. The replay fixture's original state hashes remain unchanged.
+- Comparison helper imports are local. SciPy is a locked project dependency.
+  Import sorting, executable flags, and narrow lint fixes do not change statistics.
+  `features.py` retains its import-only adapter interface: `--help` exits zero but
+  emits no CLI help. `lasthit_eval.py` now requires `--manifest` and explicit
+  `--reference` unless `--mirror` is used, and invokes pinned coworld 0.1.57.
+
+Verification on 2026-10-07 with coworld 0.1.57, softmax-cli 0.26.38, Nim 2.2.10:
+
+| Recording | Checks | Outcome |
+| --- | --- | --- |
+| Plan 01 player-only probe | 28,877 hashes; results XP/Glory; reward totals; action expansion | RedTeam; red XP 26,337; blue XP 21,432 |
+| Local competition, ten downloaded official starters | 28,909 hashes; results XP/Glory; reward totals | time limit; red XP 13,502; blue XP 12,982 |
+| Independent probe spell request count | raw tape vs expanded actions, every hero | equal; hero 100: 98 vs 98 |
+| Small fixture | 1,500 original hashes; recorded statistics; raw spell request parity | PASS |
+
+The probe was read from the existing downloaded artifacts; no re-download was
+needed. Live identity readback and game download used Games Bond in a temporary
+HOME. The original credential bytes were unchanged and the temporary copy deleted.
+The ten official starter input bytes were supplied to the local runner unchanged.
+The immutable submitted v13 was also attempted and rejected by the live loader;
+that separate acceptance blocker is recorded in `gota-toolkit-drift.md`.
+
+## Historical adapter and documentation limits
+
+The copied guide, mechanics, policy surface, and replay format describe their
+pinned historical source. They are source references, not current live contracts.
+The adaptations above are the live replay contract. The historical comparison,
+miner, and LH telemetry adapters retain fixed-seat/class and telemetry-specific
+assumptions. Do not infer current open-draft classes or exact XP accounting from
+those assumptions. Use verified replay rows for live combat and XP analysis.
+Nim helper compilation is verified; no new competitive policy claim is made.
+
+## Fixture provenance
+
+`../../tests/fixtures/gota/replay_small.bin` is the first 1,500 ticks of the Plan 01
+probe (replay format 6, gameplay version 68), exported through the live encoder.
+SHA-256: `728239b80d107a2c2c57ac5fc65be4fabb5763d78abb94d622c842792d5a7a0b`;
+194,694 bytes. It is a partial recording, not a completed match.
+`replay_small.results.json` records its verified prefix state, and
+`replay_small.expected.json` records the Python statistics envelope with only
+machine-specific paths removed. These generated fixtures carry provenance here
+rather than an in-file header because headers would corrupt binary/JSON formats.
+
+Run from `autoresearch/`:
+
+```sh
+uv run --locked --python 3.12 pytest tests/unit/gota
+uv run --locked --python 3.12 ruff check games/gota/tools tests/unit/gota/test_tools.py
+sh games/gota/tools/build_nim.sh 5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd
+uv run --locked --python 3.12 python games/gota/tools/replay_stats.py EPISODE_DIR --ref 5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd --json
+sh games/gota/tools/build_nim.sh 5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd raw_spell_counts
+games/gota/tools/bin/raw_spell_counts-5287c437 EPISODE_DIR/replay
+```
+
+Native build needs Nim, Git, and network access on the first build. Cache and
+binaries stay ignored under the tools directory. Reward-only expansion is the
+fast default; `--actions` enables exact but slower acceptance probes.
