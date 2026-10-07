@@ -174,7 +174,7 @@ def test_rerun_does_not_duplicate_requests(kb_layout, game_repo):
     again = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
     assert again.requested == []
     (request,) = _requests(kb_layout)
-    assert f"reverify {old}..{new}" in request["spec"]["why"]
+    assert f"[reverify {old}..{new}]" in request["spec"]["why"]
 
 
 def test_file_absent_at_old_sha_counts_as_change(kb_layout, game_repo):

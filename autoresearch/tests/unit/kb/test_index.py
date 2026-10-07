@@ -109,3 +109,37 @@ def test_versions_view_folds_events(kb_layout):
     by_id = {r["id"]: r for r in records}
     assert [e["kind"] for e in by_id[first]["events"]] == ["uploaded"]
     assert by_id[second]["events"] == []
+
+
+GRADES = ("very_low", "low", "moderate", "high")
+
+
+def survivors(layout, budget):
+    text = write_generated(layout, token_budget=budget)[0].read_text()
+    return {line.split("]")[0][3:] for line in text.splitlines() if line.startswith("- [C-")}
+
+
+def test_truncation_order_across_grades_and_ids(tmp_path):
+    from autoresearch.paths import Layout
+
+    layout = Layout(tmp_path)
+    # Ids 100..107, two per grade, assigned so id order differs from grade order.
+    grade_of = {}
+    for n, grade in zip(range(100, 108), ("high", "low", "very_low", "moderate") * 2, strict=True):
+        grade_of[add_claim(layout, n, grade, body=f"Claim {n}.")] = grade
+    total = len(grade_of)
+    full = estimate_tokens(write_generated(layout)[0].read_text())
+
+    drop_order = sorted(
+        grade_of, key=lambda c: (GRADES.index(grade_of[c]), [-ord(ch) for ch in c])
+    )  # lowest grade first, highest id first within a grade
+    previous = set(grade_of)
+    for budget in (full - 1, full * 3 // 4, full // 2, full // 4):
+        alive = survivors(layout, budget)
+        assert alive <= previous  # monotone: tighter budget never brings a claim back
+        dropped = [c for c in drop_order if c not in alive]
+        assert dropped == drop_order[: len(dropped)]  # always a prefix of the drop order
+        assert len(dropped) == total - len(alive)
+        previous = alive
+    assert survivors(layout, full // 4) != set(grade_of)
+    assert len(survivors(layout, full - 1)) < total

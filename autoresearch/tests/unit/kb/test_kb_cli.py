@@ -1,8 +1,17 @@
+import datetime
 import json
 import subprocess
 import sys
 
-from .conftest import C_GRADE, HUB
+from autoresearch.paths import Layout
+from autoresearch.queue.card import CardSpec
+from autoresearch.queue.requests import write_request
+from autoresearch.records.store import RecordStore
+
+from .conftest import C_GOOD, C_GRADE, C_VERIF, HUB, kb_id
+from .test_staleness import _commit, game_repo  # noqa: F401  (pytest fixture)
+
+# kb_small claims C-1..C-5 are live and checked at version 65.
 
 
 def run_kb(root, *args):
@@ -41,7 +50,8 @@ def test_index_writes_views(kb_layout):
 
 def test_stale_marks_older_claims(kb_layout):
     code, out = run_kb(kb_layout.root, "stale", "--version", "66")
-    assert code == 0 and out["data"]["marked"]
+    assert code == 0
+    assert out["data"]["marked"] == [kb_id("C", n) for n in range(1, 6)]
 
 
 def test_compact_runs(kb_layout):
@@ -82,3 +92,63 @@ def test_bad_arguments_exit_2(kb_layout):
         check=False,
     )
     assert result.returncode == 2
+
+
+def test_renew_via_cli(kb_layout, game_repo):  # noqa: F811
+    repo, old = game_repo
+    new = _commit(repo, tower=7)  # inside C_VERIF's cited lines, outside C_GOOD's
+    code, out = run_kb(
+        kb_layout.root,
+        "renew",
+        "--game-repo",
+        str(repo),
+        "--old",
+        old,
+        "--new",
+        new,
+        "--version",
+        "66",
+    )
+    assert code == 0
+    assert out["data"] == {"renewed": [C_GOOD], "requested": [C_VERIF]}
+
+
+def test_compact_skips_claim_with_pending_reverification(tmp_path):
+    store = RecordStore(Layout(tmp_path))
+    long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=400)
+
+    def claim(stale):
+        meta = {
+            "kind": "mechanism",
+            "status": "belief",
+            "confidence": 0.5,
+            "evidence": [],
+            "revise_if": "x",
+            "topics": [],
+            "last_checked_version": "65",
+        }
+        if stale:
+            at = long_ago.isoformat()
+            meta |= {
+                "status": "stale",
+                "status_reason": "game version changed: 65 -> 66",
+                "status_history": [{"from": "belief", "to": "stale", "reason": "r", "at": at}],
+            }
+        return store.create("claim", meta, "A claim.")
+
+    guarded, unguarded = claim(True), claim(True)
+    for _ in range(8):
+        claim(False)
+    spec = CardSpec(
+        "",
+        "Re-verify",
+        "maintenance",
+        "changed [reverify aaa..bbb].",
+        [f"ar://claim/{guarded}"],
+        "kb-staleness",
+        "P2",
+    )
+    write_request(Layout(tmp_path), "create", spec=spec)
+    code, out = run_kb(tmp_path, "compact")
+    assert code == 0
+    assert out["data"] == {"archived": [unguarded]}

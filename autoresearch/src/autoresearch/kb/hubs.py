@@ -10,15 +10,15 @@ two hub ids, sorted and comma-joined):
 - ``HUB_OVERLAP``: two hubs' cited-claim sets have Jaccard similarity of at least 0.6 -- merge them.
 
 ``request_hub_maintenance`` writes one P2 maintenance card request per finding. The request's
-``why`` carries a marker ``hub:<code>:<entity>``; a finding whose marker is already in
+``why`` carries a marker ``[hub:<code>:<entity>]``; a finding whose marker is already in
 ``cards/requests`` gets no second request.
 """
 
-import json
 from itertools import combinations
 
 from autoresearch.kb.index import estimate_tokens
 from autoresearch.kb.lint import Finding, cited_claims, load_records
+from autoresearch.kb.requests import bracketed, has_marker, iter_request_specs
 from autoresearch.paths import Layout
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import write_request
@@ -99,27 +99,19 @@ def _marker(finding: Finding) -> str:
     return f"hub:{finding.code}:{finding.entity}"
 
 
-def _already_requested(layout: Layout, marker: str) -> bool:
-    for path in layout.card_requests.glob("*.json"):
-        spec = json.loads(path.read_text(encoding="utf-8")).get("spec") or {}
-        if marker in spec.get("why", ""):
-            return True
-    return False
-
-
 def request_hub_maintenance(layout: Layout, findings: list[Finding]) -> list[str]:
     """Write a P2 maintenance request per hub finding not yet requested; return the Q ids."""
     request_ids = []
     for finding in findings:
         marker = _marker(finding)
-        if _already_requested(layout, marker):
+        if any(has_marker(spec, marker) for spec in iter_request_specs(layout)):
             continue
         hub_ids = finding.entity.split(",")
         spec = CardSpec(
             request_id="",  # write_request assigns the id
             title=f"{_ACTION[finding.code]} hub {' and '.join(hub_ids)}",
             mode="maintenance",
-            why=f"{finding.code}: {finding.message} ({marker})",
+            why=f"{finding.code}: {finding.message} {bracketed(marker)}",
             refs=[f"ar://hub/{hub_id}" for hub_id in hub_ids],
             created_by="kb-hub-check",
             priority="P2",

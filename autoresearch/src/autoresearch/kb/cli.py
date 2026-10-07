@@ -17,7 +17,6 @@ Same envelope, exit codes and root resolution as ``autoresearch records`` (see
 
 import argparse
 import datetime
-import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -28,7 +27,7 @@ from autoresearch.kb.compaction import compact
 from autoresearch.kb.hubs import hub_flags, request_hub_maintenance
 from autoresearch.kb.index import write_generated
 from autoresearch.kb.lint import analyze
-from autoresearch.kb.staleness import mark_stale, renew_code_citations
+from autoresearch.kb.staleness import mark_stale, pending_reverification, renew_code_citations
 from autoresearch.paths import Layout
 from autoresearch.records.cli import _ok, _run
 from autoresearch.records.store import RecordStore
@@ -40,16 +39,6 @@ def _now() -> datetime.datetime:
 
 def _relative(layout: Layout, paths: list[Path]) -> list[str]:
     return [path.relative_to(layout.root).as_posix() for path in paths]
-
-
-def _pending_reverification(layout: Layout) -> set[str]:
-    """Claim refs that a re-verification request in ``cards/requests`` names."""
-    pending: set[str] = set()
-    for path in layout.card_requests.glob("*.json"):
-        spec = json.loads(path.read_text(encoding="utf-8")).get("spec") or {}
-        if "reverify" in spec.get("why", ""):
-            pending |= {ref for ref in spec.get("refs", []) if ref.startswith("ar://claim/")}
-    return pending
 
 
 # --- handlers ---
@@ -97,7 +86,7 @@ def _renew(args, store: RecordStore) -> int:
 
 
 def _compact(args, store: RecordStore) -> int:
-    archived = compact(store.layout, _now(), pending_reverify=_pending_reverification(store.layout))
+    archived = compact(store.layout, _now(), pending_reverify=pending_reverification(store.layout))
     return _ok({"archived": archived})
 
 

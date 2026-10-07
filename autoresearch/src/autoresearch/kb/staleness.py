@@ -11,7 +11,7 @@ renewed. A ``mechanism`` claim that was stale only because of the version change
 its previous status back; other kinds keep ``stale`` for lint/apply and agents to judge, since
 unchanged source does not show unchanged behaviour. A claim with any changed cited line, or a
 cited file absent at either commit, gets a P2 maintenance re-verification card request; its
-``why`` carries ``reverify <old_sha>..<new_sha>``, and a re-run that finds such a request for
+``why`` carries ``[reverify <old_sha>..<new_sha>]``, and a re-run that finds such a request for
 the claim writes no second one.
 
 Code citations are tier-S evidence entries whose ``ref`` is one of:
@@ -27,7 +27,6 @@ Every status or version change goes through ``RecordStore.update`` and gets one
 """
 
 import datetime
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +34,7 @@ from pathlib import Path
 from autoresearch.io import gitops
 from autoresearch.kb.apply import write_log
 from autoresearch.kb.lint import load_records
+from autoresearch.kb.requests import bracketed, has_marker, iter_request_specs
 from autoresearch.paths import Layout
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import write_request
@@ -48,6 +48,7 @@ _NOT_RENEWABLE = {"superseded", "refuted"}
 
 _SPEC_CITATION = re.compile(r"(?P<path>[^:@#\s]+):(?P<a>\d+)(?:-(?P<b>\d+))?@\S+")
 _SRC_CITATION = re.compile(r"src:(?P<path>[^#\s]+)#L(?P<a>\d+)(?:-L(?P<b>\d+))?")
+_REVERIFY_MARKER = re.compile(r"\[reverify [^\]\s]+\.\.[^\]\s]+\]")
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? ", re.MULTILINE)
 
 
@@ -218,11 +219,23 @@ def _reverify_marker(old_sha: str, new_sha: str) -> str:
 def _reverification_requested(layout: Layout, claim_id: str, old_sha: str, new_sha: str) -> bool:
     """True if ``cards/requests`` already holds a create request for this claim and diff."""
     marker, ref = _reverify_marker(old_sha, new_sha), f"ar://claim/{claim_id}"
-    for path in layout.card_requests.glob("*.json"):
-        spec = json.loads(path.read_text(encoding="utf-8")).get("spec") or {}
-        if ref in spec.get("refs", []) and marker in spec.get("why", ""):
-            return True
-    return False
+    return any(
+        ref in spec.get("refs", []) and has_marker(spec, marker)
+        for spec in iter_request_specs(layout)
+    )
+
+
+def pending_reverification(layout: Layout) -> set[str]:
+    """Claim ids that a re-verification request in ``cards/requests`` names."""
+    pending: set[str] = set()
+    for spec in iter_request_specs(layout):
+        if _REVERIFY_MARKER.search(spec.get("why", "")):
+            pending |= {
+                ref.removeprefix("ar://claim/")
+                for ref in spec.get("refs", [])
+                if ref.startswith("ar://claim/")
+            }
+    return pending
 
 
 def _request_reverification(layout: Layout, claim_id: str, old_sha: str, new_sha: str) -> str:
@@ -232,7 +245,7 @@ def _request_reverification(layout: Layout, claim_id: str, old_sha: str, new_sha
         mode="maintenance",
         why=(
             f"Game source lines cited by claim {claim_id} changed ("
-            f"{_reverify_marker(old_sha, new_sha)})."
+            f"{bracketed(_reverify_marker(old_sha, new_sha))})."
         ),
         refs=[f"ar://claim/{claim_id}"],
         created_by="kb-staleness",
