@@ -5,11 +5,11 @@
 Diffs a BASELINE and a CANDIDATE policy version across two matched, fresh, same-window
 experience requests and delegates statistics, verdicts, and rendering to `ab_stats`.
 
-Unit and grouping. The class per seat is fixed (seat 0 is always the Death Knight, seat
-5 always the Vanguard Knight). Current evaluations use one subject seat per episode.
+Unit and grouping. Draft classes come from verified replay enum IDs. Class and role
+grouping fail if that evidence is missing; team/all grouping remains available.
 The unit is one observation per EPISODE per GROUP: seats of the same group in
 one episode are averaged before any test, so a game is never counted twice in a group.
-`--group` picks the split: `class` (ten groups, the honest split, needs large batches),
+`--group` picks the split: `class` (ten possible classes, needs large batches),
 `role` (the five farm-priority tiers of docs/roles.md), `team` (red/blue), or `all`
 (one group, the coarse "did it move overall" view). Under the coarser splits a rate
 metric becomes the within-episode fraction of the policy's seats and is tested as a mean.
@@ -26,6 +26,9 @@ not count. `win_team_xp_lead_rate` measures that lead AND a team win over all ga
 subtracts the highest teammate XP. Incomplete teammate evidence is excluded.
 `winning_xp_mean` is raw XP times the win indicator, averaged over all games; it
 is a diagnostic, not a claim about the platform's cumulative reward formula.
+
+Historical draw_rate includes both native draw and time_limit outcomes (no winner).
+The raw outcome remains distinct in episode records.
 
 Caveat on win rate. It is a team outcome affected by the nine other seats. Historical
 multi-copy episodes must not be treated as independent hero-match observations.
@@ -89,8 +92,8 @@ METRICS = [
 ]
 def metrics_for(grouping: str, single_seat_per_group: bool = False) -> list[tuple]:
     """Seat-level rates stay Fisher-tested rates only when each episode contributes one seat
-    per group (`class`); averaged over several seats they are fractions, tested as means."""
-    if grouping == "class" or single_seat_per_group:
+    per group, regardless of grouping. Several seats yield fractions, tested as means."""
+    if single_seat_per_group:
         return METRICS
     return [(key, hib, "mean" if kind == "rate" and group is None else kind, group)
             for key, hib, kind, group in METRICS]
@@ -192,6 +195,10 @@ def load_arm(root: Path, policy: str, version: int, grouping: str,
             continue
         per_group: dict[str, list[Seat]] = {}
         for seat in seats:
+            if grouping in {"class", "role"} and seat.hero_class == "unknown":
+                raise ValueError("class/role grouping requires verified replay class evidence; "
+                                 "supply --baseline-replay-stats and --candidate-replay-stats, "
+                                 "or use --group team/all")
             per_group.setdefault(key_of(seat), []).append(seat)
         for name, group_seats in per_group.items():
             groups[name].append((group_seats, record))

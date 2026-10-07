@@ -101,10 +101,13 @@ that separate acceptance blocker is recorded in `gota-toolkit-drift.md`.
 
 The copied guide, mechanics, policy surface, and replay format describe their
 pinned historical source. They are source references, not current live contracts.
-The adaptations above are the live replay contract. The historical comparison,
-miner, and LH telemetry adapters retain fixed-seat/class and telemetry-specific
-assumptions. Do not infer current open-draft classes or exact XP accounting from
-those assumptions. Use verified replay rows for live combat and XP analysis.
+The adaptations above are the live replay contract. The comparison and miner adapters use validated native outcomes rather than
+Glory as win indicators, and verified replay enum IDs rather than historical
+fixed-seat classes. Without class evidence labels are unknown; class/role grouping
+and filters fail with a request for verified replay stats. The LH adapter reports
+classes as unknown and retains telemetry-specific accounting assumptions. Do not
+infer exact XP accounting from LH snapshots. Use verified replay rows for live
+combat and XP analysis.
 Nim helper compilation is verified; no new competitive policy claim is made.
 
 ## Fixture provenance
@@ -242,3 +245,54 @@ The generated BASIC artifact preserves the original's trailing blank line at EOF
 Git's whitespace check flags that inherited blank line when the variant is first
 added. Removing it would violate the authorized token/whitespace identity rule;
 it is retained deliberately. All other changed files pass the whitespace check.
+
+## Task 1.1 contract evidence
+
+`tests/fixtures/gota/probe_full.results.json` is the complete Plan 01 Task 0.1
+probe result, copied byte-for-byte from `/tmp/ide-mvp-task12-probe/results.json`.
+Experience request: `xreq_b0c4ff36-2d9e-4ddb-8224-9ba8fa0c2fd5`; recorded coworld
+version: `2026.10.6.1`; ticks: `28877`; outcome: `RedTeam`.
+SHA-256: `0aeacf88f6296960345201eb0895d2e87d5c9a6360864f959719fae578ccf1cc`.
+The sidecar `probe_full.provenance.json` records this origin without adding a
+header to the result bytes. `replay_small.results.json` remains a derived
+1500-tick prefix and is not the full winning result.
+
+`GAME.md`, `tools/evaluate.py`, `tools/deferred.py`, and
+`tools/resolve_segment.py` are authored here for Plan 02 Task 1.1, not copied
+from a lab. The contract reuses the existing shared gates and replay inspector.
+Build and guarded upload remain explicit staged gaps; see GAME.md.
+
+## Final Phase B analysis integration corrections
+
+Replay expansion now uses the pinned engine's `world.outcome()` helper
+(`sim.nim:3853-3859`) and checks results.json outcome before results verification.
+The authored `tools/replay_outcome.nim` boundary is shared by the expander and a
+regression using real engine World state with simultaneous god-death draw flags.
+`build_nim.sh` copies that boundary and invalidates cached binaries when it changes.
+
+Episode readers validate completed results through the GAME evaluate adapter.
+Wins follow native outcome and seat team, independent of winning Glory magnitude.
+Historical comparison/miner `draw_rate`/`draw` aggregate both native `draw` and
+`time_limit`; episode records and miner `outcome` preserve the distinction.
+Last-hit summaries report draw and timeout separately.
+
+Class ID mapping follows `HeroClass` enum order at Polyworld 5287c437
+`content.nim:26-36`. Verified replay classes populate comparison/miner records.
+Missing class evidence remains `unknown`; class/role grouping and filters require
+verified replay stats. The last-hit runner has no verified class evidence and
+prints unknown labels. The recorded prefix's seat 0 is class 6 (Crossbowman),
+not a seat-default DeathKnight. Inferred LH accounting limitations remain.
+The last-hit command resolves its manifest in the caller's directory before
+starting coworld from the distribution's games directory.
+
+No new episodes, policy changes, engine changes, or competitive claims were
+needed for these corrections. Focused tests reuse the recorded prefix and full
+winning results with synthetic completed metadata envelopes.
+
+Repeated draft classes can put several subject seats in one episode/class group.
+Comparison seat rates use mean statistics whenever the actual grouped records
+contain multiple seats; the historical class shortcut is removed. Actual one-seat
+groups retain rate statistics, and episode-level failure/draw rates remain rates.
+The shared statistics engine rejects nonintegral binary success counts; fractions
+that happen to sum to integers would otherwise pass that guard and take an
+inappropriate Fisher path. This correction changes dispatch, not that engine.

@@ -16,8 +16,10 @@ building kill, so XP-derived scores must not be "explained" by those counts):
   win         the seat's team won (0/1); a team outcome, confounded when the policy
               holds seats on both teams
 
-Seats are class-fixed, so mine one class or one role tier at a time (`--class`, `--role`)
-when the corpus is large enough; a mixed corpus attributes class identity, not behavior.
+Draft classes require verified replay stats for class/role filters. Without replay
+class evidence rows label class and role unknown. Mine one verified class or role
+at a time when the corpus is large enough. The draw flag includes native draws and
+timeouts; the outcome field preserves the native distinction.
 
 Usage:
   uv run python gods_of_the_arena_lab/tools/miner_rows.py EPISODES_DIR [...] \
@@ -65,9 +67,9 @@ def seat_row(seat, record, score_kind: str) -> dict | None:
         return None
     row = {
         "episode_id": record.episode_id, "position": seat.position,
-        "hero_class": seat.hero_class, "role": ROLE_OF_CLASS[seat.hero_class], "team": seat.team,
+        "hero_class": seat.hero_class, "role": ROLE_OF_CLASS.get(seat.hero_class, "unknown"), "team": seat.team,
         "score_kind": score_kind, "score": float(score),
-        "ticks": record.ticks, "won": seat.won, "draw": record.draw,
+        "ticks": record.ticks, "won": seat.won, "draw": record.draw, "outcome": record.outcome,
         "total_xp": seat.total_xp, "level": seat.level, "vm_error": seat.vm_error,
         "telemetry": None if telemetry is None else asdict(telemetry),
         "combat": None if seat.combat is None else asdict(seat.combat),
@@ -109,9 +111,12 @@ def main() -> int:
                 if args.replay_stats is not None and seat.combat is None:
                     dropped["seat_missing_exact_replay"] += 1
                     continue
+                if (args.classes or args.roles) and seat.hero_class == "unknown":
+                    raise ValueError("class/role filters require verified replay class evidence; "
+                                     "pass --replay-stats or omit class/role filters")
                 if args.classes and seat.hero_class not in args.classes:
                     continue
-                if args.roles and ROLE_OF_CLASS[seat.hero_class] not in args.roles:
+                if args.roles and ROLE_OF_CLASS.get(seat.hero_class, "unknown") not in args.roles:
                     continue
                 row = seat_row(seat, record, args.score)
                 if row is None:

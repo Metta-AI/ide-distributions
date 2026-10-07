@@ -25,14 +25,25 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Seat position -> hero class. Verified against polyworld content.nim at the deployed
-# commit f2ab9598 (RedHeroClasses, BlueHeroClasses). Seats 0-4 are Red, 5-9 Blue, and
-# the class per seat is fixed, so a policy's numbers depend on which seats it drew.
-SEAT_CLASSES = (
-    "DeathKnight", "Crossbowman", "Lich", "Warlock", "Berserker",
-    "VanguardKnight", "Ranger", "Arcanist", "DruidWarden", "DemonHunter",
-)
-CLASS_NAMES = list(SEAT_CLASSES)
+if __package__:
+    from .evaluate import metrics
+else:
+    from evaluate import metrics
+
+# HeroClass enum order: Polyworld 5287c437 content.nim:26-36.
+CLASS_NAMES = ["VanguardKnight", "Ranger", "Arcanist", "DruidWarden", "DemonHunter",
+               "DeathKnight", "Crossbowman", "Lich", "Warlock", "Berserker"]
+
+
+def replay_class_name(row: dict) -> str:
+    """Use a verified replay's enum ordinal; missing class evidence stays unknown."""
+    value = row.get("class")
+    if value is None:
+        return "unknown"
+    if type(value) is not int or not 0 <= value < len(CLASS_NAMES):
+        raise ValueError("invalid replay hero class; regenerate verified replay stats")
+    return CLASS_NAMES[value]
+
 
 # Coarser grouping: the farm-priority tiers of docs/roles.md (duelists first, then burst
 # killers who need levels, then siege fronts, then the Warlock, then the healer).
@@ -115,7 +126,7 @@ class EpisodeRecord:
     status: str | None
     ops_fail: bool
     known: bool                  # False when neither a failure nor a full result is on disk
-    outcome: str | None          # RedTeam | BlueTeam | time_limit
+    outcome: str | None          # RedTeam | BlueTeam | draw | time_limit
     ticks: int | None
     seed: int | None
     coworld_version: str | None
@@ -126,7 +137,8 @@ class EpisodeRecord:
 
     @property
     def draw(self) -> bool:
-        return self.outcome == "time_limit"
+        """Historical draw_rate includes native draws and timeouts (no winning team)."""
+        return self.outcome in {"draw", "time_limit"}
 
 
 def parse_spec(spec: str) -> tuple[str, int | None]:
@@ -227,6 +239,8 @@ def load_episode(directory: Path) -> EpisodeRecord | None:
                   or episode.get("failed_policy_index") is not None
                   or episode.get("failed_agent_index") is not None)
     complete = status == "completed" and len(scores) == 10 and len(total_xp) == 10
+    if complete:
+        metrics(results, 0)  # Validate the same native result contract as GAME.md.
     summary = _game_summary(directory / "game_logs.log")
     levels = summary.get("levels")
 
@@ -246,12 +260,13 @@ def load_episode(directory: Path) -> EpisodeRecord | None:
         has_log = log_path.exists()
         vm_error, telemetry = _parse_telemetry(log_path) if has_log else (None, None)
         record.seats.append(Seat(
-            episode_id=episode_id, position=position, hero_class=SEAT_CLASSES[position],
+            episode_id=episode_id, position=position, hero_class="unknown",
             team=team_of_seat(position), policy_name=participant.get("policy_name"),
             version=participant.get("version"),
             policy_version_id=participant.get("policy_version_id"),
             player_name=participant.get("player_name"),
-            won=bool(complete and scores[position] == 1),
+            won=bool(complete and results["outcome"] ==
+                     ("RedTeam" if position < 5 else "BlueTeam")),
             total_xp=total_xp[position] if complete else None,
             level=levels[position] if levels else None,
             has_log=has_log, vm_error=vm_error, telemetry=telemetry,
@@ -299,6 +314,7 @@ def load_batch(root: Path, replay_stats: Path | None = None) -> tuple[list[Episo
                 if (row["xp"] != seat.total_xp or bool(row["win"]) != seat.won
                         or row["policy_name"] != seat.policy_name):
                     raise ValueError(f"replay identity/result mismatch: {episode_id}:{seat.position}")
+                seat.hero_class = replay_class_name(row)
                 seat.combat = CombatCounts(row["last_hits"], row["hero_kills"],
                                            row["building_kills"], row["deaths"],
                                            row.get("nearby_death_share"), row.get("nearby_kill_share"))

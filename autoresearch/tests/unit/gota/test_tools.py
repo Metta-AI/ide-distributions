@@ -73,14 +73,19 @@ def test_spell_request_counts_match_independent_raw_tape(expander, tmp_path):
     assert dict(actual) == expected
 
 
-def test_replay_stats_rejects_changed_result(expander, tmp_path):
+@pytest.mark.parametrize('field,error', [('total_xp', 'score/XP mismatch for seat 0'),
+                                       ('outcome', 'outcome mismatch')])
+def test_replay_stats_rejects_changed_result(expander, tmp_path, field, error):
     import json
     import shutil
 
     fixture = ROOT / 'tests/fixtures/gota'
     shutil.copy(fixture / 'replay_small.bin', tmp_path / 'replay.bin')
     results = json.loads((fixture / 'replay_small.results.json').read_text())
-    results['total_xp'][0] += 1
+    if field == 'total_xp':
+        results[field][0] += 1
+    else:
+        results[field] = 'RedTeam'
     (tmp_path / 'results.json').write_text(json.dumps(results))
     result = subprocess.run([sys.executable, str(TOOLS / 'replay_stats.py'), str(tmp_path),
                              '--binary', str(expander), '--json'],
@@ -88,4 +93,34 @@ def test_replay_stats_rejects_changed_result(expander, tmp_path):
     assert result.returncode == 1
     report = json.loads(result.stdout)
     assert not report['episodes']
-    assert 'score/XP mismatch for seat 0' in report['errors'][0]['error']
+    assert error in report['errors'][0]['error']
+
+
+def test_native_draw_result_validation(expander, tmp_path):
+    """Exercise the expander's shared result seam with a real engine World."""
+    clone = TOOLS / '.cache/polyworld'
+    source = clone / 'examples/gods_of_the_arena/tools/lab_draw_test.nim'
+    source.write_text("""import std/json
+import sim, content, replay_outcome
+var world = World()
+world.gameOver = true
+world.draw = true
+world.winner = RedTeam
+doAssert replayOutcome(world) == "draw"
+validateOutcome(world, %*{"outcome": "draw"})
+var rejected = false
+try:
+  validateOutcome(world, %*{"outcome": "RedTeam"})
+except ValueError:
+  rejected = true
+doAssert rejected
+""")
+    binary = tmp_path / 'draw_test'
+    import os
+    env = dict(os.environ, POLYWORLD_DEPS=str(clone / 'tmp/coworld/deps'))
+    compiled = subprocess.run(['nim', 'c', '--hints:off', '--path:' + str(clone),
+                    '--path:' + str(clone / 'examples/gods_of_the_arena'),
+                    '--path:' + str(clone / 'examples/gods_of_the_arena/tools'), '-o:' + str(binary), str(source)],
+                   cwd=clone, env=env, check=False, capture_output=True, text=True)
+    assert compiled.returncode == 0, compiled.stderr
+    subprocess.run([str(binary)], check=True)

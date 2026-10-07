@@ -3,6 +3,7 @@
 ## No simulator modifications. Ambiguous identities are null; reward totals stay exact.
 import std/[json, os, strutils, sequtils]
 import zippy
+import replay_outcome
 import polyworld/[metrics, tapes]
 import ../[content, maps, replays, sim, observations, scores]
 
@@ -455,6 +456,7 @@ proc main() =
   var resultsVerified = false
   if fileExists(resultsPath):
     let expected = parseFile(resultsPath)
+    validateOutcome(game.world, expected)
     if expected["ticks"].getInt != game.world.tick:
       fail("results.json tick mismatch")
     if expected["scores"].len != rows.len or expected["total_xp"].len != rows.len:
@@ -467,7 +469,7 @@ proc main() =
   output.emit(%*{"verified": true, "attribution_complete": attributionComplete,
     "actions_enabled": actionsEnabled, "results_verified": resultsVerified, "hash_failed": false, "ticks": game.world.tick,
     "actions_consumed": data.actions.len,
-    "outcome": (if game.world.gameOver: $game.world.winner else: "time_limit"),
+    "outcome": replayOutcome(game.world),
     "heroes": rows}, game.world.tick, "replay", "summary")
 
 try: main()

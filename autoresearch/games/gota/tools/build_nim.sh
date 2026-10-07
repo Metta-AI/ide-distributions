@@ -20,7 +20,8 @@ case "$TARGET" in
 esac
 SHORT=$(printf '%s' "$COMMIT" | cut -c1-8)
 OUT="$TOOLS/bin/$TARGET-$SHORT"
-if [ -x "$OUT" ] && [ "$OUT" -nt "$TOOLS/$TARGET.nim" ] && [ "$OUT" -nt "$0" ]; then
+if [ -x "$OUT" ] && [ "$OUT" -nt "$TOOLS/$TARGET.nim" ] &&
+    [ "$OUT" -nt "$0" ] && [ "$OUT" -nt "$TOOLS/replay_outcome.nim" ]; then
   echo "$OUT"
   exit 0
 fi
@@ -36,6 +37,7 @@ git -C "$CLONE" checkout -q "$COMMIT"
 export POLYWORLD_DEPS="$CLONE/tmp/coworld/deps"
 # Compile from inside the clone so its config.nims applies (dependency paths),
 # with the game modules and our source on the path.
+cp "$TOOLS/replay_outcome.nim" "$CLONE/examples/gods_of_the_arena/tools/replay_outcome.nim"
 cp "$TOOLS/$TARGET.nim" "$CLONE/examples/gods_of_the_arena/tools/lab_$TARGET.nim"
 (cd "$CLONE" && nim c --hints:off --path:. -d:release -d:replayEvents --nimcache:"$CACHE/nimcache-$TARGET-$SHORT" \
   -o:"$OUT" examples/gods_of_the_arena/tools/lab_$TARGET.nim)

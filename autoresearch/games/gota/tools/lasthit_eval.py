@@ -9,6 +9,8 @@ starter allies/opponents, and --label-candidate/--label-reference
 for display names. Rate columns average per-seat rates using final episode ticks.
 LH fields are last observed snapshots, not necessarily final-match counters.
 Missing telemetry stays unknown; XP never substitutes for footman last hits.
+Class labels remain unknown: these runner results and LH logs contain no verified
+draft class evidence. Native draws and timeouts are reported separately.
 """
 
 from __future__ import annotations
@@ -26,8 +28,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-# content.nim at f2ab9598: RedHeroClasses then BlueHeroClasses, enum ordinals.
-SEAT_CLASSES = (5, 6, 7, 8, 9, 0, 1, 2, 3, 4)
 
 
 @dataclass
@@ -51,7 +51,7 @@ class Telemetry:
 class SeatRecord:
     episode: str
     seat: int
-    hero_class: int
+    hero_class: str
     side: str
     policy: str
     policy_path: str
@@ -99,7 +99,7 @@ def parse_episode(directory: Path, candidate_red: bool, candidate: Path,
         issues.append('results require ten nonnegative integer total_xp values')
         xp = [None] * 10
     outcome = result.get('outcome')
-    if outcome not in ('RedTeam', 'BlueTeam', 'time_limit'):
+    if outcome not in ('RedTeam', 'BlueTeam', 'draw', 'time_limit'):
         issues.append(f'unknown or missing outcome: {outcome!r}')
         outcome = None
     players = status.get('players', [])
@@ -112,7 +112,7 @@ def parse_episode(directory: Path, candidate_red: bool, candidate: Path,
     for seat in range(10):
         is_candidate = seat in roster
         record = SeatRecord(
-            episode=str(directory), seat=seat, hero_class=SEAT_CLASSES[seat],
+            episode=str(directory), seat=seat, hero_class='unknown',
             side='Red' if seat < 5 else 'Blue',
             policy='candidate' if is_candidate else 'reference',
             policy_path=str(candidate if is_candidate else reference),
@@ -209,13 +209,13 @@ def report(records: list[SeatRecord], label_candidate: str = 'candidate',
         teams = {(r.episode, r.side): r for r in rows}
         outcomes = Counter()
         for row in teams.values():
-            if row.outcome in (None, 'time_limit'):
+            if row.outcome in (None, 'draw', 'time_limit'):
                 outcome = row.outcome or 'unavailable'
             else:
                 outcome = 'win' if row.outcome == row.side + 'Team' else 'loss'
             outcomes[outcome] += 1
         counts = ', '.join(f'{name}={outcomes[name]}' for name in
-                           ('win', 'loss', 'time_limit', 'unavailable'))
+                           ('win', 'loss', 'draw', 'time_limit', 'unavailable'))
         print(f'{labels[policy]}: mean last hits/1,000 ticks={mean_field(rows, "lastHits", rate=True)}; '
               f'mean XP/1,000 ticks={mean_field(rows, "total_xp", rate=True)}; '
               f'mean last hits/hero-match={mean_field(rows, "lastHits")}; '
@@ -281,7 +281,7 @@ def main() -> int:
         directory = out / ('mirror' if args.mirror else 'candidate-red' if candidate_red else 'candidate-blue')
         roster = candidate_seats(candidate_red, mirror=args.mirror, mixed=args.mixed)
         players = [snapshots['candidate' if seat in roster else 'reference'] for seat in range(10)]
-        command = ['uv', 'run', '--with', 'coworld==0.1.57', 'coworld', 'run-episode', str(args.manifest),
+        command = ['uv', 'run', '--with', 'coworld==0.1.57', 'coworld', 'run-episode', str(args.manifest.resolve()),
                    *map(str, players), '--variant', 'competition',
                    '--output-dir', str(directory), '--timeout-seconds', '900', '-n', str(args.episodes)]
         print('Running: ' + shlex.join(command), flush=True)
