@@ -2,11 +2,14 @@ import math
 
 import pytest
 import yaml
+from records.fixtures import EXP_DESIGNED
 
 from autoresearch.games.loader import Game, GameMetric
 from autoresearch.io.gitops import git
 from autoresearch.paths import Layout
+from autoresearch.records.store import RecordStore
 from autoresearch.stats.bootstrap import paired_bootstrap_ci
+from autoresearch.stats.design import DesignError, EvaluationDesign
 from autoresearch.stats.freeze import freeze_design
 from autoresearch.stats.ingest import EpisodeRow
 from autoresearch.stats.noise import NoiseError, compute_noise, load_noise, sd_for, write_noise
@@ -153,16 +156,15 @@ def noise_record():
     }
 
 
-META = {
-    "evaluation_design_request": {
-        "baseline_version": "pv-base",
-        "seats": [0, 1],
-        "opponents": ["pv-opp"],
-        "seeds": [1, 2, 3],
-        "primary_metrics": [{"name": "hits", "direction": "up", "min_effect": 2.0}],
-        "guardrails": [{"name": "deaths", "direction": "down", "tolerance": 0.05}],
-    }
+REQUEST = {
+    "baseline_version": "pv-base",
+    "seats": [0, 1],
+    "opponents": ["pv-opp"],
+    "seeds": [1, 2, 3],
+    "primary_metrics": [{"name": "hits", "direction": "up", "min_effect": 2.0}],
+    "guardrails": [{"name": "deaths", "direction": "down", "tolerance": 0.05}],
 }
+META = {"evaluation_design_request": REQUEST}
 
 
 def test_freeze_design_values(layout):
@@ -174,22 +176,68 @@ def test_freeze_design_values(layout):
     assert design.game_version == "65"
 
 
-def test_freeze_design_noise_rev_from_record():
-    record = {**noise_record(), "_rev": "from-record"}
-    assert freeze_design(META, make_game(), record, 100).noise_rev == "from-record"
-    with pytest.raises(NoiseError):
-        freeze_design(META, make_game(), noise_record(), 100)
+def test_freeze_design_bad_input_raises_design_error():
+    game, noise = make_game(), noise_record()
+    with pytest.raises(DesignError, match="evaluation_design_request"):
+        freeze_design({}, game, noise, 100, noise_rev="r")
+    broken = {"evaluation_design_request": {k: v for k, v in REQUEST.items() if k != "seeds"}}
+    with pytest.raises(DesignError, match="seeds"):
+        freeze_design(broken, game, noise, 100, noise_rev="r")
+    empty = {"evaluation_design_request": {**REQUEST, "primary_metrics": []}}
+    with pytest.raises(DesignError, match="primary_metrics"):
+        freeze_design(empty, game, noise, 100, noise_rev="r")
+    object.__setattr__(game, "performance_guardrails", ["not_a_metric"])
+    with pytest.raises(DesignError, match="not_a_metric"):
+        freeze_design(META, game, noise, 100, noise_rev="r")
+    with pytest.raises(DesignError, match="noise_rev"):
+        freeze_design(META, make_game(), noise, 100, noise_rev="")
 
 
 def test_frozen_design_unchanged_after_later_write_noise(layout):
-    write_noise(layout, noise_record())
-    rev = write_noise(layout, noise_record())
-    frozen = freeze_design(
-        META, make_game(), load_noise(layout, "65"), 100, noise_rev=rev
-    ).to_dict()
-    snapshot = repr(frozen)
+    store = RecordStore(layout)
+    rev1 = write_noise(layout, noise_record())
+    design_a = freeze_design(META, make_game(), load_noise(layout, "65"), 100, noise_rev=rev1)
+    exp = store.create("experiment", {**EXP_DESIGNED, "evaluation_design": design_a.to_dict()})
+
     louder = noise_record()
-    louder["metrics"]["glory"]["marginal_sd"] *= 5
-    write_noise(layout, louder)
-    assert repr(frozen) == snapshot
-    assert frozen["delta"]["glory"] == pytest.approx(0.5)
+    for entry in louder["metrics"].values():
+        entry["marginal_sd"] *= 5
+    rev2 = write_noise(layout, louder)
+    assert rev2 != rev1
+
+    stored = EvaluationDesign.from_dict(store.load(exp)[0]["evaluation_design"])
+    assert stored.noise_rev == rev1
+    assert stored.delta["glory"] == pytest.approx(0.5)
+    fresh = freeze_design(META, make_game(), load_noise(layout, "65"), 100, noise_rev=rev2)
+    assert fresh.noise_rev == rev2
+    assert fresh.delta["glory"] == pytest.approx(2.5)
+
+
+def test_delta_and_min_episodes_reject_bad_inputs():
+    for bad in (0, -1, float("nan")):
+        with pytest.raises(NoiseError, match="sd"):
+            delta(bad, 100)
+        with pytest.raises(NoiseError, match="sd"):
+            min_episodes(bad, 2)
+        with pytest.raises(NoiseError, match="min_effect"):
+            min_episodes(10, bad)
+    with pytest.raises(NoiseError, match="n_planned"):
+        delta(10, 0)
+
+
+def test_sd_for_rejects_nan():
+    with pytest.raises(NoiseError):
+        sd_for(record_with(0, None, marginal_sd=float("nan")), "score")
+
+
+def test_compute_noise_missing_metric_raises():
+    with pytest.raises(NoiseError, match="nope"):
+        compute_noise(paired_rows(5), ["nope"], "65", [])
+
+
+@pytest.mark.parametrize("text", ["", "[]", "game_version: '65'\n", "metrics: 3\n"])
+def test_load_noise_malformed_raises(layout, text):
+    layout.stats.mkdir(parents=True, exist_ok=True)
+    (layout.stats / "metric-noise.yaml").write_text(text)
+    with pytest.raises(NoiseError, match="malformed"):
+        load_noise(layout, "65")

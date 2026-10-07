@@ -10,10 +10,13 @@ store that revision in their frozen design, so recalibrating never changes an ex
 """
 
 import itertools
+import json
+import math
 import statistics
 from datetime import UTC, datetime
 from pathlib import Path
 
+import jsonschema
 import yaml
 
 from autoresearch.io.docs import _atomic_write_text
@@ -22,6 +25,7 @@ from autoresearch.paths import Layout
 from autoresearch.stats.ingest import EpisodeRow
 
 MIN_PAIRS_FOR_PAIRED_SD = 10
+_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "metric-noise.json"
 
 
 class NoiseError(ValueError):
@@ -42,6 +46,9 @@ def _paired_diffs(rows: list[EpisodeRow], metric: str) -> list[float]:
 
 
 def _metric_entry(rows: list[EpisodeRow], metric: str) -> dict:
+    lacking = [row.episode_id for row in rows if metric not in row.metrics]
+    if lacking:
+        raise NoiseError(f"metric {metric!r} is missing from rows: {lacking[:3]}")
     values = [row.metrics[metric] for row in rows]
     if len(values) < 2:
         raise NoiseError(f"metric {metric!r}: need at least 2 rows, have {len(values)}")
@@ -94,7 +101,11 @@ def load_noise(layout: Layout, game_version: str) -> dict:
     path = _noise_path(layout)
     if not path.exists():
         raise NoiseError(f"no noise record at {path}; calibrate noise first")
-    record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        record = yaml.safe_load(path.read_text(encoding="utf-8"))
+        jsonschema.validate(record, json.loads(_SCHEMA_PATH.read_text(encoding="utf-8")))
+    except (yaml.YAMLError, jsonschema.ValidationError) as error:
+        raise NoiseError(f"malformed noise record {path}: {error}") from error
     if record.get("game_version") != game_version:
         raise NoiseError(
             f"noise record is for game version {record.get('game_version')!r}, "
@@ -113,6 +124,6 @@ def sd_for(record: dict, metric: str) -> float:
         sd = paired
     else:
         sd = entry["marginal_sd"] * 2**0.5
-    if not sd:
-        raise NoiseError(f"metric {metric!r} has zero or missing sd; recalibrate")
+    if not math.isfinite(sd) or sd <= 0:
+        raise NoiseError(f"metric {metric!r} has zero or non-finite sd; recalibrate")
     return sd
