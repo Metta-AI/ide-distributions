@@ -1,0 +1,63 @@
+# Shipped defaults. Hermes keeps this file on update; bootstrap re-applies the
+# "always" rows of contract C9 with `hermes config set`.
+model:
+  default: moonshotai/kimi-k3
+  provider: openrouter
+fallback_providers:
+  - provider: openrouter
+    model: z-ai/glm-5.3
+
+# These rows govern `hermes -p autoresearch kanban dispatch` and profile tools only.
+# The host gateway runs one dispatcher with the host default profile's kanban.*
+# config (amendment A3); queue-keeper preflight checks that config.
+kanban:
+  max_in_progress: 2
+  auto_decompose: false
+  review_dispatch: false
+  auto_subscribe_on_create: false
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  write_approval: false
+
+auxiliary:
+  background_review:
+    enabled: false
+
+tool_loop_guardrails:
+  hard_stop_enabled: true
+
+agent:
+  max_turns: 150
+  run_budget_seconds: 2700
+
+approvals:
+  mode: "off"
+  # Hermes matches these over the whole command and over each command word's tail
+  # (tools/approval_detection.py _deny_command_variants), before mode and not
+  # overridable. Anchor to a command start so text that only mentions a phrase
+  # (a commit message, a summary) is not blocked.
+  deny:
+    - "coworld player use*"
+    - "coworld submit*"
+    - "coworld upload-policy*"
+    - "coworld xp-request create*"
+    - "softmax login*"
+    - "git push -f*"
+    - "git push*--force*"
+    - "git push* -f*"
+
+terminal:
+  env_passthrough:
+    - SOFTMAX_PLAYER_CREDENTIAL
+    - AUTORESEARCH_PLAYER_ID
+    - AUTORESEARCH_WORKSPACE
+    - AUTORESEARCH_WORKSPACE_REMOTE
+    - AUTORESEARCH_GAME
+    - AUTORESEARCH_SOFTMAX
+    - AUTORESEARCH_CLI
+
+plugins:
+  enabled:
+    - autoresearch

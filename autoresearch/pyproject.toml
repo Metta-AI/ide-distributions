@@ -10,6 +10,8 @@ dependencies = [
     "PyYAML",
     "python-ulid",
     "scipy",
+    "coworld==0.1.57",
+    "softmax-cli==0.26.38",
 ]
 
 [project.scripts]

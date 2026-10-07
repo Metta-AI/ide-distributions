@@ -8,6 +8,11 @@ validation calls it on git snapshots, so it must depend only on the two Docs.
 Creation (and ``records validate``) checks content only: schema and per-entity content rules.
 Updates also check transition rules: immutability, frozen design, set-once fields,
 append-only lists, and status graphs with recorded reasons.
+
+``move_problems(entity, before, after)`` judges an archive move (the record deleted from its
+directory and re-added under the same id in its archive directory) as one update: the normal
+update rules, plus the body and front matter (status included, System Design §3.5) stay as
+they were except the ``ARCHIVE_FIELDS`` it must add. ``ARCHIVE_FIELDS`` are set once.
 """
 
 from dataclasses import dataclass
@@ -81,10 +86,12 @@ APPEND_ONLY: dict[str, tuple[str, ...]] = {
 
 SET_ONCE: dict[str, tuple[str, ...]] = {
     "experiment": ("decision",),
-    "claim": ("superseded_by",),
+    "claim": ("superseded_by", "archived_at", "archive_reason"),
 }
 
 DECISIONS_HEADING = "## Decisions"
+
+ARCHIVE_FIELDS = ("archived_at", "archive_reason")
 
 
 def check_change(entity: str, before: Doc | None, after: Doc | None) -> list[str]:
@@ -103,6 +110,26 @@ def check_change(entity: str, before: Doc | None, after: Doc | None) -> list[str
     if before is not None:
         before = (normalize(before[0]), before[1])
         problems += transition_problems(entity, before, after)
+    return problems
+
+
+def move_problems(entity: str, before: Doc, after: Doc) -> list[str]:
+    record_id = before[0].get("id", "?")
+    problems = check_change(entity, before, after)
+    old, new = normalize(before[0]), normalize(after[0])
+    if before[1].strip() != after[1].strip():
+        problems.append(f"archiving {entity} {record_id} must not change its body")
+    edited = sorted(
+        key for key in {*old, *new} - set(ARCHIVE_FIELDS) if old.get(key) != new.get(key)
+    )
+    if edited:
+        problems.append(
+            f"archiving {entity} {record_id} may only add {', '.join(ARCHIVE_FIELDS)}; "
+            f"it also changed {', '.join(edited)}"
+        )
+    for name in ARCHIVE_FIELDS:
+        if not new.get(name):
+            problems.append(f"archiving {entity} {record_id} needs {name}")
     return problems
 
 

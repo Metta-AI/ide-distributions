@@ -1,0 +1,4 @@
+Error: Request failed (402) for /v2/experience-requests: The owning account cannot admit this experience request under its current credit allowance
+Next: read the detail above.
+Request id: 00000000-0000-4000-8000-000000000402
+Docs: https://softmax.com/docs/guides/error-handling

@@ -26,7 +26,10 @@ silent fallback. Core code never names a game.
 - `name`: the game directory name.
 - `bindings`: command-line strings for `build`, `local_check`, `upload`, `evaluate` and
   `replay_inspect`. Relative paths resolve from the repo root. All five are required.
-- `reference_types`: extra reference types, each mapped to a resolver script path. May be `{}`.
+- `reference_types`: extra reference types (`ar://<type>/<id>`), each mapped to a resolver
+  command run from the repo root as `<command> <id>`, with `AUTORESEARCH_WORKSPACE` and
+  `AUTORESEARCH_REV` set. Exit 0 with the content on stdout, or non-zero if not found. A type
+  never shadows a core type. May be `{}`.
 - `outcome_metrics`: list of `{name, direction}`; direction is `up` (higher is better) or `down`.
 - `performance_guardrails`: metric names that must not regress. Each must be in `outcome_metrics`.
 - `min_episodes_floor`: lowest allowed N (episodes per comparison). Measured noise may raise it.

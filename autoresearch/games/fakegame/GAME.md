@@ -6,7 +6,8 @@ bindings:
   upload: python3 games/fakegame/tools/fake_build.py --upload
   evaluate: python3 games/fakegame/tools/fake_eval.py
   replay_inspect: python3 games/fakegame/tools/fake_eval.py --replay
-reference_types: {}
+reference_types:
+  replay: python3 games/fakegame/tools/fake_ref.py
 outcome_metrics:
   - {name: score, direction: up}
   - {name: errors, direction: down}

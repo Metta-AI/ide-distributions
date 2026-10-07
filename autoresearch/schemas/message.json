@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/message.json",
+  "title": "Outbound message, schema ar-comms/0 (Overview C5, System Design 7). Staged by a worker at comms/staged/<M-id>.json, published by the runtime at comms/outbox/<seq:08d>-<M-id>.json. Versioning is additive within ar-comms/0: writers may add optional fields and new kinds, and readers must ignore unknown fields and unknown kinds. Known kinds: note, highlight, question, help_request, suggestion, decision, seen. Writers check the kind against that list (autoresearch.comms.envelope.KINDS); this schema does not, so a reader that validates with it accepts a newer kind.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "id", "kind", "title", "body", "refs", "from", "created_at"],
+  "properties": {
+    "schema": {"const": "ar-comms/0"},
+    "id": {"type": "string", "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "kind": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "body": {"type": "string"},
+    "refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["uri", "rev"],
+        "properties": {
+          "uri": {"type": "string", "pattern": "^ar://"},
+          "rev": {
+            "description": "Workspace commit the reference is read at. A staged message may use \"@result\" (the commit its card merges as); the publisher replaces it with the merge SHA.",
+            "type": "string",
+            "pattern": "^(@result|[0-9a-f]{40})$"
+          },
+          "role": {"description": "Known roles: subject, evidence, context.", "type": "string"},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "in_reply_to": {"description": "Id of the message or inbound (I-id) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[MI]-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "thread": {"type": "string", "minLength": 1},
+    "urgency": {"type": "string", "minLength": 1},
+    "from": {"enum": ["agent", "runtime"]},
+    "seq": {"description": "Outbox only: the gap-free sequence number.", "type": "integer", "minimum": 1},
+    "published_rev": {"description": "Outbox only: canonical commit the message was published at (the merge SHA for a staged message).", "type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "created_at": {"type": "string", "minLength": 1}
+  }
+}

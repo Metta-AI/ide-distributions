@@ -115,7 +115,9 @@ class FakeSoftmax:
                     "experiment": experiment,
                     "batch": batch,
                     "attempt": attempt,
-                    "episodes": int(spec.get("episodes", DEFAULT_EPISODES)),
+                    "episodes": int(
+                        spec.get("num_episodes", spec.get("episodes", DEFAULT_EPISODES))
+                    ),
                     "polls": 0,
                 }
                 state["credits"] = max(0, state["credits"] - 1)

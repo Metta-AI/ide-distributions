@@ -7,7 +7,7 @@ writers to the canonical workspace hold ``canonical.lock`` themselves.
 """
 
 import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import yaml
@@ -15,18 +15,22 @@ import yaml
 from autoresearch.ids import new_id
 from autoresearch.io.docs import read_doc, read_json, write_doc, write_json
 from autoresearch.paths import Layout
-from autoresearch.records.mutability import STATUS_RULES, check_change
+from autoresearch.records.mutability import STATUS_RULES, check_change, move_problems
 from autoresearch.records.registry import (
     REGISTRY,
     Doc,
+    archive_dir,
     entity_of_id,
     event_path,
     in_record_dir,
+    is_archived_path,
     iter_record_files,
     normalize,
     parse_record_path,
     path_for,
 )
+
+Change = tuple[str, Doc | None, Doc | None]  # (path relative to the root, before, after)
 
 
 class RecordNotFound(LookupError):
@@ -142,6 +146,23 @@ class RecordStore:
             raise RecordProblems([f"{field} is not a list field"])
         self.update(id_, {field: [*current, target]})
 
+    def archive(self, id_: str, reason: str, now: datetime.datetime) -> Path:
+        """Move a record into its entity's archive directory, keeping its id, file name, status,
+        links and body, and adding ``archived_at`` and ``archive_reason``. Return the new path."""
+        entity = entity_of_id(id_).name
+        target_dir = archive_dir(self.layout, entity)
+        if target_dir is None:
+            raise RecordProblems([f"{entity} has no archive"])
+        path = self.path_of(id_)
+        if path.parent == target_dir:
+            raise RecordProblems([f"{entity} {id_} is already archived"])
+        before = self._read(entity, path)
+        after = ({**before[0], "archived_at": now.isoformat(), "archive_reason": reason}, before[1])
+        _raise_if(move_problems(entity, before, after))
+        self._write(entity, target_dir / path.name, *after)
+        path.unlink()
+        return target_dir / path.name
+
     def add_event(self, version_id: str, kind: Literal["uploaded", "submitted"], data: dict) -> str:
         meta = {"version": version_id, "kind": kind, "recorded_at": _now(), "data": data}
         return self.create("version_event", meta)
@@ -188,6 +209,49 @@ class RecordStore:
         ]
         return problems + check_change(entity, before, after)
 
+    def validate_changes(self, changes: list[Change]) -> dict[str, list[str]]:
+        """{relative path: problems} for a set of file changes (for example one commit's diff).
+
+        An archive move, a record deleted from its directory and added with the same id and file
+        name in its archive directory, is judged as one change by ``move_problems`` and reported under the
+        archive path. Every other change goes through ``validate_change``.
+        """
+        moves = self._archive_moves(changes)
+        moved_from = {rel for rel, _, _ in moves.values()}
+        problems: dict[str, list[str]] = {}
+        for rel, before, after in changes:
+            if rel in moved_from:
+                continue
+            if rel in moves:
+                _, old_doc, _ = moves[rel]
+                entity = parse_record_path(self.layout, rel)[0]
+                found = self.validate_change(rel, None, after)  # id matches the file name
+                found = list(dict.fromkeys(found + move_problems(entity, old_doc, after)))
+            else:
+                found = self.validate_change(rel, before, after)
+            if found:
+                problems[rel] = found
+        return problems
+
+    def _archive_moves(self, changes: list[Change]) -> dict[str, Change]:
+        """{archive path: the matching deletion} for each archive move among ``changes``."""
+        deletions = {}
+        for change in changes:
+            rel, before, after = change
+            parsed = parse_record_path(self.layout, rel)
+            is_deletion = before is not None and after is None
+            if parsed and is_deletion and not is_archived_path(self.layout, rel):
+                deletions[parsed] = change
+        moves = {}
+        for rel, before, after in changes:
+            parsed = parse_record_path(self.layout, rel)
+            is_addition = before is None and after is not None
+            if is_addition and parsed in deletions and is_archived_path(self.layout, rel):
+                same_name = PurePosixPath(rel).name == PurePosixPath(deletions[parsed][0]).name
+                if same_name:
+                    moves[rel] = deletions[parsed]
+        return moves
+
     def validate(self, id_: str) -> list[str]:
         """Content problems of one stored record."""
         path = self.path_of(id_)
@@ -196,6 +260,7 @@ class RecordStore:
     def validate_all(self) -> tuple[int, dict[str, list[str]]]:
         """(records checked, {relative path: problems}) for every file in record directories."""
         checked, problems = 0, {}
+        first_path: dict[str, str] = {}  # id -> first file seen (primary directory first)
         for entity in REGISTRY:
             for path in iter_record_files(self.layout, entity):
                 rel = self._rel(path)
@@ -206,6 +271,14 @@ class RecordStore:
                 if parsed[0] != entity:
                     continue
                 checked += 1
+                if parsed[1] in first_path:
+                    # e.g. an archive move interrupted between writing the copy and deleting
+                    # the original; path_for and the resolver use the primary-directory file.
+                    problems[rel] = [
+                        f"{rel}: duplicate id {parsed[1]} (also at {first_path[parsed[1]]})"
+                    ]
+                    continue
+                first_path[parsed[1]] = rel
                 try:
                     doc = self._read(entity, path)
                 except (yaml.YAMLError, ValueError) as error:  # unparseable file: a finding

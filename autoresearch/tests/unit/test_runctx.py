@@ -16,7 +16,7 @@ def test_override_and_worker_env(tmp_path):
         "AUTORESEARCH_WORKSPACE": str(tmp_path / "elsewhere"),
         "HERMES_KANBAN_WORKSPACE": str(tmp_path / "wt"),
         "HERMES_KANBAN_TASK": "t_1",
-        "HERMES_KANBAN_RUN": "7",
+        "HERMES_KANBAN_RUN_ID": "7",
     }
     ctx = from_env(env)
     assert ctx.canonical == tmp_path / "elsewhere"

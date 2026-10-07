@@ -1,0 +1,91 @@
+{
+  "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "name": "Gods of the Arena",
+  "slug": null,
+  "game": {
+    "id": "game_e6b33734-d7f4-40c9-be09-7967baf1c032",
+    "name": "Gods Of The Arena",
+    "slug": null,
+    "coworld_name": "Gods of the Arena",
+    "coworld_id": "cow_162aa34f-f447-4c5d-8db3-480ec83e98f4",
+    "description": "Two teams of five BASIC heroes battle to slay the enemy god. The official OpenSkill ladder shows MMR and mean game score, with rating-based matchmaking and mixed teams. Open Draft allows duplicate hero picks. Game results report Emmett's Glory: winning heroes' lifetime XP per simulated minute; losses, draws, and timeouts score zero.",
+    "created_at": "2026-09-09T19:22:39.991124Z",
+    "owner_user_id": "system",
+    "notes": null,
+    "default_league_id": null,
+    "canonical_coworld_id": "cow_162aa34f-f447-4c5d-8db3-480ec83e98f4",
+    "coworld_tags": [
+      "strategy",
+      "basic",
+      "polyworld"
+    ]
+  },
+  "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_3c60897b-25cf-4b37-9d1a-8554c1198f28.md",
+  "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Gods%20of%20the%20Arena.md",
+  "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Gods%20of%20the%20Arena/pages.md",
+  "commissioner_key": "platform",
+  "commissioner_config": {
+    "default_variant_id": "competition"
+  },
+  "public": true,
+  "hidden": false,
+  "is_game_of_week": true,
+  "created_at": "2026-09-09T19:22:40.020134Z",
+  "disabled_at": null,
+  "short_name": null,
+  "description": "Gods of the Arena league for submitted policies and recurring competition rounds.",
+  "commissioner_migration_version": null,
+  "rounds_paused_at": null,
+  "submissions_locked_at": null,
+  "settings": {
+    "ladder": {
+      "enabled": true,
+      "ranking": {
+        "mu": 25.0,
+        "sigma": 8.333333333333334,
+        "algorithm": "openskill",
+        "round_scoring_rule": "mean"
+      },
+      "divisions": [
+        {
+          "name": "Competition",
+          "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+          "disqualify_after_consecutive_failures": 3
+        }
+      ],
+      "scheduler": {
+        "strategy": "team_n",
+        "team_count": 2,
+        "matchmaking": "elo_softmax",
+        "team_layout": "blocks",
+        "num_episodes": 24,
+        "distinct_teammates": true,
+        "insufficient_players": "filler_policy",
+        "matchmaking_temperature": 100.0
+      },
+      "fulfillment": {
+        "retry_times": 2,
+        "allowed_failures": 0.1
+      }
+    },
+    "scratchpads_enabled": false,
+    "round_interval_minutes": 32
+  },
+  "filler_policy_version_ids": [
+    "5a71b33a-8749-437f-9fec-e12a092104e2"
+  ],
+  "seed_policy_version_ids": null,
+  "seed_policy_number": null,
+  "rules": {
+    "division_leaderboard": {
+      "aggregation": "score",
+      "source_score": "mean_round_score"
+    }
+  },
+  "notes": null,
+  "mod": null,
+  "logs_reporter_id": "rptr_3b2b7a6b-61d8-4530-92f3-5fa7822a7005",
+  "logs_source": "platform",
+  "handicaps": null,
+  "handicap_dynamic": null
+}

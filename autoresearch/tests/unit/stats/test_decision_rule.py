@@ -17,11 +17,17 @@ BASE_VALUES = {
 }
 
 
-def design(primary=("xp_per_1k_ticks", "up", 1.0), n_min=10):
+def design(
+    primary=("xp_per_1k_ticks", "up", 1.0),
+    n_min=10,
+    guardrail=("shots_fired", "up", 0.5),
+    delta=None,
+):
     name, direction, min_effect = primary
+    guard_name, guard_direction, tolerance = guardrail
     metrics = (
         MetricSpec(name, direction, "primary", min_effect, None),
-        MetricSpec("shots_fired", "up", "agent_guardrail", None, 0.5),
+        MetricSpec(guard_name, guard_direction, "agent_guardrail", None, tolerance),
         MetricSpec("glory", "up", "performance", None, None),
         MetricSpec("win_rate", "up", "performance", None, None),
     )
@@ -33,7 +39,7 @@ def design(primary=("xp_per_1k_ticks", "up", 1.0), n_min=10):
         tuple(range(100)),
         metrics,
         0.5,
-        {"glory": 0.5, "win_rate": 0.05},
+        {"glory": 0.5, "win_rate": 0.05} if delta is None else delta,
         n_min,
         "rev1",
     )
@@ -139,3 +145,44 @@ def test_outcome_is_deterministic_and_serialisable():
     first = evaluate(design(), data, CAND, CHAMPION).to_dict()
     assert first == evaluate(design(), data, CAND, CHAMPION).to_dict()
     assert set(first) == {"promote_eligible", "failures", "per_metric"}
+
+
+def test_no_primary_metric_is_blocked():
+    without_primary = design()
+    object.__setattr__(
+        without_primary,
+        "metrics",
+        tuple(m for m in without_primary.metrics if m.role != "primary"),
+    )
+    outcome = evaluate(without_primary, pairs(), CAND, CHAMPION)
+    assert not outcome.promote_eligible
+    assert "no_primary_metric" in outcome.failures
+
+
+def test_down_direction_guardrail():
+    lower = design(guardrail=("deaths_per_1k_ticks", "down", 0.5))
+    breach = evaluate(lower, pairs(xp_per_1k_ticks=2.0, deaths_per_1k_ticks=2.0), CAND, CHAMPION)
+    assert breach.failures == ["guardrail_breach:deaths_per_1k_ticks"]
+    assert breach.per_metric["deaths_per_1k_ticks"]["mean_signed_diff"] < 0
+    fewer = evaluate(lower, pairs(xp_per_1k_ticks=2.0, deaths_per_1k_ticks=-1.0), CAND, CHAMPION)
+    assert fewer.promote_eligible, fewer.failures
+
+
+def test_performance_metric_without_delta_allows_no_slip():
+    no_delta = design(delta={"glory": 0.5})
+    outcome = evaluate(no_delta, pairs(xp_per_1k_ticks=2.0, win_rate=-0.02), CAND, CHAMPION)
+    assert outcome.failures == ["performance_slip:win_rate"]
+    assert outcome.per_metric["win_rate"]["threshold"] == 0.0
+    steady = evaluate(no_delta, pairs(xp_per_1k_ticks=2.0), CAND, CHAMPION)
+    assert steady.promote_eligible, steady.failures
+
+
+def test_diffs_equal_to_thresholds_pass():
+    # exactly representable values, no jitter: primary == min_effect, guardrail == -tolerance,
+    # performance == -delta
+    exact = pairs(jitter=0.0, xp_per_1k_ticks=1.0, shots_fired=-0.5, glory=-0.5)
+    outcome = evaluate(design(), exact, CAND, CHAMPION)
+    assert outcome.promote_eligible, outcome.failures
+    assert outcome.per_metric["xp_per_1k_ticks"]["mean_signed_diff"] == 1.0
+    assert outcome.per_metric["shots_fired"]["mean_signed_diff"] == -0.5
+    assert outcome.per_metric["glory"]["mean_signed_diff"] == -0.5

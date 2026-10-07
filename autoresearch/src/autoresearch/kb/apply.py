@@ -46,7 +46,7 @@ def apply(layout: Layout, report: LintReport, now: datetime.datetime) -> list[Pa
             continue
         before, after = change
         written.append(store.path_of(finding.entity))
-        written.append(_write_log(layout, at, finding.code, finding.entity, before, after))
+        written.append(write_log(layout, at, finding.code, finding.entity, before, after))
     return written
 
 
@@ -78,7 +78,8 @@ def _demote(layout: Layout, store: RecordStore, claim_id: str, at: str) -> tuple
     return "verified", "belief"
 
 
-def _write_log(layout: Layout, at: str, code: str, entity: str, before, after) -> Path:
+def write_log(layout: Layout, at: str, code: str, entity: str, before, after) -> Path:
+    """Write one ``kb/log/<ULID>.md`` entry for a trusted KB change; return its path."""
     path = layout.kb_log / f"{ULID()}.md"
     meta = {"at": at, "finding": code, "entity": entity, "before": before, "after": after}
     write_doc(path, meta, f"{code}: {entity} {before} -> {after}\n")

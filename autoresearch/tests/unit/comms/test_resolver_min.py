@@ -47,6 +47,13 @@ def test_plan_file_and_handoff(canonical):
     assert handoff.path == ".supervisor/ledger/handoffs/K-1/r-1.json"
 
 
+def test_missing_handoff_resolves_to_the_orphan_marker(canonical):
+    write_json(canonical.layout.ledger / "orphans" / "K-1-r-2.json", {"task_id": "K-1"})
+    gitops.commit_all(canonical.root, "orphan marker")
+    resolved = resolve(canonical.root, "ar://handoff/K-1/r-2#missing")
+    assert resolved.path == ".supervisor/ledger/orphans/K-1-r-2.json"
+
+
 def test_anchor_resolves_the_document(canonical):
     resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}#d1")
     assert b"Creep damage" in resolved.content
@@ -71,3 +78,22 @@ def test_unresolvable_raises(canonical, uri):
 def test_type_must_match_id(canonical):
     with pytest.raises(ResolveError):
         resolve(canonical.root, f"ar://topic/{canonical.hypothesis_id}")
+
+
+def test_archived_claim_resolves(canonical):
+    source = canonical.layout.claims / f"{canonical.claim_id}.md"
+    canonical.layout.archive.mkdir(parents=True, exist_ok=True)
+    source.rename(canonical.layout.archive / source.name)
+    gitops.commit_all(canonical.root, "archive claim")
+    resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}")
+    assert resolved.path == f"kb/archive/{canonical.claim_id}.md"
+    assert b"Creep damage" in resolved.content
+
+
+def test_claim_in_both_locations_resolves_to_kb_claims(canonical):
+    source = canonical.layout.claims / f"{canonical.claim_id}.md"
+    canonical.layout.archive.mkdir(parents=True, exist_ok=True)
+    (canonical.layout.archive / source.name).write_text(source.read_text())
+    gitops.commit_all(canonical.root, "interrupted archive")
+    resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}")
+    assert resolved.path == f"kb/claims/{canonical.claim_id}.md"

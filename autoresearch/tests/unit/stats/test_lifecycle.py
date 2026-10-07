@@ -17,7 +17,7 @@ def test_preregister_bind_ingest_pair_leaves_design_frozen(tmp_path):
     metrics = tuple(
         MetricSpec(name, directions[name], "performance", None, None)
         for name in game.performance_guardrails
-    ) + (MetricSpec("errors", directions["errors"], "agent_guardrail", None, 0.1),)
+    ) + (MetricSpec("errors", directions["errors"], "primary", 0.1, None),)
     design = EvaluationDesign(
         "65",
         "pv-base",
