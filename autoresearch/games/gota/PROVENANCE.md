@@ -132,3 +132,113 @@ games/gota/tools/bin/raw_spell_counts-5287c437 EPISODE_DIR/replay
 Native build needs Nim, Git, and network access on the first build. Cache and
 binaries stay ignored under the tools directory. Reward-only expansion is the
 fast default; `--actions` enables exact but slower acceptance probes.
+
+## v13 mechanical live compatibility (Task 1.4)
+
+`tools/make_v13_live.py` is new local code implementing VERDICT-B2 and B3.
+It changes exactly seven executable identifier tokens `is` to the noncolliding
+`v13_item_slot` and exactly 64 executable `/` tokens to `\`. Comments, strings,
+whitespace, and every other token remain identical. The operator rewrite restores
+historical int32 division toward zero, not the live dialect's decimal division.
+`tests/unit/gota/test_v13_live.py` proves both exact counts and full token identity.
+
+Immutable original `../../tests/fixtures/gota/submitted-v13.bas`: 54,718 bytes,
+SHA-256 `d0fd3a8210bbf754e699cfd7022ea18d7d416d8d8f9861eb0f1f10ff40b978a1`.
+Generated `../../tests/fixtures/gota/v13-live.bas`: 54,795 bytes,
+SHA-256 `1637c5604a522342de710afbffb16cdaa84befe99d3df17fa28e146414f86f9c`.
+No header is inserted because token identity is the controlling requirement.
+The original remains the identity of the submitted league entry.
+
+The intermediate identifier-only copy was SHA-256
+`009f8127286d4115b79ec977c694b36e8a99dd130ca6d6d828ba3c0122cf191e`.
+It is no longer the generated fixture. Its actual local episode failed all ten
+VMs at runtime; `../../docs/plans/findings/gota-v13-live-runtime.md` preserves that
+finding and the approved resolution. The original separately rejects loading
+with name `'is'` not a scalar, as recorded in `gota-toolkit-drift.md`.
+
+### Local compatibility and gate execution
+
+Actual coworld 0.1.57 / softmax-cli 0.26.38 local episode, downloaded live GotA
+2026.10.6.1 manifest, Polyworld source pin `5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd`:
+all ten final-variant source copies were supplied unchanged. Every private log is
+free of BASIC errors; game log reports 10/10 scripts active, 288200 decisions,
+861497 recorded actions, and positive XP for every hero. The match timed out at
+31200 ticks with all scores zero. This proves execution, not competitive strength.
+Evidence is at `/tmp/ide-mvp-task14-v13-integer-episode/`; independent tape counts
+at `/tmp/task14-actions-by-hero.json` prove every hero submitted actions.
+G2 then executed the same artifact through its public gate API; evidence at
+`/tmp/ide-mvp-task14-gates/episode/` passed identity and execution readback.
+No credential was needed for these local manifest episodes; no policy or league
+was uploaded or changed. A manifest/source pin is recorded, not an independent
+container-build provenance proof.
+
+`tools/gate_probe.nim` is new local instrumentation that includes the pinned
+engine's host schema, compiler and real simulation decision runner. Compile
+counts use Bassy's public accessors; resource samples use every VM's instruction
+and work counters, per-seat decisions, and actual PRINT callback events/bytes.
+`tools/build_nim.sh` now supports `gate_probe`. `raw_spell_counts.nim` additionally
+reports action-tape counts per hero without resimulation. No new compiler,
+lexical budget estimator, or synthetic runtime evidence was introduced.
+Shared Python gates and their API/CLI are documented in `gates/README.md`.
+
+The plan's historical 20k/50k dynamic ceilings are superseded by VERDICT-B:
+soft 80000 instructions and 200000 work units are 80% of live 100000/250000.
+Hard storage, source, routine, static-code and PRINT ceilings come from live
+`bots.nim:114-138`. PRINT events vary with separators and newline suppression;
+actual engine tests observe `PRINT "X", 12`: four events/five bytes,
+`PRINT "X"; 12;`: two events/three bytes, empty PRINT: one event/one byte.
+
+Run from `autoresearch/`:
+
+```sh
+uv run --locked --python 3.12 python games/gota/tools/make_v13_live.py tests/fixtures/gota/submitted-v13.bas tests/fixtures/gota/v13-live.bas
+uv run --locked --python 3.12 pytest tests/unit/gota -q
+uv run --locked --python 3.12 ruff check games/gota/gates games/gota/tools tests/unit/gota
+uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13-live.bas --baseline tests/fixtures/gota/v13-live.bas --manifest /path/to/coworld_manifest.json --work-dir /tmp/gota-gates-new
+```
+
+### Recorded telemetry fixtures
+
+`v13-live-telemetry.log` contains the first five lines from final-variant seat 0's
+actual private log. `v13-live-game.log` and `v13-live-results.json` contain the
+actual full game summary and result. They carry no credentials or download URLs.
+The unit test creates a ten-seat parser envelope using this one recorded log
+excerpt, explicit generated completion lines, and matching artifact copies.
+That envelope is a test fixture, not independent ten-seat execution evidence.
+G5 separately reads all actual G2 logs. It parses historical `LH` snapshots and
+reports absent compiler trace coverage explicitly; it does not validate inferred
+combat counts or compiler goal telemetry that v13 does not emit.
+
+Recorded fixture SHA-256 values:
+
+- `v13-live-telemetry.log`: `df620bec64a5219964f408b300b65544bd9e2f2286773bf834c2cead0fe47a06` (371 bytes).
+- `v13-live-game.log`: `b8bba08428a4e16c4842a80b0fe3c05325a6cf89490fb2ff57b3d2d3a85cf107` (534 bytes).
+- `v13-live-results.json`: `27c5159af38f5e8cecbc9a3d2e6762cf22384a5eb62e5718644effd46c3f059c` (175 bytes).
+
+### Final native gate validation and independent review corrections
+
+Seeds 1 through 10 each ran 31200 native ticks; every seat executed 28820
+decisions and no VM failed. Maximum charged instructions 25450, work units
+39486, PRINT events 80, PRINT bytes 106. All five gates passed; baseline mirror
+screen Glory/win rate both zero on both sides (all timeouts), so this is a
+measurement-completion check, not evidence of competitive quality. Final report:
+`/tmp/ide-mvp-task14-final-gates/gates.json`.
+
+Native execution uses `drafting=true, draftMode=UniqueDraft, replayMode=false`,
+verified against pinned `sim.nim:5849-5856,5954-5955`. The initial fixed-roster
+description was incorrect and is corrected here and in the gate README/report.
+Actual competition manifest episodes use OpenDraft. Native behavior and its
+measured resource samples were not changed during this documentation correction.
+Python G3/G4 reports now include the verified native mode metadata.
+
+Review also corrected Glory to floor each winning hero's `XP * 1440 / ticks`
+before averaging, matching `scores.nim:7-17`; a fractional regression test first
+failed then passed. G4 was recomputed from the unchanged ten measured samples,
+without new simulation; zero mirror scores remain zero. The artifact mismatch
+test now starts from a valid recorded envelope and changes one staged source,
+proving identity rejection rather than missing-file rejection.
+
+The generated BASIC artifact preserves the original's trailing blank line at EOF.
+Git's whitespace check flags that inherited blank line when the variant is first
+added. Removing it would violate the authorized token/whitespace identity rule;
+it is retained deliberately. All other changed files pass the whitespace check.

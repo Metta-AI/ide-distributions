@@ -9,13 +9,18 @@ if args.len < 1:
   quit("usage: raw_spell_counts REPLAY [PREFIX_TICKS OUT_REPLAY]", 2)
 var data = loadReplay(args[0])
 var counts = initCountTable[int32]()
+var allCounts = initCountTable[int32]()
 for action in data.actions:
+  allCounts.inc action.heroId
   if action.kind in [ActionCastTarget, ActionCastPoint]:
     counts.inc action.heroId
 var rows = newJArray()
 for hero, count in counts:
   rows.add %*{"hero_id": hero, "submitted_casts": count}
-echo $(%*{"heroes": rows, "actions": data.actions.len})
+var allRows = newJArray()
+for hero, count in allCounts:
+  allRows.add %*{"hero_id": hero, "actions": count}
+echo $(%*{"heroes": rows, "actions": data.actions.len, "actions_by_hero": allRows})
 if args.len == 3:
   let ticks = parseInt(args[1])
   data.actions = data.actions.filterIt(int(it.tick) <= ticks)

@@ -15,7 +15,7 @@ CACHE="$TOOLS/.cache"
 COMMIT=${1:?pass the exact recording Polyworld commit}
 TARGET=${2:-expand_replay}
 case "$TARGET" in
-  expand_replay|raw_spell_counts|gota_verify|gota_audit|gota_policy_replay) ;;
+  expand_replay|raw_spell_counts|gota_verify|gota_audit|gota_policy_replay|gate_probe) ;;
   *) echo "unsupported Nim tool: $TARGET" >&2; exit 2 ;;
 esac
 SHORT=$(printf '%s' "$COMMIT" | cut -c1-8)
