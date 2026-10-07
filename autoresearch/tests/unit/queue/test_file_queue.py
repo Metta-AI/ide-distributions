@@ -132,3 +132,10 @@ def test_concurrent_claims_never_double_claim(queue, tmp_path):
     claimed = [task_id for chunk in results for task_id in chunk]
     assert len(claimed) == total and len(set(claimed)) == total
     assert all(len(card.runs) == 1 for card in queue.list())
+
+
+def test_board_exists_and_ensure_board(tmp_path):
+    queue = FileQueue(tmp_path / "board")
+    assert queue.board_exists() is False  # C12: a missing directory is a missing board
+    queue.ensure_board()
+    assert queue.board_exists() is True and queue.list() == []

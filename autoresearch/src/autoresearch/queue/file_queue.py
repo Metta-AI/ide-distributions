@@ -52,8 +52,10 @@ class FileQueue:
 
     # -- Queue protocol --
 
-    def create_unassigned(self, spec: CardSpec, branch: str, worktree: Path) -> str:
-        key = f"req:{spec.request_id}"
+    def create_unassigned(
+        self, spec: CardSpec, branch: str, worktree: Path, idempotency_key: str | None = None
+    ) -> str:
+        key = idempotency_key or f"req:{spec.request_id}"
         with file_lock(self._lock_path):
             index = self._load_index()
             if key in index["keys"]:
@@ -118,6 +120,14 @@ class FileQueue:
                     run["outcome"] = f"requeued: {reason}"
             record["state"] = "pending"
             self._save_record(record)
+
+    # -- board (C12: "board missing" is a missing queue directory) --
+
+    def board_exists(self) -> bool:
+        return self.directory.is_dir()
+
+    def ensure_board(self) -> None:
+        self._cards_dir.mkdir(parents=True, exist_ok=True)
 
     # -- FileQueue extras --
 

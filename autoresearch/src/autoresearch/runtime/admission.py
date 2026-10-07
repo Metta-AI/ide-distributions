@@ -13,6 +13,12 @@ machine; ``admit_and_create`` drives it to ``admitted`` and repairs any crash fr
 4. ``queue.assign(task_id, profile)`` (outside the lock). A rerun on an ``admitted`` receipt
    redoes the runtime files and this step.
 
+Re-admission after a board loss (C12). An ``admitted`` receipt whose latest task is from an
+earlier board epoch is not finished here (``STALE_EPOCH``; the card it names is gone):
+``rebuild`` decides whether the request gets a new card and calls ``readmit``, which creates
+it with the key ``req:<Q-id>:<epoch>``, appends ``{task_id, board_epoch}`` to ``tasks`` and
+commits (``readmit <Q-id>``). After that, ``admit_and_create`` finishes steps 3-4 as usual.
+
 Rejections for ``TRANSIENT_REASONS`` write no receipt, so the request is retried on a later
 run (after calibration lands, or after resume). Any other rejection is terminal: a
 ``rejected`` receipt (``reject <Q-id>``). ``planning_owned`` is terminal because the caller
@@ -46,6 +52,7 @@ PLANNING_OWNING_STATES = ("admitted", "handed_off")
 NEEDS_CALIBRATION = "needs_calibration"
 PLANNING_OWNED = "planning_owned"
 PAUSED = "paused"
+STALE_EPOCH = "stale_epoch"
 TRANSIENT_REASONS = frozenset({NEEDS_CALIBRATION, PAUSED})
 
 
@@ -70,7 +77,8 @@ def _unresolved_refs(canonical: Path, spec: CardSpec) -> list[str]:
     return reasons
 
 
-def _has_current_noise(canonical: Path, game_version: str) -> bool:
+def has_current_noise(canonical: Path, game_version: str) -> bool:
+    """True if ``stats/metric-noise.yaml`` at HEAD is for ``game_version`` (C10)."""
     content = gitops.show(canonical, "HEAD", NOISE_PATH)
     if content is None:
         return False
@@ -108,7 +116,7 @@ def admit(
     reasons = _unresolved_refs(canonical, spec)
     if reasons:
         return reasons
-    if spec.mode == "experimentation" and not _has_current_noise(canonical, game_version):
+    if spec.mode == "experimentation" and not has_current_noise(canonical, game_version):
         return [NEEDS_CALIBRATION]
     if spec.mode == "planning" and _planning_owned(canonical, spec, queue):
         return [PLANNING_OWNED]
@@ -215,9 +223,41 @@ def admit_and_create(
     task_id = receipt["tasks"][-1]["task_id"]
     if receipt["state"] != "admitted":
         return AdmissionResult(ok=True, task_id=task_id)  # handed off or later: nothing to do
+    if receipt["tasks"][-1]["board_epoch"] != board_epoch(ledger):
+        return AdmissionResult(ok=False, task_id=task_id, reasons=[STALE_EPOCH])
     card = queue.get(task_id)
     with canonical_lock(canonical):
         _write_runtime_files(ctx, spec, task_id, inputs, pending=card.state == "pending")
     if card.state == "pending" and card.assignee != profile:
         queue.assign(task_id, profile)
     return AdmissionResult(ok=True, task_id=task_id)
+
+
+def readmit(ctx: RunContext, queue: Queue, spec: CardSpec) -> str | None:
+    """C12 re-admission: give an ``admitted`` request whose latest task is from an earlier
+    board epoch a new card (key ``req:<Q-id>:<epoch>``) and append it to the receipt's
+    ``tasks``. Returns the current-epoch task id (also when an earlier call already did
+    this), or None if the receipt is not ``admitted``. ``admit_and_create`` then writes the
+    runtime files and assigns the card. A crash between the create and the commit is
+    repaired by the rerun: the key returns the same task. The caller must not hold the
+    canonical lock."""
+    canonical, ledger = ctx.canonical, ledger_of(ctx.canonical)
+    path = receipt_path(ledger, spec.request_id)
+    epoch = board_epoch(ledger)
+    receipt = read_json(path) if path.exists() else None
+    if receipt is None or receipt["state"] != "admitted":
+        return None
+    if receipt["tasks"][-1]["board_epoch"] == epoch:
+        return receipt["tasks"][-1]["task_id"]
+    task_id = queue.create_unassigned(
+        spec,
+        branch=f"card/{spec.request_id}",
+        worktree=canonical / ".worktrees" / spec.request_id,
+        idempotency_key=f"req:{spec.request_id}:{epoch}",
+    )
+    with canonical_lock(canonical):
+        receipt = read_json(path)
+        receipt["tasks"].append({"task_id": task_id, "board_epoch": epoch})
+        receipt["history"].append({"state": "admitted", "at": now_iso()})
+        _save_receipt(canonical, path, receipt, f"readmit {spec.request_id} ({epoch})")
+    return task_id

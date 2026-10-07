@@ -89,7 +89,19 @@ class KanbanQueue:
         """Create the board; Hermes treats an existing board as success."""
         self._hermes("kanban", "boards", "create", self.board)
 
-    def create_unassigned(self, spec: CardSpec, branch: str, worktree: Path) -> str:
+    def board_exists(self) -> bool:
+        """False when Hermes reports the board missing (A2: its DB or list entry is gone)."""
+        try:
+            self._kanban("list", "--json")
+        except KanbanError as error:
+            if "does not exist" in error.stderr:
+                return False
+            raise
+        return True
+
+    def create_unassigned(
+        self, spec: CardSpec, branch: str, worktree: Path, idempotency_key: str | None = None
+    ) -> str:
         with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as body_file:
             body_file.write(json.dumps(asdict(spec)))
             body_file.flush()
@@ -99,7 +111,7 @@ class KanbanQueue:
                 "--branch", branch,
                 "--workspace", f"worktree:{worktree}",
                 "--priority", str(kanban_priority(spec.priority, spec.order)),
-                "--idempotency-key", f"req:{spec.request_id}",
+                "--idempotency-key", idempotency_key or f"req:{spec.request_id}",
                 "--json",
             )  # fmt: skip
         return json.loads(output)["id"]

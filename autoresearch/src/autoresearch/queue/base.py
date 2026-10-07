@@ -7,8 +7,11 @@ from autoresearch.queue.card import Card, CardSpec, Priority
 
 
 class Queue(Protocol):
-    def create_unassigned(self, spec: CardSpec, branch: str, worktree: Path) -> str:
-        """Create a card nobody can claim yet. Idempotent on ``req:<request_id>``."""
+    def create_unassigned(
+        self, spec: CardSpec, branch: str, worktree: Path, idempotency_key: str | None = None
+    ) -> str:
+        """Create a card nobody can claim yet. Idempotent on ``idempotency_key``, by default
+        ``req:<request_id>`` (a C12 re-admission passes ``req:<request_id>:<epoch>``)."""
 
     def assign(self, task_id: str, assignee: str | None) -> None:
         """Assign the card; ``None`` unassigns it."""

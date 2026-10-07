@@ -95,6 +95,23 @@ def test_ensure_board(fake, queue):
     assert fake.argvs() == [["kanban", "boards", "create", "board1"]]
 
 
+def test_board_exists(fake, queue):
+    fake.reply("list", [])
+    assert queue.board_exists() is True
+    fake.reply("list", code=1, stderr="kanban: board 'board1' does not exist.")
+    assert queue.board_exists() is False
+    fake.reply("list", code=1, stderr="database is locked")
+    with pytest.raises(KanbanError):
+        queue.board_exists()
+
+
+def test_create_unassigned_with_an_epoch_key(fake, queue, tmp_path):
+    fake.reply("create", {"id": "t_new", "status": "ready", "assignee": None})
+    queue.create_unassigned(SPEC, "card/Q-1", tmp_path / "wt", idempotency_key="req:Q-1:e2")
+    argv = fake.argvs()[-1]
+    assert argv[argv.index("--idempotency-key") + 1] == "req:Q-1:e2"
+
+
 def test_create_unassigned_argv_and_body(fake, queue, tmp_path):
     fake.reply("create", {"id": "t_abc", "status": "ready", "assignee": None})
     task_id = queue.create_unassigned(SPEC, "card/Q-1", tmp_path / "wt")

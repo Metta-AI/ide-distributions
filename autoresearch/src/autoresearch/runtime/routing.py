@@ -205,7 +205,9 @@ def _uncommitted_request(canonical: Path, marker: str) -> str | None:
     return None
 
 
-def _request_card(canonical: Path, marker: str, spec: CardSpec) -> Path:
+def request_card(canonical: Path, marker: str, spec: CardSpec) -> Path:
+    """Find the request carrying ``marker`` in ``cards/requests``, or write it (``marker`` is
+    appended to ``spec.why`` in brackets); return its path. The caller commits it."""
     request_id = _uncommitted_request(canonical, marker)
     if request_id is None:
         spec.why = f"{spec.why} {bracketed(marker)}"
@@ -217,7 +219,7 @@ def _route_to_request(
     canonical: Path, record: dict, marker: str, spec: CardSpec, extra: list[Path] = ()
 ) -> list[Action]:
     """Route ``record`` to its own card request; ``extra`` paths go in the same commit."""
-    request = _request_card(canonical, marker, spec)
+    request = request_card(canonical, marker, spec)
     _checkpoint("request_written")
     responsible = NO_ONE | {"request_id": request.stem}
     routed = delivery.moved(
@@ -309,7 +311,7 @@ def _answer_with_note(
 # --- routing rules ---
 
 
-def _planning_owned(canonical: Path, queue: Queue) -> bool:
+def planning_owned(canonical: Path, queue: Queue) -> bool:
     """Another planning card is pending, claimed, finished-unpublished, or requested and not
     yet admitted (C11)."""
     for state in ("pending", "claimed"):
@@ -450,13 +452,13 @@ def _route_one(
             )
             title = f"Task {inbound_id} rejected"
             return _answer_with_note(canonical, record, title, body, allow_no_remote)
-        if message["mode"] == "planning" and _planning_owned(canonical, queue):
+        if message["mode"] == "planning" and planning_owned(canonical, queue):
             return _route_to_backlog(canonical, record, message, "planning is owned")
         return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
     if kind == "steer" and message.get("urgency") == URGENT:
         extra: list[Path] = []
         mode = "planning" if message.get("proposed_topic") else "investigation"
-        if mode == "planning" and _planning_owned(canonical, queue):
+        if mode == "planning" and planning_owned(canonical, queue):
             mode = "investigation"
             extra.append(_write_topic_entry(canonical, message))
         spec = _steer_spec(message, mode)
