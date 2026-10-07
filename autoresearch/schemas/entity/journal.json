@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/entity/journal.json",
+  "title": "Journal entry: one per iteration run (System Design 3.1 #2). Body must contain a `## Decisions` section. Immutable once `outcome` is set.",
+  "type": "object",
+  "required": [
+    "id",
+    "iteration",
+    "mode",
+    "doctrine_version"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^J-[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "mode": {
+      "enum": [
+        "investigation",
+        "scouting",
+        "experimentation",
+        "maintenance",
+        "planning"
+      ]
+    },
+    "card": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started": {
+      "type": "string"
+    },
+    "ended": {
+      "type": "string"
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outcome": {
+      "enum": [
+        "done",
+        "partial",
+        "dropped",
+        "failed"
+      ]
+    },
+    "doctrine_version": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}
