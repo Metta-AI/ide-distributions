@@ -7,8 +7,8 @@
   the champion path in this card's worktree; the holder task only (adopt first).
 
 Prints one JSON envelope like ``card``: ``{"ok": true, "data": ...}`` or
-``{"ok": false, "error": {"message": ...}}``. Exit codes: 0 done, 1 refused (PromotionError),
-2 bad arguments or no runtime context.
+``{"ok": false, "error": {"message": ...}}``. Exit codes: 0 done, 1 refused (PromotionError)
+or a git/filesystem failure, 2 bad arguments or no runtime context.
 """
 
 import argparse
@@ -16,6 +16,7 @@ import json
 
 from autoresearch import runctx
 from autoresearch.cli import register_group
+from autoresearch.io import gitops
 from autoresearch.runtime.promotion import PromotionError, adopt, load, stage_champion_for
 
 EXIT_OK, EXIT_REFUSED, EXIT_BAD_ARGS = 0, 1, 2
@@ -40,6 +41,8 @@ def _run(handler):
             data = handler(ctx, args)
         except PromotionError as error:
             return _fail(str(error), EXIT_REFUSED)
+        except (gitops.GitError, OSError) as error:  # e.g. fetching the candidate branch
+            return _fail(f"{type(error).__name__}: {error}", EXIT_REFUSED)
         _emit({"ok": True, "data": data})
         return EXIT_OK
 

@@ -328,9 +328,30 @@ def test_holder_branch_without_the_champion_goes_to_repair(board):
     [action] = reconcile(board.ctx(), board.queue, board.sm)
     assert action.kind == "recovery_requested"
     assert find_orphan_done(board.queue, board.ledger) == []
-    _recover(board, action.request_id)
+    recovery = _recover(board, action.request_id)
     [recovered] = board.process()
     assert recovered.state == "published" and board.promotion().stage == "published"
+    # publishing closed the promotion-owned repair handoff and the holder's request
+    record = a.worker.handoff()
+    jsonschema.validate(record, load_schema("handoff.json"))
+    assert record["state"] == "superseded"
+    assert record["superseded_by"] == f"{recovery.task_id}/{recovery.run_id}"
+    receipt = a.worker.receipt()
+    jsonschema.validate(receipt, load_schema("receipt.json"))
+    assert receipt["state"] == "superseded" and receipt["superseded_by"] == board.promotion().id
+    assert find_orphan_done(board.queue, board.ledger) == []
+    _clean(board)
+
+
+def _assert_covered_closed(board: PromotionBoard) -> None:
+    """Rebuild-style check (C12): no covered request is left admitted or handed off."""
+    current = board.promotion()
+    original = current.candidate_branch.removeprefix("card/")
+    for request_id in [original, *current.recovery_requests]:
+        receipt = board.committed(board.receipt_path(request_id))
+        assert receipt is not None, request_id
+        jsonschema.validate(receipt, load_schema("receipt.json"))
+        assert receipt["state"] in ("published", "superseded", "rejected"), receipt
 
 
 # --- crash recovery ---
@@ -361,6 +382,7 @@ def test_worker_died_after_submit_recovery_card_publishes_without_resubmit(board
     assert spec["priority"] == "P0" and spec["mode"] == "maintenance"
     assert f"promote-recover:{pid}:1" in spec["title"]
     assert "promotion adopt" in spec["why"] and "stage-champion" in spec["why"]
+    assert f"card/{a.worker.request_id}" in spec["why"]  # carry over its other changes
     assert spec["refs"] == [f"ar://experiment/{a.experiment}", f"ar://version/{a.version}"]
     assert reconcile(board.ctx(), board.queue, board.sm) == []  # one recovery card only
 
@@ -371,6 +393,9 @@ def test_worker_died_after_submit_recovery_card_publishes_without_resubmit(board
     assert _stages(board.history(pid))[-2:] == ["recorded", "published"]
     assert (board.canonical / CHAMPION_PATH).read_text() == a.candidate_text
     assert len(board.submissions_of(PV_A)) == 1
+    assert find_orphan_done(board.queue, board.ledger) == []  # the dead holder is covered
+    assert a.worker.receipt()["superseded_by"] == pid
+    _assert_covered_closed(board)
     b = Promoter(board, PV_B, baseline=PV_A)
     assert b.acquire()
     _clean(board)
@@ -562,6 +587,36 @@ def test_recovery_card_that_dies_gets_a_second_attempt(board):
     [handled] = board.process()
     assert handled.state == "published" and board.promotion().stage == "published"
     assert len(board.submissions_of(PV_A)) == 1
+    assert find_orphan_done(board.queue, board.ledger) == []
+    assert board.committed(board.receipt_path(first.request_id))["state"] == "superseded"
+    _assert_covered_closed(board)
+
+
+def test_recovery_attempts_are_capped_then_one_help_request(board):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    for attempt in range(1, promotion.MAX_RECOVERY_ATTEMPTS + 1):
+        [action] = reconcile(board.ctx(), board.queue, board.sm)
+        assert action.kind == "recovery_requested"
+        card = board.admit_follow_up(action.request_id)
+        card.start()
+        card.end_run("crashed")  # every attempt dies before adopting
+
+    [action] = reconcile(board.ctx(), board.queue, board.sm)
+
+    assert action.kind == "help_requested"
+    assert len(board.promotion().recovery_requests) == promotion.MAX_RECOVERY_ATTEMPTS
+    outbox = [
+        json.loads(path.read_text())
+        for path in sorted((board.canonical / "comms" / "outbox").glob("*.json"))
+    ]
+    helps = [m for m in outbox if m.get("kind") == "help_request"]
+    assert len(helps) == 1 and board.promotion().id in helps[0]["title"]
+    assert helps[0]["refs"][0]["uri"] == f"ar://experiment/{a.experiment}"
+    assert reconcile(board.ctx(), board.queue, board.sm) == []  # no more cards, no more help
+    assert board.promotion().stage == "submitted"
+    _clean(board)
 
 
 def test_rate_limited_holder_retried_run_is_accepted(board):
@@ -633,3 +688,12 @@ def test_promotion_cli_needs_a_runtime_context(capsys, monkeypatch):
     monkeypatch.delenv("HERMES_HOME", raising=False)
     code = main(["promotion", "status"])
     assert code == 2 and "HERMES_HOME" in json.loads(capsys.readouterr().out)["error"]["message"]
+
+
+def test_stage_champion_git_failure_is_a_json_error(board, capsys, monkeypatch):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    _force(board, candidate_sha="0" * 40)  # not local, and the fetch below fails
+    gitops.git(board.canonical, "remote", "set-url", "origin", str(board.tmp_path / "missing"))
+    code, env = _cli(capsys, monkeypatch, a.worker, "stage-champion", board.promotion().id)
+    assert code == 1 and "GitError" in env["error"]["message"]

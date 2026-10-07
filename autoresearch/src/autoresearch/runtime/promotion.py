@@ -33,8 +33,14 @@ recording all count as "needs recovery". Recovery is a P0 maintenance card with 
 ``promote-recover:<P-id>:<attempt>``; a new attempt is requested only when the previous one
 is closed or dead, so at most one is live. Its worker runs ``promotion adopt`` (only the
 latest attempt may), ``promotion stage-champion`` and ``card finish``; its merge drives
-``recorded`` and ``published`` without resubmitting. The orphan scan skips holder, former
-holder and recovery tasks of an in-flight promotion, so recovery is the only follow-up.
+``recorded`` and ``published`` without resubmitting. After ``MAX_RECOVERY_ATTEMPTS`` dead
+attempts, one runtime ``help_request`` is published and no more cards are created for that
+promotion until an operator acts. The orphan scan skips holder, former holder and recovery
+tasks of every promotion that reached submission, so recovery is the only follow-up.
+Publishing closes what the promotion covered in the same commit: its promotion-owned
+``repair`` handoffs become ``superseded``, and open receipts of its dead holder and recovery
+requests become ``superseded{by: P-id}``, so a C12 rebuild re-admits none of them.
+Promotions aborted before submitting cover nothing: redoing their card is a fair retry.
 
 Merge integration (``merge.py`` calls these under the canonical lock): ``merge_gate`` before
 a merge — a holder-task handoff WAITs while the promotion is at ``intent`` (never merges
@@ -57,18 +63,20 @@ import logging
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
+import jsonschema
 from ulid import ULID
 
+from autoresearch.comms.publisher import publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
-from autoresearch.queue.requests import write_request
+from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.admission import board_epoch, receipt_path
-from autoresearch.runtime.handoff import handoff_path
+from autoresearch.runtime.handoff import handoff_path, write_handoff
 from autoresearch.runtime.ledger import (
     canonical_lock,
     commit,
@@ -85,6 +93,7 @@ REMOTE = "origin"  # canonical's remote (AUTORESEARCH_WORKSPACE_REMOTE, set up b
 MAIN_REFSPEC = "HEAD:refs/heads/main"
 IN_FLIGHT = ("intent", "submitted", "recorded")
 RUNTIME = "runtime"
+MAX_RECOVERY_ATTEMPTS = 3
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +121,7 @@ class Promotion:
     merge_sha: str | None = None
     recovery_requests: list[str] = field(default_factory=list)  # one per attempt, in order
     former_holders: list[str] = field(default_factory=list)  # holder tasks before adoptions
+    help_requested: bool = False  # recovery attempts exhausted; an operator must act
     history: list[dict] = field(default_factory=list)
 
     @property
@@ -137,8 +147,8 @@ class Promotion:
 
 @dataclass
 class Action:
-    """One thing ``reconcile`` did: ``submitted``, ``aborted``, ``recovery_requested`` or
-    ``published``."""
+    """One thing ``reconcile`` did: ``submitted``, ``aborted``, ``recovery_requested``,
+    ``help_requested`` or ``published``."""
 
     kind: str
     promotion_id: str
@@ -208,16 +218,20 @@ def _require(current: Promotion | None, promotion_id: str, *stages: str) -> Prom
     return current
 
 
-def _published(canonical: Path) -> list[Promotion]:
-    """Published promotions at canonical HEAD, oldest first (ids are ULIDs and promotions are
-    serialized, so id order is publication order)."""
+def _all_promotions(canonical: Path) -> list[Promotion]:
+    """Every promotion record at canonical HEAD, oldest first (ids are ULIDs and promotions
+    are serialized, so id order is creation and publication order)."""
     listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{HISTORY_DIR_REL}/")
     found = []
     for rel in sorted(listing.splitlines()):
         data = committed_json(canonical, Path(canonical) / rel)
-        if data is not None and data["stage"] == "published":
+        if data is not None:
             found.append(Promotion.from_dict(data))
     return found
+
+
+def _published(canonical: Path) -> list[Promotion]:
+    return [p for p in _all_promotions(canonical) if p.stage == "published"]
 
 
 # --- holder and worker identity ---
@@ -526,15 +540,93 @@ def _recovery_tasks(canonical: Path, promotion: Promotion) -> set[str]:
     return tasks
 
 
+def _reached_submit(promotion: Promotion) -> bool:
+    return promotion.stage in IN_FLIGHT or any(
+        entry["stage"] == "submitted" for entry in promotion.history
+    )
+
+
 def covers_task(canonical: Path, task_id: str) -> bool:
-    """True if ``task_id`` is the holder or a recovery card of an in-flight promotion; the
-    orphan scan leaves such tasks to ``reconcile`` (one follow-up, never two)."""
-    current = load(canonical)
-    if current is None or current.stage not in IN_FLIGHT:
-        return False
-    if task_id == current.holder_task or task_id in current.former_holders:
-        return True
-    return task_id in _recovery_tasks(canonical, current)
+    """True if ``task_id`` is a holder, former holder or recovery card of any promotion that
+    reached submission (in flight or closed). The orphan scan leaves such tasks alone: an
+    in-flight promotion's ``reconcile`` owns them, and redoing a closed one's promotion card
+    would only be refused by the baseline check. Promotions aborted before submitting are
+    not covered: redoing their card is a legitimate new attempt."""
+    for promotion in _all_promotions(canonical):
+        if not _reached_submit(promotion):
+            continue
+        if task_id == promotion.holder_task or task_id in promotion.former_holders:
+            return True
+        if task_id in _recovery_tasks(canonical, promotion):
+            return True
+    return False
+
+
+def _covered_requests(promotion: Promotion) -> list[str]:
+    """Request ids of the original holder card and every recovery attempt."""
+    original = promotion.candidate_branch.removeprefix("card/")
+    return [original, *promotion.recovery_requests]
+
+
+def _close_covered(canonical: Path, promotion: Promotion) -> list[Path]:
+    """When ``promotion`` publishes: close what it covered so nothing re-admits or redoes it.
+    Its promotion-owned ``repair`` handoffs become ``superseded{by: <recording run>}``; the
+    open receipts of covered requests whose tasks are dead become ``superseded{by: P-id}``;
+    a recovery request never admitted gets a ``rejected`` receipt. Returns the paths written
+    (the caller commits them with the ``published`` transition). Under the lock."""
+    ledger = ledger_of(canonical)
+    by_run = f"{promotion.holder_task}/{promotion.run_id}"
+    written: list[Path] = []
+    at = now_iso()
+    for request_id in _covered_requests(promotion):
+        path = receipt_path(ledger, request_id)
+        receipt = committed_json(canonical, path)
+        if receipt is None:
+            if request_id in promotion.recovery_requests:
+                receipt = {
+                    "request_id": request_id,
+                    "state": "rejected",
+                    "mode": "maintenance",
+                    "reason": f"promotion {promotion.id} published before admission",
+                    "history": [{"state": "rejected", "at": at}],
+                }
+                jsonschema.validate(receipt, load_schema("receipt.json"))
+                write_json(path, receipt)
+                written.append(path)
+            continue
+        for task in receipt.get("tasks", []):
+            for record in _handoffs_of(canonical, task["task_id"]):
+                if record["state"] == "repair" and record.get("promotion") == promotion.id:
+                    record_path = handoff_path(canonical, record["card"], record["run_id"])
+                    history = [*record["history"], {"state": "superseded", "at": at}]
+                    superseded = record | {
+                        "state": "superseded",
+                        "superseded_by": by_run,
+                        "history": history,
+                    }
+                    write_handoff(record_path, superseded)
+                    written.append(record_path)
+        if receipt["state"] not in ("admitted", "handed_off"):
+            continue
+        tasks = receipt.get("tasks", [])
+        if any(_task_live_quiet(canonical, t["task_id"]) for t in tasks):
+            continue
+        closed = receipt | {
+            "state": "superseded",
+            "superseded_by": promotion.id,
+            "history": [*receipt["history"], {"state": "superseded", "at": at}],
+        }
+        jsonschema.validate(closed, load_schema("receipt.json"))
+        write_json(path, closed)
+        written.append(path)
+    return written
+
+
+def _task_live_quiet(canonical: Path, task_id: str) -> bool:
+    """Liveness without a queue: the task has a handoff normal processing will still act on
+    (the recording handoff, at publish time). Dead tasks of a published promotion have
+    nothing left to do even if the board would retry them."""
+    return any(h["state"] in OPEN_HANDOFF_STATES for h in _handoffs_of(canonical, task_id))
 
 
 # --- merge hooks (the caller holds the canonical lock) ---
@@ -564,9 +656,11 @@ def on_merge(ctx: RunContext, promotion: Promotion, merge_sha: str) -> None:
 
 
 def on_published(ctx: RunContext, promotion: Promotion) -> None:
-    """Stage ``published``; this frees the promotion lock. Call under the lock."""
+    """Stage ``published`` (frees the promotion lock), closing in the same commit everything
+    the promotion covered (``_close_covered``). Call under the lock."""
     if promotion.stage == "recorded":
-        _move(ctx.canonical, promotion, "published")
+        closed = tuple(_close_covered(ctx.canonical, promotion))
+        _move(ctx.canonical, promotion, "published", extra=closed)
 
 
 def merge_gate(canonical: Path, record: dict) -> GateDecision | None:
@@ -662,8 +756,10 @@ def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
         f"without a usable handoff (recovery attempt {attempt}). Run "
         f'"$AUTORESEARCH_CLI" promotion adopt {promotion.id}, then "$AUTORESEARCH_CLI" '
         f"promotion stage-champion {promotion.id} (copies {CHAMPION_PATH} from "
-        f"{promotion.candidate_ref} at {promotion.candidate_sha}), write the journal and "
-        f"finish. Do not submit again."
+        f"{promotion.candidate_ref} at {promotion.candidate_sha}). Also carry over the "
+        f"non-champion changes the promotion card made on branch "
+        f"{promotion.candidate_branch} (for example experiment record updates): compare it "
+        f"with main and redo them. Write the journal and finish. Do not submit again."
     )
     request = _write_runtime_request(
         canonical,
@@ -680,6 +776,38 @@ def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
     return Action("recovery_requested", promotion.id, why, request.stem)
 
 
+def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
+    """Recovery attempts are exhausted: publish one runtime ``help_request`` and stop
+    creating cards for this promotion (``help_requested``) until an operator acts. Under the
+    lock. Published before the flag is committed, so a crash in between can at worst repeat
+    it; the outbox is checked first to make that rare."""
+    canonical = ctx.canonical
+    key = f"promote-recover-help:{promotion.id}"
+    title = f"Promotion {promotion.id} needs an operator ({key})"
+    if not _outbox_has_title(canonical, key):
+        body = (
+            f"Promotion {promotion.id} submitted {promotion.platform_policy_version_id} "
+            f"(submission {promotion.submission_id}) for {promotion.experiment}, but "
+            f"{len(promotion.recovery_requests)} recovery cards "
+            f"({', '.join(promotion.recovery_requests)}) ended without recording the champion. "
+            f"No further recovery card is created and no new promotion can start until an "
+            f"operator records the champion {CHAMPION_PATH} from {promotion.candidate_ref} at "
+            f"{promotion.candidate_sha} or aborts the promotion."
+        )
+        refs = [{"uri": f"ar://experiment/{promotion.experiment}"}]
+        publish_runtime(canonical, "help_request", title, body, refs, allow_no_remote=True)
+    updated = replace(promotion, help_requested=True, updated_at=now_iso())
+    _save(canonical, updated, f"promotion {promotion.id}: help requested")
+    return Action("help_requested", promotion.id, title)
+
+
+def _outbox_has_title(canonical: Path, key: str) -> bool:
+    for path in (Path(canonical) / "comms" / "outbox").glob("*.json"):
+        if key in str(read_json(path).get("title", "")):
+            return True
+    return False
+
+
 def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
     """C8 runtime reconciliation, each queue-keeper run; the caller must not hold the lock.
 
@@ -689,7 +817,8 @@ def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
        still has a handoff normal processing will act on, or is pending/claimed (current
        epoch), or the latest recovery card is still live. A holder handoff in ``repair``,
        ``reconcile``, ``superseded``, or ``published`` without recording all count as
-       "needs recovery". Then the next recovery attempt is requested (at most one live).
+       "needs recovery". Then the next recovery attempt is requested (at most one live);
+       after ``MAX_RECOVERY_ATTEMPTS`` one runtime ``help_request`` is published instead.
     3. ``recorded`` whose recording handoff is already ``published``: ``published``."""
     canonical = ctx.canonical
     promotion = load(canonical)
@@ -710,7 +839,10 @@ def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
         if current.stage == "submitted":
             live = _task_live(canonical, queue, current.holder_task, current.board_epoch)
             if not live and not _recovery_live(canonical, queue, current):
-                actions.append(_request_recovery(ctx, current))
+                if len(current.recovery_requests) < MAX_RECOVERY_ATTEMPTS:
+                    actions.append(_request_recovery(ctx, current))
+                elif not current.help_requested:
+                    actions.append(_request_help(ctx, current))
         elif current.stage == "recorded":
             for handoff in _handoffs_of(canonical, current.holder_task):
                 if (
