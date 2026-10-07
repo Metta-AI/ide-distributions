@@ -22,6 +22,10 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def write_text(path: Path, text: str) -> None:
+    _atomic_write_text(Path(path), text)
+
+
 def read_doc(path: Path) -> tuple[dict, str]:
     post = frontmatter.loads(Path(path).read_text(encoding="utf-8"))
     return dict(post.metadata), post.content
