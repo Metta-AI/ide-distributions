@@ -20,6 +20,10 @@ def _schema() -> dict:
     return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
+# Opponent entries that the platform samples per request instead of a fixed policy ref.
+OPPONENT_SELECTORS = ("random",)
+
+
 class DesignError(ValueError):
     """A stored or constructed evaluation design is malformed or inconsistent."""
 
@@ -45,6 +49,16 @@ class EvaluationDesign:
     delta: dict[str, float]
     n_min: int
     noise_rev: str
+
+    @property
+    def pairing(self) -> Literal["seed_and_opponents", "seed_only"]:
+        """What a candidate/baseline pair shares on the platform (A12). Each pair plays one
+        seed (``game_config_overrides.seed``); opponents are identical across the pair only
+        when every entry of ``opponents`` is a fixed policy ref. A selector such as
+        ``"random"`` is sampled per request, so pairing is then seed-only."""
+        if any(entry in OPPONENT_SELECTORS for entry in self.opponents):
+            return "seed_only"
+        return "seed_and_opponents"
 
     def validate(self) -> None:
         """Raise DesignError unless there is at least one primary metric, metric names are

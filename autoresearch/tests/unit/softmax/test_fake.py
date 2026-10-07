@@ -66,6 +66,37 @@ def test_xp_lifecycle_and_recover(tmp_path):
     assert again == handle  # deterministic ids
 
 
+def seeded_spec(seed, policy):
+    return {
+        "num_episodes": 1,
+        "roster": [{"slot": 0, "player": {"policy_ref": policy}}],
+        "game_config_overrides": {"seed": seed},
+    }
+
+
+def test_fake_honors_seed_override_and_tags_seed_and_arm(tmp_path):
+    sm = make(tmp_path)
+    first = sm.xp_create("E-1", 1, 1, seeded_spec(7, "pv:a"), seed=7, arm="candidate")
+    same = sm.xp_create("E-1", 1, 2, seeded_spec(7, "pv:a"), seed=7, arm="candidate")
+    other_arm = sm.xp_create("E-1", 1, 1, seeded_spec(7, "pv:b"), seed=7, arm="baseline")
+    other_seed = sm.xp_create("E-1", 1, 1, seeded_spec(8, "pv:a"), seed=8, arm="candidate")
+    assert first.seed == 7 and first.arm == "candidate"
+    assert (
+        len({first.request_id, same.request_id, other_arm.request_id, other_seed.request_id}) == 4
+    )
+    assert set(sm.xp_recover("E-1")) == {first, same, other_arm, other_seed}
+
+    def results(handle):
+        (path,) = sm.xp_artifacts(handle, tmp_path / handle.request_id)
+        return json.loads(path.read_text())
+
+    assert results(first)["seed"] == 7
+    assert results(first)["episodes"][0]["seed"] == 7
+    # same seed and policy -> the same episode, whatever the request
+    assert results(first)["episodes"] == results(same)["episodes"]
+    assert results(first)["episodes"] != results(other_seed)["episodes"]
+
+
 def test_fail_after_persists_then_raises(tmp_path):
     sm = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="fail_after=submit")
     pv = sm.upload(tmp_path / "a", "a")

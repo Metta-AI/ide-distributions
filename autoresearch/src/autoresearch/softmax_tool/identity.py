@@ -7,7 +7,12 @@ credential itself, because ``/whoami`` does not report it.
 
 from datetime import datetime
 
-from autoresearch.softmax_tool.platform_cli import IdentityError, PlatformCli, SoftmaxCliError
+from autoresearch.softmax_tool.platform_cli import (
+    IdentityError,
+    PlatformCli,
+    SoftmaxCliError,
+    ToolMissing,
+)
 from autoresearch.softmax_tool.protocol import Identity
 
 __all__ = ["IdentityError", "identity_problems", "parse_status", "require_player", "whoami"]
@@ -29,6 +34,8 @@ def whoami(cli: PlatformCli) -> Identity:
     credential = cli.install_credential()  # CredentialError is an IdentityError
     try:
         result = cli.run("softmax", ["status"])
+    except ToolMissing:
+        raise  # an installation problem, not an identity one
     except SoftmaxCliError as error:
         raise IdentityError(f"whoami failed: {error}") from None
     subject_type, subject_id = parse_status(result.stdout)

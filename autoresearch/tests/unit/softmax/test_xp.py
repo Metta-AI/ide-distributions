@@ -39,7 +39,7 @@ def listing(*titles: str | None, next_cursor: str | None = None) -> str:
 
 def test_tag_round_trip():
     assert xp.tag(E, 2, 3) == f"ar:{E}:b2:a3"
-    assert xp.parse_tag(f"ar:{E}:b2:a3") == (E, 2, 3)
+    assert xp.parse_tag(f"ar:{E}:b2:a3") == (E, 2, 3, None, None)
     assert xp.parse_tag("player-only XP probe") is None
     assert xp.parse_tag(None) is None
 
@@ -156,6 +156,76 @@ def test_client_creates_when_no_existing_request_and_checks_identity_last(env, r
         ["softmax", "status"],
         ["coworld", "xp-request", "create"],
     ]
+
+
+# --- seeded (paired) requests: one request per (seed, arm), A12 ---------------
+
+SEEDED_SPEC = {**SPEC, "num_episodes": 1, "game_config_overrides": {"seed": 7}}
+
+
+def test_seeded_tag_round_trip_and_legacy_tags_still_parse():
+    assert xp.tag(E, 2, 3, seed=7, arm="baseline") == f"ar:{E}:b2:a3:s7:baseline"
+    assert xp.parse_tag(f"ar:{E}:b2:a3:s7:baseline") == (E, 2, 3, 7, "baseline")
+    assert xp.parse_tag(f"ar:{E}:b2:a3:s-4:candidate") == (E, 2, 3, -4, "candidate")
+    assert xp.parse_tag(f"ar:{E}:b2:a3") == (E, 2, 3, None, None)
+    assert xp.parse_tag(f"ar:{E}:b2:a3:s7:other") is None
+
+
+def test_seeded_create_sends_seed_override_and_seeded_tag(env, runner):
+    runner.on(
+        "coworld", "xp-request", "create", response=completed(synthetic("xp_request_create.json"))
+    )
+    handle = xp.create(cli(env, runner), E, 1, 1, SEEDED_SPEC, seed=7, arm="candidate")
+    assert handle == XpHandle(CREATED_ID, E, 1, 1, seed=7, arm="candidate")
+    body = json.loads(runner.calls[0][1]["input"])
+    assert body["game_config_overrides"] == {"seed": 7}
+    assert body["num_episodes"] == 1
+    assert body["title"] == body["idempotency_key"] == f"ar:{E}:b1:a1:s7:candidate"
+
+
+def test_seeded_create_refuses_a_spec_whose_seed_disagrees(env, runner):
+    with pytest.raises(ValueError, match="seed"):
+        xp.create(cli(env, runner), E, 1, 1, SEEDED_SPEC, seed=8, arm="candidate")
+    with pytest.raises(ValueError, match="seed"):
+        xp.create(cli(env, runner), E, 1, 1, SPEC, seed=8, arm="candidate")
+    with pytest.raises(ValueError, match="arm"):
+        xp.create(cli(env, runner), E, 1, 1, SEEDED_SPEC, seed=7, arm=None)
+    assert runner.calls == []
+
+
+def test_recover_returns_seed_and_arm(env, runner):
+    titles = (f"ar:{E}:b1:a1:s7:candidate", f"ar:{E}:b1:a1:s7:baseline", f"ar:{E}:b1:a1")
+    runner.on("coworld", "xp-request", "list", response=completed(listing(*titles)))
+    handles = xp.recover(cli(env, runner), E)
+    assert [(h.batch, h.attempt, h.seed, h.arm) for h in handles] == [
+        (1, 1, None, None),
+        (1, 1, 7, "baseline"),
+        (1, 1, 7, "candidate"),
+    ]
+
+
+def test_client_reuses_only_the_request_with_the_same_seed_and_arm(env, runner):
+    runner.on(
+        "coworld",
+        "xp-request",
+        "list",
+        response=completed(listing(f"ar:{E}:b1:a1:s7:candidate")),
+    )
+    runner.on(
+        "coworld", "xp-request", "create", response=completed(synthetic("xp_request_create.json"))
+    )
+    sm = SoftmaxClient(env, run=runner)
+    reused = sm.xp_create(E, 1, 1, SEEDED_SPEC, seed=7, arm="candidate")
+    assert reused.request_id == "xreq_00000000-0000-4000-8000-000000000000"
+    assert not any(argv[:3] == ["coworld", "xp-request", "create"] for argv in runner.argvs())
+    created = sm.xp_create(E, 1, 1, SEEDED_SPEC, seed=7, arm="baseline")
+    assert created == XpHandle(CREATED_ID, E, 1, 1, seed=7, arm="baseline")
+
+
+def test_recorded_results_carry_the_episode_seed():
+    """Rows map ``seed`` from results.json; the recorded GotA artifact has a top-level int."""
+    results = json.loads(recorded("download_results.json"))
+    assert isinstance(results["seed"], int)
 
 
 # --- status ------------------------------------------------------------------

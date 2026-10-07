@@ -16,10 +16,16 @@ class Identity:
 
 @dataclass(frozen=True)
 class XpHandle:
+    """One XP request. ``seed`` and ``arm`` (``"candidate"`` or ``"baseline"``) are set for a
+    seeded request of a paired evaluation (A12: one request per seed and arm); they are None
+    for a request tagged without them."""
+
     request_id: str
     experiment: str
     batch: int
     attempt: int
+    seed: int | None = None
+    arm: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,12 +42,34 @@ class XpStatus:
     warning: str | None = None  # set when the platform status was not recognised
 
 
+class Refused(RuntimeError):
+    """A softmax tool guard refused an action (upload, submit). ``reason`` is a stable
+    machine-readable code (for example ``stale_outcome``); the message says why."""
+
+    def __init__(self, reason: str, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.details = details or {}
+
+    def to_dict(self) -> dict:
+        data = {"reason": self.reason, "message": str(self)}
+        if self.details:
+            data["details"] = self.details
+        return data
+
+
 class Softmax(Protocol):
     def whoami(self) -> Identity: ...
     def credits(self) -> int: ...
     def game_version(self, league_id: str) -> str: ...
     def xp_create(
-        self, experiment: str, batch: int, attempt: int, spec: dict
+        self,
+        experiment: str,
+        batch: int,
+        attempt: int,
+        spec: dict,
+        seed: int | None = None,
+        arm: str | None = None,
     ) -> XpHandle | CreditDenied: ...
     def xp_status(self, handle: XpHandle) -> XpStatus: ...
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...

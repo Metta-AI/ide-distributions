@@ -17,7 +17,7 @@ import frontmatter
 import jsonschema
 import yaml
 
-from autoresearch.comms.envelope import FROM_RUNTIME, message_problems
+from autoresearch.comms.envelope import FROM_AGENT, FROM_RUNTIME, message_problems
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -139,7 +139,7 @@ def _json_at(repo: Path, sha: str, path: str):
 
 def _message_problems(path: str, message) -> list[str]:
     """A staged message must pass ``schemas/message.json`` with a known kind, be ``from``
-    ``agent``, use its id as its file name, and carry no outbox-only fields."""
+    ``research-agent``, use its id as its file name, and carry no outbox-only fields."""
     problems = [f"{path}: staged message: {problem}" for problem in message_problems(message)]
     if not isinstance(message, dict):
         return problems
@@ -147,7 +147,7 @@ def _message_problems(path: str, message) -> list[str]:
     if isinstance(message.get("id"), str) and message["id"] != stem:
         problems.append(f"{path}: staged message id {message['id']!r} must match the file name")
     if message.get("from") == FROM_RUNTIME:
-        problems.append(f"{path}: a staged message is from 'agent', never 'runtime'")
+        problems.append(f"{path}: a staged message is from {FROM_AGENT!r}, never 'runtime'")
     for name in ("seq", "published_rev"):
         if name in message:
             problems.append(f"{path}: {name!r} is set by publication, not by a staged message")

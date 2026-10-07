@@ -7,6 +7,15 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 ``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), and
 ``crash_after=<label>`` (read by runtime code through :func:`fault`).
+
+Like the real client, the mutating calls (``upload``, a new ``xp_create``, ``submit``) re-check
+``whoami`` first and raise ``IdentityError`` unless it is the expected unexpired Player (C6), so
+an ``identity=``, ``player=`` or ``expires_in=`` fault stops a running worker at the boundary.
+
+Seeds (A12): like the platform, a spec's ``game_config_overrides.seed`` pins the request's
+episodes to that seed. Results of a seeded request depend only on (seed, our roster policy,
+episode index), so the same seed and policy give the same episode in any request; unseeded
+results depend on the request id.
 """
 
 import hashlib
@@ -16,7 +25,9 @@ from pathlib import Path
 
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.io.locks import file_lock
+from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
+from autoresearch.softmax_tool.xp import handle_order
 
 FAULTS_ENV = "AUTORESEARCH_FAKE_FAULTS"
 DEFAULT_PLAYER_ID = "ply_fake"
@@ -39,6 +50,15 @@ def fault(env: Mapping[str, str], name: str) -> str | None:
 
 def _short_hash(*parts: object) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:12]
+
+
+def _roster_policy(spec: dict) -> str | None:
+    """Our policy: the first fixed ``policy_ref`` in the roster (our seats come first)."""
+    for entry in spec.get("roster") or []:
+        ref = (entry.get("player") or {}).get("policy_ref")
+        if ref:
+            return ref
+    return None
 
 
 class FakeSoftmax:
@@ -91,6 +111,11 @@ class FakeSoftmax:
         )
         return self._operate("whoami", lambda _state: identity, persist=False)
 
+    def _require_player(self) -> None:
+        problems = identity_problems(self.whoami(), self._player_id, self._clock())
+        if problems:
+            raise IdentityError("; ".join(problems))
+
     def _current_credits(self, state: dict) -> int:
         return int(self._faults["credits"]) if "credits" in self._faults else state["credits"]
 
@@ -103,9 +128,23 @@ class FakeSoftmax:
     # --- XP requests ----------------------------------------------------
 
     def xp_create(
-        self, experiment: str, batch: int, attempt: int, spec: dict
+        self,
+        experiment: str,
+        batch: int,
+        attempt: int,
+        spec: dict,
+        seed: int | None = None,
+        arm: str | None = None,
     ) -> XpHandle | CreditDenied:
-        request_id = f"xp_{_short_hash(experiment, batch, attempt)}"
+        key = (
+            (experiment, batch, attempt)
+            if seed is None
+            else (experiment, batch, attempt, seed, arm)
+        )
+        request_id = f"xp_{_short_hash(*key)}"
+        known = self._operate("xp_lookup", lambda state: request_id in state["xp"], persist=False)
+        if not known:  # like the client: an existing request is reused without a new check
+            self._require_player()
 
         def action(state: dict):
             if request_id not in state["xp"]:
@@ -119,9 +158,13 @@ class FakeSoftmax:
                         spec.get("num_episodes", spec.get("episodes", DEFAULT_EPISODES))
                     ),
                     "polls": 0,
+                    "seed": seed,
+                    "arm": arm,
+                    "game_seed": (spec.get("game_config_overrides") or {}).get("seed"),
+                    "policy": _roster_policy(spec),
                 }
                 state["credits"] = max(0, state["credits"] - 1)
-            return XpHandle(request_id, experiment, batch, attempt)
+            return XpHandle(request_id, experiment, batch, attempt, seed, arm)
 
         return self._operate("xp_create", action)
 
@@ -140,31 +183,47 @@ class FakeSoftmax:
         request = self._operate(
             "xp_artifacts", lambda state: dict(state["xp"][handle.request_id]), persist=False
         )
-        episodes = [
-            {
+        game_seed = request.get("game_seed")
+        source = handle.request_id if game_seed is None else f"{game_seed}|{request['policy']}"
+        episodes = []
+        for index in range(request["episodes"]):
+            episode = {
                 "episode": index,
-                "score": int(_short_hash(handle.request_id, index, "score"), 16) % 100,
-                "errors": int(_short_hash(handle.request_id, index, "errors"), 16) % 5,
+                "score": int(_short_hash(source, index, "score"), 16) % 100,
+                "errors": int(_short_hash(source, index, "errors"), 16) % 5,
             }
-            for index in range(request["episodes"])
-        ]
+            if game_seed is not None:
+                episode["seed"] = game_seed
+            episodes.append(episode)
+        results = {"request_id": handle.request_id, "episodes": episodes}
+        if game_seed is not None:
+            results["seed"] = game_seed
         results_path = Path(dest) / "results.json"
-        write_json(results_path, {"request_id": handle.request_id, "episodes": episodes})
+        write_json(results_path, results)
         return [results_path]
 
     def xp_recover(self, experiment: str) -> list[XpHandle]:
         def action(state: dict) -> list[XpHandle]:
             return [
-                XpHandle(request_id, r["experiment"], r["batch"], r["attempt"])
+                XpHandle(
+                    request_id,
+                    r["experiment"],
+                    r["batch"],
+                    r["attempt"],
+                    r.get("seed"),
+                    r.get("arm"),
+                )
                 for request_id, r in state["xp"].items()
                 if r["experiment"] == experiment
             ]
 
-        return self._operate("xp_recover", action, persist=False)
+        return sorted(self._operate("xp_recover", action, persist=False), key=handle_order)
 
     # --- policies -------------------------------------------------------
 
     def upload(self, artifact: Path, name: str) -> str:
+        self._require_player()
+
         def action(state: dict) -> str:
             policy_version_id = f"pv_{_short_hash(name, len(state['uploads']))}"
             state["uploads"][policy_version_id] = {"name": name}
@@ -173,6 +232,8 @@ class FakeSoftmax:
         return self._operate("upload", action)
 
     def submit(self, policy_version_id: str, league_id: str) -> str:
+        self._require_player()
+
         def action(state: dict) -> str:
             submission_id = (
                 f"sub_{_short_hash(policy_version_id, league_id, len(state['submissions']))}"

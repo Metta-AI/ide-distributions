@@ -19,6 +19,7 @@ class PreflightResult:
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     credits: int | None = None
+    identity_problems: list[str] = field(default_factory=list)  # also in reasons (signals)
 
 
 def preflight(
@@ -38,7 +39,8 @@ def preflight(
         result.ok = False
         return result
 
-    result.reasons.extend(identity_problems(identity, expected_player, now))
+    result.identity_problems = identity_problems(identity, expected_player, now)
+    result.reasons.extend(result.identity_problems)
     if now < identity.expires_at and identity.expires_at - now < EXPIRY_WARNING:
         result.warnings.append(f"credential expires at {identity.expires_at.isoformat()}")
 

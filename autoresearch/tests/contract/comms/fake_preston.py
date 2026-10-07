@@ -67,8 +67,8 @@ class FakePreston:
     def reply(self, in_reply_to: str, text: str) -> str:
         return self.send("reply", in_reply_to=in_reply_to, text=text)
 
-    def seen(self, seq: int) -> str:
-        return self.send("seen", consumer=self.consumer, seq=seq)
+    def seen(self, *message_ids: str) -> str:
+        return self.send("seen", ids=list(message_ids))
 
     def task(self, title: str, mode: str, why: str, refs: list[str], priority: str) -> str:
         return self.send("task", title=title, mode=mode, why=why, refs=refs, priority=priority)

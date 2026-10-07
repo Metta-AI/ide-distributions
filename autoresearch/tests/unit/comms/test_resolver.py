@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 from runtime.workspace import AUTORESEARCH_DIR, Canonical
 
+from autoresearch.comms import resolver
 from autoresearch.comms.resolver import CORE_TYPES, ResolveError, resolve
 from autoresearch.games.loader import load_game
 from autoresearch.ids import new_id
@@ -272,3 +273,10 @@ def test_minimal_canonical_still_resolves(tmp_path):
     handle = Canonical(tmp_path)
     handle.seed()
     assert b"Focus on last hits" in resolve(tmp_path, "ar://plan").content
+
+
+def test_a_slow_game_resolver_times_out(workspace, fakegame, monkeypatch):
+    monkeypatch.setattr(resolver, "GAME_RESOLVER_TIMEOUT_S", 0.5)
+    game = replace(fakegame, reference_types={"slow": "python3 -c 'import time; time.sleep(10)'"})
+    with pytest.raises(ResolveError, match="did not finish"):
+        resolve(workspace.root, "ar://slow/x", game=game)

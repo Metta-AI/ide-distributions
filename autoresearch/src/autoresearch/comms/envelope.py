@@ -3,6 +3,13 @@
 Versioning is additive within ``ar-comms/0``: new optional fields and new kinds may appear, and
 readers ignore what they do not know. Writers are stricter: ``message_problems`` also requires
 the kind to be one of ``KINDS``, so this version never emits a kind its own readers skip.
+
+Essential fields (System Design 7): ``id``, ``seq`` (outbox), ``created``, ``from``
+(``research-agent`` | ``runtime``), ``iteration``, ``kind``, ``title``, ``body``, ``refs``,
+``priority`` (P0-P5, the card scale), ``expects_response``, ``thread``/``in_reply_to``
+(optional), ``supersedes``, ``expires``. Status is derived, never stored
+(``comms.inbound.derived_status``). A message published from a card's handoff also carries
+``card`` (that task id; set by the publisher).
 """
 
 import datetime
@@ -16,9 +23,11 @@ from jsonschema import Draft202012Validator
 from autoresearch.ids import new_id
 
 SCHEMA_VERSION = "ar-comms/0"
-KINDS = ("note", "highlight", "question", "help_request", "suggestion", "decision", "seen")
+KINDS = ("note", "question", "suggestion", "help_request", "highlight")
+PRIORITIES = ("P0", "P1", "P2", "P3", "P4", "P5")
+DEFAULT_PRIORITY = "P2"  # the card default
 RESULT_REV = "@result"  # staged ref rev: replaced by the merge SHA at publication
-FROM_AGENT = "agent"
+FROM_AGENT = "research-agent"
 FROM_RUNTIME = "runtime"
 _SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "message.json"
 
@@ -60,19 +69,40 @@ def now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
 
-def build_message(kind: str, title: str, body: str, refs: list, sender: str, **fields) -> dict:
-    """A new message with a fresh ``M-`` id. ``fields`` adds optional envelope fields
-    (``in_reply_to``, ``thread``, ``urgency``, or any additive field)."""
+def build_message(
+    kind: str,
+    title: str,
+    body: str,
+    refs: list,
+    sender: str,
+    *,
+    iteration: int | None = None,
+    priority: str = DEFAULT_PRIORITY,
+    expects_response: bool | None = None,
+    supersedes: str | None = None,
+    expires: str | None = None,
+    **fields,
+) -> dict:
+    """A new message with a fresh ``M-`` id. ``expects_response`` defaults to True for a
+    ``question`` only. ``fields`` adds optional envelope fields (``in_reply_to``, ``thread``)
+    or any additive field."""
+    if expects_response is None:
+        expects_response = kind == "question"
     return {
         **fields,
         "schema": SCHEMA_VERSION,
         "id": new_id("message"),
+        "created": now_iso(),
+        "from": sender,
+        "iteration": iteration,
         "kind": kind,
         "title": title,
         "body": body,
         "refs": [ref_dict(ref) for ref in refs],
-        "from": sender,
-        "created_at": now_iso(),
+        "priority": priority,
+        "expects_response": expects_response,
+        "supersedes": supersedes,
+        "expires": expires,
     }
 
 

@@ -49,6 +49,10 @@ class IdentityError(RuntimeError):
     """The credential cannot be confirmed as the expected, unexpired Player."""
 
 
+class ToolMissing(SoftmaxCliError):
+    """The pinned ``softmax``/``coworld`` executable is not installed in the profile venv."""
+
+
 class CredentialError(IdentityError):
     """``SOFTMAX_PLAYER_CREDENTIAL`` is missing or malformed. Messages never include its value.
 
@@ -134,15 +138,19 @@ class PlatformCli:
     ) -> subprocess.CompletedProcess:
         """Run ``<venv>/bin/<tool> <args>`` as the Player; raise unless the exit code is in ok_codes."""
         self.install_credential()
-        result = self._run(
-            [str(self._bin_dir / tool), *args],
-            input=input,
-            capture_output=True,
-            text=True,
-            env=self._child_env(),
-            cwd=str(self.home),
-            timeout=timeout,
-        )
+        executable = self._bin_dir / tool
+        try:
+            result = self._run(
+                [str(executable), *args],
+                input=input,
+                capture_output=True,
+                text=True,
+                env=self._child_env(),
+                cwd=str(self.home),
+                timeout=timeout,
+            )
+        except FileNotFoundError:
+            raise ToolMissing(f"{executable} is not installed (reinstall the profile venv)") from None
         if result.returncode not in ok_codes:
             raise SoftmaxCliError(describe_failure(tool, args, result))
         return result

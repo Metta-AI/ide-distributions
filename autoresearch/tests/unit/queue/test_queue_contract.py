@@ -91,6 +91,14 @@ def test_create_is_idempotent_and_unassigned(queue, tmp_path):
     assert card.state == "pending" and card.assignee is None and card.spec == make_spec(1)
 
 
+def test_idempotency_key_override_creates_a_second_card(queue, tmp_path):
+    first = queue.create_unassigned(make_spec(1), "card/1", tmp_path)
+    again = queue.create_unassigned(make_spec(1), "card/1", tmp_path, idempotency_key="req:1:e2")
+    assert again != first
+    assert queue.create_unassigned(make_spec(1), "card/1", tmp_path, "req:1:e2") == again
+    assert len(queue.list()) == 2
+
+
 def test_assign_and_unassign(queue, tmp_path):
     task_id = queue.create_unassigned(make_spec(1), "card/1", tmp_path)
     queue.assign(task_id, "w")

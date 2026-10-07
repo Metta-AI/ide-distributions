@@ -24,7 +24,8 @@ HEAD and the result carries the full commit SHA it was read at. Reference forms
 - A game type (``Game.reference_types``, never shadowing a core type): the game's resolver
   command runs from the autoresearch repo root with the id as its last argument and
   ``AUTORESEARCH_WORKSPACE`` (canonical) and ``AUTORESEARCH_REV`` (the full SHA) in its
-  environment. Exit 0 and stdout is the content; any other exit is "not found". ``path`` is
+  environment. Exit 0 and stdout is the content; any other exit, or no exit within
+  ``GAME_RESOLVER_TIMEOUT_S`` (30 s), is "not found". ``path`` is
   then ``<type>/<id>``, since the content need not be a workspace file.
 
 Anchors. ``ar://journal/<J>#dN`` is the Nth top-level list item under the journal body's
@@ -86,6 +87,7 @@ WIKI_INDEX = "kb/index.md"
 DECISIONS_HEADING = "## Decisions"
 GAME_ENV_WORKSPACE = "AUTORESEARCH_WORKSPACE"
 GAME_ENV_REV = "AUTORESEARCH_REV"
+GAME_RESOLVER_TIMEOUT_S = 30
 # Game resolver commands are relative to the autoresearch repo root (where games/ lives).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DECISION_ANCHOR = re.compile(r"d(?P<n>[1-9][0-9]*)")
@@ -281,7 +283,18 @@ def _resolve_game(canonical: Path, sha: str, game: Game, kind: str, rest: str, u
     env = os.environ | {GAME_ENV_WORKSPACE: str(canonical), GAME_ENV_REV: sha}
     command = [*_game_command(game.reference_types[kind]), rest]
     try:
-        result = subprocess.run(command, cwd=_REPO_ROOT, env=env, capture_output=True, check=False)
+        result = subprocess.run(
+            command,
+            cwd=_REPO_ROOT,
+            env=env,
+            capture_output=True,
+            check=False,
+            timeout=GAME_RESOLVER_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        raise ResolveError(
+            f"{uri!r}: the {game.name} resolver did not finish in {GAME_RESOLVER_TIMEOUT_S} s"
+        ) from None
     except OSError as error:
         raise ResolveError(f"{uri!r}: cannot run the {game.name} resolver: {error}") from None
     if result.returncode != 0:
