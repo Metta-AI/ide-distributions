@@ -2,7 +2,7 @@
 
 Pinned committed source: `personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84`. No source working-tree bytes were used. Implementation retains the lab-relative `tools/`, `strategy/compiler/`, `docs/`, and `reference/` layout. Build reports remain in `tools/strategy_build.py:finalize`; no `strategy_report.py` alias exists.
 
-This is vendored Paintbot code, not yet a GotA backend. The semantic audit modules are staged for later adaptation; Paintbot historical builds, uploads, replay evidence, and native binaries are not copied. No semantic audit or engine qualification is claimed. `tools/pw.py` retains the original dispatcher catalog; unrelated catalog commands are not included in this focused closure.
+Task 2.1 originally vendored Paintbot code; the Task 2.3 section below records the current GotA backend adaptation. The semantic audit modules are staged for later adaptation; Paintbot historical builds, uploads, replay evidence, and native binaries are not copied. No semantic audit or engine qualification is claimed. `tools/pw.py` retains the original dispatcher catalog; unrelated catalog commands are not included in this focused closure.
 
 Approved C1 mechanical corrections: destination test imports point to the vendored tools; the committed-input test uses `base-bassy-28030de6.bas`; the M1 screen assertion accepts `high >= .5`, as implemented and documented by the current pinned command reference. Gate implementation is unchanged. Task 2.4 action-stream equivalence remains required. Python/BASIC/Markdown/environment files carry comment provenance; JSON config has an inert `_provenance` field. Original source SHA-256 values below identify bytes before headers.
 
@@ -51,7 +51,7 @@ Original unchanged baseline: 62 passed, 2 failed, 5 skipped with isolated pandas
 
 Ruff on the four-file test suite and copied Python modules finds **116 inherited diagnostics** under the destination configuration, exactly matching the same source-file set at the pin, with identical per-rule counts. Source executable modes are preserved; 14 EXE001 diagnostics also exist in pinned files with mode 100644. The new `test_vendor_layout.py` passes Ruff. No suppression or lint configuration changes were made. Source/destination diagnostic JSON was retained in `/tmp/ide-mvp-codex-task-2.1-ruff-{source,destination}.json`. The gate body is hash-verified unchanged.
 
-The copied policy-surface, AGENT, LESSONS, config, runtime, semantic evaluators, and reference are Paintbot inputs. Adaptation remains for later tasks. The original dispatcher catalog includes unsupported unrelated commands; only the focused strategy pipeline closure is vendored. No agent invocation, credential, remote action, or native execution was performed in Task 2.1.
+At Task 2.1, the copied policy surface, AGENT, LESSONS, config, runtime, semantic evaluators and reference were Paintbot inputs. Task 2.3 below records the active GotA context; semantic gameplay evaluators remain historical. The original dispatcher catalog includes unsupported unrelated commands; only the focused strategy pipeline closure is vendored. No agent invocation, credential, remote action, or native execution was performed in Task 2.1.
 
 ## Task 2.2 destination extension: descriptive goals
 
@@ -99,3 +99,41 @@ tests pass Ruff. Diagnostic evidence is
 PRINT branches, bounds, maps, readers, and synthetic audit events. No engine,
 model, semantic gameplay, hosted, or policy-equivalence qualification is claimed;
 Task 2.4 remains required. Task 2.3 waits for independent review.
+
+## Task 2.3 destination extension: GotA backend
+
+The destination now supports the live unstructured GotA compiler backend. Original
+Paintbot hashes above remain original-byte provenance, not hashes of adapted files.
+All actual driver paths select GotA. Historical standalone parser/generator tests
+retain explicit/default Paintbot helper behavior. The original historical gate
+module is retained; the driver now calls shared GotA G1–G5 through gota_gates.
+
+Source verification: cached Polyworld `5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd`
+and Bassy `a02e6dd5889310b13d21725c891bde8d01539f08`. Runtime packing uses the exact
+Phase A pvId(660) layout, fixed49 and reserve128; explicit immutable baseline
+bindings support genuine component decomposition. The exact reference is
+v13-live SHA-256 `1637c5604a522342de710afbffb16cdaa84befe99d3df17fa28e146414f86f9c`.
+No baseline execution is substituted into generated output.
+
+C1 rulings: real vendor paths, explicit backend seam, 100-based host hero IDs,
+packing.json storage bindings, source compaction with original units retained,
+shared G5 compiler-wire support, and live generation-context replacement are
+faithful mechanical changes. No strategy/GAME contract, gameplay behavior,
+credentials, remote action or spend is authorized by this adaptation. See
+[backend guide](docs/gota-backend.md) and
+[finding](../../../docs/plans/findings/compiler-gota-backend.md).
+
+The partial GotA port was researched but not copied. Its structured host and
+starter baseline are unsuitable for these ceilings and submitted-policy oracle.
+New host/packing/adapter files use the existing scanner and shared gates. Source
+hashes now include all compiler Python helpers, GotA Python/Nim/build helpers,
+shared gate implementations, binding metadata and exact baseline reference.
+
+TDD began with six failing backend tests. Real cached G1/G3 validate the generated
+trivial fixture (7,596 bytes, zero globals, one 661-cell array, 27 routines,
+1,452 static instructions; ten seats with 620 decisions each over 3,000 ticks).
+Packed baseline compile confirms 251 globals, 32 arrays and 4,061 cells and unchanged
+original access tokens. Neither proves full episode/action-stream equivalence.
+Dynamic unit index bounds, real G2 and full artifact G3/G4 remain Task 2.4 work.
+No model or container episode was executed. Full commands/results and remaining
+limitations are in `/tmp/ide-mvp-codex-task-2.3-report.md`.

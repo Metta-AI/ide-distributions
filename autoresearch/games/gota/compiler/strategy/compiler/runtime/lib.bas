@@ -1,6 +1,8 @@
 ' Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: paintbot_pw_lab/strategy/compiler/runtime/lib.bas
 ' runtime.lib: strategy runtime library, telemetry v2 print routines. Hand-written source,
-' copied verbatim into every build (compilation design §4.1). Do not edit a build's copy.
+' Paintbot embeds this verbatim; GotA relocates it through gota_packing.py.
+' GotA uses four adaptations (five cells with index zero) and no COM runtime.
+' The immutable units retain this source; the final policy contains packed accesses.
 '
 ' Contract with generated.tables (strategy_basic.py writes these; this file only reads them):
 '   rt__n_rules, rt__def(r), rt__prio(r), rt__rcap(r)    rules 1..n: default and current

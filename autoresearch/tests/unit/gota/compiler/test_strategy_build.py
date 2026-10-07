@@ -45,7 +45,11 @@ def test_changed_units_receive_previous_source(tmp_path, monkeypatch):
     monkeypatch.setattr(sb, 'previous_build', lambda *args: prior)
     monkeypatch.setattr(sb.shutil, 'which', lambda _: '/fake/claude')
     monkeypatch.setattr(sb.subprocess, 'run', lambda *args, **kw: SimpleNamespace(stdout='test-version'))
-    order = sb.prepare(source, full=True)
+    gota_source = tmp_path / 'STRATEGY.md'
+    gota_source.write_text(source.read_text().replace(',10,11,12,13,14,15', ''))
+    monkeypatch.setattr(sb, 'REPO', tmp_path)
+    order = sb.prepare(gota_source, full=True)
+    assert order['backend'] == 'gota'
     assert order['units']['K.position'] == 'changed'
     assert (sb.STAGING / order['build_id'] / 'units/K.position.bas').read_text() == 'previous unit\n'
 
@@ -202,6 +206,12 @@ def test_committed_input_check_includes_staged_edits_and_deletions(tmp_path, mon
     monkeypatch.setattr(sb, 'REPO', tmp_path)
     monkeypatch.setattr(sb, 'LAB', lab)
     monkeypatch.setattr(sb, 'COMPILER', compiler)
+    import gota_host
+    baseline = tmp_path / 'v13-live.bas'
+    baseline.write_text('fixture baseline')
+    monkeypatch.setattr(gota_host, 'BASELINE', baseline)
+    (tmp_path / 'tools').mkdir()
+    (tmp_path / 'tools/build_nim.sh').write_text('fixture builder')
     original_git = sb.git
     monkeypatch.setattr(sb, 'git', lambda *args, **kwargs: original_git(*args, root=tmp_path))
     sb.git('init')

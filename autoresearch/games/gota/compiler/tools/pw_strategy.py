@@ -15,7 +15,7 @@ DEFAULT_SOURCE = builds.LAB / 'strategy/STRATEGY.md'
 
 def parser():
     root = pw_cli.ArgumentParser('pw_strategy', __doc__, examples=[
-        'pw.py strategy lint paintbot_pw_lab/strategy/STRATEGY.md --json',
+        'pw.py strategy lint games/gota/compiler/strategy/STRATEGY.md --json',
         'pw.py strategy compile --agent claude --milestone m1 --json',
         'pw.py strategy trace <build-id> --json'])
     commands = root.add_subparsers(dest='action', required=True)
@@ -46,7 +46,7 @@ def parser():
 
 def run(args, report):
     from strategy_format import parse_strategy, lint_strategy
-    from strategy_gates import verify
+    from gota_gates import verify
     from strategy_basic import BuildError
     if args.action == 'audit':
         from strategy_audit import run as audit
@@ -54,7 +54,7 @@ def run(args, report):
     if args.action == 'lint':
         if not args.source.is_file():
             raise pw_cli.UsageError(f'strategy does not exist: {args.source}')
-        strategy = parse_strategy(args.source.resolve())
+        strategy = parse_strategy(args.source.resolve(), backend='gota')
         diagnostics = [d.to_dict() for d in lint_strategy(strategy)]
         for diagnostic in diagnostics:
             if diagnostic['level'] == 'error':
@@ -65,7 +65,7 @@ def run(args, report):
         path = builds.build_path(args.build)
         version = builds.read(path / 'version.json')
         source = builds.REPO / version['source_path']
-        current = builds.component_map(parse_strategy(source))
+        current = builds.component_map(parse_strategy(source, backend='gota'))
         previous = builds.read(path / 'map.json')['components']
         statuses = builds.changes(current, previous)
         return {'build_id': args.build, 'source_commit': version['source_commit'], 'units': statuses}

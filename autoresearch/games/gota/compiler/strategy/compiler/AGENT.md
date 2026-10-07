@@ -1,7 +1,7 @@
 <!-- Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: paintbot_pw_lab/strategy/compiler/AGENT.md -->
 # Strategy compiler instructions
 
-You are the compiler step of the Paintbot PW strategy compiler. You turn the components listed in
+You are the compiler step of the GotA strategy compiler. You turn the components listed in
 `work_order.json` into BASIC unit files. A Python driver prepared this directory and will check
 and assemble your output. It will also run the gates. You do not build `policy.bas`, and you do
 not run anything.
@@ -17,7 +17,7 @@ These instructions work the same for every agent. They describe files and rules 
 | `units/` | Unchanged units, supplied as read-only context. Every requested output is initially absent and must be written. |
 | `context/LESSONS.md` | BASIC pitfalls learned on earlier builds. Read it every time. |
 | `context/policy-surface.md` | The BASIC dialect, budgets, failure modes, and every host call. It is the authority for what the engine does. |
-| `context/base.bas` | The official starter policy. It is a library of proven BASIC idioms. |
+| `context/base.bas` | The exact compatibility-adjusted v13-live policy; semantic reference only, never an assembly fallback. |
 | `report_draft.json` | Your report (below). It can already exist from an earlier repair round. |
 
 ## What you write
@@ -79,40 +79,26 @@ example, but it also changes gameplay: do not copy its targeting/HP/item changes
      - After done or abort, the runtime selects again on the next tick.
    - `A.`: `<p>__eval()`. It MUST assign `<p>__fire` (0 or 1) on every call. The priority effect
      is generated and applies on the rising edge. Do not change priorities yourself.
-   - `COM.`: define only the SUBs of its `Directions`.
-     - `<p>__recv()` sets `<p>__got = 1` and `<p>__from` (the speaker seat) when it decoded a
-       message this tick.
-     - `<p>__send()` sets `<p>__sent = 1` when it shouted.
-
-     Generated code sets `got` and `sent` to 0 before each call. Shout only what the `Spec`
-     says.
-     - For `Encoding: comms-v1 N`, the generated dispatcher owns `got`, `from`, `sent`
-       and the `packet[2]` output. Do not write them. Declare and log exactly `packet`.
-       The work order lists read-only `cm__` decoded fields and per-seat memories.
-       `__recv()` runs once per accepted message, before Knowledge; it does not run on
-       empty ticks. `__send()` may call `cm__send(type, fieldsA, fieldsB, cell, quiet)`.
-       Inspect `cm__sent` to advance a cooldown only on success. The runtime owns encoding,
-       shout, cooldown, one-send enforcement and compact telemetry.
-     - Codec send routines run in G,D,X,F,H,E,U,K,R order and stop after a successful send.
-       Do not depend on an uncalled send or receive routine for per-tick bookkeeping.
-       Knowledge may read a COM memory and the COM may read that Knowledge's current
-       output in send; keep the receive-before-Knowledge phase explicit.
-     - Use unit-owned arrays for bounded per-seat/per-station memory and scratch state
-       where many scalar temporaries would exceed the whole-policy 512-global budget.
-       The checksum is not authentication; never infer certainty from decoding.
+   - `COM.` is rejected for GotA. Goals are descriptive metadata and PRINT literals only.
    - Optional for every kind: `<p>__init()`, called once on the first tick, after constants are
      set.
 5. **Safety.** Every runtime error disables the seat for the rest of the match. Every compile
    error fails the whole episode. So:
-   - bound every `WHILE` by a constant, by 16, or by `heartCount()`;
+   - bound every `WHILE` by a constant, by ten seats, or by a bounded object list;
    - guard every division and `MOD` against zero;
    - keep every array index in range (logical operators do not short-circuit, so guard the index
      with a nested `IF`);
    - never use a host-function name as a variable;
    - never keep a string handle across ticks.
-6. **Budget.** The whole policy has 50,000 instructions and 125,000 work units per tick, 512
-   globals, and 4,096 array cells. Prefer the cheapest host calls (`policy-surface.md` §5). Avoid
-   per-tick loops over all 16 seats when `nearAgents` serves.
+6. **Budget.** The unstructured host allows 256 globals, 32 arrays, 4,096 array
+   cells, 65,536 source bytes, 64 routines, and 20,000 static instructions. G3 uses
+   80,000 instructions and 200,000 work units per decision. Compiler telemetry
+   reserves at most 512 bytes / 64 events; host PRINT limits are 1,024 / 128.
+   GotA packing places runtime state in pvId indices 64–660; baseline indices
+   0–63 retain their original meaning. There are only 128 cells for new metadata
+   and scratch. Existing baseline variables need explicit packing.json bindings.
+   Never add arrays or access runtime tail cells in a component. Preserve baseline
+   index bounds; arbitrary dynamic indices are not isolated by the packer.
 7. **Guesses.** Where the `Spec` is ambiguous or impossible, choose the most conservative
    reading, implement it, and record it. Do not ask questions and do not stop. Do not edit the
    source.

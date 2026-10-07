@@ -98,6 +98,8 @@ TOKEN_RE = re.compile(r'\s*(?:(?P<str>"[^"\n]*")|(?P<num>\d+)|(?P<id>[A-Za-z_][A
 @dataclass
 class Scan:
     """What one BASIC text defines and references. Names are lower case."""
+    host_data: set[str] = field(default_factory=lambda: HOST_DATA)
+    keywords: set[str] = field(default_factory=lambda: KEYWORDS)
     subs: dict[str, int] = field(default_factory=dict)             # name -> arity
     sub_lines: dict[str, int] = field(default_factory=dict)
     arrays: dict[str, int] = field(default_factory=dict)           # name -> cells
@@ -130,9 +132,14 @@ def _tokens(line: str) -> list[tuple[str, str]]:
     return out
 
 
-def scan_basic(text: str) -> Scan:
+def scan_basic(text: str, *, backend: str = "paintbot") -> Scan:
     """Classify every name use in a BASIC text (dialect: docs/policy-surface.md §2)."""
-    scan = Scan()
+    if backend == "gota":
+        from gota_host import HOST_DATA as host_data
+        from gota_host import KEYWORDS as keywords
+        scan = Scan(host_data=host_data, keywords=keywords)
+    else:
+        scan = Scan()
     current_sub: str | None = None
     params: set[str] = set()
     for number, raw in enumerate(text.splitlines(), start=1):
@@ -159,14 +166,14 @@ def scan_basic(text: str) -> Scan:
 
 def _expression(scan: Scan, toks: list[tuple[str, str]], number: int, sub: str | None, params: set[str]) -> None:
     for index, (kind, text) in enumerate(toks):
-        if kind != "id" or text in KEYWORDS:
+        if kind != "id" or text in scan.keywords:
             continue
         nxt = toks[index + 1] if index + 1 < len(toks) else None
         if nxt == ("op", "("):
             scan.paren_refs.append((text, number))
         elif text not in params:
             scan.scalar_reads.append((text, number, sub))
-            if text not in HOST_DATA:
+            if text not in scan.host_data:
                 scan.globals.add(text)
 
 
@@ -335,7 +342,7 @@ def check_unit(strategy: sf.Strategy, component_id: str, text: str) -> list[sf.D
         diags.append(sf.Diagnostic("error", code, message + (f" (unit line {line})" if line else ""), comp.id, None))
 
     own = comp.prefix + "__"
-    scan = scan_basic(text)
+    scan = scan_basic(text, backend=strategy.backend)
     for line, problem in scan.problems:
         err("unit-structure", problem, line)
     for line in scan.prints:
@@ -373,7 +380,7 @@ def check_unit(strategy: sf.Strategy, component_id: str, text: str) -> list[sf.D
         elif codec and name == own + CODEC_PACKET:
             err("unit-namespace", f"writes {name}; generated code fills the packet", line)
     for name, line, _ in scan.scalar_reads:
-        if name.startswith(own) or name in HOST_DATA or name in dep_scalars or name in RUNTIME_EXPORTS:
+        if name.startswith(own) or name in scan.host_data or name in dep_scalars or name in RUNTIME_EXPORTS:
             continue
         if "__" not in name:
             err("unit-bare-name", f"reads {name}, which is neither host data nor a prefixed name "
@@ -757,7 +764,7 @@ def generate_tables(strategy: sf.Strategy, unit_subs: dict[str, dict[str, int]])
     for set_name, members in strategy.roles.items():
         init.append(f"st__role_{set_name} = 0")
         for code, (role, seats) in enumerate(members.items(), start=1):
-            init += _if(" OR ".join(f"selfId = {s}" for s in seats), [f"st__role_{set_name} = {code}"])
+            init += _if(" OR ".join(f"selfId = {s + (100 if strategy.backend == 'gota' else 0)}" for s in seats), [f"st__role_{set_name} = {code}"])
     init.append(f"rt__n_rules = {len(strategy.rules)}")
     for rule in strategy.rules:
         init += [f"rt__def({rule.code}) = {rule.priority}", f"rt__prio({rule.code}) = {rule.priority}",
@@ -925,16 +932,19 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def policy_stats(policy: str) -> dict:
-    scan = scan_basic(policy)
-    return {"globals": len(scan.globals), "globals_limit": LIMITS["globals"],
-            "array_cells": sum(scan.arrays.values()), "array_cells_limit": LIMITS["array_cells"],
-            "arrays": len(scan.arrays), "arrays_limit": LIMITS["arrays"],
-            "source_bytes": len(policy.encode()), "source_limit": LIMITS["source_bytes"]}
+def policy_stats(policy: str, *, backend: str = "paintbot") -> dict:
+    scan = scan_basic(policy, backend=backend)
+    limits = LIMITS
+    if backend == "gota":
+        from gota_host import LIMITS as limits
+    return {"globals": len(scan.globals), "globals_limit": limits["globals"],
+            "array_cells": sum(scan.arrays.values()), "array_cells_limit": limits["array_cells"],
+            "arrays": len(scan.arrays), "arrays_limit": limits["arrays"],
+            "source_bytes": len(policy.encode()), "source_limit": limits["source_bytes"]}
 
 
 def assemble(strategy: sf.Strategy, units: dict[str, str], runtime_dir: Path, build_id: str,
-             source_commit: str) -> dict:
+             source_commit: str, *, baseline_bindings: dict | None = None) -> dict:
     """Check every unit, generate the tables and join policy.bas. Raises BuildError."""
     diags = [d for d in sf.lint_strategy(strategy) if d.level == "error"]
     plan, comms_diags = comms_plan(strategy)
@@ -969,13 +979,23 @@ def assemble(strategy: sf.Strategy, units: dict[str, str], runtime_dir: Path, bu
     blocks += [(comp_id, texts[comp_id]) for comp_id in order]
     blocks.append(("runtime.main", runtime["runtime.main"]))
     header = [f"' policy.bas | build {build_id} | source {source_commit} | strategy {strategy.name}",
-              "' GENERATED from paintbot_pw_lab/strategy/STRATEGY.md by the strategy compiler. Do not edit:",
+              (f"' GENERATED from {strategy.path.name} by the GotA strategy compiler. Do not edit:"
+               if strategy.backend == "gota" else
+               "' GENERATED from paintbot_pw_lab/strategy/STRATEGY.md by the strategy compiler. Do not edit:"),
               "' change the source and recompile."]
     # Blocks are embedded byte for byte; a block without a final newline gets one so the next
     # block's marker starts a new line.
     policy = "\n".join(header) + "\n\n" + "".join(
         f"' ==== {name} ====\n{text}{'' if text.endswith(chr(10)) else chr(10)}\n" for name, text in blocks)
-    budget = {"telemetry": telemetry_worst_case(strategy), **policy_stats(policy)}
+    packing = None
+    if strategy.backend == "gota":
+        from gota_packing import pack
+        try:
+            policy, packing = pack(policy, baseline_bindings)
+        except (ValueError, TypeError) as error:
+            raise BuildError([sf.Diagnostic("error", "gota-packing", str(error))]) from error
+    budget = {"telemetry": telemetry_worst_case(strategy),
+              **policy_stats(policy, backend=strategy.backend)}
     over = [key for key in ("globals", "array_cells", "arrays", "source_bytes")
             if budget[key] > budget[key + "_limit" if key != "source_bytes" else "source_limit"]]
     if over:
@@ -984,8 +1004,11 @@ def assemble(strategy: sf.Strategy, units: dict[str, str], runtime_dir: Path, bu
     out_units = dict(texts)
     out_units.update(runtime)
     out_units["generated.tables"] = tables
-    return {"policy": policy, "units": out_units, "map": build_map(strategy, out_units, build_id, source_commit, budget),
-            "budget": budget}
+    mapping = build_map(strategy, out_units, build_id, source_commit, budget)
+    mapping["backend"] = strategy.backend
+    if packing is not None:
+        mapping["packing"] = packing
+    return {"policy": policy, "units": out_units, "map": mapping, "budget": budget}
 
 
 def build_map(strategy: sf.Strategy, units: dict[str, str], build_id: str, source_commit: str, budget: dict) -> dict:

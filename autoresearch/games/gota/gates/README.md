@@ -78,3 +78,16 @@ ignored binaries; compiler/runtime errors and missing tools produce failed gates
 Unit tests use short real native simulations and recorded telemetry fixtures.
 The fixture envelope assembled by a test is a parser test, not a new episode.
 Full manifest and ten-seed execution evidence is recorded separately in provenance.
+
+## Compiler adapter
+
+The GotA compiler driver calls these same modules in G1–G5 order through
+`compiler/tools/gota_gates.py`. It selects the verified cached native probe
+explicitly and never builds/fetches implicitly. Its GateContext may carry a
+`compiler_map`: shared G5 then parses compiler telemetry through the existing
+strict reader on all ten G2 logs, requiring decisions and rejecting malformed
+or backwards-tick lines and BASIC failures. Legacy LH parsing is unchanged.
+Compiler parsing still reports `compiler_trace_coverage: null`; full trace
+coverage, goal truth and semantic equivalence are separate validations.
+See [compiler backend](../compiler/docs/gota-backend.md) for the packing contract,
+configuration and exact scope of local fixture evidence.

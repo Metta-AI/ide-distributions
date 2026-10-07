@@ -53,16 +53,24 @@ def plain(value):
 
 
 def source_files(source: Path) -> list[Path]:
-    paths = [source]
+    from gota_host import BASELINE
+    paths = [source, BASELINE]
+    packing = source.parent / 'packing.json'
+    if packing.exists():
+        paths.append(packing)
     for folder in (source.parent / 'skills', COMPILER):
         if folder.exists():
             paths.extend(p for p in folder.rglob('*') if p.is_file())
     comms = source.parent / 'comms.md'
     if comms.exists():
         paths.append(comms)
-    paths.extend(LAB.joinpath('tools').glob('strategy_*.py'))
+    paths.extend(LAB.joinpath('tools').glob('*.py'))
+    paths.extend(LAB.parent.joinpath('gates').glob('*.py'))
+    paths.extend(LAB.parent.joinpath('tools').glob('*.py'))
+    paths.extend(LAB.parent.joinpath('tools').glob('*.nim'))
+    paths.append(LAB.parent / 'tools/build_nim.sh')
     paths.extend([LAB / 'tools/pw_strategy.py', LAB / 'tools/pw_intent.py', LAB / 'tools/release.env',
-                  LAB / 'docs/policy-surface.md', LAB / 'reference/base-bassy-28030de6.bas'])
+                  LAB / 'docs/policy-surface.md'])
     paths.extend(LAB / 'tools' / name for name in ('pw_local.py', 'pw_release.py', 'pw_cli.py',
                                                    'pw_terrain.py', 'pw.py'))
     return sorted(set(paths))
@@ -81,6 +89,7 @@ def committed_inputs(source: Path) -> dict[str, str]:
             raise pw_cli.UsageError(f'source must be inside {REPO}') from None
     scopes = relative + [str(source.parent.relative_to(REPO) / 'skills'),
                          str(source.parent.relative_to(REPO) / 'comms.md'),
+                         str(source.parent.relative_to(REPO) / 'packing.json'),
                          str(COMPILER.relative_to(REPO))]
     dirty = git('status', '--porcelain', '--untracked-files=all', '--', *scopes)
     tracked = set(git('ls-files', '--', *relative).splitlines())
@@ -92,6 +101,10 @@ def committed_inputs(source: Path) -> dict[str, str]:
 
 
 def assert_inputs(order: dict) -> None:
+    if 'source_path' in order:
+        packing = (REPO / order['source_path']).parent / 'packing.json'
+        if packing.exists() and str(packing.relative_to(REPO)) not in order['source_hashes']:
+            raise pw_cli.UsageError('packing.json added since prepare; prepare a new build')
     for name, expected in order['source_hashes'].items():
         path = REPO / name
         if not path.is_file() or path.is_symlink() or digest(path) != expected:
@@ -162,9 +175,26 @@ def changes(current: dict, previous: dict, full: bool = False) -> dict[str, str]
     return statuses
 
 
+def packing_bindings(source: Path) -> dict:
+    path = source.parent / 'packing.json'
+    if not path.exists():
+        return {}
+    try:
+        value = read(path)
+    except (OSError, ValueError) as error:
+        raise pw_cli.UsageError(f'invalid {path}: {error}') from error
+    if (not isinstance(value, dict) or set(value) != {'baseline_bindings'}
+            or not isinstance(value['baseline_bindings'], dict)
+            or any(not isinstance(name, str) or not isinstance(target, str)
+                   for name, target in value['baseline_bindings'].items())):
+        raise pw_cli.UsageError(f'{path}: expected an object with baseline_bindings mapping string names to names')
+    return value['baseline_bindings']
+
+
 def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None, previous=None) -> dict:
     from strategy_format import parse_strategy, lint_strategy
-    strategy = parse_strategy(source)
+    strategy = parse_strategy(source, backend="gota")
+    packing_bindings(source)
     diagnostics = [plain(d) for d in lint_strategy(strategy)]
     errors = [d for d in diagnostics if d['level'] == 'error']
     if errors:
@@ -185,7 +215,8 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
     old_map = read(prior / 'map.json').get('components', {}) if prior else {}
     current = component_map(strategy)
     # A runtime release can change BASIC semantics without changing strategy text.
-    if prior and read(prior / "version.json").get("engine", {}).get("tag") != pw_release.current_tag():
+    from gota_host import POLYWORLD_COMMIT
+    if prior and read(prior / 'version.json').get('engine', {}).get('commit') != POLYWORLD_COMMIT:
         full = True
     statuses = changes(current, old_map, full)
     # Interfaces are source-declared, so dependency invalidation is known before the LLM runs.
@@ -231,7 +262,8 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
              'compiler': {'agent': agent, 'model': model, 'cli_version': cli_version,
                           'agent_sha256': digest(COMPILER / 'AGENT.md'),
                           'lessons_sha256': digest(COMPILER / 'LESSONS.md')},
-             'engine': {'tag': pw_release.current_tag(), 'commit': pw_release.current_sha()},
+             'backend': 'gota',
+             'engine': {'tag': 'gota-2026.10.6.1', 'commit': POLYWORLD_COMMIT},
              'created': datetime.now(timezone.utc).isoformat(), 'diagnostics': diagnostics}
     dump(stage / 'work_order.json', order)
     return order
@@ -291,13 +323,14 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         (root / 'units').mkdir()
         (root / 'context').mkdir()
         from strategy_format import parse_strategy
-        strategy = parse_strategy(REPO / order['source_path'])
+        strategy = parse_strategy(REPO / order['source_path'], backend='gota')
         authored = {comp.id: strategy.root / comp.code_path for comp in strategy.of_kind('SK')}
         copy_unit_inputs(stage, root, generated, authored)
         shutil.copyfile(COMPILER / 'AGENT.md', root / 'AGENTS.md')
         shutil.copyfile(COMPILER / 'LESSONS.md', root / 'context/LESSONS.md')
         shutil.copyfile(LAB / 'docs/policy-surface.md', root / 'context/policy-surface.md')
-        shutil.copyfile(LAB / 'reference/base-bassy-28030de6.bas', root / 'context/base.bas')
+        from gota_host import BASELINE
+        shutil.copyfile(BASELINE, root / 'context/base.bas')
         prior = build_path(order['previous_build']) if order['previous_build'] else None
         previous_guesses = read(prior / 'report.json').get('guesses', []) if prior else []
         from strategy_basic import unit_contract
@@ -388,10 +421,12 @@ def assemble_build(build_id: str) -> dict:
     stage = build_path(build_id, staged=True)
     order = read(stage / 'work_order.json')
     assert_inputs(order)
-    strategy = parse_strategy(REPO / order['source_path'])
+    strategy = parse_strategy(REPO / order['source_path'], backend='gota')
     units = {p.stem: p.read_text() for p in (stage / 'units').glob('*.bas')
              if p.stem in strategy.components and strategy.components[p.stem].llm}
-    result = assemble(strategy, units, COMPILER / 'runtime', build_id, order['source_commit'])
+    bindings = packing_bindings(strategy.path)
+    result = assemble(strategy, units, COMPILER / 'runtime', build_id, order['source_commit'],
+                      baseline_bindings=bindings)
     (stage / 'policy.bas').write_text(result['policy'])
     for key, text in result['units'].items():
         (stage / 'units' / f'{key}.bas').write_text(text)
@@ -462,7 +497,7 @@ def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
     (stage / 'report.md').write_text('\n'.join(lines) + '\n')
     version = {k: order[k] for k in ('build_id', 'source_commit', 'source_path', 'source_hashes',
                                     'previous_build', 'compiler', 'engine', 'created', 'intent')}
-    version.update(status=status, gates=gates, driver={'repo_commit': order['source_commit'], 'dirty': False},
+    version.update(backend='gota', status=status, gates=gates, driver={'repo_commit': order['source_commit'], 'dirty': False},
                    policy_sha256=digest(stage / 'policy.bas') if (stage / 'policy.bas').exists() else None)
     version['artifact_hashes'] = {str(p.relative_to(stage)): digest(p) for p in stage.rglob('*')
                                   if p.is_file() and p.name != 'version.json' and p.suffix != '.log'}

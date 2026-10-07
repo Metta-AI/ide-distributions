@@ -225,6 +225,7 @@ class Strategy:
     path: Path
     root: Path
     name: str = ""
+    backend: str = "paintbot"
     components: dict[str, Component] = field(default_factory=dict)
     rules: list[Rule] = field(default_factory=list)
     roles: dict[str, dict[str, tuple[int, ...]]] = field(default_factory=dict)
@@ -275,8 +276,8 @@ def prefix_for(component_id: str) -> str:
 # ---------------------------------------------------------------- parsing
 
 class _Parser:
-    def __init__(self, path: Path, text: str):
-        self.strategy = Strategy(path=path, root=path.parent)
+    def __init__(self, path: Path, text: str, backend: str = "paintbot"):
+        self.strategy = Strategy(path=path, root=path.parent, backend=backend)
         self.lines = text.splitlines()
 
     def error(self, code: str, message: str, component: str | None = None, line: int | None = None) -> None:
@@ -596,8 +597,9 @@ class _Parser:
                     self.error("roles-syntax", f"role {m.group('name')} listed twice", comp.id, comp.field_lines[name])
                 members[m.group("name")] = tuple(int(s) for s in m.group("seats").split(","))
             seats = sorted(s for group in members.values() for s in group)
-            if members and seats != list(range(SEATS)):
-                self.error("roles-syntax", f"role set `{set_name}` must assign every seat 0..15 exactly once",
+            seat_count = 10 if self.strategy.backend == "gota" else SEATS
+            if members and seats != list(range(seat_count)):
+                self.error("roles-syntax", f"role set `{set_name}` must assign every seat 0..{seat_count - 1} exactly once",
                            comp.id, comp.field_lines[name])
             self.strategy.roles[set_name] = members
 
@@ -772,10 +774,12 @@ def skill_subs(source: str) -> dict[str, int]:
     return subs
 
 
-def parse_strategy(path: Path) -> Strategy:
+def parse_strategy(path: Path, *, backend: str = "paintbot") -> Strategy:
     """Parse STRATEGY.md into the typed model. Content problems become `strategy.diagnostics`."""
     path = Path(path)
-    return _Parser(path, path.read_text(encoding="utf-8")).run()
+    if backend not in ("paintbot", "gota"):
+        raise ValueError(f"unknown backend: {backend}")
+    return _Parser(path, path.read_text(encoding="utf-8"), backend).run()
 
 
 # ---------------------------------------------------------------- lint
@@ -789,6 +793,15 @@ def lint_strategy(strategy: Strategy) -> list[Diagnostic]:
 
     def warn(code: str, message: str, comp: str | None = None, line: int | None = None) -> None:
         diags.append(Diagnostic("warning", code, message, comp, line))
+
+    if strategy.backend == "gota":
+        for comp in strategy.of_kind("COM"):
+            error("gota-com", "GotA does not support COM components", comp.id)
+        for kind, limit in (("A", 4), ("S", 124)):
+            if len(strategy.of_kind(kind)) > limit:
+                error("gota-capacity", f"GotA {kind} capacity is {limit}")
+        if len(strategy.rules) > 63:
+            error("gota-capacity", "GotA rule capacity is 63")
 
     comps = strategy.components
     rule_ids = {r.id for r in strategy.rules}

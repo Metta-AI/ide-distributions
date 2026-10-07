@@ -1,6 +1,7 @@
 ' Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: paintbot_pw_lab/strategy/compiler/runtime/main.bas
 ' runtime.main: the per-tick order (strategy file format §3). Hand-written source, copied
-' verbatim as the last block of every build; the only top-level executable code in policy.bas.
+' as the last block. GotA packs these scalar accesses into pvId through gota_packing.py.
+' This is the only top-level executable code in policy.bas.
 IF rt__started = 0 THEN
   rt__started = 1
   rt__snap = 1

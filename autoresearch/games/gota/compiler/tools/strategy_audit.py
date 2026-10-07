@@ -63,7 +63,7 @@ def load_build(build_id):
     with tempfile.TemporaryDirectory(prefix='pw-audit-source-') as directory:
         source_path = Path(directory) / 'STRATEGY.md'
         source_path.write_bytes(source)
-        strategy = sf.parse_strategy(source_path)
+        strategy = sf.parse_strategy(source_path, backend=version.get('backend', 'paintbot'))
     if strategy.diagnostics:
         raise pw_cli.UsageError('committed source cannot be parsed')
     from strategy_basic import build_map

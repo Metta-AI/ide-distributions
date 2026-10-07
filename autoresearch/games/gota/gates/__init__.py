@@ -21,3 +21,4 @@ class GateContext:
     timeout: int = 600
     variant: str = 'competition'
     measurements: dict = field(default_factory=dict)
+    compiler_map: dict | None = None
