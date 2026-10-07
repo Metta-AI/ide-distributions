@@ -355,16 +355,20 @@ def publish_runtime(
 # --- inbound acknowledgement (C11) ---
 
 
-def find_reply(canonical: Path, target: str, sender: str | None = None) -> str | None:
+def find_reply(
+    canonical: Path, target: str, sender: str | None = None, card: str | None = None
+) -> str | None:
     """Id of a message in the outbox (on disk) with ``in_reply_to`` == ``target``, from
-    ``sender`` if given; the oldest one if several."""
+    ``sender`` and published by card ``card`` if given; the oldest one if several."""
     for message_id, (_, path) in sorted(
         _outbox_files(canonical).items(), key=lambda item: item[1][0]
     ):
         message = read_json(path)
         if not isinstance(message, dict) or message.get("in_reply_to") != target:
             continue
-        if sender is None or message.get("from") == sender:
+        if sender is not None and message.get("from") != sender:
+            continue
+        if card is None or message.get("card") == card:
             return message_id
     return None
 
@@ -384,17 +388,20 @@ def _is_responsible(record: dict, handoff: dict) -> bool:
 
 
 def _task_acknowledgement(
-    canonical: Path, inbound_id: str, handoff: dict, allow_no_remote: bool
+    canonical: Path, inbound_id: str, handoff: dict, backlog: bool, allow_no_remote: bool
 ) -> str:
     """The runtime note acknowledging an inbound ``task`` (published once: a rerun after a
     crash finds the note already in the outbox)."""
     found = find_reply(canonical, inbound_id, FROM_RUNTIME)
     if found is not None:
         return found
+    if backlog:
+        how = f"took inbound task {inbound_id} from the planning backlog"
+    else:
+        how = f"created for inbound task {inbound_id},"
     body = (
-        f"Card {handoff['card']} (request {handoff['request_id']}), created for inbound task "
-        f"{inbound_id}, finished with outcome {handoff.get('outcome')!r} and was published "
-        f"at {handoff['merge_sha']}."
+        f"Card {handoff['card']} (request {handoff['request_id']}) {how} finished with "
+        f"outcome {handoff.get('outcome')!r} and was published at {handoff['merge_sha']}."
     )
     result = publish_runtime(
         canonical,
@@ -411,7 +418,8 @@ def _task_acknowledgement(
 def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = False) -> None:
     """After a handoff's messages are published: move each routed inbound this card is
     responsible for to ``acknowledged`` (C11). A ``reply``/``steer`` is acknowledged by the
-    card's own published ``note`` with ``in_reply_to`` (validation required it); a ``task``
+    card's own published ``note`` with ``in_reply_to`` (its ``card`` must be this handoff's
+    card; validation required the note); a ``task``
     by a runtime note published here. One the card did not answer stays ``routed``; routing
     returns it to the planning backlog once the card's request is closed. Under the lock;
     idempotent."""
@@ -420,10 +428,15 @@ def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = 
         if record["state"] != "routed" or not _is_responsible(record, handoff):
             continue
         if record["kind"] == "task":
-            message_id = _task_acknowledgement(canonical, inbound_id, handoff, allow_no_remote)
+            backlog = record["responsible"]["backlog"]
+            message_id = _task_acknowledgement(
+                canonical, inbound_id, handoff, backlog, allow_no_remote
+            )
             _checkpoint("ack_published")
         else:
-            message_id = find_reply(canonical, inbound_id, FROM_AGENT)
+            # Only the responsible card's own note counts: a card that showed the message
+            # read-only and answered it anyway does not acknowledge it.
+            message_id = find_reply(canonical, inbound_id, FROM_AGENT, card=handoff["card"])
         if message_id is None:
             continue
         acknowledged = delivery.moved(record, "acknowledged", acknowledged_by=message_id)

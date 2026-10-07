@@ -13,18 +13,22 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
    - ``task``: checked again (shape, and its refs must resolve at HEAD). Invalid -> a runtime
      ``note`` with ``in_reply_to`` and the errors, and ``acknowledged`` by it. Valid -> its
      own card request (fields from the task, ``created_by`` the I-id, marker ``task:<I-id>``).
-   - ``steer`` urgency ``now`` -> a P0 card request (``planning`` if it has a
-     ``proposed_topic``, else ``investigation``; marker ``steer:<I-id>``).
+   - ``steer`` urgency ``now`` -> always a new P0 card request (marker ``steer:<I-id>``):
+     ``planning`` if it has a ``proposed_topic`` and planning is free, else
+     ``investigation``; when planning is owned, the topic becomes its own backlog entry
+     (``source: proposed_topic``) for the planning card, while the steer stays with the P0
+     card.
    - another ``steer`` with a ``proposed_topic`` -> the planning backlog.
    - a ``reply``, or another ``steer``, on a thread with an open card -> that card; else the
      planning backlog.
 
-   A planning request (urgent steer with a topic, task in mode planning) while another
-   planning card owns planning goes to the backlog instead (single planning owner).
+   A ``task`` in mode planning while another planning card owns planning goes to the
+   backlog instead (single planning owner).
 3. **Resolve.** A record routed to a request gets the request's task id once admitted, and
    the id is added to that card's ``runtime/cards/<task>.json["responsible_inbound"]``. An
    untaken backlog entry is bound to the open planning card (one not yet claimed, or one
-   whose card file already lists it). A record whose responsible request closed without
+   whose card file already lists it); so is an untaken proposed-topic entry
+   (``taken_by``). A record whose responsible request closed without
    acknowledging it (rejected, superseded, dropped, published) goes back to the backlog; a
    ``task`` whose request was rejected for another reason than planning ownership gets a
    runtime note with the reason instead.
@@ -42,13 +46,14 @@ planning briefing. ``inbound_for_briefing`` gives the inbound a card's briefing 
 Acknowledgement happens at publication (``comms.publisher.acknowledge_inbound``).
 """
 
+import datetime
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from autoresearch.comms import delivery
 from autoresearch.comms.envelope import FROM_RUNTIME
-from autoresearch.comms.inbound import inbound_problems, is_late
+from autoresearch.comms.inbound import inbound_problems, is_late, parse_time
 from autoresearch.comms.publisher import (
     commit_and_push,
     find_reply,
@@ -208,7 +213,10 @@ def _request_card(canonical: Path, marker: str, spec: CardSpec) -> Path:
     return Layout(canonical).card_requests / f"{request_id}.json"
 
 
-def _route_to_request(canonical: Path, record: dict, marker: str, spec: CardSpec) -> list[Action]:
+def _route_to_request(
+    canonical: Path, record: dict, marker: str, spec: CardSpec, extra: list[Path] = ()
+) -> list[Action]:
+    """Route ``record`` to its own card request; ``extra`` paths go in the same commit."""
     request = _request_card(canonical, marker, spec)
     _checkpoint("request_written")
     responsible = NO_ONE | {"request_id": request.stem}
@@ -218,7 +226,7 @@ def _route_to_request(canonical: Path, record: dict, marker: str, spec: CardSpec
     path = delivery.write_record(canonical, routed)
     _checkpoint("routed_written")
     commit_and_push(
-        canonical, [request, path], f"inbound {record['id']}: card request {request.stem}"
+        canonical, [request, path, *extra], f"inbound {record['id']}: card request {request.stem}"
     )
     return [Action("card_requested", record["id"], marker, request_id=request.stem)]
 
@@ -231,6 +239,28 @@ def _write_backlog_entry(canonical: Path, message: dict) -> Path:
         "author": message.get("author"),
         "summary": _one_line(_describe(message), SUMMARY_LIMIT),
         "proposed_topic": message.get("proposed_topic"),
+        "created_at": now_iso(),
+    }
+    path = delivery.backlog_path(canonical, message["id"])
+    write_json(path, entry)
+    return path
+
+
+def _write_topic_entry(canonical: Path, message: dict) -> Path:
+    """A backlog entry for the ``proposed_topic`` of an urgent steer whose own card cannot be
+    the planning card (planning is owned). The steer stays with its P0 card; only the topic
+    waits for planning. ``taken_by``: the planning card that takes it (``_resolve``)."""
+    topic = message["proposed_topic"]
+    entry = {
+        "id": message["id"],
+        "source": "proposed_topic",
+        "kind": message["kind"],
+        "author": message.get("author"),
+        "summary": _one_line(
+            f"Proposed topic: {topic.get('title')} — {topic.get('objective')}", SUMMARY_LIMIT
+        ),
+        "proposed_topic": topic,
+        "taken_by": None,
         "created_at": now_iso(),
     }
     path = delivery.backlog_path(canonical, message["id"])
@@ -327,7 +357,7 @@ def _open_card_on_thread(
         for task in receipt.get("tasks", [])
     }
     pending = {card.task_id for card in queue.list("pending")}
-    candidates: list[str] = []
+    candidates: list[tuple[datetime.datetime, str]] = []  # (when it joined the thread, Q-id)
     for other in delivery.records(canonical).values():
         responsible = other["responsible"]
         if (
@@ -336,11 +366,11 @@ def _open_card_on_thread(
             and other["state"] in ("routed", "acknowledged")
             and responsible["request_id"]
         ):
-            candidates.append(responsible["request_id"])
+            candidates.append((parse_time(other["received_at"]), responsible["request_id"]))
     for message in _published_on_thread(canonical, thread):
         if message.get("card") in by_task:
-            candidates.append(by_task[message["card"]])
-    for request_id in reversed(candidates):
+            candidates.append((parse_time(message["created"]), by_task[message["card"]]))
+    for _, request_id in sorted(candidates, reverse=True):
         receipt = receipts.get(request_id)
         if receipt is None:
             return None, request_id
@@ -424,11 +454,13 @@ def _route_one(
             return _route_to_backlog(canonical, record, message, "planning is owned")
         return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
     if kind == "steer" and message.get("urgency") == URGENT:
+        extra: list[Path] = []
         mode = "planning" if message.get("proposed_topic") else "investigation"
         if mode == "planning" and _planning_owned(canonical, queue):
-            return _route_to_backlog(canonical, record, message, "planning is owned")
+            mode = "investigation"
+            extra.append(_write_topic_entry(canonical, message))
         spec = _steer_spec(message, mode)
-        return _route_to_request(canonical, record, f"steer:{inbound_id}", spec)
+        return _route_to_request(canonical, record, f"steer:{inbound_id}", spec, extra)
     if kind == "steer" and message.get("proposed_topic"):
         return _route_to_backlog(canonical, record, message, "proposed topic")
     return _route_to_thread_or_backlog(ctx, queue, record, message)
@@ -525,6 +557,16 @@ def _resolve(
         }
         paths.append(delivery.write_record(canonical, updated))
         actions.append(Action("bound", inbound_id, request_id=request_id, task_id=task_id))
+    for inbound_id, entry in delivery.backlog_entries(canonical).items():
+        if entry.get("source") != "proposed_topic" or entry.get("taken_by") is not None:
+            continue
+        bound = _open_planning_task(ctx, queue, inbound_id)
+        if bound is None:
+            continue
+        path = delivery.backlog_path(canonical, inbound_id)
+        write_json(path, entry | {"taken_by": bound[0]})
+        paths.append(path)
+        actions.append(Action("topic_taken", inbound_id, request_id=bound[1], task_id=bound[0]))
     if paths:
         commit_and_push(canonical, paths, f"inbound: {len(actions)} bound or returned")
     return actions
@@ -585,16 +627,24 @@ def inbound_for_briefing(
     return entries
 
 
-def planning_backlog(canonical: Path) -> list[str]:
-    """``BriefingInputs.planning_backlog``: one line per backlog entry not yet acknowledged."""
+def planning_backlog(canonical: Path, task_id: str | None = None) -> list[str]:
+    """``BriefingInputs.planning_backlog``: one line per open backlog entry. For planning card
+    ``task_id``, inbound messages it is responsible for are left out (its briefing shows them
+    in full under the inbound messages), and proposed topics another planning card took are
+    left out too. Without ``task_id``, every open entry."""
     records = delivery.records(canonical)
+    shown = set(delivery.responsible_ids(canonical, task_id, planning=True)) if task_id else set()
     lines = []
     for inbound_id, entry in delivery.backlog_entries(canonical).items():
         record = records.get(inbound_id)
-        if (
+        if entry.get("source") == "proposed_topic":
+            if entry.get("taken_by") not in (None, task_id):
+                continue
+        elif (
             record is None
             or record["state"] == "acknowledged"
             or not record["responsible"]["backlog"]
+            or inbound_id in shown
         ):
             continue
         lines.append(f"{inbound_id} ({entry['kind']} from {entry['author']}): {entry['summary']}")

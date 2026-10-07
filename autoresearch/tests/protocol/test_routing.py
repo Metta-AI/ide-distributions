@@ -14,7 +14,7 @@ from autoresearch.comms.publisher import publish_hook, publish_runtime
 from autoresearch.comms.reader import read_since, seen_path
 from autoresearch.comms.stage import stage
 from autoresearch.io import gitops
-from autoresearch.io.docs import read_json
+from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.requests import load_schema
 from autoresearch.runtime import routing
@@ -274,9 +274,12 @@ def test_orphan_reply_goes_to_the_backlog_and_the_next_planning_briefing(board):
         planner.task_id
     )
     spec = card_spec(_card_file(board, planner.task_id))
-    inputs = BriefingInputs(inbound=inbound, planning_backlog=planning_backlog(board.canonical))
+    backlog = planning_backlog(board.canonical, planner.task_id)
+    assert backlog == []  # shown once, in full, as this card's inbound
+    inputs = BriefingInputs(inbound=inbound, planning_backlog=backlog)
     text = build_briefing(board.canonical, spec, planner.task_id, inputs)
     assert "you must acknowledge this" in text and "No." in text
+    assert text.count(reply) == 1
 
 
 def test_reply_on_a_thread_with_an_open_card_goes_to_that_card(board):
@@ -412,3 +415,127 @@ def test_rerun_after_a_crash_in_task_acknowledgement_makes_no_duplicate_note(boa
 
     notes = [m for m in _outbox(board) if m.get("in_reply_to") == task]
     assert len(notes) == 1 and _delivery(board, task)["acknowledged_by"] == notes[0]["id"]
+
+
+# --- fix round 1 ---
+
+
+def test_urgent_steer_with_topic_while_planning_is_owned(board):
+    planner = board.admit(mode="planning")  # pending: owns planning
+    steer = _send(board, "steer", text="Towers now.", urgency="now", proposed_topic=TOPIC)
+
+    _route(board)
+
+    [request] = _requests(board)
+    assert request["spec"]["priority"] == "P0" and request["spec"]["mode"] == "investigation"
+    assert f"[steer:{steer}]" in request["spec"]["why"]
+    record = _delivery(board, steer)
+    assert record["responsible"] == {
+        "task_id": None,
+        "request_id": request["id"],
+        "backlog": False,
+    }
+    entry = board.committed(board.ledger / "backlog" / f"{steer}.json")
+    assert entry["source"] == "proposed_topic" and entry["proposed_topic"] == TOPIC
+    assert entry["taken_by"] == planner.task_id  # the pending planning card takes the topic
+    [line] = planning_backlog(board.canonical, planner.task_id)
+    assert "Towers" in line
+    assert planning_backlog(board.canonical, "K-other") == []
+    _assert_clean(board)
+
+
+def test_a_read_only_cards_note_does_not_acknowledge(board):
+    steer = _send(board, "steer", text="Stop.", urgency="now")
+    _route(board)
+    [request] = _requests(board)
+    board.admit_follow_up(request["id"])
+    bystander = board.admit()
+    bystander.start()
+    bystander.write_journal()
+    stage(Layout(bystander.worktree), "note", "Seen it", "Ok.", [], in_reply_to=steer)
+    bystander.finish()
+
+    board.process(publish=local_hook)
+
+    assert any(m.get("in_reply_to") == steer for m in _outbox(board))
+    assert _delivery(board, steer)["state"] == "routed"
+
+
+def test_backlog_task_acknowledgement_does_not_claim_the_card_was_created_for_it(board):
+    planner = board.admit(mode="planning")  # owns planning, so the task goes to the backlog
+    task = _send(
+        board, "task", "ide", title="Replan", mode="planning", why="W", refs=[], priority="P2"
+    )
+    _route(board)
+    assert _delivery(board, task)["responsible"] == {
+        "task_id": planner.task_id,
+        "request_id": planner.request_id,
+        "backlog": True,
+    }
+    planner.start()
+    planner.write_journal()
+    planner.finish()
+
+    board.process(publish=local_hook)
+
+    [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert "from the planning backlog" in ack["body"] and "created for" not in ack["body"]
+
+
+def test_reply_on_a_thread_whose_card_is_claimed_goes_to_the_backlog(board):
+    question = _question(board)
+    _send(board, "steer", text="Hold on this.", urgency="now", in_reply_to=question)
+    _route(board)
+    [request] = _requests(board)
+    worker = board.admit_follow_up(request["id"])
+    _route(board)
+    worker.start()  # claimed: it would never see a new message
+
+    reply = _send(board, "reply", in_reply_to=question, text="Actually yes.")
+    _route(board)
+
+    assert _delivery(board, reply)["responsible"] == {
+        "task_id": None,
+        "request_id": None,
+        "backlog": True,
+    }
+    assert reply not in _card_file(board, worker.task_id)["responsible_inbound"]
+
+
+def test_reply_routes_to_an_admitted_pending_card_found_by_outbox_card(board):
+    card = board.admit()
+    question = _question(board, card=card.task_id, thread="credits")
+    reply = _send(board, "reply", in_reply_to=question, text="Yes.")
+
+    _route(board)
+
+    assert _delivery(board, reply)["responsible"] == {
+        "task_id": card.task_id,
+        "request_id": card.request_id,
+        "backlog": False,
+    }
+    assert _card_file(board, card.task_id)["responsible_inbound"] == [reply]
+
+
+def test_task_rejected_by_admission_gets_a_runtime_note_with_the_reason(board):
+    task = _send(board, "task", "ide", title="T", mode="scouting", why="W", refs=[], priority="P1")
+    _route(board)
+    [request] = _requests(board)
+    receipt = {
+        "request_id": request["id"],
+        "state": "rejected",
+        "mode": "scouting",
+        "reason": "unresolved ref ar://claim/C-gone: not found",
+        "history": [{"state": "rejected", "at": "2026-10-07T00:00:00+00:00"}],
+    }
+    path = board.receipt_path(request["id"])
+    write_json(path, receipt)
+    gitops.commit_paths(board.canonical, [path.relative_to(board.canonical).as_posix()], "reject")
+
+    _route(board)
+
+    [note] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert note["from"] == "runtime" and "unresolved ref ar://claim/C-gone" in note["body"]
+    record = _delivery(board, task)
+    assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
+    _assert_clean(board)
