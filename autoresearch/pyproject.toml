@@ -9,6 +9,7 @@ dependencies = [
     "numpy",
     "PyYAML",
     "python-ulid",
+    "scipy",
 ]
 
 [project.scripts]
