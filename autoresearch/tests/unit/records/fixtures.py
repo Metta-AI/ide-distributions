@@ -34,11 +34,21 @@ EXP_DESIGNED = {
     "baseline": "V-0",
     "change": {"components": ["SK.last_hit"], "description": "Attack only in kill range."},
     "evaluation_design": {
-        "primary_metrics": [
-            {"name": "last_hits_per_1k_ticks", "direction": "up", "min_effect": 0.5}
+        "game_version": "65",
+        "baseline_version": "pv-base",
+        "seats": [0, 1],
+        "opponents": ["pv-opp"],
+        "seeds": [1, 2, 3],
+        "metrics": [
+            {"name": "last_hits_per_1k_ticks", "direction": "up", "role": "primary",
+             "min_effect": 0.5, "tolerance": None},
+            {"name": "deaths_per_1k_ticks", "direction": "down", "role": "agent_guardrail",
+             "min_effect": None, "tolerance": 0.05},
+            {"name": "glory", "direction": "up", "role": "performance",
+             "min_effect": None, "tolerance": None},
         ],
-        "guardrails": [{"name": "deaths_per_1k_ticks", "direction": "down", "tolerance": 0.05}],
-        "performance_guardrails": [{"name": "glory", "delta": 0.4}],
+        "k": 0.5,
+        "delta": {"glory": 0.4},
         "n_min": 40,
         "noise_rev": "abc123",
     },
