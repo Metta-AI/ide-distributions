@@ -28,6 +28,10 @@ document must stay consistent with it.
 The review record for the System Design (two rounds of comments with replies) is in
 [`docs/designs/reviews/`](docs/designs/reviews/).
 
+## Implementation plan
+
+[`docs/plans/2026-10-07-autoresearch-v0/`](docs/plans/2026-10-07-autoresearch-v0/) — reviewed with Codex (six rounds, final verdict GO). Start with `00-overview.md` (cross-cutting contracts C1–C12, dependency graph, dates in force, decisions needed), then the three executable plans: `01-foundation-and-vertical-slice.md`, `02-gota-and-compiler.md`, `03-research-completion-and-hardening.md`. Not yet executed.
+
 ## Tracking
 
 Asana: "GotA auto-research agent on Hermes: autonomous research loop + comms
