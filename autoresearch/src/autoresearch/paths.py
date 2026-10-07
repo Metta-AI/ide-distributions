@@ -10,7 +10,7 @@ class Layout:
 
     kb/claims, kb/hubs, kb/archive, kb/log (one ``<ULID>.md`` per entry), kb/_generated;
     topics, hypotheses, experiments, results, versions (``<V-id>/version.json`` + events/);
-    evidence/index (``<sha>.json``); journal; comms/{outbox,staged,inbox};
+    evidence/index (``<EV-id>.json``); journal; lessons; comms/{outbox,staged,inbox};
     cards/requests; strategy; candidates; stats; plan.md; AGENTS.md;
     .supervisor/ledger (durable, tracked).
     """
@@ -71,6 +71,10 @@ class Layout:
     @property
     def journal(self) -> Path:
         return self._sub("journal")
+
+    @property
+    def lessons(self) -> Path:
+        return self._sub("lessons")
 
     @property
     def comms_outbox(self) -> Path:

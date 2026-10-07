@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/entity/experiment.json",
+  "title": "Experiment: a pre-registered test of one hypothesis (System Design 3.1 #6). Design fields freeze once status leaves `designed`.",
+  "type": "object",
+  "required": [
+    "id",
+    "hypothesis",
+    "baseline",
+    "change",
+    "evaluation_design",
+    "environment",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^E-[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "hypothesis": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mode": {
+      "const": "experimentation"
+    },
+    "lever": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseline": {
+      "type": "string",
+      "minLength": 1
+    },
+    "change": {
+      "type": "object",
+      "required": [
+        "components",
+        "description"
+      ],
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "evaluation_design": {
+      "type": "object",
+      "required": [
+        "n_min"
+      ],
+      "properties": {
+        "n_min": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "game_id",
+        "game_version"
+      ],
+      "properties": {
+        "game_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "game_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "candidate_binding": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "version_id",
+        "platform_policy_version_id"
+      ],
+      "properties": {
+        "version_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform_policy_version_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "xp_requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "batch",
+          "attempt"
+        ],
+        "properties": {
+          "batch": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "enum": [
+        "designed",
+        "built",
+        "uploaded",
+        "evaluating",
+        "awaiting-credits",
+        "reviewed"
+      ]
+    },
+    "decision": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "promote",
+            "hold",
+            "refute",
+            "invalid"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decided_at": {
+          "type": "string"
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "properties": {
+        "launch_attempts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
