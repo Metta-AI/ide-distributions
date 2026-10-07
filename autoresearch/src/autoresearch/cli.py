@@ -19,6 +19,7 @@ _GROUPS: dict[str, GroupSetup] = {}
 GROUP_MODULES = (
     "autoresearch.records.cli",
     "autoresearch.stats.cli",
+    "autoresearch.kb.cli",
     "autoresearch.runtime.card_cli",
 )
 
