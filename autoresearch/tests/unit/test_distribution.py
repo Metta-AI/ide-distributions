@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -82,3 +83,49 @@ def test_plugin_stub_registers_five_hooks_and_logs_tool_events(tmp_path, monkeyp
     hooks["post_tool_call"](tool_name="terminal", status="ok", surprise_kwarg=1)
     log = tmp_path / "workspace/.supervisor/runtime/tool_events.jsonl"
     assert json.loads(log.read_text())["tool"] == "terminal"
+
+
+HERMES_SOURCE = Path.home() / "coding/tools/hermes-agent-v2026.9.24"
+
+
+def _deny_globs() -> list[str]:
+    return yaml.safe_load((ROOT / "config.yaml").read_text())["approvals"]["deny"]
+
+
+def _is_denied(command: str) -> bool:
+    """Hermes' own variant generator plus its fnmatchcase rule (tools/approval_floors.py:23-42)."""
+    import fnmatch
+
+    sys.path.insert(0, str(HERMES_SOURCE))
+    try:
+        from tools.approval_detection import _deny_command_variants
+    finally:
+        sys.path.remove(str(HERMES_SOURCE))
+    globs = [g.lower() for g in _deny_globs()]
+    return any(
+        fnmatch.fnmatchcase(variant.lower().strip(), glob)
+        for variant in _deny_command_variants(command)
+        for glob in globs
+    )
+
+
+@pytest.mark.skipif(not HERMES_SOURCE.is_dir(), reason="Hermes source checkout not available")
+@pytest.mark.parametrize(
+    ("command", "blocked"),
+    [
+        ('"$AUTORESEARCH_CLI" softmax submit E-1', False),
+        ('"$AUTORESEARCH_CLI" softmax xp create E-1', False),
+        ('git commit -m "avoid coworld submit"', False),
+        ('"$AUTORESEARCH_CLI" card finish --summary "never run coworld player use"', False),
+        ("coworld submit pv_1 league_x", True),
+        ("cd /tmp && coworld player use ply_1", True),
+        ("softmax login", True),
+        ("coworld xp-request create --x", True),
+        ("git push --force", True),
+        ("git push -f origin main", True),
+        ("git push origin --force", True),
+        ("git push origin main", False),
+    ],
+)
+def test_deny_globs_are_anchored(command, blocked):
+    assert _is_denied(command) is blocked
