@@ -26,11 +26,13 @@ All canonical mutations run under ``canonical.lock``, which is not re-entrant: c
 not hold it, and ``publish`` is called while it is held and must not take it.
 
 Promotion hooks (C8, ``promotion.py``), all under the lock: ``promotion.merge_gate`` runs
-before a merge and can send the handoff to ``repair`` (the promotion holder's branch lacks
-the candidate champion) or ``reconcile`` (another branch changes the champion);
-``promotion.after_merge`` runs once a handoff is ``merged`` (stage ``recorded``); and
-``promotion.after_publish`` runs right after ``publish`` (stage ``published``). Each is
-idempotent, so a crash before the handoff's next commit just repeats it.
+before a merge and can make the handoff wait (its promotion is still at ``intent``), mark
+it ``repair`` owned by the promotion (holder branch lacks the candidate champion; no
+follow-up card, the promotion-recovery card is the only follow-up), or send it to
+``reconcile`` (another branch changes the champion); ``promotion.after_merge`` runs once a
+handoff is ``merged`` (stage ``recorded``); and ``promotion.after_publish`` runs right after
+``publish`` (stage ``published``). Each is idempotent, so a crash before the handoff's next
+commit just repeats it. The orphan scan skips tasks an in-flight promotion covers.
 """
 
 from collections.abc import Callable
@@ -394,11 +396,14 @@ def _advance(ctx: RunContext, path: Path, store: RecordStore, publish: Publish) 
     if record["state"] == "committed":
         record = _validate(canonical, path, record)
     if record["state"] == "validated":
-        blocked = promotion.merge_gate(canonical, record)
-        if blocked is not None:
-            record = _request_follow_up(canonical, path, record, *blocked)
-        else:
+        gate = promotion.merge_gate(canonical, record)
+        if gate is None:
             record = _merge(canonical, path, record, store)
+        elif gate.kind == promotion.REPAIR:
+            record = _transition(canonical, path, record, "repair", promotion=gate.promotion_id)
+        elif gate.kind == promotion.RECONCILE:
+            record = _request_follow_up(canonical, path, record, "reconcile", gate.why)
+        # promotion.WAIT: stays validated until reconcile settles the promotion's intent
     if record["state"] == "merged":
         promotion.after_merge(ctx, record)
         record = _publish(canonical, path, record, _publish_then_promote(ctx, publish))
@@ -488,6 +493,8 @@ def find_orphan_done(queue: Queue, ledger: Path) -> list[str]:
         run = card.runs[-1]
         if not run.terminal or run.outcome == "dropped":
             continue
+        if promotion.covers_task(canonical, card.task_id):
+            continue  # promotion reconcile owns its holder and recovery cards
         with canonical_lock(canonical):
             request_id = _orphan_repair(canonical, card.task_id, str(run.run_id), card.spec)
         if request_id is not None:

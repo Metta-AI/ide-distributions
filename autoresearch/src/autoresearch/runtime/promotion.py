@@ -23,14 +23,24 @@ Rules that make a crash at any point safe:
 - ``submit_promotion`` is the single submit path. It submits only from ``acquired`` via
   ``intent``; a promotion at ``intent`` or later is never submitted again. ``reconcile``
   settles a crashed ``intent`` from the Softmax submissions list, never by resubmitting.
-- A ``submitted`` promotion whose holder ended with no committed handoff (or with one in
-  ``repair``) gets one promotion-recovery card (P0, key ``promote-recover:<P-id>``). That
-  card ``adopt``s the promotion, stages the champion from ``candidate_sha``
-  (``stage_champion``) and finishes; its merge drives ``recorded`` and ``published``.
+Liveness (one rule, in ``reconcile``): a ``submitted`` promotion needs recovery unless a
+live holder-role run exists. The holder role belongs to the holder TASK (a retried run after
+a rate limit or reclaim is accepted; ``on_merge`` rebinds ``run_id``). It is live while the
+task has a handoff that normal processing will act on (``committed|validated|merged``), or
+is pending/claimed in the current board epoch, or the latest recovery card is still live.
+A holder handoff in ``repair``, ``reconcile``, ``superseded`` or ``published`` without
+recording all count as "needs recovery". Recovery is a P0 maintenance card with key
+``promote-recover:<P-id>:<attempt>``; a new attempt is requested only when the previous one
+is closed or dead, so at most one is live. Its worker runs ``promotion adopt`` (only the
+latest attempt may), ``promotion stage-champion`` and ``card finish``; its merge drives
+``recorded`` and ``published`` without resubmitting. The orphan scan skips holder, former
+holder and recovery tasks of an in-flight promotion, so recovery is the only follow-up.
 
 Merge integration (``merge.py`` calls these under the canonical lock): ``merge_gate`` before
-a merge (the holder's branch must carry the candidate at the champion path, else ``repair``;
-any other branch that changes the champion path is a ``reconcile``, "champion mismatch"),
+a merge — a holder-task handoff WAITs while the promotion is at ``intent`` (never merges
+there), merges at ``submitted`` when its champion is the candidate, else is marked
+``repair`` owned by the promotion (``promotion: <P-id>``, no follow-up card); any other
+branch that changes the champion path is a ``reconcile`` ("champion mismatch").
 ``after_merge`` (stage ``recorded``) and ``after_publish`` (stage ``published``).
 
 Locking. ``acquire``, ``record_intent``, ``record_submitted``, ``adopt``, ``reconcile`` and
@@ -57,7 +67,7 @@ from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import write_request
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime.admission import board_epoch
+from autoresearch.runtime.admission import board_epoch, receipt_path
 from autoresearch.runtime.handoff import handoff_path
 from autoresearch.runtime.ledger import (
     canonical_lock,
@@ -85,7 +95,7 @@ class PromotionError(RuntimeError):
 
 @dataclass
 class Promotion:
-    """The C8 ledger record, plus the submission id, merge sha, recovery request and history."""
+    """The C8 ledger record, plus the submission id, merge sha, recovery requests and history."""
 
     id: str
     holder_task: str
@@ -100,8 +110,14 @@ class Promotion:
     updated_at: str
     submission_id: str | None = None
     merge_sha: str | None = None
-    recovery_request: str | None = None
+    recovery_requests: list[str] = field(default_factory=list)  # one per attempt, in order
+    former_holders: list[str] = field(default_factory=list)  # holder tasks before adoptions
     history: list[dict] = field(default_factory=list)
+
+    @property
+    def recovery_request(self) -> str | None:
+        """The latest recovery attempt's request id (the only one that may adopt)."""
+        return self.recovery_requests[-1] if self.recovery_requests else None
 
     @property
     def candidate_branch(self) -> str:
@@ -297,25 +313,37 @@ def _champion_matches(canonical: Path, promotion: Promotion, sha: str) -> bool:
     return champion is not None and champion == candidate
 
 
-def current_champion(ctx: RunContext, sm: Softmax, league_id: str) -> str | None:
-    """The champion's platform policy version id: the latest ``published`` promotion,
-    confirmed against the Softmax leaderboard for our player. Before any promotion is
-    published the leaderboard champion is taken as is. None when there is no champion, or
-    when the ledger and the leaderboard disagree (logged; callers must refuse to submit)."""
+def has_published(canonical: Path) -> bool:
+    """True once any promotion has been published (the ledger then owns the champion)."""
+    return bool(_published(canonical))
+
+
+def champion_status(ctx: RunContext, sm: Softmax, league_id: str) -> tuple[str | None, str]:
+    """(champion, why it is None). See ``current_champion``."""
     published = _published(ctx.canonical)
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     if not published:
-        return on_board
+        if on_board is None:
+            return None, f"no champion known: nothing promoted and no {league_id} leaderboard entry"
+        return on_board, ""
     latest = published[-1].platform_policy_version_id
     if on_board != latest:
-        log.warning(
-            "champion unknown: promotion ledger says %s but the %s leaderboard says %s",
-            latest,
-            league_id,
-            on_board,
+        why = (
+            f"champion unknown: the promotion ledger says {latest} but the {league_id} "
+            f"leaderboard says {on_board}"
         )
-        return None
-    return latest
+        log.warning(why)
+        return None, why
+    return latest, ""
+
+
+def current_champion(ctx: RunContext, sm: Softmax, league_id: str) -> str | None:
+    """The champion's platform policy version id: the latest ``published`` promotion,
+    confirmed against the Softmax leaderboard for our player. Before any promotion is
+    published the leaderboard champion is taken as is (amendment A9). None when no champion
+    is known, or when the ledger and the leaderboard disagree (logged; callers must refuse
+    to submit)."""
+    return champion_status(ctx, sm, league_id)[0]
 
 
 def stage_champion(ctx: RunContext, promotion: Promotion) -> Path:
@@ -433,12 +461,100 @@ def record_submitted(ctx: RunContext, promotion: Promotion, submission_id: str) 
         log.warning("promotion %s submitted but the ledger push failed", promotion.id)
 
 
+# --- holder role and liveness ---
+#
+# While a promotion is at ``intent`` or ``submitted`` the holder role belongs to the holder
+# TASK, not one run: a rate-limited or reclaimed run ends and its task returns to ready
+# (A8), and the retried run may finish the promotion. ``on_merge`` rebinds ``run_id`` to the
+# run whose handoff merged. ``adopt`` moves the role to the latest recovery card's task.
+
+OPEN_HANDOFF_STATES = ("committed", "validated", "merged")  # normal processing will act
+CLOSED_RECEIPT_STATES = ("published", "superseded", "dropped", "rejected")
+LIVE_CARD_STATES = ("pending", "claimed")
+
+
+def _handoffs_of(canonical: Path, task_id: str) -> list[dict]:
+    """Committed handoff records of every run of ``task_id`` at canonical HEAD."""
+    directory = handoff_path(canonical, task_id, "x").parent
+    rel = directory.relative_to(canonical).as_posix()
+    listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{rel}/")
+    records = []
+    for name in listing.splitlines():
+        record = committed_json(canonical, Path(canonical) / name)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def _task_live(canonical: Path, queue: Queue, task_id: str, epoch: str) -> bool:
+    """True while ``task_id`` can still produce or advance a handoff: it has a handoff that
+    normal processing will act on, or (current epoch) it is pending/claimed or has an open
+    run. An unknown task in the current epoch counts as live (keep waiting, like C3)."""
+    if any(h["state"] in OPEN_HANDOFF_STATES for h in _handoffs_of(canonical, task_id)):
+        return True
+    if epoch != board_epoch(ledger_of(canonical)):
+        return False
+    try:
+        card = queue.get(task_id)
+    except LookupError:
+        return True
+    return card.state in LIVE_CARD_STATES or any(not run.terminal for run in card.runs)
+
+
+def _recovery_live(canonical: Path, queue: Queue, promotion: Promotion) -> bool:
+    """True while the latest recovery request can still adopt and finish the promotion."""
+    request_id = promotion.recovery_request
+    if request_id is None:
+        return False
+    receipt = committed_json(canonical, receipt_path(ledger_of(canonical), request_id))
+    if receipt is None:
+        return True  # not admitted yet (or held back by a transient rejection)
+    if receipt["state"] in CLOSED_RECEIPT_STATES:
+        return False
+    task = receipt["tasks"][-1]
+    if receipt["state"] == "admitted" and task["board_epoch"] != board_epoch(ledger_of(canonical)):
+        return True  # rebuild re-admits it (C12)
+    return _task_live(canonical, queue, task["task_id"], task["board_epoch"])
+
+
+def _recovery_tasks(canonical: Path, promotion: Promotion) -> set[str]:
+    tasks = set()
+    for request_id in promotion.recovery_requests:
+        receipt = committed_json(canonical, receipt_path(ledger_of(canonical), request_id))
+        for task in (receipt or {}).get("tasks", []):
+            tasks.add(task["task_id"])
+    return tasks
+
+
+def covers_task(canonical: Path, task_id: str) -> bool:
+    """True if ``task_id`` is the holder or a recovery card of an in-flight promotion; the
+    orphan scan leaves such tasks to ``reconcile`` (one follow-up, never two)."""
+    current = load(canonical)
+    if current is None or current.stage not in IN_FLIGHT:
+        return False
+    if task_id == current.holder_task or task_id in current.former_holders:
+        return True
+    return task_id in _recovery_tasks(canonical, current)
+
+
 # --- merge hooks (the caller holds the canonical lock) ---
+
+WAIT = "wait"  # leave the handoff for a later poll
+REPAIR = "repair"  # mark the handoff repair, owned by the promotion (no follow-up card)
+RECONCILE = "reconcile"  # the usual reconcile follow-up card
+
+
+@dataclass
+class GateDecision:
+    kind: str  # WAIT | REPAIR | RECONCILE
+    why: str
+    promotion_id: str | None = None
 
 
 def on_merge(ctx: RunContext, promotion: Promotion, merge_sha: str) -> None:
     """Stage ``recorded`` if the champion in ``merge_sha`` is the candidate; otherwise leave
-    ``submitted`` (``merge_gate`` normally stops such a merge). Call under the lock."""
+    ``submitted`` (``merge_gate`` normally stops such a merge). Saves ``promotion`` as
+    given, so a caller may pass it rebound to the merged run. Call under the lock."""
     if promotion.stage != "submitted":
         return
     if not _champion_matches(ctx.canonical, promotion, merge_sha):
@@ -453,43 +569,58 @@ def on_published(ctx: RunContext, promotion: Promotion) -> None:
         _move(ctx.canonical, promotion, "published")
 
 
-def merge_gate(canonical: Path, record: dict) -> tuple[str, str] | None:
-    """Before merging handoff ``record``: (``repair``, why) when it is the holder's run of a
-    ``submitted`` promotion and its champion is not the candidate; (``reconcile``, why) when
-    any other branch changes the champion path; else None."""
+def merge_gate(canonical: Path, record: dict) -> GateDecision | None:
+    """Decide, before merging handoff ``record``, whether the promotion lets it merge.
+
+    A handoff of the holder task: at ``intent`` it WAITs (``reconcile`` settles the intent
+    first; it never merges at ``intent``); at ``submitted`` it merges when its champion is
+    the candidate, else it is a REPAIR owned by the promotion (the recovery card is the only
+    follow-up). Any other handoff that changes the champion path is a RECONCILE ("champion
+    mismatch"). None: merge normally."""
     current = load(canonical)
     label = f"{record['card']}/{record['run_id']}"
-    in_flight = current is not None and current.stage == "submitted"
-    if in_flight and _is_holder(current, record["card"], record["run_id"]):
-        if _champion_matches(canonical, current, record["result_sha"]):
-            return None
-        return "repair", (
-            f"Handoff {label} holds promotion {current.id} but {CHAMPION_PATH} at "
-            f"{record['result_sha']} is not the candidate {current.candidate_ref} at "
-            f"{current.candidate_sha}: stage the champion from the candidate and finish."
-        )
+    if current is not None and record["card"] == current.holder_task:
+        if current.stage == "intent":
+            why = f"handoff {label} waits: promotion {current.id} is at intent"
+            return GateDecision(WAIT, why, current.id)
+        if current.stage == "submitted":
+            if _champion_matches(canonical, current, record["result_sha"]):
+                return None
+            why = (
+                f"handoff {label} holds promotion {current.id} but {CHAMPION_PATH} at "
+                f"{record['result_sha']} is not the candidate {current.candidate_ref} at "
+                f"{current.candidate_sha}; a promotion-recovery card will stage it"
+            )
+            return GateDecision(REPAIR, why, current.id)
     changed = gitops.diff_paths(canonical, record["base_sha"], record["result_sha"])
     if CHAMPION_PATH in changed:
         holder = "none" if current is None else f"{current.id} ({current.stage})"
-        return "reconcile", (
+        why = (
             f"champion mismatch: handoff {label} changes {CHAMPION_PATH} but is not the "
             f"holder of the in-flight promotion (current promotion: {holder}). The champion "
             f"changes only through a promotion; drop the champion change."
         )
+        return GateDecision(RECONCILE, why)
     return None
 
 
 def after_merge(ctx: RunContext, record: dict) -> None:
-    """Merge hook: ``on_merge`` when ``record`` is the holder's run. Under the lock."""
+    """Merge hook: a merged handoff of the holder task records the promotion (rebinding
+    ``run_id`` to that run). Under the lock."""
     current = load(ctx.canonical)
-    if current is not None and _is_holder(current, record["card"], record["run_id"]):
-        on_merge(ctx, current, record["merge_sha"])
+    if current is not None and record["card"] == current.holder_task:
+        on_merge(ctx, replace(current, run_id=str(record["run_id"])), record["merge_sha"])
 
 
 def after_publish(ctx: RunContext, record: dict) -> None:
-    """Publish hook: ``on_published`` when ``record`` is the holder's run. Under the lock."""
+    """Publish hook: publishing the handoff that recorded the promotion publishes it. Under
+    the lock."""
     current = load(ctx.canonical)
-    if current is not None and _is_holder(current, record["card"], record["run_id"]):
+    if (
+        current is not None
+        and record["card"] == current.holder_task
+        and record.get("merge_sha") == current.merge_sha
+    ):
         on_published(ctx, current)
 
 
@@ -497,8 +628,8 @@ def after_publish(ctx: RunContext, record: dict) -> None:
 
 
 def _settle_intent(ctx: RunContext, promotion: Promotion, sm: Softmax) -> Action | None:
-    """``intent`` with a terminal holder: ``submitted`` if Softmax has the submission, else
-    ``aborted``. The Softmax query runs outside the lock."""
+    """``intent`` with a terminal holder run: ``submitted`` if Softmax has the submission,
+    else ``aborted``. The Softmax query runs outside the lock."""
     player = sm.whoami().player_id
     found = [
         s
@@ -519,19 +650,20 @@ def _settle_intent(ctx: RunContext, promotion: Promotion, sm: Softmax) -> Action
         return Action("aborted", promotion.id, "holder ended before submitting")
 
 
-def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action | None:
-    """One promotion-recovery card request per promotion, committed with the promotion's
-    ``recovery_request`` pointer. Under the lock."""
+def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
+    """Write the next recovery attempt's request (P0, key ``promote-recover:<P>:<n>``) and
+    commit it with the promotion's ``recovery_requests``. Under the lock."""
     canonical = ctx.canonical
-    if promotion.recovery_request is not None:
-        return None
-    key = f"promote-recover:{promotion.id}"
+    attempt = len(promotion.recovery_requests) + 1
+    key = f"promote-recover:{promotion.id}:{attempt}"
     why = (
         f"Promotion {promotion.id} submitted {promotion.platform_policy_version_id} "
-        f"(submission {promotion.submission_id}) but its holder {promotion.holder_task}/"
-        f"{promotion.run_id} ended without a usable handoff. Adopt promotion {promotion.id}, "
-        f"stage the champion {CHAMPION_PATH} from {promotion.candidate_ref} at "
-        f"{promotion.candidate_sha}, and finish. Do not submit again."
+        f"(submission {promotion.submission_id}) but its holder {promotion.holder_task} ended "
+        f"without a usable handoff (recovery attempt {attempt}). Run "
+        f'"$AUTORESEARCH_CLI" promotion adopt {promotion.id}, then "$AUTORESEARCH_CLI" '
+        f"promotion stage-champion {promotion.id} (copies {CHAMPION_PATH} from "
+        f"{promotion.candidate_ref} at {promotion.candidate_sha}), write the journal and "
+        f"finish. Do not submit again."
     )
     request = _write_runtime_request(
         canonical,
@@ -542,53 +674,58 @@ def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action | None:
         why,
         "P0",
     )
-    updated = replace(promotion, recovery_request=request.stem, updated_at=now_iso())
-    _save(canonical, updated, f"promotion {promotion.id}: recovery {request.stem}", (request,))
+    requests = [*promotion.recovery_requests, request.stem]
+    updated = replace(promotion, recovery_requests=requests, updated_at=now_iso())
+    _save(canonical, updated, f"promotion {promotion.id}: recovery {attempt}", (request,))
     return Action("recovery_requested", promotion.id, why, request.stem)
 
 
 def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
     """C8 runtime reconciliation, each queue-keeper run; the caller must not hold the lock.
 
-    With the holder terminal (run ended, or an earlier board epoch): ``intent`` becomes
-    ``submitted`` (submission found on Softmax) or ``aborted``; ``submitted`` with no
-    committed handoff for the holder's run, or one in ``repair``, gets one recovery card
-    request; ``recorded`` whose holder handoff is already ``published`` becomes
-    ``published``. Otherwise normal handoff processing drives the promotion."""
+    1. ``intent`` with the holder run terminal (or an earlier board epoch): ``submitted``
+       (submission found on Softmax) or ``aborted``. Never resubmits.
+    2. ``submitted`` needs recovery unless a live holder-role run exists: the holder task
+       still has a handoff normal processing will act on, or is pending/claimed (current
+       epoch), or the latest recovery card is still live. A holder handoff in ``repair``,
+       ``reconcile``, ``superseded``, or ``published`` without recording all count as
+       "needs recovery". Then the next recovery attempt is requested (at most one live).
+    3. ``recorded`` whose recording handoff is already ``published``: ``published``."""
     canonical = ctx.canonical
     promotion = load(canonical)
     if promotion is None or promotion.stage not in IN_FLIGHT:
         return []
-    if not _holder_terminal(canonical, queue, promotion):
-        return []
     actions = []
     if promotion.stage == "intent":
+        if not _holder_terminal(canonical, queue, promotion):
+            return []
         action = _settle_intent(ctx, promotion, sm)
         if action is None:
             return []
         actions.append(action)
-        promotion = load(canonical)
     with canonical_lock(canonical):
         current = load(canonical)
         if current is None or current.id != promotion.id:
             return actions
-        handoff = committed_json(
-            canonical, handoff_path(canonical, current.holder_task, current.run_id)
-        )
-        state = None if handoff is None else handoff["state"]
-        if current.stage == "submitted" and state in (None, "repair"):
-            action = _request_recovery(ctx, current)
-            if action is not None:
-                actions.append(action)
-        elif current.stage == "recorded" and state == "published":
-            on_published(ctx, current)
-            actions.append(Action("published", current.id))
+        if current.stage == "submitted":
+            live = _task_live(canonical, queue, current.holder_task, current.board_epoch)
+            if not live and not _recovery_live(canonical, queue, current):
+                actions.append(_request_recovery(ctx, current))
+        elif current.stage == "recorded":
+            for handoff in _handoffs_of(canonical, current.holder_task):
+                if (
+                    handoff["state"] == "published"
+                    and handoff.get("merge_sha") == current.merge_sha
+                ):
+                    on_published(ctx, current)
+                    actions.append(Action("published", current.id))
+                    break
     return actions
 
 
 def adopt(ctx: RunContext, promotion_id: str) -> Promotion:
-    """Rebind a ``submitted`` promotion's holder to the calling card run. Only the
-    promotion-recovery card (the request in ``recovery_request``) may adopt."""
+    """Rebind a ``submitted`` promotion's holder to the calling card run. Only the latest
+    promotion-recovery card (``recovery_request``) may adopt."""
     task_id, run_id = _worker_identity(ctx)
     card_meta = runtime_dir(ctx) / "cards" / f"{task_id}.json"
     request_id = read_json(card_meta).get("request_id") if card_meta.exists() else None
@@ -597,7 +734,7 @@ def adopt(ctx: RunContext, promotion_id: str) -> Promotion:
         current = _require(load(canonical), promotion_id, "submitted")
         if current.recovery_request is None or current.recovery_request != request_id:
             raise PromotionError(
-                f"only the recovery card of {promotion_id} "
+                f"only the latest recovery card of {promotion_id} "
                 f"(request {current.recovery_request}) may adopt it; this card is {request_id}"
             )
         if _is_holder(current, task_id, run_id):
@@ -611,7 +748,21 @@ def adopt(ctx: RunContext, promotion_id: str) -> Promotion:
             holder_task=task_id,
             run_id=run_id,
             board_epoch=board_epoch(ledger_of(canonical)),
+            former_holders=[*current.former_holders, current.holder_task],
         )
+
+
+def stage_champion_for(ctx: RunContext, promotion_id: str) -> Path:
+    """``stage_champion`` for the calling card, which must be the holder task of promotion
+    ``promotion_id`` at ``intent`` or ``submitted`` (a recovery card adopts first)."""
+    task_id, _ = _worker_identity(ctx)
+    current = _require(load(ctx.canonical), promotion_id, "intent", "submitted")
+    if current.holder_task != task_id:
+        raise PromotionError(
+            f"card {task_id} does not hold promotion {promotion_id} "
+            f"(holder {current.holder_task}); a recovery card must adopt it first"
+        )
+    return stage_champion(ctx, current)
 
 
 # --- the submit path ---
@@ -668,9 +819,9 @@ def submit_promotion(
         return SubmitOutcome(False, reason="another promotion holds the promotion lock")
     promotion = load(ctx.canonical)
     baseline = _baseline(ctx.canonical, experiment)
-    champion = current_champion(ctx, sm, league_id)
+    champion, why_unknown = champion_status(ctx, sm, league_id)
     if champion is None:
-        return _refuse(ctx, promotion, "champion unknown: the ledger and leaderboard disagree")
+        return _refuse(ctx, promotion, why_unknown)
     if champion != baseline:
         reason = f"the champion {champion} is not the experiment baseline {baseline}"
         return _refuse(ctx, promotion, reason, f"reevaluate:{experiment}:{champion}")

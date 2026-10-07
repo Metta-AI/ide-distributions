@@ -36,7 +36,7 @@ from autoresearch.io.docs import _atomic_write_text
 from autoresearch.paths import Layout
 from autoresearch.records.cli import BadArguments, _check_id, _ok, _run
 from autoresearch.records.store import RecordStore
-from autoresearch.runtime.promotion import current_champion
+from autoresearch.runtime.promotion import current_champion, has_published
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
 from autoresearch.stats.design import EvaluationDesign
@@ -150,28 +150,39 @@ def _noise(args, store: RecordStore) -> int:
     return _ok({"noise_rev": revision, "path": str(store.layout.stats / "metric-noise.yaml")})
 
 
-def _confirmed_champion() -> str | None:
-    """The promotion ledger's champion inside a profile; None outside one or when unknown."""
+def _confirmed_champion() -> tuple[str | None, bool]:
+    """(champion, ledger owns it) inside a profile; (None, False) outside one. The champion
+    is None when unknown; the ledger owns it once any promotion is published, and then
+    ``--champion`` cannot stand in for it."""
     game_name = os.environ.get(GAME_ENV)
     if not game_name:
-        return None
+        return None, False
     try:
         ctx = runctx.from_env()
     except KeyError:
-        return None
+        return None, False
     try:
         game = load_game(_REPO_ROOT, game_name)
     except GameError as error:
         raise BadArguments(str(error)) from None
-    sm = softmax_from_env(os.environ, ctx.canonical)
-    return current_champion(ctx, sm, game.league_id)
+    try:
+        sm = softmax_from_env(os.environ, ctx.canonical)
+        champion = current_champion(ctx, sm, game.league_id)
+    except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
+        raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
+    return champion, has_published(ctx.canonical)
 
 
 def _resolve_champion(args) -> str:
     """The confirmed champion when there is one (``--champion`` must then agree), else
-    ``--champion``."""
-    champion = _confirmed_champion()
+    ``--champion`` (refused once the promotion ledger owns the champion)."""
+    champion, ledger_owned = _confirmed_champion()
     if champion is None:
+        if ledger_owned:
+            raise ValueError(
+                "champion unknown: the promotion ledger and the leaderboard disagree; "
+                "--champion is not accepted until they agree"
+            )
         if not args.champion:
             raise BadArguments(CHAMPION_UNKNOWN)
         return args.champion

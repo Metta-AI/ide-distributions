@@ -36,6 +36,7 @@
     "overlap": {"type": "array", "items": {"type": "string"}},
     "conflicts": {"type": "array", "items": {"type": "string"}},
     "superseded_by": {"type": "string", "minLength": 1},
+    "promotion": {"type": "string", "pattern": "^P-[0-9A-HJKMNP-TV-Z]{26}$"},
     "state": {
       "enum": ["committed", "validated", "merged", "published", "repair", "reconcile", "superseded"]
     },
@@ -51,8 +52,11 @@
   "allOf": [
     {"if": {"properties": {"state": {"enum": ["merged", "published"]}}},
      "then": {"required": ["merge_sha"]}},
-    {"if": {"properties": {"state": {"enum": ["repair", "reconcile", "superseded"]}}},
+    {"if": {"properties": {"state": {"enum": ["repair", "reconcile", "superseded"]}},
+            "not": {"required": ["promotion"]}},
      "then": {"required": ["follow_up_request"]}},
+    {"if": {"required": ["promotion"]},
+     "then": {"properties": {"state": {"enum": ["repair", "superseded"]}}}},
     {"if": {"properties": {"state": {"const": "superseded"}}},
      "then": {"required": ["superseded_by"]}}
   ]

@@ -292,6 +292,7 @@ def promotion(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
     monkeypatch.setattr(stats_cli, "current_champion", champion)
+    monkeypatch.setattr(stats_cli, "has_published", lambda canonical: True)
     return asked
 
 
@@ -314,3 +315,38 @@ def test_champion_from_promotion_and_mismatch(tmp_path, experiment, promotion, c
     assert code == 0
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", "pv-other")
     assert code == 1 and "champion mismatch" in env["error"]["message"]
+
+
+def _ingested(tmp_path, capsys, experiment):
+    root = tmp_path / "ws"
+    rows_file = write_rows(tmp_path / "rows.jsonl", experiment_rows())
+    code, env = run_in_process(
+        capsys, root, "ingest", "--rows", str(rows_file), "--experiment", experiment
+    )
+    assert code == 0, env
+    return root
+
+
+def test_champion_override_refused_once_the_ledger_owns_it(
+    tmp_path, experiment, promotion, capsys, monkeypatch
+):
+    root = _ingested(tmp_path, capsys, experiment)
+    monkeypatch.setattr(stats_cli, "current_champion", lambda ctx, sm, league_id: None)
+    code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
+    assert code == 1 and "not accepted" in env["error"]["message"]
+    monkeypatch.setattr(stats_cli, "has_published", lambda canonical: False)
+    code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
+    assert code == 0 and env["data"]["champion"] == BASE  # nothing promoted yet (A9)
+
+
+def test_softmax_failure_while_confirming_the_champion_is_exit_1(
+    tmp_path, experiment, promotion, capsys, monkeypatch
+):
+    root = _ingested(tmp_path, capsys, experiment)
+
+    def broken(ctx, sm, league_id):
+        raise RuntimeError("whoami failed: token expired")
+
+    monkeypatch.setattr(stats_cli, "current_champion", broken)
+    code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
+    assert code == 1 and "cannot confirm the champion" in env["error"]["message"]

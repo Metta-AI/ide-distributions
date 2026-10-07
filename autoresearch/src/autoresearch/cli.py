@@ -23,6 +23,7 @@ GROUP_MODULES = (
     "autoresearch.runtime.card_cli",
     "autoresearch.comms.cli",
     "autoresearch.queue.cli",
+    "autoresearch.runtime.promotion_cli",
 )
 
 

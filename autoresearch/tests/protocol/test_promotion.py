@@ -1,17 +1,23 @@
 """Promotion state machine (Task 3.6, Overview C8): real git with a bare ``origin``, FileQueue,
-FakeSoftmax and simulated workers. The Board/Worker helpers come from ``test_merge.py``."""
+FakeSoftmax and simulated workers. The Board/Worker helpers come from ``tests/support/board.py``."""
 
 import datetime
+import json
 import stat
 from dataclasses import replace
+from pathlib import Path
 
+import jsonschema
 import pytest
 from support.board import Board, Worker
 
+from autoresearch.cli import main
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
+from autoresearch.queue.requests import load_schema
 from autoresearch.runtime import promotion
 from autoresearch.runtime.ledger import canonical_lock, commit
+from autoresearch.runtime.merge import find_orphan_done
 from autoresearch.runtime.promotion import (
     CHAMPION_PATH,
     PromotionError,
@@ -27,7 +33,9 @@ from autoresearch.runtime.promotion import (
 from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
 
 LEAGUE = "league_fake"
-BASELINE_PV = "pv_base"  # the champion on the leaderboard before autoresearch promoted anything
+# Platform policy version ids are opaque labels (the real client uses ``name:vN``).
+BASELINE_PV = "autoresearch-fake:v0"  # leaderboard champion before any promotion (A9)
+PV_A, PV_B = "autoresearch-fake:v1", "autoresearch-fake:v2"
 CHAMPION_V0 = "# Champion v0\n"
 VERSION = {
     "parents": [],
@@ -92,12 +100,14 @@ class Promoter:
     """A promotion card: a worker that commits a candidate STRATEGY on its branch, then
     promotes it."""
 
-    def __init__(self, board: PromotionBoard, platform_id: str, baseline: str = BASELINE_PV):
+    def __init__(
+        self, board: PromotionBoard, platform_id: str, baseline: str = BASELINE_PV, refs=()
+    ):
         self.board = board
         self.platform_id = platform_id
         self.experiment, self.version = board.new_experiment(platform_id, baseline)
         self.worker: Worker = board.admit(
-            refs=[f"ar://experiment/{self.experiment}"], mode="maintenance"
+            refs=[f"ar://experiment/{self.experiment}", *refs], mode="maintenance"
         )
         self.worker.start()
         self.candidate_path = f"strategy/candidates/{self.experiment}/STRATEGY.md"
@@ -168,13 +178,13 @@ def _clean(board: PromotionBoard) -> None:
 
 @pytest.mark.parametrize("stage", ["intent", "submitted", "recorded"])
 def test_acquire_refused_while_in_flight_even_after_holder_ended(board, stage):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     record_intent(a.ctx(), board.promotion())
     a.worker.end_run("done")
     _force(board, stage=stage, updated_at=_minutes_ago(20))
 
-    b = Promoter(board, "pv_b")
+    b = Promoter(board, PV_B)
     assert b.acquire() is False
     assert board.promotion().holder_task == a.worker.task_id
     assert board.promotion().stage == stage
@@ -182,24 +192,24 @@ def test_acquire_refused_while_in_flight_even_after_holder_ended(board, stage):
 
 @pytest.mark.parametrize("stage", ["published", "aborted"])
 def test_acquire_allowed_after_published_or_aborted(board, stage):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     _force(board, stage=stage)  # holder run still open: the stage alone frees the lock
 
-    b = Promoter(board, "pv_b")
+    b = Promoter(board, PV_B)
     assert b.acquire()
     current = board.promotion()
     assert current.holder_task == b.worker.task_id and current.stage == "acquired"
-    assert current.platform_policy_version_id == "pv_b"
+    assert current.platform_policy_version_id == PV_B
     assert current.id.startswith("P-")
 
 
 def test_acquire_takes_over_only_an_abandoned_acquired_promotion(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     assert a.acquire()  # idempotent for its own holder
     first = board.promotion()
-    b = Promoter(board, "pv_b")
+    b = Promoter(board, PV_B)
     assert b.acquire() is False  # holder run still open
 
     a.worker.end_run("done")  # abandoned in `acquired`: no submit intent
@@ -213,7 +223,7 @@ def test_acquire_takes_over_only_an_abandoned_acquired_promotion(board):
 
 
 def test_record_intent_refuses_when_candidate_branch_push_fails(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     gitops.git(board.canonical, "remote", "set-url", "origin", str(board.tmp_path / "missing"))
     assert a.acquire()
 
@@ -224,7 +234,7 @@ def test_record_intent_refuses_when_candidate_branch_push_fails(board):
     outcome = a.submit()
     assert outcome.ok is False and "candidate branch" in outcome.reason
     assert board.promotion().stage == "acquired"
-    assert board.submissions_of("pv_a") == []
+    assert board.submissions_of(PV_A) == []
     _clean(board)
 
 
@@ -232,7 +242,7 @@ def test_record_intent_refuses_when_ledger_push_fails(board):
     hook = board.origin / "hooks" / "update"
     hook.write_text('#!/bin/sh\n[ "$1" = "refs/heads/main" ] && exit 1\nexit 0\n')
     hook.chmod(hook.stat().st_mode | stat.S_IEXEC)
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
 
     with pytest.raises(PromotionError, match="ledger"):
@@ -244,7 +254,7 @@ def test_record_intent_refuses_when_ledger_push_fails(board):
     branch = f"refs/heads/card/{a.worker.request_id}"
     assert gitops.git(board.origin, "rev-parse", branch)  # the branch push itself worked
     assert a.submit().ok is False
-    assert board.submissions_of("pv_a") == []
+    assert board.submissions_of(PV_A) == []
     _clean(board)
 
 
@@ -252,7 +262,7 @@ def test_record_intent_refuses_when_ledger_push_fails(board):
 
 
 def test_promotion_merges_records_publishes_and_frees_the_lock(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     outcome = a.submit()
     assert outcome.ok, outcome.reason
     current = board.promotion()
@@ -269,22 +279,26 @@ def test_promotion_merges_records_publishes_and_frees_the_lock(board):
     assert _stages(history) == ["acquired", "intent", "submitted", "recorded", "published"]
     assert history["merge_sha"] == handled.merge_sha
     assert (board.canonical / CHAMPION_PATH).read_text() == a.candidate_text
-    assert current_champion(board.ctx(), board.sm, LEAGUE) == "pv_a"
-    assert len(board.submissions_of("pv_a")) == 1
+    assert current_champion(board.ctx(), board.sm, LEAGUE) == PV_A
+    assert len(board.submissions_of(PV_A)) == 1
     assert reconcile(board.ctx(), board.queue, board.sm) == []
 
-    b = Promoter(board, "pv_b", baseline="pv_a")
+    b = Promoter(board, PV_B, baseline=PV_A)
     assert b.acquire()  # on_published freed the lock
     _clean(board)
 
 
 def test_champion_not_baseline_refuses_and_requests_reevaluation(board):
-    a = Promoter(board, "pv_a", baseline="pv_old")
+    a = Promoter(board, PV_A, baseline="autoresearch-fake:v-old")
 
     outcome = a.submit()
 
-    assert outcome.ok is False and "pv_old" in outcome.reason and BASELINE_PV in outcome.reason
-    assert board.submissions_of("pv_a") == []
+    assert (
+        outcome.ok is False
+        and "autoresearch-fake:v-old" in outcome.reason
+        and BASELINE_PV in outcome.reason
+    )
+    assert board.submissions_of(PV_A) == []
     request = board.follow_up(outcome.request_id)
     spec = request["spec"]
     assert spec["refs"] == [f"ar://experiment/{a.experiment}", f"ar://version/{a.version}"]
@@ -297,20 +311,26 @@ def test_champion_not_baseline_refuses_and_requests_reevaluation(board):
 
 
 def test_holder_branch_without_the_champion_goes_to_repair(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.submit().ok
     (a.worker.worktree / CHAMPION_PATH).write_text("# something else\n")
     a.finish()
 
     [handled] = board.process()
 
-    assert handled.state == "repair"
-    assert "champion" in board.follow_up(handled.follow_up_request)["spec"]["why"]
+    assert handled.state == "repair" and handled.follow_up_request is None
+    record = a.worker.handoff()
+    jsonschema.validate(record, load_schema("handoff.json"))
+    assert record["promotion"] == board.promotion().id and "follow_up_request" not in record
     assert board.promotion().stage == "submitted"
     assert (board.canonical / CHAMPION_PATH).read_text() == CHAMPION_V0
-    # the holder's handoff ended in repair, so reconcile asks for a promotion-recovery card
+    # the recovery card is the only follow-up
     [action] = reconcile(board.ctx(), board.queue, board.sm)
     assert action.kind == "recovery_requested"
+    assert find_orphan_done(board.queue, board.ledger) == []
+    _recover(board, action.request_id)
+    [recovered] = board.process()
+    assert recovered.state == "published" and board.promotion().stage == "published"
 
 
 # --- crash recovery ---
@@ -329,7 +349,7 @@ def _recover(board: PromotionBoard, request_id: str) -> Worker:
 
 
 def test_worker_died_after_submit_recovery_card_publishes_without_resubmit(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.submit().ok
     a.worker.end_run("crashed")  # died before card finish; its branch exists
     pid = board.promotion().id
@@ -339,7 +359,8 @@ def test_worker_died_after_submit_recovery_card_publishes_without_resubmit(board
     assert action.kind == "recovery_requested" and action.promotion_id == pid
     spec = board.follow_up(action.request_id)["spec"]
     assert spec["priority"] == "P0" and spec["mode"] == "maintenance"
-    assert f"promote-recover:{pid}" in spec["title"]
+    assert f"promote-recover:{pid}:1" in spec["title"]
+    assert "promotion adopt" in spec["why"] and "stage-champion" in spec["why"]
     assert spec["refs"] == [f"ar://experiment/{a.experiment}", f"ar://version/{a.version}"]
     assert reconcile(board.ctx(), board.queue, board.sm) == []  # one recovery card only
 
@@ -349,19 +370,19 @@ def test_worker_died_after_submit_recovery_card_publishes_without_resubmit(board
     assert handled.state == "published"
     assert _stages(board.history(pid))[-2:] == ["recorded", "published"]
     assert (board.canonical / CHAMPION_PATH).read_text() == a.candidate_text
-    assert len(board.submissions_of("pv_a")) == 1
-    b = Promoter(board, "pv_b", baseline="pv_a")
+    assert len(board.submissions_of(PV_A)) == 1
+    b = Promoter(board, PV_B, baseline=PV_A)
     assert b.acquire()
     _clean(board)
 
 
 def test_submit_succeeded_but_record_crashed_reconcile_finds_the_submission(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     crashing = FakeSoftmax(board.canonical, {FAULTS_ENV: "fail_after=submit"})
     with pytest.raises(RuntimeError, match="injected fault after submit"):
         a.submit(sm=crashing)
     assert board.promotion().stage == "intent"
-    assert len(board.submissions_of("pv_a")) == 1
+    assert len(board.submissions_of(PV_A)) == 1
     a.worker.end_run("crashed")
 
     actions = reconcile(board.ctx(), board.queue, board.sm)
@@ -369,16 +390,16 @@ def test_submit_succeeded_but_record_crashed_reconcile_finds_the_submission(boar
     assert [action.kind for action in actions] == ["submitted", "recovery_requested"]
     current = board.promotion()
     assert current.stage == "submitted"
-    assert current.submission_id == board.submissions_of("pv_a")[0]["submission_id"]
+    assert current.submission_id == board.submissions_of(PV_A)[0]["submission_id"]
     _recover(board, actions[-1].request_id)
     [handled] = board.process()
     assert handled.state == "published"
     assert board.promotion().stage == "published"
-    assert len(board.submissions_of("pv_a")) == 1  # never submitted twice
+    assert len(board.submissions_of(PV_A)) == 1  # never submitted twice
 
 
 def test_intent_without_submission_is_aborted(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     record_intent(a.ctx(), board.promotion())
     a.worker.end_run("crashed")  # died between intent and submit
@@ -386,11 +407,11 @@ def test_intent_without_submission_is_aborted(board):
     [action] = reconcile(board.ctx(), board.queue, board.sm)
 
     assert action.kind == "aborted" and board.promotion().stage == "aborted"
-    assert Promoter(board, "pv_b").acquire()
+    assert Promoter(board, PV_B).acquire()
 
 
 def test_intent_holder_still_running_is_left_alone(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     record_intent(a.ctx(), board.promotion())
     assert reconcile(board.ctx(), board.queue, board.sm) == []
@@ -398,7 +419,7 @@ def test_intent_holder_still_running_is_left_alone(board):
 
 
 def test_holder_from_an_earlier_board_epoch_counts_as_terminal(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     record_intent(a.ctx(), board.promotion())
     _force(board, board_epoch="e0")  # the board that held the run is gone (C12)
@@ -408,10 +429,10 @@ def test_holder_from_an_earlier_board_epoch_counts_as_terminal(board):
 
 
 def test_old_promotion_branch_after_another_published_is_reconciled(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.acquire()
     board.queue.requeue(a.worker.task_id, "reclaimed")  # the run ends; the card goes back
-    b = Promoter(board, "pv_b")
+    b = Promoter(board, PV_B)
     assert b.submit().ok  # A's promotion was abandoned in `acquired`
     b.finish()
     [published] = board.process()
@@ -434,25 +455,181 @@ def test_old_promotion_branch_after_another_published_is_reconciled(board):
 
 def test_current_champion_needs_ledger_and_leaderboard_to_agree(board):
     assert current_champion(board.ctx(), board.sm, LEAGUE) == BASELINE_PV  # nothing promoted
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.submit().ok
     a.finish()
     board.process()
-    assert current_champion(board.ctx(), board.sm, LEAGUE) == "pv_a"
+    assert current_champion(board.ctx(), board.sm, LEAGUE) == PV_A
 
-    board.sm.submit("pv_elsewhere", LEAGUE)  # the leaderboard moved without a promotion
+    board.sm.submit("other-policy:v1", LEAGUE)  # the leaderboard moved without a promotion
     assert current_champion(board.ctx(), board.sm, LEAGUE) is None
-    b = Promoter(board, "pv_b", baseline="pv_a")
+    b = Promoter(board, PV_B, baseline=PV_A)
     outcome = b.submit()
     assert outcome.ok is False and "unknown" in outcome.reason
-    assert board.submissions_of("pv_b") == []
+    assert board.submissions_of(PV_B) == []
 
 
 def test_adopt_only_by_the_recovery_card(board):
-    a = Promoter(board, "pv_a")
+    a = Promoter(board, PV_A)
     assert a.submit().ok
     other = board.admit(mode="maintenance")
     other.start()
     with pytest.raises(PromotionError, match="recovery"):
         adopt(other.ctx(), board.promotion().id)
     assert board.promotion().holder_task == a.worker.task_id
+
+
+# --- liveness (fix round 1) ---
+
+
+def test_holder_handoff_reconciled_then_superseded_gets_recovery(board):
+    hypothesis = f"ar://hypothesis/{board.hypothesis}"
+    a = Promoter(board, PV_A, refs=[hypothesis])
+    other = board.admit(refs=[hypothesis])
+    other.start()
+    assert a.submit().ok
+    a.worker.store.update(board.hypothesis, {"lever": "SK.wait"})
+    other.store.update(board.hypothesis, {"lever": "SK.rush"})
+    other.write_journal()
+    other.finish()
+    assert [o.state for o in board.process()] == ["published"]
+    a.finish()
+
+    [held] = board.process()  # C4: both changed the hypothesis
+    assert held.state == "reconcile" and board.promotion().stage == "submitted"
+    follow_up = board.admit_follow_up(held.follow_up_request)
+    follow_up.start()
+    follow_up.write_journal()  # redoes the non-champion work only
+    follow_up.finish()
+    [done] = board.process()
+    assert done.state == "published" and a.worker.handoff()["state"] == "superseded"
+    assert board.promotion().stage == "submitted"  # the reconcile card is not the holder
+
+    [action] = reconcile(board.ctx(), board.queue, board.sm)
+    assert action.kind == "recovery_requested"
+    _recover(board, action.request_id)
+    [recovered] = board.process()
+    assert recovered.state == "published"
+    assert _stages(board.history(board.promotion().id))[-2:] == ["recorded", "published"]
+    assert len(board.submissions_of(PV_A)) == 1
+
+
+def test_record_submitted_crash_holder_handoff_waits_at_intent(board, monkeypatch):
+    a = Promoter(board, PV_A)
+
+    def crash(ctx, promotion_record, submission_id):
+        raise RuntimeError("crash in record_submitted")
+
+    monkeypatch.setattr(promotion, "record_submitted", crash)
+    with pytest.raises(RuntimeError, match="record_submitted"):
+        a.submit()
+    monkeypatch.undo()
+    assert board.promotion().stage == "intent"
+    stage_champion(a.ctx(), board.promotion())  # the worker stages it and finishes
+    record = a.finish()
+
+    [waiting] = board.process()
+    assert waiting.state == "validated" and board.promotion().stage == "intent"
+    assert not gitops.contains(board.canonical, record["result_sha"])  # never merged at intent
+
+    [action] = reconcile(board.ctx(), board.queue, board.sm)
+    assert action.kind == "submitted"  # no recovery: the holder's handoff is still open
+    [handled] = board.process()
+    assert handled.state == "published"
+    assert _stages(board.history(board.promotion().id))[-2:] == ["recorded", "published"]
+    assert len(board.submissions_of(PV_A)) == 1
+
+
+def test_recovery_card_that_dies_gets_a_second_attempt(board):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    [first] = reconcile(board.ctx(), board.queue, board.sm)
+    first_card = board.admit_follow_up(first.request_id)
+    first_card.start()
+    adopt(first_card.ctx(), board.promotion().id)
+    first_card.end_run("crashed")  # adopted, then died without a handoff
+    assert find_orphan_done(board.queue, board.ledger) == []  # reconcile owns it
+
+    [second] = reconcile(board.ctx(), board.queue, board.sm)
+
+    assert second.kind == "recovery_requested" and second.request_id != first.request_id
+    pid = board.promotion().id
+    assert f"promote-recover:{pid}:2" in board.follow_up(second.request_id)["spec"]["title"]
+    assert board.promotion().recovery_requests == [first.request_id, second.request_id]
+    assert reconcile(board.ctx(), board.queue, board.sm) == []  # at most one live
+    _recover(board, second.request_id)
+    [handled] = board.process()
+    assert handled.state == "published" and board.promotion().stage == "published"
+    assert len(board.submissions_of(PV_A)) == 1
+
+
+def test_rate_limited_holder_retried_run_is_accepted(board):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    first_run = a.worker.run_id
+    board.queue.requeue(a.worker.task_id, "rate_limited")  # the run ends; the task is ready
+
+    assert reconcile(board.ctx(), board.queue, board.sm) == []  # a retry will come
+    a.worker.start()  # the retried run; the staged champion is still in the worktree
+    a.finish()
+    [handled] = board.process()
+
+    assert handled.state == "published"
+    current = board.promotion()
+    assert current.stage == "published" and current.run_id == a.worker.run_id != first_run
+    assert current.recovery_requests == []
+
+
+def test_no_champion_known_refusal_message(board):
+    a = Promoter(board, PV_A)
+    newcomer = FakeSoftmax(board.canonical, {"AUTORESEARCH_PLAYER_ID": "ply_new"})
+    outcome = a.submit(sm=newcomer)
+    assert outcome.ok is False and outcome.reason.startswith("no champion known")
+
+
+# --- the promotion CLI ---
+
+
+def _cli(capsys, monkeypatch, worker: Worker, *argv) -> tuple[int, dict]:
+    env = {
+        "HERMES_HOME": str(worker.board.tmp_path / "home"),
+        "AUTORESEARCH_WORKSPACE": str(worker.board.canonical),
+        "HERMES_KANBAN_WORKSPACE": str(worker.worktree),
+        "HERMES_KANBAN_TASK": worker.task_id,
+        "HERMES_KANBAN_RUN_ID": worker.run_id,
+    }
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    code = main(["promotion", *argv])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_recovery_through_the_promotion_cli(board, capsys, monkeypatch):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    [action] = reconcile(board.ctx(), board.queue, board.sm)
+    pid = board.promotion().id
+    card = board.admit_follow_up(action.request_id)
+    card.start()
+
+    code, env = _cli(capsys, monkeypatch, card, "status")
+    assert code == 0 and env["data"]["id"] == pid and env["data"]["stage"] == "submitted"
+    code, env = _cli(capsys, monkeypatch, card, "stage-champion", pid)
+    assert code == 1 and "adopt" in env["error"]["message"]  # not the holder yet
+    code, env = _cli(capsys, monkeypatch, card, "adopt", pid)
+    assert code == 0 and env["data"]["holder_task"] == card.task_id
+    code, env = _cli(capsys, monkeypatch, card, "stage-champion", pid)
+    assert code == 0 and Path(env["data"]["path"]).read_text() == a.candidate_text
+
+    card.write_journal()
+    card.finish()
+    [handled] = board.process()
+    assert handled.state == "published" and board.promotion().stage == "published"
+
+
+def test_promotion_cli_needs_a_runtime_context(capsys, monkeypatch):
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    code = main(["promotion", "status"])
+    assert code == 2 and "HERMES_HOME" in json.loads(capsys.readouterr().out)["error"]["message"]
