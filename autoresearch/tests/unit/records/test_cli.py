@@ -164,3 +164,16 @@ def test_python_m_entry_point(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout) == {"ok": True, "data": {"ids": []}}
+
+
+@pytest.mark.parametrize("flag", ["--meta-file", "--body-file"])
+def test_missing_input_file_is_bad_arguments(capsys, root, tmp_path, flag):
+    argv = ["new", "topic", "--root", root, flag, str(tmp_path / "missing.json")]
+    code, env = run(capsys, *argv)
+    assert code == 2 and env["ok"] is False and "missing.json" in env["error"]["message"]
+
+
+def test_missing_patch_file_is_bad_arguments(capsys, root, tmp_path):
+    hid = new(capsys, root, "hypothesis", HYP)
+    code, env = run(capsys, "update", hid, "--root", root, "--patch-file", str(tmp_path / "nope"))
+    assert code == 2 and env["ok"] is False

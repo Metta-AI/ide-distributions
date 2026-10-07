@@ -23,6 +23,7 @@ EXPERIMENT_DESIGN_FIELDS = (
     "evaluation_design",
     "environment",
     "parents",
+    "lever",
 )
 
 HYPOTHESIS_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -200,10 +201,20 @@ def _status_change(rule: StatusRule, old: dict, new: dict) -> list[str]:
         return problems
     reason = new.get(rule.reason_field)
     ref = new.get(rule.ref_field) if rule.ref_field else None
+    # Reason and ref persist in front matter, so a change must bring fresh values rather than
+    # silently reusing the previous transition's.
     if not reason:
         problems.append(f"{rule.field} change needs {rule.reason_field}")
+    elif reason == old.get(rule.reason_field):
+        problems.append(
+            f"{rule.field} change needs a new {rule.reason_field}; it repeats the previous one"
+        )
     if rule.ref_required and not ref:
         problems.append(f"{rule.field} change needs {rule.ref_field}")
+    elif rule.ref_required and ref == old.get(rule.ref_field):
+        problems.append(
+            f"{rule.field} change needs a new {rule.ref_field}; it repeats the previous one"
+        )
     old_history = old.get(rule.history_field) or []
     new_history = new.get(rule.history_field) or []
     added = new_history[len(old_history) :]
@@ -233,6 +244,8 @@ def _experiment_transition(old: dict, new: dict) -> list[str]:
             problems.append("candidate_binding can only be set in status uploaded")
         if old.get("xp_requests"):
             problems.append("candidate_binding must be set before any XP request")
+    if old.get("status") == "uploaded" and new.get("status") != "uploaded" and new_binding is None:
+        problems.append(f"cannot leave uploaded for {new.get('status')} without candidate_binding")
     old_attempts = (old.get("lifecycle") or {}).get("launch_attempts", 0)
     new_attempts = (new.get("lifecycle") or {}).get("launch_attempts", 0)
     if new_attempts < old_attempts:
