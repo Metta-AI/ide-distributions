@@ -1,3 +1,5 @@
+import pytest
+
 from autoresearch.stats.design import EvaluationDesign, MetricSpec, signed
 from autoresearch.stats.ingest import EpisodeRow, ingest, ingest_rows, pair
 
@@ -11,7 +13,7 @@ DESIGN = EvaluationDesign(
     seeds=(1, 2, 3),
     metrics=(UP, DOWN),
     k=0.5,
-    delta={"score": 0.2},
+    delta={},
     n_min=10,
     noise_rev="abc",
 )
@@ -97,3 +99,21 @@ def test_pair_requires_same_seats_and_opponents():
 def test_signed_negates_down():
     assert signed(2.0, UP) == 2.0
     assert signed(2.0, DOWN) == -2.0
+
+
+def test_ingest_drops_seed_outside_design():
+    kept, report = ingest([row("a", seed=1), row("b", seed=99)], DESIGN)
+    assert [r.episode_id for r in kept] == ["a"]
+    assert report.wrong_seed == 1
+
+
+def test_ingest_and_pair_accept_json_lists():
+    rows = [row("b", "pv-base", seats=[0, 1], opponents=["pv-opp"]), row("c", "pv-cand")]
+    kept, report = ingest(rows, DESIGN)
+    assert report.kept == 2
+    assert len(pair(kept, DESIGN, "pv-cand")) == 1
+
+
+def test_pair_rejects_candidate_equal_to_baseline():
+    with pytest.raises(ValueError):
+        pair([row("a")], DESIGN, "pv-base")

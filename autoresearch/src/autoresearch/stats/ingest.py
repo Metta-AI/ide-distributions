@@ -25,6 +25,7 @@ class IngestReport:
     failed: int = 0
     wrong_version: int = 0
     wrong_seats: int = 0
+    wrong_seed: int = 0
     missing_metrics: list[str] = field(default_factory=list)
 
 
@@ -59,10 +60,15 @@ def ingest(
 ) -> tuple[list[EpisodeRow], IngestReport]:
     """``ingest_rows`` plus the design's seat and opponent checks (both count as wrong_seats)."""
     kept, report = ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
-    in_design = [
-        row for row in kept if row.seats == design.seats and row.opponents == design.opponents
-    ]
-    report.wrong_seats = len(kept) - len(in_design)
+    seats, opponents, seeds = tuple(design.seats), tuple(design.opponents), set(design.seeds)
+    in_design = []
+    for row in kept:
+        if tuple(row.seats) != seats or tuple(row.opponents) != opponents:
+            report.wrong_seats += 1
+        elif row.seed not in seeds:
+            report.wrong_seed += 1
+        else:
+            in_design.append(row)
     report.kept = len(in_design)
     return in_design, report
 
@@ -74,10 +80,15 @@ def pair(
 
     Only the first row per side and key, in episode_id order, is used; extras are ignored.
     """
+    if candidate_platform_id == design.baseline_version:
+        raise ValueError(
+            "candidate_platform_id equals the baseline version; cannot pair a policy with itself"
+        )
     sides = {design.baseline_version: {}, candidate_platform_id: {}}
     for row in sorted(rows, key=lambda r: r.episode_id):
         side = sides.get(row.policy_version)
         if side is not None:
-            side.setdefault((row.game_version, row.seed, row.seats, row.opponents), row)
+            key = (row.game_version, row.seed, tuple(row.seats), tuple(row.opponents))
+            side.setdefault(key, row)
     baseline, candidate = sides[design.baseline_version], sides[candidate_platform_id]
     return [(baseline[key], candidate[key]) for key in sorted(baseline.keys() & candidate.keys())]

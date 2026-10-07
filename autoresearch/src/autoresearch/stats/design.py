@@ -6,8 +6,22 @@ The candidate is not part of the design: it is bound once after upload through
 ``experiment.candidate_binding`` and passed to ``pair()`` / ``evaluate()``.
 """
 
+import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Literal
+
+import jsonschema
+
+_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "evaluation_design.json"
+
+
+def _schema() -> dict:
+    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+class DesignError(ValueError):
+    """A stored or constructed evaluation design is malformed or inconsistent."""
 
 
 @dataclass(frozen=True)
@@ -32,17 +46,41 @@ class EvaluationDesign:
     n_min: int
     noise_rev: str
 
+    def validate(self) -> None:
+        """Raise DesignError unless metric names are unique, every delta key names a
+        performance metric, and baseline_version is non-empty."""
+        problems = []
+        names = [metric.name for metric in self.metrics]
+        for name in sorted({n for n in names if names.count(n) > 1}):
+            problems.append(f"duplicate metric name {name!r}")
+        performance = {m.name for m in self.metrics if m.role == "performance"}
+        for key in sorted(set(self.delta) - performance):
+            problems.append(f"delta key {key!r} is not a performance metric")
+        if not self.baseline_version.strip():
+            problems.append("baseline_version is empty")
+        if problems:
+            raise DesignError("; ".join(problems))
+
     def to_dict(self) -> dict:
         """JSON-ready dict (tuples become lists); matches schemas/evaluation_design.json."""
+        self.validate()
         data = asdict(self)
         for key in ("seats", "opponents", "seeds", "metrics"):
             data[key] = list(data[key])
         data["delta"] = dict(self.delta)
+        try:
+            jsonschema.validate(data, _schema())
+        except jsonschema.ValidationError as error:
+            raise DesignError(error.message) from error
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "EvaluationDesign":
-        return cls(
+        try:
+            jsonschema.validate(data, _schema())
+        except jsonschema.ValidationError as error:
+            raise DesignError(error.message) from error
+        design = cls(
             game_version=data["game_version"],
             baseline_version=data["baseline_version"],
             seats=tuple(data["seats"]),
@@ -54,6 +92,8 @@ class EvaluationDesign:
             n_min=data["n_min"],
             noise_rev=data["noise_rev"],
         )
+        design.validate()
+        return design
 
 
 def signed(value: float, spec: MetricSpec) -> float:
