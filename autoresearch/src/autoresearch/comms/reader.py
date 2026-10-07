@@ -7,8 +7,12 @@ that loses its cursor just reads again from the start (delivery is at-least-once
 re-reads idempotent). Readers ignore unknown fields (they are kept in the returned dicts) and,
 by default, messages of unknown kinds.
 
+Snapshots. Every read takes ``rev`` (default HEAD). A caller that both lists and advances a
+cursor reads ``snapshot()`` once and passes it to both, so a publication committed between
+the two steps is neither skipped nor half-counted.
+
 Per-consumer ``seen`` records are durable: ``.supervisor/ledger/seen/<consumer>.json``
-(``{consumer, seqs}``), written by an inbound ``seen`` (``comms.inbound``).
+(``{consumer, ids}``), written by an inbound ``seen`` (``comms.inbound``).
 """
 
 import json
@@ -31,9 +35,14 @@ def check_consumer(consumer: str) -> str:
     return consumer
 
 
-def _outbox_index(canonical: Path) -> list[tuple[int, str, str]]:
-    """(seq, message id, path) of every outbox file at HEAD, by seq."""
-    listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{OUTBOX_DIR}/")
+def snapshot(canonical: Path) -> str:
+    """The commit SHA to read one consistent view of the outbox at."""
+    return gitops.head(canonical)
+
+
+def _outbox_index(canonical: Path, rev: str = "HEAD") -> list[tuple[int, str, str]]:
+    """(seq, message id, path) of every outbox file at ``rev``, by seq."""
+    listing = gitops.git(canonical, "ls-tree", "--name-only", rev, f"{OUTBOX_DIR}/")
     index = []
     for path in listing.splitlines():
         match = OUTBOX_NAME.fullmatch(path.rsplit("/", 1)[-1])
@@ -42,13 +51,13 @@ def _outbox_index(canonical: Path) -> list[tuple[int, str, str]]:
     return sorted(index)
 
 
-def _load(canonical: Path, path: str) -> dict:
-    return json.loads(gitops.show(canonical, "HEAD", path))
+def _load(canonical: Path, path: str, rev: str = "HEAD") -> dict:
+    return json.loads(gitops.show(canonical, rev, path))
 
 
-def last_seq(canonical: Path) -> int:
-    """Highest published seq at HEAD (0 if none), counting messages of unknown kinds."""
-    index = _outbox_index(canonical)
+def last_seq(canonical: Path, rev: str = "HEAD") -> int:
+    """Highest published seq at ``rev`` (0 if none), counting messages of unknown kinds."""
+    index = _outbox_index(canonical, rev)
     return index[-1][0] if index else 0
 
 
@@ -68,12 +77,18 @@ def advance(canonical: Path, consumer: str, seq: int) -> None:
 
 
 def read_since(
-    canonical: Path, consumer: str, after: int | None = None, include_unknown: bool = False
+    canonical: Path,
+    consumer: str,
+    after: int | None = None,
+    include_unknown: bool = False,
+    rev: str = "HEAD",
 ) -> list[dict]:
-    """Published messages with seq > ``after`` (default: ``consumer``'s cursor), by seq.
-    Does not move the cursor: call ``advance`` once the messages are handled."""
+    """Published messages at ``rev`` with seq > ``after`` (default: ``consumer``'s cursor),
+    by seq. Does not move the cursor: call ``advance`` once the messages are handled."""
     start = cursor(canonical, consumer) if after is None else after
-    messages = [_load(canonical, path) for seq, _, path in _outbox_index(canonical) if seq > start]
+    messages = [
+        _load(canonical, path, rev) for seq, _, path in _outbox_index(canonical, rev) if seq > start
+    ]
     if include_unknown:
         return messages
     return [message for message in messages if message.get("kind") in KINDS]
@@ -108,7 +123,7 @@ def status(canonical: Path, message_id: str) -> dict:
     listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{SEEN_DIR}/")
     for path in sorted(listing.splitlines()):
         record = _load(canonical, path)
-        if receipt["seq"] in record.get("seqs", []):
+        if message_id in record.get("ids", []):
             seen_by.append(record["consumer"])
     return {
         "id": message_id,

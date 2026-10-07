@@ -151,8 +151,13 @@ class CardWorkspace:
             "title": "T",
             "body": "B",
             "refs": [],
-            "from": "agent",
-            "created_at": "2026-10-07T00:00:00+00:00",
+            "from": "research-agent",
+            "created": "2026-10-07T00:00:00+00:00",
+            "iteration": 1,
+            "priority": "P2",
+            "expects_response": False,
+            "supersedes": None,
+            "expires": None,
         }
         message.update(fields)
         path = self.worktree / "comms" / "staged" / f"{message_id}.json"

@@ -29,7 +29,7 @@ packages = ["src/autoresearch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 markers = ["hermes: needs a real Hermes install; excluded by default"]
 addopts = "-m 'not hermes'"
 

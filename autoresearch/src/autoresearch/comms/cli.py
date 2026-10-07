@@ -4,15 +4,18 @@ Same JSON envelope and exit codes as ``autoresearch records``: ``{"ok": true, "d
 or ``{"ok": false, "error": {"message", "problems"?}}``; 0 ok, 1 failure (invalid message,
 not found, unresolvable), 2 bad arguments or no workspace.
 
-- ``stage KIND --title T (--body B | --body-file F) [--ref R]... [--in-reply-to I]
-  [--thread T] [--urgency U] [--fields JSON]``: a card worker stages a message in its
-  worktree (RunContext worker; ``--root`` overrides). ``--ref`` is an ``ar://`` URI (rev
-  ``@result``) or a JSON object ``{uri, rev?, role?, note?}``.
+- ``stage KIND --title T (--body B | --body-file F) [--ref R]... [--iteration N]
+  [--priority P0..P5] [--expects-response | --no-expects-response] [--thread T]
+  [--in-reply-to ID] [--supersedes M] [--expires ISO] [--fields JSON]``: a card worker stages
+  a message in its worktree (RunContext worker; ``--root`` overrides). ``--ref`` is an
+  ``ar://`` URI (rev ``@result``) or a JSON object ``{uri, rev?, role?, note?}``.
+  Defaults: priority P2, expects_response true only for a question.
 - ``list [--after N] [--consumer C [--advance]] [--all-kinds]``: published messages after
-  ``N`` or after C's cursor; ``--advance`` then moves C's cursor to ``last_seq``. Data:
-  ``{messages, last_seq, cursor}``.
+  ``N`` or after C's cursor; ``--advance`` then moves C's cursor to ``last_seq``. The listing
+  and ``last_seq`` come from one commit snapshot (``rev`` in the data), so a publication
+  that lands meanwhile is left for the next read. Data: ``{messages, last_seq, cursor, rev}``.
 - ``get <seq|M-id>``, ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``.
-- ``inbound KIND (--json J | --file F) [--author A]``: an external agent submits a
+- ``inbound KIND (--json J | --file F) --author A``: an external agent submits a
   ``reply``, ``steer``, ``task`` or ``seen`` (``comms.inbound``).
 
 Every command except ``stage`` works on the canonical workspace (``--root`` overrides it).
@@ -26,7 +29,7 @@ from pathlib import Path
 from autoresearch import runctx
 from autoresearch.cli import register_group
 from autoresearch.comms import reader
-from autoresearch.comms.envelope import MessageProblems
+from autoresearch.comms.envelope import PRIORITIES, MessageProblems
 from autoresearch.comms.inbound import INBOUND_KINDS, InboundProblems, submit_inbound
 from autoresearch.comms.resolver import ResolveError, resolve
 from autoresearch.comms.stage import stage
@@ -81,7 +84,15 @@ def _stage(args) -> int:
             raise BadArguments("comms stage runs in a card worker (no worktree in RunContext)")
     body = _read_file(args.body_file) if args.body_file is not None else (args.body or "")
     fields = _json_object(args.fields, "--fields") if args.fields else {}
-    for name in ("in_reply_to", "thread", "urgency"):
+    for name in (
+        "iteration",
+        "priority",
+        "expects_response",
+        "thread",
+        "in_reply_to",
+        "supersedes",
+        "expires",
+    ):
         if getattr(args, name) is not None:
             fields[name] = getattr(args, name)
     refs = [_ref(text) for text in args.ref]
@@ -97,15 +108,16 @@ def _list(args) -> int:
     consumer = args.consumer or "_"
     if args.after is None and args.consumer is None:
         args.after = 0
+    rev = reader.snapshot(canonical)  # one view for the listing and the advance target
     try:
         position = reader.cursor(canonical, consumer) if args.after is None else args.after
-        messages = reader.read_since(canonical, consumer, position, args.all_kinds)
+        messages = reader.read_since(canonical, consumer, position, args.all_kinds, rev=rev)
     except ValueError as error:
         raise BadArguments(str(error)) from None
-    last = reader.last_seq(canonical)
+    last = reader.last_seq(canonical, rev=rev)
     if args.advance:
         reader.advance(canonical, consumer, last)
-    return _ok({"messages": messages, "last_seq": last, "cursor": position})
+    return _ok({"messages": messages, "last_seq": last, "cursor": position, "rev": rev})
 
 
 def _get(args) -> int:
@@ -174,9 +186,15 @@ def setup(parser: argparse.ArgumentParser) -> None:
     body.add_argument("--body", help="Markdown body, written for the Preston-role agent")
     body.add_argument("--body-file")
     sub.add_argument("--ref", action="append", default=[], metavar="URI|JSON")
-    sub.add_argument("--in-reply-to", dest="in_reply_to")
+    sub.add_argument("--iteration", type=int, help="this card run's journal iteration")
+    sub.add_argument("--priority", choices=PRIORITIES)
+    sub.add_argument(
+        "--expects-response", dest="expects_response", action=argparse.BooleanOptionalAction
+    )
     sub.add_argument("--thread")
-    sub.add_argument("--urgency")
+    sub.add_argument("--in-reply-to", dest="in_reply_to")
+    sub.add_argument("--supersedes", metavar="M-ID")
+    sub.add_argument("--expires", metavar="ISO-TIME")
     sub.add_argument("--fields", help="JSON object of extra envelope fields")
 
     sub = command("list", _list, "published messages after a seq or a consumer's cursor")
@@ -201,7 +219,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     payload = sub.add_mutually_exclusive_group(required=True)
     payload.add_argument("--json", help="the message fields as a JSON object")
     payload.add_argument("--file", help="path to the message fields as a JSON object")
-    sub.add_argument("--author")
+    sub.add_argument("--author", required=True, help="consumer name of the sender")
 
 
 register_group("comms", setup)

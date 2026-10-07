@@ -1,6 +1,7 @@
 """Comms contract suite (Runtime 9.3): a fake Preston drives ``autoresearch comms`` over
 subprocesses against a canonical workspace that real workers publish into."""
 
+import functools
 import json
 
 import pytest
@@ -11,6 +12,9 @@ from autoresearch.ids import new_id
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runtime.ledger import canonical_lock
+
+# The canonical repos here have no remote.
+local_hook = functools.partial(publish_hook, allow_no_remote=True)
 
 HYPOTHESIS = {
     "statement": "Raising credits unblocks the experiment queue.",
@@ -56,7 +60,7 @@ def _question_card(board, base_env) -> tuple[str, str]:
         thread="credits",
     )
     worker.finish()
-    board.process(publish=publish_hook)
+    board.process(publish=local_hook)
     return question, hypothesis
 
 
@@ -72,7 +76,7 @@ def _ack_card(board, base_env, inbound_id: str) -> str:
     )
     record = worker.finish()
     assert record["responsible_inbound"] == [inbound_id]
-    [outcome] = board.process(publish=publish_hook)
+    [outcome] = board.process(publish=local_hook)
     assert outcome.state == "published"
     return note
 
@@ -91,7 +95,7 @@ def test_round_trip_read_resolve_reply_seen_and_acknowledgement(board, base_env,
     assert "Raising credits" in resolved[0]["content"]
 
     reply = preston.reply(question, "Yes. Credits are raised to 200.")
-    preston.seen(message["seq"])
+    preston.seen(message["id"])
     status = preston.status(question)
     assert status["published"] and status["seq"] == 1 and status["seen_by"] == ["preston"]
     inbox = json.loads(gitops.show(board.canonical, "HEAD", f"comms/inbox/{reply}.json"))
@@ -122,8 +126,14 @@ def test_two_consumers_keep_independent_cursors(board, base_env, preston, ide):
 def test_unknown_additive_fields_and_kinds_are_ignored_by_the_reader(board, preston):
     with canonical_lock(board.canonical):
         seq = publish_runtime(
-            board.canonical, "note", "Queue paused", "Disk is low.", [], future_field={"x": 1}
-        )
+            board.canonical,
+            "note",
+            "Queue paused",
+            "Disk is low.",
+            [],
+            allow_no_remote=True,
+            future_field={"x": 1},
+        ).seq
     # A newer writer publishes a kind this reader does not know.
     future_id = new_id("message")
     future = {
@@ -134,7 +144,12 @@ def test_unknown_additive_fields_and_kinds_are_ignored_by_the_reader(board, pres
         "body": "",
         "refs": [],
         "from": "runtime",
-        "created_at": "2026-10-07T00:00:00+00:00",
+        "created": "2026-10-07T00:00:00+00:00",
+        "iteration": None,
+        "priority": "P2",
+        "expects_response": True,
+        "supersedes": None,
+        "expires": None,
         "seq": seq + 1,
         "published_rev": gitops.head(board.canonical),
         "options": ["a", "b"],
@@ -156,14 +171,52 @@ def test_unknown_additive_fields_and_kinds_are_ignored_by_the_reader(board, pres
     assert preston.get(seq + 1)["kind"] == "poll"
 
 
-def test_inbound_validation(board, preston):
+@pytest.mark.parametrize(
+    ("kind", "payload", "needle"),
+    [
+        ("steer", {"text": "Go faster", "urgency": "yesterday"}, "urgency"),
+        (
+            "steer",
+            {"text": "Look at towers", "urgency": "next", "proposed_topic": {"title": "Towers"}},
+            "proposed_topic.objective",
+        ),
+        ("reply", {"in_reply_to": "M-1", "text": "yes"}, "in_reply_to"),
+        ("reply", {"in_reply_to": "M-01K6Z3V8QX0000000000000000"}, "choice or text"),
+        ("seen", {"consumer": "preston", "seq": 1}, "ids"),
+        ("seen", {"ids": ["M-01K6Z3V8QX0000000000000000"]}, "not a published message"),
+        ("task", {"title": "T", "mode": "scouting", "why": "W", "refs": []}, "priority"),
+        (
+            "task",
+            {"title": "T", "mode": "dancing", "why": "W", "refs": [], "priority": "P1"},
+            "mode",
+        ),
+    ],
+)
+def test_inbound_validation(board, preston, kind, payload, needle):
     with pytest.raises(CommsError) as caught:
-        preston.send("steer", text="Go faster", urgency="yesterday")
+        preston.send(kind, **payload)
     assert caught.value.code == 1
+    assert any(needle in problem for problem in caught.value.payload["error"]["problems"])
+
+
+def test_inbound_needs_a_known_kind_and_an_author(board, preston):
     with pytest.raises(CommsError):
         preston.send("dance", text="x")
-    with pytest.raises(CommsError):
-        preston.send("seen", consumer="preston")
+    with pytest.raises(CommsError) as caught:  # argparse: --author is required
+        preston.comms("inbound", "steer", "--json", '{"text": "x", "urgency": "now"}')
+    assert caught.value.code == 2
+
+
+def test_valid_steer_with_proposed_topic_is_recorded(board, preston):
+    topic = {
+        "title": "Towers",
+        "objective": "Stop dying to towers.",
+        "metrics": [],
+        "priority": "P2",
+    }
+    inbound = preston.send("steer", text="Look at towers", urgency="now", proposed_topic=topic)
+    record = json.loads(gitops.show(board.canonical, "HEAD", f"comms/inbox/{inbound}.json"))
+    assert record["proposed_topic"] == topic and record["author"] == "preston"
 
 
 @pytest.mark.xfail(strict=True, reason="Task 3.7: inbound task routing and acknowledgement")
@@ -176,7 +229,7 @@ def test_inbound_task_is_acknowledged_when_its_card_publishes(board, ide):
     worker.start()
     worker.write_journal()
     worker.finish()
-    board.process(publish=publish_hook)
+    board.process(publish=local_hook)
     assert any(
         message["kind"] == "note" and message.get("in_reply_to") == task for message in ide.read()
     )

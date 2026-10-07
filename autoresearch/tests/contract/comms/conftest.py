@@ -1,17 +1,12 @@
-"""Fixtures for the comms contract suite: the protocol tests' Board (real git canonical,
-FileQueue, simulated workers) and fake Preston consumers that use only the CLI."""
+"""Fixtures for the comms contract suite: the shared protocol Board (real git canonical,
+FileQueue, simulated workers; ``tests/support``) and fake Preston consumers that use only
+the CLI."""
 
 import os
-import sys
-from pathlib import Path
 
 import pytest
-
-# Reuse the Board/Worker helpers of the handoff-processing protocol tests.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "protocol"))
-
 from fake_preston import FakePreston
-from test_merge import Board
+from support.board import Board
 
 
 @pytest.fixture

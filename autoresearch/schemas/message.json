@@ -1,16 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "autoresearch/message.json",
-  "title": "Outbound message, schema ar-comms/0 (Overview C5, System Design 7). Staged by a worker at comms/staged/<M-id>.json, published by the runtime at comms/outbox/<seq:08d>-<M-id>.json. Versioning is additive within ar-comms/0: writers may add optional fields and new kinds, and readers must ignore unknown fields and unknown kinds. Known kinds: note, highlight, question, help_request, suggestion, decision, seen. Writers check the kind against that list (autoresearch.comms.envelope.KINDS); this schema does not, so a reader that validates with it accepts a newer kind.",
+  "title": "Outbound message, schema ar-comms/0 (Overview C5, System Design 7). Staged by a card worker at comms/staged/<M-id>.json, published by the runtime at comms/outbox/<seq:08d>-<M-id>.json. Versioning is additive within ar-comms/0: writers may add optional fields and new kinds, and readers must ignore unknown fields and unknown kinds. The five outbound kinds are note, question, suggestion, help_request and highlight. Writers check the kind against that list (autoresearch.comms.envelope.KINDS); this schema does not, so a reader that validates with it accepts a newer kind. Status (open, answered, withdrawn, expired) is never stored: it is derived from later messages (Task 3.7).",
   "type": "object",
   "additionalProperties": true,
-  "required": ["schema", "id", "kind", "title", "body", "refs", "from", "created_at"],
+  "required": [
+    "schema", "id", "created", "from", "iteration", "kind", "title", "body", "refs",
+    "priority", "expects_response", "supersedes", "expires"
+  ],
   "properties": {
     "schema": {"const": "ar-comms/0"},
     "id": {"type": "string", "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "created": {"description": "ISO 8601 time the message was written.", "type": "string", "minLength": 1},
+    "from": {"enum": ["research-agent", "runtime"]},
+    "iteration": {"description": "Iteration (journal iteration) of the card run that wrote it; null if none (runtime messages).", "type": ["integer", "null"], "minimum": 0},
     "kind": {"type": "string", "minLength": 1},
     "title": {"type": "string", "minLength": 1},
-    "body": {"type": "string"},
+    "body": {"description": "Markdown written for the Preston-role agent.", "type": "string"},
     "refs": {
       "type": "array",
       "items": {
@@ -20,21 +26,22 @@
         "properties": {
           "uri": {"type": "string", "pattern": "^ar://"},
           "rev": {
-            "description": "Workspace commit the reference is read at. A staged message may use \"@result\" (the commit its card merges as); the publisher replaces it with the merge SHA.",
+            "description": "Workspace commit the reference is read at. A staged message may use \"@result\" (the commit its card merges as); the publisher replaces it with that merge commit.",
             "type": "string",
             "pattern": "^(@result|[0-9a-f]{40})$"
           },
-          "role": {"description": "Known roles: subject, evidence, context.", "type": "string"},
+          "role": {"enum": ["subject", "evidence", "context"]},
           "note": {"type": "string"}
         }
       }
     },
-    "in_reply_to": {"description": "Id of the message or inbound (I-id) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[MI]-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "priority": {"description": "Same scale as card priority: P0 (most urgent) to P5.", "enum": ["P0", "P1", "P2", "P3", "P4", "P5"]},
+    "expects_response": {"type": "boolean"},
     "thread": {"type": "string", "minLength": 1},
-    "urgency": {"type": "string", "minLength": 1},
-    "from": {"enum": ["agent", "runtime"]},
+    "in_reply_to": {"description": "Id of the message or inbound (I-id) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[MI]-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "supersedes": {"description": "Id of an earlier message this one replaces (that message becomes withdrawn).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "expires": {"description": "ISO 8601 time after which an unanswered message is expired; null for never.", "type": ["string", "null"], "minLength": 1},
     "seq": {"description": "Outbox only: the gap-free sequence number.", "type": "integer", "minimum": 1},
-    "published_rev": {"description": "Outbox only: canonical commit the message was published at (the merge SHA for a staged message).", "type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "created_at": {"type": "string", "minLength": 1}
+    "published_rev": {"description": "Outbox only: canonical commit the message was published at (for a staged message, the merge commit that brought it in).", "type": "string", "pattern": "^[0-9a-f]{40}$"}
   }
 }
