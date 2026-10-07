@@ -21,7 +21,8 @@ def test_ok(tmp_path):
 
 
 def test_user_token_fails(tmp_path):
-    assert not run(tmp_path, "identity=user").ok
+    result = run(tmp_path, "identity=user")
+    assert not result.ok and "not a player" in result.reasons[0]
 
 
 def test_wrong_player_names_both(tmp_path):
@@ -31,7 +32,7 @@ def test_wrong_player_names_both(tmp_path):
 
 def test_expired_fails(tmp_path):
     result = run(tmp_path, "expires_in=-60")
-    assert not result.ok
+    assert not result.ok and "expired" in result.reasons[0]
 
 
 def test_expiring_soon_warns(tmp_path):
@@ -40,7 +41,8 @@ def test_expiring_soon_warns(tmp_path):
 
 
 def test_low_disk_fails(tmp_path):
-    assert not run(tmp_path, disk=GB // 2).ok
+    result = run(tmp_path, disk=GB // 2)
+    assert not result.ok and "MB free" in result.reasons[0]
 
 
 def test_zero_credits_warns(tmp_path):
@@ -51,3 +53,19 @@ def test_zero_credits_warns(tmp_path):
 def test_whoami_exception(tmp_path):
     result = run(tmp_path, "fail_after=whoami")
     assert not result.ok and "injected fault" in result.reasons[0]
+
+
+def test_missing_player_id_fails(tmp_path):
+    result = run(tmp_path, player="")
+    assert not result.ok and any("AUTORESEARCH_PLAYER_ID" in r for r in result.reasons)
+
+
+def test_disk_check_oserror_fails(tmp_path):
+    env = {"AUTORESEARCH_PLAYER_ID": "ply_a"}
+    sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)
+
+    def missing(_path):
+        raise FileNotFoundError("no such dir")
+
+    result = preflight(env, sm, tmp_path, NOW, disk_free=missing)
+    assert not result.ok and "cannot check disk" in result.reasons[0]

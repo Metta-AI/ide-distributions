@@ -108,9 +108,9 @@ class FakeSoftmax:
         request_id = f"xp_{_short_hash(experiment, batch, attempt)}"
 
         def action(state: dict):
-            if self._current_credits(state) <= 0:
-                return CreditDenied("no credits")
             if request_id not in state["xp"]:
+                if self._current_credits(state) <= 0:
+                    return CreditDenied("no credits")
                 state["xp"][request_id] = {
                     "experiment": experiment,
                     "batch": batch,

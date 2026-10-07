@@ -39,7 +39,9 @@ def preflight(
 
     if identity.subject_type != "player":
         result.reasons.append(f"credential is a {identity.subject_type!r}, not a player")
-    if identity.player_id != expected_player:
+    if not expected_player:
+        result.reasons.append("AUTORESEARCH_PLAYER_ID is not set")
+    elif identity.player_id != expected_player:
         result.reasons.append(
             f"credential player {identity.player_id!r} does not match expected {expected_player!r}"
         )
@@ -48,7 +50,11 @@ def preflight(
     elif identity.expires_at - now < EXPIRY_WARNING:
         result.warnings.append(f"credential expires at {identity.expires_at.isoformat()}")
 
-    free_bytes = disk_free(canonical).free
+    try:
+        free_bytes = disk_free(canonical).free
+    except OSError as error:
+        result.reasons.append(f"cannot check disk space under {canonical}: {error}")
+        free_bytes = MIN_FREE_BYTES
     if free_bytes < MIN_FREE_BYTES:
         result.reasons.append(
             f"only {free_bytes // 1024**2} MB free under {canonical}; need 1024 MB"
@@ -56,7 +62,7 @@ def preflight(
 
     try:
         result.credits = sm.credits()
-    except Exception as error:  # noqa: BLE001 - any failure means the credential cannot be trusted
+    except Exception as error:  # noqa: BLE001 - credit lookup failure is non-fatal
         result.warnings.append(f"credits unavailable: {error}")
     else:
         if result.credits == 0:

@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -91,3 +92,34 @@ def test_from_env(tmp_path):
     assert isinstance(from_env({"AUTORESEARCH_SOFTMAX": "fake"}, tmp_path), FakeSoftmax)
     with pytest.raises(NotImplementedError):
         from_env({}, tmp_path)
+
+
+def test_xp_create_idempotent_single_charge(tmp_path):
+    sm = make(tmp_path)
+    before = sm.credits()
+    first = sm.xp_create("E-1", 1, 1, SPEC)
+    assert sm.xp_create("E-1", 1, 1, SPEC) == first
+    assert sm.credits() == before - 1
+    assert sm.xp_recover("E-1") == [first]
+
+
+def test_xp_create_retry_after_fail_after_not_double_charged(tmp_path):
+    crashing = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="fail_after=xp_create")
+    before = crashing.credits()
+    with pytest.raises(RuntimeError):
+        crashing.xp_create("E-1", 1, 1, SPEC)
+    sm = make(tmp_path)
+    handle = sm.xp_create("E-1", 1, 1, SPEC)
+    assert sm.xp_recover("E-1") == [handle]
+    assert sm.credits() == before - 1
+
+
+def test_xp_create_retry_at_zero_credits_returns_existing(tmp_path):
+    sm = make(tmp_path)
+    handle = sm.xp_create("E-1", 1, 1, SPEC)
+    state_path = tmp_path / ".supervisor/runtime/fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["credits"] = 0
+    state_path.write_text(json.dumps(state))
+    assert sm.xp_create("E-1", 1, 1, SPEC) == handle
+    assert isinstance(sm.xp_create("E-1", 2, 1, SPEC), CreditDenied)
