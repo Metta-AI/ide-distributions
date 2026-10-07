@@ -32,6 +32,8 @@ class XpStatus:
     state: Literal["pending", "running", "completed", "failed"]
     episodes_completed: int
     episodes_total: int
+    raw_status: str | None = None  # the platform's own status string, when there is one
+    warning: str | None = None  # set when the platform status was not recognised
 
 
 class Softmax(Protocol):
@@ -58,4 +60,4 @@ def from_env(env: Mapping[str, str], canonical: Path) -> Softmax:
         return FakeSoftmax(canonical, env)
     from autoresearch.softmax_tool.client import SoftmaxClient
 
-    return SoftmaxClient(env, canonical)
+    return SoftmaxClient(env)

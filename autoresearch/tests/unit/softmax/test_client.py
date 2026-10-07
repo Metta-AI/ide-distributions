@@ -19,7 +19,7 @@ MUTATING = (
 
 
 def make(env, runner, tmp_path) -> SoftmaxClient:
-    return SoftmaxClient(env, tmp_path / "canonical", run=runner)
+    return SoftmaxClient(env, run=runner)
 
 
 def saw_mutation(runner) -> bool:
@@ -199,3 +199,20 @@ def test_read_only_calls_do_not_need_identity_check(env, runner, tmp_path):
     make(env, runner, tmp_path).submissions(PLAYER_ID)
     assert ["softmax", "status"] not in runner.argvs()
     assert Path(env["HERMES_HOME"], "local", "softmax", "home", ".softmax").is_dir()
+
+
+@pytest.mark.parametrize("credential", ["", "ply_bare_token", '{"token": "ply_x"}'])
+def test_bad_credential_is_identity_error_before_any_mutating_call(
+    env, runner, tmp_path, credential
+):
+    with_mutations(runner)
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = credential
+    sm = make(env, runner, tmp_path)
+    for action in (
+        lambda: sm.upload(tmp_path / "policy.bas", "ar-E-x"),
+        lambda: sm.submit(LABEL, LEAGUE_ID),
+        lambda: sm.xp_create("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", 1, 1, SPEC),
+    ):
+        with pytest.raises(IdentityError):
+            action()
+    assert not saw_mutation(runner)

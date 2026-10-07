@@ -39,7 +39,6 @@ class SoftmaxClient:
     def __init__(
         self,
         env: Mapping[str, str],
-        canonical: Path,
         run: Runner = subprocess.run,
         bin_dir: Path | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -74,7 +73,11 @@ class SoftmaxClient:
     def xp_create(
         self, experiment: str, batch: int, attempt: int, spec: dict
     ) -> XpHandle | CreditDenied:
-        """Reuse an existing request for (experiment, batch, attempt); else check identity, create."""
+        """Reuse an existing request for (experiment, batch, attempt); else check identity, create.
+
+        The existing request is reused whatever its state, including failed or cancelled ones;
+        callers retry by bumping ``attempt``.
+        """
         for handle in xp.recover(self._cli, experiment):
             if (handle.batch, handle.attempt) == (batch, attempt):
                 return handle

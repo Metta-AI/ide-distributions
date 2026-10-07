@@ -35,6 +35,8 @@ TAG_PATTERN = re.compile(r"ar:(?P<experiment>[^:\s]+):b(?P<batch>\d+):a(?P<attem
 CREDIT_DENIAL = re.compile(r"\(402\)|HTTP 402")
 REQUIRED_SPEC = ("league_id", "num_episodes", "roster")
 OPTIONAL_SPEC = ("description", "notes", "variant_id", "episode_player_llm_spend_limit_usd")
+# ExperienceRequestStatus in observatory-core v2/models.py (metta 1301d30f33): pending,
+# submitted, running, completed, failed, cancelled. coworld also spells "canceled" elsewhere.
 STATE_BY_SERVER_STATUS = {
     "pending": "pending",
     "submitted": "pending",
@@ -42,7 +44,9 @@ STATE_BY_SERVER_STATUS = {
     "completed": "completed",
     "failed": "failed",
     "cancelled": "failed",
+    "canceled": "failed",
 }
+UNKNOWN_STATUS_STATE = "pending"  # non-terminal: keep polling, never decide on an unknown status
 DOWNLOAD_INCOMPLETE_EXIT = 2
 DOWNLOAD_TIMEOUT_S = 900
 
@@ -98,7 +102,12 @@ def request_body(experiment: str, batch: int, attempt: int, spec: dict) -> dict:
 def create(
     cli: PlatformCli, experiment: str, batch: int, attempt: int, spec: dict
 ) -> XpHandle | CreditDenied:
-    """Create the request. Callers check identity and run ``recover`` first (see SoftmaxClient)."""
+    """Create the request. Callers check identity and run ``recover`` first (see SoftmaxClient).
+
+    The tag is also the idempotency key, so the platform never creates a second request for the
+    same (experiment, batch, attempt), even after a failed or cancelled one: to retry, the caller
+    bumps ``attempt``.
+    """
     body = request_body(experiment, batch, attempt, spec)
     args = ["xp-request", "create", "-", "--json"]
     result = cli.run("coworld", args, input=json.dumps(body), ok_codes=(0, 1))
@@ -106,8 +115,13 @@ def create(
         if CREDIT_DENIAL.search(result.stderr or ""):
             return CreditDenied(reason=_error_detail(result.stderr))
         raise SoftmaxCliError(describe_failure("coworld", args, result))
-    detail = json.loads(result.stdout)
-    return XpHandle(detail["id"], experiment, batch, attempt)
+    try:
+        request_id = json.loads(result.stdout)["id"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise SoftmaxCliError(
+            f"xp-request create printed no request id: {result.stdout.strip()[-500:]!r}"
+        ) from None
+    return XpHandle(request_id, experiment, batch, attempt)
 
 
 def _error_detail(stderr: str) -> str:
@@ -128,12 +142,21 @@ def recover(cli: PlatformCli, experiment: str) -> list[XpHandle]:
 
 
 def status(cli: PlatformCli, handle: XpHandle) -> XpStatus:
+    """Map the platform status; an unknown one stays non-terminal and carries a warning."""
     detail = cli.run_json("coworld", ["xp-request", "get", handle.request_id])
-    try:
-        state = STATE_BY_SERVER_STATUS[detail["status"]]
-    except KeyError:
-        raise SoftmaxCliError(f"unknown XP request status {detail.get('status')!r}") from None
-    return XpStatus(state, int(detail["completed_count"]), int(detail["episode_count"]))
+    raw_status = str(detail.get("status"))
+    state = STATE_BY_SERVER_STATUS.get(raw_status)
+    warning = None
+    if state is None:
+        state = UNKNOWN_STATUS_STATE
+        warning = f"unknown XP request status {raw_status!r}; treated as {state}"
+    return XpStatus(
+        state,
+        int(detail["completed_count"]),
+        int(detail["episode_count"]),
+        raw_status=raw_status,
+        warning=warning,
+    )
 
 
 def artifacts(cli: PlatformCli, handle: XpHandle, dest: Path) -> list[Path]:
@@ -144,11 +167,17 @@ def artifacts(cli: PlatformCli, handle: XpHandle, dest: Path) -> list[Path]:
     result = cli.run(
         "coworld", args, ok_codes=(0, DOWNLOAD_INCOMPLETE_EXIT), timeout=DOWNLOAD_TIMEOUT_S
     )
-    receipts = latest_receipts(dest / "manifest.jsonl")
-    if result.returncode == DOWNLOAD_INCOMPLETE_EXIT:
-        waiting = sorted(r.get("filename", r.get("id", "?")) for r in receipts if not _completed(r))
+    manifest = dest / "manifest.jsonl"
+    if not manifest.exists():
+        raise ArtifactVerificationError(f"XP {handle.request_id} download wrote no {manifest}")
+    receipts = latest_receipts(manifest)
+    waiting = sorted(r.get("filename") or r.get("id") for r in receipts if not _completed(r))
+    if result.returncode == DOWNLOAD_INCOMPLETE_EXIT or waiting:
         raise ArtifactsIncomplete(f"XP {handle.request_id} evidence not ready: {waiting}")
-    return sorted(verify_receipt(dest, receipt) for receipt in receipts if _completed(receipt))
+    completed = [receipt for receipt in receipts if _completed(receipt)]
+    if not completed:
+        raise ArtifactVerificationError(f"XP {handle.request_id} download produced no artifacts")
+    return sorted(verify_receipt(dest, receipt) for receipt in completed)
 
 
 def _completed(receipt: dict) -> bool:
@@ -158,11 +187,13 @@ def _completed(receipt: dict) -> bool:
 def latest_receipts(manifest: Path) -> list[dict]:
     """The last receipt per artifact (or unavailable selector) in the append-only log."""
     latest: dict[str, dict] = {}
-    if manifest.exists():
-        for line in manifest.read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                latest[row.get("artifact_id") or row.get("id")] = row
+    for number, line in enumerate(manifest.read_text().splitlines(), start=1):
+        if line.strip():
+            row = json.loads(line)
+            key = row.get("artifact_id") or row.get("id")
+            if not key:
+                raise ArtifactVerificationError(f"{manifest}:{number} has no artifact_id or id")
+            latest[key] = row
     return list(latest.values())
 
 

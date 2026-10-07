@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from autoresearch.softmax_tool.identity import identity_problems
 from autoresearch.softmax_tool.protocol import Softmax
 
 EXPIRY_WARNING = timedelta(hours=2)
@@ -37,17 +38,8 @@ def preflight(
         result.ok = False
         return result
 
-    if identity.subject_type != "player":
-        result.reasons.append(f"credential is a {identity.subject_type!r}, not a player")
-    if not expected_player:
-        result.reasons.append("AUTORESEARCH_PLAYER_ID is not set")
-    elif identity.player_id != expected_player:
-        result.reasons.append(
-            f"credential player {identity.player_id!r} does not match expected {expected_player!r}"
-        )
-    if identity.expires_at <= now:
-        result.reasons.append(f"credential expired at {identity.expires_at.isoformat()}")
-    elif identity.expires_at - now < EXPIRY_WARNING:
+    result.reasons.extend(identity_problems(identity, expected_player, now))
+    if now < identity.expires_at and identity.expires_at - now < EXPIRY_WARNING:
         result.warnings.append(f"credential expires at {identity.expires_at.isoformat()}")
 
     try:

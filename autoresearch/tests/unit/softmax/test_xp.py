@@ -6,7 +6,7 @@ import pytest
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.client import SoftmaxClient
-from autoresearch.softmax_tool.platform_cli import PlatformCli
+from autoresearch.softmax_tool.platform_cli import PlatformCli, SoftmaxCliError
 from autoresearch.softmax_tool.protocol import CreditDenied, XpHandle, XpStatus
 
 from .conftest import LEAGUE_ID, RECORDED, completed, recorded, synthetic
@@ -138,7 +138,7 @@ def test_client_retry_reuses_existing_request_instead_of_creating(env, runner, t
     runner.on(
         "coworld", "xp-request", "create", response=completed(synthetic("xp_request_create.json"))
     )
-    sm = SoftmaxClient(env, tmp_path, run=runner)
+    sm = SoftmaxClient(env, run=runner)
     handle = sm.xp_create(E, 1, 1, SPEC)
     assert handle == XpHandle("xreq_00000000-0000-4000-8000-000000000000", E, 1, 1)
     assert not any(argv[:3] == ["coworld", "xp-request", "create"] for argv in runner.argvs())
@@ -149,7 +149,7 @@ def test_client_creates_when_no_existing_request_and_checks_identity_last(env, r
     runner.on(
         "coworld", "xp-request", "create", response=completed(synthetic("xp_request_create.json"))
     )
-    handle = SoftmaxClient(env, tmp_path, run=runner).xp_create(E, 1, 2, SPEC)
+    handle = SoftmaxClient(env, run=runner).xp_create(E, 1, 2, SPEC)
     assert isinstance(handle, XpHandle)
     assert [argv[:3] for argv in runner.argvs()] == [
         ["coworld", "xp-request", "list"],
@@ -164,7 +164,9 @@ def test_client_creates_when_no_existing_request_and_checks_identity_last(env, r
 def test_status_maps_recorded_completed_request(env, runner):
     runner.on("coworld", "xp-request", "get", response=completed(recorded("xp_request_get.json")))
     handle = XpHandle("xreq_b0c4ff36-2d9e-4ddb-8224-9ba8fa0c2fd5", E, 1, 1)
-    assert xp.status(cli(env, runner), handle) == XpStatus("completed", 1, 1)
+    assert xp.status(cli(env, runner), handle) == XpStatus(
+        "completed", 1, 1, raw_status="completed"
+    )
     assert runner.argvs() == [["coworld", "xp-request", "get", handle.request_id, "--json"]]
 
 
@@ -177,13 +179,26 @@ def test_status_maps_recorded_completed_request(env, runner):
         ("completed", "completed"),
         ("failed", "failed"),
         ("cancelled", "failed"),
+        ("canceled", "failed"),
     ],
 )
 def test_status_mapping(env, runner, server_status, state):
     body = json.loads(synthetic("xp_request_create.json"))
     body.update(status=server_status, completed_count=1, episode_count=4)
     runner.on("coworld", "xp-request", "get", response=completed(json.dumps(body)))
-    assert xp.status(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1)) == XpStatus(state, 1, 4)
+    result = xp.status(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1))
+    assert result == XpStatus(state, 1, 4, raw_status=server_status)
+
+
+def test_unknown_status_stays_non_terminal_with_warning(env, runner):
+    body = json.loads(synthetic("xp_request_create.json"))
+    body.update(status="paused_for_maintenance", completed_count=2, episode_count=4)
+    runner.on("coworld", "xp-request", "get", response=completed(json.dumps(body)))
+    result = xp.status(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1))
+    assert result.state == "pending"
+    assert (result.episodes_completed, result.episodes_total) == (2, 4)
+    assert result.raw_status == "paused_for_maintenance"
+    assert "paused_for_maintenance" in result.warning
 
 
 # --- artifacts ---------------------------------------------------------------
@@ -288,3 +303,50 @@ def test_artifacts_rerun_uses_latest_receipt_per_artifact(env, runner, tmp_path)
     runner.on("coworld", "xp-request", "download", response=downloader(files, [replay, results]))
     paths = xp.artifacts(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1), dest)
     assert paths == [dest / "f1/results.json", dest / "f2/replay.replay"]
+
+
+def test_create_with_unparseable_output_raises(env, runner):
+    runner.on("coworld", "xp-request", "create", response=completed("Experience request created"))
+    with pytest.raises(SoftmaxCliError, match="no request id"):
+        xp.create(cli(env, runner), E, 1, 1, SPEC)
+
+
+def test_artifacts_exit_zero_without_manifest_fails_closed(env, runner, tmp_path):
+    runner.on("coworld", "xp-request", "download", response=completed(""))
+    with pytest.raises(xp.ArtifactVerificationError, match="manifest"):
+        xp.artifacts(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1), tmp_path / "a")
+
+
+def test_artifacts_exit_zero_with_no_completed_receipts_fails_closed(env, runner, tmp_path):
+    runner.on("coworld", "xp-request", "download", response=downloader({}, []))
+    with pytest.raises(xp.ArtifactVerificationError, match="no artifacts"):
+        xp.artifacts(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1), tmp_path / "a")
+
+
+def test_artifacts_exit_zero_with_pending_receipt_is_incomplete(env, runner, tmp_path):
+    done = receipt("ereq_1", "a1:results:None", "f1", "results.json", b"{}")
+    pending = {
+        **receipt("ereq_1", "a1:replay:None", "f2", "replay.replay", b""),
+        "state": "pending",
+    }
+    unavailable = {"kind": "selector", "id": "ereq_2", "state": "unavailable"}
+    files = {"f1/results.json": b"{}"}
+    runner.on("coworld", "xp-request", "download", response=downloader(files, [done, pending]))
+    with pytest.raises(xp.ArtifactsIncomplete, match="replay"):
+        xp.artifacts(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1), tmp_path / "a")
+    runner.on("coworld", "xp-request", "download", response=downloader(files, [done, unavailable]))
+    with pytest.raises(xp.ArtifactsIncomplete, match="ereq_2"):
+        xp.artifacts(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1), tmp_path / "b")
+
+
+def test_manifest_row_without_key_is_an_error(env, runner, tmp_path):
+    row = receipt("ereq_1", "a1:results:None", "f1", "results.json", b"{}")
+    del row["artifact_id"]
+    runner.on(
+        "coworld",
+        "xp-request",
+        "download",
+        response=downloader({"f1/results.json": b"{}"}, [row]),
+    )
+    with pytest.raises(xp.ArtifactVerificationError, match="no artifact_id"):
+        xp.artifacts(cli(env, runner), XpHandle(CREATED_ID, E, 1, 1), tmp_path / "a")

@@ -7,12 +7,10 @@ credential itself, because ``/whoami`` does not report it.
 
 from datetime import datetime
 
-from autoresearch.softmax_tool.platform_cli import PlatformCli, SoftmaxCliError
+from autoresearch.softmax_tool.platform_cli import IdentityError, PlatformCli, SoftmaxCliError
 from autoresearch.softmax_tool.protocol import Identity
 
-
-class IdentityError(RuntimeError):
-    """The credential cannot be confirmed as the expected, unexpired Player."""
+__all__ = ["IdentityError", "identity_problems", "parse_status", "require_player", "whoami"]
 
 
 def parse_status(text: str) -> tuple[str, str]:
@@ -28,7 +26,7 @@ def parse_status(text: str) -> tuple[str, str]:
 
 
 def whoami(cli: PlatformCli) -> Identity:
-    credential = cli.install_credential()
+    credential = cli.install_credential()  # CredentialError is an IdentityError
     try:
         result = cli.run("softmax", ["status"])
     except SoftmaxCliError as error:
@@ -39,17 +37,31 @@ def whoami(cli: PlatformCli) -> Identity:
     )
 
 
+def identity_problems(identity: Identity, expected_player_id: str, now: datetime) -> list[str]:
+    """Why ``identity`` may not act as ``expected_player_id`` now; empty when it may (C6).
+
+    The single source of these checks: ``require_player`` and preflight both use it.
+    """
+    problems = []
+    if identity.subject_type != "player":
+        problems.append(f"credential is a {identity.subject_type!r}, not a player")
+    if not expected_player_id:
+        problems.append("AUTORESEARCH_PLAYER_ID is not set")
+    elif identity.player_id != expected_player_id:
+        problems.append(
+            f"credential player {identity.player_id!r} does not match expected {expected_player_id!r}"
+        )
+    if identity.expires_at <= now:
+        problems.append(f"credential expired at {identity.expires_at.isoformat()}")
+    return problems
+
+
 def require_player(cli: PlatformCli, expected_player_id: str, now: datetime) -> Identity:
     """``whoami`` and refuse unless it is ``expected_player_id`` as a Player with a live token."""
     if not expected_player_id:
         raise IdentityError("AUTORESEARCH_PLAYER_ID is not set")
     identity = whoami(cli)
-    if identity.subject_type != "player":
-        raise IdentityError(f"credential is a {identity.subject_type!r}, not a player")
-    if identity.player_id != expected_player_id:
-        raise IdentityError(
-            f"credential player {identity.player_id!r} does not match expected {expected_player_id!r}"
-        )
-    if identity.expires_at <= now:
-        raise IdentityError(f"credential expired at {identity.expires_at.isoformat()}")
+    problems = identity_problems(identity, expected_player_id, now)
+    if problems:
+        raise IdentityError("; ".join(problems))
     return identity

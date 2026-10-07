@@ -6,8 +6,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from autoresearch.softmax_tool.identity import IdentityError, require_player, whoami
-from autoresearch.softmax_tool.platform_cli import SERVER, CredentialError, PlatformCli
+from autoresearch.softmax_tool.identity import (
+    IdentityError,
+    identity_problems,
+    require_player,
+    whoami,
+)
+from autoresearch.softmax_tool.platform_cli import SERVER, PlatformCli
+from autoresearch.softmax_tool.protocol import Identity
 
 from .conftest import PLAYER_ID, TOKEN, completed, credential_value, recorded, synthetic
 
@@ -72,7 +78,7 @@ def test_status_failure_is_identity_error(env, runner):
 @pytest.mark.parametrize("value", ["", TOKEN, json.dumps({"token": TOKEN})])
 def test_malformed_credential_is_rejected_without_echoing_it(env, runner, value):
     env["SOFTMAX_PLAYER_CREDENTIAL"] = value
-    with pytest.raises(CredentialError) as raised:
+    with pytest.raises(IdentityError) as raised:
         whoami(make_cli(env, runner))
     assert TOKEN not in str(raised.value)
     assert runner.calls == []
@@ -104,3 +110,14 @@ def test_require_player_rejects_expired_credential(env, runner):
 def test_require_player_rejects_missing_expected_id(env, runner):
     with pytest.raises(IdentityError, match="AUTORESEARCH_PLAYER_ID"):
         require_player(make_cli(env, runner), "", datetime.now(UTC))
+
+
+def test_identity_problems_is_the_single_predicate():
+    now = datetime.now(UTC)
+    good = Identity("player", PLAYER_ID, now + timedelta(hours=1))
+    assert identity_problems(good, PLAYER_ID, now) == []
+    bad = Identity("user", "usr_1", now - timedelta(seconds=1))
+    problems = identity_problems(bad, PLAYER_ID, now)
+    assert len(problems) == 3
+    assert any("'user'" in p for p in problems) and any("expired" in p for p in problems)
+    assert identity_problems(good, "", now) == ["AUTORESEARCH_PLAYER_ID is not set"]

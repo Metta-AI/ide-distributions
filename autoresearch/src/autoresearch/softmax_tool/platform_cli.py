@@ -45,8 +45,15 @@ class SoftmaxCliError(RuntimeError):
     """A CLI call failed or printed something we could not interpret."""
 
 
-class CredentialError(SoftmaxCliError):
-    """``SOFTMAX_PLAYER_CREDENTIAL`` is missing or malformed. Messages never include its value."""
+class IdentityError(RuntimeError):
+    """The credential cannot be confirmed as the expected, unexpired Player."""
+
+
+class CredentialError(IdentityError):
+    """``SOFTMAX_PLAYER_CREDENTIAL`` is missing or malformed. Messages never include its value.
+
+    An ``IdentityError``, so every call (mutating or not) fails as an identity problem.
+    """
 
 
 @dataclass(frozen=True)
