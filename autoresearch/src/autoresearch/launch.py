@@ -52,7 +52,14 @@ def main(job: str, argv: list[str] | None = None) -> int:
         ensure_venv(hermes_home)
     except LaunchError as error:
         print(f"autoresearch launcher: {error}", file=sys.stderr)
-        return 3
+        return 1
     python = str(hermes_home / "local" / "venv" / "bin" / "python")
+    if not Path(python).exists():
+        print(
+            f"autoresearch launcher: venv python missing at {python}; "
+            "delete local/venv and .lock-sha, then rerun to resync",
+            file=sys.stderr,
+        )
+        return 1
     args = sys.argv[1:] if argv is None else argv
     os.execv(python, [python, "-m", f"autoresearch.runtime.{job}", *args])
