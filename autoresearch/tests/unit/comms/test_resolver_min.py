@@ -81,3 +81,12 @@ def test_archived_claim_resolves(canonical):
     resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}")
     assert resolved.path == f"kb/archive/{canonical.claim_id}.md"
     assert b"Creep damage" in resolved.content
+
+
+def test_claim_in_both_locations_resolves_to_kb_claims(canonical):
+    source = canonical.layout.claims / f"{canonical.claim_id}.md"
+    canonical.layout.archive.mkdir(parents=True, exist_ok=True)
+    (canonical.layout.archive / source.name).write_text(source.read_text())
+    gitops.commit_all(canonical.root, "interrupted archive")
+    resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}")
+    assert resolved.path == f"kb/claims/{canonical.claim_id}.md"

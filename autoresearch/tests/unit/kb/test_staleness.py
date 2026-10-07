@@ -122,10 +122,12 @@ def test_unchanged_lines_renew_and_unstale(kb_layout, game_repo):
     assert report.renewed == sorted([C_GOOD, C_VERIF]) and report.requested == []
     store = RecordStore(kb_layout)
     for claim_id in (C_GOOD, C_VERIF):
-        meta, _ = store.load(claim_id)
-        assert meta["last_checked_version"] == "66"
-        assert meta["status"] == "verified"
-        assert meta["status_history"][-1]["from"] == "stale"
+        assert store.load(claim_id)[0]["last_checked_version"] == "66"
+    mechanism, _ = store.load(C_GOOD)
+    assert mechanism["status"] == "verified"
+    assert mechanism["status_history"][-1]["from"] == "stale"
+    # Behaviour claims keep stale: unchanged source does not show unchanged behaviour.
+    assert store.load(C_VERIF)[0]["status"] == "stale"
     assert store.load(C_GRADE)[0]["status"] == "stale"  # no code citation
     assert _requests(kb_layout) == []
     again = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
@@ -163,3 +165,23 @@ def test_deleted_file_counts_as_change(kb_layout, game_repo):
     new = gitops.commit_all(repo, "delete")
     report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
     assert report.requested == [C_VERIF]
+
+
+def test_rerun_does_not_duplicate_requests(kb_layout, game_repo):
+    repo, old = game_repo
+    new = _commit(repo, tower=7)
+    renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
+    again = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
+    assert again.requested == []
+    (request,) = _requests(kb_layout)
+    assert f"reverify {old}..{new}" in request["spec"]["why"]
+
+
+def test_file_absent_at_old_sha_counts_as_change(kb_layout, game_repo):
+    repo, _ = game_repo
+    (repo / "src" / "tower.py").unlink()
+    old = gitops.commit_all(repo, "no tower")
+    (repo / "src" / "tower.py").write_text(_lines(30))
+    new = gitops.commit_all(repo, "tower back")
+    report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
+    assert report.requested == [C_VERIF] and report.renewed == [C_GOOD]

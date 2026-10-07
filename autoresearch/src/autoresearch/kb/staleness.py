@@ -7,8 +7,12 @@ older).
 
 ``renew_code_citations`` diffs the game source lines that claims cite between the old and new
 game commits. A claim whose cited lines all stayed the same gets ``last_checked_version``
-renewed (and, if it was stale only because of the version change, its previous status back).
-A claim with any changed cited line gets a P2 maintenance re-verification card request.
+renewed. A ``mechanism`` claim that was stale only because of the version change also gets
+its previous status back; other kinds keep ``stale`` for lint/apply and agents to judge, since
+unchanged source does not show unchanged behaviour. A claim with any changed cited line, or a
+cited file absent at either commit, gets a P2 maintenance re-verification card request; its
+``why`` carries ``reverify <old_sha>..<new_sha>``, and a re-run that finds such a request for
+the claim writes no second one.
 
 Code citations are tier-S evidence entries whose ``ref`` is one of:
 
@@ -23,6 +27,7 @@ Every status or version change goes through ``RecordStore.update`` and gets one
 """
 
 import datetime
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -134,8 +139,9 @@ def renew_code_citations(
             if path not in changed_ranges:
                 changed_ranges[path] = _changed_old_ranges(game_repo, old_sha, new_sha, path)
         if any(_range_changed(changed_ranges[p], first, last) for p, first, last in citations):
-            _request_reverification(layout, claim.id, old_sha, new_sha)
-            report.requested.append(claim.id)
+            if not _reverification_requested(layout, claim.id, old_sha, new_sha):
+                _request_reverification(layout, claim.id, old_sha, new_sha)
+                report.requested.append(claim.id)
         elif _renew(store, meta, current_version, at):
             write_log(
                 layout, at, RENEWED, claim.id, meta.get("last_checked_version"), current_version
@@ -149,9 +155,9 @@ def renew_code_citations(
 def _changed_old_ranges(
     repo: Path, old_sha: str, new_sha: str, path: str
 ) -> list[tuple[int, int]] | None:
-    """Old-side (start, line count) of each diff hunk for ``path``; None if the file is gone
-    at ``new_sha`` (every cited line counts as changed)."""
-    if gitops.show(repo, new_sha, path) is None:
+    """Old-side (start, line count) of each diff hunk for ``path``; None if the file is absent
+    at either commit (every cited line counts as changed)."""
+    if gitops.show(repo, old_sha, path) is None or gitops.show(repo, new_sha, path) is None:
         return None
     diff = gitops.git(repo, "diff", "-U0", "--no-renames", old_sha, new_sha, "--", path)
     return [(int(start), int(count or 1)) for start, count in _HUNK.findall(diff)]
@@ -176,10 +182,11 @@ def _renew(store: RecordStore, meta: dict, current_version: str, at: str) -> boo
     stale_by_version = meta.get("status") == "stale" and str(
         meta.get("status_reason") or ""
     ).startswith(STALE_REASON_PREFIX)
-    if meta.get("last_checked_version") == current_version and not stale_by_version:
+    restore_status = stale_by_version and meta.get("kind") == "mechanism"
+    if meta.get("last_checked_version") == current_version and not restore_status:
         return False
     patch = {"last_checked_version": current_version}
-    if stale_by_version:
+    if restore_status:
         reason = f"cited game source unchanged in {current_version}; renewed (at {at})"
         patch |= _status_patch(meta, _status_before_stale(meta), reason, at)
     store.update(meta["id"], patch)
@@ -204,14 +211,28 @@ def _status_patch(meta: dict, status: str, reason: str, at: str) -> dict:
     }
 
 
+def _reverify_marker(old_sha: str, new_sha: str) -> str:
+    return f"reverify {old_sha}..{new_sha}"
+
+
+def _reverification_requested(layout: Layout, claim_id: str, old_sha: str, new_sha: str) -> bool:
+    """True if ``cards/requests`` already holds a create request for this claim and diff."""
+    marker, ref = _reverify_marker(old_sha, new_sha), f"ar://claim/{claim_id}"
+    for path in layout.card_requests.glob("*.json"):
+        spec = json.loads(path.read_text(encoding="utf-8")).get("spec") or {}
+        if ref in spec.get("refs", []) and marker in spec.get("why", ""):
+            return True
+    return False
+
+
 def _request_reverification(layout: Layout, claim_id: str, old_sha: str, new_sha: str) -> str:
     spec = CardSpec(
         request_id="",  # write_request assigns the id
         title=f"Re-verify claim {claim_id}",
         mode="maintenance",
         why=(
-            f"Game source lines cited by claim {claim_id} changed between "
-            f"{old_sha[:12]} and {new_sha[:12]}."
+            f"Game source lines cited by claim {claim_id} changed ("
+            f"{_reverify_marker(old_sha, new_sha)})."
         ),
         refs=[f"ar://claim/{claim_id}"],
         created_by="kb-staleness",

@@ -149,10 +149,10 @@ def in_record_dir(layout: Layout, rel_path: str) -> bool:
 
 
 def iter_record_files(layout: Layout, entity_name: str) -> list[Path]:
-    """Files in the entity's directories (archive included) matching its naming glob (not yet
-    checked by name)."""
+    """Files in the entity's directories matching its naming glob (not yet checked by name):
+    the primary directory's files first, then the archive's."""
     pattern = _glob_pattern(REGISTRY[entity_name])
-    return sorted(path for d in record_dirs(layout, entity_name) for path in d.glob(pattern))
+    return [path for d in record_dirs(layout, entity_name) for path in sorted(d.glob(pattern))]
 
 
 def path_for(layout: Layout, id_: str, slug: str | None = None) -> Path:

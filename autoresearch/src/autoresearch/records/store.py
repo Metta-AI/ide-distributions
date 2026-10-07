@@ -7,7 +7,7 @@ writers to the canonical workspace hold ``canonical.lock`` themselves.
 """
 
 import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import yaml
@@ -212,8 +212,8 @@ class RecordStore:
     def validate_changes(self, changes: list[Change]) -> dict[str, list[str]]:
         """{relative path: problems} for a set of file changes (for example one commit's diff).
 
-        An archive move, a record deleted from its directory and added with the same id in its
-        archive directory, is judged as one change by ``move_problems`` and reported under the
+        An archive move, a record deleted from its directory and added with the same id and file
+        name in its archive directory, is judged as one change by ``move_problems`` and reported under the
         archive path. Every other change goes through ``validate_change``.
         """
         moves = self._archive_moves(changes)
@@ -247,7 +247,9 @@ class RecordStore:
             parsed = parse_record_path(self.layout, rel)
             is_addition = before is None and after is not None
             if is_addition and parsed in deletions and is_archived_path(self.layout, rel):
-                moves[rel] = deletions[parsed]
+                same_name = PurePosixPath(rel).name == PurePosixPath(deletions[parsed][0]).name
+                if same_name:
+                    moves[rel] = deletions[parsed]
         return moves
 
     def validate(self, id_: str) -> list[str]:
@@ -258,6 +260,7 @@ class RecordStore:
     def validate_all(self) -> tuple[int, dict[str, list[str]]]:
         """(records checked, {relative path: problems}) for every file in record directories."""
         checked, problems = 0, {}
+        first_path: dict[str, str] = {}  # id -> first file seen (primary directory first)
         for entity in REGISTRY:
             for path in iter_record_files(self.layout, entity):
                 rel = self._rel(path)
@@ -268,6 +271,14 @@ class RecordStore:
                 if parsed[0] != entity:
                     continue
                 checked += 1
+                if parsed[1] in first_path:
+                    # e.g. an archive move interrupted between writing the copy and deleting
+                    # the original; path_for and the resolver use the primary-directory file.
+                    problems[rel] = [
+                        f"{rel}: duplicate id {parsed[1]} (also at {first_path[parsed[1]]})"
+                    ]
+                    continue
+                first_path[parsed[1]] = rel
                 try:
                     doc = self._read(entity, path)
                 except (yaml.YAMLError, ValueError) as error:  # unparseable file: a finding

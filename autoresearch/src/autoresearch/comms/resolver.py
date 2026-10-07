@@ -44,11 +44,14 @@ class Resolved:
 
 
 def _record_path(repo: Path, sha: str, entity_name: str, id_: str) -> str:
-    directories = [f"{d.as_posix()}/" for d in record_dirs(_RELATIVE, entity_name)]
-    listing = gitops.git(repo, "ls-tree", "-r", "--name-only", sha, "--", *directories)
-    for path in listing.splitlines():
-        if parse_record_path(_RELATIVE, path) == (entity_name, id_):
-            return path
+    # Search the primary directory before the archive, as path_for does.
+    for directory in record_dirs(_RELATIVE, entity_name):
+        listing = gitops.git(
+            repo, "ls-tree", "-r", "--name-only", sha, "--", f"{directory.as_posix()}/"
+        )
+        for path in listing.splitlines():
+            if parse_record_path(_RELATIVE, path) == (entity_name, id_):
+                return path
     raise ResolveError(f"no {entity_name} {id_} at {sha[:12]}")
 
 

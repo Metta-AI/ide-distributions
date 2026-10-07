@@ -11,8 +11,8 @@ append-only lists, and status graphs with recorded reasons.
 
 ``move_problems(entity, before, after)`` judges an archive move (the record deleted from its
 directory and re-added under the same id in its archive directory) as one update: the normal
-update rules, plus the body and front matter stay as they were except the ``ARCHIVE_FIELDS``
-it must add and a recorded status change.
+update rules, plus the body and front matter (status included, System Design §3.5) stay as
+they were except the ``ARCHIVE_FIELDS`` it must add. ``ARCHIVE_FIELDS`` are set once.
 """
 
 from dataclasses import dataclass
@@ -86,7 +86,7 @@ APPEND_ONLY: dict[str, tuple[str, ...]] = {
 
 SET_ONCE: dict[str, tuple[str, ...]] = {
     "experiment": ("decision",),
-    "claim": ("superseded_by",),
+    "claim": ("superseded_by", "archived_at", "archive_reason"),
 }
 
 DECISIONS_HEADING = "## Decisions"
@@ -119,12 +119,9 @@ def move_problems(entity: str, before: Doc, after: Doc) -> list[str]:
     old, new = normalize(before[0]), normalize(after[0])
     if before[1].strip() != after[1].strip():
         problems.append(f"archiving {entity} {record_id} must not change its body")
-    rule = STATUS_RULES.get(entity)
-    status_fields = (
-        (rule.field, rule.reason_field, rule.ref_field, rule.history_field) if rule else ()
+    edited = sorted(
+        key for key in {*old, *new} - set(ARCHIVE_FIELDS) if old.get(key) != new.get(key)
     )
-    allowed = {*ARCHIVE_FIELDS, *status_fields}
-    edited = sorted(key for key in {*old, *new} - allowed if old.get(key) != new.get(key))
     if edited:
         problems.append(
             f"archiving {entity} {record_id} may only add {', '.join(ARCHIVE_FIELDS)}; "
