@@ -21,6 +21,7 @@ GROUP_MODULES = (
     "autoresearch.stats.cli",
     "autoresearch.kb.cli",
     "autoresearch.runtime.card_cli",
+    "autoresearch.comms.cli",
     "autoresearch.queue.cli",
 )
 

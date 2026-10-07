@@ -144,7 +144,16 @@ class CardWorkspace:
 
     def stage_message(self, **fields) -> Path:
         message_id = new_id("message")
-        message = {"id": message_id, "kind": "note", "title": "T", "body": "B", "refs": []}
+        message = {
+            "schema": "ar-comms/0",
+            "id": message_id,
+            "kind": "note",
+            "title": "T",
+            "body": "B",
+            "refs": [],
+            "from": "agent",
+            "created_at": "2026-10-07T00:00:00+00:00",
+        }
         message.update(fields)
         path = self.worktree / "comms" / "staged" / f"{message_id}.json"
         write_json(path, message)
