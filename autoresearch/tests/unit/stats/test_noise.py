@@ -160,7 +160,7 @@ REQUEST = {
     "baseline_version": "pv-base",
     "seats": [0, 1],
     "opponents": ["pv-opp"],
-    "seeds": [1, 2, 3],
+    "seeds": list(range(250)),  # at least n_min (197): each seed is one pair
     "primary_metrics": [{"name": "hits", "direction": "up", "min_effect": 2.0}],
     "guardrails": [{"name": "deaths", "direction": "down", "tolerance": 0.05}],
 }
@@ -193,6 +193,12 @@ def test_freeze_design_bad_input_raises_design_error():
         freeze_design(META, make_game(), noise, 100, noise_rev="")
 
 
+def test_freeze_design_refuses_fewer_seeds_than_n_min():
+    few = {"evaluation_design_request": {**REQUEST, "seeds": [1, 2, 3]}}
+    with pytest.raises(DesignError, match="seeds"):
+        freeze_design(few, make_game(), noise_record(), 100, noise_rev="rev1")
+
+
 def test_frozen_design_unchanged_after_later_write_noise(layout):
     store = RecordStore(layout)
     rev1 = write_noise(layout, noise_record())
@@ -208,7 +214,8 @@ def test_frozen_design_unchanged_after_later_write_noise(layout):
     stored = EvaluationDesign.from_dict(store.load(exp)[0]["evaluation_design"])
     assert stored.noise_rev == rev1
     assert stored.delta["glory"] == pytest.approx(0.5)
-    fresh = freeze_design(META, make_game(), load_noise(layout, "65"), 100, noise_rev=rev2)
+    many_seeds = {"evaluation_design_request": {**REQUEST, "seeds": list(range(5000))}}
+    fresh = freeze_design(many_seeds, make_game(), load_noise(layout, "65"), 100, noise_rev=rev2)
     assert fresh.noise_rev == rev2
     assert fresh.delta["glory"] == pytest.approx(2.5)
 

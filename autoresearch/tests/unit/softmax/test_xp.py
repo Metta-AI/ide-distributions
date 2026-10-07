@@ -222,6 +222,22 @@ def test_client_reuses_only_the_request_with_the_same_seed_and_arm(env, runner):
     assert created == XpHandle(CREATED_ID, E, 1, 1, seed=7, arm="baseline")
 
 
+def test_client_with_known_handles_skips_the_listing(env, runner):
+    runner.on(
+        "coworld", "xp-request", "create", response=completed(synthetic("xp_request_create.json"))
+    )
+    sm = SoftmaxClient(env, run=runner)
+    known = [XpHandle("xreq_known", E, 1, 1, seed=7, arm="candidate")]
+    assert sm.xp_create(E, 1, 1, SEEDED_SPEC, seed=7, arm="candidate", known=known) == known[0]
+    assert runner.argvs() == []
+    created = sm.xp_create(E, 1, 1, SEEDED_SPEC, seed=7, arm="baseline", known=known)
+    assert created.request_id == CREATED_ID
+    assert [argv[:3] for argv in runner.argvs()] == [
+        ["softmax", "status"],
+        ["coworld", "xp-request", "create"],
+    ]
+
+
 def test_recorded_results_carry_the_episode_seed():
     """Rows map ``seed`` from results.json; the recorded GotA artifact has a top-level int."""
     results = json.loads(recorded("download_results.json"))

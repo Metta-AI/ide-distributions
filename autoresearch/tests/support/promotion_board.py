@@ -37,7 +37,7 @@ def design_dict(baseline: str = BASELINE_PV) -> dict:
         MetricSpec("score_perf", "up", "performance", None, None),
     )
     design = EvaluationDesign(
-        "fake-1", baseline, (0, 1), ("random", "opp:v3"), (1, 2), metrics, 0.5, {}, 12, "rev1"
+        "fake-1", baseline, (0, 1), ("random", "opp:v3"), (1, 2), metrics, 0.5, {}, 2, "rev1"
     )
     return design.to_dict()
 

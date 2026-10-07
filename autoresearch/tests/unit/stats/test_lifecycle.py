@@ -27,7 +27,7 @@ def test_preregister_bind_ingest_pair_leaves_design_frozen(tmp_path):
         metrics,
         0.5,
         {"score": 0.2},
-        game.min_episodes_floor,
+        3,  # one pair per seed: n_min cannot exceed the 3 seeds
         "rev1",
     )
     frozen = design.to_dict()

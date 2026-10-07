@@ -62,7 +62,9 @@ class EvaluationDesign:
 
     def validate(self) -> None:
         """Raise DesignError unless there is at least one primary metric, metric names are
-        unique, every delta key names a performance metric, and baseline_version is non-empty."""
+        unique, every delta key names a performance metric, baseline_version is non-empty, seeds
+        are unique, and there are at least ``n_min`` seeds (each seed is one candidate/baseline
+        pair of one-episode XP requests, A12, so fewer seeds can never reach N)."""
         problems = []
         if not any(metric.role == "primary" for metric in self.metrics):
             problems.append("no primary metric")
@@ -74,6 +76,13 @@ class EvaluationDesign:
             problems.append(f"delta key {key!r} is not a performance metric")
         if not self.baseline_version.strip():
             problems.append("baseline_version is empty")
+        for seed in sorted({s for s in self.seeds if self.seeds.count(s) > 1}):
+            problems.append(f"duplicate seed {seed}")
+        if len(set(self.seeds)) < self.n_min:
+            problems.append(
+                f"{len(set(self.seeds))} unique seeds < n_min {self.n_min}: each seed is one "
+                f"pair, so add seeds"
+            )
         if problems:
             raise DesignError("; ".join(problems))
 

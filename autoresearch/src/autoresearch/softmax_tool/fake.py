@@ -5,7 +5,8 @@ read-modify-write under a file lock, so separate processes share one fake platfo
 
 Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value``):
 ``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
-``fail_after=<op>`` (raise right after that op's state change is saved), and
+``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
+(creating a new XP request raises once N exist, like the platform's pending-request cap), and
 ``crash_after=<label>`` (read by runtime code through :func:`fault`).
 
 Like the real client, the mutating calls (``upload``, a new ``xp_create``, ``submit``) re-check
@@ -135,21 +136,25 @@ class FakeSoftmax:
         spec: dict,
         seed: int | None = None,
         arm: str | None = None,
+        known: list[XpHandle] | None = None,
     ) -> XpHandle | CreditDenied:
+        """``known`` is accepted for protocol parity and ignored: the fake's state is the truth."""
         key = (
             (experiment, batch, attempt)
             if seed is None
             else (experiment, batch, attempt, seed, arm)
         )
         request_id = f"xp_{_short_hash(*key)}"
-        known = self._operate("xp_lookup", lambda state: request_id in state["xp"], persist=False)
-        if not known:  # like the client: an existing request is reused without a new check
+        exists = self._operate("xp_lookup", lambda state: request_id in state["xp"], persist=False)
+        if not exists:  # like the client: an existing request is reused without a new check
             self._require_player()
 
         def action(state: dict):
             if request_id not in state["xp"]:
                 if self._current_credits(state) <= 0:
                     return CreditDenied("no credits")
+                if "xp_limit" in self._faults and len(state["xp"]) >= int(self._faults["xp_limit"]):
+                    raise RuntimeError("injected fault: pending XP request limit (429)")
                 state["xp"][request_id] = {
                     "experiment": experiment,
                     "batch": batch,

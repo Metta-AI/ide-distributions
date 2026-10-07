@@ -9,7 +9,7 @@
     "baseline_version": {"type": "string", "minLength": 1},
     "seats": {"type": "array", "items": {"type": "integer"}},
     "opponents": {"type": "array", "items": {"type": "string"}},
-    "seeds": {"type": "array", "items": {"type": "integer"}},
+    "seeds": {"type": "array", "uniqueItems": true, "items": {"type": "integer"}},
     "metrics": {
       "type": "array",
       "contains": {"type": "object", "required": ["role"], "properties": {"role": {"const": "primary"}}},

@@ -78,15 +78,21 @@ class SoftmaxClient:
         spec: dict,
         seed: int | None = None,
         arm: str | None = None,
+        known: list[XpHandle] | None = None,
     ) -> XpHandle | CreditDenied:
         """Reuse an existing request for (experiment, batch, attempt, seed, arm); else check
         identity, create.
 
-        The existing request is reused whatever its state, including failed or cancelled ones;
-        callers retry by bumping ``attempt``.
+        ``known`` is the caller's own recover of this experiment (``xp_recover``); passing it
+        skips a second full ``xp-request list``, which pages through every request we own. The
+        tag is also the server-side idempotency key, so a request missing from a stale ``known``
+        is still never duplicated. The existing request is reused whatever its state, including
+        failed or cancelled ones; callers retry by bumping ``attempt``.
         """
-        for handle in xp.recover(self._cli, experiment):
-            if (handle.batch, handle.attempt, handle.seed, handle.arm) == (
+        handles = xp.recover(self._cli, experiment) if known is None else known
+        for handle in handles:
+            if (handle.experiment, handle.batch, handle.attempt, handle.seed, handle.arm) == (
+                experiment,
                 batch,
                 attempt,
                 seed,

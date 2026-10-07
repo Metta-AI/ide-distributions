@@ -206,8 +206,10 @@ def test_xp_specs_refuses_bad_batches_and_seedless_designs():
         softmax_cli.xp_specs(design_dict(), binding, LEAGUE, batch=3, batches=2)
     with pytest.raises(softmax_cli.BadArguments, match="batch"):
         softmax_cli.xp_specs(design_dict(), binding, LEAGUE, batch=0, batches=2)
-    with pytest.raises(softmax_cli.BadArguments, match="seeds"):
-        softmax_cli.xp_specs({**design_dict(), "seeds": []}, binding, LEAGUE, 1, 1)
+    five = {**design_dict(), "seeds": [1, 2, 3, 4, 5]}  # slices of 2: batch 4 is empty
+    with pytest.raises(softmax_cli.Refused) as refused:
+        softmax_cli.xp_specs(five, binding, LEAGUE, batch=4, batches=4)
+    assert refused.value.reason == "empty_batch"
 
 
 def test_design_pairing_is_seed_only_with_selector_opponents():
@@ -341,6 +343,78 @@ def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launc
     assert meta["status"] == "evaluating"
     assert meta["lifecycle"]["credit_denials"] == 0
     assert meta["lifecycle"]["next_launch_after"] is None
+
+
+def test_xp_create_failure_mid_batch_keeps_created_records_and_relaunch_completes(board, launch):
+    """A non-credit failure (here the platform's pending-request cap) on the 3rd create: the
+    two requests already created are recorded; a relaunch creates the rest and records all."""
+    worker, experiment = launch
+    env = base_env(board, worker, **{FAULTS_ENV: "xp_limit=2"})
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 1 and data["error"]["reason"] == "platform"
+    meta = worker.store.load(experiment)[0]
+    assert [(r["seed"], r["arm"]) for r in meta["xp_requests"]] == [
+        (1, "candidate"),
+        (1, "baseline"),
+    ]
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
+    )
+    assert code == 0, data
+    assert [(r["seed"], r["arm"]) for r in data["data"]["created"]] == [
+        (2, "candidate"),
+        (2, "baseline"),
+    ]
+    meta = worker.store.load(experiment)[0]
+    assert len(meta["xp_requests"]) == 4 and meta["status"] == "evaluating"
+
+
+def test_xp_create_backfills_requests_created_but_never_recorded(board, launch):
+    """A crash right after the platform created a request (before the record write): the
+    relaunch finds it by recover, records it, and creates only the rest."""
+    worker, experiment = launch
+    env = base_env(board, worker, **{FAULTS_ENV: "fail_after=xp_create"})
+    code, _ = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 1
+    assert not worker.store.load(experiment)[0].get("xp_requests")
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
+    )
+    assert code == 0, data
+    assert [(h["seed"], h["arm"]) for h in data["data"]["existing"]] == [(1, "candidate")]
+    assert len(data["data"]["created"]) == 3
+    entries = worker.store.load(experiment)[0]["xp_requests"]
+    assert sorted((r["seed"], r["arm"]) for r in entries) == [
+        (1, "baseline"),
+        (1, "candidate"),
+        (2, "baseline"),
+        (2, "candidate"),
+    ]
+    backfilled = next(r for r in entries if (r["seed"], r["arm"]) == (1, "candidate"))
+    assert backfilled["policy"] == PV_A
+
+
+def test_xp_create_empty_batch_is_refused_without_status_change(board):
+    from support.promotion_board import design_dict
+
+    worker = board.admit(mode="experimentation")
+    worker.start()
+    experiment = uploaded_experiment(worker.store, {**design_dict(), "seeds": [1, 2, 3, 4, 5]})
+    code, data = softmax(
+        base_env(board, worker),
+        "xp",
+        "create",
+        experiment,
+        "--batch",
+        "4",
+        "--attempt",
+        "1",
+        "--batches",
+        "4",
+    )
+    assert code == 1 and data["error"]["reason"] == "empty_batch"
+    meta = worker.store.load(experiment)[0]
+    assert meta["status"] == "uploaded" and not meta.get("xp_requests")
 
 
 def test_xp_create_identity_fault_is_refused(board, launch):
