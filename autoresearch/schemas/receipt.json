@@ -7,6 +7,7 @@
   "properties": {
     "request_id": {"type": "string", "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}$"},
     "state": {"enum": ["rejected", "admitted", "handed_off", "published", "superseded", "dropped"]},
+    "mode": {"enum": ["investigation", "scouting", "experimentation", "maintenance", "planning"]},
     "tasks": {
       "type": "array",
       "items": {

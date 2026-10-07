@@ -35,6 +35,16 @@ def commit_all(repo: Path, message: str, allow_empty: bool = False) -> str:
     return head(repo)
 
 
+def commit_paths(repo: Path, paths: list[str], message: str) -> str | None:
+    """Commit only ``paths`` (additions, changes and deletions), leaving anything else staged
+    or modified untouched. Return the new HEAD, or None if those paths had no changes."""
+    git(repo, "add", "-A", "--", *paths)
+    if _run(repo, "diff", "--cached", "--quiet", "--", *paths, check=False).returncode == 0:
+        return None
+    git(repo, "commit", "-m", message, "--", *paths)
+    return head(repo)
+
+
 def diff_paths(repo: Path, a: str, b: str) -> list[str]:
     return sorted({path for _, path in diff_status(repo, a, b)})
 

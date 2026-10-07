@@ -6,8 +6,10 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "jsonschema",
     "python-frontmatter",
+    "numpy",
     "PyYAML",
     "python-ulid",
+    "scipy",
 ]
 
 [project.scripts]

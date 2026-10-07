@@ -2,7 +2,7 @@ import pytest
 from jsonschema import ValidationError, validate
 
 from autoresearch.queue.requests import load_schema
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
+from autoresearch.stats.design import DesignError, EvaluationDesign, MetricSpec
 
 DESIGN = EvaluationDesign(
     game_version="65",
@@ -15,7 +15,7 @@ DESIGN = EvaluationDesign(
         MetricSpec("errors", "down", "performance", None, None),
     ),
     k=0.5,
-    delta={"score": 0.2},
+    delta={"errors": 0.2},
     n_min=10,
     noise_rev="abc",
 )
@@ -36,3 +36,40 @@ def test_schema_rejects_bad_direction():
     data["metrics"][0]["direction"] = "sideways"
     with pytest.raises(ValidationError):
         validate(data, load_schema("evaluation_design.json"))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d.pop("n_min"),
+        lambda d: d["metrics"][0].update(direction="sideways"),
+        lambda d: d["metrics"][0].update(role="boss"),
+    ],
+)
+def test_from_dict_rejects_malformed(mutate):
+    data = DESIGN.to_dict()
+    mutate(data)
+    with pytest.raises(DesignError):
+        EvaluationDesign.from_dict(data)
+
+
+def test_from_dict_rejects_inconsistent():
+    data = DESIGN.to_dict()
+    data["delta"] = {"score": 0.1}  # score is primary, not performance
+    with pytest.raises(DesignError):
+        EvaluationDesign.from_dict(data)
+    data = DESIGN.to_dict()
+    data["metrics"].append(dict(data["metrics"][0]))
+    with pytest.raises(DesignError):
+        EvaluationDesign.from_dict(data)
+    data = DESIGN.to_dict()
+    data["baseline_version"] = " "
+    with pytest.raises(DesignError):
+        EvaluationDesign.from_dict(data)
+
+
+def test_to_dict_validates():
+    bad = EvaluationDesign.from_dict(DESIGN.to_dict())
+    object.__setattr__(bad, "delta", {"nope": 1.0})
+    with pytest.raises(DesignError):
+        bad.to_dict()

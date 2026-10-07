@@ -82,8 +82,9 @@ def test_merge_no_ff_conflict_aborts_cleanly(repo):
 
 def test_push_success_and_failure(repo, tmp_path):
     remote = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", "-b", "main", str(remote)], check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "init", "--bare", "-b", "main", str(remote)], check=True, capture_output=True
+    )
     gitops.git(repo, "remote", "add", "origin", str(remote))
     assert gitops.push(repo, "origin", ["main"]) is True
     assert gitops.push(repo, "origin", ["nonexistent-ref"]) is False
@@ -99,3 +100,16 @@ def test_merge_no_ff_non_conflict_failure_raises_with_stderr(repo):
 def test_contains_unknown_sha_raises(repo):
     with pytest.raises(gitops.GitError):
         gitops.contains(repo, "deadbeef" * 5)
+
+
+def test_commit_paths_commits_only_named_paths(repo):
+    (repo / "f.txt").write_text("unrelated edit\n")
+    (repo / "ledger.json").write_text("{}\n")
+    tip = gitops.commit_paths(repo, ["ledger.json"], "ledger")
+    assert tip == gitops.head(repo)
+    assert gitops.git(repo, "show", "--name-only", "--format=", "HEAD") == "ledger.json"
+    assert gitops.git(repo, "status", "--porcelain") == "M f.txt"
+    assert gitops.commit_paths(repo, ["ledger.json"], "again") is None
+    (repo / "ledger.json").unlink()
+    gitops.commit_paths(repo, ["ledger.json"], "remove")
+    assert gitops.show(repo, "HEAD", "ledger.json") is None

@@ -9,6 +9,7 @@ EID = "E-01K6Z3V8QX0000000000000000"
 HID = "H-01K6Z3V8QX0000000000000000"
 JID = "J-01K6Z3V8QX0000000000000000"
 TID = "T-01K6Z3V8QX0000000000000000"
+BINDING = {"version_id": "V-1", "platform_policy_version_id": "pv_1"}
 
 
 # --- brief tests (verbatim, reformatted onto separate lines) ---
@@ -33,6 +34,7 @@ def test_candidate_binding_set_once(store):
 def test_evaluating_to_awaiting_credits_allowed(store):
     eid = store.create("experiment", {**EXP_DESIGNED, "status": "evaluating"})
     store.update(eid, {"status": "awaiting-credits"})
+    assert store.load(eid)[0]["status"] == "awaiting-credits"
 
 
 def test_results_append_only(store):
@@ -75,6 +77,12 @@ def test_contradiction_resolution_is_appended(store):
             ]
         },
     )
+    evidence = store.load(cid)[0]["evidence"]
+    assert [(e["ref"], e["stance"]) for e in evidence] == [
+        ("EV-1", "contradicts"),
+        ("R-9", "resolves"),
+    ]
+    assert evidence[1]["target"] == "EV-1"
 
 
 # --- direct check_change tests ---
@@ -116,7 +124,19 @@ def test_illegal_experiment_transition():
     ],
 )
 def test_legal_experiment_transitions(before, after):
-    assert check_change("experiment", exp(status=before), exp(status=after)) == []
+    bound = {"candidate_binding": BINDING}
+    assert check_change("experiment", exp(status=before, **bound), exp(status=after, **bound)) == []
+
+
+@pytest.mark.parametrize("after", ["evaluating", "awaiting-credits"])
+def test_cannot_leave_uploaded_without_binding(after):
+    problems = check_change("experiment", exp(status="uploaded"), exp(status=after))
+    assert any("candidate_binding" in p and "uploaded" in p for p in problems)
+
+
+def test_lever_frozen_after_designed():
+    problems = check_change("experiment", exp(status="built"), exp(status="built", lever="other"))
+    assert any("lever" in p and "frozen" in p for p in problems)
 
 
 def test_binding_only_in_uploaded():
@@ -232,3 +252,61 @@ def test_id_change_rejected():
         "topic", doc({**TOPIC, "id": TID}), doc({**TOPIC, "id": TID[:-1] + "1"})
     )
     assert any("id" in p for p in problems)
+
+
+def test_hypothesis_transition_cannot_reuse_reason_or_ref():
+    before = hyp(state="under-test", state_reason="E-1 registered", state_ref="E-1")
+    after = hyp(
+        state="supported",
+        state_reason="E-1 registered",
+        state_ref="E-1",
+        state_history=[
+            {"from": "under-test", "to": "supported", "reason": "E-1 registered", "ref": "E-1"}
+        ],
+    )
+    problems = check_change("hypothesis", before, after)
+    assert any("new state_reason" in p for p in problems)
+    assert any("new state_ref" in p for p in problems)
+
+
+def test_claim_status_change_cannot_reuse_reason():
+    before = claim(status_reason="first look")
+    after = claim(
+        status="verified",
+        status_reason="first look",
+        status_history=[{"from": "belief", "to": "verified", "reason": "first look", "ref": None}],
+    )
+    assert any("new status_reason" in p for p in check_change("claim", before, after))
+
+
+def test_store_status_change_needs_fresh_reason_and_ref(store):
+    hid = store.create("hypothesis", HYP)
+    store.set_status(hid, "under-test", reason="E-1 registered", ref="E-1")
+    with pytest.raises(ValueError, match="new state_reason"):
+        store.update(hid, {"state": "supported"})
+    with pytest.raises(ValueError, match="new state_ref"):
+        store.set_status(hid, "supported", reason="R-1 promote", ref="E-1")
+    store.set_status(hid, "supported", reason="R-1 promote", ref="R-1")
+    meta = store.load(hid)[0]
+    assert meta["state"] == "supported"
+    assert [h["ref"] for h in meta["state_history"]] == ["E-1", "R-1"]
+
+
+def test_validate_change_rejects_reused_reason(store, layout):
+    from autoresearch.records.registry import path_for
+
+    hid = store.create("hypothesis", HYP)
+    store.set_status(hid, "under-test", reason="E-1 registered", ref="E-1")
+    before = store.load(hid)
+    after_meta = {
+        **before[0],
+        "state": "supported",
+        "state_history": [
+            *before[0]["state_history"],
+            {"from": "under-test", "to": "supported", "reason": "E-1 registered", "ref": "E-1"},
+        ],
+    }
+    rel = str(path_for(layout, hid).relative_to(layout.root))
+    problems = store.validate_change(rel, before, (after_meta, before[1]))
+    assert any("new state_reason" in p for p in problems)
+    assert any("new state_ref" in p for p in problems)

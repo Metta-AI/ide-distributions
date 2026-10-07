@@ -53,9 +53,16 @@ def _store(args) -> RecordStore:
     return RecordStore(Layout(ctx.worker or ctx.canonical))
 
 
+def _read_arg_file(file: str) -> str:
+    try:
+        return Path(file).read_text(encoding="utf-8")
+    except OSError as error:
+        raise BadArguments(f"cannot read {file}: {error.strerror or error}") from None
+
+
 def _json_arg(text: str | None, file: str | None, what: str) -> dict:
     if file is not None:
-        text = Path(file).read_text(encoding="utf-8")
+        text = _read_arg_file(file)
     if text is None:
         return {}
     try:
@@ -69,7 +76,7 @@ def _json_arg(text: str | None, file: str | None, what: str) -> dict:
 
 def _body_arg(text: str | None, file: str | None) -> str | None:
     if file is not None:
-        return Path(file).read_text(encoding="utf-8")
+        return _read_arg_file(file)
     return text
 
 
