@@ -8,7 +8,10 @@ env_requires:
     description: OpenRouter API key for the research model.
   - name: SOFTMAX_PLAYER_CREDENTIAL
     required: true
-    description: Credential of the Softmax player account the agent submits policies as.
+    description: >-
+      Credential of the Softmax player account the agent acts as, as JSON
+      {"token": "ply_...", "expires_at": "<ISO 8601>"} (one entry of
+      player_sessions.<server>.cache written by `coworld player use <ply_id>`).
   - name: AUTORESEARCH_PLAYER_ID
     required: true
     description: Id of that Softmax player.

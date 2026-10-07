@@ -1,0 +1,7 @@
+Authenticated
+user_email: owner@example.com
+subject_type: user
+subject_id: xhkpr7aw1f0gwjvc2yl0c5sa
+owner_user_id: xhkpr7aw1f0gwjvc2yl0c5sa
+is_softmax_team_member: False
+is_softmax_admin: False

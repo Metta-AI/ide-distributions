@@ -56,4 +56,6 @@ def from_env(env: Mapping[str, str], canonical: Path) -> Softmax:
         from autoresearch.softmax_tool.fake import FakeSoftmax
 
         return FakeSoftmax(canonical, env)
-    raise NotImplementedError("real client: Plan 03 Task 3.1")
+    from autoresearch.softmax_tool.client import SoftmaxClient
+
+    return SoftmaxClient(env, canonical)

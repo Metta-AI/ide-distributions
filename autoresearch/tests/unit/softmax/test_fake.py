@@ -90,8 +90,6 @@ def test_game_version_default(tmp_path):
 
 def test_from_env(tmp_path):
     assert isinstance(from_env({"AUTORESEARCH_SOFTMAX": "fake"}, tmp_path), FakeSoftmax)
-    with pytest.raises(NotImplementedError):
-        from_env({}, tmp_path)
 
 
 def test_xp_create_idempotent_single_charge(tmp_path):
