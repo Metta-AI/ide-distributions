@@ -16,7 +16,11 @@ GroupSetup = Callable[[argparse.ArgumentParser], None]
 
 _GROUPS: dict[str, GroupSetup] = {}
 
-GROUP_MODULES = ("autoresearch.records.cli", "autoresearch.stats.cli")
+GROUP_MODULES = (
+    "autoresearch.records.cli",
+    "autoresearch.stats.cli",
+    "autoresearch.runtime.card_cli",
+)
 
 
 def register_group(name: str, setup_fn: GroupSetup) -> None:

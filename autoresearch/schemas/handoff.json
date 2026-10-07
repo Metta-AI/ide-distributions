@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/handoff.json",
+  "title": "Handoff record at .supervisor/ledger/handoffs/<task-id>/<run-id>.json: one card run's committed result, written by `card finish` and advanced by the runtime (Overview C3).",
+  "type": "object",
+  "required": [
+    "card", "run_id", "request_id", "mode", "refs", "base_sha", "result_sha", "outcome",
+    "journal", "responsible_inbound", "report", "state", "history"
+  ],
+  "properties": {
+    "card": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "request_id": {"type": "string", "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "mode": {"enum": ["investigation", "scouting", "experimentation", "maintenance", "planning"]},
+    "refs": {"type": "array", "items": {"type": "string"}},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "result_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "outcome": {"enum": ["done", "partial", "failed", "blocked"]},
+    "journal": {"type": ["string", "null"]},
+    "responsible_inbound": {"type": "array", "items": {"type": "string"}},
+    "report": {
+      "type": "object",
+      "required": ["ok", "problems", "violations", "created", "changed_existing"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "problems": {"type": "array", "items": {"type": "string"}},
+        "violations": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "created": {"type": "array", "items": {"type": "string"}},
+        "changed_existing": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "state": {
+      "enum": ["committed", "validated", "merged", "published", "repair", "reconcile", "superseded"]
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["state", "at"],
+        "properties": {"state": {"type": "string"}, "at": {"type": "string"}}
+      }
+    }
+  }
+}
