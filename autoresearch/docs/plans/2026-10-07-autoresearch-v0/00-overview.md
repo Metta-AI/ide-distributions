@@ -110,7 +110,7 @@ Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, 
 - Detection (each `queue-keeper` run after preflight): the board has no tasks with our idempotency keys while the ledger lists admitted requests not yet published, or the board is missing → rebuild.
 - Rebuild starts a new board epoch and gives **each request exactly one recovery action** from its receipt: `admitted` with no handoff → re-admit (new task id appended to `tasks` with the new epoch; key `req:<Q-id>:<epoch>`); `handed_off` → no new card, the committed handoff is adopted by normal processing (earlier-epoch rule in C3), and its repair/reconcile, if any, is the only follow-up; `published|superseded|dropped|rejected` → nothing. Then experiment lifecycle (`designed`→build, `built`→upload, `uploaded` with a candidate binding→launch, `awaiting-credits`→launch when credits > 0, `evaluating` with completed XP→review, `reviewed`+promote with no promotion → promote), promotion reconcile (C8), calibration (C10), and one planning card (C11). Lifecycle cards use the same rule: no card when an admitted-unpublished request already covers that experiment step. XP launches use `experiment.lifecycle.launch_attempts` in their keys and call `xp recover` before any create, so a rebuilt launch never duplicates a request.
 
-## Contract amendments from Plan 01 Task 0.2 (PROPOSED — awaiting James's OK)
+## Contract amendments from Plan 01 Task 0.2 (APPROVED by James, 2026-10-07)
 
 Source: `../findings/hermes-facts.md` (Hermes v0.21.5 verified on 2026-10-07). Each amendment overrides the contract text above where they differ.
 
