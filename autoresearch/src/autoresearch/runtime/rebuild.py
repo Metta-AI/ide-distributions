@@ -101,6 +101,7 @@ from autoresearch.softmax_tool.protocol import Softmax
 BOARD_FILE = "board.json"
 OPEN_RECEIPT_STATES = ("admitted", "handed_off")
 LIFECYCLE_PRIORITY = "P1"
+REBUILT = "the board was rebuilt"
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +137,18 @@ def _start_epoch(canonical: Path) -> str:
     }
     write_json(_board_path(canonical), record)
     commit(canonical, [_board_path(canonical)], f"rebuild: board epoch {epoch}")
+    return epoch
+
+
+def new_board_epoch(canonical: Path, reason: str) -> str:
+    """Start a new board epoch when a board is created outside a rebuild (bootstrap, C1):
+    ``board.json`` gets the next epoch, keeping its other fields (an unfinished rebuild then
+    resumes in the new epoch). Commits it; call under the canonical lock."""
+    board = _board_file(canonical)
+    epoch = _next_epoch(board["epoch"])
+    record = board | {"epoch": epoch, "previous_epoch": board["epoch"], "created_at": now_iso()}
+    write_json(_board_path(canonical), record)
+    commit(canonical, [_board_path(canonical)], f"board epoch {epoch}: {reason}")
     return epoch
 
 
@@ -301,7 +314,7 @@ def _recover_requests(
 # --- experiment lifecycle ---
 
 
-def _open_experiment_refs(canonical: Path) -> set[str]:
+def open_experiment_refs(canonical: Path) -> set[str]:
     """``ar://experiment/<E>`` refs of committed requests that are not closed."""
     ledger = ledger_of(canonical)
     refs: set[str] = set()
@@ -337,16 +350,21 @@ def _xp_completed(sm: Softmax, experiment: str) -> bool:
     return bool(handles) and all(sm.xp_status(h).state == "completed" for h in handles)
 
 
-def _launch(experiment: dict) -> tuple[str, str, str, str]:
+def launch_step(
+    experiment: dict, reason: str, marker: str | None = None
+) -> tuple[str, str, str, str]:
+    """(marker, title, why, mode) of a card that launches ``experiment``'s XP evaluation with
+    attempt ``launch_attempts + 1``. ``reason`` says why (in parentheses); ``marker`` defaults
+    to ``launch:<E>:<attempt>`` (xp-poll passes its relaunch marker)."""
     attempt = next_launch_attempt(experiment)
     eid = experiment["id"]
     why = (
-        f"Launch the XP evaluation of {eid}, attempt {attempt} (the board was rebuilt). First "
+        f"Launch the XP evaluation of {eid}, attempt {attempt} ({reason}). First "
         f'run "$AUTORESEARCH_CLI" softmax xp recover {eid}: requests it finds already exist '
         f'and must not be created again. Then run "$AUTORESEARCH_CLI" softmax xp create {eid} '
         f"--batch <n> --attempt {attempt}, which creates only the requests still missing."
     )
-    return launch_marker(eid, attempt), f"Launch {eid}", why, "experimentation"
+    return marker or launch_marker(eid, attempt), f"Launch {eid}", why, "experimentation"
 
 
 def _lifecycle_step(
@@ -361,10 +379,10 @@ def _lifecycle_step(
         why = f"Experiment {eid} is built but not uploaded (board rebuilt). Upload the policy."
         return upload_marker(eid, epoch), f"Upload {eid}", why, "experimentation"
     if status == "uploaded" and experiment.get("candidate_binding"):
-        return _launch(experiment)
+        return launch_step(experiment, REBUILT)
     if status == "awaiting-credits":
         after = _parse_time((experiment.get("lifecycle") or {}).get("next_launch_after"))
-        return None if after is not None and now < after else _launch(experiment)
+        return None if after is not None and now < after else launch_step(experiment, REBUILT)
     if status == "evaluating" and _xp_completed(sm, eid):
         why = f"The XP requests of {eid} completed (board rebuilt). Review the results."
         return review_marker(eid), f"Review {eid}", why, "experimentation"
@@ -385,7 +403,7 @@ def _lifecycle_cards(
     """Step 4 (module docstring)."""
     canonical = ctx.canonical
     store = RecordStore(Layout(canonical))
-    covered = _open_experiment_refs(canonical)
+    covered = open_experiment_refs(canonical)
     created = []
     for experiment_id in store.find("experiment"):
         if f"ar://experiment/{experiment_id}" in covered:
@@ -419,7 +437,10 @@ def _reconcile_promotion(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Car
     return created
 
 
-def _calibration(ctx: RunContext, game_version: str) -> list[CardSpec]:
+def request_calibration(ctx: RunContext, game_version: str) -> list[CardSpec]:
+    """Commit the C10 calibration request (marker ``calibrate:<game_version>``) when no noise
+    record is current; the spec in a list, or [] when none is needed or it exists. Takes the
+    canonical lock."""
     canonical = ctx.canonical
     if has_current_noise(canonical, game_version):
         return []
@@ -459,7 +480,7 @@ def rebuild(
     created = _recover_requests(ctx, queue, epoch, allow_no_remote)
     created += _lifecycle_cards(ctx, sm, epoch, now)
     created += _reconcile_promotion(ctx, queue, sm)
-    created += _calibration(ctx, game_version)
+    created += request_calibration(ctx, game_version)
     planning = request_planning(
         ctx, queue, planning_rebuild_marker(epoch), f"The board was rebuilt (epoch {epoch})."
     )
