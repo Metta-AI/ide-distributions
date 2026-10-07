@@ -21,7 +21,10 @@ def _unit(*parts: str) -> float:
 def policy_id(policy: str) -> str:
     path = Path(policy)
     if path.is_file():
-        return json.loads(path.read_text()).get("policy", policy)
+        try:
+            return json.loads(path.read_text())["policy"]
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise ValueError(f"{policy} is not a valid policy artifact: {error!r}") from error
     return policy
 
 
@@ -37,13 +40,29 @@ def evaluate(policy: str, seed: int) -> dict:
     }
 
 
+def replay(policy: str, seed: int, ticks: int = 5) -> dict:
+    """Small deterministic per-tick summary of one fake episode."""
+    pid = policy_id(policy)
+    summary = [
+        {"tick": tick, "score": round(_unit(pid, str(seed), "tick", str(tick)) * 10, 4)}
+        for tick in range(ticks)
+    ]
+    return {"policy": pid, "seed": seed, "ticks": summary}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", required=True)
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--replay", action="store_true", help="per-tick summary, not metrics")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    print(json.dumps({"ok": True, "data": evaluate(args.policy, args.seed)}, sort_keys=True))
+    try:
+        data = (replay if args.replay else evaluate)(args.policy, args.seed)
+    except ValueError as error:
+        print(json.dumps({"ok": False, "error": str(error)}))
+        return 1
+    print(json.dumps({"ok": True, "data": data}, sort_keys=True))
     return 0
 
 

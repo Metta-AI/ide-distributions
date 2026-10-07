@@ -1,4 +1,6 @@
 import json
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -114,3 +116,57 @@ def test_seed_workspace_present():
     seed = REPO_ROOT / "games" / "fakegame" / "seed"
     assert (seed / "plan.md").exists()
     assert (seed / "strategy" / "STRATEGY.md").exists()
+
+
+def _run_binding(game, binding, *args):
+    command = shlex.split(game.bindings[binding])
+    command = [sys.executable if part == "python3" else part for part in command]
+    return subprocess.run(
+        [*command, *args, "--json"], capture_output=True, text=True, cwd=REPO_ROOT
+    )
+
+
+def test_every_binding_is_runnable(tmp_path):
+    game = load_game(REPO_ROOT, "fakegame")
+    candidate = tmp_path / "cand"
+    shutil.copytree(REPO_ROOT / "games" / "fakegame" / "seed", candidate)
+    build_dir = tmp_path / "build"
+    calls = {
+        "build": [str(candidate), "--out", str(build_dir)],
+        "local_check": [str(candidate)],
+        "upload": [str(build_dir)],
+        "evaluate": ["--policy", str(build_dir / "policy.json"), "--seed", "3"],
+        "replay_inspect": ["--policy", str(build_dir / "policy.json"), "--seed", "3"],
+    }
+    assert set(calls) == set(BINDING_NAMES)
+    for binding in BINDING_NAMES:  # build runs first so later bindings have its output
+        result = _run_binding(game, binding, *calls[binding])
+        assert result.returncode == 0, (binding, result.stderr, result.stdout)
+        assert json.loads(result.stdout)["ok"] is True, binding
+
+
+def test_upload_id_is_deterministic_and_version_path_relative(tmp_path):
+    candidate = tmp_path / "cand"
+    shutil.copytree(REPO_ROOT / "games" / "fakegame" / "seed", candidate)
+    _run("fake_build.py", str(candidate), "--out", str(tmp_path / "b"))
+    version = json.loads((tmp_path / "b" / "version.json").read_text())
+    assert version["artifact"] == "policy.json"
+    first = _run("fake_build.py", "--upload", str(tmp_path / "b"))
+    assert first == _run("fake_build.py", "--upload", str(tmp_path / "b"))
+    assert first["data"]["policy_version_id"].startswith("fake-pv-")
+
+
+def test_bad_input_gives_error_envelope(tmp_path):
+    bad = tmp_path / "policy.json"
+    bad.write_text("not json")
+    for tool, args in (
+        ("fake_eval.py", ["--policy", str(bad), "--seed", "1"]),
+        ("fake_build.py", ["--check", str(tmp_path)]),
+        ("fake_build.py", ["--upload", str(tmp_path)]),
+    ):
+        result = subprocess.run(
+            [sys.executable, str(FAKE_TOOLS / tool), *args, "--json"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1, tool
+        assert json.loads(result.stdout)["ok"] is False
