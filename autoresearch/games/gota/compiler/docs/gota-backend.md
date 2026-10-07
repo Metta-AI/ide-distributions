@@ -43,7 +43,10 @@ must identify actual emitted component globals or arrays. Targets must be exact
 v13-live storage names (case-insensitive), with matching scalar/array kind and
 original inclusive bounds. Targets are unique, cannot collide with already
 emitted storage, and cannot bind runtime/generated ST state. Unknown/malformed
-bindings fail. Missing bindings never cause prefix guessing or baseline copying;
+bindings fail. SUB parameters cannot use any physical binding target or the
+synthesized `pvId` array name; assembly asks for the parameter to be renamed.
+A parameter that shadows a source component symbol still remains local.
+Missing bindings never cause prefix guessing or baseline copying;
 new scalar names consume reserve cells, while an unbound new array fails.
 
 The exact reference is `tests/fixtures/gota/v13-live.bas`, SHA-256
@@ -96,7 +99,12 @@ alone never establishes a full G3 pass or action equivalence.
 ## Shared gates and offline execution
 
 `gota_gates.verify(build_id, context=GateContext(...))` supports explicit local
-fixtures. The CLI uses `strategy/compiler/config.json`'s `gates.manifest`; null
+fixtures. Every call allocates a fresh `attempt-*` subdirectory under the selected
+work directory and copies the context with cleared measurements/episode/map state.
+The caller's context is unchanged. G2 and G5 share that attempt's context; repaired
+artifacts cannot reuse a previous episode. Attempt directories and their gates.json
+are retained, while the stage's gates.json contains the latest result.
+The CLI uses `strategy/compiler/config.json`'s `gates.manifest`; null
 means G2 fails for missing evidence. Supply an already downloaded live manifest
 and available image for real G2; the adapter does not invent a manifest or skip
 this gate. Default baseline is exact v13-live. The order is G1, G2, G3, G4, G5;

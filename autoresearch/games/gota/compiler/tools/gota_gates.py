@@ -1,6 +1,8 @@
 """Build adapter for the shared G1–G5 gates; no duplicate gate implementation."""
 
+from dataclasses import replace
 from pathlib import Path
+from tempfile import mkdtemp
 
 from gota_host import BASELINE, cached_probe
 
@@ -28,9 +30,16 @@ def verify(build_id: str, *, context: GateContext | None = None) -> dict:
             native_binary=cached_probe(),
             manifest=Path(manifest) if manifest else None,
         )
-    if context.native_binary is None:
-        context.native_binary = cached_probe()
-    context.compiler_map = builds.read(stage / "map.json")
+    context.work_dir.mkdir(parents=True, exist_ok=True)
+    # Each repair round owns its evidence, including when callers reuse a context.
+    context = replace(
+        context,
+        work_dir=Path(mkdtemp(prefix="attempt-", dir=context.work_dir)),
+        native_binary=context.native_binary or cached_probe(),
+        episode_dir=None,
+        measurements={},
+        compiler_map=builds.read(stage / "map.json"),
+    )
     gates = {}
     for name, module in zip(
         ("G1", "G2", "G3", "G4", "G5"), (g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry)
@@ -44,5 +53,6 @@ def verify(build_id: str, *, context: GateContext | None = None) -> dict:
                 if remaining not in gates:
                     gates[remaining] = {"passed": False, "summary": f"not run: {name} failed"}
             break
+    builds.dump(context.work_dir / "gates.json", gates)
     builds.dump(stage / "gates.json", gates)
     return gates

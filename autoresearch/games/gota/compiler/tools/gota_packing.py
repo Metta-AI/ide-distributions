@@ -143,6 +143,12 @@ def pack(source: str, bindings: dict | None = None) -> tuple[str, dict]:
             raise ValueError("multiple DIM declarations must use separate lines")
         if tokens[0] == ("id", "sub"):
             parameters = {text for kind, text in tokens[2:] if kind == "id"}
+            collisions = parameters & ({"pvid"} | set(aliases.values()))
+            if collisions:
+                raise ValueError(
+                    f"SUB {tokens[1][1]} parameter conflicts with physical storage "
+                    f"{', '.join(sorted(collisions))}; rename the parameter before packing"
+                )
         if tokens[:2] == [("id", "end"), ("id", "sub")]:
             parameters = set()
         if tokens[0] == ("id", "dim"):

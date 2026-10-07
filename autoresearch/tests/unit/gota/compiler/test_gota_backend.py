@@ -382,3 +382,131 @@ def test_cached_probe_rejects_missing_and_stale(tmp_path, monkeypatch):
         (tools / name).write_text("new source")
     with pytest.raises(RuntimeError, match="stale native gate probe"):
         host.cached_probe()
+
+
+@pytest.mark.parametrize(
+    'parameter,bindings,declaration,assignment',
+    [
+        ('pvN', {'k_position__x': 'pvN'}, '', 'k_position__x=3'),
+        ('pvId', {}, '', 'k_position__x=3'),
+        ('efId', {'k_position__memory': 'efId'}, 'DIM k_position__memory(63)\n',
+         'k_position__memory(0)=3'),
+    ],
+)
+def test_assembly_rejects_parameter_capture_by_physical_storage(
+    tmp_path, parameter, bindings, declaration, assignment,
+):
+    value = strategy(tmp_path)
+    units = dict(TRIVIAL_UNITS)
+    units['K.position'] = declaration + f'''SUB k_position__update()
+ k_position__x=0
+ k_position__helper(7)
+ k_position__y=k_position__x
+END SUB
+SUB k_position__helper({parameter})
+ {assignment}
+END SUB
+'''
+    assert not sb.check_unit(value, 'K.position', units['K.position'])
+    with pytest.raises(sb.BuildError, match='parameter.*physical storage.*rename'):
+        sb.assemble(value, units, RUNTIME, 'abcdef12-1', 'a' * 40, baseline_bindings=bindings)
+
+
+def test_assembly_preserves_parameter_shadowing_source_symbol(tmp_path):
+    units = dict(TRIVIAL_UNITS)
+    units['K.position'] += '''
+SUB k_position__helper(k_position__x)
+k_position__x=k_position__x+1
+END SUB
+'''
+    result = sb.assemble(strategy(tmp_path), units, RUNTIME, 'abcdef12-1', 'a' * 40,
+                         baseline_bindings={'k_position__x': 'pvN'})
+    assert 'SUB k_position__helper(k_position__x)\nk_position__x=k_position__x+1\nEND SUB' in result['policy']
+    assert 'pvn = selfX' in result['policy']
+
+
+@pytest.mark.parametrize('supplied_context', [False, True])
+@pytest.mark.parametrize('first_failure', ['G2', 'G3'])
+def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
+    tmp_path, monkeypatch, supplied_context, first_failure,
+):
+    import subprocess
+
+    import gota_gates
+    import gota_host
+    import strategy_build as builds
+
+    from games.gota.gates import GateContext, GateResult
+
+    value = strategy(tmp_path)
+    stage = tmp_path / 'stage'
+    stage.mkdir()
+    artifact = stage / 'policy.bas'
+    artifact.write_text('candidate=1\n')
+    mapping = sb.assemble(value, TRIVIAL_UNITS, RUNTIME, 'abcdef12-1', 'a' * 40)['map']
+    builds.dump(stage / 'map.json', mapping)
+    builds.dump(stage / 'work_order.json', {'source_path': str(value.path), 'source_hashes': {}})
+    compiler = tmp_path / 'compiler'
+    manifest = tmp_path / 'manifest.json'
+    builds.dump(compiler / 'config.json', {'gates': {'manifest': str(manifest)}})
+    monkeypatch.setattr(builds, 'COMPILER', compiler)
+    monkeypatch.setattr(builds, 'build_path', lambda *a, **kw: stage)
+    monkeypatch.setattr(builds, 'assert_inputs', lambda order: None)
+    monkeypatch.setattr(gota_gates.g1_lint, 'run', lambda *a: GateResult(True, {}))
+    monkeypatch.setattr(gota_gates.g4_screen, 'run', lambda *a: GateResult(True, {}))
+    episodes, telemetry = [], []
+
+    def episode_runner(command, **kwargs):
+        directory = Path(command[command.index('--output-dir') + 1])
+        directory.mkdir(parents=True)
+        episodes.append(directory)
+        if first_failure == 'G2' and len(episodes) == 1:
+            raise subprocess.CalledProcessError(1, command)
+        (directory / 'logs').mkdir()
+        for seat in range(10):
+            player = directory / 'players' / str(seat)
+            player.mkdir(parents=True)
+            (player / 'file').write_bytes(artifact.read_bytes())
+            (directory / 'logs' / f'policy_agent_{seat}.log').write_text(
+                'PWD v=2 t=0 r=1 c=1 i=12,0,0 h=0 p=0 f=0\n'
+                f'Player slot {seat} completed.\n')
+        (directory / 'logs/game.stdout.log').write_text(
+            'scripts: 10/10 active, 10 decisions\nreplay saved: fixture (10 actions)\n')
+        builds.dump(directory / 'results.json', {'scores': [0] * 10, 'total_xp': [0] * 10, 'ticks': 1})
+
+    def budget(candidate, context):
+        assert context.measurements == {}
+        context.measurements['current-candidate'] = candidate.read_text()
+        return GateResult(not (first_failure == 'G3' and len(episodes) == 1), {})
+
+    real_g5 = gota_gates.g5_telemetry.run
+
+    def g5(candidate, context):
+        assert context.episode_dir == episodes[-1]
+        assert context.measurements['current-candidate'] == candidate.read_text()
+        result = real_g5(candidate, context)
+        telemetry.append((context.episode_dir, result))
+        return result
+
+    monkeypatch.setattr(gota_gates.g2_episode.subprocess, 'run', episode_runner)
+    monkeypatch.setattr(gota_gates.g3_budget, 'run', budget)
+    monkeypatch.setattr(gota_gates.g5_telemetry, 'run', g5)
+    caller = GateContext(tmp_path / 'caller', manifest=manifest,
+                         native_binary=gota_host.cached_probe(), episode_dir=tmp_path / 'old',
+                         measurements={'old': 'evidence'}, compiler_map={'old': 'map'})
+    context = caller if supplied_context else None
+    first = gota_gates.verify('abcdef12-1', context=context)
+    assert not first[first_failure]['passed']
+    artifact.write_text('candidate=2\n')
+    second = gota_gates.verify('abcdef12-1', context=context)
+    assert all(row['passed'] for row in second.values()), second
+    assert len(episodes) == 2 and episodes[0] != episodes[1]
+    assert all(path.exists() for path in episodes)
+    assert telemetry[-1][0] == episodes[1] and telemetry[-1][1].ok
+    assert (episodes[1] / 'players/0/file').read_text() == 'candidate=2\n'
+    if first_failure == 'G3':
+        assert (episodes[0] / 'players/0/file').read_text() == 'candidate=1\n'
+    assert all((path.parent / 'gates.json').is_file() for path in episodes)
+    assert caller.episode_dir == tmp_path / 'old'
+    assert caller.measurements == {'old': 'evidence'}
+    assert caller.compiler_map == {'old': 'map'}

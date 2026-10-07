@@ -45,3 +45,30 @@ No model, credentials, remote operation, upload or container episode was run.
 Real G2 and real compiled-v13 qualification remain for Task 2.4 after its gate.
 The audit-documentation skill checked the generation context, policy surface,
 backend guide, gate guide, runtime comments and provenance against code/tests.
+
+
+## Independent review round 1 corrections
+
+P1: relocation previously tested source names for local scope but did not protect
+physical target names. Assembly now rejects SUB parameters colliding with any
+bound baseline target (scalar or array) or synthesized pvId. The error identifies
+the SUB and parameter and asks for a rename. Source-symbol parameter shadowing
+remains valid and is tested through actual assembly.
+
+P2: every verify call now creates a retained attempt directory and a fresh copy
+of GateContext, clearing old episode, measurements and compiler map. This applies
+to both default and reused caller contexts; the caller is unchanged. Per-attempt
+G2 output and G5 parsing stay aligned with the current artifact. Both partial G2
+failure and a later G3 failure can be followed by a successful repaired attempt;
+prior episode artifacts and gate reports are retained.
+
+P3: the active AGENT instruction no longer calls the exact v13-live reference an
+upstream gameplay-changing Bassy example. It requires preserving specified
+behavior without copying the full baseline or using it as a fallback.
+
+These are faithful corrections under C1, not new gameplay or schema choices.
+The eight regressions initially had seven failures and one pass. They exercise
+actual assembly, real adapter/G2/G5 behavior and synthetic local episode output;
+external execution is stubbed, so no model, container, remote or credential action
+is implied. The audit-documentation skill checked the active prompt and backend
+operational/storage docs against these changes before the fix commit.

@@ -137,3 +137,28 @@ original access tokens. Neither proves full episode/action-stream equivalence.
 Dynamic unit index bounds, real G2 and full artifact G3/G4 remain Task 2.4 work.
 No model or container episode was executed. Full commands/results and remaining
 limitations are in `/tmp/ide-mvp-codex-task-2.3-report.md`.
+
+
+### Task 2.3 independent-review corrections
+
+Review round 1 found two integration defects: physical baseline targets could
+capture SUB parameters after relocation, and repeated verify calls reused G2's
+output directory. The smallest faithful fixes reject parameter names colliding
+with binding targets or synthesized pvId while preserving local source-symbol
+shadowing, and allocate a fresh retained attempt directory/context for every
+verification call (including caller-supplied contexts). G2 and G5 share only the
+current attempt's episode, and measurements are cleared between attempts.
+
+The active AGENT warning now correctly identifies context/base.bas as the exact
+v13-live semantic reference, with the no-copy/no-fallback constraint. Eight new
+regressions initially gave seven failures and one valid-shadowing pass; after
+correction all eight pass. Retry tests invoke the real adapter, G2 inspection and
+G5 reader, stubbing external episode execution and unrelated gate measurements;
+no container, model, credentials or network call occurs. No Task 2.4 behavior
+or contract was added. Details and exact final commands are in the task report.
+
+Final affected validation: `uv run --locked --offline --with pandas pytest
+ tests/unit/gota/compiler/test_gota_backend.py tests/unit/gota/test_gates.py -q`
+(with the command on one line) gives **65 passed** in 4.07 seconds. Ruff passes on
+all gota_*.py backend modules, shared G5 and test_gota_backend.py; diff whitespace
+checks pass. Broader tests were not repeated for this bounded review correction.

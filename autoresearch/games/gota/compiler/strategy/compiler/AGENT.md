@@ -35,8 +35,9 @@ Use integer division `\` everywhere this integer strategy divides; `/` is fixed 
 is rejected by the scanner. Replace `NOT flag` with `flag = 0` for numeric flags. Bassy
 comparisons produce -1, so outputs specified as 0/1 require explicit assignments in IF/ELSE.
 The legacy scalar host names and calls remain available and fit this compiler ABI; use them
-rather than introducing records into unit interfaces. `context/base.bas` is upstream's Bassy
-example, but it also changes gameplay: do not copy its targeting/HP/item changes into our source.
+rather than introducing records into unit interfaces. `context/base.bas` is the exact
+compatibility-adjusted v13-live semantic reference: preserve its gameplay behavior in the
+specified components. Do not copy the full policy into a unit or use it as an assembly fallback.
 
 
 1. **Implement the `Spec` and the other fields of `compiled_text`, and nothing else.** Numbers
@@ -51,6 +52,8 @@ example, but it also changes gameplay: do not copy its targeting/HP/item changes
    The driver writes the header line.
 3. **Names.** Every scalar, array, and SUB the unit defines starts with `contract.prefix` + `__`.
    - A unit writes only its own names.
+   - SUB parameters must not use physical baseline binding targets or `pvId`;
+     the packer rejects those collisions. Local source-symbol shadowing is preserved.
    - It never writes its own params, inputs (`<prefix>__in_*`), or condition constants
      (`<prefix>__k_*`). Generated code sets those.
    - It never `DIM`s a declared output array, because generated code does that.
