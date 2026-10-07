@@ -7,6 +7,10 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 ``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), and
 ``crash_after=<label>`` (read by runtime code through :func:`fault`).
+
+Like the real client, the mutating calls (``upload``, a new ``xp_create``, ``submit``) re-check
+``whoami`` first and raise ``IdentityError`` unless it is the expected unexpired Player (C6), so
+an ``identity=``, ``player=`` or ``expires_in=`` fault stops a running worker at the boundary.
 """
 
 import hashlib
@@ -16,6 +20,7 @@ from pathlib import Path
 
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.io.locks import file_lock
+from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
 
 FAULTS_ENV = "AUTORESEARCH_FAKE_FAULTS"
@@ -91,6 +96,11 @@ class FakeSoftmax:
         )
         return self._operate("whoami", lambda _state: identity, persist=False)
 
+    def _require_player(self) -> None:
+        problems = identity_problems(self.whoami(), self._player_id, self._clock())
+        if problems:
+            raise IdentityError("; ".join(problems))
+
     def _current_credits(self, state: dict) -> int:
         return int(self._faults["credits"]) if "credits" in self._faults else state["credits"]
 
@@ -106,6 +116,9 @@ class FakeSoftmax:
         self, experiment: str, batch: int, attempt: int, spec: dict
     ) -> XpHandle | CreditDenied:
         request_id = f"xp_{_short_hash(experiment, batch, attempt)}"
+        known = self._operate("xp_lookup", lambda state: request_id in state["xp"], persist=False)
+        if not known:  # like the client: an existing request is reused without a new check
+            self._require_player()
 
         def action(state: dict):
             if request_id not in state["xp"]:
@@ -165,6 +178,8 @@ class FakeSoftmax:
     # --- policies -------------------------------------------------------
 
     def upload(self, artifact: Path, name: str) -> str:
+        self._require_player()
+
         def action(state: dict) -> str:
             policy_version_id = f"pv_{_short_hash(name, len(state['uploads']))}"
             state["uploads"][policy_version_id] = {"name": name}
@@ -173,6 +188,8 @@ class FakeSoftmax:
         return self._operate("upload", action)
 
     def submit(self, policy_version_id: str, league_id: str) -> str:
+        self._require_player()
+
         def action(state: dict) -> str:
             submission_id = (
                 f"sub_{_short_hash(policy_version_id, league_id, len(state['submissions']))}"

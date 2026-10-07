@@ -28,7 +28,13 @@ def build(candidate: Path, out: Path) -> dict:
     artifact_hash = hashlib.sha256(_strategy_path(candidate).read_bytes()).hexdigest()
     out.mkdir(parents=True, exist_ok=True)
     (out / "policy.json").write_text(json.dumps({"policy": artifact_hash}, sort_keys=True) + "\n")
-    version = {"artifact_hash": artifact_hash, "artifact": "policy.json"}
+    # The version.json contract read by `softmax upload` (softmax_tool/upload.py).
+    version = {
+        "artifact_hash": artifact_hash,
+        "artifact": "policy.json",
+        "strategy_sha256": artifact_hash,
+        "gates": {"local_check": {"passed": True}},
+    }
     (out / "version.json").write_text(json.dumps(version, indent=2, sort_keys=True) + "\n")
     return version
 
