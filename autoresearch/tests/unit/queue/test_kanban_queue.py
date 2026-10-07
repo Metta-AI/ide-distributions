@@ -159,7 +159,7 @@ def test_state_mapping(fake, queue, status, state):
     assert queue.get("t_abc").state == state
 
 
-def test_list_filters_by_state(fake, queue):
+def test_list_filters_by_state_and_returns_runs(fake, queue):
     fake.reply(
         "list",
         [
@@ -168,10 +168,34 @@ def test_list_filters_by_state(fake, queue):
             task_json("blocked", task_id="t_3"),
         ],
     )
-    assert [c.task_id for c in queue.list()] == ["t_1", "t_2", "t_3"]
+    fake.reply(
+        "show",
+        {
+            "task": task_json("done", task_id="t_2"),
+            "runs": [{"id": 4, "outcome": "completed", "ended_at": 9}],
+        },
+    )
     assert [c.task_id for c in queue.list("completed")] == ["t_2"]
+    assert [(r.run_id, r.terminal) for r in queue.list("completed")[0].runs] == [("4", True)]
+    assert [c.task_id for c in queue.list()] == ["t_2"] * 3  # fake show always returns t_2
     assert fake.argvs()[0] == [*BOARD, "list", "--json"]
-    assert all(c.runs == [] for c in queue.list())
+
+
+def test_dropped_outcome_comes_from_run_metadata(fake, queue):
+    run = {"id": 1, "outcome": "completed", "ended_at": 9, "metadata": {"outcome": "dropped"}}
+    fake.reply("show", {"task": task_json("done"), "runs": [run]})
+    assert queue.get("t_abc").runs[0].outcome == "dropped"
+
+
+def test_foreign_body_skipped_in_list_and_error_in_get(fake, queue):
+    foreign = task_json("ready", task_id="t_foreign") | {"body": "just some notes"}
+    empty = task_json("ready", task_id="t_empty") | {"body": None}
+    fake.reply("list", [foreign, empty, task_json("ready", task_id="t_abc")])
+    fake.reply("show", {"task": task_json("ready"), "runs": []})
+    assert [c.task_id for c in queue.list()] == ["t_abc"]
+    fake.reply("show", {"task": foreign, "runs": []})
+    with pytest.raises(KanbanError, match="t_foreign"):
+        queue.get("t_foreign")
 
 
 def test_reprioritize_pending(fake, queue):

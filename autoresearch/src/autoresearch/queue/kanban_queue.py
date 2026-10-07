@@ -70,16 +70,18 @@ class KanbanQueue:
         return self._hermes("kanban", "--board", self.board, *args)
 
     @staticmethod
-    def _to_card(task: dict, runs: list[dict]) -> Card:
-        return Card(
-            task_id=task["id"],
-            spec=CardSpec(**json.loads(task["body"])),
-            state=_STATE_BY_STATUS[task["status"]],
-            assignee=task["assignee"],
-            runs=[
-                RunInfo(str(run["id"]), run["ended_at"] is not None, run["outcome"]) for run in runs
-            ],
-        )
+    def _parse_spec(task: dict) -> CardSpec:
+        """The CardSpec in the task body; ValueError for a task we did not create."""
+        try:
+            return CardSpec(**json.loads(task["body"]))
+        except (TypeError, KeyError, ValueError) as error:
+            raise ValueError(f"task {task['id']} has no autoresearch card body") from error
+
+    @staticmethod
+    def _run_info(run: dict) -> RunInfo:
+        # Drops are recorded as outcome "completed" by Hermes; our metadata says "dropped".
+        outcome = (run.get("metadata") or {}).get("outcome") or run["outcome"]
+        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome)
 
     # -- Queue protocol --
 
@@ -107,13 +109,34 @@ class KanbanQueue:
 
     def get(self, task_id: str) -> Card:
         shown = json.loads(self._kanban("show", task_id, "--json"))
-        return self._to_card(shown["task"], shown["runs"])
+        task = shown["task"]
+        try:
+            spec = self._parse_spec(task)
+        except ValueError as error:
+            raise KanbanError(["kanban", "show", task_id], str(error)) from error
+        return Card(
+            task_id=task["id"],
+            spec=spec,
+            state=_STATE_BY_STATUS[task["status"]],
+            assignee=task["assignee"],
+            runs=[self._run_info(run) for run in shown["runs"]],
+        )
 
     def list(self, state: str | None = None) -> list[Card]:
-        """Cards on the board (archived hidden). ``runs`` is empty; use ``get`` for runs."""
-        tasks = json.loads(self._kanban("list", "--json"))
-        cards = [self._to_card(task, []) for task in tasks]
-        return [card for card in cards if state is None or card.state == state]
+        """Cards on the board (archived hidden), with runs; foreign tasks are skipped.
+
+        Costs one ``show`` per card because the list JSON carries no runs.
+        """
+        cards = []
+        for task in json.loads(self._kanban("list", "--json")):
+            if state is not None and _STATE_BY_STATUS[task["status"]] != state:
+                continue
+            try:
+                self._parse_spec(task)
+            except ValueError:
+                continue
+            cards.append(self.get(task["id"]))
+        return cards
 
     def reprioritize(self, task_id: str, priority: Priority, order: int = 0) -> None:
         number = kanban_priority(priority, order)  # validates the order range

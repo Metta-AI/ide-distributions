@@ -44,10 +44,12 @@ def test_operations_against_real_hermes(queue, tmp_path):
 
     assert [c.task_id for c in queue.list()] == [task_id]
     assert [c.task_id for c in queue.list("pending")] == [task_id]
+    assert queue.list()[0].runs == []
 
     queue.drop(task_id, "integration test")
     dropped = queue.get(task_id)
     assert dropped.state == "completed"
-    assert [(r.terminal, r.outcome) for r in dropped.runs] == [(True, "completed")]
+    assert [(r.terminal, r.outcome) for r in dropped.runs] == [(True, "dropped")]
+    assert [r.outcome for r in queue.list("completed")[0].runs] == ["dropped"]
     with pytest.raises(ValueError):
         queue.drop(task_id, "again")
