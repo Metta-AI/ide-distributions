@@ -296,3 +296,7 @@ groups retain rate statistics, and episode-level failure/draw rates remain rates
 The shared statistics engine rejects nonintegral binary success counts; fractions
 that happen to sum to integers would otherwise pass that guard and take an
 inappropriate Fisher path. This correction changes dispatch, not that engine.
+
+## Compiler vendor (Task 2.1)
+
+All copied compiler code, runtime, inputs, and destination test files are listed individually with pinned source paths and SHA-256 values in [compiler/PROVENANCE.md](compiler/PROVENANCE.md). Source: committed Paintbot `6b0bffa5085ffc4bf94ecaa8baee463e55599c84`. This is a preserved Paintbot baseline, pending GotA adaptation; engine and semantic qualification do not transfer.

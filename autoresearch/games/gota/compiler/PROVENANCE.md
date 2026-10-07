@@ -1,0 +1,54 @@
+# Pinned Paintbot compiler pipeline
+
+Pinned committed source: `personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84`. No source working-tree bytes were used. Implementation retains the lab-relative `tools/`, `strategy/compiler/`, `docs/`, and `reference/` layout. Build reports remain in `tools/strategy_build.py:finalize`; no `strategy_report.py` alias exists.
+
+This is vendored Paintbot code, not yet a GotA backend. The semantic audit modules are staged for later adaptation; Paintbot historical builds, uploads, replay evidence, and native binaries are not copied. No semantic audit or engine qualification is claimed. `tools/pw.py` retains the original dispatcher catalog; unrelated catalog commands are not included in this focused closure.
+
+Approved C1 mechanical corrections: destination test imports point to the vendored tools; the committed-input test uses `base-bassy-28030de6.bas`; the M1 screen assertion accepts `high >= .5`, as implemented and documented by the current pinned command reference. Gate implementation is unchanged. Task 2.4 action-stream equivalence remains required. Python/BASIC/Markdown/environment files carry comment provenance; JSON config has an inert `_provenance` field. Original source SHA-256 values below identify bytes before headers.
+
+| Destination | Original source under paintbot_pw_lab | Original SHA-256 |
+| --- | --- | --- |
+| `tools/strategy_gates.py` | `tools/strategy_gates.py` | `c212518f9a5fe5f59c63f9c60d89459fa7c81de189d13eb8ad079f90c4681cb4` |
+| `tools/strategy_audit_runtime.py` | `tools/strategy_audit_runtime.py` | `e430c38955632541dbccc854f88bcb34c9e8341e25dd65fb6faacf1c7f60f065` |
+| `tools/strategy_audit_comms.py` | `tools/strategy_audit_comms.py` | `758cdf899577c8d225bf719dc382e3b67842029273214360c6119e1c8d08fc59` |
+| `tools/strategy_comms.py` | `tools/strategy_comms.py` | `71fad5fa243465eb71b8a80f6a070ad1554c65452c59220ceef39740cb60f8a7` |
+| `tools/strategy_audit.py` | `tools/strategy_audit.py` | `6b276ed3b4924b222839c1d077034b5f7dc32182552079666959ed9a128655f6` |
+| `tools/strategy_format.py` | `tools/strategy_format.py` | `46ff44e22b0bb8478520cd3de81b10afeaf2c97dad3900e68738275731e43f53` |
+| `tools/strategy_build.py` | `tools/strategy_build.py` | `8948f9bce170a91987c3a88936eee85c802169ac2ef993b0e74d8e629a985727` |
+| `tools/strategy_audit_baseline.py` | `tools/strategy_audit_baseline.py` | `70ae26dd9bd0a23ced231ec7dfa7e531bdfe794dd1d1df767c2e1cb505a6aa9a` |
+| `tools/strategy_basic.py` | `tools/strategy_basic.py` | `b3818ae285d2da96e3d6b6ca0d8a2bcd6abae012f348801b1c1af6e65f712780` |
+| `tools/pw_cli.py` | `tools/pw_cli.py` | `3d988c9504269e7bf6944aec739633df3bddd5e0775e26303f0cd532585d5797` |
+| `tools/pw_release.py` | `tools/pw_release.py` | `68283656ad029b75f119eb8ef2f9d1d04004979c00a9a70b433409e713b444dd` |
+| `tools/pw_strategy.py` | `tools/pw_strategy.py` | `e56e3ff1e98d04520569a63a3e5e8005061d624c7f4b287dbe053930ae1f6405` |
+| `tools/pw.py` | `tools/pw.py` | `954672c1b9584cd9d091d7db3b79dccd1f21d8b67bd51bd760b4fa41560784c6` |
+| `tools/pw_local.py` | `tools/pw_local.py` | `fb8a1d27ac71adf7a087ec1090d4900edb50de56b2e2f4ab9b0e23e350402947` |
+| `tools/pw_terrain.py` | `tools/pw_terrain.py` | `4ddc544c60f9eed2e9bb737e4534f955bb504f6f178452e375287f438b73eade` |
+| `tools/pw_intent.py` | `tools/pw_intent.py` | `f8ad7ee2ff30bc437637b17d5692fe7879a12627fcbb8d303c94d12c773581fe` |
+| `tools/pw_episodes.py` | `tools/pw_episodes.py` | `0406334457926cbb57a44aaf678e0f83de24d37a738bdd74dc5098bd83259ed6` |
+| `tools/release.env` | `tools/release.env` | `0561b309c7c9842b7dc474ea0bfcda1d38f8013ab3485ee3097bbf4168adc09c` |
+| `strategy/compiler/AGENT.md` | `strategy/compiler/AGENT.md` | `fdf8939ceda5ab4641570cd71874c7f8a788d51c9e126c2451e2c3182fc6b863` |
+| `strategy/compiler/config.json` | `strategy/compiler/config.json` | `f0240c328e26289f6ddf41857df3b9eddaafce89404228988303df332c3d2c93` |
+| `strategy/compiler/LESSONS.md` | `strategy/compiler/LESSONS.md` | `8734a91f73563a780e2b9342e7938ed2cf9343f2d04fbdbc7e25342745a9a0b5` |
+| `strategy/compiler/runtime/lib.bas` | `strategy/compiler/runtime/lib.bas` | `ef0a6b940d95f537ac9623f53d25b6aa26b9e474d311ccb6bc64d89bfa47dee7` |
+| `strategy/compiler/runtime/comms.bas` | `strategy/compiler/runtime/comms.bas` | `05639c3995e9d527f0e4b124a3d37b57d76636266102a8da7d21f5c4603d1e4e` |
+| `strategy/compiler/runtime/main.bas` | `strategy/compiler/runtime/main.bas` | `735c59e4033a60229b3d8ae3d3128a26d8aac9563873999e0f5db71111a30527` |
+| `docs/policy-surface.md` | `docs/policy-surface.md` | `b5fce6e48e24edecd5d29a7913c6652e598340df8bb61f5a42ad3d8bd3a1361d` |
+| `reference/base-bassy-28030de6.bas` | `reference/base-bassy-28030de6.bas` | `8c81b016a92a4bde2d8420e793633b79ef4f1f8e834e7bf3cd2baf6cc9e4775b` |
+| `autoresearch/tests/unit/gota/compiler/test_strategy_basic.py` | `tools/tests/test_strategy_basic.py` | `b331d2b17e903a5cceed31aa07d3aa93476464bd016169cd9234676125868c7b` |
+| `autoresearch/tests/unit/gota/compiler/test_strategy_format.py` | `tools/tests/test_strategy_format.py` | `41754f8fc124232171aeb8f2050895934684abb61a48dcb236a70d4c49a487f8` |
+| `autoresearch/tests/unit/gota/compiler/test_strategy_build.py` | `tools/tests/test_strategy_build.py` | `2e36b71b370e3cdf473bc47c88138af1130aaea3ec8dff34900c937ea074031a` |
+| `autoresearch/tests/unit/gota/compiler/fixtures/strategy_trivial/STRATEGY.md` | `tools/tests/fixtures/strategy_trivial/STRATEGY.md` | `a8ebe8ec216f62ac7e07f14f3d69ae1c32ec2bc0df19df6a1d462e75958185cf` |
+| `tools/pw_scout.py` | `tools/pw_scout.py` | `b62c9ba289d3e38e1939c60c743b5ae99918272a236ff83d9bf78707bab94318` |
+| `tools/pw_fights.py` | `tools/pw_fights.py` | `c63e8448ded5f2c5b9a16edf06a1618a77773ab68f708b546325acc060731973` |
+| `tools/pw_metrics.py` | `tools/pw_metrics.py` | `0f33530405b5997ec303b991e56e77de0a36a3ee8d91f7fc0978779d01940ac8` |
+| `tools/pw_public.py` | `tools/pw_public.py` | `7443140caa7e6ad1948865993acd362feadef7b0a717893a68ecf6ba9b2d8888` |
+
+## Relocation, validation, and remaining work
+
+`tools/pw_release.py` changes only `REPO = LAB.parent` to `REPO = LAB.parents[3]`, the enclosing Git checkout. LAB and all lab-relative paths remain inside this vendor directory. This correction lets relocated fixtures and future candidate sources share the same checkout identity. `reference/base-bassy-28030de6.bas` is preserved byte-identically, with adjacent provenance sidecar, under the approved identity-oracle exception. Runtime comment headers change runtime hashes; historical semantic-audit hash qualification does not transfer.
+
+Original unchanged baseline: 62 passed, 2 failed, 5 skipped with isolated pandas 3.0.6 overlay. After C1-approved destination corrections and four new portability tests: `uv run --locked --with pandas pytest tests/unit/gota/compiler -q` gives **68 passed, 5 skipped**. Missing native handoff binary causes five existing skips. Imports and source inventory resolve inside this checkout. This is not engine, hosted, semantic, or GotA policy qualification. pandas is not yet in the shared project lock; the overlay is provisional dependency proof only.
+
+Ruff on the four-file test suite and copied Python modules finds **116 inherited diagnostics** under the destination configuration, exactly matching the same source-file set at the pin, with identical per-rule counts. Source executable modes are preserved; 14 EXE001 diagnostics also exist in pinned files with mode 100644. The new `test_vendor_layout.py` passes Ruff. No suppression or lint configuration changes were made. Source/destination diagnostic JSON was retained in `/tmp/ide-mvp-codex-task-2.1-ruff-{source,destination}.json`. The gate body is hash-verified unchanged.
+
+The copied policy-surface, AGENT, LESSONS, config, runtime, semantic evaluators, and reference are Paintbot inputs. Adaptation remains for later tasks. The original dispatcher catalog includes unsupported unrelated commands; only the focused strategy pipeline closure is vendored. No agent invocation, credential, remote action, or native execution was performed in Task 2.1.
