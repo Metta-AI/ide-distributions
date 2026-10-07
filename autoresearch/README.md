@@ -19,9 +19,10 @@ text, add a comment, then use **Copy JSON** to send feedback.
 | Document | Status | Covers |
 |---|---|---|
 | [`docs/designs/autoresearch-system-design-2026-10-06.html`](docs/designs/autoresearch-system-design-2026-10-06.html) | Approved 2026-10-06 | The research agent itself: research method and modes, ontology (topics, hypotheses, experiments, results, claims and hubs, STRATEGY), doctrine, procedures, skills and tools, message semantics, stuck signals, game contract, parameters |
+| [`docs/designs/autoresearch-runtime-2026-10-06.html`](docs/designs/autoresearch-runtime-2026-10-06.html) | Draft for review | How it runs: Hermes profile distribution, Hermes Kanban as the next-action work queue, cron scripts, Hermes plugin, configuration, hosting neutrality, comms transport and adapters, credentials, compiler port plan, tests, schedule, risks |
 
-The System Design is the authority for research-side behaviour. A companion
-Runtime document (how the system runs on Hermes) follows separately.
+The System Design is the authority for research-side behaviour. The Runtime
+document must stay consistent with it.
 
 The review record for the System Design (two rounds of comments with replies) is in
 [`docs/designs/reviews/`](docs/designs/reviews/).
