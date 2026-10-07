@@ -10,6 +10,11 @@ File formats (one record per file):
   ``versions/<V-id>/version.json``, ``versions/<V-id>/events/<VE-id>.json`` and
   ``evidence/index/<EV-id>.json``. Their Doc body is always ``""``.
 
+Archive. An entity may have a second, archive location (claims: ``kb/archive``). An archived
+record keeps its id and file name; lookups (``path_for``, ``parse_record_path``,
+``iter_record_files``) search both locations, and new records go to the primary one. The move
+itself is ``RecordStore.archive``; ``mutability.move_problems`` judges it.
+
 Schemas live in ``schemas/entity/<name>.json`` (draft 2020-12). There is no ``lever`` entity:
 a closed lever is a refuted mechanism claim.
 """
@@ -40,10 +45,11 @@ class EntityType:
     subdir: str  # name of the Layout property holding this entity's directory
     fmt: str  # "md" or "json"
     schema: str  # schema file name under SCHEMA_DIR
+    archive_subdir: str | None = None  # Layout property of the archive location, if any
 
 
-def _entity(name: str, subdir: str, fmt: str) -> EntityType:
-    return EntityType(name, ENTITY_PREFIXES[name], subdir, fmt, f"{name}.json")
+def _entity(name: str, subdir: str, fmt: str, archive_subdir: str | None = None) -> EntityType:
+    return EntityType(name, ENTITY_PREFIXES[name], subdir, fmt, f"{name}.json", archive_subdir)
 
 
 REGISTRY: dict[str, EntityType] = {
@@ -53,7 +59,7 @@ REGISTRY: dict[str, EntityType] = {
         _entity("hypothesis", "hypotheses", "md"),
         _entity("experiment", "experiments", "md"),
         _entity("result", "results", "md"),
-        _entity("claim", "claims", "md"),
+        _entity("claim", "claims", "md", archive_subdir="archive"),
         _entity("hub", "hubs", "md"),
         _entity("lesson", "lessons", "md"),
         _entity("journal", "journal", "md"),
@@ -74,12 +80,33 @@ def entity_of_id(id_: str) -> EntityType:
     return _ENTITY_BY_PREFIX[prefix]
 
 
-def _relative_dir(layout: Layout, entity: EntityType) -> str:
-    return getattr(layout, entity.subdir).relative_to(layout.root).as_posix()
+def record_dirs(layout: Layout, entity_name: str) -> list[Path]:
+    """The entity's directories: its primary one, then its archive (if it has one)."""
+    entity = REGISTRY[entity_name]
+    subdirs = [entity.subdir, *([entity.archive_subdir] if entity.archive_subdir else [])]
+    return [getattr(layout, subdir) for subdir in subdirs]
+
+
+def archive_dir(layout: Layout, entity_name: str) -> Path | None:
+    entity = REGISTRY[entity_name]
+    return getattr(layout, entity.archive_subdir) if entity.archive_subdir else None
+
+
+def is_archived_path(layout: Layout, rel_path: str) -> bool:
+    """True if ``rel_path`` is a record file in its entity's archive directory."""
+    parsed = parse_record_path(layout, rel_path)
+    if parsed is None:
+        return False
+    directory = archive_dir(layout, parsed[0])
+    return directory is not None and (layout.root / rel_path).parent == directory
+
+
+def _relative_dirs(layout: Layout, entity: EntityType) -> list[str]:
+    return [path.relative_to(layout.root).as_posix() for path in record_dirs(layout, entity.name)]
 
 
 def _path_regex(layout: Layout, entity: EntityType) -> re.Pattern:
-    directory = re.escape(_relative_dir(layout, entity))
+    directory = "(?:" + "|".join(re.escape(d) for d in _relative_dirs(layout, entity)) + ")"
     id_group = rf"(?P<id>{entity.prefix}-{_ULID})"
     if entity.name == "version":
         return re.compile(rf"{directory}/{id_group}/version\.json")
@@ -115,14 +142,17 @@ def entity_of_path(layout: Layout, rel_path: str) -> str | None:
 def in_record_dir(layout: Layout, rel_path: str) -> bool:
     """True if the path sits where only records belong (a record directory or below)."""
     return any(
-        rel_path.startswith(_relative_dir(layout, entity) + "/") for entity in REGISTRY.values()
+        rel_path.startswith(directory + "/")
+        for entity in REGISTRY.values()
+        for directory in _relative_dirs(layout, entity)
     )
 
 
 def iter_record_files(layout: Layout, entity_name: str) -> list[Path]:
-    """Files in the entity's directory matching its naming glob (not yet checked by name)."""
-    entity = REGISTRY[entity_name]
-    return sorted(getattr(layout, entity.subdir).glob(_glob_pattern(entity)))
+    """Files in the entity's directories (archive included) matching its naming glob (not yet
+    checked by name)."""
+    pattern = _glob_pattern(REGISTRY[entity_name])
+    return sorted(path for d in record_dirs(layout, entity_name) for path in d.glob(pattern))
 
 
 def path_for(layout: Layout, id_: str, slug: str | None = None) -> Path:
@@ -139,9 +169,10 @@ def path_for(layout: Layout, id_: str, slug: str | None = None) -> Path:
         return matches[0]
     if entity.fmt == "json":
         return directory / f"{id_}.json"
-    existing = sorted([*directory.glob(f"{id_}--*.md"), *directory.glob(f"{id_}.md")])
-    if existing:
-        return existing[0]
+    for location in record_dirs(layout, entity.name):
+        existing = sorted([*location.glob(f"{id_}--*.md"), *location.glob(f"{id_}.md")])
+        if existing:
+            return existing[0]
     if slug is not None:
         if not SLUG_PATTERN.fullmatch(slug):
             raise ValueError(f"invalid slug {slug!r}: use lowercase letters, digits and hyphens")

@@ -1,9 +1,9 @@
 """Resolve ``ar://`` references against a commit of a workspace repo (never its working tree).
 
 Minimal resolver (Task 3.2): core record types ``ar://<type>/<id>`` for the types in
-``CORE_TYPES``, ``ar://plan``, ``ar://file/<path>`` and ``ar://handoff/<task>/<run>``. A
+``CORE_TYPES`` (claims also from ``kb/archive``), ``ar://plan``, ``ar://file/<path>`` and ``ar://handoff/<task>/<run>``. A
 ``#fragment`` is ignored here and the whole document is returned. Task 3.5 extends this with
-anchors, archived claims, and game-declared reference types.
+anchors and game-declared reference types.
 """
 
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from autoresearch.io import gitops
 from autoresearch.paths import Layout
-from autoresearch.records.registry import REGISTRY, parse_record_path
+from autoresearch.records.registry import parse_record_path, record_dirs
 
 SCHEME = "ar://"
 CORE_TYPES = (
@@ -44,8 +44,8 @@ class Resolved:
 
 
 def _record_path(repo: Path, sha: str, entity_name: str, id_: str) -> str:
-    directory = getattr(_RELATIVE, REGISTRY[entity_name].subdir).as_posix()
-    listing = gitops.git(repo, "ls-tree", "-r", "--name-only", sha, "--", f"{directory}/")
+    directories = [f"{d.as_posix()}/" for d in record_dirs(_RELATIVE, entity_name)]
+    listing = gitops.git(repo, "ls-tree", "-r", "--name-only", sha, "--", *directories)
     for path in listing.splitlines():
         if parse_record_path(_RELATIVE, path) == (entity_name, id_):
             return path

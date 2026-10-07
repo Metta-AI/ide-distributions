@@ -71,3 +71,13 @@ def test_unresolvable_raises(canonical, uri):
 def test_type_must_match_id(canonical):
     with pytest.raises(ResolveError):
         resolve(canonical.root, f"ar://topic/{canonical.hypothesis_id}")
+
+
+def test_archived_claim_resolves(canonical):
+    source = canonical.layout.claims / f"{canonical.claim_id}.md"
+    canonical.layout.archive.mkdir(parents=True, exist_ok=True)
+    source.rename(canonical.layout.archive / source.name)
+    gitops.commit_all(canonical.root, "archive claim")
+    resolved = resolve(canonical.root, f"ar://claim/{canonical.claim_id}")
+    assert resolved.path == f"kb/archive/{canonical.claim_id}.md"
+    assert b"Creep damage" in resolved.content

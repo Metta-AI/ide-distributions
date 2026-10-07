@@ -222,6 +222,14 @@
     },
     "recorded": {
       "type": "string"
+    },
+    "archived_at": {
+      "type": "string",
+      "description": "Set when compaction moves the claim to kb/archive/."
+    },
+    "archive_reason": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "additionalProperties": true

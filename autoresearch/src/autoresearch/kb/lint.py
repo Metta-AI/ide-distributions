@@ -35,6 +35,7 @@ from autoresearch.paths import Layout
 from autoresearch.records.registry import (
     REGISTRY,
     entity_of_id,
+    is_archived_path,
     iter_record_files,
     normalize,
     parse_record_path,
@@ -105,10 +106,12 @@ def superseded_or_refuted_refs(claims: list[dict]) -> set[str]:
 
 
 def load_records(layout: Layout, entity: str) -> list[_Record]:
+    """Records in the entity's primary directory (archived claims: ``load_archived_claims``)."""
     records = []
     for path in iter_record_files(layout, entity):
-        parsed = parse_record_path(layout, path.relative_to(layout.root).as_posix())
-        if parsed is None or parsed[0] != entity:
+        rel = path.relative_to(layout.root).as_posix()
+        parsed = parse_record_path(layout, rel)
+        if parsed is None or parsed[0] != entity or is_archived_path(layout, rel):
             continue
         meta, body = read_doc(path)
         records.append(_Record(entity, parsed[1], normalize(meta), body))
@@ -183,6 +186,16 @@ def _is_live(record: _Record) -> bool:
         return True
     state = record.meta.get("state" if record.entity == "hypothesis" else "status")
     return state not in _CLOSED_STATES.get(record.entity, ())
+
+
+def claims_cited_by_live_records(layout: Layout) -> set[str]:
+    """Claim ids cited by any hub or any live topic, hypothesis or experiment."""
+    cited: set[str] = set()
+    for entity in ("hub", "topic", "hypothesis", "experiment"):
+        for record in load_records(layout, entity):
+            if _is_live(record):
+                cited |= cited_claims(record)
+    return cited
 
 
 def _hub_uncited_lines(body: str) -> Iterator[tuple[int, str]]:
