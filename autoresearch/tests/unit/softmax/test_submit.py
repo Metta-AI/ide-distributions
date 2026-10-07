@@ -21,9 +21,7 @@ def board(tmp_path):
 
 
 def run_submit(board, worker, experiment, sm=None, player=PLAYER):
-    return submit(
-        worker.ctx(), board.queue, sm or board.sm, experiment, LEAGUE, player_id=player
-    )
+    return submit(worker.ctx(), board.queue, sm or board.sm, experiment, LEAGUE, player_id=player)
 
 
 def submissions_of(board, platform_id):

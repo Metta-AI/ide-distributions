@@ -74,9 +74,7 @@ def _check_outcome(store, experiment: str, meta: dict, platform_id: str) -> dict
         )
     design = EvaluationDesign.from_dict(meta["evaluation_design"])
     if outcome.get("design_sha256") != _design_sha256(design):
-        raise Refused(
-            "stale_outcome", "the outcome was computed for another evaluation design"
-        )
+        raise Refused("stale_outcome", "the outcome was computed for another evaluation design")
     return outcome
 
 
