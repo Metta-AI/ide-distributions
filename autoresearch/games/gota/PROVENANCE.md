@@ -300,3 +300,13 @@ inappropriate Fisher path. This correction changes dispatch, not that engine.
 ## Compiler vendor (Task 2.1)
 
 All copied compiler code, runtime, inputs, and destination test files are listed individually with pinned source paths and SHA-256 values in [compiler/PROVENANCE.md](compiler/PROVENANCE.md). Source: committed Paintbot `6b0bffa5085ffc4bf94ecaa8baee463e55599c84`. This is a preserved Paintbot baseline, pending GotA adaptation; engine and semantic qualification do not transfer.
+
+
+## Current compiler/native toolkit refresh (Task 2.4)
+
+Current gates and compiler helpers target live 2026.10.7.2 / Polyworld
+801749e509e888b423ba44ee2188946c22e3ba85. Historical recording evidence above
+retains its original pin. Both native builders now require populated, verified
+offline caches and never fetch. Current harness/context source inventory and
+adoption decisions are in [compiler provenance](compiler/PROVENANCE.md); live
+verification is in [the refresh finding](../../docs/plans/findings/gota-live-refresh-2026-10-07.md).

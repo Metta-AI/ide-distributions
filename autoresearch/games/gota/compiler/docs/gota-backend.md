@@ -1,145 +1,153 @@
-# GotA build adapter and bounded packing
+# GotA compiler and M1 readiness
 
-Task 2.3 adapts the pinned Paintbot pipeline to the live unstructured GotA host.
-It does not provide the v13 strategy decomposition, Hermes invocation, or a
-v13 action-equivalence verdict; those belong to Task 2.4.
+The existing Paintbot pipeline now targets GotA at Polyworld
+`801749e509e888b423ba44ee2188946c22e3ba85`, version `2026.10.7.2`, with Bassy
+`a02e6dd5889310b13d21725c891bde8d01539f08`. The primary GotA reference is
+`personal_labs_gota@09d3ed28`; [PROVENANCE](../PROVENANCE.md) inventories adopted
+files and retained contracts. The live refresh is recorded in
+[the pin finding](../../../../docs/plans/findings/gota-live-refresh-2026-10-07.md).
 
-## Entry points
+## Source and storage
 
-From `autoresearch/`, the existing driver is:
+The default source is `games/gota/seed/strategy/STRATEGY.md`. Its components are
+specified, not proven. `K.config` owns the 46 configuration outputs and executes
+before `C.farm` every decision. `C.farm` owns the baseline's remaining shared
+mutable globals, all 32 arrays, and helper routines. Its empty start routine and
+absence of an init routine preserve baseline persistence. Runtime death handling
+uses the rising edge of `selfRespawnTicks > 0`; it resets selection state only.
+
+One always-selected rule carries `G.survive`, `G.farm`, and `G.finish`. These are
+coarse declared labels. They do not distinguish the selected gameplay branch and
+do not establish survival, farming quality, or finishing success. This ownership
+split preserves cross-routine writes without duplicating mutable state. Finer
+capabilities require a later state-ownership design.
+
+Assembly prefixes `' @gota-structures` and retains namespaced state. The structured
+limits are 512 globals, 128 arrays, 262,144 cells, 64 routines and 20,000 static
+instructions. Host declarations consume 78 globals, 57 arrays and 153,920 cells,
+including unused fields. The policy cap is 65,535 bytes; native compiled input,
+including host structures, may use 69,191 bytes. Legacy v13 retains its unmodified
+256-global, 32-array, 4,096-cell, 65,536-byte mode. Both use 80,000 instruction and
+200,000 work soft gates per decision.
+
+The earlier Task 2.3 pvId packing path is retired. `packing.json` is rejected;
+there is no implicit binding or baseline-copy fallback. Its historical tests live
+in `tests/unit/gota/compiler/legacy_packing.py`. Original generated unit texts
+remain available separately from comment/whitespace-compacted `policy.bas`.
+
+## Compiler and Hermes
+
+From `autoresearch/`, with the locked dependencies installed:
 
 ```sh
-uv run --locked --with pandas python games/gota/compiler/tools/pw_strategy.py lint PATH/STRATEGY.md
-uv run --locked --with pandas python games/gota/compiler/tools/pw_strategy.py prepare --source PATH/STRATEGY.md
-uv run --locked --with pandas python games/gota/compiler/tools/pw_strategy.py assemble BUILD-ID
-uv run --locked --with pandas python games/gota/compiler/tools/pw_strategy.py verify BUILD-ID
+uv run --locked --offline python games/gota/compiler/tools/pw_strategy.py lint --json
+uv run --locked --offline python games/gota/compiler/tools/pw_strategy.py compile \
+  --agent hermes --model z-ai/glm-5.3-flash --milestone m1 --full \
+  --agent-timeout 3600 --manifest /path/to/coworld_manifest.json --json
 ```
 
-The retained `pw_strategy.py` filename is a vendor-layout compatibility detail.
-Every driver parse (lint, prepare, generation context, incremental comparison,
-assembly) selects `backend='gota'`. Finalized version/map files record the backend;
-audit source reconstruction reads that value. The low-level parser defaults to
-`paintbot` only to retain reproducible historical fixtures. Call
-`parse_strategy(path, backend='gota')` in GotA integrations. Unknown backends fail.
-The legacy `strategy_gates.py` remains historical Paintbot reference; the driver
-imports `gota_gates.verify`, which calls the shared `games.gota.gates` modules.
+The second command invokes a real model and requires separately authorized
+credentials and credit. It has **not** been run for Task 2.4. No claim of real M1
+completion follows from the local fixture results below. The default model is
+configured in `strategy/compiler/config.json`; explicit `--model` wins, followed
+by `OPENROUTER_MODEL` for Hermes. Use the explicitly selected dry-run model first,
+then the approved `OPENROUTER_MODEL` value. Prepare checks the selected CLI version;
+tests only use local fakes and never probe a real agent executable.
 
-Prepare supports exactly `claude` and `codex`; unknown agent names raise an error
-before command dispatch or model lookup. Hermes is still unimplemented: Task 2.4
-was stopped after an unintended real CLI launch during its initial test. See
-[the containment finding](../../../../docs/plans/findings/compiler-task-2.4-containment.md).
+Hermes dispatch uses `-z --query-file prompt.txt -t file --max-turns 40
+--usage-file usage.json --model MODEL --provider openrouter`. The process receives
+`TERMINAL_CWD` for its isolated scratch directory and the selected
+`OPENROUTER_MODEL`. The scratch snapshot contains the work order, exact baseline,
+compiler ABI/lessons, live host JSON and GotA/Bassy/structures context before
+execution. Only requested units, report_draft.json and usage.json may change.
+Symlink/missing outputs, unexpected writes, Git index/ref changes and nonzero exit
+fail closed. Usage is retained separately for each attempt. Unknown backend names
+never fall through to another executable.
 
-Prepare requires committed inputs and an installed configured compiler CLI. It
-reads `--version`; it does not run a model. The full `compile` command runs the
-configured model and was not authorized by Task 2.3; that completed task ran no model.
-The pandas overlay is still provisional until the shared dependency owner updates
-its lock. No project dependency file changed.
+One compile invokes the agent 1–3 times, with up to 40 agent turns per invocation.
+Provider requests/retries and tokens are not a hard spend cap. The 3600-second
+operational allowance is informed by the primary lab's observed 3–25 minute
+28-unit generations and 2–4 minute gates; this two-unit source has no promised
+latency. Local fake fixtures do not predict model reliability or cost.
 
-## Explicit baseline bindings
+Inputs must be committed. Source hashes cover the strategy, reference baseline,
+compiler context/host/runtime/config, all compiler and gate Python, GotA Python
+and Nim helpers, both build scripts and engine.env. Finalization hashes immutable
+artifacts. G1–G5 use the shared gate modules, with fresh evidence per repair round.
+`--manifest` supplies the downloaded live manifest to G2; null config does not
+skip the gate. G2's Coworld overlay is locked to `coworld==0.1.57` and
+`softmax-cli==0.26.38` and resolves offline. Images and overlay must already exist.
+Pandas is now a locked project dependency; no pandas overlay is needed.
 
-A strategy can supply a sibling `packing.json`:
+## Offline native tools
 
-```json
-{"baseline_bindings": {"sk_baseline__pvId": "pvId", "sk_baseline__pvN": "pvN"}}
+No helper fetches a repository or installs a dependency. Establish the exact
+source/dependency caches first, retaining the real Polyworld config.nims and Nim
+2.2.10. Before compilation the builder checks every dependencies.lock Git pin and tracked
+cleanliness. Cached acceptance separately checks the recorded build fingerprint:
+
+```sh
+sh games/gota/tools/build_nim.sh 801749e509e888b423ba44ee2188946c22e3ba85 gate_probe
+sh games/gota/tools/build_gota_match.sh
 ```
 
-This example illustrates names, not a ready baseline strategy. The mapping keys
-must identify actual emitted component globals or arrays. Targets must be exact
-v13-live storage names (case-insensitive), with matching scalar/array kind and
-original inclusive bounds. Targets are unique, cannot collide with already
-emitted storage, and cannot bind runtime/generated ST state. Unknown/malformed
-bindings fail. SUB parameters cannot use any physical binding target or the
-synthesized `pvId` array name; assembly asks for the parameter to be renamed.
-A parameter that shadows a source component symbol still remains local.
-Missing bindings never cause prefix guessing or baseline copying;
-new scalar names consume reserve cells, while an unbound new array fails.
+The latter hashes its source, build script, engine.env and Nim version into a
+binary fingerprint checked before use. G1/G3/G4 use the cached gate probe and
+reject missing/stale files. Historical replay tools may use a separately
+populated `.cache/polyworld-<sha8>` checkout and matching dependency cache; the
+builder never changes a checkout or fetches missing objects. Historical replay
+fixtures retain their original recording pin.
 
-The exact reference is `tests/fixtures/gota/v13-live.bas`, SHA-256
+## Exact action oracle and honest goal audit
+
+After a finalized compiler build, use its immutable policy artifact:
+
+```sh
+uv run --locked --offline python games/gota/tools/equivalence.py \
+  games/gota/compiler/strategy/compiled/BUILD-ID/policy.bas --out /path/to/new-oracle-dir
+uv run --locked --offline python games/gota/tools/goal_audit.py --build BUILD-ID \
+  --logs /path/to/new-oracle-dir/seed-1-candidate --out /path/to/goal-audit-seed-1.json
+```
+
+The audit command above covers seed 1 only; run it for each of the 20 candidate
+directories to report all M1 decision evidence.
+
+The oracle uses seeds 1–20, full Open Draft and 28,800 battle ticks. Candidate
+seats 0–4 (hero IDs 100–104) face the exact baseline in seats 5–9; the paired
+reference substitutes baseline on the candidate seats with identical setup.
+The baseline SHA-256 must be
 `1637c5604a522342de710afbffb16cdaa84befe99d3df17fa28e146414f86f9c`.
-The packer checks this identity before using its lexical storage inventory.
-It never copies any executable baseline source into generated output.
+No roster is forced. The actual engine determines decision order; command capture
+records attempted commands, including rejected actions, with arguments and order.
+All five candidate action streams must match at every tick. PRINT is excluded;
+missing ticks, missing/no-action decisions, malformed data, VM failure or truncated
+runs fail. Receipt files bind setup, binary fingerprint, engine/Bassy, opponent
+hashes, loaded policy source hashes, logs and traces. Policies are snapshotted
+before loading and native source SHA1 is checked against snapshot SHA1/SHA256.
+This is trajectory identity against fixed opponents, not competitive qualification.
 
-`source_hashes` includes packing.json when present and rejects its addition after
-prepare. It also includes the actual baseline, every compiler Python helper, the
-compiler config/instructions/runtime, shared gate code, and GotA Python/Nim/build
-helpers. Map `packing` records canonical bindings, physical slot mapping and the
-baseline hash. Original unit texts are retained separately from packed policy.bas.
+The supported GotA audit verifies immutable build artifacts and reconstructs the
+map from committed source using the existing load_build path. It binds the native
+receipt's first five policies to that build, verifies evidence hashes and engine,
+and attributes valid PWD labels within the 24-tick heartbeat to actual decisions.
+Every True/Believed/Acted/Acted properly/Result predicate and goal claim remains
+unmeasurable until a reviewed GotA evaluator exists. Analysis exit zero is not a
+policy pass. `--map` supports exploration but always leaves coverage unmeasurable.
+The vendored Paintbot semantic audit is not a GotA evidence entry point.
 
-## Allocation and bounds
+## Local evidence and remaining gate
 
-The Phase A map is implemented literally:
+Test-only mechanical units reproduce the reference statements and exercise fake
+Hermes generation plus actual assembly. Full native strict compilation used 384
+globals, 102 arrays, 157,993 cells, 54 routines and 5,056 instructions; policy size
+54,452 bytes (58,108 with host). The complete fake seed-1 oracle matched all 31,200
+ticks. Adding a rejected attackTarget(0) caused the oracle to detect its first
+changed attempt at draft tick 241. These are harness/fixture proofs, not generated
+M1 results. Real generation, all G gates, the twenty-seed oracle, and the bound
+audit remain required after OpenRouter credit is available.
 
-| Region | pvId indices |
-| --- | --- |
-| Original baseline | 0–63 |
-| Runtime arrays | 64–483 |
-| Sorted 49 fixed scalars | 484–532 |
-| New metadata and scratch, sorted by name | 533–660 |
-
-The emitted DIM is `pvId(660)`, exactly 661 cells. Rule/situation capacities remain
-63/124; the seven adaptation arrays each have five cells (unused zero plus four
-adaptations). Lint rejects larger component counts; allocation rejects more than
-128 new scalar names or any unsupported extra arrays. Goals occupy only literal
-PRINT text and map metadata. Exact offsets are exported as ARRAYS/FIXED in
-`tools/gota_packing.py` and included in each build map.
-
-The rewrite tokenizes identifiers with the existing scanner, respects SUB-local
-parameters, preserves PRINT literals and inline comments, and removes indentation,
-blank lines and comment-only lines to reduce source size. Nested indices retain
-parentheses. DIM/SUB compound statements and multiple DIM declarations on one
-line are rejected explicitly. Literal signed out-of-range runtime/pvId indices
-are rejected before flattening. Array accesses cannot silently truncate.
-
-This is **not arbitrary dynamic-index isolation**. Generated runtime loops are
-bounded by lint-checked rule, situation and adaptation counts. Baseline pvId
-reads/writes are bounded by pvN/efN at 64 as recorded in Phase A. Task 2.4's source
-and bindings must preserve those invariants; an arbitrary generated unit with a
-computed out-of-range index has not been proven safe by this lexical pass.
-
-The final packed source is counted and rejected above the actual globals, arrays,
-cells or source-size ceilings. G1 compiles it with the real engine, and G3 also
-checks routine/static-instruction limits and measured decisions. Storage fit
-alone never establishes a full G3 pass or action equivalence.
-
-## Shared gates and offline execution
-
-`gota_gates.verify(build_id, context=GateContext(...))` supports explicit local
-fixtures. Every call allocates a fresh `attempt-*` subdirectory under the selected
-work directory and copies the context with cleared measurements/episode/map state.
-The caller's context is unchanged. G2 and G5 share that attempt's context; repaired
-artifacts cannot reuse a previous episode. Attempt directories and their gates.json
-are retained, while the stage's gates.json contains the latest result.
-The CLI uses `strategy/compiler/config.json`'s `gates.manifest`; null
-means G2 fails for missing evidence. Supply an already downloaded live manifest
-and available image for real G2; the adapter does not invent a manifest or skip
-this gate. Default baseline is exact v13-live. The order is G1, G2, G3, G4, G5;
-G1/G2 failures mark subsequent gates unrun/failed. G4 regressions remain advisory,
-but missing or failed measurements fail. The shared screen owns seeds 1–10 and
-Glory/win-rate scoring.
-
-The adapter uses only the cached `tools/bin/gate_probe-5287c437`. It rejects missing
-or stale binaries against gate_probe.nim, replay_outcome.nim and build_nim.sh;
-it never fetches or builds implicitly. If stale, establish the pinned offline
-Nim/dependency toolchain before rebuilding. Do not invoke build_nim.sh's network
-branch under Phase C's offline authorization.
-
-Shared G5 retains LH parsing for legacy policies. A compiler map switches it to
-the existing strict PWD v2/v3 and PWP/PWE/PWB/PWC reader for all ten episode logs,
-after G2 artifact/completion checks. Missing decisions, malformed labels, backwards
-ticks or BASIC failures fail. This proves wire parsing only:
-`compiler_trace_coverage` remains null, and no goal truth, complete temporal
-coverage or semantic equivalence is inferred.
-
-## Local evidence
-
-The authored trivial strategy fixture emits 7,596 bytes, zero scalar globals,
-one 661-cell array, 27 routines and 1,452 static instructions. A cached native
-3,000-tick seed-1 simulation measured 620 decisions on each of ten seats, no VM
-errors, 2,010 peak instructions, 3,600 work, 33 PRINT events and 110 PRINT bytes.
-It is a runtime fixture, not the v13 decomposition or a competitive screen.
-
-Separately, packing the exact v13-live fixture without adding runtime execution
-compiles with 251 globals, 32 arrays and 4,061 cells. A token comparison proves
-only the pvId DIM bound changed (comments/whitespace omitted). No gameplay or
-container episode was run for that packed reference. Real G2, full G3/G4 and the
-action-stream oracle remain for the Task 2.4 compiled artifact.
+The earlier seven-launch containment incident is preserved in
+[the incident finding](../../../../docs/plans/findings/compiler-task-2.4-containment.md).
+C2 accepted containment and authorized local resumption; all owned tests now have
+a session guard against real codex/claude/hermes execution, and dispatch tests use
+strict fake-only PATH/process allowlists.

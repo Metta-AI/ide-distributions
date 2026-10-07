@@ -1,4 +1,4 @@
-"""Live unstructured GotA surface, verified at Polyworld 5287c437 / Bassy a02e6dd5.
+"""Live GotA scalar surface in structured policies, verified at Polyworld 801749e5 / Bassy a02e6dd5.
 
 Historical Paintbot helpers remain available; real GotA driver paths select this backend.
 """

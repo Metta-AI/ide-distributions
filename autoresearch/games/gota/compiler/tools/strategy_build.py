@@ -68,7 +68,8 @@ def source_files(source: Path) -> list[Path]:
     paths.extend(LAB.parent.joinpath('gates').glob('*.py'))
     paths.extend(LAB.parent.joinpath('tools').glob('*.py'))
     paths.extend(LAB.parent.joinpath('tools').glob('*.nim'))
-    paths.append(LAB.parent / 'tools/build_nim.sh')
+    paths.extend([LAB.parent / 'tools/build_nim.sh', LAB.parent / 'tools/build_gota_match.sh',
+                  LAB.parent / 'tools/engine.env'])
     paths.extend([LAB / 'tools/pw_strategy.py', LAB / 'tools/pw_intent.py', LAB / 'tools/release.env',
                   LAB / 'docs/policy-surface.md'])
     paths.extend(LAB / 'tools' / name for name in ('pw_local.py', 'pw_release.py', 'pw_cli.py',
@@ -176,19 +177,9 @@ def changes(current: dict, previous: dict, full: bool = False) -> dict[str, str]
 
 
 def packing_bindings(source: Path) -> dict:
-    path = source.parent / 'packing.json'
-    if not path.exists():
-        return {}
-    try:
-        value = read(path)
-    except (OSError, ValueError) as error:
-        raise pw_cli.UsageError(f'invalid {path}: {error}') from error
-    if (not isinstance(value, dict) or set(value) != {'baseline_bindings'}
-            or not isinstance(value['baseline_bindings'], dict)
-            or any(not isinstance(name, str) or not isinstance(target, str)
-                   for name, target in value['baseline_bindings'].items())):
-        raise pw_cli.UsageError(f'{path}: expected an object with baseline_bindings mapping string names to names')
-    return value['baseline_bindings']
+    if (source.parent / 'packing.json').exists():
+        raise pw_cli.UsageError('packing.json is obsolete: structured GotA builds preserve namespaced storage')
+    return {}
 
 
 def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None, previous=None) -> dict:
@@ -204,9 +195,9 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
     prior = previous_build(source, commit, previous)
     config = read(COMPILER / 'config.json')
     agent = agent or config['agent']
-    if agent not in ('claude', 'codex'):
-        raise pw_cli.UsageError('unknown compiler agent', ['claude', 'codex'])
-    model = model or config['models'][agent]
+    if agent not in ('claude', 'codex', 'hermes'):
+        raise pw_cli.UsageError('unknown compiler agent', ['claude', 'codex', 'hermes'])
+    model = model or (os.environ.get('OPENROUTER_MODEL') if agent == 'hermes' else None) or config['models'][agent]
     executable = shutil.which(agent)
     if executable is None:
         raise pw_cli.EnvironmentMissing(f'{agent} CLI is not installed', f'install the {agent} CLI and log in')
@@ -263,7 +254,7 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
                           'agent_sha256': digest(COMPILER / 'AGENT.md'),
                           'lessons_sha256': digest(COMPILER / 'LESSONS.md')},
              'backend': 'gota',
-             'engine': {'tag': 'gota-2026.10.6.1', 'commit': POLYWORLD_COMMIT},
+             'engine': {'tag': 'gota-2026.10.7.2', 'commit': POLYWORLD_COMMIT},
              'created': datetime.now(timezone.utc).isoformat(), 'diagnostics': diagnostics}
     dump(stage / 'work_order.json', order)
     return order
@@ -291,8 +282,12 @@ def agent_command(agent: str, model: str, directory: Path) -> list[str]:
     if agent == 'claude':
         return ['claude', '-p', '--model', model, '--safe-mode', '--dangerously-skip-permissions',
                 '--tools', 'Read,Write,Edit,Glob,Grep', '--output-format', 'text']
+    if agent == 'hermes':
+        return ['hermes', '-z', '--query-file', str(directory / 'prompt.txt'), '-t', 'file',
+                '--max-turns', '40', '--usage-file', str(directory / 'usage.json'),
+                '--model', model, '--provider', 'openrouter']
     if agent != 'codex':
-        raise pw_cli.UsageError(f'unknown compiler agent: {agent}', ['claude', 'codex'])
+        raise pw_cli.UsageError(f'unknown compiler agent: {agent}', ['claude', 'codex', 'hermes'])
     return ['codex', 'exec', '--ignore-user-config', '--ephemeral', '--sandbox', 'workspace-write',
             '--model', model, '-C', str(directory), '-']
 
@@ -331,6 +326,9 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         shutil.copyfile(COMPILER / 'AGENT.md', root / 'AGENTS.md')
         shutil.copyfile(COMPILER / 'LESSONS.md', root / 'context/LESSONS.md')
         shutil.copyfile(LAB / 'docs/policy-surface.md', root / 'context/policy-surface.md')
+        for context_file in (COMPILER / 'context').glob('*'):
+            shutil.copyfile(context_file, root / 'context' / context_file.name)
+        shutil.copyfile(COMPILER / 'host_surface.json', root / 'context/host_surface.json')
         from gota_host import BASELINE
         shutil.copyfile(BASELINE, root / 'context/base.bas')
         prior = build_path(order['previous_build']) if order['previous_build'] else None
@@ -343,10 +341,19 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         work = {'build_id': order['build_id'], 'generate': generated,
                 'components': components,
                 'interfaces': {key: value['interface'] for key, value in order['components'].items()},
-                'previous_guesses': previous_guesses, 'repair_errors': errors or []}
+                'previous_guesses': previous_guesses, 'repair_errors': errors or [],
+                'baseline_bindings': packing_bindings(REPO / order['source_path'])}
         dump(root / 'work_order.json', work)
         if (stage / 'report_draft.json').exists():
             shutil.copyfile(stage / 'report_draft.json', root / 'report_draft.json')
+        prompt = ('Read AGENTS.md and work_order.json. Generate only the listed components into units/<ID>.bas. '
+                  'Read context/LESSONS.md and context/policy-surface.md. The components include their exact '
+                  'source hashes and declared interfaces. Write report_draft.json with guesses and gaps. '
+                  'Do not edit any other path or run Git commands. Do not commit. '
+                  'Finish after writing the files; the driver assembles and runs gates.')
+        hermes = order['compiler']['agent'] == 'hermes'
+        if hermes:
+            (root / 'prompt.txt').write_text(prompt)
         git('init', root=root)
         git('add', '.', root=root)
         git('-c', 'user.name=Strategy compiler', '-c', 'user.email=local@invalid',
@@ -356,15 +363,16 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         head = git('rev-parse', 'HEAD', root=root)
         refs = git('show-ref', root=root)
         allowed = {f'units/{key}.bas' for key in generated} | {'report_draft.json'}
-        prompt = ('Read AGENTS.md and work_order.json. Generate only the listed components into units/<ID>.bas. '
-                  'Read context/LESSONS.md and context/policy-surface.md. The components include their exact '
-                  'source hashes and declared interfaces. Write report_draft.json with guesses and gaps. '
-                  'Do not edit any other path or run Git commands. Do not commit. '
-                  'Finish after writing the files; the driver assembles and runs gates.')
+        if hermes:
+            allowed.add('usage.json')
         command = agent_command(order['compiler']['agent'], order['compiler']['model'], root)
+        environment = os.environ.copy()
+        if hermes:
+            environment['OPENROUTER_MODEL'] = order['compiler']['model']
+            environment['TERMINAL_CWD'] = str(root)
         with (stage / 'agent.log').open('a') as log:
             try:
-                completed = subprocess.run(command, input=prompt, cwd=root, text=True,
+                completed = subprocess.run(command, input=None if hermes else prompt, cwd=root, text=True, env=environment,
                                            stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
             except subprocess.TimeoutExpired:
                 raise RuntimeError(f'compiler timed out after {timeout}s; see {stage}/agent.log') from None
@@ -382,9 +390,12 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
             path = root / name
             if not path.is_file() or path.is_symlink() or path.resolve().parent not in (root, root / 'units'):
                 raise RuntimeError(f'compiler did not write a regular output: {name}')
+        if hermes and not isinstance(read(root / 'usage.json'), dict):
+            raise ValueError('Hermes usage file must contain a JSON object')
         validate_draft(read(root / 'report_draft.json'), order)
         for name in allowed:
-            shutil.copyfile(root / name, stage / name)
+            target = stage / (f'hermes-usage-{root.name}.json' if name == 'usage.json' else name)
+            shutil.copyfile(root / name, target)
 
 
 def validate_draft(draft: dict, order: dict) -> None:

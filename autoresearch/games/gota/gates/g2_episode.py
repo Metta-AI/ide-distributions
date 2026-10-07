@@ -45,7 +45,7 @@ def run(artifact: Path, context: GateContext) -> GateResult:
         directory = context.work_dir / 'episode'
         if directory.exists():
             raise ValueError('Episode output already exists; use a fresh work directory')
-        command = ['uv', 'run', '--project', str(PROJECT), '--locked', '--python', '3.12',
+        command = ['uv', 'run', '--project', str(PROJECT), '--locked', '--offline', '--python', '3.12',
                    '--with', 'coworld==0.1.57', '--with', 'softmax-cli==0.26.38',
                    'coworld', 'run-episode', str(context.manifest.resolve()),
                    *([str(artifact.resolve())] * 10), '--variant', context.variant,

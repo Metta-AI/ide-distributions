@@ -2,7 +2,8 @@
   "agent": "claude",
   "models": {
     "claude": "claude-opus-5-5",
-    "codex": "gpt-6-astra"
+    "codex": "gpt-6-astra",
+    "hermes": "moonshotai/kimi-k3"
   },
   "_provenance": "Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: paintbot_pw_lab/strategy/compiler/config.json",
   "backend": "gota",

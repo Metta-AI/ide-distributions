@@ -58,7 +58,7 @@ more lifetime XP than every teammate; ties are 0.
 
 The extractor requires all ten finite, nonnegative score and XP values, positive
 integer ticks, and a known outcome (`RedTeam`, `BlueTeam`, `draw`, `time_limit`).
-These spellings match Polyworld `5287c437` `sim.nim:3853–3859`;
+These spellings match Polyworld `801749e5` (the live 2026.10.7.2 source);
 `time_limit` is a timeout. It rejects invalid evidence and nonzero scores for nonwinning seats. Missing
 metrics never become guessed zeros. Comparisons require at least 40 episodes;
 calibration can raise that floor.

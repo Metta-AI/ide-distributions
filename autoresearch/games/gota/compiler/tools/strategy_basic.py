@@ -937,9 +937,13 @@ def policy_stats(policy: str, *, backend: str = "paintbot") -> dict:
     limits = LIMITS
     if backend == "gota":
         from gota_host import LIMITS as limits
-    return {"globals": len(scan.globals), "globals_limit": limits["globals"],
-            "array_cells": sum(scan.arrays.values()), "array_cells_limit": limits["array_cells"],
-            "arrays": len(scan.arrays), "arrays_limit": limits["arrays"],
+    overhead = {}
+    if backend == "gota" and policy.startswith("' @gota-structures"):
+        from games.gota.gates.limits import HOST_STORAGE
+        overhead = HOST_STORAGE
+    return {"globals": len(scan.globals) + overhead.get("globals", 0), "globals_limit": limits["globals"],
+            "array_cells": sum(scan.arrays.values()) + overhead.get("array_cells", 0), "array_cells_limit": limits["array_cells"],
+            "arrays": len(scan.arrays) + overhead.get("arrays", 0), "arrays_limit": limits["arrays"],
             "source_bytes": len(policy.encode()), "source_limit": limits["source_bytes"]}
 
 
@@ -987,13 +991,13 @@ def assemble(strategy: sf.Strategy, units: dict[str, str], runtime_dir: Path, bu
     # block's marker starts a new line.
     policy = "\n".join(header) + "\n\n" + "".join(
         f"' ==== {name} ====\n{text}{'' if text.endswith(chr(10)) else chr(10)}\n" for name, text in blocks)
-    packing = None
     if strategy.backend == "gota":
-        from gota_packing import pack
-        try:
-            policy, packing = pack(policy, baseline_bindings)
-        except (ValueError, TypeError) as error:
-            raise BuildError([sf.Diagnostic("error", "gota-packing", str(error))]) from error
+        if baseline_bindings:
+            raise BuildError([sf.Diagnostic("error", "obsolete-packing", "structured GotA uses namespaced storage; remove packing.json")])
+        # Source compaction follows the verified GotA lab port; units remain verbatim.
+        policy = "' @gota-structures\n" + "\n".join(
+            line.strip() for line in policy.splitlines()
+            if line.strip() and not line.lstrip().startswith("'")) + "\n"
     budget = {"telemetry": telemetry_worst_case(strategy),
               **policy_stats(policy, backend=strategy.backend)}
     over = [key for key in ("globals", "array_cells", "arrays", "source_bytes")
@@ -1006,8 +1010,8 @@ def assemble(strategy: sf.Strategy, units: dict[str, str], runtime_dir: Path, bu
     out_units["generated.tables"] = tables
     mapping = build_map(strategy, out_units, build_id, source_commit, budget)
     mapping["backend"] = strategy.backend
-    if packing is not None:
-        mapping["packing"] = packing
+    if strategy.backend == "gota":
+        mapping["policy_mode"] = "structured"
     return {"policy": policy, "units": out_units, "map": mapping, "budget": budget}
 
 

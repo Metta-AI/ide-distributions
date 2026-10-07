@@ -10,13 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pw_cli
 import strategy_build as builds
 
-DEFAULT_SOURCE = builds.LAB / 'strategy/STRATEGY.md'
+DEFAULT_SOURCE = builds.LAB.parent / 'seed/strategy/STRATEGY.md'
 
 
 def parser():
     root = pw_cli.ArgumentParser('pw_strategy', __doc__, examples=[
-        'pw.py strategy lint games/gota/compiler/strategy/STRATEGY.md --json',
-        'pw.py strategy compile --agent claude --milestone m1 --json',
+        'pw_strategy.py lint --json',
+        'pw_strategy.py compile --agent hermes --milestone m1 --manifest MANIFEST --json',
         'pw.py strategy trace <build-id> --json'])
     commands = root.add_subparsers(dest='action', required=True)
     lint = commands.add_parser('lint', help='validate source format and references')
@@ -24,16 +24,19 @@ def parser():
     for action in ('prepare', 'compile'):
         child = commands.add_parser(action, help='prepare a work order' if action == 'prepare' else 'run the full compiler')
         child.add_argument('--source', type=Path, default=DEFAULT_SOURCE)
-        child.add_argument('--agent', choices=['claude', 'codex'])
+        child.add_argument('--agent', choices=['claude', 'codex', 'hermes'])
         child.add_argument('--model')
         child.add_argument('--full', action='store_true')
         child.add_argument('--milestone', choices=['m0', 'm1'])
         child.add_argument('--from', dest='previous', help='explicit previous passed build ID')
         if action == 'compile':
             child.add_argument('--agent-timeout', type=int, default=900)
+            child.add_argument('--manifest', type=Path, required=True, help='downloaded live Coworld manifest for G2')
     for action in ('assemble', 'verify', 'trace'):
         child = commands.add_parser(action)
         child.add_argument('build', help='staged build ID (assemble/verify), finalized ID (trace)')
+        if action == 'verify':
+            child.add_argument('--manifest', type=Path, required=True)
     audit = commands.add_parser('audit', help='join strategy beliefs and decisions to verified replay evidence')
     audit.add_argument('roots', nargs='+')
     audit.add_argument('--build', required=True)
@@ -45,6 +48,7 @@ def parser():
 
 
 def run(args, report):
+    report.release_tag = 'gota-2026.10.7.2'
     from strategy_format import parse_strategy, lint_strategy
     from gota_gates import verify
     from strategy_basic import BuildError
@@ -87,7 +91,7 @@ def run(args, report):
                 print(f'{order["build_id"]}: generation/gates round {attempt}/3', flush=True)
                 builds.generate(order, errors=errors, timeout=args.agent_timeout)
                 builds.assemble_build(order['build_id'])
-                gates = verify(order['build_id'])
+                gates = verify(order['build_id'], manifest=args.manifest)
                 errors = [{'gate': name, **gate} for name, gate in gates.items() if not gate['passed']]
                 if not errors:
                     break
@@ -127,7 +131,7 @@ def run(args, report):
         report.output(stage / 'map.json')
         return {'build_id': args.build, 'budget': result['budget']}
     order = builds.read(stage / 'work_order.json')
-    gates = verify(args.build)
+    gates = verify(args.build, manifest=args.manifest)
     target = builds.finalize(order, gates)
     report.output(target)
     if not all(g['passed'] for g in gates.values()):

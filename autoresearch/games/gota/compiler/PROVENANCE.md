@@ -184,3 +184,63 @@ parent review but was not implemented. No seed strategy, packing bindings,
 equivalence oracle, GotA goal-audit adapter, native build, or M1 run was produced.
 Task 2.4 remains stopped pending a ruling on the boundary violation. This commit
 is containment, not Task 2.4 completion or real-M1 readiness.
+
+
+## Task 2.4 local resumption (C2, 2026-10-07)
+
+C2 accepted the containment commit and authorized local work again. The earlier
+incident record above remains historical evidence. Its stopped/unsupported
+statements describe that commit, not the resumed implementation. No further real
+agent/model, broker, credential, or remote action was performed by the implementer.
+The parent separately performed the NOTES-2-authorized isolated Games Bond live
+version verification/download; it involved no model/broker/spend action.
+Pandas is now locked by shared dependency work merged at `ee140c52`.
+
+The primary GotA reference is `personal_labs_gota@09d3ed28d488fa965e36d4d4f6d99439952e18c7`.
+These files were copied from that exact Git commit (source-byte SHA-256 below),
+then adapted only where described. Context/host JSON bytes are unchanged. Native
+and Python helpers add destination paths, offline cache verification, ordered
+attempted-command capture, loaded-source hashes and immutable evidence receipts.
+
+| Destination relative to compiler | Source path | Source SHA-256 |
+| --- | --- | --- |
+| `../tools/gota_match.nim` | `gods_of_the_arena_lab/tools/gota_match.nim` | `91e6a99fdbabde1961beede7649449a8d5682f1fa300ca78b71bd0cdce5a24c5` |
+| `../tools/gota_local.py` | `gods_of_the_arena_lab/tools/gota_local.py` | `81f3a48b8d759dd3484d82f85938dbd58fb13ea29ac72e9ba71d9c90f9825b4d` |
+| `../tools/gota_cli.py` | `gods_of_the_arena_lab/tools/gota_cli.py` | `9de932334984aa0a8c80bb3048f11bce3ecd1fb45ca6beca08b37ef5121ec6e1` |
+| `../tools/engine.env` | `gods_of_the_arena_lab/tools/engine.env` | `98c45566ed43feb9378747a9c60887bad60dedbd6d9b22cb3aa5b540f8abd4cd` |
+| `../tools/build_gota_match.sh` | `gods_of_the_arena_lab/tools/build_gota_match.sh` | `063c3d7738bec8c19d1bd8ae7ff8f74806a5259ef272bab428fb8e2cc36d0f6a` |
+| `strategy/compiler/host_surface.json` | `gods_of_the_arena_lab/strategy/compiler/host_surface.json` | `0f77e77c2067114abde60de7de21780d0c70543766eb3ac13c276012c9998265` |
+| `strategy/compiler/context/gota-guide.md` | `gods_of_the_arena_lab/strategy/compiler/context/gota-guide.md` | `cae705ba912fed790a5d6e68225084daf29b2aea47477e2065e715197da8a7fc` |
+| `strategy/compiler/context/bassy-language.md` | `gods_of_the_arena_lab/strategy/compiler/context/bassy-language.md` | `c8b3619608c107a25fed5d2f277c10eae42faaa4033d8c63e8479efc2f9633de` |
+| `strategy/compiler/context/structures.bas` | `gods_of_the_arena_lab/strategy/compiler/context/structures.bas` | `fef65b46b9881fa593fdb52d1d3ee40b2210a15f69e304a35238f70f1e58445c` |
+
+Adopted: the lab's verified structured host, complete injected storage accounting,
+resource probe, real engine context/harness, exact build fingerprint, native action
+capture and death rising-edge model. Retained: our PW unit ABI, G grammar and
+PWD/PWE/PWP/PWB/PWC telemetry, immutable build machinery, shared G1–G5, exact
+legacy v13 oracle target and Hermes dispatch. The lab's different phase ABI and
+stale 5287 engine/audit semantic contracts were not adopted. All declared host
+storage counts even when unread; stale lab advice to count only reads is rejected.
+
+The live pin is `801749e509e888b423ba44ee2188946c22e3ba85`, verified by the parent;
+Bassy remains `a02e6dd5889310b13d21725c891bde8d01539f08`. Offline native builds
+use our own verified cache, real Nim config and locked dependencies. Lab checkouts
+are read-only sources. Historical 5287 replay fixtures remain at their recording
+pin in a separate local cache; no network fallback exists in either build script.
+
+Parent-approved ownership is K.config (46 configuration scalars), followed every
+decision by C.farm (coherent mutable baseline state and helpers). Empty C.start
+and no baseline init preserve persistence. One always rule bears three coarse
+goal labels; they neither identify executed branches nor prove claims. Finer
+capabilities require later design. Structured mode removes the old physical
+packing need. `packing.json` is rejected; historical packer evidence remains only
+in tests. There is no production baseline-copy path. Full authored unit fixtures
+are test inputs mechanically checked against the reference, never normal compile
+alternatives.
+
+Local fake-Hermes generation, native full artifact budgets, complete seed-1
+attempted-command equivalence and deliberate rejected-action mismatch establish
+harness readiness only. Real M1 generation, G gates and twenty-seed equivalence
+remain blocked on OpenRouter credit. The supported GotA audit checks immutable
+build/map/source and native loaded policies before claiming trace coverage; every
+goal claim and semantic predicate remains unmeasurable.

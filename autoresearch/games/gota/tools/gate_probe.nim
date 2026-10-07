@@ -1,4 +1,4 @@
-## Local gate instrumentation against Polyworld 5287c437; no compiler reimplementation.
+## Local gate instrumentation against Polyworld 801749e5; no compiler reimplementation.
 import std/[os, json, strutils]
 include examples/gods_of_the_arena/bots
 
@@ -6,20 +6,23 @@ let source = readFile(paramStr(2))
 let output = paramStr(3)
 var report = %*{"ok": false}
 try:
-  let program = compile(source, initHeroHost(0), heroVmLimits())
+  let structured = usesStructures(source)
+  let compiledSource = if structured: StructureSource & "\n" & source else: source
+  let limits = if structured: structureLimits(neuralLimits()) else: neuralLimits()
+  let program = compile(compiledSource, initHeroHost(0), limits)
   var cells = 0
   for i in 0 ..< program.arrays:
     cells += int(program.arrayExtent(int32(i))[1])
   report = %*{"ok": true, "globals": program.globals,
     "arrays": program.arrays, "array_cells": cells,
     "routines": program.routines, "static_instructions": program.instructions,
-    "source_bytes": source.len}
+    "source_bytes": source.len, "mode": (if structured: "structured" else: "legacy")}
   if paramStr(1) == "simulate":
     let seed = parseInt(paramStr(4))
     let maxTicks = parseInt(paramStr(5))
     let opponent = if paramCount() >= 6: paramStr(6) else: paramStr(2)
     let candidateBlue = paramCount() >= 7 and paramStr(7) == "blue"
-    let game = newGame(generateMap(int32(seed)), 240, 10, false, ReplayData())
+    let game = newGame(generateMap(int32(seed)), 240, 10, false, ReplayData(), draftMode = OpenDraft)
     game.loadBots([
       BotGroup(count: 5, path: if candidateBlue: opponent else: paramStr(2)),
       BotGroup(count: 5, path: if candidateBlue: paramStr(2) else: opponent)])

@@ -42,20 +42,20 @@ def test_real_generated_artifact_compiles(tmp_path):
     assert compiled.ok, compiled.details
     measured = g3_budget.run(policy, context)
     assert measured.ok, measured.details
-    assert result["budget"]["array_cells"] == 661
-    assert result["budget"]["globals"] == 0
-    assert result["map"]["packing"]["fixed"]["rt__started"] == 526
+    assert result["budget"]["array_cells"] > 153920
+    assert result["budget"]["globals"] > 78
+    assert result["map"]["policy_mode"] == "structured"
 
 
 def test_reserve_overflow(tmp_path):
-    import gota_packing as packing
+    import legacy_packing as packing
 
     with pytest.raises(ValueError, match="128"):
         packing.pack("\n".join(f"c_x__scratch{i} = 0" for i in range(129)))
 
 
 def test_baseline_accesses_disjoint_and_exact(tmp_path):
-    import gota_packing as packing
+    import legacy_packing as packing
 
     baseline = (ROOT / "tests/fixtures/gota/v13-live.bas").read_text()
     packed, mapping = packing.pack(baseline)
@@ -68,7 +68,7 @@ def test_baseline_accesses_disjoint_and_exact(tmp_path):
 
 
 def test_unknown_array_and_oversized_binding_fail():
-    import gota_packing as packing
+    import legacy_packing as packing
 
     with pytest.raises(ValueError, match="array"):
         packing.pack("DIM c_x__items(3)")
@@ -77,7 +77,7 @@ def test_unknown_array_and_oversized_binding_fail():
 
 
 def test_binding_and_strings_are_preserved():
-    import gota_packing as packing
+    import legacy_packing as packing
 
     text = 'DIM sk_base__pvId(63)\nsk_base__pvId(0)=5\nc_x__n=2\nPRINT "c_x__n"\n'
     packed, mapping = packing.pack(text, {"sk_base__pvId": "pvId"})
@@ -100,14 +100,14 @@ def test_binding_and_strings_are_preserved():
     ],
 )
 def test_unsafe_flattening_fails(source):
-    import gota_packing as packing
+    import legacy_packing as packing
 
     with pytest.raises(ValueError):
         packing.pack(source)
 
 
 def test_scoped_parameters_and_nested_indices():
-    import gota_packing as packing
+    import legacy_packing as packing
 
     text = "c_x__n=3\nSUB c_x__f(c_x__n)\nc_x__n=c_x__n+1\nEND SUB\n"
     packed, _ = packing.pack(text)
@@ -195,7 +195,6 @@ def test_source_inventory_includes_backend_and_shared_gate_closure(tmp_path):
     paths = builds.source_files(path)
     for suffix in (
         "gota_host.py",
-        "gota_packing.py",
         "gota_gates.py",
         "pw_episodes.py",
         "pw_metrics.py",
@@ -238,7 +237,7 @@ def test_backend_host_schema_matches_cached_live_sources():
 
 def test_actual_packed_v13_storage_compiles(tmp_path):
     import gota_host as host
-    import gota_packing as packing
+    import legacy_packing as packing
 
     from games.gota.gates import GateContext, g1_lint
 
@@ -262,7 +261,7 @@ def test_actual_packed_v13_storage_compiles(tmp_path):
 
 
 def test_bindings_fail_on_duplicate_unknown_or_wrong_kind():
-    import gota_packing as packing
+    import legacy_packing as packing
 
     for source, bindings in [
         ("a=1\nb=2", {"a": "pvN", "b": "pvN"}),
@@ -306,7 +305,7 @@ def test_g5_parses_ten_goal_traces_and_rejects_missing_or_malformed(tmp_path):
     assert not g5_telemetry.compiler_logs(context).ok
 
 
-def test_assemble_build_uses_hash_bound_gota_bindings(tmp_path, monkeypatch):
+def test_assemble_build_rejects_obsolete_gota_bindings(tmp_path, monkeypatch):
     import pw_cli
     import strategy_build as builds
 
@@ -325,11 +324,8 @@ def test_assemble_build_uses_hash_bound_gota_bindings(tmp_path, monkeypatch):
     builds.dump(stage / "work_order.json", order)
     monkeypatch.setattr(builds, "REPO", tmp_path)
     monkeypatch.setattr(builds, "build_path", lambda *a, **kw: stage)
-    result = builds.assemble_build("abcdef12-1")
-    assert result["map"]["backend"] == "gota"
-    assert result["map"]["packing"]["bindings"] == {"k_position__x": "pvn"}
-    assert result["budget"]["globals"] == 1
-    assert (stage / "policy.bas").read_text() == result["policy"]
+    with pytest.raises(pw_cli.UsageError, match="packing.json is obsolete"):
+        builds.assemble_build("abcdef12-1")
     builds.dump(packing, {"baseline_bindings": {}})
     with pytest.raises(pw_cli.UsageError, match="changed since prepare"):
         builds.assemble_build("abcdef12-1")
@@ -338,9 +334,9 @@ def test_assemble_build_uses_hash_bound_gota_bindings(tmp_path, monkeypatch):
 def test_metadata_overflow_fails_in_actual_assembly(tmp_path):
     units = dict(TRIVIAL_UNITS)
     units["K.position"] = units["K.position"].replace(
-        "END SUB", "\n".join(f"k_position__extra{i}=0" for i in range(129)) + "\nEND SUB"
+        "END SUB", "\n".join(f"k_position__extra{i}=0" for i in range(513)) + "\nEND SUB"
     )
-    with pytest.raises(sb.BuildError, match="128"):
+    with pytest.raises(sb.BuildError, match="globals"):
         sb.assemble(strategy(tmp_path), units, RUNTIME, "abcdef12-1", "a" * 40)
 
 
@@ -375,7 +371,7 @@ def test_cached_probe_rejects_missing_and_stale(tmp_path, monkeypatch):
         host.cached_probe()
     tools = tmp_path / "games/gota/tools"
     (tools / "bin").mkdir(parents=True)
-    binary = tools / "bin/gate_probe-5287c437"
+    binary = tools / "bin/gate_probe-801749e5"
     binary.write_bytes(b"fixture binary")
     os.utime(binary, (1, 1))
     for name in ("gate_probe.nim", "replay_outcome.nim", "build_nim.sh"):
@@ -408,8 +404,9 @@ SUB k_position__helper({parameter})
 END SUB
 '''
     assert not sb.check_unit(value, 'K.position', units['K.position'])
-    with pytest.raises(sb.BuildError, match='parameter.*physical storage.*rename'):
-        sb.assemble(value, units, RUNTIME, 'abcdef12-1', 'a' * 40, baseline_bindings=bindings)
+    # Structured names remain namespaced; physical baseline names are no longer aliases.
+    result = sb.assemble(value, units, RUNTIME, 'abcdef12-1', 'a' * 40)
+    assert f'SUB k_position__helper({parameter})' in result['policy']
 
 
 def test_assembly_preserves_parameter_shadowing_source_symbol(tmp_path):
@@ -419,10 +416,9 @@ SUB k_position__helper(k_position__x)
 k_position__x=k_position__x+1
 END SUB
 '''
-    result = sb.assemble(strategy(tmp_path), units, RUNTIME, 'abcdef12-1', 'a' * 40,
-                         baseline_bindings={'k_position__x': 'pvN'})
+    result = sb.assemble(strategy(tmp_path), units, RUNTIME, 'abcdef12-1', 'a' * 40)
     assert 'SUB k_position__helper(k_position__x)\nk_position__x=k_position__x+1\nEND SUB' in result['policy']
-    assert 'pvn = selfX' in result['policy']
+    assert 'k_position__x = selfX' in result['policy']
 
 
 @pytest.mark.parametrize('supplied_context', [False, True])

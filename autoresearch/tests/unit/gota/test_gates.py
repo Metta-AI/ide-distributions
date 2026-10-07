@@ -38,7 +38,7 @@ def test_measured_budget_baseline_and_33rd_array(context, tmp_path):
     result = gate('g3_budget').run(BASELINE, context)
     assert result.ok
     assert result.details['native_mode'] == {
-        'drafting': True, 'draft_mode': 'UniqueDraft', 'replay_mode': False}
+        'drafting': True, 'draft_mode': 'OpenDraft', 'replay_mode': False}
     invalid = tmp_path / 'arrays.bas'
     invalid.write_text('\n'.join(f'DIM a{i}(0)' for i in range(33)))
     assert not gate('g3_budget').run(invalid, context).ok

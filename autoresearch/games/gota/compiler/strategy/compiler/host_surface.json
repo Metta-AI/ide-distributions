@@ -1,0 +1,1554 @@
+{
+  "baseline": {
+    "arrays": [
+      {
+        "cells": 4096,
+        "name": "objects.id"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.kind"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.team"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.class"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.hp"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.maxhp"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.alive"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.level"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.mana"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.targetid"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.campid"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.leader"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.returning"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.position.x"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.position.y"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.facing.x"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.facing.y"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.velocity.x"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.velocity.y"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.controls.stunticks"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.controls.rootticks"
+      },
+      {
+        "cells": 4096,
+        "name": "objects.controls.silenceticks"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.level"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.maxlevel"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.requiredlevel"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.canlevel"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.damage"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.heal"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.restore"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.manacost"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.charges"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.cooldownticks"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.rechargeticks"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.casting"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.effectkind"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.range"
+      },
+      {
+        "cells": 4,
+        "name": "abilities.radius"
+      },
+      {
+        "cells": 6,
+        "name": "items.id"
+      },
+      {
+        "cells": 6,
+        "name": "items.count"
+      },
+      {
+        "cells": 6,
+        "name": "items.cooldownticks"
+      },
+      {
+        "cells": 24576,
+        "name": "objectitems.id"
+      },
+      {
+        "cells": 24576,
+        "name": "objectitems.count"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.abilityid"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.casterid"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.impacttick"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.hostile"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.support"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.position.x"
+      },
+      {
+        "cells": 2048,
+        "name": "spells.position.y"
+      },
+      {
+        "cells": 64,
+        "name": "camps.tier"
+      },
+      {
+        "cells": 64,
+        "name": "camps.position.x"
+      },
+      {
+        "cells": 64,
+        "name": "camps.position.y"
+      },
+      {
+        "cells": 10,
+        "name": "players.id"
+      },
+      {
+        "cells": 10,
+        "name": "players.team"
+      },
+      {
+        "cells": 10,
+        "name": "players.class"
+      },
+      {
+        "cells": 10,
+        "name": "herochoices.role"
+      },
+      {
+        "cells": 10,
+        "name": "herochoices.available"
+      }
+    ],
+    "globals": [
+      "self.id",
+      "self.team",
+      "self.class",
+      "self.role",
+      "self.hp",
+      "self.maxhp",
+      "self.mana",
+      "self.maxmana",
+      "self.gold",
+      "self.level",
+      "self.xp",
+      "self.nextlevelxp",
+      "self.totalxp",
+      "self.kills",
+      "self.deaths",
+      "self.assists",
+      "self.layer",
+      "self.alive",
+      "self.hasmovetarget",
+      "self.attackdamage",
+      "self.targetid",
+      "self.attackcooldownticks",
+      "self.attackslanded",
+      "self.respawnticks",
+      "self.abilitypoints",
+      "self.portalcooldownticks",
+      "self.channelticks",
+      "self.canshop",
+      "self.inownspawn",
+      "self.buybackprice",
+      "self.position.x",
+      "self.position.y",
+      "self.velocity.x",
+      "self.velocity.y",
+      "self.movespeed",
+      "self.attackrange",
+      "self.score",
+      "self.controls.stunticks",
+      "self.controls.rootticks",
+      "self.controls.silenceticks",
+      "match.tick",
+      "match.battletick",
+      "match.maxticks",
+      "match.tickrate",
+      "match.seed",
+      "match.waveticks",
+      "match.waveintervalticks",
+      "match.gameover",
+      "match.objectcount",
+      "match.spellcount",
+      "match.campcount",
+      "match.allytowers",
+      "match.allytowerstotal",
+      "match.allybarracks",
+      "match.allybarrackstotal",
+      "match.enemytowers",
+      "match.enemytowerstotal",
+      "match.enemybarracks",
+      "match.enemybarrackstotal",
+      "map.width",
+      "map.height",
+      "map.layers",
+      "map.origin",
+      "map.enemygod.x",
+      "map.enemygod.y",
+      "draft.active",
+      "draft.mode",
+      "draft.turnid",
+      "draft.playercount",
+      "lastaction.accepted",
+      "lastaction.error",
+      "tile.x",
+      "tile.y",
+      "tile.layer",
+      "tile.kind",
+      "tile.walkable",
+      "tile.height",
+      "tile.waterdepth"
+    ],
+    "host_source_bytes": 3656,
+    "limits": {
+      "array_cells": 262144,
+      "arrays": 128,
+      "code_instructions": 20000,
+      "globals": 512,
+      "instructions": 100000,
+      "instructions_per_decision": 100000,
+      "parameters": 16,
+      "print_bytes": 1024,
+      "print_events": 128,
+      "raw": {
+        "disableFixed": false,
+        "maxArrayElements": 262144,
+        "maxArrays": 128,
+        "maxCallDepth": 16,
+        "maxCodeInstructions": 20000,
+        "maxGlobals": 512,
+        "maxHostData": 128,
+        "maxHostFunctions": 256,
+        "maxInstructions": 100000,
+        "maxMemoryBytes": 8388608,
+        "maxNativeBuffers": 256,
+        "maxNativeMemoryBytes": 33554432,
+        "maxParameters": 16,
+        "maxPrintBytes": 1024,
+        "maxPrintEvents": 128,
+        "maxRegisters": 256,
+        "maxRoutines": 64,
+        "maxSourceBytes": 69191,
+        "maxStringBytes": 262144,
+        "maxStringLength": 65536,
+        "maxStrings": 1024,
+        "maxSyntaxDepth": 32,
+        "maxWorkUnits": 250000
+      },
+      "registers": 256,
+      "routines": 64,
+      "source_bytes": 69191,
+      "work": 250000,
+      "work_per_decision": 250000
+    },
+    "mode": "structured",
+    "policy_source_bytes": 18,
+    "routine_metrics": [
+      {
+        "code_instructions": 2,
+        "name": "main",
+        "registers": 0
+      }
+    ],
+    "routines": [
+      "main"
+    ],
+    "strict_error": "",
+    "strict_ok": true,
+    "structured_storage": {
+      "empty": {
+        "array_cells": 153920,
+        "arrays": 57,
+        "globals": 78
+      },
+      "probe": "PRINT self.hp, self.position.x, objects(0).hp, abilities(0).level",
+      "referenced": {
+        "array_cells": 153920,
+        "arrays": 57,
+        "globals": 78
+      }
+    },
+    "used": {
+      "array_cells": 153920,
+      "arrays": 57,
+      "code_instructions": 2,
+      "globals": 78,
+      "registers": 0,
+      "routines": 1,
+      "source_bytes": 3674
+    }
+  },
+  "engine": {
+    "bassy_commit": "a02e6dd5889310b13d21725c891bde8d01539f08",
+    "polyworld_commit": "801749e509e888b423ba44ee2188946c22e3ba85"
+  },
+  "host_data": [
+    "NoActionError",
+    "ActionNotAlive",
+    "ActionInvalidSlot",
+    "ActionUnknownItem",
+    "ActionInsufficientGold",
+    "ActionAlreadyEquipped",
+    "ActionStackFull",
+    "ActionInventoryFull",
+    "ActionEmptySlot",
+    "ActionNotConsumable",
+    "ActionFullHealth",
+    "ActionFullMana",
+    "ActionTargetUnavailable",
+    "ActionOutOfRange",
+    "ActionNoRoute",
+    "ActionInvalidPoint",
+    "ActionCooldown",
+    "ActionNoCharges",
+    "ActionInsufficientMana",
+    "ActionSpellLimit",
+    "ActionChanneling",
+    "ActionStunned",
+    "ActionRooted",
+    "ActionOutsideKeep",
+    "ActionAbilityLocked",
+    "ActionNoAbilityPoints",
+    "ActionAbilityMaxLevel",
+    "ActionHeroLevelRequired",
+    "ActionNotDead",
+    "ActionMatchEnded",
+    "ActionDrafting",
+    "ActionNotDrafting",
+    "ActionNotDraftTurn",
+    "ActionUnknownHero",
+    "ActionHeroTaken",
+    "ActionSilenced",
+    "VanguardKnight",
+    "Ranger",
+    "Arcanist",
+    "DruidWarden",
+    "DemonHunter",
+    "DeathKnight",
+    "Crossbowman",
+    "Lich",
+    "Warlock",
+    "Berserker",
+    "selfId",
+    "selfTeam",
+    "selfClass",
+    "selfX",
+    "selfY",
+    "selfHp",
+    "selfMaxHp",
+    "selfMana",
+    "selfMaxMana",
+    "selfGold",
+    "selfLevel",
+    "worldTick",
+    "selfLayer",
+    "selfMoveSpeed",
+    "selfAttackRange",
+    "selfAttackDamage",
+    "selfTarget",
+    "selfAttackCooldown",
+    "selfAttacksLanded",
+    "selfPortalCooldown",
+    "selfChannelTicks",
+    "selfStunTicks",
+    "selfRootTicks",
+    "selfSilenceTicks",
+    "selfDeaths",
+    "selfRespawnTicks",
+    "drafting",
+    "draftTurnId",
+    "draftMode",
+    "mapWidth",
+    "mapHeight",
+    "mapLayers",
+    "worldScale",
+    "tickRate",
+    "TerrainNone",
+    "TerrainGrass",
+    "TerrainRoad",
+    "TerrainRock",
+    "TerrainTrees",
+    "TerrainMarsh",
+    "TerrainWall",
+    "TerrainWater",
+    "GroundLayer",
+    "RedFortLayer",
+    "BlueFortLayer",
+    "WaterLayer"
+  ],
+  "host_functions": [
+    {
+      "arguments": 4,
+      "name": "annotate",
+      "work": 1024
+    },
+    {
+      "arguments": 0,
+      "name": "annotate_error$",
+      "work": 1
+    },
+    {
+      "arguments": 0,
+      "name": "llmAvailable",
+      "work": 256
+    },
+    {
+      "arguments": 0,
+      "name": "llmReady",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "llmAsk",
+      "work": 256
+    },
+    {
+      "arguments": 3,
+      "name": "llmRequest",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "llmPoll",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "llmStatus",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "llmResponse$",
+      "work": 256
+    },
+    {
+      "arguments": 3,
+      "name": "llmRead$",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "llmText$",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "llmError$",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "jsonQuote$",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "jsonGet$",
+      "work": 256
+    },
+    {
+      "arguments": 0,
+      "name": "oracleAvailable",
+      "work": 256
+    },
+    {
+      "arguments": 0,
+      "name": "oracleReady",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "oracleState",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "oracleStateText",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "oracleNote",
+      "work": 256
+    },
+    {
+      "arguments": 3,
+      "name": "oracleQuestion",
+      "work": 256
+    },
+    {
+      "arguments": 3,
+      "name": "oracleCriterion",
+      "work": 256
+    },
+    {
+      "arguments": 4,
+      "name": "oracleCriterionField",
+      "work": 256
+    },
+    {
+      "arguments": 0,
+      "name": "oracleAsk",
+      "work": 256
+    },
+    {
+      "arguments": 1,
+      "name": "oraclePoll",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "oracleAnswer",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "oracleConfidence",
+      "work": 256
+    },
+    {
+      "arguments": 3,
+      "name": "oracleProbability",
+      "work": 256
+    },
+    {
+      "arguments": 2,
+      "name": "sendChat",
+      "work": 256
+    },
+    {
+      "arguments": 0,
+      "name": "pullMailbox$",
+      "work": 256
+    },
+    {
+      "arguments": 0,
+      "name": "mailboxId",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "mailboxCount",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "mailboxSelf",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "mailboxPlayers",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "draftHero",
+      "work": 20
+    },
+    {
+      "arguments": 1,
+      "name": "draftedClass",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "heroAvailable",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "heroRole",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "draftPlayerCount",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "draftPlayerId",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "draftPlayerTeam",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "levelAbility",
+      "work": 20
+    },
+    {
+      "arguments": 0,
+      "name": "abilityPoints",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityLevel",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityMaxLevel",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityRequiredLevel",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "canLevelAbility",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityDamage",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityHeal",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityRestore",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityManaCost",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "lastActionError",
+      "work": 4
+    },
+    {
+      "arguments": 2,
+      "name": "castTarget",
+      "work": 80
+    },
+    {
+      "arguments": 3,
+      "name": "castPoint",
+      "work": 80
+    },
+    {
+      "arguments": 1,
+      "name": "abilityCharges",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityCooldown",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "abilityRecharge",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectCamp",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectLeader",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectReturning",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectLevel",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectMana",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectStunTicks",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectSilenceTicks",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectRootTicks",
+      "work": 16
+    },
+    {
+      "arguments": 2,
+      "name": "objectItemId",
+      "work": 16
+    },
+    {
+      "arguments": 2,
+      "name": "objectItemCount",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectFacingX",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectFacingY",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectTarget",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectVelX",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "objectVelY",
+      "work": 16
+    },
+    {
+      "arguments": 0,
+      "name": "spellCount",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "spellAbility",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "spellCasterId",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "spellX",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "spellY",
+      "work": 16
+    },
+    {
+      "arguments": 1,
+      "name": "spellImpactTick",
+      "work": 16
+    },
+    {
+      "arguments": 0,
+      "name": "objectCount",
+      "work": 2
+    },
+    {
+      "arguments": 1,
+      "name": "objectId",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "campCount",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "campX",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "campY",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "campTier",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectKind",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectTeam",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectClass",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectX",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectY",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectHp",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "objectAlive",
+      "work": 4
+    },
+    {
+      "arguments": 2,
+      "name": "walkTo",
+      "work": 800
+    },
+    {
+      "arguments": 2,
+      "name": "attackMove",
+      "work": 800
+    },
+    {
+      "arguments": 1,
+      "name": "attackTarget",
+      "work": 20
+    },
+    {
+      "arguments": 1,
+      "name": "itemId",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "itemCount",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "itemCooldown",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "canShop",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "inOwnSpawn",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "buyItem",
+      "work": 20
+    },
+    {
+      "arguments": 0,
+      "name": "buybackPrice",
+      "work": 4
+    },
+    {
+      "arguments": 0,
+      "name": "buyback",
+      "work": 20
+    },
+    {
+      "arguments": 1,
+      "name": "useItem",
+      "work": 20
+    },
+    {
+      "arguments": 3,
+      "name": "useItemAt",
+      "work": 800
+    },
+    {
+      "arguments": 2,
+      "name": "terrainKind",
+      "work": 32
+    },
+    {
+      "arguments": 3,
+      "name": "terrainKindAt",
+      "work": 32
+    },
+    {
+      "arguments": 2,
+      "name": "terrainWalkable",
+      "work": 32
+    },
+    {
+      "arguments": 3,
+      "name": "terrainWalkableAt",
+      "work": 32
+    },
+    {
+      "arguments": 2,
+      "name": "terrainHeight",
+      "work": 32
+    },
+    {
+      "arguments": 3,
+      "name": "terrainHeightAt",
+      "work": 32
+    },
+    {
+      "arguments": 2,
+      "name": "terrainWaterDepth",
+      "work": 32
+    },
+    {
+      "arguments": 3,
+      "name": "terrainWaterDepthAt",
+      "work": 32
+    },
+    {
+      "arguments": 3,
+      "name": "readTile",
+      "work": 128
+    },
+    {
+      "arguments": 1,
+      "name": "floor",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "sqrt",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "exp",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "selfInfo",
+      "work": 4
+    },
+    {
+      "arguments": 2,
+      "name": "objectInfo",
+      "work": 4
+    },
+    {
+      "arguments": 2,
+      "name": "abilityInfo",
+      "work": 4
+    },
+    {
+      "arguments": 2,
+      "name": "spellInfo",
+      "work": 4
+    },
+    {
+      "arguments": 1,
+      "name": "matchInfo",
+      "work": 4
+    },
+    {
+      "arguments": 2,
+      "name": "tensorCreate",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorScalar",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "tensorLoad",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorImport",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "tensorExport",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorFill",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorCopy",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorConvert",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorReinterpret",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorAdd",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorSubtract",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorMultiply",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorDivide",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorRelu",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorSigmoid",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorSigmoidDirect",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorExp",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorTanh",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorAbs",
+      "work": 1
+    },
+    {
+      "arguments": 4,
+      "name": "tensorDense",
+      "work": 1
+    },
+    {
+      "arguments": 5,
+      "name": "tensorCsr",
+      "work": 1
+    },
+    {
+      "arguments": 4,
+      "name": "tensorCompare",
+      "work": 1
+    },
+    {
+      "arguments": 4,
+      "name": "tensorSelect",
+      "work": 1
+    },
+    {
+      "arguments": 4,
+      "name": "tensorLerp",
+      "work": 1
+    },
+    {
+      "arguments": 4,
+      "name": "tensorSlice",
+      "work": 1
+    },
+    {
+      "arguments": 5,
+      "name": "tensorCopySlice",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorReshape",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorGather",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "tensorScatterAdd",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "tensorArgmax",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorArgmaxMasked",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "tensorSize",
+      "work": 1
+    },
+    {
+      "arguments": 2,
+      "name": "tensorDim",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "tensorDtype",
+      "work": 1
+    },
+    {
+      "arguments": 0,
+      "name": "blobcreate",
+      "work": 1
+    },
+    {
+      "arguments": 1,
+      "name": "blobclear",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "nn_richard",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "nn_david",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "andre_nn",
+      "work": 1
+    },
+    {
+      "arguments": 3,
+      "name": "fly_nn",
+      "work": 1
+    }
+  ],
+  "limits": {
+    "array_cells": 262144,
+    "arrays": 128,
+    "code_instructions": 20000,
+    "globals": 512,
+    "instructions": 100000,
+    "instructions_per_decision": 100000,
+    "parameters": 16,
+    "print_bytes": 1024,
+    "print_events": 128,
+    "raw": {
+      "disableFixed": false,
+      "maxArrayElements": 262144,
+      "maxArrays": 128,
+      "maxCallDepth": 16,
+      "maxCodeInstructions": 20000,
+      "maxGlobals": 512,
+      "maxHostData": 128,
+      "maxHostFunctions": 256,
+      "maxInstructions": 100000,
+      "maxMemoryBytes": 8388608,
+      "maxNativeBuffers": 256,
+      "maxNativeMemoryBytes": 33554432,
+      "maxParameters": 16,
+      "maxPrintBytes": 1024,
+      "maxPrintEvents": 128,
+      "maxRegisters": 256,
+      "maxRoutines": 64,
+      "maxSourceBytes": 69191,
+      "maxStringBytes": 262144,
+      "maxStringLength": 65536,
+      "maxStrings": 1024,
+      "maxSyntaxDepth": 32,
+      "maxWorkUnits": 250000
+    },
+    "registers": 256,
+    "routines": 64,
+    "source_bytes": 69191,
+    "work": 250000,
+    "work_per_decision": 250000
+  },
+  "records": {
+    "abilities": {
+      "array": true,
+      "cells": 4,
+      "fields": [
+        "level",
+        "maxLevel",
+        "requiredLevel",
+        "canLevel",
+        "damage",
+        "heal",
+        "restore",
+        "manaCost",
+        "charges",
+        "cooldownTicks",
+        "rechargeTicks",
+        "casting",
+        "effectKind",
+        "range",
+        "radius"
+      ]
+    },
+    "camps": {
+      "array": true,
+      "cells": 64,
+      "fields": [
+        "tier",
+        "position.x",
+        "position.y"
+      ]
+    },
+    "draft": {
+      "array": false,
+      "cells": 1,
+      "fields": [
+        "active",
+        "mode",
+        "turnId",
+        "playerCount"
+      ]
+    },
+    "heroChoices": {
+      "array": true,
+      "cells": 10,
+      "fields": [
+        "role",
+        "available"
+      ]
+    },
+    "items": {
+      "array": true,
+      "cells": 6,
+      "fields": [
+        "id",
+        "count",
+        "cooldownTicks"
+      ]
+    },
+    "lastAction": {
+      "array": false,
+      "cells": 1,
+      "fields": [
+        "accepted",
+        "error"
+      ]
+    },
+    "map": {
+      "array": false,
+      "cells": 1,
+      "fields": [
+        "width",
+        "height",
+        "layers",
+        "origin",
+        "enemyGod.x",
+        "enemyGod.y"
+      ]
+    },
+    "match": {
+      "array": false,
+      "cells": 1,
+      "fields": [
+        "tick",
+        "battleTick",
+        "maxTicks",
+        "tickRate",
+        "seed",
+        "waveTicks",
+        "waveIntervalTicks",
+        "gameOver",
+        "objectCount",
+        "spellCount",
+        "campCount",
+        "allyTowers",
+        "allyTowersTotal",
+        "allyBarracks",
+        "allyBarracksTotal",
+        "enemyTowers",
+        "enemyTowersTotal",
+        "enemyBarracks",
+        "enemyBarracksTotal"
+      ]
+    },
+    "objectItems": {
+      "array": true,
+      "cells": 24576,
+      "fields": [
+        "id",
+        "count"
+      ]
+    },
+    "objects": {
+      "array": true,
+      "cells": 4096,
+      "fields": [
+        "id",
+        "kind",
+        "team",
+        "class",
+        "hp",
+        "maxHp",
+        "alive",
+        "level",
+        "mana",
+        "targetId",
+        "campId",
+        "leader",
+        "returning",
+        "position.x",
+        "position.y",
+        "facing.x",
+        "facing.y",
+        "velocity.x",
+        "velocity.y",
+        "controls.stunTicks",
+        "controls.rootTicks",
+        "controls.silenceTicks"
+      ]
+    },
+    "players": {
+      "array": true,
+      "cells": 10,
+      "fields": [
+        "id",
+        "team",
+        "class"
+      ]
+    },
+    "self": {
+      "array": false,
+      "cells": 1,
+      "fields": [
+        "id",
+        "team",
+        "class",
+        "role",
+        "hp",
+        "maxHp",
+        "mana",
+        "maxMana",
+        "gold",
+        "level",
+        "xp",
+        "nextLevelXp",
+        "totalXp",
+        "kills",
+        "deaths",
+        "assists",
+        "layer",
+        "alive",
+        "hasMoveTarget",
+        "attackDamage",
+        "targetId",
+        "attackCooldownTicks",
+        "attacksLanded",
+        "respawnTicks",
+        "abilityPoints",
+        "portalCooldownTicks",
+        "channelTicks",
+        "canShop",
+        "inOwnSpawn",
+        "buybackPrice",
+        "position.x",
+        "position.y",
+        "velocity.x",
+        "velocity.y",
+        "moveSpeed",
+        "attackRange",
+        "score",
+        "controls.stunTicks",
+        "controls.rootTicks",
+        "controls.silenceTicks"
+      ]
+    },
+    "spells": {
+      "array": true,
+      "cells": 2048,
+      "fields": [
+        "abilityId",
+        "casterId",
+        "impactTick",
+        "hostile",
+        "support",
+        "position.x",
+        "position.y"
+      ]
+    },
+    "tile": {
+      "array": false,
+      "cells": 1,
+      "fields": [
+        "x",
+        "y",
+        "layer",
+        "kind",
+        "walkable",
+        "height",
+        "waterDepth"
+      ]
+    }
+  }
+}

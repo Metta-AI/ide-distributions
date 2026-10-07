@@ -1,11 +1,11 @@
 <!-- Destination adaptation, Task 2.3. Original Paintbot source hash remains in ../PROVENANCE.md. -->
 # GotA compiler policy surface
 
-Verified from cached Polyworld `5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd`,
+Verified from cached Polyworld `801749e509e888b423ba44ee2188946c22e3ba85`,
 `examples/gods_of_the_arena/{bots,sim,content,events,terrains}.nim`, and Bassy
 `a02e6dd5889310b13d21725c891bde8d01539f08`, `src/bassy.nim`.
-This is the unstructured legacy host used by v13-live. Do not add the
-`@gota-structures` marker: that opts into a different host and storage contract.
+The compiler adds the `@gota-structures` marker. The scalar host used by v13-live
+remains available; the unchanged reference itself stays in legacy mode.
 The separate `games/gota/docs/policy-surface.md` is a historical September reference.
 
 ## Execution and storage
@@ -21,20 +21,25 @@ Bassy supports integers and Q16.16 decimals. This compiler preserves the integer
 strategy contract: use `\` for integer division; `/` produces decimals. Comparisons
 return -1 or 0; logical operators are bitwise and evaluate both operands. Units
 use the existing DIM/SUB/IF/WHILE subset. One DIM or SUB declaration per line is
-required by packing, even though the engine permits additional syntax.
+required by the compiler scanner, even though the engine permits additional syntax.
 
 | Budget | Live hard maximum | Compiler gate |
 | --- | ---: | ---: |
-| Globals | 256 | 256 |
-| Arrays | 32 | 32 |
-| Array cells | 4096 | 4096 |
-| Source bytes | 65536 | 65536 |
+| Globals (structured) | 512 | 512 |
+| Arrays (structured) | 128 | 128 |
+| Array cells (structured) | 262144 | 262144 |
+| Policy source bytes (structured) | 65535 | 65535 |
 | Routines, including main | 64 | 64 |
 | Static instructions | 20000 | 20000 |
 | Instructions per decision | 100000 | 80000 |
 | Work units per decision | 250000 | 200000 |
 | PRINT bytes per decision | 1024 | 1024 measured |
 | PRINT events per decision | 128 | 128 measured |
+
+Injected structures consume 78 globals, 57 arrays and 153,920 cells, including
+unused declarations, and add 3,656 source bytes. The injected compile cap is
+69,191 bytes. Legacy policies retain 256 globals, 32 arrays, 4,096 cells and
+65,536 source bytes.
 
 The generated telemetry retains the conservative 512-byte/64-event allocation;
 that is compiler headroom, not a claim that the host PRINT maximum is smaller.
@@ -107,4 +112,4 @@ Unknown names or arities fail actual G1 compilation. COM components and Paintbot
 heart/shout/grenade interfaces are not part of this compiler. Avoid inferring
 signatures from the historical policy surface.
 
-See [backend and packing](gota-backend.md) for the build, gate and immutable input contracts.
+See [compiler backend](gota-backend.md) for the build, gate and immutable input contracts.

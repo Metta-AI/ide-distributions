@@ -114,12 +114,14 @@ evaluators and engine qualification requirements remain in force.
 From `autoresearch/`:
 
 ```bash
-uv run --locked --with pandas pytest tests/unit/gota/compiler/test_goal_layer.py -q
-uv run --locked --with pandas pytest tests/unit/gota -q
-uv run --locked ruff check tests/unit/gota/compiler/test_goal_layer.py
+uv run --locked --offline pytest tests/unit/gota/compiler/test_goal_layer.py -q
+uv run --locked --offline pytest tests/unit/gota -q
+uv run --locked --offline ruff check tests/unit/gota/compiler/test_goal_layer.py
 ```
 
-The pandas overlay is provisional until the shared dependency owner updates the
-project lock. These tests use authored fixture units and synthetic telemetry;
-they invoke no real model, engine, credentials, hosted service, or uploads.
-Task 2.4 action-stream equivalence remains required.
+Pandas is a locked project dependency. The full owned suite includes local native
+fixtures and a mandatory session guard against real agent execution. Goal tests
+use synthetic telemetry; native oracle tests use mechanically derived test units.
+See [GotA backend](gota-backend.md) for the supported build-bound goal-audit entry
+point. The older Paintbot semantic evaluators are not GotA predicates. Real M1
+is still blocked on model credit; local fixture equivalence is not real M1 proof.

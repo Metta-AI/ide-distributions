@@ -211,7 +211,8 @@ def test_committed_input_check_includes_staged_edits_and_deletions(tmp_path, mon
     baseline.write_text('fixture baseline')
     monkeypatch.setattr(gota_host, 'BASELINE', baseline)
     (tmp_path / 'tools').mkdir()
-    (tmp_path / 'tools/build_nim.sh').write_text('fixture builder')
+    for name in ('build_nim.sh', 'build_gota_match.sh', 'engine.env'):
+        (tmp_path / 'tools' / name).write_text('fixture builder')
     original_git = sb.git
     monkeypatch.setattr(sb, 'git', lambda *args, **kwargs: original_git(*args, root=tmp_path))
     sb.git('init')

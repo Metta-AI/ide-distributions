@@ -76,3 +76,24 @@ no dependency or lockfile changed. Ruff passes for the new test file;
 this guard change. The backend guide, this finding, and compiler provenance now
 state the exact supported-agent boundary and stopped Task 2.4 status. No external
 pricing or account checks were made; spend remains unverified.
+
+
+## C2 acceptance and local resumption
+
+The user accepted containment in VERDICT-C2 and authorized Task 2.4 local-only
+resumption. The historical account above is preserved. A session-wide Python
+process audit guard now blocks real named agent executables (including symlink
+resolution) and shell command strings; dispatch tests additionally restrict PATH
+and process calls to local Git/Python and the fake backend. Hermes is now an
+explicit supported backend; unknown values still fail closed. Tests never invoke
+a real agent version probe. No subsequent model/broker/credential action was performed by the implementer.
+The parent later used the NOTES-2-authorized isolated credential context for live
+version verification/download only, with no model/broker/spend action.
+
+Shared dependency work locked pandas and merged at ee140c52; the provisional
+pandas overlay above describes only the containment test run. The reviewer
+assessed all seven earlier requests as server400/no generation and effectively
+no spend. Independent provider billing was not queried, and that assessment is
+not a new billing verification. The resumed implementation and evidence are in
+[the backend guide](../../../games/gota/compiler/docs/gota-backend.md) and compiler
+PROVENANCE. Real M1 remains blocked on OpenRouter credit.

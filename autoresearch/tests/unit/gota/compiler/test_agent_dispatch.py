@@ -12,13 +12,13 @@ import strategy_build as sb
 from strategy_format import parse_strategy
 
 
-@pytest.mark.parametrize('agent', ['hermes', 'unknown-backend', '', 'CODEX'])
+@pytest.mark.parametrize('agent', ['unknown-backend', '', 'CODEX'])
 def test_unknown_agent_command_fails_closed(agent, tmp_path):
     with pytest.raises(pw_cli.UsageError, match='unknown compiler agent'):
         sb.agent_command(agent, 'unused', tmp_path)
 
 
-@pytest.mark.parametrize('agent', ['claude', 'codex'])
+@pytest.mark.parametrize('agent', ['claude', 'codex', 'hermes'])
 def test_supported_agent_command_is_explicit(agent, tmp_path):
     command = sb.agent_command(agent, 'test-model', tmp_path)
     assert command[0] == agent
@@ -63,7 +63,7 @@ def isolated_generation(tmp_path, monkeypatch):
     return order, stage, calls
 
 
-@pytest.mark.parametrize('agent', ['hermes', 'unknown-backend'])
+@pytest.mark.parametrize('agent', ['unknown-backend'])
 def test_generate_rejects_unknown_agent_without_launch(isolated_generation, agent):
     order, stage, calls = isolated_generation
     order['compiler']['agent'] = agent

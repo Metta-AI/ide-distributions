@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 from . import GateContext, GateResult
-from .limits import HARD, PRINT, SOFT
+from .limits import HARD, LEGACY, PRINT, SOFT
 from .native import NATIVE_MODE, measure
 
 
@@ -12,7 +12,8 @@ def run(artifact: Path, context: GateContext) -> GateResult:
         compiled = measure(artifact, context)
         if compiled.get('ok') is not True:
             return GateResult(False, compiled)
-        violations = [name for name, limit in HARD.items()
+        limits = HARD if compiled.get("mode") == "structured" else LEGACY
+        violations = [name for name, limit in limits.items()
                       if name not in compiled or compiled[name] > limit]
         runtime = []
         if not context.seeds or context.max_ticks < 1:

@@ -9,7 +9,7 @@ from gota_host import BASELINE, cached_probe
 from games.gota.gates import GateContext, g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry
 
 
-def verify(build_id: str, *, context: GateContext | None = None) -> dict:
+def verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None) -> dict:
     import strategy_build as builds
     from strategy_format import lint_strategy, parse_strategy
 
@@ -23,7 +23,7 @@ def verify(build_id: str, *, context: GateContext | None = None) -> dict:
         raise ValueError("assemble the staged build before verify")
     if context is None:
         config = builds.read(builds.COMPILER / "config.json").get("gates", {})
-        manifest = config.get("manifest")
+        manifest = manifest or config.get("manifest")
         context = GateContext(
             stage / "verify",
             baseline=BASELINE,

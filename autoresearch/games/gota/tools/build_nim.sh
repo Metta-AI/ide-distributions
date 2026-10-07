@@ -6,9 +6,10 @@
 # The recording Polyworld commit is required. Replays only re-simulate at that commit.
 #
 # Output: games/gota/tools/bin/<target>-<sha> (gitignored).
-# Needs: nim 2.x on PATH, git, network on first use. The polyworld clone and its
+# Needs: Nim 2.x, Git, and a prepopulated pinned offline dependency cache. The polyworld clone and its
 # dependency cache live under games/gota/tools/.cache/.
 set -eu
+export GIT_NO_LAZY_FETCH=1
 LAB=$(cd "$(dirname "$0")/.." && pwd)
 TOOLS="$LAB/tools"
 CACHE="$TOOLS/.cache"
@@ -27,13 +28,22 @@ if [ -x "$OUT" ] && [ "$OUT" -nt "$TOOLS/$TARGET.nim" ] &&
 fi
 mkdir -p "$CACHE" "$TOOLS/bin"
 CLONE="$CACHE/polyworld"
-if [ ! -d "$CLONE/.git" ]; then
-  git clone -q https://github.com/Metta-AI/polyworld.git "$CLONE"
+if [ "$(git -C "$CLONE" rev-parse HEAD)" != "$COMMIT" ]; then
+  CLONE="$CACHE/polyworld-$SHORT"
 fi
-git -C "$CLONE" fetch -q origin "$COMMIT" 2>/dev/null || git -C "$CLONE" fetch -q origin
-git -C "$CLONE" checkout -q "$COMMIT"
-# polyworld's own dependency sync: pins every Nim package the sim needs.
-(cd "$CLONE" && nim r --hints:off coworld/tools/sync_dependencies.nim >/dev/null)
+[ "$(git -C "$CLONE" rev-parse HEAD)" = "$COMMIT" ] || {
+  echo "offline source cache must already be at $COMMIT" >&2; exit 1;
+}
+while read -r name version repository pin; do
+  [ -n "$name" ] || continue
+  [ "$(git -C "$CLONE/tmp/coworld/deps/$name" rev-parse HEAD)" = "$pin" ] || {
+    echo "offline dependency pin mismatch: $name" >&2; exit 1;
+  }
+  git -C "$CLONE/tmp/coworld/deps/$name" diff --quiet
+  git -C "$CLONE/tmp/coworld/deps/$name" diff --cached --quiet
+done < "$CLONE/coworld/dependencies.lock"
+git -C "$CLONE" diff --quiet
+git -C "$CLONE" diff --cached --quiet
 export POLYWORLD_DEPS="$CLONE/tmp/coworld/deps"
 # Compile from inside the clone so its config.nims applies (dependency paths),
 # with the game modules and our source on the path.

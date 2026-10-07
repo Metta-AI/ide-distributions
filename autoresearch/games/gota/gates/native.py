@@ -7,8 +7,8 @@ from pathlib import Path
 from . import GateContext
 from .limits import POLYWORLD_COMMIT
 
-# Verified defaults at sim.nim:5849-5856,5954-5955 @5287c437.
-NATIVE_MODE = {'drafting': True, 'draft_mode': 'UniqueDraft', 'replay_mode': False}
+# Explicitly selected by gate_probe at the current engine pin.
+NATIVE_MODE = {'drafting': True, 'draft_mode': 'OpenDraft', 'replay_mode': False}
 
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
 

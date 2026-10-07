@@ -17,6 +17,7 @@ These instructions work the same for every agent. They describe files and rules 
 | `units/` | Unchanged units, supplied as read-only context. Every requested output is initially absent and must be written. |
 | `context/LESSONS.md` | BASIC pitfalls learned on earlier builds. Read it every time. |
 | `context/policy-surface.md` | The BASIC dialect, budgets, failure modes, and every host call. It is the authority for what the engine does. |
+| `context/host_surface.json`, `context/gota-guide.md`, `context/bassy-language.md`, `context/structures.bas` | Verified live host declarations and primary GotA/Bassy references; read alongside the compiler ABI. |
 | `context/base.bas` | The exact compatibility-adjusted v13-live policy; semantic reference only, never an assembly fallback. |
 | `report_draft.json` | Your report (below). It can already exist from an earlier repair round. |
 
@@ -37,7 +38,7 @@ comparisons produce -1, so outputs specified as 0/1 require explicit assignments
 The legacy scalar host names and calls remain available and fit this compiler ABI; use them
 rather than introducing records into unit interfaces. `context/base.bas` is the exact
 compatibility-adjusted v13-live semantic reference: preserve its gameplay behavior in the
-specified components. Do not copy the full policy into a unit or use it as an assembly fallback.
+specified components. Implement the specified ownership split: K.config owns all configuration outputs and C.farm owns coherent mutable farming state. Preserve every specified helper and statement; do not use the baseline as an assembly fallback.
 
 
 1. **Implement the `Spec` and the other fields of `compiled_text`, and nothing else.** Numbers
@@ -52,8 +53,6 @@ specified components. Do not copy the full policy into a unit or use it as an as
    The driver writes the header line.
 3. **Names.** Every scalar, array, and SUB the unit defines starts with `contract.prefix` + `__`.
    - A unit writes only its own names.
-   - SUB parameters must not use physical baseline binding targets or `pvId`;
-     the packer rejects those collisions. Local source-symbol shadowing is preserved.
    - It never writes its own params, inputs (`<prefix>__in_*`), or condition constants
      (`<prefix>__k_*`). Generated code sets those.
    - It never `DIM`s a declared output array, because generated code does that.
@@ -93,15 +92,14 @@ specified components. Do not copy the full policy into a unit or use it as an as
      with a nested `IF`);
    - never use a host-function name as a variable;
    - never keep a string handle across ticks.
-6. **Budget.** The unstructured host allows 256 globals, 32 arrays, 4,096 array
-   cells, 65,536 source bytes, 64 routines, and 20,000 static instructions. G3 uses
-   80,000 instructions and 200,000 work units per decision. Compiler telemetry
-   reserves at most 512 bytes / 64 events; host PRINT limits are 1,024 / 128.
-   GotA packing places runtime state in pvId indices 64–660; baseline indices
-   0–63 retain their original meaning. There are only 128 cells for new metadata
-   and scratch. Existing baseline variables need explicit packing.json bindings.
-   Never add arrays or access runtime tail cells in a component. Preserve baseline
-   index bounds; arbitrary dynamic indices are not isolated by the packer.
+6. **Budget.** The driver selects structured mode: 512 globals, 128 arrays,
+   262,144 cells, 65,535 policy bytes, 64 routines, 20,000 static instructions.
+   Injected host declarations cost 78 globals, 57 arrays and 153,920 cells even
+   if the policy does not read them. Include that cost and runtime storage.
+   G3 uses 80,000 instructions and 200,000 work units per decision. Compiler
+   telemetry reserves 512 bytes / 64 events; host PRINT limits are 1,024 / 128.
+   Preserve all baseline arrays and shared scratch; do not pack pvId or change
+   persistence, array bounds, arithmetic, call order or attempted commands.
 7. **Guesses.** Where the `Spec` is ambiguous or impossible, choose the most conservative
    reading, implement it, and record it. Do not ask questions and do not stop. Do not edit the
    source.

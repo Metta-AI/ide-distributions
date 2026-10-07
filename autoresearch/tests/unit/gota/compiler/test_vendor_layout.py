@@ -40,7 +40,8 @@ def test_provenance_config_does_not_change_agent_selection():
     compiler = Path(__file__).resolve().parents[4] / "games/gota/compiler"
     config = json.loads((compiler / "strategy/compiler/config.json").read_text())
     assert config["agent"] == "claude"
-    assert config["models"] == {"claude": "claude-opus-5-5", "codex": "gpt-6-astra"}
+    assert config["models"] == {"claude": "claude-opus-5-5", "codex": "gpt-6-astra",
+                                "hermes": "moonshotai/kimi-k3"}
 
 
 def test_gate_body_keeps_pinned_bytes():
