@@ -204,9 +204,9 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
     prior = previous_build(source, commit, previous)
     config = read(COMPILER / 'config.json')
     agent = agent or config['agent']
-    model = model or config['models'][agent]
     if agent not in ('claude', 'codex'):
         raise pw_cli.UsageError('unknown compiler agent', ['claude', 'codex'])
+    model = model or config['models'][agent]
     executable = shutil.which(agent)
     if executable is None:
         raise pw_cli.EnvironmentMissing(f'{agent} CLI is not installed', f'install the {agent} CLI and log in')
@@ -291,6 +291,8 @@ def agent_command(agent: str, model: str, directory: Path) -> list[str]:
     if agent == 'claude':
         return ['claude', '-p', '--model', model, '--safe-mode', '--dangerously-skip-permissions',
                 '--tools', 'Read,Write,Edit,Glob,Grep', '--output-format', 'text']
+    if agent != 'codex':
+        raise pw_cli.UsageError(f'unknown compiler agent: {agent}', ['claude', 'codex'])
     return ['codex', 'exec', '--ignore-user-config', '--ephemeral', '--sandbox', 'workspace-write',
             '--model', model, '-C', str(directory), '-']
 

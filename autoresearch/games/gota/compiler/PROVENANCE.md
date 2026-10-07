@@ -162,3 +162,25 @@ Final affected validation: `uv run --locked --offline --with pandas pytest
 (with the command on one line) gives **65 passed** in 4.07 seconds. Ruff passes on
 all gota_*.py backend modules, shared G5 and test_gota_backend.py; diff whitespace
 checks pass. Broader tests were not repeated for this bounded review correction.
+
+## Task 2.4 containment only (2026-10-07)
+
+Task 2.4 was stopped during its initial red test. The existing `agent_command`
+selected Codex for every backend other than Claude, so an unsupported `hermes`
+work order reached the real Codex executable. Seven CLI processes started; six
+logged unsupported-model request errors and one was interrupted. No model output
+or generated units were observed. Remote request attempts crossed the task's
+local-only boundary; absence of spend has not been verified. See
+[the incident finding](../../../docs/plans/findings/compiler-task-2.4-containment.md).
+
+The containment change explicitly rejects unknown agent names in both prepare
+and command selection. Supported backends remain exactly Claude and Codex;
+Hermes is not implemented. New regression tests isolate PATH and allow only
+local Git and a fake backend through their subprocess guard. Existing scope
+snapshots, Git refs/index checks, and regular-output checks are unchanged.
+
+The proposed configuration/stateful-capability decomposition was approved in
+parent review but was not implemented. No seed strategy, packing bindings,
+equivalence oracle, GotA goal-audit adapter, native build, or M1 run was produced.
+Task 2.4 remains stopped pending a ruling on the boundary violation. This commit
+is containment, not Task 2.4 completion or real-M1 readiness.

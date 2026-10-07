@@ -24,9 +24,14 @@ audit source reconstruction reads that value. The low-level parser defaults to
 The legacy `strategy_gates.py` remains historical Paintbot reference; the driver
 imports `gota_gates.verify`, which calls the shared `games.gota.gates` modules.
 
+Prepare supports exactly `claude` and `codex`; unknown agent names raise an error
+before command dispatch or model lookup. Hermes is still unimplemented: Task 2.4
+was stopped after an unintended real CLI launch during its initial test. See
+[the containment finding](../../../../docs/plans/findings/compiler-task-2.4-containment.md).
+
 Prepare requires committed inputs and an installed configured compiler CLI. It
 reads `--version`; it does not run a model. The full `compile` command runs the
-configured model and is not authorized by Task 2.3. No model was run in this task.
+configured model and was not authorized by Task 2.3; that completed task ran no model.
 The pandas overlay is still provisional until the shared dependency owner updates
 its lock. No project dependency file changed.
 
