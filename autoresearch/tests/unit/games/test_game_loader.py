@@ -122,7 +122,7 @@ def _run_binding(game, binding, *args):
     command = shlex.split(game.bindings[binding])
     command = [sys.executable if part == "python3" else part for part in command]
     return subprocess.run(
-        [*command, *args, "--json"], capture_output=True, text=True, cwd=REPO_ROOT
+        [*command, *args, "--json"], capture_output=True, text=True, cwd=REPO_ROOT, check=False
     )
 
 
@@ -166,7 +166,7 @@ def test_bad_input_gives_error_envelope(tmp_path):
     ):
         result = subprocess.run(
             [sys.executable, str(FAKE_TOOLS / tool), *args, "--json"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         assert result.returncode == 1, tool
         assert json.loads(result.stdout)["ok"] is False
