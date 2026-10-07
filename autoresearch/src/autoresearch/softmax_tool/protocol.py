@@ -16,10 +16,16 @@ class Identity:
 
 @dataclass(frozen=True)
 class XpHandle:
+    """One XP request. ``seed`` and ``arm`` (``"candidate"`` or ``"baseline"``) are set for a
+    seeded request of a paired evaluation (A12: one request per seed and arm); they are None
+    for a request tagged without them."""
+
     request_id: str
     experiment: str
     batch: int
     attempt: int
+    seed: int | None = None
+    arm: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,7 +63,13 @@ class Softmax(Protocol):
     def credits(self) -> int: ...
     def game_version(self, league_id: str) -> str: ...
     def xp_create(
-        self, experiment: str, batch: int, attempt: int, spec: dict
+        self,
+        experiment: str,
+        batch: int,
+        attempt: int,
+        spec: dict,
+        seed: int | None = None,
+        arm: str | None = None,
     ) -> XpHandle | CreditDenied: ...
     def xp_status(self, handle: XpHandle) -> XpStatus: ...
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...

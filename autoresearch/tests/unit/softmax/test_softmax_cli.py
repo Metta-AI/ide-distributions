@@ -149,25 +149,75 @@ def test_no_profile_context_is_exit_2():
 # --- XP ---
 
 
-def test_xp_spec_maps_design_to_the_platform_roster():
+def test_xp_specs_one_seeded_request_per_seed_and_arm():
+    """A12: each seed in the batch's slice gets one candidate and one baseline request with
+    num_episodes 1 and game_config_overrides.seed; opponents sit in fixed slots."""
     from support.promotion_board import design_dict
 
-    design = design_dict()  # seats (0, 1), opponents ("random", "opp:v3"), n_min 12
+    design = {**design_dict(), "seeds": [11, 12, 13, 14, 15]}  # seats (0, 1)
     binding = {"platform_policy_version_id": PV_A}
-    spec, side = softmax_cli.xp_spec(design, binding, LEAGUE, batch=1, batches=2)
-    assert side == "candidate"
-    assert spec["league_id"] == LEAGUE and spec["num_episodes"] == 6
-    assert spec["roster"] == [
-        {"slot": 0, "player": {"policy_ref": PV_A}},
-        {"slot": 1, "player": {"policy_ref": PV_A}},
-        {"slot": -1, "player": {"random": True}},
-        {"slot": -1, "player": {"policy_ref": "opp:v3"}},
+    first = softmax_cli.xp_specs(design, binding, LEAGUE, batch=1, batches=2)
+    assert [(seed, arm) for seed, arm, _ in first] == [
+        (11, "candidate"),
+        (11, "baseline"),
+        (12, "candidate"),
+        (12, "baseline"),
+        (13, "candidate"),
+        (13, "baseline"),
     ]
-    spec, side = softmax_cli.xp_spec(design, binding, LEAGUE, batch=2, batches=2)
-    assert side == "baseline"
-    assert spec["roster"][0] == {"slot": 0, "player": {"policy_ref": BASELINE_PV}}
-    spec, _ = softmax_cli.xp_spec(design, binding, LEAGUE, batch=1, batches=5)
-    assert spec["num_episodes"] == 3  # ceil(12 / 5)
+    second = softmax_cli.xp_specs(design, binding, LEAGUE, batch=2, batches=2)
+    assert [seed for seed, arm, _ in second if arm == "candidate"] == [14, 15]
+    _, _, candidate = first[0]
+    _, _, baseline = first[1]
+    assert candidate == {
+        "league_id": LEAGUE,
+        "num_episodes": 1,
+        "game_config_overrides": {"seed": 11},
+        "roster": [
+            {"slot": 0, "player": {"policy_ref": PV_A}},
+            {"slot": 1, "player": {"policy_ref": PV_A}},
+            {"slot": 2, "player": {"random": True}},
+            {"slot": 3, "player": {"policy_ref": "opp:v3"}},
+        ],
+    }
+    assert baseline["roster"][:2] == [
+        {"slot": 0, "player": {"policy_ref": BASELINE_PV}},
+        {"slot": 1, "player": {"policy_ref": BASELINE_PV}},
+    ]
+    assert baseline["roster"][2:] == candidate["roster"][2:]
+    assert baseline["game_config_overrides"] == {"seed": 11}
+
+
+def test_xp_specs_opponent_slots_skip_our_seats():
+    from support.promotion_board import design_dict
+
+    design = {**design_dict(), "seats": [1], "opponents": ["opp:v3", "opp:v4"]}
+    (_, _, spec), _ = softmax_cli.xp_specs(
+        design, {"platform_policy_version_id": PV_A}, LEAGUE, 1, 2
+    )
+    assert [entry["slot"] for entry in spec["roster"]] == [1, 0, 2]
+
+
+def test_xp_specs_refuses_bad_batches_and_seedless_designs():
+    from support.promotion_board import design_dict
+
+    binding = {"platform_policy_version_id": PV_A}
+    with pytest.raises(softmax_cli.BadArguments, match="batch"):
+        softmax_cli.xp_specs(design_dict(), binding, LEAGUE, batch=3, batches=2)
+    with pytest.raises(softmax_cli.BadArguments, match="batch"):
+        softmax_cli.xp_specs(design_dict(), binding, LEAGUE, batch=0, batches=2)
+    with pytest.raises(softmax_cli.BadArguments, match="seeds"):
+        softmax_cli.xp_specs({**design_dict(), "seeds": []}, binding, LEAGUE, 1, 1)
+
+
+def test_design_pairing_is_seed_only_with_selector_opponents():
+    from support.promotion_board import design_dict
+
+    from autoresearch.stats.design import EvaluationDesign
+
+    assert EvaluationDesign.from_dict(design_dict()).pairing == "seed_only"
+    pinned = {**design_dict(), "opponents": ["opp:v3"]}
+    assert EvaluationDesign.from_dict(pinned).pairing == "seed_and_opponents"
 
 
 def test_credit_backoff_doubles_and_caps():
@@ -176,41 +226,93 @@ def test_credit_backoff_doubles_and_caps():
 
 
 def test_xp_create_records_request_and_starts_evaluating(board, launch):
-    worker, experiment = launch
+    worker, experiment = launch  # design_dict: seeds (1, 2)
     env = base_env(board, worker)
     code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
     assert code == 0, data
-    request = data["data"]
-    assert request["side"] == "candidate" and request["request_id"].startswith("xp_")
+    launched = data["data"]
+    assert launched["credit_denied"] is False and launched["missing"] == []
+    assert launched["pairing"] == "seed_only"
+    assert [(r["seed"], r["arm"]) for r in launched["created"]] == [
+        (1, "candidate"),
+        (1, "baseline"),
+        (2, "candidate"),
+        (2, "baseline"),
+    ]
     meta = worker.store.load(experiment)[0]
     assert meta["status"] == "evaluating"
-    assert meta["xp_requests"] == [
-        {
-            "batch": 1,
-            "attempt": 1,
-            "request_id": request["request_id"],
-            "side": "candidate",
-            "policy": PV_A,
-        }
-    ]
-    # retried create: the same request, no second xp_requests entry
+    assert meta["xp_requests"] == launched["created"]
+    first = meta["xp_requests"][0]
+    assert first == {
+        "batch": 1,
+        "attempt": 1,
+        "seed": 1,
+        "arm": "candidate",
+        "request_id": first["request_id"],
+        "policy": PV_A,
+    }
+    assert meta["xp_requests"][1]["policy"] == BASELINE_PV
+    # retried create: every request exists, nothing new is created or recorded
     code, again = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
-    assert code == 0 and again["data"]["request_id"] == request["request_id"]
-    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 1
+    assert code == 0 and again["data"]["created"] == []
+    assert len(again["data"]["existing"]) == 4
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 4
 
     code, recovered = softmax(env, "xp", "recover", experiment)
     assert code == 0
-    assert [h["request_id"] for h in recovered["data"]] == [request["request_id"]]
+    assert {(h["seed"], h["arm"]) for h in recovered["data"]} == {
+        (1, "candidate"),
+        (1, "baseline"),
+        (2, "candidate"),
+        (2, "baseline"),
+    }
 
     code, status = softmax(env, "xp", "status", experiment)
-    assert code == 0 and status["data"][0]["state"] == "completed"
-    assert status["data"][0]["episodes_total"] == 12
+    assert code == 0 and {row["state"] for row in status["data"]} == {"completed"}
+    assert {row["episodes_total"] for row in status["data"]} == {1}
 
     dest = board.tmp_path / "artifacts"
     code, artifacts = softmax(env, "xp", "artifacts", experiment, "--dest", str(dest))
-    assert code == 0
-    (paths,) = artifacts["data"].values()
-    assert Path(paths[0]).exists() and Path(paths[0]).is_relative_to(dest)
+    assert code == 0 and len(artifacts["data"]) == 4
+    for paths in artifacts["data"].values():
+        assert Path(paths[0]).exists() and Path(paths[0]).is_relative_to(dest)
+
+
+def _set_fake_credits(board, credits: int) -> None:
+    from autoresearch.io.docs import write_json
+    from autoresearch.softmax_tool.fake import FakeSoftmax
+
+    fake = FakeSoftmax(board.canonical, {})
+    path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(path) if path.exists() else fake._initial_state()
+    state["credits"] = credits
+    write_json(path, state)
+
+
+def test_xp_create_credit_denied_mid_batch_reports_missing_and_relaunch_fills_them(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker)
+    _set_fake_credits(board, 3)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["credit_denied"] is True
+    assert [(r["seed"], r["arm"]) for r in data["data"]["created"]] == [
+        (1, "candidate"),
+        (1, "baseline"),
+        (2, "candidate"),
+    ]
+    assert data["data"]["missing"] == [{"seed": 2, "arm": "baseline"}]
+    meta = worker.store.load(experiment)[0]
+    assert len(meta["xp_requests"]) == 3
+    assert meta["status"] == "awaiting-credits" and meta["lifecycle"]["credit_denials"] == 1
+
+    _set_fake_credits(board, 100)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["credit_denied"] is False
+    assert [(r["seed"], r["arm"]) for r in data["data"]["created"]] == [(2, "baseline")]
+    assert len(data["data"]["existing"]) == 3 and data["data"]["missing"] == []
+    meta = worker.store.load(experiment)[0]
+    assert len(meta["xp_requests"]) == 4 and meta["status"] == "evaluating"
+    assert meta["lifecycle"]["credit_denials"] == 0
 
 
 def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launch):
@@ -218,6 +320,7 @@ def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launc
     env = base_env(board, worker, **{FAULTS_ENV: "credits=0"})
     code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
     assert code == 0 and data["data"]["credit_denied"] is True
+    assert data["data"]["created"] == [] and len(data["data"]["missing"]) == 4
     meta = worker.store.load(experiment)[0]
     assert meta["status"] == "awaiting-credits"
     assert meta["lifecycle"]["credit_denials"] == 1
@@ -233,7 +336,7 @@ def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launc
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "3"
     )
-    assert code == 0 and data["data"]["side"] == "candidate"
+    assert code == 0 and len(data["data"]["created"]) == 4
     meta = worker.store.load(experiment)[0]
     assert meta["status"] == "evaluating"
     assert meta["lifecycle"]["credit_denials"] == 0
@@ -354,4 +457,4 @@ def test_leaderboard(board):
 
 
 def test_xp_tag_round_trip():
-    assert parse_tag("ar:E-1:b2:a3") == ("E-1", 2, 3)
+    assert parse_tag("ar:E-1:b2:a3:s1:candidate") == ("E-1", 2, 3, 1, "candidate")

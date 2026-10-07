@@ -22,7 +22,7 @@ Verified 2026-10-07 against coworld 0.1.57, softmax-cli 0.26.38 (both pinned in 
 | champion | `coworld memberships --league <L> --player <ply> --champions-only --json` | `entries[0].policy_version.label` |
 
 ## XP tagging and duplicates
-- coworld 0.1.57 has no tag or metadata field on an XP request. The tag `ar:<experiment>:b<batch>:a<attempt>` goes in `title` (found again by `recover`) and in `idempotency_key`. The server returns the existing request for a repeated key in the same league (observatory-api `v2/experience_requests.py`), checked before credit admission. Experiment ids are ULIDs, so keys do not collide across installs.
+- coworld 0.1.57 has no tag or metadata field on an XP request. The tag `ar:<experiment>:b<batch>:a<attempt>:s<seed>:<arm>` (amendment A12: one request per seed and arm, each with `game_config_overrides: {"seed": <seed>}` and `num_episodes: 1`; older tags without `:s<seed>:<arm>` still parse) goes in `title` (found again by `recover`) and in `idempotency_key`. The server returns the existing request for a repeated key in the same league (observatory-api `v2/experience_requests.py`), checked before credit admission. Experiment ids are ULIDs, so keys do not collide across installs.
 - `xp-request list --mine` as a Player lists requests at the owning-user level and also shows rows from `machine-sentinel@softmax.internal`. Filtering is by exact tag only.
 
 ## Credits

@@ -7,12 +7,17 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   (``AUTORESEARCH_PLAYER_ID``) unexpired Player.
 - ``credits``: ``{available: true, credits}``, or ``{available: false, reason}`` when the
   balance cannot be read (always, for a Player credential: amendment A10).
-- ``xp create <E> --batch N --attempt N [--batches K]``: launch one XP request (see ``xp_spec``
-  for the mapping from the frozen design). Success appends ``{batch, attempt, request_id, side,
-  policy}`` to ``experiment.xp_requests`` (once) and moves ``uploaded|awaiting-credits`` to
-  ``evaluating``. A credit denial is exit 0 with ``{credit_denied: true}``: the experiment goes
+- ``xp create <E> --batch N --attempt N [--batches K]``: launch batch N of a paired evaluation:
+  one seeded XP request per (seed, arm) in the batch's slice of ``design.seeds`` (see
+  ``xp_specs`` for the mapping, A12). It recovers first and creates only the missing requests,
+  appending ``{batch, attempt, seed, arm, request_id, policy}`` per new request to
+  ``experiment.xp_requests``, and moves ``uploaded|awaiting-credits`` to ``evaluating``. It
+  prints ``{created, existing, missing, pairing, credit_denied}``. A credit denial stops the
+  batch with exit 0 and ``credit_denied: true``: requests already created stay (and are
+  recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating``) and ``lifecycle.next_launch_after`` is set
-  by ``credit_backoff`` (A10); ``lifecycle.credit_denials`` counts consecutive denials.
+  by ``credit_backoff`` (A10); ``lifecycle.credit_denials`` counts consecutive denials. Rerunning
+  the same ``--batch``/``--attempt`` later creates only the missing requests.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
@@ -28,6 +33,7 @@ Prints one JSON envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false, "erro
 """
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -47,7 +53,7 @@ from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.submit import submit
 from autoresearch.softmax_tool.upload import upload, worker_store
-from autoresearch.softmax_tool.xp import ArtifactsIncomplete
+from autoresearch.softmax_tool.xp import ARMS, ArtifactsIncomplete
 from autoresearch.stats.design import DesignError, EvaluationDesign
 
 EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS, EXIT_TOOL_MISSING = 0, 1, 2, 3
@@ -126,39 +132,60 @@ def _opponent(entry: str) -> dict:
     return {"slot": -1, "player": player}
 
 
-def xp_spec(
+def _roster(design: EvaluationDesign, policy: str) -> list[dict]:
+    """Our policy in each ``design.seats`` slot, then ``design.opponents`` in order in the
+    remaining slots (ascending, skipping our seats). Fixed slots keep a pair's seating
+    identical; with ``slot: -1`` the platform would rotate open seats per episode."""
+    roster = [{"slot": seat, "player": {"policy_ref": policy}} for seat in design.seats]
+    free_slots = (slot for slot in itertools.count() if slot not in design.seats)
+    for entry, slot in zip(design.opponents, free_slots, strict=False):
+        roster.append({**_opponent(entry), "slot": slot})
+    return roster
+
+
+def xp_specs(
     design: dict, binding: dict, league_id: str, batch: int, batches: int
-) -> tuple[dict, str]:
-    """(XP spec, side) for request ``batch`` of an evaluation split into ``batches`` pairs.
+) -> list[tuple[int, str, dict]]:
+    """``(seed, arm, XP spec)`` for every request of ``batch`` (1-based) of ``batches`` (A12).
 
     Mapping from the frozen evaluation design:
 
-    - A comparison needs episodes of both policies, and one XP request has one roster, so the
-      requests come in pairs: an odd ``batch`` plays the candidate (the binding's platform id),
-      the next even ``batch`` plays ``design.baseline_version``. Pair ``p`` is batches
-      ``2p-1`` and ``2p``. Each tag ``ar:<E>:b<batch>:a<attempt>`` stays unique.
-    - ``num_episodes`` = ceil(``n_min`` / ``batches``), so ``batches`` pairs give at least
-      ``n_min`` episodes per side.
-    - Roster: our policy in each ``design.seats`` slot; then one entry per
-      ``design.opponents`` item with ``slot: -1`` (the platform assigns the slot): ``"random"``
-      is a random league player, anything else a policy ref.
-    - ``design.seeds`` cannot be sent: coworld 0.1.57 XP requests take no seeds.
+    - ``design.seeds`` is split into ``batches`` contiguous slices of ceil(len(seeds)/batches);
+      ``batch`` takes its slice. Each seed gets two requests, candidate first, then baseline.
+    - Each request has ``num_episodes: 1`` and ``game_config_overrides: {"seed": seed}``: the
+      platform pins every episode of a request to its override seed, so the two arms of a seed
+      play the same board. The tag ``ar:<E>:b<batch>:a<attempt>:s<seed>:<arm>`` is unique.
+    - The candidate arm plays the binding's platform id, the baseline arm
+      ``design.baseline_version``, each in every ``design.seats`` slot.
+    - Opponents fill the other slots in order as fixed seats: a policy ref is identical across
+      the pair; ``"random"`` is sampled per request by the platform, so pairing is then
+      seed-only (``EvaluationDesign.pairing``). The roster must fill the game's seat count.
     """
-    if batch < 1 or batches < 1:
-        raise BadArguments("--batch and --batches must be at least 1")
+    if batches < 1 or not 1 <= batch <= batches:
+        raise BadArguments(f"--batch must be between 1 and --batches ({batches}), got {batch}")
     parsed = EvaluationDesign.from_dict(design)
-    side = "candidate" if batch % 2 == 1 else "baseline"
-    policy = (
-        binding["platform_policy_version_id"] if side == "candidate" else (parsed.baseline_version)
-    )
-    roster = [{"slot": seat, "player": {"policy_ref": policy}} for seat in parsed.seats]
-    roster += [_opponent(entry) for entry in parsed.opponents]
-    spec = {
-        "league_id": league_id,
-        "num_episodes": math.ceil(parsed.n_min / batches),
-        "roster": roster,
+    if not parsed.seeds:
+        raise BadArguments("the design has no seeds; a paired evaluation needs seeds (A12)")
+    size = math.ceil(len(parsed.seeds) / batches)
+    seeds = parsed.seeds[(batch - 1) * size : batch * size]
+    policies = {
+        "candidate": binding["platform_policy_version_id"],
+        "baseline": parsed.baseline_version,
     }
-    return spec, side
+    return [
+        (
+            seed,
+            arm,
+            {
+                "league_id": league_id,
+                "num_episodes": 1,
+                "game_config_overrides": {"seed": seed},
+                "roster": _roster(parsed, policies[arm]),
+            },
+        )
+        for seed in seeds
+        for arm in ARMS
+    ]
 
 
 # --- handlers ---
@@ -214,22 +241,63 @@ def _xp_create(ctx, sm, args) -> dict:
     binding = meta.get("candidate_binding")
     if not binding:
         raise Refused("no_binding", f"{experiment} has no candidate_binding; upload first")
-    spec, side = xp_spec(meta["evaluation_design"], binding, _league_id(), args.batch, args.batches)
-    result = sm.xp_create(experiment, args.batch, args.attempt, spec)
-    if isinstance(result, CreditDenied):
-        return _credit_denied(store, experiment, meta, result.reason)
-    policy = spec["roster"][0]["player"]["policy_ref"] if spec["roster"] else None
-    entry = {
+    design = meta["evaluation_design"]
+    planned = xp_specs(design, binding, _league_id(), args.batch, args.batches)
+    # Recover first so a relaunch (after a credit denial or a crash) creates only what is missing.
+    existing = {
+        (handle.seed, handle.arm): handle
+        for handle in sm.xp_recover(experiment)
+        if (handle.batch, handle.attempt) == (args.batch, args.attempt)
+    }
+    created: list[dict] = []
+    denial: CreditDenied | None = None
+    for seed, arm, spec in planned:
+        if (seed, arm) in existing:
+            continue
+        result = sm.xp_create(experiment, args.batch, args.attempt, spec, seed=seed, arm=arm)
+        if isinstance(result, CreditDenied):
+            denial = result
+            break
+        created.append(
+            {
+                "batch": args.batch,
+                "attempt": args.attempt,
+                "seed": seed,
+                "arm": arm,
+                "request_id": result.request_id,
+                "policy": spec["roster"][0]["player"]["policy_ref"],
+            }
+        )
+    done = set(existing) | {(entry["seed"], entry["arm"]) for entry in created}
+    missing = [{"seed": seed, "arm": arm} for seed, arm, _ in planned if (seed, arm) not in done]
+    report = {
+        "experiment": experiment,
         "batch": args.batch,
         "attempt": args.attempt,
-        "request_id": result.request_id,
-        "side": side,
-        "policy": policy,
+        "pairing": EvaluationDesign.from_dict(design).pairing,
+        "created": created,
+        "existing": [
+            _handle_dict(existing[(seed, arm)])
+            for seed, arm, _ in planned
+            if (seed, arm) in existing
+        ],
+        "missing": missing,
     }
+
     requests = meta.get("xp_requests") or []
+    recorded = {(r.get("batch"), r.get("attempt"), r.get("seed"), r.get("arm")) for r in requests}
+    new_entries = [
+        entry
+        for entry in created
+        if (entry["batch"], entry["attempt"], entry["seed"], entry["arm"]) not in recorded
+    ]
+    if new_entries:
+        store.update(experiment, {"xp_requests": [*requests, *new_entries]})
+        meta, _ = store.load(experiment)
+    if denial is not None:
+        return {**report, **_credit_denied(store, experiment, meta, denial.reason)}
+
     patch: dict = {}
-    if not any((r.get("batch"), r.get("attempt")) == (args.batch, args.attempt) for r in requests):
-        patch["xp_requests"] = [*requests, entry]
     if meta["status"] in ("uploaded", "awaiting-credits"):
         patch["status"] = "evaluating"
     lifecycle = meta.get("lifecycle") or {}
@@ -237,12 +305,7 @@ def _xp_create(ctx, sm, args) -> dict:
         patch["lifecycle"] = {**lifecycle, "credit_denials": 0, "next_launch_after": None}
     if patch:
         store.update(experiment, patch)
-    return {
-        **entry,
-        "experiment": experiment,
-        "num_episodes": spec["num_episodes"],
-        "credit_denied": False,
-    }
+    return {**report, "credit_denied": False}
 
 
 def _handle_dict(handle: XpHandle) -> dict:
@@ -251,6 +314,8 @@ def _handle_dict(handle: XpHandle) -> dict:
         "experiment": handle.experiment,
         "batch": handle.batch,
         "attempt": handle.attempt,
+        "seed": handle.seed,
+        "arm": handle.arm,
     }
 
 
@@ -338,11 +403,20 @@ def setup(parser: argparse.ArgumentParser) -> None:
 
     xp = commands.add_parser("xp", help="experience requests for an experiment")
     xp_commands = xp.add_subparsers(dest="xp_command", metavar="XP_COMMAND", required=True)
-    sub = command(xp_commands, "create", _xp_create, "launch one XP request (idempotent)")
+    sub = command(
+        xp_commands,
+        "create",
+        _xp_create,
+        "launch a batch: one seeded request per (seed, arm), creating only missing ones",
+    )
     sub.add_argument("experiment")
-    sub.add_argument("--batch", type=int, required=True, help="odd: candidate, even: baseline")
+    sub.add_argument(
+        "--batch", type=int, required=True, help="which slice of design.seeds (1..--batches)"
+    )
     sub.add_argument("--attempt", type=int, required=True)
-    sub.add_argument("--batches", type=int, default=1, help="pairs the evaluation is split into")
+    sub.add_argument(
+        "--batches", type=int, default=1, help="slices design.seeds is split into (default 1)"
+    )
     sub = command(xp_commands, "status", _xp_status, "status of every request of an experiment")
     sub.add_argument("experiment")
     sub = command(xp_commands, "recover", _xp_recover, "list the experiment's existing requests")

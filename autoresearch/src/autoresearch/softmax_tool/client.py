@@ -71,18 +71,30 @@ class SoftmaxClient:
     # --- XP requests ----------------------------------------------------
 
     def xp_create(
-        self, experiment: str, batch: int, attempt: int, spec: dict
+        self,
+        experiment: str,
+        batch: int,
+        attempt: int,
+        spec: dict,
+        seed: int | None = None,
+        arm: str | None = None,
     ) -> XpHandle | CreditDenied:
-        """Reuse an existing request for (experiment, batch, attempt); else check identity, create.
+        """Reuse an existing request for (experiment, batch, attempt, seed, arm); else check
+        identity, create.
 
         The existing request is reused whatever its state, including failed or cancelled ones;
         callers retry by bumping ``attempt``.
         """
         for handle in xp.recover(self._cli, experiment):
-            if (handle.batch, handle.attempt) == (batch, attempt):
+            if (handle.batch, handle.attempt, handle.seed, handle.arm) == (
+                batch,
+                attempt,
+                seed,
+                arm,
+            ):
                 return handle
         self._require_player()
-        return xp.create(self._cli, experiment, batch, attempt, spec)
+        return xp.create(self._cli, experiment, batch, attempt, spec, seed, arm)
 
     def xp_status(self, handle: XpHandle) -> XpStatus:
         return xp.status(self._cli, handle)

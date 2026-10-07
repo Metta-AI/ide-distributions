@@ -1,8 +1,9 @@
 """Hosted Experience Requests (XP) through ``coworld xp-request`` (coworld 0.1.57).
 
 Tagging: coworld 0.1.57 has no tag or metadata field on an XP request. The request body's
-``title`` carries the tag ``ar:<experiment>:b<batch>:a<attempt>`` (experiment ids are ULIDs, so
-the tag is globally unique), and ``recover`` finds requests by parsing titles from
+``title`` carries the tag ``ar:<experiment>:b<batch>:a<attempt>:s<seed>:<arm>`` (experiment ids
+are ULIDs, so the tag is globally unique; ``:s<seed>:<arm>`` is present for the seeded requests
+of a paired evaluation and absent on older untagged-seed requests), and ``recover`` finds requests by parsing titles from
 ``xp-request list --mine``. The same tag is sent as ``idempotency_key``: the server returns the
 existing request for a repeated key instead of creating a second one (observatory-api
 ``v2/experience_requests.py``), so even a create retried after a lost response cannot duplicate.
@@ -16,6 +17,13 @@ and appends a receipt per file to ``<dest>/manifest.jsonl`` with ``size`` and ``
 computes ``sha256`` while streaming and checks ``size`` against the server's declared size; the
 server publishes no content hash of its own (``version`` is not one). We verify every file on disk
 against the latest receipt for it.
+
+Seeds (A12): the body's ``game_config_overrides`` (validated by the server against the Coworld
+config schema; GotA has a top-level integer ``seed``) with ``{"seed": s}`` pins EVERY episode
+of the request to seed ``s`` (observatory-api ``v2/experience_requests.py``). Without it each
+episode gets a seed derived from (request id, job index). There is no per-episode seed list, so
+a paired evaluation sends one request per (seed, arm). Roster ``random``/``top_n`` selectors are
+sampled per request, so only fixed ``policy_ref`` opponents are identical across a pair.
 """
 
 import hashlib
@@ -31,10 +39,20 @@ from autoresearch.softmax_tool.platform_cli import (
 )
 from autoresearch.softmax_tool.protocol import CreditDenied, XpHandle, XpStatus
 
-TAG_PATTERN = re.compile(r"ar:(?P<experiment>[^:\s]+):b(?P<batch>\d+):a(?P<attempt>\d+)")
+ARMS = ("candidate", "baseline")
+TAG_PATTERN = re.compile(
+    r"ar:(?P<experiment>[^:\s]+):b(?P<batch>\d+):a(?P<attempt>\d+)"
+    r"(?::s(?P<seed>-?\d+):(?P<arm>candidate|baseline))?"
+)
 CREDIT_DENIAL = re.compile(r"\(402\)|HTTP 402")
 REQUIRED_SPEC = ("league_id", "num_episodes", "roster")
-OPTIONAL_SPEC = ("description", "notes", "variant_id", "episode_player_llm_spend_limit_usd")
+OPTIONAL_SPEC = (
+    "description",
+    "notes",
+    "variant_id",
+    "episode_player_llm_spend_limit_usd",
+    "game_config_overrides",
+)
 # ExperienceRequestStatus in observatory-core v2/models.py (metta 1301d30f33): pending,
 # submitted, running, completed, failed, cancelled. coworld also spells "canceled" elsewhere.
 STATE_BY_SERVER_STATUS = {
@@ -59,32 +77,58 @@ class ArtifactVerificationError(SoftmaxCliError):
     """A downloaded file is missing or does not match its receipt."""
 
 
-def tag(experiment: str, batch: int, attempt: int) -> str:
-    return f"ar:{experiment}:b{batch}:a{attempt}"
+def tag(
+    experiment: str, batch: int, attempt: int, seed: int | None = None, arm: str | None = None
+) -> str:
+    base = f"ar:{experiment}:b{batch}:a{attempt}"
+    return base if seed is None else f"{base}:s{seed}:{arm}"
 
 
-def parse_tag(title: str | None) -> tuple[str, int, int] | None:
+def parse_tag(title: str | None) -> tuple[str, int, int, int | None, str | None] | None:
+    """(experiment, batch, attempt, seed, arm); seed and arm are None for an unseeded tag."""
     match = TAG_PATTERN.fullmatch(title or "")
     if match is None:
         return None
-    return match["experiment"], int(match["batch"]), int(match["attempt"])
+    seed = None if match["seed"] is None else int(match["seed"])
+    return match["experiment"], int(match["batch"]), int(match["attempt"]), seed, match["arm"]
 
 
-def request_body(experiment: str, batch: int, attempt: int, spec: dict) -> dict:
+def _check_seed(spec: dict, seed: int | None, arm: str | None) -> None:
+    """A seeded request names its arm and its spec pins exactly that seed (the tag must say
+    what the request runs)."""
+    if seed is None:
+        return
+    if arm not in ARMS:
+        raise ValueError(f"a seeded XP request needs arm in {ARMS}, got {arm!r}")
+    pinned = (spec.get("game_config_overrides") or {}).get("seed")
+    if pinned != seed:
+        raise ValueError(f"XP spec game_config_overrides.seed is {pinned!r}, tag seed is {seed}")
+
+
+def request_body(
+    experiment: str,
+    batch: int,
+    attempt: int,
+    spec: dict,
+    seed: int | None = None,
+    arm: str | None = None,
+) -> dict:
     """The ``V2CreateExperienceRequestRequest`` body for ``spec``.
 
     ``spec`` keys: ``league_id``, ``num_episodes``, ``roster`` (the platform's roster entries, e.g.
     ``{"player": {"policy_ref": "name:v3"}, "slot": 0}``), and optionally ``description``,
-    ``notes``, ``variant_id``, ``episode_player_llm_spend_limit_usd``.
+    ``notes``, ``variant_id``, ``episode_player_llm_spend_limit_usd``,
+    ``game_config_overrides`` (e.g. ``{"seed": 7}``; must match ``seed`` when it is given).
     """
     missing = [key for key in REQUIRED_SPEC if key not in spec]
     unknown = sorted(set(spec) - set(REQUIRED_SPEC) - set(OPTIONAL_SPEC))
     if missing or unknown:
         raise ValueError(f"XP spec: missing {missing}, unknown {unknown}")
+    _check_seed(spec, seed, arm)
     target = {"league_id": spec["league_id"]}
     if "variant_id" in spec:
         target["variant_id"] = spec["variant_id"]
-    request_tag = tag(experiment, batch, attempt)
+    request_tag = tag(experiment, batch, attempt, seed, arm)
     body = {
         "target": target,
         "roster": spec["roster"],
@@ -93,22 +137,33 @@ def request_body(experiment: str, batch: int, attempt: int, spec: dict) -> dict:
         "title": request_tag,
         "idempotency_key": request_tag,
     }
-    for key in ("description", "notes", "episode_player_llm_spend_limit_usd"):
+    for key in (
+        "description",
+        "notes",
+        "episode_player_llm_spend_limit_usd",
+        "game_config_overrides",
+    ):
         if key in spec:
             body[key] = spec[key]
     return body
 
 
 def create(
-    cli: PlatformCli, experiment: str, batch: int, attempt: int, spec: dict
+    cli: PlatformCli,
+    experiment: str,
+    batch: int,
+    attempt: int,
+    spec: dict,
+    seed: int | None = None,
+    arm: str | None = None,
 ) -> XpHandle | CreditDenied:
     """Create the request. Callers check identity and run ``recover`` first (see SoftmaxClient).
 
     The tag is also the idempotency key, so the platform never creates a second request for the
-    same (experiment, batch, attempt), even after a failed or cancelled one: to retry, the caller
-    bumps ``attempt``.
+    same (experiment, batch, attempt, seed, arm), even after a failed or cancelled one: to retry,
+    the caller bumps ``attempt``.
     """
-    body = request_body(experiment, batch, attempt, spec)
+    body = request_body(experiment, batch, attempt, spec, seed, arm)
     args = ["xp-request", "create", "-", "--json"]
     result = cli.run("coworld", args, input=json.dumps(body), ok_codes=(0, 1))
     if result.returncode != 0:
@@ -121,7 +176,7 @@ def create(
         raise SoftmaxCliError(
             f"xp-request create printed no request id: {result.stdout.strip()[-500:]!r}"
         ) from None
-    return XpHandle(request_id, experiment, batch, attempt)
+    return XpHandle(request_id, experiment, batch, attempt, seed, arm)
 
 
 def _error_detail(stderr: str) -> str:
@@ -130,15 +185,28 @@ def _error_detail(stderr: str) -> str:
 
 
 def recover(cli: PlatformCli, experiment: str) -> list[XpHandle]:
-    """Every existing request tagged for ``experiment``, ordered by (batch, attempt)."""
+    """Every existing request tagged for ``experiment``, ordered by (batch, attempt, seed, arm)."""
     args = ["xp-request", "list", "--mine", "--limit", str(PAGE_LIMIT)]
     rows = cli.run_json_pages("coworld", args)
     handles = []
     for row in rows:
         parsed = parse_tag(row.get("title"))
         if parsed is not None and parsed[0] == experiment:
-            handles.append(XpHandle(row["id"], experiment, parsed[1], parsed[2]))
-    return sorted(handles, key=lambda handle: (handle.batch, handle.attempt, handle.request_id))
+            handles.append(XpHandle(row["id"], *parsed))
+    return sorted(handles, key=handle_order)
+
+
+def handle_order(handle: XpHandle) -> tuple:
+    """Sort key: (batch, attempt), unseeded first, then seed, arm, request id."""
+    seeded = handle.seed is not None
+    return (
+        handle.batch,
+        handle.attempt,
+        seeded,
+        handle.seed or 0,
+        handle.arm or "",
+        handle.request_id,
+    )
 
 
 def status(cli: PlatformCli, handle: XpHandle) -> XpStatus:
