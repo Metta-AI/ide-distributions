@@ -46,14 +46,8 @@ autoresearch/
 
 ## Milestone 0 — De-risking checks
 
-### Task 0.1: Player-only XP probe
-**Files:** `docs/plans/findings/player-xp-probe.md`
-- [ ] **Step 1:** Throwaway venv: `uv venv /tmp/archeck && uv pip install --python /tmp/archeck coworld==0.1.57 softmax-cli==0.26.38`. Configure a credentials file holding **only** a test Player's token.
-- [ ] **Step 2:** Record `whoami` (`subject_type`, player id).
-- [ ] **Step 3:** As that Player, without `--elevated`: create a 1-episode GotA XP request, `get` it, `list --mine`, fetch one artifact, upload a trivial policy, and read the leaderboard. Record exact argv, status, and response for each.
-- [ ] **Step 4 (separate diagnostic):** for a failing operation, repeat with James's user account and `--elevated` only to learn its scope; never count it as Player-only PASS.
-- [ ] **Step 5:** Write `PLAYER-ONLY: PASS` or `FAIL (<operation>, <error>)`. On FAIL, stop and ask James for a design amendment (two-credential option). Use the token broker for any vended credential.
-- [ ] **Step 6:** Commit `docs: player-only XP probe finding`.
+### Task 0.1: Player-only XP probe — DONE (PASS)
+Completed 2026-10-07; see `docs/plans/findings/player-xp-probe.md`. A Player-only credential (Games Bond, no `--elevated`) can create, get, list, read episodes of, and download artifacts from XP requests on the GotA league. The single-credential design (C6) stands. Note: XP requests record `requester_user_id` = the user account.
 
 ### Task 0.2: Hermes v0.21.5 facts
 **Files:** `docs/plans/findings/hermes-facts.md`
@@ -69,6 +63,7 @@ autoresearch/
   8. `hermes config set` writes nested keys.
   9. Copy one real `cron/jobs.json` record produced by `hermes cron create` for a no-agent script job created paused.
   10. A worker's cwd is the worktree; `AGENTS.md` committed in the canonical repo appears there and loads.
+  11. Tool calling works in Hermes through OpenRouter with `moonshotai/kimi-k3`, `z-ai/glm-5.3`, and `z-ai/glm-5.3-flash`: each completes a card that runs one terminal command, writes one file, and calls `kanban_complete`. Record failures per model; a failing primary is a decision for James.
 - [ ] **Step 3:** For each FAIL, write the contract amendment into `00-overview.md` and get James's OK before Milestone 3. Commit.
 
 (The GotA globals-budget check is `02-gota-and-compiler.md` Task 0.1.)
@@ -120,11 +115,13 @@ def test_manifest():
     m = yaml.safe_load((ROOT/"distribution.yaml").read_text())
     assert m["name"]=="autoresearch" and m["hermes_requires"]==">=0.21.5" and "distribution_owned" not in m
     env={e["name"]:e for e in m["env_requires"]}
-    for k in ["OPENROUTER_API_KEY","OPENROUTER_MODEL","SOFTMAX_PLAYER_CREDENTIAL","AUTORESEARCH_PLAYER_ID","AUTORESEARCH_WORKSPACE_REMOTE"]: assert env[k]["required"] is True
+    for k in ["OPENROUTER_API_KEY","SOFTMAX_PLAYER_CREDENTIAL","AUTORESEARCH_PLAYER_ID","AUTORESEARCH_WORKSPACE_REMOTE"]: assert env[k]["required"] is True
+    assert env["OPENROUTER_MODEL"]["default"]=="moonshotai/kimi-k3"
     assert env["AUTORESEARCH_GAME"]["default"]=="gota"
 def test_config():
     c=yaml.safe_load((ROOT/"config.yaml").read_text())
     assert "autoresearch" in c["plugins"]["enabled"]
+    assert c["model"]["default"]=="moonshotai/kimi-k3" and "z-ai/glm-5.3" in json.dumps(c["fallback_providers"])
     k=c["kanban"]; assert (k["max_in_progress"],k["auto_decompose"],k["review_dispatch"],k["auto_subscribe_on_create"])==(2,False,False,False) and "default_assignee" not in k
     assert c["memory"]=={"memory_enabled":True,"user_profile_enabled":False,"write_approval":False}
     assert set(c["terminal"]["env_passthrough"])=={"SOFTMAX_PLAYER_CREDENTIAL","AUTORESEARCH_PLAYER_ID","AUTORESEARCH_WORKSPACE","AUTORESEARCH_WORKSPACE_REMOTE","AUTORESEARCH_GAME","AUTORESEARCH_SOFTMAX","AUTORESEARCH_CLI"}
@@ -145,7 +142,7 @@ def test_plugin_import_graph_is_stdlib_only():
 - [ ] **Step 2: Tests**
   - `test_payload_present`: profile has `scripts/queue_keeper.py`, `src/autoresearch/launch.py`, `uv.lock`, `plugins/autoresearch/plugin.yaml`.
   - `test_launcher_bootstraps`: run `python <profile>/scripts/queue_keeper.py --bootstrap-only` (flag handled by `runtime.queue_keeper`, Task 3.9 adds it; until then a minimal `queue_keeper.main` that runs `bootstrap` only); assert `local/venv/bin/python`, `bin/autoresearch`, canonical `workspace/.git`, `.supervisor/ledger/`, pushed `main` on the bare remote.
-  - `test_worker_shell_finds_cli`: create one card body "run `"$AUTORESEARCH_CLI" --version` and finish"; let one worker run (cheap model; skip if `OPENROUTER_MODEL` unset); assert the run log contains the version string.
+  - `test_worker_shell_finds_cli`: create one card body "run `"$AUTORESEARCH_CLI" --version` and finish"; let one worker run with `z-ai/glm-5.3-flash` (skip if no OpenRouter key); assert the run log contains the version string.
   - `test_plugin_loads_in_worker`: same run; assert `runtime/tool_events.jsonl` exists (post_tool_call stub appends).
   - `test_update_preserves`: write `workspace/x`, `memories/MEMORY.md`, set `kanban.max_in_progress: 3`; `hermes profile update ar-it` from a modified copy; assert both files survive, cap stays 3, changed script arrived.
 - [ ] **Step 3:** Iterate to PASS. **Step 4:** Commit.
@@ -433,7 +430,7 @@ Card metadata comes from `runtime/cards/<task-id>.json` written at admission (no
 
 ### Task 5.1: Protocol slice (marker `hermes`)
 **Files:** `tests/integration/test_protocol_slice.py`, `tests/integration/slice_cards/*.md`
-- [ ] **Step 1:** Install (Task 1.3 fixture) with `AUTORESEARCH_GAME=fakegame`, `AUTORESEARCH_SOFTMAX=fake`, a bare remote, `OPENROUTER_MODEL` (cheap; the test **fails**, not skips, when unset during the go/no-go run).
+- [ ] **Step 1:** Install (Task 1.3 fixture) with `AUTORESEARCH_GAME=fakegame`, `AUTORESEARCH_SOFTMAX=fake`, a bare remote, `OPENROUTER_MODEL=z-ai/glm-5.3-flash` (the test **fails**, not skips, when the OpenRouter key is missing during the go/no-go run).
 - [ ] **Step 2:** Write three card requests into canonical (committed) and run queue-keeper: A and B (investigation) both reference hypothesis H-x and are admitted together so both branch from the same base; their bodies instruct the worker exactly (edit H-x's body line N, create one claim, stage one highlight, write one card request, run `"$AUTORESEARCH_CLI" card finish --outcome done`, call `kanban_complete`). C is a promotion card body that runs `"$AUTORESEARCH_CLI" softmax submit E-fake` (Plan 03 Task 3.4; with `AUTORESEARCH_SOFTMAX=fake` the eligibility check reads a pre-seeded `reviewed` experiment whose stored RuleOutcome is eligible) against that experiment.
 - [ ] **Step 3:** Resume cron jobs; run the gateway; wait up to 20 min for all handoffs to reach a final state.
 - [ ] **Step 4: Assert:** one of A/B merges, the other produces a reconciliation request (same entity); outbox seqs contiguous; requested cards admitted with receipts; remote has `main` and `card/*`; plugin events exist; C reaches promotion `published` and FakeSoftmax shows one submission.

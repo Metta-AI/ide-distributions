@@ -81,7 +81,7 @@ def compact(layout, now, trigger=0.10, target=0.025, min_stale_days=14, pending_
 ```python
 @dataclass(frozen=True) class MetricSpec: name: str; direction: Literal["up","down"]; role: Literal["primary","agent_guardrail","performance"]; min_effect: float|None; tolerance: float|None
 @dataclass(frozen=True) class EvaluationDesign: game_version: str; baseline_version: str; seats: tuple[int,...]; opponents: tuple[str,...]; seeds: tuple[int,...]; metrics: tuple[MetricSpec,...]; k: float; delta: dict[str,float]; n_min: int; noise_rev: str
-#   frozen into experiment.evaluation_design at preregistration (C10); performance metrics come from Game.performance_guardrails (GotA: xp_per_1k_ticks AND win_rate);
+#   frozen into experiment.evaluation_design at preregistration (C10); performance metrics come from Game.performance_guardrails (GotA: glory AND win_rate);
 #   metric names and directions come from Game.outcome_metrics; the experiment adds primary metrics and agent guardrails with min_effect/tolerance.
 #   The candidate is NOT in the design: it is bound once after upload via experiment.candidate_binding (Plan 01 Task 1.5) and passed to pair()/evaluate().
 @dataclass class EpisodeRow: episode_id: str; game_version: str; policy_version: str; seed: int; seats: tuple[int,...]; opponents: tuple[str,...]; metrics: dict[str,float]; status: Literal["completed","failed"]
@@ -112,11 +112,11 @@ def freeze_design(experiment_meta, game: Game, noise: dict, planned_pairs: int) 
 ```python
 def evaluate(design: EvaluationDesign, pairs, candidate_platform_id: str, current_champion: str) -> RuleOutcome   # promote_eligible: bool, failures: list[str], per_metric: dict
 #   unique pairs ≥ design.n_min; every primary metric: mean signed diff ≥ min_effect and bootstrap CI excludes 0;
-#   every agent guardrail: signed diff ≥ -tolerance; every performance metric (all of them, e.g. XP/1k AND win rate): signed diff ≥ -delta[metric],
+#   every agent guardrail: signed diff ≥ -tolerance; every performance metric (all of them; GotA: glory AND win rate): signed diff ≥ -delta[metric],
 #   and a negative performance diff is allowed only when at least one primary metric is significant; design.baseline_version == current_champion
 ```
 CLI: `"$AUTORESEARCH_CLI" stats ingest --league <id>` (uses `ingest_rows`) `| --experiment <E>` (uses `ingest` with the frozen design and the candidate binding), `stats noise`, `stats evaluate <E>` (reads the champion from Plan 01 `current_champion`). The calibration card's procedure runs `stats ingest --league` then `stats noise`.
-- [ ] Tests: on fixture rows carrying both `xp_per_1k_ticks` and `win_rate` from the GotA contract: XP up but win rate down beyond δ → blocked; guardrail breach (shots fired down) → blocked; slip within δ with a significant primary → eligible; slip without significance → blocked; lower-is-better primary handled; N short → blocked; baseline ≠ champion → blocked. Commit.
+- [ ] Tests: on fixture rows carrying both `glory` and `win_rate` from the GotA contract: glory up but win rate down beyond δ → blocked; guardrail breach (shots fired down) → blocked; slip within δ with a significant primary → eligible; slip without significance → blocked; lower-is-better primary handled; N short → blocked; baseline ≠ champion → blocked. Commit.
 
 ## Milestone 3 — softmax tool
 
@@ -161,7 +161,7 @@ Each SKILL.md: front matter (`name`, `description` beginning "Use when"), the Sy
 
 ### Task 5.1: Bootstrap configuration migrations
 **Files:** `src/autoresearch/runtime/config_migrations.py`, tests (fake `hermes config set` recorder) + integration (marker `hermes`)
-Implements the `00-overview.md` C9 table exactly: each key with its policy (always / missing-only), applied with `hermes config set`; `HERMES_WRITE_SAFE_ROOT` = canonical (covers `.worktrees/`) in the profile `.env`; `AUTORESEARCH_CLI` in the profile `.env`; `skills.create_dir` = `$HERMES_HOME/local/skills-staging`; no `kanban.default_assignee`; exact env passthrough list; auto-update off; curator exclusion of shipped skills; unset model → bootstrap fails with "set OPENROUTER_MODEL in the profile .env". Profile name read from `HERMES_HOME` (no hard-coded assignee).
+Implements the `00-overview.md` C9 table exactly: each key with its policy (always / missing-only), applied with `hermes config set`; `HERMES_WRITE_SAFE_ROOT` = canonical (covers `.worktrees/`) in the profile `.env`; `AUTORESEARCH_CLI` in the profile `.env`; `skills.create_dir` = `$HERMES_HOME/local/skills-staging`; no `kanban.default_assignee`; exact env passthrough list; auto-update off; curator exclusion of shipped skills; the model defaults to `moonshotai/kimi-k3` with fallback `z-ai/glm-5.3` (installer may override `OPENROUTER_MODEL`). Profile name read from `HERMES_HOME` (no hard-coded assignee).
 - [ ] Tests: each key applied; missing-only keys not overwritten; integration: fresh install then update keeps installer's `kanban.max_in_progress: 3`. Commit.
 
 ### Task 5.2: MEMORY.md snapshot and README operations guide
@@ -184,7 +184,7 @@ Implements the `00-overview.md` C9 table exactly: each key with its policy (alwa
 
 
 ### Task 6.1: Real cycle on local Hermes (manual gate with checklist)
-**Preconditions:** Plan 01 complete; Plan 02 build binding (compiler or fallback); Plan 01 Task 0.1 PASS (or approved amendment); real Player credential, `OPENROUTER_MODEL`, league id, workspace remote.
+**Preconditions:** Plan 01 complete; Plan 02 compiler build binding; Plan 01 Task 0.1 PASS (done); real Player credential, OpenRouter key (model defaults to `moonshotai/kimi-k3`), workspace remote.
 - [ ] **Step 1:** Install fresh; fill `.env`; resume cron jobs.
 - [ ] **Step 2:** Observe in order and tick each with evidence (journal ids, outbox seqs, commit SHAs): calibration card writes a noise record; planning card creates Topics and investigation cards; an investigation card produces hypotheses with evidence; an experimentation card builds, uploads, launches XP; xp-poll creates the review card; review writes a Result and a decision; if `promote`, the promotion card submits and the champion is published.
 - [ ] **Step 3:** Timeouts: if no card completes within 60 min, or the same signal fires 3 times, stop and record the state; that is a finding, not a pass.
@@ -192,6 +192,6 @@ Implements the `00-overview.md` C9 table exactly: each key with its policy (alwa
 
 ### Task 6.2: Acceptance and handoff checklist
 **Files:** `docs/plans/findings/acceptance-checklist.md`
-- [ ] Leaderboard measurement procedure for Friday (league, player, how to read rank, what counts as top half; fallback criterion "plays reasonably" defined as completing episodes without errors and XP per 1,000 ticks within one SD of the league median).
+- [ ] Leaderboard measurement procedure for Friday (league, player, how to read rank, what counts as top half; fallback criterion "plays reasonably" defined as completing episodes without errors and glory within one SD of the league median).
 - [ ] Hosting handoff for Rohit: required env keys, remote access, token refresh owner, evidence storage and refetch policy (replays not in git), restore procedure, Kanban go/no-go status, known Hermes issues.
 - [ ] Local readiness vs hosted run clearly separated. Commit.

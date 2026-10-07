@@ -8,14 +8,14 @@
 
 **Plans:**
 1. `01-foundation-and-vertical-slice.md` — install/bootstrap, records, queue, runtime protocols (admission, handoff, merge, publication, promotion, pause, rebuild), plugin, and a protocol slice on the real Kanban dispatcher with recovery tests.
-2. `02-gota-and-compiler.md` — GotA extension, toolkit, seed, compiler port with the G layer, and the BASIC fallback (tripwire).
+2. `02-gota-and-compiler.md` — GotA extension, toolkit, seed, shared gates, and the semantic↔policy compiler port with the G layer and full goal tracing (the only build path).
 3. `03-research-completion-and-hardening.md` — KB maintenance, statistics and calibration, the full softmax tool, doctrine and skills, operational configuration, a full fake-game research cycle, the real GotA cycle, and the acceptance checklist.
 
 Plan 01 is the critical path. Plan 02 can start in parallel after Plan 01 Milestone 0. Plan 03 Milestones 1–4 start after Plan 01 Milestone 1; Milestone 6 needs Plans 01 and 02. See "Execution order".
 
 ## Tech stack and versions
 
-Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, ruff; jsonschema, python-frontmatter, PyYAML, python-ulid; git CLI via subprocess. Hermes Agent v0.21.5 (tag `v2026.9.24`) installed with `uv tool install git+https://github.com/NousResearch/hermes-agent@v2026.9.24` (PyPI lags at 0.19.0). coworld 0.1.57, softmax-cli 0.26.38 (latest on PyPI on 2026-10-07; re-check before Plan 01 Task 1.1). Nim 2.2.10 for GotA replay tools. Source pins: optimizer-seed `7ebea87`, co-gas `6742feb`, GotA lab `personal_labs_gota@07dc6f94`, Paintbot PW `personal_labs_paintbot_pw@6b0bffa5` (re-pin to a clean commit; the checkout has uncommitted edits).
+Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, ruff; jsonschema, python-frontmatter, PyYAML, python-ulid; git CLI via subprocess. Hermes Agent v0.21.5 (tag `v2026.9.24`) installed with `uv tool install git+https://github.com/NousResearch/hermes-agent@v2026.9.24` (PyPI lags at 0.19.0). coworld 0.1.57, softmax-cli 0.26.38 (latest on PyPI on 2026-10-07; the globally installed uv tool coworld is stale at 0.1.38, so always use the project-pinned version). Live GotA coworld version on 2026-10-07: 2026.10.6.1. Models (open-weight, via OpenRouter, chosen 2026-10-07): primary `moonshotai/kimi-k3`, fallback `z-ai/glm-5.3`, tests and protocol slice `z-ai/glm-5.3-flash`. Nim 2.2.10 for GotA replay tools. Source pins: optimizer-seed `7ebea87`, co-gas `6742feb`, GotA lab `personal_labs_gota@07dc6f94`, Paintbot PW `personal_labs_paintbot_pw@6b0bffa5` (re-pin to a clean commit; the checkout has uncommitted edits).
 
 ## Global constraints (every task inherits these)
 
@@ -95,8 +95,8 @@ Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, 
 | `HERMES_WRITE_SAFE_ROOT` = canonical (covers `.worktrees/`) | always | profile `.env` via bootstrap |
 | `terminal.env_passthrough` = `SOFTMAX_PLAYER_CREDENTIAL, AUTORESEARCH_PLAYER_ID, AUTORESEARCH_WORKSPACE, AUTORESEARCH_WORKSPACE_REMOTE, AUTORESEARCH_GAME, AUTORESEARCH_SOFTMAX, AUTORESEARCH_CLI` (exact names; no wildcards: `tools/env_passthrough.py:111-133`) | always | config.yaml + bootstrap |
 | Auto-update off | always | bootstrap |
-| `OPENROUTER_MODEL` and fallback chain | installer; required | `.env`; bootstrap fails with an actionable message if unset |
-| League id, outcome and performance metrics, `min_episodes_floor` (40/side) | game contract; installer override | `games/<game>/GAME.md`; env override |
+| `OPENROUTER_MODEL` (default `moonshotai/kimi-k3`) and fallback chain (`z-ai/glm-5.3`) | distribution default; installer may override | config.yaml model + `fallback_providers`; `.env` override |
+| League id (GotA: `league_3c60897b-25cf-4b37-9d1a-8554c1198f28`), outcome and performance metrics, `min_episodes_floor` (40/side) | game contract; installer override | `games/<game>/GAME.md`; env override |
 
 ### C10. Calibration before experiments
 - Admission of an experimentation card requires a noise record for the **current game version** (`stats/metric-noise.yaml` with matching `game_version`). When none exists, `queue-keeper` admits a P1 calibration card (`mode: maintenance`, idempotency key `calibrate:<game_version>`).
@@ -116,15 +116,16 @@ Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, 
 Plan01 M0 (probe, Hermes facts) ─┬─> Plan01 M1 (package, install, ids, records, game loader) ─> Plan01 M2 (queue) ─> Plan01 M3 (runtime protocols) ─> Plan01 M4 (plugin) ─> Plan01 M5 (protocol slice on real Hermes)
                                  │                                    │
                                  │                                    └─> Plan03 M1 (KB) , Plan03 M2 (stats) , Plan03 M3 (softmax tool) , Plan03 M4 (doctrine, skills)
-                                 └─> Plan02 M0–M1 (globals budget, contract, toolkit, gates) ─> Plan02 M2 (compiler) or M3 (BASIC fallback)
+                                 └─> Plan02 M0–M1 (globals budget, contract, toolkit, gates) ─> Plan02 M2 (compiler)
 Plan03 M3 Task 3.4 (softmax CLI incl. guarded submit) ─> Plan01 M5
 Plan01 M5 + Plan03 M1–M4 ─> Plan03 M5 (config hardening) ─> Plan03 M6 (fake-game full cycle, then real GotA cycle, acceptance)
 ```
 Plan 01 Milestone 5 proves the protocols (finish → merge → publish, reconciliation, promotion lock, pause, recovery) with scripted card bodies; the full research cycle is proven in Plan 03 Milestone 6 once stats, the softmax tool, and skills exist.
 
-## Dates in force and decisions needed from James
-- **In force now (Runtime doc):** Kanban go/no-go and compiler tripwire at **end of day Wed Oct 7** (today). Until James changes them, executors treat both as in force: the serial fallback (Plan 01 Task 5.3) and the BASIC fallback (Plan 02 Milestone 3) are the v0 paths, and the Kanban and compiler paths continue only as non-blocking work.
-- **Proposal awaiting James:** move both to end of day Thu Oct 8.
-- **Approved deviation needed for the BASIC fallback:** the fallback cannot emit goal-labelled decision traces (System Design §3.1 G layer) because v13 modules have no goal telemetry; it keeps goals as annotations only.
-- **Model id and fallback chain** (open question 8): `OPENROUTER_MODEL` required, no default.
-- **League id** (open question 9): set in `games/gota/GAME.md`.
+## Dates and decisions (James, 2026-10-07)
+- **Goal: end of day Wed Oct 7.** Kanban go/no-go and the compiler target are both end of day today.
+- **Kanban:** if Plan 01 Task 5.1 has not passed by then, the serial fallback (Plan 01 Task 5.2) is the v0 path.
+- **Compiler:** there is **no BASIC fallback** (dropped by James). The semantic↔policy compiler, with full goal tracing, is the only build path; if it slips past the goal, the work continues on the compiler rather than switching paths.
+- **Models:** open-weight only (James). Primary `moonshotai/kimi-k3` (top open-weight model on the BenchLM agentic leaderboard, 2026-10-07: #8, 69.7; Terminal-Bench 2.1 88.3), fallback `z-ai/glm-5.3` (#12, 67.5; MIT), tests `z-ai/glm-5.3-flash`. Plan 01 Task 0.2 verifies tool calling with each inside Hermes.
+- **League:** `league_3c60897b-25cf-4b37-9d1a-8554c1198f28` ("Gods of the Arena"). Its score is "Emmett's Glory": winning heroes' lifetime XP per simulated minute; losses, draws, and timeouts score zero.
+- **Player-only credential:** verified PASS on 2026-10-07 (`../findings/player-xp-probe.md`); C6 stands unchanged.
