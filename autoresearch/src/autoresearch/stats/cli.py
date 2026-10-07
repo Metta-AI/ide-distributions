@@ -13,21 +13,31 @@ Files under the workspace root:
   candidate it was evaluated against, ``rows_sha256`` (of the rows file) and ``design_sha256``
   (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
   detect a stale outcome by recomputing both hashes.
+
+The champion for ``stats evaluate`` comes from ``runtime.promotion.current_champion`` (the
+latest published promotion confirmed against the Softmax leaderboard of the game's league)
+when the command runs inside a profile (``HERMES_HOME`` and ``AUTORESEARCH_GAME`` set);
+``--champion`` must then agree with it. Outside a profile, or when the champion is unknown,
+``--champion`` is required.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import re
 from dataclasses import asdict
 from pathlib import Path
 
+from autoresearch import runctx
 from autoresearch.cli import register_group
 from autoresearch.games.loader import GameError, load_game
 from autoresearch.io.docs import _atomic_write_text
 from autoresearch.paths import Layout
 from autoresearch.records.cli import BadArguments, _check_id, _ok, _run
 from autoresearch.records.store import RecordStore
+from autoresearch.runtime.promotion import current_champion
+from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
 from autoresearch.stats.design import EvaluationDesign
 from autoresearch.stats.ingest import EpisodeRow, ingest, ingest_rows, pair
@@ -35,7 +45,8 @@ from autoresearch.stats.noise import compute_noise, write_noise
 
 # games/ lives at the autoresearch project root, next to schemas/.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-CHAMPION_UNKNOWN = "champion unknown: pass --champion until promotion lands"
+CHAMPION_UNKNOWN = "champion unknown: pass --champion"
+GAME_ENV = "AUTORESEARCH_GAME"
 # A league id becomes a file name under stats/rows/, so no path separators or leading dots.
 _LEAGUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -139,16 +150,31 @@ def _noise(args, store: RecordStore) -> int:
     return _ok({"noise_rev": revision, "path": str(store.layout.stats / "metric-noise.yaml")})
 
 
-def _resolve_champion(args, store: RecordStore) -> str:
-    """The promotion module's champion when it exists (``--champion`` must then agree),
-    else ``--champion``."""
+def _confirmed_champion() -> str | None:
+    """The promotion ledger's champion inside a profile; None outside one or when unknown."""
+    game_name = os.environ.get(GAME_ENV)
+    if not game_name:
+        return None
     try:
-        from autoresearch.runtime.promotion import current_champion
-    except ImportError:
+        ctx = runctx.from_env()
+    except KeyError:
+        return None
+    try:
+        game = load_game(_REPO_ROOT, game_name)
+    except GameError as error:
+        raise BadArguments(str(error)) from None
+    sm = softmax_from_env(os.environ, ctx.canonical)
+    return current_champion(ctx, sm, game.league_id)
+
+
+def _resolve_champion(args) -> str:
+    """The confirmed champion when there is one (``--champion`` must then agree), else
+    ``--champion``."""
+    champion = _confirmed_champion()
+    if champion is None:
         if not args.champion:
-            raise BadArguments(CHAMPION_UNKNOWN) from None
+            raise BadArguments(CHAMPION_UNKNOWN)
         return args.champion
-    champion = current_champion(store.layout)
     if args.champion and args.champion != champion:
         raise ValueError(
             f"champion mismatch: --champion {args.champion} but the current champion is {champion}"
@@ -167,7 +193,7 @@ def _evaluate(args, store: RecordStore) -> int:
         raise ValueError(
             f"no rows for {args.experiment}; run stats ingest --experiment {args.experiment}"
         )
-    champion = _resolve_champion(args, store)
+    champion = _resolve_champion(args)
     rows_bytes = path.read_bytes()
     pairs = pair(_parse_rows(rows_bytes.decode("utf-8"), str(path)), design, candidate)
     outcome = evaluate(design, pairs, candidate, champion)

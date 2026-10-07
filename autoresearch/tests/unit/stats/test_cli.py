@@ -4,7 +4,6 @@ import hashlib
 import json
 import subprocess
 import sys
-import types
 from dataclasses import asdict
 
 import pytest
@@ -14,6 +13,7 @@ from records.fixtures import EXP_DESIGNED
 from autoresearch.cli import main
 from autoresearch.paths import Layout
 from autoresearch.records.store import RecordStore
+from autoresearch.stats import cli as stats_cli
 from autoresearch.stats.design import EvaluationDesign, MetricSpec
 from autoresearch.stats.ingest import EpisodeRow
 
@@ -180,13 +180,14 @@ def test_ingest_experiment_then_evaluate(tmp_path, experiment):
     assert env["data"]["failures"] == ["baseline_not_champion"]
 
 
-def test_evaluate_without_champion_until_promotion_lands(tmp_path, experiment):
+def test_evaluate_without_champion_outside_a_profile(tmp_path, experiment, monkeypatch):
+    monkeypatch.delenv("AUTORESEARCH_GAME", raising=False)
     root = tmp_path / "ws"
     write_rows(tmp_path / "rows.jsonl", experiment_rows())
     stats(root, "ingest", "--rows", str(tmp_path / "rows.jsonl"), "--experiment", experiment)
     code, env = stats(root, "evaluate", experiment)
     assert code == 2
-    assert env["error"]["message"] == "champion unknown: pass --champion until promotion lands"
+    assert env["error"]["message"] == "champion unknown: pass --champion"
 
 
 def test_evaluate_without_rows_is_failure(tmp_path, experiment):
@@ -277,11 +278,21 @@ def test_non_numeric_metric_is_failure_envelope(tmp_path):
 
 
 @pytest.fixture
-def promotion(monkeypatch):
-    """A stand-in for autoresearch.runtime.promotion that names BASE as champion."""
-    module = types.ModuleType("autoresearch.runtime.promotion")
-    module.current_champion = lambda layout: BASE
-    monkeypatch.setitem(sys.modules, "autoresearch.runtime.promotion", module)
+def promotion(monkeypatch, tmp_path):
+    """Run inside a profile whose promotion ledger names BASE as champion; returns the
+    league ids ``current_champion`` was asked about."""
+    asked = []
+
+    def champion(ctx, sm, league_id):
+        asked.append(league_id)
+        return BASE
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    monkeypatch.setattr(stats_cli, "current_champion", champion)
+    return asked
 
 
 def run_in_process(capsys, root, *argv):
@@ -298,6 +309,7 @@ def test_champion_from_promotion_and_mismatch(tmp_path, experiment, promotion, c
     assert code == 0, env
     code, env = run_in_process(capsys, root, "evaluate", experiment)
     assert code == 0 and env["data"]["champion"] == BASE and env["data"]["promote_eligible"]
+    assert promotion == ["fake-league"]  # the game's league
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
     assert code == 0
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", "pv-other")

@@ -24,6 +24,13 @@ called again. ``publish`` must therefore be idempotent.
 
 All canonical mutations run under ``canonical.lock``, which is not re-entrant: callers must
 not hold it, and ``publish`` is called while it is held and must not take it.
+
+Promotion hooks (C8, ``promotion.py``), all under the lock: ``promotion.merge_gate`` runs
+before a merge and can send the handoff to ``repair`` (the promotion holder's branch lacks
+the candidate champion) or ``reconcile`` (another branch changes the champion);
+``promotion.after_merge`` runs once a handoff is ``merged`` (stage ``recorded``); and
+``promotion.after_publish`` runs right after ``publish`` (stage ``published``). Each is
+idempotent, so a crash before the handoff's next commit just repeats it.
 """
 
 from collections.abc import Callable
@@ -41,6 +48,7 @@ from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.registry import parse_record_path
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
+from autoresearch.runtime import promotion
 from autoresearch.runtime.admission import board_epoch, receipt_path
 from autoresearch.runtime.handoff import (
     HANDOFFS_DIR,
@@ -361,8 +369,19 @@ def _publish(canonical: Path, path: Path, record: dict, publish: Publish) -> dic
     return _transition(canonical, path, record, "published", tuple(written))
 
 
-def _advance(canonical: Path, path: Path, store: RecordStore, publish: Publish) -> dict:
+def _publish_then_promote(ctx: RunContext, publish: Publish) -> Publish:
+    """``publish``, then the promotion publish hook, before the handoff's ``published`` commit."""
+
+    def run(canonical: Path, merge_sha: str, record: dict) -> None:
+        publish(canonical, merge_sha, record)
+        promotion.after_publish(ctx, record)
+
+    return run
+
+
+def _advance(ctx: RunContext, path: Path, store: RecordStore, publish: Publish) -> dict:
     """Drive one handoff as far as it goes; call under the canonical lock."""
+    canonical = ctx.canonical
     record = committed_json(canonical, path)
     if record["state"] not in PROCESS_STATES:
         return record
@@ -375,9 +394,14 @@ def _advance(canonical: Path, path: Path, store: RecordStore, publish: Publish) 
     if record["state"] == "committed":
         record = _validate(canonical, path, record)
     if record["state"] == "validated":
-        record = _merge(canonical, path, record, store)
+        blocked = promotion.merge_gate(canonical, record)
+        if blocked is not None:
+            record = _request_follow_up(canonical, path, record, *blocked)
+        else:
+            record = _merge(canonical, path, record, store)
     if record["state"] == "merged":
-        record = _publish(canonical, path, record, publish)
+        promotion.after_merge(ctx, record)
+        record = _publish(canonical, path, record, _publish_then_promote(ctx, publish))
     return record
 
 
@@ -398,7 +422,7 @@ def process_handoffs(
         if not _run_is_terminal(queue, canonical, record):
             continue
         with canonical_lock(canonical):
-            record = _advance(canonical, path, store, publish)
+            record = _advance(ctx, path, store, publish)
         outcomes.append(
             HandoffOutcome(
                 task_id=record["card"],
