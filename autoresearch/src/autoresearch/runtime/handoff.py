@@ -29,7 +29,7 @@ from autoresearch.records.registry import (
     normalize,
     parse_record_path,
 )
-from autoresearch.records.store import RecordStore
+from autoresearch.records.store import Change, RecordStore
 from autoresearch.runtime.ledger import ledger_of
 
 HANDOFFS_DIR = ".supervisor/ledger/handoffs"
@@ -41,6 +41,9 @@ FORBIDDEN_DIRS = ("kb/_generated/", ".supervisor/", "comms/outbox/", "comms/inbo
 # Inbound kinds the responsible card must answer with a staged ``in_reply_to`` message. A
 # ``task`` is acknowledged by the runtime when its card publishes (C11); ``seen`` needs none.
 ACK_REQUIRED_KINDS = frozenset({"reply", "steer"})
+ACK_KIND = "note"  # the staged message kind that acknowledges an inbound
+# The only non-record files a card may delete.
+DELETABLE_DIRS = (STAGED_DIR, REQUESTS_DIR + "/")
 D23 = "D-23"  # a card changed an existing entity outside its refs
 
 # Paths relative to the repository root (as git reports them).
@@ -144,6 +147,9 @@ def _message_problems(path: str, message) -> list[str]:
     ]
     if not isinstance(message.get("refs"), list):
         problems.append(f"{path}: staged message needs a 'refs' list")
+    stem = path.rsplit("/", 1)[-1].removesuffix(".json")
+    if isinstance(message.get("id"), str) and message["id"] != stem:
+        problems.append(f"{path}: staged message id {message['id']!r} must match the file name")
     if message.get("in_reply_to") is not None and not isinstance(message["in_reply_to"], str):
         problems.append(f"{path}: staged message 'in_reply_to' must be a string")
     return problems
@@ -173,6 +179,63 @@ def _journals_of_other_runs(repo: Path, task_id: str, result_sha: str) -> set[st
     return journals
 
 
+def _non_record_problems(
+    repo: Path, result_sha: str, status: str, path: str
+) -> tuple[list[str], str | None]:
+    """(problems, inbound id acknowledged) for a changed file that is not a record."""
+    deleted = status == "D"
+    if _is_forbidden(path):
+        action = "deletes" if deleted else "changes"
+        return [f"{path}: a card {action} a runtime-owned file"], None
+    if deleted:
+        if path.startswith(DELETABLE_DIRS):
+            return [], None
+        return [f"{path}: a card may delete only staged messages and card requests"], None
+    if in_record_dir(_RELATIVE, path):
+        return [f"{path} is not a valid record path"], None
+    if not path.startswith((STAGED_DIR, REQUESTS_DIR + "/")):
+        return [], None  # other worktree files (strategy/, candidates/, ...) are free to edit
+    try:
+        content = _json_at(repo, result_sha, path)
+    except ValueError as error:
+        return [f"{path} is not valid JSON: {error}"], None
+    if not path.startswith(STAGED_DIR):
+        return _request_problems(path, content), None
+    problems = _message_problems(path, content)
+    if problems or content.get("kind") != ACK_KIND:
+        return problems, None
+    return [], content.get("in_reply_to")
+
+
+def _classify_records(
+    report: HandoffReport, changes: list[Change], allowed_ids: set[str], task_id: str
+) -> list[str]:
+    """Fill ``created``, ``changed_existing`` and D-23; return paths of new journals for
+    ``task_id``. An id both deleted and added (an archive move) is one existing entity."""
+    added, removed_or_changed = {}, {}
+    for path, before, after in changes:
+        id_ = parse_record_path(_RELATIVE, path)[1]
+        if before is None:
+            added[id_] = (path, after)
+        else:
+            removed_or_changed[id_] = path
+    own_journals = []
+    for id_, (path, after) in added.items():
+        if id_ in removed_or_changed:
+            continue
+        report.created.append(id_)
+        if parse_record_path(_RELATIVE, path)[0] == "journal" and after[0].get("card") == task_id:
+            own_journals.append(path)
+    for id_, path in removed_or_changed.items():
+        report.changed_existing.append(id_)
+        if id_ not in allowed_ids:
+            report.violations[D23] = report.violations.get(D23, 0) + 1
+            report.problems.append(
+                f"{path}: {id_} is an existing entity outside the card refs ({D23})"
+            )
+    return own_journals
+
+
 def validate_at(
     repo: Path,
     base_sha: str,
@@ -185,60 +248,34 @@ def validate_at(
 
     ``repo`` is the canonical repository (worktrees share its objects). Checks: exactly one
     new journal for this run (card == task_id; content rules give ``## Decisions`` and
-    ``doctrine_version``); every changed record passes ``validate_change``; existing entities
-    changed are within ``spec.refs`` (else D-23); no generated, ledger, outbox or inbox file
-    changed; staged messages and card requests are valid; each responsible ``reply``/``steer``
-    inbound is answered by a staged message with ``in_reply_to``."""
+    ``doctrine_version``); every changed record passes; existing entities
+    changed are within ``spec.refs`` (else D-23); records are judged together by
+    ``validate_changes`` so an archive move is one change of an existing entity; no generated,
+    ledger, outbox or inbox file changed; only staged messages and card requests are deleted;
+    staged messages and card requests are valid; each responsible ``reply``/``steer`` inbound
+    is answered by a staged ``note`` with ``in_reply_to``."""
     report = HandoffReport(ok=False)
-    allowed_ids = _ref_ids(spec.refs)
-    own_journals: list[str] = []
+    record_changes: list[Change] = []
     replied_to: set[str] = set()
-
     for status, path in gitops.diff_status(repo, base_sha, result_sha):
-        deleted = status == "D"
-        if _is_forbidden(path):
-            action = "deletes" if deleted else "changes"
-            report.problems.append(f"{path}: a card {action} a runtime-owned file")
+        if parse_record_path(_RELATIVE, path) is None:
+            found, reply = _non_record_problems(repo, result_sha, status, path)
+            report.problems += found
+            if reply is not None:
+                replied_to.add(reply)
             continue
-        parsed = parse_record_path(_RELATIVE, path)
-        if parsed is not None:
-            entity, id_ = parsed
-            try:
-                before = None if status == "A" else _doc_at(repo, base_sha, path, entity)
-                after = None if deleted else _doc_at(repo, result_sha, path, entity)
-            except (ValueError, yaml.YAMLError) as error:  # unparseable file: a finding
-                report.problems.append(f"{path} cannot be parsed: {error}")
-                continue
-            report.problems += _STORE.validate_change(path, before, after)
-            if status == "A":
-                report.created.append(id_)
-                if entity == "journal" and after[0].get("card") == task_id:
-                    own_journals.append(path)
-            else:
-                report.changed_existing.append(id_)
-                if id_ not in allowed_ids:
-                    report.violations[D23] = report.violations.get(D23, 0) + 1
-                    report.problems.append(
-                        f"{path}: {id_} is an existing entity outside the card refs ({D23})"
-                    )
+        entity = parse_record_path(_RELATIVE, path)[0]
+        try:
+            before = None if status == "A" else _doc_at(repo, base_sha, path, entity)
+            after = None if status == "D" else _doc_at(repo, result_sha, path, entity)
+        except (ValueError, yaml.YAMLError) as error:  # unparseable file: a finding
+            report.problems.append(f"{path} cannot be parsed: {error}")
             continue
-        if deleted:
-            continue  # deleting a staged message or a card request is allowed
-        if in_record_dir(_RELATIVE, path):
-            report.problems.append(f"{path} is not a valid record path")
-            continue
-        if path.startswith((STAGED_DIR, f"{REQUESTS_DIR}/")):
-            try:
-                content = _json_at(repo, result_sha, path)
-            except ValueError as error:
-                report.problems.append(f"{path} is not valid JSON: {error}")
-                continue
-            if path.startswith(STAGED_DIR):
-                report.problems += _message_problems(path, content)
-                if isinstance(content, dict) and isinstance(content.get("in_reply_to"), str):
-                    replied_to.add(content["in_reply_to"])
-            else:
-                report.problems += _request_problems(path, content)
+        record_changes.append((path, before, after))
+
+    for problems in _STORE.validate_changes(record_changes).values():
+        report.problems += problems
+    own_journals = _classify_records(report, record_changes, _ref_ids(spec.refs), task_id)
 
     earlier = _journals_of_other_runs(repo, task_id, result_sha)
     own_journals = [path for path in own_journals if path not in earlier]
@@ -255,8 +292,8 @@ def validate_at(
         needs_ack = kind is None or kind in ACK_REQUIRED_KINDS
         if needs_ack and inbound_id not in replied_to:
             report.problems.append(
-                f"responsible inbound {inbound_id} is not acknowledged: stage a message "
-                f"with in_reply_to {inbound_id}"
+                f"responsible inbound {inbound_id} is not acknowledged: stage a "
+                f"{ACK_KIND!r} message with in_reply_to {inbound_id}"
             )
 
     report.created.sort()

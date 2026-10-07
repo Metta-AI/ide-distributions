@@ -3,6 +3,7 @@
   "$id": "autoresearch/handoff.json",
   "title": "Handoff record at .supervisor/ledger/handoffs/<task-id>/<run-id>.json: one card run's committed result, written by `card finish` and advanced by the runtime (Overview C3).",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "card", "run_id", "request_id", "mode", "refs", "base_sha", "result_sha", "outcome",
     "journal", "responsible_inbound", "report", "state", "history"
@@ -20,6 +21,7 @@
     "responsible_inbound": {"type": "array", "items": {"type": "string"}},
     "report": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["ok", "problems", "violations", "created", "changed_existing"],
       "properties": {
         "ok": {"type": "boolean"},

@@ -1,3 +1,4 @@
+import datetime
 import json
 import shutil
 
@@ -9,6 +10,7 @@ from autoresearch.ids import new_id
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.requests import load_schema
+from autoresearch.runtime import card_finish
 from autoresearch.runtime.card_finish import FinishUsageError, finish
 from autoresearch.runtime.handoff import card_spec, validate_at
 
@@ -363,7 +365,7 @@ def test_finish_requires_worker_card_and_run(card):
 def test_cli_without_card_context_exits_2(card, monkeypatch, capsys):
     monkeypatch.setenv("HERMES_HOME", str(card.tmp_path / "home"))
     monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(card.canonical))
-    for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN"):
+    for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
         monkeypatch.delenv(name, raising=False)
     assert cli.main(["card", "finish", "--outcome", "done"]) == 2
     assert json.loads(capsys.readouterr().out)["ok"] is False
@@ -373,3 +375,139 @@ def test_cli_rejects_unknown_outcome(card, monkeypatch):
     with pytest.raises(SystemExit) as exit_info:
         _finish_cli(card, monkeypatch, outcome="succeeded")
     assert exit_info.value.code == 2
+
+
+# --- fix round 1 ---
+
+
+def test_uncommitted_record_after_crash_is_committed_on_rerun(card, monkeypatch):
+    card.write_journal()
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("simulated crash before the canonical commit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(card_finish, "commit", crash)
+        with pytest.raises(RuntimeError):
+            finish(card.ctx(), "done")
+    assert card.handoff_path("run-1").exists()  # written, but not committed
+    before = _commit_count(card.canonical)
+
+    result = finish(card.ctx(), "done")
+
+    assert result.ok and not result.existing
+    assert _commit_count(card.canonical) == before + 1
+    changed = gitops.git(card.canonical, "show", "--name-only", "--format=", "HEAD").splitlines()
+    assert sorted(changed) == sorted(
+        [
+            f".supervisor/ledger/handoffs/{card.task_id}/run-1.json",
+            f".supervisor/ledger/requests/{card.request_id}.json",
+        ]
+    )
+    assert gitops.git(card.canonical, "status", "--porcelain") == ""
+    receipt = read_json(card.receipt_path)
+    assert [entry["state"] for entry in receipt["history"]] == ["admitted", "handed_off"]
+    assert read_json(card.handoff_path("run-1")) == result.record
+    assert finish(card.ctx(), "done").existing
+
+
+def test_deleting_a_tracked_non_record_file_is_a_problem(card):
+    card.write_journal()
+    (card.worktree / "AGENTS.md").unlink()
+    result = finish(card.ctx(), "done")
+    assert not result.ok
+    assert any("AGENTS.md" in problem for problem in result.problems)
+
+
+def test_editing_other_worktree_files_is_allowed(card):
+    card.write_journal()
+    (card.worktree / "strategy").mkdir()
+    (card.worktree / "strategy" / "STRATEGY.md").write_text("Play safe.\n")
+    (card.worktree / "AGENTS.md").write_text("# Doctrine\n\nEdited.\n")
+    assert finish(card.ctx(), "done").ok
+
+
+def test_acknowledgement_must_be_a_note(card):
+    inbound = new_id("inbound")
+    card.write_inbound(inbound, "reply")
+    _set_responsible(card, [inbound])
+    card.write_journal()
+    card.stage_message(kind="finding", in_reply_to=inbound)
+    result = finish(card.ctx(), "done")
+    assert not result.ok
+    assert any(inbound in problem for problem in result.problems)
+
+
+def test_staged_message_id_must_match_file_name(card):
+    card.write_journal()
+    path = card.stage_message()
+    write_json(path, read_json(path) | {"id": new_id("message")})
+    result = finish(card.ctx(), "done")
+    assert not result.ok
+    assert any("must match the file name" in problem for problem in result.problems)
+
+
+@pytest.mark.parametrize("state", ["published", "dropped"])
+def test_closed_receipt_is_refused_before_committing(card, state):
+    receipt = read_json(card.receipt_path)
+    receipt.update(state=state, merge_sha="0" * 40)
+    write_json(card.receipt_path, receipt)
+    gitops.commit_all(card.canonical, "close")
+    card.write_journal()
+    worker_head = gitops.head(card.worktree)
+
+    with pytest.raises(FinishUsageError, match=state):
+        finish(card.ctx(), "done")
+    assert gitops.head(card.worktree) == worker_head
+
+
+def test_task_not_in_receipt_is_refused(card):
+    receipt = read_json(card.receipt_path)
+    receipt["tasks"] = [{"task_id": "K-other", "board_epoch": "e0"}]
+    write_json(card.receipt_path, receipt)
+    gitops.commit_all(card.canonical, "retarget")
+    with pytest.raises(FinishUsageError, match="not a task"):
+        finish(card.ctx(), "done")
+
+
+def test_malformed_card_metadata_is_a_usage_error(card, monkeypatch, capsys):
+    card.card_file.write_text("{not json")
+    with pytest.raises(FinishUsageError, match="malformed"):
+        finish(card.ctx(), "done")
+    write_json(card.card_file, {"task_id": card.task_id})
+    with pytest.raises(FinishUsageError, match="malformed"):
+        finish(card.ctx(), "done")
+    assert _finish_cli(card, monkeypatch) == 2
+    assert "malformed" in json.loads(capsys.readouterr().out)["error"]["message"]
+
+
+NOW = datetime.datetime(2026, 10, 7, 12, tzinfo=datetime.UTC)
+
+
+def test_archive_move_is_one_change_of_an_existing_entity(card):
+    card.write_journal()
+    card.worker_store.archive(card.claim_in_refs, "compacted", NOW)
+
+    result = finish(card.ctx(), "done")
+
+    assert result.ok, result.problems
+    assert result.report.changed_existing == [card.claim_in_refs]
+    assert card.claim_in_refs not in result.report.created
+
+
+def test_archive_move_outside_refs_is_d23(card):
+    card.write_journal()
+    card.worker_store.archive(card.claim_not_in_refs, "compacted", NOW)
+    result = finish(card.ctx(), "done")
+    assert not result.ok
+    assert result.report.violations == {"D-23": 1}
+    assert result.report.changed_existing == [card.claim_not_in_refs]
+
+
+def test_archive_move_that_edits_the_record_is_a_problem(card):
+    card.write_journal()
+    path = card.worker_store.archive(card.claim_in_refs, "compacted", NOW)
+    path.write_text(path.read_text().replace("Damage is 10.", "Damage is 12."))
+    result = finish(card.ctx(), "done")
+    assert not result.ok
+    assert any("must not change its body" in problem for problem in result.problems)

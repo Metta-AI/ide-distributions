@@ -30,9 +30,11 @@ def _fail(message: str, code: int, problems: list[str] | None = None) -> int:
 
 def _finish(args: argparse.Namespace) -> int:
     try:
-        result = finish(runctx.from_env(), args.outcome)
+        ctx = runctx.from_env()
     except KeyError as error:
         return _fail(f"{error.args[0]} is not set", EXIT_BAD_ARGS)
+    try:
+        result = finish(ctx, args.outcome)
     except FinishUsageError as error:
         return _fail(str(error), EXIT_BAD_ARGS)
     if not result.ok:

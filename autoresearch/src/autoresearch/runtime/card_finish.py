@@ -9,10 +9,12 @@
    receipt to ``handed_off{task_id, run_id}``. That commit is the durable handoff.
 5. Set ``finished=true`` in ``runtime/cards/<task>.json`` so the plugin blocks model writes.
 
-Idempotent per run: if the record for (task, run) already exists, it is returned as is and
-step 5 is redone. A new run id of the same task writes a second record.
+Idempotent per run: if the record for (task, run) is committed at canonical HEAD, it is
+returned as is and step 5 is redone. A record written but not committed (crash before the
+commit) is rewritten with its receipt and committed. A new run id of the same task writes a second record.
 """
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +22,7 @@ import jsonschema
 
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
+from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import load_schema
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.admission import receipt_path
@@ -27,7 +30,6 @@ from autoresearch.runtime.handoff import (
     HandoffReport,
     card_spec,
     handoff_path,
-    read_handoff,
     validate_at,
     write_handoff,
 )
@@ -72,16 +74,48 @@ def _checked_context(ctx: RunContext, outcome: str) -> tuple[Path, str, str]:
     return ctx.worker, ctx.card_id, ctx.run_id
 
 
-def _record_handoff(ctx: RunContext, record: dict) -> None:
-    """Write the handoff record and move the receipt in one canonical commit."""
-    task_id, run_id = record["card"], record["run_id"]
-    record_path = handoff_path(ctx.canonical, task_id, run_id)
-    receipt_file = receipt_path(ledger_of(ctx.canonical), record["request_id"])
-    receipt = read_json(receipt_file)
+def _committed_json(canonical: Path, path: Path) -> dict | None:
+    """``path`` as committed at canonical HEAD (None if absent). The ledger's truth is git:
+    a file written but not committed (a crash before the commit) does not count."""
+    content = gitops.show(canonical, "HEAD", path.relative_to(canonical).as_posix())
+    return None if content is None else json.loads(content)
+
+
+def _load_card_meta(path: Path, task_id: str) -> tuple[dict, CardSpec]:
+    if not path.exists():
+        raise FinishUsageError(f"no card metadata for {task_id} at {path}")
+    try:
+        meta = read_json(path)
+        spec = card_spec(meta)
+        responsible = meta.get("responsible_inbound", [])
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise FinishUsageError(f"card metadata {path} is malformed: {error!r}") from None
+    if not isinstance(responsible, list):
+        raise FinishUsageError(f"card metadata {path}: responsible_inbound must be a list")
+    return meta, spec
+
+
+def _committed_receipt(canonical: Path, request_id: str, task_id: str) -> tuple[Path, dict]:
+    """The request receipt at canonical HEAD, checked to accept a handoff of ``task_id``."""
+    path = receipt_path(ledger_of(canonical), request_id)
+    receipt = _committed_json(canonical, path)
+    if receipt is None:
+        raise FinishUsageError(f"request {request_id} has no committed receipt")
     if receipt["state"] not in HANDOFF_FROM_STATES:
         raise FinishUsageError(
-            f"request {record['request_id']} is {receipt['state']}; it cannot be handed off"
+            f"request {request_id} is {receipt['state']}; it cannot be handed off"
         )
+    if task_id not in [task["task_id"] for task in receipt.get("tasks", [])]:
+        raise FinishUsageError(f"task {task_id} is not a task of request {request_id}")
+    return path, receipt
+
+
+def _record_handoff(ctx: RunContext, record: dict) -> None:
+    """Write the handoff record and move the receipt in one canonical commit. Built from the
+    committed receipt, so a rerun after a crash before the commit rewrites the same pair."""
+    task_id, run_id = record["card"], record["run_id"]
+    record_path = handoff_path(ctx.canonical, task_id, run_id)
+    receipt_file, receipt = _committed_receipt(ctx.canonical, record["request_id"], task_id)
     receipt["state"] = "handed_off"
     receipt["handed_off"] = {"task_id": task_id, "run_id": run_id}
     receipt["history"].append({"state": "handed_off", "at": record["history"][0]["at"]})
@@ -94,24 +128,24 @@ def _record_handoff(ctx: RunContext, record: dict) -> None:
 def finish(ctx: RunContext, outcome: str) -> FinishResult:
     """Commit, validate and (if valid, or if the outcome is ``failed``) record the handoff.
 
-    Raises FinishUsageError outside a card worker or for an unknown outcome. The caller must
-    not hold the canonical lock."""
+    Raises FinishUsageError outside a card worker, for an unknown outcome, malformed card
+    metadata, or a receipt that cannot take this handoff. The caller must not hold the
+    canonical lock."""
     worker, task_id, run_id = _checked_context(ctx, outcome)
     meta_path = card_file(ctx, task_id)
-    if not meta_path.exists():
-        raise FinishUsageError(f"no card metadata for {task_id} at {meta_path}")
+    meta, spec = _load_card_meta(meta_path, task_id)
     record_path = handoff_path(ctx.canonical, task_id, run_id)
-    if record_path.exists():
+    existing = _committed_json(ctx.canonical, record_path)
+    if existing is not None:
         _mark_finished(meta_path)
-        return FinishResult(ok=True, record=read_handoff(record_path), existing=True)
+        return FinishResult(ok=True, record=existing, existing=True)
+    _committed_receipt(ctx.canonical, spec.request_id, task_id)  # fail before committing
 
-    meta = read_json(meta_path)
     result_sha = gitops.commit_all(
         worker, f"card {task_id} run {run_id}: {outcome}", allow_empty=True
     )
     base_sha = gitops.merge_base(ctx.canonical, result_sha, "HEAD")
     responsible = list(meta.get("responsible_inbound", []))
-    spec = card_spec(meta)
     report = validate_at(ctx.canonical, base_sha, result_sha, spec, responsible, task_id)
     if not report.ok and outcome != "failed":
         return FinishResult(ok=False, problems=report.problems, report=report)
@@ -132,9 +166,10 @@ def finish(ctx: RunContext, outcome: str) -> FinishResult:
         "history": [{"state": "committed", "at": now_iso()}],
     }
     with canonical_lock(ctx.canonical):
-        if record_path.exists():  # a concurrent call for the same run won the race
-            record = read_handoff(record_path)
-        else:
+        committed = _committed_json(ctx.canonical, record_path)
+        if committed is not None:  # a concurrent call for the same run won the race
+            record = committed
+        else:  # also repairs a pair written but left uncommitted by a crash
             _record_handoff(ctx, record)
     _mark_finished(meta_path)
     return FinishResult(ok=True, problems=report.problems, record=record, report=report)

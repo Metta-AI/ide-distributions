@@ -21,6 +21,18 @@ HYPOTHESIS = {
     "state": "proposed",
 }
 
+CLAIM = {
+    "kind": "mechanism",
+    "status": "belief",
+    "confidence": 0.7,
+    "evidence": [],
+    "revise_if": "A replay shows damage other than 10.",
+    "relations": [],
+    "topics": [],
+    "valid_from_version": "65",
+    "last_checked_version": "65",
+}
+
 
 class CardWorkspace:
     """A canonical repo with one admitted card (receipt + runtime card file) and its worktree.
@@ -39,7 +51,7 @@ class CardWorkspace:
             self.canonical / ".supervisor" / "runtime" / "cards" / f"{self.task_id}.json"
         )
         self._seed()
-        self.refs = [f"ar://hypothesis/{self.in_refs}"]
+        self.refs = [f"ar://hypothesis/{self.in_refs}", f"ar://claim/{self.claim_in_refs}"]
         self._admit()
         gitops.git(
             self.canonical, "worktree", "add", "-b", f"card/{self.request_id}", str(self.worktree)
@@ -61,6 +73,8 @@ class CardWorkspace:
         store = RecordStore(Layout(self.canonical))
         self.in_refs = store.create("hypothesis", dict(HYPOTHESIS))
         self.not_in_refs = store.create("hypothesis", dict(HYPOTHESIS))
+        self.claim_in_refs = store.create("claim", dict(CLAIM), "Damage is 10.", slug="damage")
+        self.claim_not_in_refs = store.create("claim", dict(CLAIM), "Range is 3.")
         gitops.commit_all(self.canonical, "seed")
 
     def _admit(self) -> None:
@@ -106,7 +120,7 @@ class CardWorkspace:
             "AUTORESEARCH_WORKSPACE": str(self.canonical),
             "HERMES_KANBAN_WORKSPACE": str(self.worktree),
             "HERMES_KANBAN_TASK": self.task_id,
-            "HERMES_KANBAN_RUN": run_id,
+            "HERMES_KANBAN_RUN_ID": run_id,
         }
 
     @property
