@@ -19,8 +19,8 @@ a crash before the commit finds the written request and commits it instead of wr
 second one. ``why`` also gives the number of open planning-backlog entries; the refs are the
 open and active Topics, so the briefing shows them.
 
-``request_planning`` is the shared step. ``rebuild`` calls it with the marker
-``planning:rebuild:<epoch>`` (one planning card after a board rebuild, C12).
+Markers come from ``runtime.markers``. ``request_planning`` is the shared step. ``rebuild``
+calls it with the marker ``planning:rebuild:<epoch>`` (one planning card after a board rebuild, C12).
 """
 
 import datetime
@@ -34,6 +34,7 @@ from autoresearch.queue.card import CardSpec
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
+from autoresearch.runtime.markers import planning_growth_marker, planning_marker
 from autoresearch.runtime.routing import planning_backlog, planning_owned, request_card
 
 RUNTIME = "runtime"
@@ -46,8 +47,7 @@ def slot_marker(now: datetime.datetime, every: datetime.timedelta = PLANNING_EVE
     """The cadence marker of the slot that holds ``now``."""
     now = now.astimezone(datetime.UTC)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    start = midnight + ((now - midnight) // every) * every
-    return f"planning:{start:%Y-%m-%d-%H}"
+    return planning_marker(midnight + ((now - midnight) // every) * every)
 
 
 def marked_request(canonical: Path, marker: str) -> Path | None:
@@ -115,7 +115,7 @@ def planning_request(
     """Request planning for the cadence slot of ``now`` (or, with ``growth``, for the
     queue-growth signal) under the single-owner rule; see the module docstring."""
     if growth:
-        marker = f"planning:growth:{now.astimezone(datetime.UTC):%Y-%m-%d}"
+        marker = planning_growth_marker(now)
         reason = "Queue growth: the Pending card count keeps rising despite planning."
     else:
         marker = slot_marker(now, every)

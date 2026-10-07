@@ -17,9 +17,6 @@ import functools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from autoresearch.runtime.rebuild import needs_rebuild, rebuild
-from autoresearch.runtime.signals import QUEUE_GROWTH, SignalConfig, compute_signals
-
 from autoresearch.comms.publisher import publish_hook
 from autoresearch.games.loader import Game
 from autoresearch.io import gitops
@@ -35,7 +32,9 @@ from autoresearch.runtime.briefing import BriefingInputs
 from autoresearch.runtime.ledger import committed_json, ledger_of
 from autoresearch.runtime.merge import find_orphan_done, process_handoffs
 from autoresearch.runtime.planning import planning_request
+from autoresearch.runtime.rebuild import needs_rebuild, rebuild
 from autoresearch.runtime.routing import route_all
+from autoresearch.runtime.signals import QUEUE_GROWTH, SignalConfig, compute_signals
 from autoresearch.softmax_tool.protocol import Softmax
 
 
@@ -95,7 +94,14 @@ class KeeperDriver:
         run = KeeperRun()
         promotion.reconcile(ctx, queue, sm)
         if needs_rebuild(ctx, queue):
-            run.rebuilt = rebuild(ctx, queue, sm, game_version=self.game_version, now=now)
+            run.rebuilt = rebuild(
+                ctx,
+                queue,
+                sm,
+                game_version=self.game_version,
+                now=now,
+                allow_no_remote=self.allow_no_remote,
+            )
         publish = functools.partial(publish_hook, allow_no_remote=self.allow_no_remote)
         store = RecordStore(Layout(ctx.canonical))
         run.handoffs = process_handoffs(ctx, queue, store, publish=publish)

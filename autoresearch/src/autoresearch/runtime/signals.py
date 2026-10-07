@@ -16,10 +16,13 @@ samples of the Pending card count for queue growth. A signal that stops firing i
 
 Escalation. A signal that still fires ``escalation_iterations`` (T) more iterations after it
 first fired (``count > T``) adds an ``escalation`` signal for its key and publishes ONE
-runtime ``help_request`` per key. The committed marker
-``.supervisor/ledger/escalations/<key>.json`` dedupes it across runs, loss of ``signals.json``
-and host loss; a crash between publication and the marker commit is caught by looking for
-the key in the outbox titles first. Identity mismatch is not escalated: it is a hard stop
+runtime ``help_request`` per episode of that key (an episode starts when the signal first
+fires and ends when it stops). The committed marker
+``.supervisor/ledger/escalations/<key>@<first_seen>.json`` dedupes it across runs; when
+``signals.json`` is lost (host rebuilt), a still-firing signal continues its latest
+escalated episode from that marker instead of escalating again. A signal that clears and
+returns is a new episode and can escalate again. A crash between publication and the marker
+commit is caught by looking for the key and episode in the outbox titles first. Identity mismatch is not escalated: it is a hard stop
 that preflight already answers with a pause and a help request (C6).
 
 Signals and their data sources:
@@ -440,20 +443,36 @@ def _file_key(key: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", key.replace(":", "--"))
 
 
-def escalation_marker_path(canonical: Path, key: str) -> Path:
-    return ledger_of(canonical) / "escalations" / f"{_file_key(key)}.json"
+def escalation_marker_path(canonical: Path, key: str, first_seen: str) -> Path:
+    """The marker of one episode of signal ``key`` (it first fired at ``first_seen``): a
+    signal that clears and returns later is a new episode and can escalate again."""
+    return ledger_of(canonical) / "escalations" / f"{_file_key(f'{key}@{first_seen}')}.json"
 
 
 def _load_state(ctx: RunContext) -> dict:
     path = signals_state_path(ctx)
     try:
-        state = read_json(path) if path.exists() else {}
+        state = read_json(path) if path.exists() else None
     except ValueError:
-        state = {}  # disposable: a damaged file just restarts persistence
+        state = None  # disposable: a damaged file just restarts persistence
     return {
-        "signals": state.get("signals", {}),
-        "pending_samples": state.get("pending_samples", []),
+        "signals": (state or {}).get("signals", {}),
+        "pending_samples": (state or {}).get("pending_samples", []),
+        "lost": state is None,
     }
+
+
+def _escalated_episode(canonical: Path, key: str) -> dict | None:
+    """The latest escalated episode of ``key`` (from its committed markers), if any."""
+    episodes = [
+        marker
+        for marker in (
+            committed_json(canonical, path)
+            for path in (ledger_of(canonical) / "escalations").glob("*.json")
+        )
+        if marker is not None and marker.get("key") == key and "first_iteration" in marker
+    ]
+    return max(episodes, key=lambda marker: marker["first_seen"]) if episodes else None
 
 
 def _outbox_has(canonical: Path, text: str) -> bool:
@@ -464,12 +483,13 @@ def _outbox_has(canonical: Path, text: str) -> bool:
     return False
 
 
-def _escalate(ctx: RunContext, signal: Signal, allow_no_remote: bool) -> None:
-    """Publish one runtime help_request for ``signal`` and commit its marker (once per key).
-    Takes the canonical lock."""
+def _escalate(ctx: RunContext, signal: Signal, first_iteration: int, allow_no_remote: bool):
+    """Publish one runtime help_request for this episode of ``signal`` and commit its marker
+    (once per episode). Takes the canonical lock."""
     canonical = ctx.canonical
-    marker = escalation_marker_path(canonical, signal.key)
-    prefix = f"Signal {signal.key} persists"  # stable part of the title, for the outbox check
+    marker = escalation_marker_path(canonical, signal.key, signal.first_seen)
+    # The stable part of the title (key and episode), for the outbox check.
+    prefix = f"Signal {signal.key} (since {signal.first_seen}) persists"
     title = f"{prefix} after {signal.count - 1} iterations"
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
@@ -481,7 +501,14 @@ def _escalate(ctx: RunContext, signal: Signal, allow_no_remote: bool) -> None:
                 f"Detail: {signal.detail}. Please look at the research state and steer."
             )
             publish_runtime(canonical, "help_request", title, body, [], allow_no_remote)
-        write_json(marker, {"key": signal.key, "detail": signal.detail, "at": now_iso()})
+        record = {
+            "key": signal.key,
+            "first_seen": signal.first_seen,
+            "first_iteration": first_iteration,
+            "detail": signal.detail,
+            "at": now_iso(),
+        }
+        write_json(marker, record)
         commit(canonical, [marker], f"signals: escalated {signal.key}")
 
 
@@ -517,7 +544,14 @@ def compute_signals(
     persisted = {}
     signals = []
     for item in raw:
-        first = seen.get(item.key) or {"first_seen": now.isoformat(), "first_iteration": iteration}
+        first = seen.get(item.key)
+        if first is None and inputs.state["lost"]:
+            # signals.json was lost (host rebuilt): continue the escalated episode, if any,
+            # rather than start a new one that would escalate again.
+            episode = _escalated_episode(canonical, item.key)
+            if episode is not None:
+                first = {k: episode[k] for k in ("first_seen", "first_iteration")}
+        first = first or {"first_seen": now.isoformat(), "first_iteration": iteration}
         persisted[item.key] = first
         count = iteration - first["first_iteration"] + 1
         signals.append(Signal(item.code, item.entity, item.detail, first["first_seen"], count))
@@ -525,9 +559,10 @@ def compute_signals(
     for signal in signals:
         if signal.code in NOT_ESCALATED or signal.count <= cfg.escalation_iterations:
             continue
-        _escalate(ctx, signal, allow_no_remote)
+        _escalate(ctx, signal, persisted[signal.key]["first_iteration"], allow_no_remote)
         detail = f"{signal.key} persisted {signal.count - 1} iterations; help requested"
         escalations.append(Signal(ESCALATION, signal.key, detail, signal.first_seen, signal.count))
     inputs.state["signals"] = persisted
+    inputs.state.pop("lost")
     write_json(signals_state_path(ctx), inputs.state)
     return signals + escalations

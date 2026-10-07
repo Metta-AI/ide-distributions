@@ -3,6 +3,8 @@ Overview C12 with amendments A2, A10, A11). Real git with a bare ``origin``, Fil
 FakeSoftmax and simulated workers (``tests/support``)."""
 
 import datetime
+import json
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 
@@ -11,7 +13,9 @@ import pytest
 import yaml
 from support.board import Board, Worker, new_hypothesis
 from support.keeper_driver import KeeperDriver
+from support.promotion_board import design_dict
 
+from autoresearch.cli import main as cli_main
 from autoresearch.games.loader import load_game
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -25,11 +29,13 @@ from autoresearch.runtime.admission import STALE_EPOCH, admit_and_create, board_
 from autoresearch.runtime.briefing import BriefingInputs
 from autoresearch.runtime.promotion import CHAMPION_PATH, adopt, stage_champion, submit_promotion
 from autoresearch.runtime.rebuild import needs_rebuild, rebuild
-from autoresearch.softmax_tool.fake import FakeSoftmax
+from autoresearch.softmax_tool import cli as softmax_cli
+from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FAULTS_ENV, FakeSoftmax
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[2]
 GAME_VERSION = "fake-1"  # FakeSoftmax's game version
 LEAGUE = "league_fake"
+FAKE_LEAGUE = "fake-league"  # games/fakegame league_id (XP requests)
 PROFILE = "autoresearch"
 BASELINE_PV = "autoresearch-fake:v0"
 CANDIDATE_PV = "autoresearch-fake:v1"
@@ -88,7 +94,9 @@ class Host(Board):
         gitops.commit_paths(self.canonical, [path.relative_to(self.canonical).as_posix()], "req")
         return worker
 
-    def experiment(self, status: str, binding: bool = True, **fields) -> tuple[str, str]:
+    def experiment(
+        self, status: str, binding: bool = True, design: dict | None = None, **fields
+    ) -> tuple[str, str]:
         """An experiment walked to ``status`` (bound to a version from ``uploaded`` on)."""
         version = self.store.create("version", dict(VERSION))
         experiment = self.store.create(
@@ -100,7 +108,7 @@ class Host(Board):
                 "lever": LEVER,
                 "baseline": "V-0",
                 "change": {"components": [LEVER], "description": "Wait for range."},
-                "evaluation_design": {"n_min": 10, "baseline_version": BASELINE_PV},
+                "evaluation_design": design or {"n_min": 10, "baseline_version": BASELINE_PV},
                 "environment": {"game_id": "fakegame", "game_version": GAME_VERSION},
                 "status": "designed",
             },
@@ -158,13 +166,13 @@ def _queue_keys(queue: FileQueue) -> dict:
 
 
 def test_needs_rebuild_when_the_board_is_missing(host, tmp_path):
-    host.admit()
+    host.admit_requested()
     assert needs_rebuild(host.ctx(), host.queue) is False
     assert needs_rebuild(host.ctx(), _lose_board(host, tmp_path)) is True
 
 
 def test_needs_rebuild_when_no_task_of_an_open_request_is_on_the_board(host, tmp_path):
-    host.admit()
+    host.admit_requested()
     queue = _lose_board(host, tmp_path)
     queue.ensure_board()  # an empty board with the same slug
     assert needs_rebuild(host.ctx(), queue) is True
@@ -262,17 +270,18 @@ def test_rebuild_lifecycle_cards(host, tmp_path):
     expected = {
         f"build:{designed}@{epoch}",
         f"upload:{built}@{epoch}",
-        f"launch:{uploaded}:0",
-        f"launch:{awaiting}:2",
-        f"review:{evaluated}@{epoch}",
+        f"launch:{uploaded}:1",  # launch_attempts + 1: the attempt about to be made
+        f"launch:{awaiting}:3",
+        f"review:{evaluated}",
         f"promote:{promote}@{epoch}",
         f"planning:rebuild:{epoch}",
     }
     assert set(by_marker) == expected
     for experiment in (unbound, backing_off, running, hold, covered):
         assert not any(experiment in marker for marker in by_marker)
-    launch = by_marker[f"launch:{uploaded}:0"]
+    launch = by_marker[f"launch:{uploaded}:1"]
     assert "xp recover" in launch.why and launch.mode == "experimentation"
+    assert "--attempt 1" in launch.why
     assert launch.refs == [f"ar://experiment/{uploaded}", f"ar://version/{version}"]
     assert by_marker[f"promote:{promote}@{epoch}"].mode == "maintenance"
     for spec in runtime_specs:
@@ -329,6 +338,62 @@ def test_admission_leaves_an_earlier_epoch_receipt_to_rebuild(host, tmp_path, ga
     assert queue.list() == []
 
 
+def test_uncommitted_handoff_debris_does_not_block_readmission(host, tmp_path):
+    admitted = host.admit_requested()
+    debris = host.ledger / "handoffs" / admitted.task_id / "r-lost.json"
+    write_json(debris, {"state": "committed"})  # a crash left it on disk, never committed
+    queue = _lose_board(host, tmp_path)
+    assert needs_rebuild(host.ctx(), queue) is True
+
+    specs = _rebuild(host)
+
+    assert [spec.request_id for spec in specs].count(admitted.request_id) == 1
+    assert len(admitted.receipt()["tasks"]) == 2
+    assert needs_rebuild(host.ctx(), queue) is False  # no rebuild on every run
+
+
+def _help_requests(host: Host, text: str) -> list[dict]:
+    outbox = host.canonical / "comms" / "outbox"
+    messages = [read_json(path) for path in sorted(outbox.glob("*.json"))]
+    return [m for m in messages if m.get("kind") == "help_request" and text in m["title"]]
+
+
+def test_admitted_request_without_a_committed_spec_is_closed_with_one_help_request(host, tmp_path):
+    lost = host.admit()  # admitted, but its cards/requests file was never committed
+    queue = _lose_board(host, tmp_path)
+    queue.ensure_board()
+    assert needs_rebuild(host.ctx(), queue) is True
+
+    specs = _rebuild(host)
+
+    assert lost.request_id not in {spec.request_id for spec in specs}
+    receipt = lost.receipt()
+    jsonschema.validate(receipt, load_schema("receipt.json"))
+    assert receipt["state"] == "rejected" and lost.request_id in receipt["reason"]
+    assert len(_help_requests(host, lost.request_id)) == 1
+    assert needs_rebuild(host.ctx(), queue) is False  # settled for good: no repeat rebuild
+    assert gitops.git(host.canonical, "status", "--porcelain") == ""
+
+
+def test_rebuild_readmits_the_latest_recovery_request(host, tmp_path):
+    holder = _dead_holder(host)
+    [action] = promotion.reconcile(host.ctx(), host.queue, host.sm)
+    assert action.kind == "recovery_requested"
+    recovery = host.admit_follow_up(action.request_id)  # admitted on the old board, never ran
+    queue = _lose_board(host, tmp_path)
+    assert needs_rebuild(host.ctx(), queue) is True
+
+    specs = _rebuild(host)
+
+    assert [spec.request_id for spec in specs].count(action.request_id) == 1
+    epoch = board_epoch(host.ledger)
+    assert [t["board_epoch"] for t in recovery.receipt()["tasks"]] == ["e1", epoch]
+    requests = [card.spec.request_id for card in queue.list()]
+    assert requests.count(action.request_id) == 1 and holder.request_id not in requests
+    assert len(promotion.load(host.canonical).recovery_requests) == 1  # no second attempt
+    assert needs_rebuild(host.ctx(), queue) is False
+
+
 # --- restore from the workspace remote alone ---
 
 
@@ -359,6 +424,42 @@ def _card_worker(board: Board, request_id: str) -> Worker:
     return Worker(board, card.spec, card.task_id)
 
 
+def _dead_holder(host: Host) -> Worker:
+    """A promotion card that submitted its candidate (stage ``submitted``) and then died
+    before ``card finish``."""
+    experiment, version = host.experiment("reviewed")
+    holder = host.admit_requested(refs=[f"ar://experiment/{experiment}"], mode="maintenance")
+    holder.start()
+    candidate_path = f"strategy/candidates/{experiment}/STRATEGY.md"
+    candidate = holder.worktree / candidate_path
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text("# Candidate v1\n")
+    gitops.commit_all(holder.worktree, "candidate")
+    outcome = submit_promotion(
+        holder.ctx(), host.queue, host.sm, experiment, version, candidate_path, LEAGUE
+    )
+    assert outcome.ok, outcome.reason
+    holder.end_run("crashed")
+    assert promotion.load(host.canonical).stage == "submitted"
+    return holder
+
+
+def _launched_before_loss(host: Host) -> str:
+    """(d): an ``awaiting-credits`` experiment (launch_attempts 1) whose relaunch, attempt 2,
+    created every XP request on the platform, but whose record update was lost with the host."""
+    awaiting, _ = host.experiment(
+        "awaiting-credits", design=design_dict(), lifecycle={"launch_attempts": 1}
+    )
+    meta, _ = host.store.load(awaiting)
+    planned = softmax_cli.xp_specs(
+        meta["evaluation_design"], meta["candidate_binding"], FAKE_LEAGUE, 1, 1
+    )
+    for seed, arm, spec in planned:
+        host.sm.xp_create(awaiting, 1, 2, spec, seed=seed, arm=arm)
+    assert len(host.sm.xp_recover(awaiting)) == len(planned)
+    return awaiting
+
+
 def _old_host_before_loss(host: Host) -> dict:
     """Canonical state (a)-(f) of the restore test, pushed to ``origin``."""
     # (a) a published request
@@ -375,24 +476,10 @@ def _old_host_before_loss(host: Host) -> dict:
     new_hypothesis(handed_off)
     handed_off.write_journal()
     handed_off.finish()
-    # (d) an awaiting-credits experiment whose relaunch reached the platform (attempt 2) but
-    #     whose record update was lost with the host
-    awaiting, _ = host.experiment("awaiting-credits", lifecycle={"launch_attempts": 1})
-    assert host.sm.xp_create(awaiting, 1, 2, {"num_episodes": 2}) is not None
+    # (d) an awaiting-credits experiment whose relaunch reached the platform
+    awaiting = _launched_before_loss(host)
     # (e) a promotion in submitted whose holder never finished
-    experiment, version = host.experiment("reviewed")
-    holder = host.admit_requested(refs=[f"ar://experiment/{experiment}"], mode="maintenance")
-    holder.start()
-    candidate_path = f"strategy/candidates/{experiment}/STRATEGY.md"
-    candidate = holder.worktree / candidate_path
-    candidate.parent.mkdir(parents=True, exist_ok=True)
-    candidate.write_text("# Candidate v1\n")
-    gitops.commit_all(holder.worktree, "candidate")
-    outcome = submit_promotion(
-        holder.ctx(), host.queue, host.sm, experiment, version, candidate_path, LEAGUE
-    )
-    assert outcome.ok, outcome.reason
-    holder.end_run("crashed")
+    holder = _dead_holder(host)
     # (f) open Topics: host.topic
     host.push()
     return {
@@ -410,13 +497,30 @@ def _submissions(sm: FakeSoftmax, platform_id: str) -> list[dict]:
     return [s for s in sm.submissions(player) if s["policy_version_id"] == platform_id]
 
 
-def _xp_requests(sm: FakeSoftmax, experiment: str) -> list:
-    return sm.xp_recover(experiment)
+def _softmax_cli(monkeypatch, capsys, restored: "RestoredHost", worker: Worker, *argv) -> dict:
+    """Run ``autoresearch softmax ...`` in-process as the card's worker would."""
+    env = {
+        "HERMES_HOME": str(restored.home),
+        "AUTORESEARCH_WORKSPACE": str(restored.canonical),
+        "HERMES_KANBAN_WORKSPACE": str(worker.worktree),
+        "HERMES_KANBAN_TASK": worker.task_id,
+        "HERMES_KANBAN_RUN_ID": worker.run_id,
+        "AUTORESEARCH_SOFTMAX": "fake",
+        "AUTORESEARCH_GAME": "fakegame",
+        "AUTORESEARCH_PLAYER_ID": DEFAULT_PLAYER_ID,
+    }
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv(FAULTS_ENV, raising=False)
+    capsys.readouterr()
+    code = cli_main(["softmax", *argv])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["ok"], payload
+    return payload["data"]
 
 
-def test_restore_from_the_remote_alone(host, tmp_path, game):
+def test_restore_from_the_remote_alone(host, tmp_path, game, monkeypatch, capsys):
     old = _old_host_before_loss(host)
-    platform = host.sm  # the platform outlives the host
 
     home = tmp_path / "new-home"
     home.mkdir()
@@ -424,6 +528,11 @@ def test_restore_from_the_remote_alone(host, tmp_path, game):
     gitops.git(tmp_path, "clone", "-q", str(host.origin), str(canonical))
     gitops.git(canonical, "config", "user.email", "t@example.com")
     gitops.git(canonical, "config", "user.name", "T")
+    # The platform outlives the host: the fake platform's state moves to the new home.
+    state = Path(".supervisor") / "runtime" / "fake_softmax.json"
+    (canonical / state).parent.mkdir(parents=True)
+    shutil.copy(host.canonical / state, canonical / state)
+    platform = FakeSoftmax(canonical, {})
     restored = RestoredHost(home, canonical, FileQueue(home / "board"))
     keeper = KeeperDriver(restored.ctx(), restored.queue, platform, game, GAME_VERSION)
 
@@ -456,15 +565,23 @@ def test_restore_from_the_remote_alone(host, tmp_path, game):
     )
     assert record["state"] == "published"
     assert restored.committed(restored.receipt_path(handed_off.request_id))["state"] == "published"
-    # (d) one launch card, which says to run xp recover first; following it, no duplicate XP
+    # (d) one launch card for attempt 2 that says to run xp recover first. Its scripted
+    #     worker runs `softmax xp recover`, then `softmax xp create`: nothing is created twice.
     awaiting = old["awaiting"]
-    [launch] = [c for c in cards if f"[launch:{awaiting}:1]" in c.spec.why]
-    assert "xp recover" in launch.spec.why
+    [launch] = [c for c in cards if f"[launch:{awaiting}:2]" in c.spec.why]
     assert launch.assignee == PROFILE
-    recovered = _xp_requests(platform, awaiting)
-    if not recovered:  # what the card says: create only when recover finds nothing
-        platform.xp_create(awaiting, 1, 2, {"num_episodes": 2})
-    assert len(_xp_requests(platform, awaiting)) == 1
+    assert launch.spec.why.index("xp recover") < launch.spec.why.index("xp create")
+    on_platform = len(platform.xp_recover(awaiting))
+    launcher = _card_worker(restored, launch.spec.request_id)
+    launcher.start()
+    recovered = _softmax_cli(monkeypatch, capsys, restored, launcher, "xp", "recover", awaiting)
+    assert len(recovered) == on_platform and {r["attempt"] for r in recovered} == {2}
+    created = _softmax_cli(
+        monkeypatch, capsys, restored, launcher, "xp", "create", awaiting,
+        "--batch", "1", "--attempt", "2",
+    )  # fmt: skip
+    assert created["created"] == [] and len(created["existing"]) == on_platform
+    assert len(platform.xp_recover(awaiting)) == on_platform  # no duplicate XP request
     # (e) one promotion-recovery card; no resubmit
     pid = old["promotion"]
     recovery = [c for c in cards if f"promote-recover:{pid}:1" in c.spec.title]

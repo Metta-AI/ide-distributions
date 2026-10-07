@@ -380,7 +380,7 @@ def test_escalation_after_t_more_iterations_publishes_one_help_request(board):
     assert escalation.entity == "spinning"
     [help_request] = _outbox_help(board)
     assert "spinning" in help_request["title"] and help_request["from"] == "runtime"
-    marker = escalation_marker_path(board.canonical, "spinning")
+    marker = escalation_marker_path(board.canonical, "spinning", escalation.first_seen)
     assert board.committed(marker) is not None
     assert gitops.git(board.canonical, "status", "--porcelain") == ""
 
@@ -399,3 +399,19 @@ def test_escalation_marker_survives_loss_of_runtime_state(board):
     _iterations(board, 3, start=20)
     assert "escalation" in _codes(_compute(board))
     assert len(_outbox_help(board)) == 1  # the committed marker dedupes it
+
+
+def test_a_signal_that_clears_and_returns_escalates_again(board):
+    _iterations(board, 6)
+    _compute(board)
+    _iterations(board, 3, start=40)
+    _compute(board)
+    assert len(_outbox_help(board)) == 1
+    _iterations(board, 1, start=30, created=[new_id("journal"), new_id("hypothesis")])
+    assert _compute(board) == []  # the episode ends
+    later = NOW + datetime.timedelta(minutes=5)
+    _iterations(board, 6, start=20)
+    _compute(board, now=later)  # a new episode starts
+    _iterations(board, 3, start=10)
+    assert "escalation" in _codes(_compute(board, now=later))
+    assert len(_outbox_help(board)) == 2
