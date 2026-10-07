@@ -30,6 +30,11 @@ gets exactly one sequence number across crashes, with no gaps.
 
 Readers see only committed outbox files (``reader``), never a half-done publication.
 
+Acknowledgement (C11). ``publish_hook`` then moves the inbound the publishing card is
+responsible for (``comms.delivery`` records) to ``acknowledged``: a ``reply``/``steer`` by
+the card's published ``note`` with ``in_reply_to``, a ``task`` by a runtime note published
+here (found again in the outbox on a rerun, so it is published once).
+
 Locking. Every function here must run under ``canonical.lock`` held by the caller, and never
 takes it: ``process_handoffs`` calls ``publish_hook`` while it holds the (non-reentrant) lock.
 """
@@ -39,6 +44,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from autoresearch.comms import delivery
 from autoresearch.comms.envelope import (
     FROM_AGENT,
     FROM_RUNTIME,
@@ -81,7 +87,7 @@ class PublishResult:
 def _checkpoint(step: str) -> None:
     """Test seam: crash-injection tests replace this to stop after ``step``
     (``outbox_written``, ``receipt_written``, ``staged_removed``, ``before_commit``,
-    ``before_push``)."""
+    ``before_push``, ``ack_published``)."""
 
 
 # --- files ---
@@ -269,8 +275,12 @@ def _added_by(canonical: Path, message_id: str) -> str | None:
     return sha or None
 
 
-def _staged_message(canonical: Path, message_id: str, seq: int, fallback_rev: str) -> dict:
-    """The staged message in published form; raises MessageProblems if it is invalid."""
+def _staged_message(
+    canonical: Path, message_id: str, seq: int, fallback_rev: str, card: str | None = None
+) -> dict:
+    """The staged message in published form; raises MessageProblems if it is invalid. When
+    ``card`` is given and the message arrived with ``fallback_rev`` (that card's merge), the
+    message records ``card``: the runtime sets it, whatever the worker wrote."""
     content = gitops.show(canonical, "HEAD", f"{STAGED_DIR}/{message_id}.json")
     try:
         staged = json.loads(content)
@@ -279,16 +289,22 @@ def _staged_message(canonical: Path, message_id: str, seq: int, fallback_rev: st
     if not isinstance(staged, dict):
         raise MessageProblems(["a message must be a JSON object"])
     rev = _added_by(canonical, message_id) or fallback_rev
+    if card is not None and rev == fallback_rev:
+        staged = staged | {"card": card}
     message = _published_form(_as_agent(staged), seq, rev)
     check_message(message, outbox=True)
     return message
 
 
-def publish_staged(canonical: Path, merge_sha: str, allow_no_remote: bool = False) -> PublishResult:
+def publish_staged(
+    canonical: Path, merge_sha: str, allow_no_remote: bool = False, card: str | None = None
+) -> PublishResult:
     """Publish every staged message committed in canonical (they arrive by merges). Each
     message's ``@result`` becomes the commit that added it (``merge_sha`` only if git finds
-    none). Invalid messages are skipped and reported. Idempotent: a rerun publishes nothing
-    twice and pushes again. Raises PublishError (no remote, unrepairable state)."""
+    none). With ``card`` (the publishing handoff's task id), the messages that ``merge_sha``
+    added get a ``card`` field, so a later reply finds its thread's card. Invalid messages
+    are skipped and reported. Idempotent: a rerun publishes nothing twice and pushes again.
+    Raises PublishError (no remote, unrepairable state)."""
     recover(canonical)
     receipts = _receipts(canonical)
     result = PublishResult()
@@ -297,7 +313,7 @@ def publish_staged(canonical: Path, merge_sha: str, allow_no_remote: bool = Fals
         if message_id in receipts:  # recover already removed it
             continue
         try:
-            message = _staged_message(canonical, message_id, next_seq, merge_sha)
+            message = _staged_message(canonical, message_id, next_seq, merge_sha, card)
         except MessageProblems as error:
             result.skipped[message_id] = error.problems
             continue
@@ -336,21 +352,95 @@ def publish_runtime(
     return PublishResult(seqs=[seq], pushed=push(canonical, allow_no_remote))
 
 
-def _acknowledge_inbound_tasks(canonical: Path, handoff: dict) -> None:
-    """TODO(Task 3.7): when the handoff's card was created for an inbound ``task``, publish
-    the runtime acknowledgement (a ``note`` with ``in_reply_to`` the I-id) and move the
-    inbound to ``acknowledged`` (C11). Routing, which links a card to its inbound, does not
-    exist yet."""
-    del canonical, handoff
+# --- inbound acknowledgement (C11) ---
+
+
+def find_reply(canonical: Path, target: str, sender: str | None = None) -> str | None:
+    """Id of a message in the outbox (on disk) with ``in_reply_to`` == ``target``, from
+    ``sender`` if given; the oldest one if several."""
+    for message_id, (_, path) in sorted(
+        _outbox_files(canonical).items(), key=lambda item: item[1][0]
+    ):
+        message = read_json(path)
+        if not isinstance(message, dict) or message.get("in_reply_to") != target:
+            continue
+        if sender is None or message.get("from") == sender:
+            return message_id
+    return None
+
+
+def message_id_of_seq(canonical: Path, seq: int) -> str:
+    (message_id,) = [mid for mid, (number, _) in _outbox_files(canonical).items() if number == seq]
+    return message_id
+
+
+def _is_responsible(record: dict, handoff: dict) -> bool:
+    responsible = record["responsible"]
+    return (
+        responsible["task_id"] == handoff["card"]
+        or responsible["request_id"] == handoff["request_id"]
+        or record["id"] in handoff.get("responsible_inbound", [])
+    )
+
+
+def _task_acknowledgement(
+    canonical: Path, inbound_id: str, handoff: dict, allow_no_remote: bool
+) -> str:
+    """The runtime note acknowledging an inbound ``task`` (published once: a rerun after a
+    crash finds the note already in the outbox)."""
+    found = find_reply(canonical, inbound_id, FROM_RUNTIME)
+    if found is not None:
+        return found
+    body = (
+        f"Card {handoff['card']} (request {handoff['request_id']}), created for inbound task "
+        f"{inbound_id}, finished with outcome {handoff.get('outcome')!r} and was published "
+        f"at {handoff['merge_sha']}."
+    )
+    result = publish_runtime(
+        canonical,
+        "note",
+        f"Task {inbound_id} done",
+        body,
+        [],
+        allow_no_remote=allow_no_remote,
+        in_reply_to=inbound_id,
+    )
+    return message_id_of_seq(canonical, result.seq)
+
+
+def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = False) -> None:
+    """After a handoff's messages are published: move each routed inbound this card is
+    responsible for to ``acknowledged`` (C11). A ``reply``/``steer`` is acknowledged by the
+    card's own published ``note`` with ``in_reply_to`` (validation required it); a ``task``
+    by a runtime note published here. One the card did not answer stays ``routed``; routing
+    returns it to the planning backlog once the card's request is closed. Under the lock;
+    idempotent."""
+    changed = []
+    for inbound_id, record in delivery.records(canonical).items():
+        if record["state"] != "routed" or not _is_responsible(record, handoff):
+            continue
+        if record["kind"] == "task":
+            message_id = _task_acknowledgement(canonical, inbound_id, handoff, allow_no_remote)
+            _checkpoint("ack_published")
+        else:
+            message_id = find_reply(canonical, inbound_id, FROM_AGENT)
+        if message_id is None:
+            continue
+        acknowledged = delivery.moved(record, "acknowledged", acknowledged_by=message_id)
+        changed.append(delivery.write_record(canonical, acknowledged))
+    if changed:
+        commit_and_push(canonical, changed, f"inbound acknowledged by {handoff['card']}")
 
 
 def publish_hook(
     canonical: Path, merge_sha: str, handoff: dict, allow_no_remote: bool = False
 ) -> PublishResult:
     """The ``publish`` hook for ``runtime.merge.process_handoffs``: called under the canonical
-    lock after a merge; idempotent. ``process_handoffs`` ignores the return value, so a caller
-    that needs ``pushed``/``skipped`` wraps this hook (queue-keeper, Task 3.9). Tests bind
+    lock after a merge; idempotent. Publishes the staged messages (those the card's merge
+    added carry ``card``: the handoff's task id), then acknowledges the inbound the card is
+    responsible for. ``process_handoffs`` ignores the return value, so a caller that needs
+    ``pushed``/``skipped`` wraps this hook (queue-keeper, Task 3.9). Tests bind
     ``allow_no_remote`` with ``functools.partial``."""
-    result = publish_staged(canonical, merge_sha, allow_no_remote)
-    _acknowledge_inbound_tasks(canonical, handoff)
+    result = publish_staged(canonical, merge_sha, allow_no_remote, card=handoff["card"])
+    acknowledge_inbound(canonical, handoff, allow_no_remote)
     return result

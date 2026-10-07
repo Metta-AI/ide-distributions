@@ -12,6 +12,7 @@ from autoresearch.ids import new_id
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runtime.ledger import canonical_lock
+from autoresearch.runtime.routing import route_all
 
 # The canonical repos here have no remote.
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
@@ -98,6 +99,7 @@ def test_round_trip_read_resolve_reply_seen_and_acknowledgement(board, base_env,
     preston.seen(message["id"])
     status = preston.status(question)
     assert status["published"] and status["seq"] == 1 and status["seen_by"] == ["preston"]
+    assert status["state"] == "answered" and status["late"] is False
     inbox = json.loads(gitops.show(board.canonical, "HEAD", f"comms/inbox/{reply}.json"))
     assert inbox["kind"] == "reply" and inbox["in_reply_to"] == question
     assert inbox["author"] == "preston"
@@ -219,13 +221,13 @@ def test_valid_steer_with_proposed_topic_is_recorded(board, preston):
     assert record["proposed_topic"] == topic and record["author"] == "preston"
 
 
-@pytest.mark.xfail(strict=True, reason="Task 3.7: inbound task routing and acknowledgement")
 def test_inbound_task_is_acknowledged_when_its_card_publishes(board, ide):
     task = ide.task("Profile opponent andre", "scouting", "Andre leads the league.", [], "P1")
     record = json.loads(gitops.show(board.canonical, "HEAD", f"comms/inbox/{task}.json"))
     assert record["kind"] == "task" and record["author"] == "ide"
-    # Task 3.7 routes the task to its own card; here the card is admitted by hand.
-    worker = board.admit(mode="scouting")
+    route_all(board.ctx(), board.queue, allow_no_remote=True)  # the task gets its own card
+    delivery = board.committed(board.ledger / "inbound" / f"{task}.json")
+    worker = board.admit_follow_up(delivery["responsible"]["request_id"])
     worker.start()
     worker.write_journal()
     worker.finish()

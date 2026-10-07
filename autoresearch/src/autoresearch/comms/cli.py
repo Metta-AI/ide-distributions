@@ -14,7 +14,9 @@ not found, unresolvable), 2 bad arguments or no workspace.
   ``N`` or after C's cursor; ``--advance`` then moves C's cursor to ``last_seq``. The listing
   and ``last_seq`` come from one commit snapshot (``rev`` in the data), so a publication
   that lands meanwhile is left for the next read. Data: ``{messages, last_seq, cursor, rev}``.
-- ``get <seq|M-id>``, ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``.
+- ``get <seq|M-id>``, ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
+  data: ``{id, published, seq, published_rev, seen_by}`` plus, for a published message, the
+  derived ``state`` (open | answered | withdrawn | expired) and ``late``.
 - ``inbound KIND (--json J | --file F) --author A``: an external agent submits a
   ``reply``, ``steer``, ``task`` or ``seen`` (``comms.inbound``).
 
@@ -30,7 +32,12 @@ from autoresearch import runctx
 from autoresearch.cli import register_group
 from autoresearch.comms import reader
 from autoresearch.comms.envelope import PRIORITIES, MessageProblems
-from autoresearch.comms.inbound import INBOUND_KINDS, InboundProblems, submit_inbound
+from autoresearch.comms.inbound import (
+    INBOUND_KINDS,
+    InboundProblems,
+    derived_status,
+    submit_inbound,
+)
 from autoresearch.comms.resolver import ResolveError, resolve
 from autoresearch.comms.stage import stage
 from autoresearch.games.loader import GameError, load_game
@@ -126,7 +133,12 @@ def _get(args) -> int:
 
 
 def _status(args) -> int:
-    return _ok(reader.status(_canonical(args), args.message_id))
+    canonical = _canonical(args)
+    data = reader.status(canonical, args.message_id)
+    if data["published"]:
+        derived = derived_status(canonical, args.message_id)
+        data |= {"state": derived.state, "late": derived.late}
+    return _ok(data)
 
 
 def _resolve(args) -> int:
@@ -206,7 +218,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub = command("get", _get, "one published message by seq or M-id")
     sub.add_argument("key", metavar="SEQ|M-ID")
 
-    sub = command("status", _status, "publication and seen status of a message")
+    sub = command("status", _status, "publication, seen and derived status of a message")
     sub.add_argument("message_id", metavar="M-ID")
 
     sub = command("resolve", _resolve, "print the content an ar:// reference names")

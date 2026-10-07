@@ -8,7 +8,8 @@ machine; ``admit_and_create`` drives it to ``admitted`` and repairs any crash fr
    crash here is repaired by the rerun: the key returns the same task.
 3. Under the lock: write the ``admitted`` receipt with ``{task_id, board_epoch}`` and commit
    it (``admit <Q-id>``) — the durable point — then write the disposable
-   ``runtime/cards/<task-id>.json`` and ``runtime/briefings/<task-id>.md``.
+   ``runtime/cards/<task-id>.json`` (with ``responsible_inbound``, kept across rewrites and
+   merged with the inbound routed to the request) and ``runtime/briefings/<task-id>.md``.
 4. ``queue.assign(task_id, profile)`` (outside the lock). A rerun on an ``admitted`` receipt
    redoes the runtime files and this step.
 
@@ -24,6 +25,7 @@ from pathlib import Path
 import jsonschema
 import yaml
 
+from autoresearch.comms.delivery import responsible_ids
 from autoresearch.comms.resolver import ResolveError, resolve
 from autoresearch.games.loader import Game
 from autoresearch.io import gitops
@@ -127,11 +129,20 @@ def _save_receipt(canonical: Path, path: Path, receipt: dict, message: str) -> N
 
 
 def _write_runtime_files(
-    ctx: RunContext, spec: CardSpec, task_id: str, inputs: BriefingInputs
+    ctx: RunContext, spec: CardSpec, task_id: str, inputs: BriefingInputs, pending: bool
 ) -> None:
+    """Write ``runtime/cards/<task>.json`` and the briefing. ``finished`` and
+    ``responsible_inbound`` already in the card file are kept; the inbound routed to this
+    request is added, and, for a planning card not yet claimed (``pending``), the backlog
+    no card has taken (C11). A claimed card never gains backlog it could not have seen."""
     runtime = runtime_dir(ctx)
     card_path = runtime / "cards" / f"{task_id}.json"
-    finished = read_json(card_path).get("finished", False) if card_path.exists() else False
+    existing = read_json(card_path) if card_path.exists() else {}
+    routed = responsible_ids(
+        ctx.canonical, task_id, spec.request_id, planning=pending and spec.mode == "planning"
+    )
+    responsible = list(existing.get("responsible_inbound", []))
+    responsible += [inbound_id for inbound_id in routed if inbound_id not in responsible]
     write_json(
         card_path,
         {
@@ -139,7 +150,8 @@ def _write_runtime_files(
             "request_id": spec.request_id,
             "mode": spec.mode,
             "refs": spec.refs,
-            "finished": finished,
+            "finished": existing.get("finished", False),
+            "responsible_inbound": responsible,
         },
     )
     briefing = build_briefing(ctx.canonical, spec, task_id, inputs)
@@ -203,9 +215,9 @@ def admit_and_create(
     task_id = receipt["tasks"][-1]["task_id"]
     if receipt["state"] != "admitted":
         return AdmissionResult(ok=True, task_id=task_id)  # handed off or later: nothing to do
-    with canonical_lock(canonical):
-        _write_runtime_files(ctx, spec, task_id, inputs)
     card = queue.get(task_id)
+    with canonical_lock(canonical):
+        _write_runtime_files(ctx, spec, task_id, inputs, pending=card.state == "pending")
     if card.state == "pending" and card.assignee != profile:
         queue.assign(task_id, profile)
     return AdmissionResult(ok=True, task_id=task_id)

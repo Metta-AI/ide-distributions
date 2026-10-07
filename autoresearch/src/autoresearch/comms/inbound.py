@@ -1,10 +1,14 @@
-"""Inbound messages from external agents (C11, System Design 7 Inbound). Minimal form.
+"""Inbound messages from external agents (C11, System Design 7 Inbound).
 
 ``submit_inbound`` validates the System Design 7 shape of each kind, writes
 ``comms/inbox/<I-id>.json`` in canonical and commits it; a ``seen`` also adds its message ids
 to the author's durable seen record ``.supervisor/ledger/seen/<author>.json``
-(``{consumer, ids}``) in the same commit. Task 3.7 adds ``schemas/inbound.json``, routing to
-a responsible card, and delivery states in ``.supervisor/ledger/inbound/<I-id>.json``.
+(``{consumer, ids}``) in the same commit. Routing each message to its one responsible card
+and its delivery state (``.supervisor/ledger/inbound/<I-id>.json``, ``schemas/inbound.json``)
+belong to the runtime: ``runtime.routing`` and ``comms.delivery``.
+
+``derived_status`` gives the status of an outbound message (System Design 7). It is never
+stored; it is derived from the inbox and the outbox.
 
 Every kind carries ``author`` (the consumer name; it carries the full authority of the human
 it serves). Shapes (other fields are kept):
@@ -16,13 +20,16 @@ it serves). Shapes (other fields are kept):
 - ``task``: ``title``, ``mode``, ``why``, ``refs`` (ar:// strings), ``priority`` (P0-P5).
 """
 
+import datetime
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+from autoresearch.comms import delivery
 from autoresearch.comms.envelope import PRIORITIES, SCHEMA_VERSION, now_iso
 from autoresearch.comms.publisher import RECEIPTS_DIR, commit_and_push
-from autoresearch.comms.reader import check_consumer, seen_path
+from autoresearch.comms.reader import check_consumer, read_since, seen_path
 from autoresearch.ids import new_id
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
@@ -154,3 +161,55 @@ def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> st
             paths.append(_record_seen(canonical, author, payload["ids"]))
         commit_and_push(canonical, paths, f"inbound {kind} {inbound_id}")
     return inbound_id
+
+
+# --- derived status of outbound messages ---
+
+
+@dataclass(frozen=True)
+class StatusInfo:
+    """``state``: open | answered | withdrawn | expired. ``late``: a reply arrived after the
+    message's ``expires``."""
+
+    state: str
+    late: bool
+
+
+def parse_time(text: str) -> datetime.datetime:
+    """An ISO 8601 time; a time without a zone is taken as UTC."""
+    parsed = datetime.datetime.fromisoformat(text)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.UTC)
+
+
+def is_late(message: dict, received_at: str) -> bool:
+    """True if an inbound received at ``received_at`` answers ``message`` after it expired."""
+    expires = message.get("expires")
+    return bool(expires) and parse_time(received_at) > parse_time(expires)
+
+
+def derived_status(
+    canonical: Path, message_id: str, now: datetime.datetime | None = None
+) -> StatusInfo:
+    """Status of a published outbound message at canonical HEAD: ``answered`` if an inbound
+    reply has ``in_reply_to`` == its id; else ``withdrawn`` if a later message supersedes
+    it; else ``expired`` if its ``expires`` has passed; else ``open``. Raises LookupError
+    for an unpublished id."""
+    published = read_since(canonical, "status", after=0, include_unknown=True)
+    by_id = {message["id"]: message for message in published}
+    if message_id not in by_id:
+        raise LookupError(f"no published message {message_id!r}")
+    message = by_id[message_id]
+    replies = [
+        inbound
+        for inbound in delivery.inbox(canonical).values()
+        if inbound.get("kind") == "reply" and inbound.get("in_reply_to") == message_id
+    ]
+    late = any(is_late(message, reply["received_at"]) for reply in replies)
+    if replies:
+        return StatusInfo("answered", late)
+    if any(other.get("supersedes") == message_id for other in published):
+        return StatusInfo("withdrawn", late)
+    now = now or datetime.datetime.now(datetime.UTC)
+    if message.get("expires") and parse_time(message["expires"]) <= now:
+        return StatusInfo("expired", late)
+    return StatusInfo("open", late)

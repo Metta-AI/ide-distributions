@@ -7,7 +7,9 @@ the kind to be one of ``KINDS``, so this version never emits a kind its own read
 Essential fields (System Design 7): ``id``, ``seq`` (outbox), ``created``, ``from``
 (``research-agent`` | ``runtime``), ``iteration``, ``kind``, ``title``, ``body``, ``refs``,
 ``priority`` (P0-P5, the card scale), ``expects_response``, ``thread``/``in_reply_to``
-(optional), ``supersedes``, ``expires``. Status is derived, never stored (Task 3.7).
+(optional), ``supersedes``, ``expires``. Status is derived, never stored
+(``comms.inbound.derived_status``). A message published from a card's handoff also carries
+``card`` (that task id; set by the publisher).
 """
 
 import datetime

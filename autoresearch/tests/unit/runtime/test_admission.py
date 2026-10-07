@@ -65,6 +65,7 @@ def test_admit_and_create_happy_path(canonical, ctx, queue, game):
         "mode": "investigation",
         "refs": spec.refs,
         "finished": False,
+        "responsible_inbound": [],
     }
     briefing = (runtime / "briefings" / f"{result.task_id}.md").read_text()
     assert f"<!-- autoresearch-briefing task={result.task_id} -->" in briefing
@@ -208,3 +209,38 @@ def test_receipt_is_valid_json_in_git(canonical, ctx, queue, game):
     _admit(ctx, queue, spec, game)
     path = f".supervisor/ledger/requests/{spec.request_id}.json"
     assert json.loads(gitops.show(canonical.root, "HEAD", path))["state"] == "admitted"
+
+
+def test_rewrite_preserves_responsible_inbound(canonical, ctx, queue, game):
+    spec = make_spec()
+    first = _admit(ctx, queue, spec, game)
+    card_file = canonical.root / ".supervisor" / "runtime" / "cards" / f"{first.task_id}.json"
+    inbound_id = "I-01K6Z3V8QX0000000000000000"
+    write_json(card_file, read_json(card_file) | {"responsible_inbound": [inbound_id]})
+
+    _admit(ctx, queue, spec, game)
+
+    assert read_json(card_file)["responsible_inbound"] == [inbound_id]
+
+
+def test_card_file_lists_inbound_routed_to_its_request(canonical, ctx, queue, game):
+    spec = make_spec()
+    inbound_id = "I-01K6Z3V8QX0000000000000001"
+    record = {
+        "id": inbound_id,
+        "kind": "steer",
+        "received_at": "2026-10-07T00:00:00+00:00",
+        "state": "routed",
+        "responsible": {"task_id": None, "request_id": spec.request_id, "backlog": False},
+        "acknowledged_by": None,
+        "late": False,
+        "history": [],
+    }
+    path = canonical.layout.ledger / "inbound" / f"{inbound_id}.json"
+    write_json(path, record)
+    gitops.commit_paths(canonical.root, [path.relative_to(canonical.root).as_posix()], "inbound")
+
+    result = _admit(ctx, queue, spec, game)
+
+    card_file = canonical.root / ".supervisor" / "runtime" / "cards" / f"{result.task_id}.json"
+    assert read_json(card_file)["responsible_inbound"] == [inbound_id]

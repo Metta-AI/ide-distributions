@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "autoresearch/message.json",
-  "title": "Outbound message, schema ar-comms/0 (Overview C5, System Design 7). Staged by a card worker at comms/staged/<M-id>.json, published by the runtime at comms/outbox/<seq:08d>-<M-id>.json. Versioning is additive within ar-comms/0: writers may add optional fields and new kinds, and readers must ignore unknown fields and unknown kinds. The five outbound kinds are note, question, suggestion, help_request and highlight. Writers check the kind against that list (autoresearch.comms.envelope.KINDS); this schema does not, so a reader that validates with it accepts a newer kind. Status (open, answered, withdrawn, expired) is never stored: it is derived from later messages (Task 3.7).",
+  "title": "Outbound message, schema ar-comms/0 (Overview C5, System Design 7). Staged by a card worker at comms/staged/<M-id>.json, published by the runtime at comms/outbox/<seq:08d>-<M-id>.json. Versioning is additive within ar-comms/0: writers may add optional fields and new kinds, and readers must ignore unknown fields and unknown kinds. The five outbound kinds are note, question, suggestion, help_request and highlight. Writers check the kind against that list (autoresearch.comms.envelope.KINDS); this schema does not, so a reader that validates with it accepts a newer kind. Status (open, answered, withdrawn, expired) is never stored: it is derived from later messages and inbound replies (autoresearch.comms.inbound.derived_status).",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -41,6 +41,7 @@
     "in_reply_to": {"description": "Id of the message or inbound (I-id) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[MI]-[0-9A-HJKMNP-TV-Z]{26}$"},
     "supersedes": {"description": "Id of an earlier message this one replaces (that message becomes withdrawn).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
     "expires": {"description": "ISO 8601 time after which an unanswered message is expired; null for never.", "type": ["string", "null"], "minLength": 1},
+    "card": {"description": "Outbox only: the task id of the card whose handoff published it (set by the publisher, never by the worker); a reply's thread is routed by it.", "type": "string", "minLength": 1},
     "seq": {"description": "Outbox only: the gap-free sequence number.", "type": "integer", "minimum": 1},
     "published_rev": {"description": "Outbox only: canonical commit the message was published at (for a staged message, the merge commit that brought it in).", "type": "string", "pattern": "^[0-9a-f]{40}$"}
   }
