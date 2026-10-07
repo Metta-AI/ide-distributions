@@ -1,0 +1,226 @@
+"""``autoresearch stats ...`` through the real entry point (subprocess)."""
+
+import json
+import subprocess
+import sys
+from dataclasses import asdict
+
+import pytest
+import yaml
+from records.fixtures import EXP_DESIGNED
+
+from autoresearch.paths import Layout
+from autoresearch.records.store import RecordStore
+from autoresearch.stats.design import EvaluationDesign, MetricSpec
+from autoresearch.stats.ingest import EpisodeRow
+
+BASE, CAND = "pv-base", "pv-cand"
+
+
+def stats(root, *argv):
+    proc = subprocess.run(
+        [sys.executable, "-m", "autoresearch", "stats", *argv, "--root", str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, json.loads(proc.stdout) if proc.stdout.strip() else proc.stderr
+
+
+def write_rows(path, rows):
+    path.write_text("".join(json.dumps(asdict(row)) + "\n" for row in rows), encoding="utf-8")
+    return path
+
+
+def league_rows():
+    rows = []
+    for seed in range(12):
+        for policy, shift in (("pv-a", 0.0), ("pv-b", 1.0)):
+            metrics = {"score": seed + shift, "errors": float(seed % 3)}
+            rows.append(
+                EpisodeRow(
+                    f"{policy}-{seed}", "65", policy, seed, (0,), ("o",), metrics, "completed"
+                )
+            )
+    rows.append(EpisodeRow("bad", "65", "pv-a", 99, (0,), ("o",), {"score": 1.0}, "completed"))
+    rows.append(EpisodeRow("pv-a-0", "65", "pv-a", 0, (0,), ("o",), {}, "completed"))
+    return rows
+
+
+def test_ingest_league_then_noise(tmp_path):
+    rows_file = write_rows(tmp_path / "rows.jsonl", league_rows())
+    root = tmp_path / "ws"
+    code, env = stats(
+        root,
+        "ingest",
+        "--rows",
+        str(rows_file),
+        "--league",
+        "L1",
+        "--game-version",
+        "65",
+        "--game",
+        "fakegame",
+    )
+    assert code == 0, env
+    assert env["data"]["report"]["kept"] == 24
+    assert env["data"]["report"]["duplicates"] == 1
+    assert env["data"]["report"]["missing_metrics"] == ["errors"]
+    stored = (root / "stats" / "rows" / "L1.jsonl").read_text().splitlines()
+    assert len(stored) == 24
+
+    code, env = stats(
+        root,
+        "noise",
+        "--league",
+        "L1",
+        "--game-version",
+        "65",
+        "--metrics",
+        "score,errors",
+        "--evidence",
+        "EV-1",
+    )
+    assert code == 0, env
+    assert len(env["data"]["noise_rev"]) == 40
+    record = yaml.safe_load((root / "stats" / "metric-noise.yaml").read_text())
+    assert set(record["metrics"]) == {"score", "errors"} and record["evidence"] == ["EV-1"]
+
+
+def test_ingest_league_requires_game_version_and_game(tmp_path):
+    rows_file = write_rows(tmp_path / "rows.jsonl", league_rows())
+    code, env = stats(
+        tmp_path, "ingest", "--rows", str(rows_file), "--league", "L1", "--game", "fakegame"
+    )
+    assert code == 2 and env["ok"] is False
+
+
+def test_noise_without_rows_is_failure(tmp_path):
+    code, env = stats(
+        tmp_path, "noise", "--league", "L9", "--game-version", "65", "--metrics", "score"
+    )
+    assert code == 1 and "L9" in env["error"]["message"]
+
+
+def design_dict():
+    metrics = (
+        MetricSpec("speed", "up", "primary", 1.0, None),
+        MetricSpec("errors", "down", "agent_guardrail", None, 0.5),
+        MetricSpec("score", "up", "performance", None, None),
+    )
+    design = EvaluationDesign(
+        "65", BASE, (0,), ("o",), tuple(range(20)), metrics, 0.5, {"score": 0.5}, 10, "rev1"
+    )
+    return design.to_dict()
+
+
+@pytest.fixture
+def experiment(tmp_path):
+    store = RecordStore(Layout(tmp_path / "ws"))
+    exp = store.create("experiment", {**EXP_DESIGNED, "evaluation_design": design_dict()})
+    store.set_status(exp, "built")
+    store.set_status(exp, "uploaded")
+    store.update(
+        exp, {"candidate_binding": {"version_id": "V-1", "platform_policy_version_id": CAND}}
+    )
+    return exp
+
+
+def experiment_rows():
+    rows = []
+    for seed in range(20):
+        jitter = 0.01 if seed % 2 else -0.01
+        for policy, gain in ((BASE, 0.0), (CAND, 2.0)):
+            metrics = {"speed": 5.0 + gain + jitter, "errors": 1.0, "score": 3.0 + gain / 4}
+            rows.append(
+                EpisodeRow(
+                    f"{policy}-{seed}", "65", policy, seed, (0,), ("o",), metrics, "completed"
+                )
+            )
+    rows.append(
+        EpisodeRow(
+            "seatless",
+            "65",
+            CAND,
+            1,
+            (1,),
+            ("o",),
+            {"speed": 1.0, "errors": 1.0, "score": 1.0},
+            "completed",
+        )
+    )
+    return rows
+
+
+def test_ingest_experiment_then_evaluate(tmp_path, experiment):
+    root = tmp_path / "ws"
+    rows_file = write_rows(tmp_path / "rows.jsonl", experiment_rows())
+    code, env = stats(root, "ingest", "--rows", str(rows_file), "--experiment", experiment)
+    assert code == 0, env
+    assert env["data"]["report"]["kept"] == 40 and env["data"]["report"]["wrong_seats"] == 1
+    assert (root / "stats" / "rows" / f"{experiment}.jsonl").exists()
+
+    code, env = stats(root, "evaluate", experiment, "--champion", BASE)
+    assert code == 0, env
+    assert env["data"]["promote_eligible"] is True and env["data"]["failures"] == []
+    stored = json.loads((root / "stats" / "outcomes" / f"{experiment}.json").read_text())
+    assert stored["promote_eligible"] is True and stored["champion"] == BASE
+    assert stored["candidate_platform_id"] == CAND
+
+    code, env = stats(root, "evaluate", experiment, "--champion", "pv-other")
+    assert code == 0 and env["ok"] is True
+    assert env["data"]["promote_eligible"] is False
+    assert env["data"]["failures"] == ["baseline_not_champion"]
+
+
+def test_evaluate_without_champion_until_promotion_lands(tmp_path, experiment):
+    root = tmp_path / "ws"
+    write_rows(tmp_path / "rows.jsonl", experiment_rows())
+    stats(root, "ingest", "--rows", str(tmp_path / "rows.jsonl"), "--experiment", experiment)
+    code, env = stats(root, "evaluate", experiment)
+    assert code == 2
+    assert env["error"]["message"] == "champion unknown: pass --champion until promotion lands"
+
+
+def test_evaluate_without_rows_is_failure(tmp_path, experiment):
+    code, env = stats(tmp_path / "ws", "evaluate", experiment, "--champion", BASE)
+    assert code == 1 and "stats ingest" in env["error"]["message"]
+
+
+def test_ingest_needs_exactly_one_target(tmp_path):
+    rows_file = write_rows(tmp_path / "rows.jsonl", league_rows())
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "autoresearch",
+            "stats",
+            "ingest",
+            "--rows",
+            str(rows_file),
+            "--root",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 2
+
+
+def test_malformed_rows_file_is_bad_arguments(tmp_path):
+    bad = tmp_path / "rows.jsonl"
+    bad.write_text('{"episode_id": "x"}\n', encoding="utf-8")
+    code, env = stats(
+        tmp_path,
+        "ingest",
+        "--rows",
+        str(bad),
+        "--league",
+        "L1",
+        "--game-version",
+        "65",
+        "--game",
+        "fakegame",
+    )
+    assert code == 2 and "line 1" in env["error"]["message"]
