@@ -50,7 +50,7 @@ D-18. **Self-written skills go to `skills-proposed/`.** Send a `suggestion` for 
 
 ## Communication
 
-These rules also appear in <code>doctrine/communication.md</code>.
+These rules also appear in `doctrine/communication.md`.
 
 D-19. **Findings first.** Answer the question first. An unanswered question stays owed. Teach before you ask: never ask for a strategic choice built on mechanics you have not explained. Keep the backstage backstage. Never send an empty message.
 
