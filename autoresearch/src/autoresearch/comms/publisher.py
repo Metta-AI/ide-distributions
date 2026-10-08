@@ -500,20 +500,22 @@ def _task_acknowledgement(
     it plus the outcome; its body is the card's own completion summary, then what follows from
     the outcome and the titles of the messages the card sent. The summary is the one the run
     ended with on the board (``run_summary``, from ``process_handoffs``) or the opening of the
-    card's journal, whichever names no ids (``runtime_messages.plainest_summary``). Ids and
-    commits go into ``refs`` and ``about``."""
+    card's journal, whichever names no ids (``runtime_messages.plainest_summary``). For a
+    blocked card the journal comes first: its board summary is the ``kanban_block`` reason,
+    which its help request already carries. Ids and commits go into ``refs`` and ``about``."""
     found = find_reply(canonical, inbound_id, FROM_RUNTIME)
     if found is not None:
         return found
     journal_id, journal_summary = _journal(canonical, handoff)
     outcome = str(handoff.get("outcome"))
     sent = _sent(canonical, handoff["card"])
+    summaries = [_clip(handoff.get("run_summary")), journal_summary]
+    if outcome == "blocked":
+        summaries.reverse()
     message = runtime_messages.task_acknowledgement(
         task_title=_task_title(canonical, inbound_id),
         outcome=outcome,
-        summary=runtime_messages.plainest_summary(
-            [_clip(handoff.get("run_summary")), journal_summary]
-        ),
+        summary=runtime_messages.plainest_summary(summaries),
         sent_titles=[message["title"] for message in sent],
         backlog=backlog,
         has_journal=journal_id is not None,

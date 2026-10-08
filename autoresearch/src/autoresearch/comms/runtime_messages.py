@@ -67,11 +67,13 @@ _REBUILD_LOST = "board rebuild could not re-admit "
 # (``H-<ULID>``, ``Q-<ULID>``, ``K-<ULID>``, ...), a Kanban task id (``t_6c0a018c``), or a
 # commit (7 to 40 hex characters with at least one digit and one letter).
 ID_TOKEN = re.compile(
-    r"ar://[^\s,;)\]]+"
+    r"ar://[^\s,;)\]]*[^\s,;)\].]"  # never ends on a sentence's full stop
     r"|\b[A-Z]{1,3}-[0-9A-HJKMNP-TV-Z]{26}\b"
     r"|\bt_[0-9a-f]{4,}\b"
     r"|\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b"
 )
+# The " (<content hash>)" a skill proposal's title ended with before runtime_key existed.
+_LEGACY_HASH = re.compile(r" \([0-9a-f]{12}\)$")
 _NAME_BY_PREFIX = {prefix: name for name, prefix in ENTITY_PREFIXES.items()}
 _NAME_BY_PREFIX.update({"Q": "request", "I": "inbound message", "K": "card", "P": "promotion"})
 
@@ -503,7 +505,9 @@ def skill_proposal_legacy_prefix(name: str) -> str:
 
 
 def proposal_still_open(message: dict, rev: str) -> RuntimeMessage:
-    """A re-raise of an open proposal that has had no reply for a day."""
+    """A re-raise of an open proposal that has had no reply for a day. A skill proposal
+    published before runtime_key existed has its content hash in the title; it is dropped."""
     body = f"This still has no reply (first sent {message['created']}). {message['body']}"
     refs = [ref | {"rev": rev} for ref in message["refs"]]
-    return RuntimeMessage("suggestion", _title("Still open", message["title"]), body, refs)
+    title = plain_ids(_LEGACY_HASH.sub("", message["title"]))
+    return RuntimeMessage("suggestion", _title("Still open", title), body, refs)

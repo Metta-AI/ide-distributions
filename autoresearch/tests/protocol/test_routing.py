@@ -188,6 +188,18 @@ def test_task_acknowledgement_quotes_the_runs_summary_and_the_cards_messages(boa
     )
 
 
+def test_a_blocked_cards_ack_prefers_its_journal_over_the_block_reason(board):
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked", terminal=False)
+    reason = "tool-fault: softmax build: FileNotFoundError"
+    board.queue.finish(worker.task_id, worker.run_id, "blocked", summary=reason)
+
+    board.process(publish=local_hook)
+
+    [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert ack["body"].startswith("Did things. ") and reason not in ack["body"]
+
+
 def test_a_summary_that_names_ids_gives_way_to_the_journal_or_is_made_plain(board):
     task, worker = _finished_task_card(board)
     stage(Layout(worker.worktree), "help_request", "Stuck on H-01K6Z3V8QX0000000000000000", "B", [])

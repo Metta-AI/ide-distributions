@@ -229,6 +229,15 @@ def test_plain_ids_names_what_an_id_points_to():
     )
     assert rm.plainest_summary([None, f"Made {FILE_CARD}.", "Plain words."]) == "Plain words."
     assert rm.plainest_summary(["", None]) is None
+    claim = "ar://claim/C-01M4EJ9RQMHVH6XK3N4T760MNH"
+    assert rm.plain_ids(f"See {claim}. Also {claim}, then ({claim}).") == (
+        "See the claim. Also the claim, then (the claim)."
+    )
+
+
+def test_a_pre_upgrade_proposal_is_reraised_without_its_hash():
+    legacy = OPEN_PROPOSAL | {"title": "Skill proposal: replay-diff (0123456789ab)"}
+    assert rm.proposal_still_open(legacy, SHA).title == "Still open: Skill proposal: replay-diff"
 
 
 @pytest.mark.parametrize(

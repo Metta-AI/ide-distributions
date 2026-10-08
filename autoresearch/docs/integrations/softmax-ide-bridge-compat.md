@@ -173,7 +173,8 @@ What changes on each side:
   summary, then what follows from the outcome and the titles of the messages the card sent. The
   summary is the one the card's run ended with on the board (the `summary` it gave
   `kanban_complete`, which complete-card asks to be plain sentences for the coach), or the
-  opening paragraph of its journal when the board summary names ids. When both name ids, each id
+  opening paragraph of its journal when the board summary names ids. For a blocked card the
+  journal comes first, because its board summary is the block reason. When both name ids, each id
   is replaced by what it names ("the hypothesis", "the card", "a commit"). Ids and commits moved
   into `refs` and the additive `about` field. These messages are still agent-facing and partly
   the agent's own words, so the translation step is still the place where text becomes fit for a
