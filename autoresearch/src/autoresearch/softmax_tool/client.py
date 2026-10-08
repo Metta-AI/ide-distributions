@@ -198,13 +198,21 @@ class SoftmaxClient:
         window: deque[Future] = deque()
         try:
             for episode_id in self._completed_episode_ids(league_id, limit):
-                window.append(pool.submit(self._league_episode, episode_id, versions))
+                window.append(pool.submit(self._fetch_episode, episode_id, versions))
                 if len(window) > 2 * LEAGUE_FETCH_WORKERS:
                     yield window.popleft().result()
             while window:
                 yield window.popleft().result()
         finally:
             pool.shutdown(wait=True, cancel_futures=True)
+
+    def _fetch_episode(self, episode_id: str, versions: dict[str, str]) -> dict:
+        """One episode, retried once: a transient CLI or HTTP failure on one of hundreds of
+        episodes should not throw away the whole read (``--out`` is written only at the end)."""
+        try:
+            return self._league_episode(episode_id, versions)
+        except SoftmaxCliError:
+            return self._league_episode(episode_id, versions)
 
     def _completed_episode_ids(self, league_id: str, limit: int) -> Iterator[str]:
         """Up to ``limit`` completed episode ids, round by round (no league-wide listing)."""

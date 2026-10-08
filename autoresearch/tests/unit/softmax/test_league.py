@@ -199,7 +199,23 @@ def test_real_league_episodes_stop_early_with_little_in_flight(env, runner):
     stream = SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 40)
     next(stream)
     stream.close()  # the consumer failed (for example an evaluate error)
-    assert state["details"] <= 2 * LEAGUE_FETCH_WORKERS + 1 + LEAGUE_FETCH_WORKERS
+    assert state["details"] <= 2 * LEAGUE_FETCH_WORKERS + 1  # the window, nothing more
+
+
+def test_real_league_episode_fetch_is_retried_once(env, runner):
+    many_episodes_runner(runner, 3, delay=0)
+    failures = {"left": 1}
+    detail = synthetic("coworld_episode_detail.json")
+
+    def flaky(argv, kwargs):
+        if failures["left"]:
+            failures["left"] -= 1
+            return completed(stderr="502 Bad Gateway", returncode=1)
+        return completed(detail)
+
+    runner.on("coworld", "episodes", "ereq_0001", response=flaky)
+    episodes = list(SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 3))
+    assert [e["episode_id"] for e in episodes] == ["ereq_0000", "ereq_0001", "ereq_0002"]
 
 
 def test_real_version_falls_back_to_coworld_show(env, runner):
