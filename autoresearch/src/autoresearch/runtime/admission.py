@@ -46,7 +46,8 @@ from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import load_schema
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
-from autoresearch.runtime.ledger import canonical_lock, commit, ledger_of, now_iso
+from autoresearch.runtime.handoff import handoff_path
+from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.pause import is_paused
 
 NOISE_PATH = "stats/metric-noise.yaml"
@@ -59,7 +60,6 @@ PLANNING_OWNED = "planning_owned"
 PAUSED = "paused"
 STALE_EPOCH = "stale_epoch"
 TRANSIENT_REASONS = frozenset({NEEDS_CALIBRATION, PAUSED})
-RUNTIME = "runtime"  # created_by of runtime-written requests
 HANDOFF_REF = "ar://handoff/"
 
 Inputs = BriefingInputs | Callable[[str], BriefingInputs]
@@ -133,18 +133,39 @@ def admit(
         return [NEEDS_CALIBRATION]
     if (
         spec.mode == "planning"
-        and not is_runtime_follow_up(spec)
+        and not is_runtime_follow_up(canonical, spec)
         and _planning_owned(canonical, spec, queue)
     ):
         return [PLANNING_OWNED]
     return []
 
 
-def is_runtime_follow_up(spec: CardSpec) -> bool:
-    """A repair/reconcile request the runtime wrote for an existing card's handoff (its refs
-    name ``ar://handoff/...``). It carries on that card's work, so for a planning card it
-    continues the same planning ownership (C11) instead of competing for it."""
-    return spec.created_by == RUNTIME and any(ref.startswith(HANDOFF_REF) for ref in spec.refs)
+def is_runtime_follow_up(canonical: Path, spec: CardSpec) -> bool:
+    """A repair/reconcile request the runtime wrote for an existing card's handoff. It
+    carries on that card's work, so for a planning card it continues the same planning
+    ownership (C11) instead of competing for it.
+
+    Decided by provenance, never by the request's own fields (a worker can copy those): one
+    of its ``ar://handoff/<task>/<run>`` refs names a handoff record, or for a run that left
+    none the runtime's orphan marker, committed at canonical HEAD whose
+    ``follow_up_request`` is this request."""
+    ledger = ledger_of(canonical)
+    for ref in spec.refs:
+        if not ref.startswith(HANDOFF_REF):
+            continue
+        target, _, fragment = ref.removeprefix(HANDOFF_REF).partition("#")
+        task_id, _, run_id = target.partition("/")
+        if not task_id or not run_id:
+            continue
+        record_path = (
+            ledger / "orphans" / f"{task_id}-{run_id}.json"
+            if fragment
+            else handoff_path(canonical, task_id, run_id)
+        )
+        record = committed_json(canonical, record_path)
+        if record is not None and record.get("follow_up_request") == spec.request_id:
+            return True
+    return False
 
 
 def board_epoch(ledger: Path) -> str:

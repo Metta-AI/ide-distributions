@@ -151,19 +151,39 @@ def test_second_planning_card_rejected_until_first_publishes(canonical, ctx, que
 
 
 def test_runtime_follow_up_of_a_planning_card_continues_its_ownership(canonical, ctx, queue, game):
-    """A repair/reconcile request the runtime writes for a planning card's handoff (or its
+    """A repair/reconcile request the runtime wrote for a planning card's handoff (or its
     missing handoff) is that card's work, not a second planner: it is not ``planning_owned``,
-    else the card's work is silently dropped."""
+    else the card's work is silently dropped. Provenance decides: the committed handoff
+    record (or orphan marker) names the request as its ``follow_up_request``."""
     first = make_spec(mode="planning")
     assert _admit(ctx, queue, first, game).ok
     task_id = _receipt(canonical, first)["tasks"][0]["task_id"]
-    write_json(canonical.layout.ledger / "handoffs" / task_id / "1.json", {"state": "repair"})
-    gitops.commit_all(canonical.root, "handoff")
     follow_up = make_spec(mode="planning", refs=[f"ar://handoff/{task_id}/1"])
     follow_up.created_by = "runtime"
+    orphan = make_spec(mode="planning", refs=[f"ar://handoff/{task_id}/2#missing"])
+    orphan.created_by = "runtime"
+    ledger = canonical.layout.ledger
+    write_json(ledger / "handoffs" / task_id / "1.json",
+               {"state": "repair", "follow_up_request": follow_up.request_id})  # fmt: skip
+    write_json(ledger / "orphans" / f"{task_id}-2.json",
+               {"task_id": task_id, "run_id": "2", "follow_up_request": orphan.request_id})  # fmt: skip
+    gitops.commit_all(canonical.root, "handoff and orphan marker")
     assert admit(canonical.root, follow_up, queue, game, GAME_VERSION) == []
-    planner = make_spec(mode="planning", refs=[f"ar://handoff/{task_id}/1"])
-    assert admit(canonical.root, planner, queue, game, GAME_VERSION) == ["planning_owned"]
+    assert admit(canonical.root, orphan, queue, game, GAME_VERSION) == []
+
+
+def test_worker_copy_of_a_runtime_follow_up_is_still_planning_owned(canonical, ctx, queue, game):
+    """A request that only looks like a runtime follow-up (created_by runtime, a handoff ref)
+    but is not the one the handoff record names gets no exception (C11)."""
+    first = make_spec(mode="planning")
+    assert _admit(ctx, queue, first, game).ok
+    task_id = _receipt(canonical, first)["tasks"][0]["task_id"]
+    write_json(canonical.layout.ledger / "handoffs" / task_id / "1.json",
+               {"state": "repair", "follow_up_request": "Q-OTHER"})  # fmt: skip
+    gitops.commit_all(canonical.root, "handoff")
+    spoof = make_spec(mode="planning", refs=[f"ar://handoff/{task_id}/1"])
+    spoof.created_by = "runtime"
+    assert admit(canonical.root, spoof, queue, game, GAME_VERSION) == ["planning_owned"]
 
 
 def test_planning_card_on_the_queue_without_receipt_owns_planning(canonical, queue, game):

@@ -244,6 +244,20 @@ def test_invalid_card_request_is_a_problem(card):
     assert any("cards/requests" in problem for problem in result.problems)
 
 
+def test_card_request_claiming_to_be_from_the_runtime_is_a_problem(card):
+    """Only the runtime writes runtime requests (in canonical); a card branch never does,
+    so a copy cannot pass as a runtime follow-up."""
+    card.write_journal()
+    request_id = new_id("card_request")
+    spec = {"request_id": request_id, "title": "t", "mode": "planning", "why": "w",
+            "refs": [], "created_by": "runtime", "priority": "P0"}  # fmt: skip
+    path = card.worktree / "cards" / "requests" / f"{request_id}.json"
+    write_json(path, {"id": request_id, "op": "create", "spec": spec})
+    result = finish(card.ctx(), "done")
+    assert not result.ok
+    assert any("never created_by 'runtime'" in problem for problem in result.problems)
+
+
 # --- responsible inbound ---
 
 

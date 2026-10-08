@@ -156,7 +156,13 @@ def _message_problems(path: str, message) -> list[str]:
 
 def _request_problems(path: str, request) -> list[str]:
     validator = jsonschema.Draft202012Validator(load_schema("card_request.json"))
-    return [f"{path}: card request: {error.message}" for error in validator.iter_errors(request)]
+    problems = [
+        f"{path}: card request: {error.message}" for error in validator.iter_errors(request)
+    ]
+    spec = request.get("spec") if isinstance(request, dict) else None
+    if isinstance(spec, dict) and spec.get("created_by") == FROM_RUNTIME:
+        problems.append(f"{path}: a card request from a card is never created_by 'runtime'")
+    return problems
 
 
 def _inbound_kind(repo: Path, inbound_id: str) -> str | None:
