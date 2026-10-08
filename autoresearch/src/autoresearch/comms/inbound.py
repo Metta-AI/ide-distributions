@@ -7,6 +7,15 @@ to the author's durable seen record ``.supervisor/ledger/seen/<author>.json``
 and its delivery state (``.supervisor/ledger/inbound/<I-id>.json``, ``schemas/inbound.json``)
 belong to the runtime: ``runtime.routing`` and ``comms.delivery``.
 
+``adopt_direct_writes`` takes the other path into the inbox (Runtime 9.2, the L0 file
+adapter): an external agent such as the Softmax IDE bridge writes
+``comms/inbox/<id>.json`` itself, with its own id, and never commits. queue-keeper's routing
+calls it under the canonical lock: a valid file is committed unchanged (the external agent
+owns it and may look for it again), an invalid one is left as it is and listed with its
+problems for a runtime note. An inbound id is any ``INBOUND_ID`` (the ``I-`` ULIDs that
+``submit_inbound`` makes, or an external one such as ``<player id>:task:<key>``). A direct
+write carries its own ``created`` time, which stands for ``received_at``.
+
 ``derived_status`` gives the status of an outbound message (System Design 7). It is never
 stored; it is derived from the inbox and the outbox.
 
@@ -40,6 +49,12 @@ INBOUND_KINDS = ("reply", "steer", "task", "seen")
 URGENCIES = ("now", "next", "whenever")
 MODES = ("investigation", "scouting", "experimentation", "maintenance", "planning")
 _MESSAGE_ID = re.compile(r"M-[0-9A-HJKMNP-TV-Z]{26}")
+# One safe path component; schemas/inbound.json "id" and message.json "in_reply_to" match it.
+INBOUND_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}")
+
+
+def is_inbound_id(text) -> bool:
+    return isinstance(text, str) and bool(INBOUND_ID.fullmatch(text)) and ".." not in text
 
 
 class InboundProblems(ValueError):
@@ -161,6 +176,48 @@ def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> st
             paths.append(_record_seen(canonical, author, payload["ids"]))
         commit_and_push(canonical, paths, f"inbound {kind} {inbound_id}")
     return inbound_id
+
+
+def _direct_write_problems(canonical: Path, name: str, message) -> list[str]:
+    if not isinstance(message, dict):
+        return ["the file is not a JSON object"]
+    if message.get("id") != name:
+        return [f"id: must equal the file name {name!r}"]
+    received = message.get("received_at") or message.get("created")
+    try:
+        parse_time(received)
+    except (TypeError, ValueError):
+        return ["created: an ISO 8601 time is required"]
+    return inbound_problems(canonical, message.get("kind"), message, message.get("author"))
+
+
+def adopt_direct_writes(canonical: Path) -> tuple[list[str], dict[str, list[str]]]:
+    """Commit the inbox files an external agent wrote directly (module docstring). Returns
+    the adopted ids and, for each invalid file, its problems. A file that is not JSON yet, or
+    whose name is not an inbound id, is skipped silently. Call under the canonical lock."""
+    listing = gitops.git(canonical, "ls-files", "--others", "-z", "--", delivery.INBOX_DIR)
+    adopted, rejected, paths = [], {}, []
+    for relative in sorted(entry for entry in listing.split("\0") if entry.endswith(".json")):
+        parent, _, file_name = relative.rpartition("/")
+        name = file_name.removesuffix(".json")
+        if parent != delivery.INBOX_DIR or not is_inbound_id(name):
+            continue
+        path = Path(canonical) / relative
+        try:
+            message = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        problems = _direct_write_problems(canonical, name, message)
+        if problems:
+            rejected[name] = problems
+            continue
+        adopted.append(name)
+        paths.append(path)
+        if message["kind"] == "seen":
+            paths.append(_record_seen(canonical, message["author"], message["ids"]))
+    if paths:
+        commit_and_push(canonical, paths, f"inbound: adopted {len(adopted)} direct writes")
+    return adopted, rejected
 
 
 # --- derived status of outbound messages ---

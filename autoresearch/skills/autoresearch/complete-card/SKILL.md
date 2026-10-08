@@ -58,7 +58,7 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    Do not make a second journal.
 2. Acknowledge each `reply` and `steer` that this card is responsible for (D-02). See the
    `communicate` skill:
-   `"$AUTORESEARCH_CLI" comms stage note --title "<outcome>: <subject>" --body-file .scratch/ack.md --in-reply-to <I-id> --ref <ar://ref>`
+   `"$AUTORESEARCH_CLI" comms stage note --title "<outcome>: <subject>" --body-file .scratch/ack.md --in-reply-to <inbound id> --ref <ar://ref>`
    State the outcome: applied, declined with a reason, or noted. Do not acknowledge a `task`;
    the runtime does that when this card publishes.
 3. Request follow-up cards for further work, any number (D-22). Each card names its refs:

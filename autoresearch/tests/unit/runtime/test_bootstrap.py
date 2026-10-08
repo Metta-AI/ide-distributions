@@ -76,6 +76,8 @@ def test_fresh_bootstrap_seeds_pushes_and_creates_the_board(tmp_path):
     assert gitops.git(canonical, "remote", "get-url", "origin") == str(origin)
     assert gitops.git(origin, "rev-parse", "main") == gitops.head(canonical)
     assert gitops.git(canonical, "status", "--porcelain") == ""
+    # External agents (the IDE bridge) wait for comms/outbox/ before they start.
+    assert (canonical / "comms" / "outbox").is_dir() and (canonical / "comms" / "inbox").is_dir()
     assert queue.board_exists() and result.board_created
     assert read_json(canonical / ".supervisor" / "ledger" / "board.json")["epoch"] == "e1"
     assert queue.list() == []  # bootstrap never creates cards

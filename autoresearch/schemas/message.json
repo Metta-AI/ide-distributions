@@ -38,7 +38,7 @@
     "priority": {"description": "Same scale as card priority: P0 (most urgent) to P5.", "enum": ["P0", "P1", "P2", "P3", "P4", "P5"]},
     "expects_response": {"type": "boolean"},
     "thread": {"type": "string", "minLength": 1},
-    "in_reply_to": {"description": "Id of the message or inbound (I-id) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[MI]-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "in_reply_to": {"description": "Id of the message (M-id) or inbound message (an I-id, or an external agent's own id such as <player id>:task:<key>) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
     "supersedes": {"description": "Id of an earlier message this one replaces (that message becomes withdrawn).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
     "expires": {"description": "ISO 8601 time after which an unanswered message is expired; null for never.", "type": ["string", "null"], "minLength": 1},
     "card": {"description": "Outbox only: the task id of the card whose handoff published it (set by the publisher, never by the worker); a reply's thread is routed by it.", "type": "string", "minLength": 1},

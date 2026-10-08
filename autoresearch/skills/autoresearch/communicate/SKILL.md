@@ -39,7 +39,7 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
    `--thread <thread>`, `--in-reply-to <id>`, `--supersedes <M-id>`, `--expires <ISO time>`.
    A `--ref` can also be a JSON object `{"uri": "ar://…", "role": "subject|evidence|context", "note": "…"}`.
 4. Acknowledge each `reply` and `steer` this card is responsible for (D-02):
-   `"$AUTORESEARCH_CLI" comms stage note --title "Applied: <subject>" --body-file .scratch/ack.md --in-reply-to <I-id> --ref <ar://ref>`
+   `"$AUTORESEARCH_CLI" comms stage note --title "Applied: <subject>" --body-file .scratch/ack.md --in-reply-to <inbound id> --ref <ar://ref>`
    The outcome is applied, declined with a reason, or noted. Card finish fails while a
    responsible `reply` or `steer` has no acknowledgement. Do not acknowledge a `task` (the
    runtime does it when the card publishes) or a `seen`.

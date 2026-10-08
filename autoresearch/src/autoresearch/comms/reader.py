@@ -26,12 +26,13 @@ from autoresearch.io.docs import read_json, write_json
 
 CURSORS_DIR = ".supervisor/runtime/cursors"
 SEEN_DIR = ".supervisor/ledger/seen"
-CONSUMER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# ':' is allowed for external authors such as the IDE bridge's "coach:<player id>".
+CONSUMER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 
 
 def check_consumer(consumer: str) -> str:
     if not CONSUMER_NAME.fullmatch(consumer) or ".." in consumer:
-        raise ValueError(f"invalid consumer name {consumer!r}: use letters, digits, '.', '_', '-'")
+        raise ValueError(f"invalid consumer name {consumer!r}: use letters, digits, '.', '_', '-', ':'")
     return consumer
 
 

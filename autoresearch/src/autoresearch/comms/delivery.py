@@ -51,8 +51,12 @@ def _committed_dir(canonical: Path, directory: str) -> dict[str, dict]:
 
 
 def inbox(canonical: Path) -> dict[str, dict]:
-    """I-id -> inbound message, as committed at HEAD, oldest id first."""
-    return _committed_dir(canonical, INBOX_DIR)
+    """Inbound id -> inbound message, as committed at HEAD, sorted by id. A message an
+    external agent wrote directly has no ``received_at``; its ``created`` stands for it."""
+    messages = _committed_dir(canonical, INBOX_DIR)
+    for message in messages.values():
+        message.setdefault("received_at", message.get("created"))
+    return messages
 
 
 def records(canonical: Path) -> dict[str, dict]:

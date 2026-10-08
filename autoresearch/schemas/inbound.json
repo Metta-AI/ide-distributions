@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "autoresearch/inbound.json",
-  "title": "Inbound delivery record at .supervisor/ledger/inbound/<I-id>.json (Overview C11). Written by the runtime only (runtime.routing, and the publish hook for acknowledgements). The inbound message itself stays immutable at comms/inbox/<I-id>.json.",
+  "title": "Inbound delivery record at .supervisor/ledger/inbound/<I-id>.json (Overview C11). Written by the runtime only (runtime.routing, and the publish hook for acknowledgements). The inbound message itself stays immutable at comms/inbox/<inbound id>.json.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "kind", "received_at", "state", "responsible", "acknowledged_by", "late", "history"],
   "properties": {
-    "id": {"type": "string", "pattern": "^I-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "id": {"description": "The inbound id: an I-id from comms inbound, or the external agent's own id for a file it wrote directly (comms.inbound.INBOUND_ID).", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
     "kind": {"enum": ["reply", "steer", "task", "seen"]},
     "received_at": {"type": "string", "minLength": 1},
     "state": {"enum": ["received", "routed", "acknowledged"]},

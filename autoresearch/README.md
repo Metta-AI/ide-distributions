@@ -208,6 +208,15 @@ Where things live:
 | Staged skills (not adopted) | `$PROFILE/local/skills-staging/` |
 | Hermes memory | `$PROFILE/memories/MEMORY.md` |
 | Memory snapshot (committed) | `$PROFILE/workspace/.supervisor/hermes-memory.md` |
+| Outbound messages (read by external agents) | `$PROFILE/workspace/comms/outbox/<seq>-<M-id>.json` |
+| Inbound messages | `$PROFILE/workspace/comms/inbox/<id>.json` |
+
+External agents send inbound messages in one of two ways: `"$AUTORESEARCH_CLI" comms inbound`
+(validates, gives an `I-` id, commits), or by writing `comms/inbox/<id>.json` directly with
+their own id and a `created` time (the Softmax IDE bridge does this). queue-keeper commits a
+valid direct write unchanged on its next run and answers an invalid one with a runtime
+`note` in reply to its id. See
+[softmax-ide-bridge-compat.md](docs/integrations/softmax-ide-bridge-compat.md).
 
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a
 `keeper_step_failed` signal. The agent pauses itself when preflight fails (identity,

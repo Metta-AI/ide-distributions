@@ -3,7 +3,10 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
 
 ``route_all`` takes the canonical lock once (the caller must not hold it) and:
 
-1. **Receive.** Every committed ``comms/inbox/<I-id>.json`` without a delivery record gets one
+0. **Adopt.** Files an external agent wrote into ``comms/inbox/`` directly are committed when
+   valid (``comms.inbound.adopt_direct_writes``); an invalid one gets a runtime ``note`` in
+   reply to its id, once, and is never delivered.
+1. **Receive.** Every committed ``comms/inbox/<id>.json`` without a delivery record gets one
    (``comms.delivery``; state ``received``), with ``thread`` (the thread of the outbound
    message it answers: its ``thread``, else its id) and ``late`` (a reply after that
    message's ``expires``). One commit.
@@ -59,7 +62,12 @@ from pathlib import Path
 
 from autoresearch.comms import delivery
 from autoresearch.comms.envelope import FROM_RUNTIME
-from autoresearch.comms.inbound import inbound_problems, is_late, parse_time
+from autoresearch.comms.inbound import (
+    adopt_direct_writes,
+    inbound_problems,
+    is_late,
+    parse_time,
+)
 from autoresearch.comms.publisher import (
     commit_and_push,
     find_reply,
@@ -93,8 +101,10 @@ BACKLOG = {"task_id": None, "request_id": None, "backlog": True}
 
 @dataclass
 class Action:
-    """One thing ``route_all`` did: ``received``, ``card_requested``, ``routed_to_card``,
-    ``backlogged``, ``rejected`` (a task answered with a note), ``acknowledged`` (a seen),
+    """One thing ``route_all`` did: ``adopted`` (a direct inbox write committed), ``received``,
+    ``card_requested``, ``routed_to_card``,
+    ``backlogged``, ``rejected`` (a task or a direct write answered with a note),
+    ``acknowledged`` (a seen),
     ``bound`` (a record got its task id) or ``returned`` (back to the backlog)."""
 
     kind: str
@@ -501,6 +511,32 @@ def _route_one(
 # --- receive, resolve ---
 
 
+def _reject_direct_writes(
+    canonical: Path, rejected: dict[str, list[str]], allow_no_remote: bool
+) -> list[Action]:
+    """Answer (once) each invalid file an external agent wrote into the inbox with a runtime
+    note in reply to its id. The file is not committed, so it gets no delivery record."""
+    actions = []
+    for inbound_id, problems in sorted(rejected.items()):
+        if find_reply(canonical, inbound_id, FROM_RUNTIME) is not None:
+            continue
+        body = (
+            f"The inbound message {inbound_id} in comms/inbox/ is not valid and was not "
+            "delivered: " + "; ".join(problems) + ". Write a corrected message with a new id."
+        )
+        publish_runtime(
+            canonical,
+            "note",
+            f"Inbound {inbound_id} rejected",
+            body,
+            [],
+            allow_no_remote=allow_no_remote,
+            in_reply_to=inbound_id,
+        )
+        actions.append(Action("rejected", inbound_id, body))
+    return actions
+
+
 def _receive(canonical: Path, inbox: dict[str, dict]) -> list[Action]:
     existing = delivery.records(canonical)
     paths, actions = [], []
@@ -625,6 +661,9 @@ def route_all(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> l
     canonical = ctx.canonical
     actions: list[Action] = []
     with canonical_lock(canonical):
+        adopted, rejected = adopt_direct_writes(canonical)
+        actions += [Action("adopted", inbound_id) for inbound_id in adopted]
+        actions += _reject_direct_writes(canonical, rejected, allow_no_remote)
         inbox = delivery.inbox(canonical)
         actions += _receive(canonical, inbox)
         for inbound_id, record in delivery.records(canonical).items():

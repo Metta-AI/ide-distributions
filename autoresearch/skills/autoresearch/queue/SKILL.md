@@ -61,7 +61,7 @@ Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23.
      acknowledge it.
    - A `proposed_topic` goes to the planning card. In a planning card, create the Topic
      (`"$AUTORESEARCH_CLI" records new topic --meta-file .scratch/topic.json --body-file
-     .scratch/topic.md`, with `origin: {"kind": "human", "inbound": "<I-id>"}`) or merge it
+     .scratch/topic.md`, with `origin: {"kind": "human", "inbound": "<inbound id>"}`) or merge it
      into an existing Topic, and put the `ar://topic/<T-id>` ref in the acknowledgement.
 5. Respond to each stuck signal in the briefing (§5.9, D-13). Do one of these three things:
    - Change course: request cards for a new hypothesis, a different lever, a different
