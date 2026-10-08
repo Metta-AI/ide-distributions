@@ -6,10 +6,31 @@ from tempfile import mkdtemp
 
 from gota_host import BASELINE, cached_probe
 
-from games.gota.gates import GateContext, g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry
+from games.gota.gates import (
+    GateContext,
+    GateResult,
+    g1_lint,
+    g2_episode,
+    g3_budget,
+    g4_screen,
+    g5_telemetry,
+)
 
 
 def verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None) -> dict:
+    import strategy_build as builds
+
+    try:
+        return _verify(build_id, context=context, manifest=manifest)
+    except Exception as error:  # noqa: BLE001 - persist arbitrary tool faults; never repair them.
+        result = GateResult.errored(error)
+        gates = {'verification': {'outcome': result.outcome, 'passed': False,
+                                  'summary': result.details}}
+        builds.dump(builds.build_path(build_id, staged=True) / 'gates.json', gates)
+        return gates
+
+
+def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None) -> dict:
     import strategy_build as builds
     from strategy_format import lint_strategy, parse_strategy
 
@@ -62,17 +83,20 @@ def verify(build_id: str, *, context: GateContext | None = None, manifest: Path 
     for name, module in zip(
         ("G1", "G2", "G3", "G4", "G5"), (g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry)
     ):
-        result = module.run(policy, context)
-        for measurement in context.measurements.values():
-            if measurement.get('native_build') != native_builds['gate_probe']:
-                raise ValueError('gate used a different native build from verification provenance')
-        gates[name] = {"passed": result.ok, "summary": result.details}
+        try:
+            result = module.run(policy, context)
+            for measurement in context.measurements.values():
+                if measurement.get('native_build') != native_builds['gate_probe']:
+                    raise ValueError('gate used a different native build from verification provenance')
+        except Exception as error:  # noqa: BLE001 - persist arbitrary tool faults; never repair them.
+            result = GateResult.errored(error)
+        gates[name] = {"outcome": result.outcome, "passed": result.ok, "summary": result.details}
+        if result.outcome == 'errored':
+            break
         if name == "G1" and errors:
-            gates[name] = {"passed": False, "summary": {"lint": errors, "compile": result.details}}
+            gates[name] = {"outcome": "failed", "passed": False,
+                           "summary": {"lint": errors, "compile": result.details}}
         if not gates[name]["passed"] and name in ("G1", "G2"):
-            for remaining in ("G1", "G2", "G3", "G4", "G5"):
-                if remaining not in gates:
-                    gates[remaining] = {"passed": False, "summary": f"not run: {name} failed"}
             break
     builds.dump(context.work_dir / "gates.json", gates)
     builds.dump(stage / "gates.json", gates)

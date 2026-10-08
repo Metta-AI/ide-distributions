@@ -133,7 +133,8 @@ def test_telemetry_artifact_identity_mismatch(context, recorded_episode):
     (recorded_episode / 'players/7/file').write_text('PRINT \"different\"\n')
     result = gate('g5_telemetry').run(BASELINE, context)
     assert not result.ok
-    assert 'Artifact identity mismatch at seat 7' in result.details['error']
+    assert result.outcome == 'errored'
+    assert 'Artifact identity mismatch at seat 7' in result.details['error']['message']
 
 
 def test_screen_rejects_incomplete_metrics():

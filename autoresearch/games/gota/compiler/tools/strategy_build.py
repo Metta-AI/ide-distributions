@@ -536,7 +536,7 @@ def carry_guesses(order: dict, draft: dict) -> list[dict]:
     return list(guesses.values())
 
 
-def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
+def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: dict | None = None) -> Path:
     assert_inputs(order)
     stage = build_path(order['build_id'], staged=True)
     target = BUILDS / order['build_id']
@@ -548,18 +548,23 @@ def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
                and str(order['components'].get(g['component'], {}).get('fields', {}).get('Status', '')).startswith(('tested', 'proven'))]
     if blocked:
         error = 'Status: tested is blocked by unresolved high-severity guesses: ' + ', '.join(blocked)
-    status = 'passed' if not error and len(gates) == 5 and all(g['passed'] for g in gates.values()) else 'failed'
+    gate_errors = [g['summary']['error'] for g in gates.values() if g.get('outcome') == 'errored']
+    if tool_error or gate_errors:
+        status = 'errored'
+        error = tool_error or gate_errors[0]
+    else:
+        status = 'passed' if not error and len(gates) == 5 and all(g['passed'] for g in gates.values()) else 'failed'
     budget = read(stage / 'budget.json') if (stage / 'budget.json').exists() else {}
     report = {'build_id': order['build_id'], 'status': status, 'units': order['units'],
               'guesses': guesses, 'gaps': draft['gaps'], 'gates': gates, 'budget': budget, 'error': error}
     dump(stage / 'report.json', report)
     lines = [f'# Build {order["build_id"]}', '', f'Status: **{status}**. Intent: {order["intent"]}.', '',
-             '| Gate | Pass | Evidence |', '| --- | --- | --- |']
+             '| Gate | Outcome | Evidence |', '| --- | --- | --- |']
     unexercised = gates.get("G5", {}).get("coverage", {}).get("unexercised_message_types", [])
     if unexercised:
         lines[3:3] = ["G5 event coverage: **not exercised**: " + ", ".join(unexercised) +
                       ". Their semantic checks remain unproven.", ""]
-    lines.extend(f'| {name} | {gate["passed"]} | {gate.get("summary", "")} |' for name, gate in gates.items())
+    lines.extend(f'| {name} | {gate.get("outcome", "passed" if gate["passed"] else "failed")} | {gate.get("summary", "")} |' for name, gate in gates.items())
     lines += ['', '## Units', '', *(f'- `{key}`: {state}' for key, state in order['units'].items()),
               '', '## Guesses', '']
     lines.extend(f'- **{g["id"]}** ({g["severity"]}, {g["state"]}): {g["decision"]} — {g["why"]}\n'
@@ -569,7 +574,7 @@ def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
     lines += ['', '## Gaps', '', '```json', json.dumps(draft['gaps'], indent=2), '```']
     lines += ['', '## Budget', '', '```json', json.dumps(budget, indent=2), '```']
     if error:
-        lines += ['', '## Failure', '', error]
+        lines += ['', '## Failure', '', '```json', json.dumps(error, indent=2), '```']
     (stage / 'report.md').write_text('\n'.join(lines) + '\n')
     version = {k: order[k] for k in ('build_id', 'source_commit', 'source_path', 'source_hashes',
                                     'previous_build', 'compiler', 'engine', 'created', 'intent')}

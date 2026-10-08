@@ -251,7 +251,7 @@ def parse_telemetry_line(line: str, mapping: dict) -> list[dict]:
                 f"PWC v=2 t={tick} m={code} s={direction} w={message.sender} d={a},{b}", mapping)
             events.append(event)
         return events
-    except (ValueError, KeyError, IndexError, TypeError) as error:
+    except ValueError as error:
         raise IntentError(f"PWC: invalid compact batch: {error}") from error
 
 

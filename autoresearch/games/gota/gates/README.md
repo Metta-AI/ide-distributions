@@ -1,6 +1,13 @@
 # Shared local GotA gates
 
 Every gate exports `run(artifact: Path, context: GateContext) -> GateResult`.
+`GateResult.outcome` is `passed`, `failed`, or `errored`; its computed `ok` is true
+only for `passed`. A deliberate policy rejection (compile diagnostics, resource
+violations, VM failures or malformed policy telemetry) is `failed`. Unexpected
+exceptions, missing tools/files, subprocess failures and broken harness invariants
+are `errored`, retaining exception type, message and a traceback summary under
+`details.error`. Raw exceptions from a gate or its import are caught at the
+runner boundary too. An errored result immediately stops later gates.
 Import the context and result from `games.gota.gates` with `autoresearch/` on
 Python's import path. Both legacy baseline and structured compiler policies are
 accepted; the marker selects the native host's corresponding limits.
@@ -21,8 +28,10 @@ uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13
 ```
 
 `--gate NAME` selects a gate and can repeat. Each result is printed as JSON;
-`WORK_DIR/gates.json` holds the final report. Exit 0 means every selected gate
-ran and passed. A G4 behavior regression is advisory and does not change its exit
+`WORK_DIR/gates.json` holds the final report, including an errored harness if
+startup fails. Exit 0 means every selected gate ran and passed; exit 1 means a
+policy failed verification; exit 3 means a tool or harness errored. Gates omitted
+after an error were not run. A G4 behavior regression is advisory and does not change its exit
 status; missing or failed measurements do. Use a fresh work directory for G2.
 No command uploads or submits a policy. The manifest and container image must
 already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
@@ -93,8 +102,9 @@ sh games/gota/tools/build_gota_match.sh
 Set `GOTA_ENGINE_SOURCE` to a local Git mirror and `GOTA_DEPENDENCY_ROOT` to a
 directory of dependency Git mirrors named by the lockfile for offline setup.
 Neither variable changes required pins. Build and receipt validation never fetch.
-Builders cache ignored binaries; compiler/runtime errors and missing tools produce
-failed gates. Receipts include effective absolute compiler/configuration paths;
+Builders cache ignored binaries. Measured policy compile/runtime failures produce
+failed gates; missing tools, build/receipt failures and unexpected exceptions
+produce errored gates. Receipts include effective absolute compiler/configuration paths;
 after moving an install, rebuild to produce valid receipts at the new location.
 No parent repository Git metadata is required, so a `git archive` install works.
 

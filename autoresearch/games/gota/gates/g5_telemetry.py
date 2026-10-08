@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from ..tools.gota_episodes import _parse_telemetry
-from . import GateContext, GateResult
+from . import GateContext, GateResult, PolicyFailure, gate_run
 from .g2_episode import inspect_episode
 
 
@@ -13,41 +13,40 @@ def parse_log(path: Path) -> dict:
         if parts[:1] != ["LH"]:
             continue
         if len(parts) < 12:
-            raise ValueError(f"{path}: malformed LH telemetry")
+            raise PolicyFailure(f"{path}: malformed LH telemetry")
         try:
             [int(value) for value in parts[1:]]
         except ValueError as error:
-            raise ValueError(f"{path}: malformed LH telemetry") from error
+            raise PolicyFailure(f"{path}: malformed LH telemetry") from error
     failed, telemetry = _parse_telemetry(path)
     if failed or telemetry is None:
-        raise ValueError(f"{path}: BASIC failure or missing LH telemetry")
+        raise PolicyFailure(f"{path}: BASIC failure or missing LH telemetry")
     return vars(telemetry)
 
 
+@gate_run
 def run(artifact: Path, context: GateContext) -> GateResult:
-    try:
-        if context.episode_dir is None:
-            return GateResult(False, {"error": "G2 episode logs required"})
-        inspect_episode(artifact, context.episode_dir)
-        if context.compiler_map is not None:
-            return compiler_logs(context)
-        seats = [
-            parse_log(context.episode_dir / "logs" / f"policy_agent_{slot}.log")
-            for slot in range(10)
-        ]
-        return GateResult(
-            True,
-            {
-                "seats": seats,
-                "episode_dir": str(context.episode_dir),
-                "telemetry_kind": "legacy_LH",
-                "compiler_trace_coverage": None,
-            },
-        )
-    except (OSError, ValueError) as error:
-        return GateResult(False, {"error": str(error)})
+    if context.episode_dir is None:
+        raise ValueError("G2 episode logs required")
+    inspect_episode(artifact, context.episode_dir)
+    if context.compiler_map is not None:
+        return compiler_logs(context)
+    seats = [
+        parse_log(context.episode_dir / "logs" / f"policy_agent_{slot}.log")
+        for slot in range(10)
+    ]
+    return GateResult(
+        'passed',
+        {
+            "seats": seats,
+            "episode_dir": str(context.episode_dir),
+            "telemetry_kind": "legacy_LH",
+            "compiler_trace_coverage": None,
+        },
+    )
 
 
+@gate_run
 def compiler_logs(context: GateContext) -> GateResult:
     """Parse the compiler wire using its strict shared reader, for all ten seats.
 
@@ -69,19 +68,19 @@ def compiler_logs(context: GateContext) -> GateResult:
             previous = -1
             for line in path.read_text().splitlines():
                 if "BASIC VM disabled" in line or "BASIC error:" in line:
-                    raise ValueError(f"seat {seat}: BASIC failure")
+                    raise PolicyFailure(f"seat {seat}: BASIC failure")
                 if line.split(" ", 1)[0] not in ("PWD", "PWP", "PWE", "PWB", "PWC"):
                     continue
                 for event in parse_telemetry_line(line, context.compiler_map):
                     if event["t"] < previous:
-                        raise ValueError(f"seat {seat}: telemetry ticks went backwards")
+                        raise PolicyFailure(f"seat {seat}: telemetry ticks went backwards")
                     previous = event["t"]
                     counts[event["kind"]] = counts.get(event["kind"], 0) + 1
             if not counts.get("PWD"):
-                raise ValueError(f"seat {seat}: missing compiler decisions")
+                raise PolicyFailure(f"seat {seat}: missing compiler decisions")
             seats.append({"seat": seat, "lines": counts})
         return GateResult(
-            True,
+            'passed',
             {
                 "seats": seats,
                 "telemetry_kind": "compiler",
@@ -89,5 +88,5 @@ def compiler_logs(context: GateContext) -> GateResult:
                 "claim": "wire parsed; full trace coverage not measured",
             },
         )
-    except (OSError, ValueError, KeyError, TypeError, IntentError) as error:
-        return GateResult(False, {"error": str(error)})
+    except IntentError as error:
+        raise PolicyFailure(str(error)) from error

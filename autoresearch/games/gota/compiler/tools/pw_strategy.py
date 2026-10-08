@@ -50,7 +50,7 @@ def parser():
 def run(args, report, *, engine_identity=None):
     report.release_tag = 'gota-2026.10.7.2'
     from strategy_format import parse_strategy, lint_strategy
-    from gota_gates import verify
+    from games.gota.gates import exception_summary
     from strategy_basic import BuildError
     if args.action == 'audit':
         from strategy_audit import run as audit
@@ -86,43 +86,50 @@ def run(args, report, *, engine_identity=None):
             report.output(stage / 'work_order.json')
             report.suggest(f'run the compiler agent for {order["build_id"]}, then strategy assemble {order["build_id"]}')
             return order
-        gates, errors, failure = {}, [], None
+        gates, errors, failure, tool_error = {}, [], None, None
         for attempt in range(1, 4):
             try:
                 print(f'{order["build_id"]}: generation/gates round {attempt}/3', flush=True)
                 builds.generate(order, errors=errors, timeout=args.agent_timeout)
                 builds.assemble_build(order['build_id'])
+                from gota_gates import verify
                 gates = verify(order['build_id'], manifest=args.manifest)
-                errors = [{'gate': name, **gate} for name, gate in gates.items() if not gate['passed']]
+                if any(gate['outcome'] == 'errored' for gate in gates.values()):
+                    break
+                errors = [{'gate': name, **gate} for name, gate in gates.items()
+                          if gate['outcome'] == 'failed']
                 if not errors:
                     break
                 # A bad screen is never sent to an LLM as a gameplay-improvement request.
-                if not gates['G4']['passed'] and gates['G2']['passed']:
+                if gates.get('G4', {}).get('outcome') == 'failed' and gates['G2']['passed']:
                     break
-                if not any(not gates[name]['passed'] for name in ('G2', 'G3', 'G5')):
+                if not any(gates.get(name, {}).get('outcome') == 'failed' for name in ('G2', 'G3', 'G5')):
                     break
-            except (ValueError, RuntimeError, BuildError) as error:
+            except BuildError as error:
                 failure = str(error)
-                errors = [{'stage': 'generate/assemble', 'message': failure}]
-                if isinstance(error, BuildError):
-                    errors = [d.to_dict() for d in error.diagnostics]
-                    for diagnostic in error.diagnostics:
-                        key = diagnostic.component
-                        if key in order['components'] and order['components'][key]['llm']:
-                            order['units'][key] = 'changed'
-                    builds.dump(stage / 'work_order.json', order)
-                # Scope violations are not repairable compiler mistakes.
-                if 'write-scope violation' in failure:
-                    break
+                errors = [d.to_dict() for d in error.diagnostics]
+                for diagnostic in error.diagnostics:
+                    key = diagnostic.component
+                    if key in order['components'] and order['components'][key]['llm']:
+                        order['units'][key] = 'changed'
+                builds.dump(stage / 'work_order.json', order)
                 if attempt < 3:
                     failure = None
-        if errors and not failure:
+            except (Exception, pw_cli.EnvironmentMissing, pw_cli.UsageError) as error:  # noqa: BLE001 - persist arbitrary tool faults; never repair them.
+                tool_error = exception_summary(error)
+                break
+        if errors and not failure and not tool_error and not any(
+                gate['outcome'] == 'errored' for gate in gates.values()):
             failure = f'build failed after round {attempt}: {errors}'
-        target = builds.finalize(order, gates, error=failure)
+        target = builds.finalize(order, gates, error=failure, tool_error=tool_error)
         report.output(target)
         result = builds.read(target / 'report.json')
         if result['status'] != 'passed':
-            report.fail(order['build_id'], 'build_failed', failure or 'one or more local gates failed')
+            message = result['error']
+            if isinstance(message, dict):
+                message = f"{message['type']}: {message['message']}"
+            report.fail(order['build_id'], 'build_' + result['status'],
+                        message or 'one or more local gates failed')
         report.counts['processed'] = len(order['components'])
         return {'build': str(target), **result}
     stage = builds.build_path(args.build, staged=True)
@@ -132,12 +139,19 @@ def run(args, report, *, engine_identity=None):
         report.output(stage / 'map.json')
         return {'build_id': args.build, 'budget': result['budget']}
     order = builds.read(stage / 'work_order.json')
-    gates = verify(args.build, manifest=args.manifest)
-    target = builds.finalize(order, gates)
+    tool_error = None
+    try:
+        from gota_gates import verify
+        gates = verify(args.build, manifest=args.manifest)
+    except (Exception, pw_cli.EnvironmentMissing, pw_cli.UsageError) as error:  # noqa: BLE001 - retain import/harness faults.
+        gates = {}
+        tool_error = exception_summary(error)
+    target = builds.finalize(order, gates, tool_error=tool_error)
     report.output(target)
-    if not all(g['passed'] for g in gates.values()):
-        report.fail(args.build, 'gates_failed', 'one or more local gates failed')
-    return {'build': str(target), 'gates': gates}
+    result = builds.read(target / 'report.json')
+    if result['status'] != 'passed':
+        report.fail(args.build, 'gates_' + result['status'], 'one or more local gates ' + result['status'])
+    return {'build': str(target), **result}
 
 
 def main(argv=None):

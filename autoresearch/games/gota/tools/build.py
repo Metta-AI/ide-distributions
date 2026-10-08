@@ -93,6 +93,7 @@ def build(candidate, out, manifest=None, *, timeout=900, offline=False):
     target.rename(out)
     shutil.rmtree(scratch)
     return {'ok': version['status'] == 'passed', 'build_id': version['build_id'],
+            'status': version['status'], 'error': result.get('error'), 'build': str(out),
             'gates': version['gates'], 'artifact': str(out / 'policy.bas')}
 
 
@@ -107,19 +108,26 @@ def main():
     try:
         manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
         result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, offline=args.offline)
-    except SystemExit as error:
-        if isinstance(error.code, int):
+    except (Exception, SystemExit) as error:
+        if isinstance(error, SystemExit) and isinstance(error.code, int):
             raise
-        print(json.dumps({'ok': False, 'error': str(error)}))
-        return getattr(error, 'exit_code', 2)
-    except (OSError, subprocess.SubprocessError) as error:
-        print(json.dumps({'ok': False, 'error': str(error)}))
-        return 3
-    except (ValueError, KeyError, RuntimeError) as error:
-        print(json.dumps({'ok': False, 'error': str(error)}))
-        return 2
+        from games.gota.gates import exception_summary
+        result = {'ok': False, 'status': 'errored', 'build': str(args.out.resolve()),
+                  'error': exception_summary(error), 'gates': {}}
+        # Never overwrite an existing immutable build, even if the caller reused --out.
+        if not args.out.exists():
+            args.out.mkdir(parents=True)
+            for name in ('report.json', 'version.json'):
+                (args.out / name).write_text(json.dumps(result, indent=2) + '\n')
+            (args.out / 'report.md').write_text(
+                '# Build error\n\nStatus: **errored**.\n\n```json\n' +
+                json.dumps(result['error'], indent=2) + '\n```\n')
+        print(json.dumps(result))
+        if isinstance(error, (ValueError, KeyError, RuntimeError)):
+            return 2
+        return getattr(error, 'exit_code', 3)
     print(json.dumps(result))
-    return 0 if result['ok'] else 1
+    return 0 if result['ok'] else 3 if result.get('status') == 'errored' else 1
 
 
 if __name__ == '__main__':

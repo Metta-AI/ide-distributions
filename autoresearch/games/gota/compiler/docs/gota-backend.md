@@ -90,6 +90,12 @@ reconciliation. Retained receipts alone are not complete spend accounting. Unkno
 backend names never fall through to another executable.
 
 One compile invokes the agent 1–3 times, with up to 40 agent turns per invocation.
+Only explicit `failed` policy gate results and expected structural assembly
+`BuildError` diagnostics can request another generation. Unexpected gate,
+generation, import or harness exceptions stop immediately with build status
+`errored`. Reports retain their type, message and traceback summary; they never
+enter the model's `repair_errors`. Later gates are omitted when not run. The
+existing screen stopping rule still applies to failed G4 results.
 Provider requests/retries and tokens are not a hard spend cap. The 3600-second
 operational allowance is informed by the primary lab's observed 3–25 minute
 28-unit generations and 2–4 minute gates; this two-unit source has no promised

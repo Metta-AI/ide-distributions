@@ -177,7 +177,7 @@ def test_shared_gate_order_and_advisory_screen(mocked_native_verification, tmp_p
     def run(name):
         def gate(artifact, context):
             calls.append(name)
-            return GateResult(True, {"regressions": ["glory"]} if name == "G4" else {})
+            return GateResult('passed', {"regressions": ["glory"]} if name == "G4" else {})
 
         return gate
 
@@ -196,17 +196,18 @@ def test_shared_gate_order_and_advisory_screen(mocked_native_verification, tmp_p
     assert calls == ["G1", "G2", "G3", "G4", "G5"]
     assert all(row["passed"] for row in result.values())
     monkeypatch.setattr(
-        gota_gates.g4_screen, "run", lambda *a: GateResult(False, {"error": "missing"})
+        gota_gates.g4_screen, "run", lambda *a: GateResult('failed', {"error": "missing"})
     )
     assert not gota_gates.verify("abcdef12-1", context=GateContext(tmp_path))["G4"]["passed"]
 
     def swapped_native(artifact, context):
         context.measurements['changed'] = {'native_build': {'different': True}}
-        return GateResult(True, {})
+        return GateResult('passed', {})
 
     monkeypatch.setattr(gota_gates.g1_lint, 'run', swapped_native)
-    with pytest.raises(ValueError, match='different native build'):
-        gota_gates.verify('abcdef12-1', context=GateContext(tmp_path))
+    result = gota_gates.verify('abcdef12-1', context=GateContext(tmp_path))
+    assert result['G1']['outcome'] == 'errored'
+    assert 'different native build' in result['G1']['summary']['error']['message']
 
 
 def test_source_inventory_includes_backend_and_shared_gate_closure(tmp_path):
@@ -451,8 +452,6 @@ END SUB
 def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
     mocked_native_verification, tmp_path, monkeypatch, supplied_context, first_failure,
 ):
-    import subprocess
-
     import gota_gates
     import gota_host
     import strategy_build as builds
@@ -473,8 +472,8 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
     monkeypatch.setattr(builds, 'COMPILER', compiler)
     monkeypatch.setattr(builds, 'build_path', lambda *a, **kw: stage)
     monkeypatch.setattr(builds, 'assert_inputs', lambda order: None)
-    monkeypatch.setattr(gota_gates.g1_lint, 'run', lambda *a: GateResult(True, {}))
-    monkeypatch.setattr(gota_gates.g4_screen, 'run', lambda *a: GateResult(True, {}))
+    monkeypatch.setattr(gota_gates.g1_lint, 'run', lambda *a: GateResult('passed', {}))
+    monkeypatch.setattr(gota_gates.g4_screen, 'run', lambda *a: GateResult('passed', {}))
     episodes, telemetry = [], []
 
     def episode_runner(command, **kwargs):
@@ -482,7 +481,12 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
         directory.mkdir(parents=True)
         episodes.append(directory)
         if first_failure == 'G2' and len(episodes) == 1:
-            raise subprocess.CalledProcessError(1, command)
+            (directory / 'logs').mkdir()
+            player = directory / 'players/0'
+            player.mkdir(parents=True)
+            (player / 'file').write_bytes(artifact.read_bytes())
+            (directory / 'logs/policy_agent_0.log').write_text('BASIC error: policy fault\n')
+            return
         (directory / 'logs').mkdir()
         for seat in range(10):
             player = directory / 'players' / str(seat)
@@ -498,7 +502,7 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
     def budget(candidate, context):
         assert context.measurements == {}
         context.measurements['current-candidate'] = {'text': candidate.read_text(), 'native_build': {}}
-        return GateResult(not (first_failure == 'G3' and len(episodes) == 1), {})
+        return GateResult('failed' if first_failure == 'G3' and len(episodes) == 1 else 'passed', {})
 
     real_g5 = gota_gates.g5_telemetry.run
 

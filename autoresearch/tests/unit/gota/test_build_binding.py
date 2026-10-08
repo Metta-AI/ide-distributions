@@ -26,7 +26,7 @@ def test_missing_manifest_launches_no_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'), '--offline', '--json'])
     monkeypatch.delenv('GOTA_MANIFEST', raising=False)
     assert module.main() == 2
-    assert not (tmp_path / 'out/version.json').exists()
+    assert json.loads((tmp_path / 'out/version.json').read_text())['status'] == 'errored'
 
 
 def test_wrong_manifest_pin_launches_no_agent(tmp_path, monkeypatch):
@@ -81,7 +81,7 @@ def test_archive_distribution_and_candidate_committed_inputs(tmp_path, monkeypat
         compiler.committed_inputs(source)
 
 
-@pytest.mark.parametrize('status,security', [('passed', 'ready'), ('failed', 'ready'), ('passed', 'empty')])
+@pytest.mark.parametrize('status,security', [('passed', 'ready'), ('failed', 'ready'), ('errored', 'ready'), ('passed', 'empty')])
 def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, monkeypatch, status, security):
     import hashlib
     import shutil
@@ -89,7 +89,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
 
     installed = tmp_path / 'distribution'
     shutil.copytree(ROOT / 'games/gota', installed / 'games/gota',
-                    ignore=shutil.ignore_patterns('compiled', 'tmp', 'bin', '__pycache__'))
+                    ignore=shutil.ignore_patterns('compiled', 'tmp', 'bin', '.cache', '__pycache__'))
     installed_spec = importlib.util.spec_from_file_location(
         'installed_gota_build', installed / 'games/gota/tools/build.py')
     module = importlib.util.module_from_spec(installed_spec)
@@ -137,7 +137,8 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
                 'compiler': {}, 'source_commit': 'abcdef12', 'source_hashes': {str(ROOT / 'driver'): 'hash'},
                 'policy_sha256': hashlib.sha256((target / 'policy.bas').read_bytes()).hexdigest()}
         compiler.dump(target / 'version.json', data)
-        return {'build': str(target)}
+        return {'build': str(target), 'error': {'type': 'ValueError', 'message': 'tool fault',
+                                                 'traceback': 'fault in fixture'} if status == 'errored' else None}
     parser = types.SimpleNamespace(parse_args=lambda argv: argv)
     monkeypatch.setitem(sys.modules, 'pw_strategy', types.SimpleNamespace(parser=lambda: parser, run=compile_fake))
     out = tmp_path / 'separate-output'
@@ -149,8 +150,11 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
         assert error.value.exit_code == 3
         return
     result = module.build(candidate, out, manifest, offline=True)
-    if status == 'failed':
+    if status != 'passed':
         assert not result['ok']
+        assert result['status'] == status
+        if status == 'errored':
+            assert result['error']['message'] == 'tool fault'
         with pytest.raises(Exception, match='gates did not pass'):
             _read_build(out)
         return

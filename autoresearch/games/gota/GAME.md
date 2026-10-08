@@ -75,8 +75,15 @@ also require clean tracked compiler inputs. Archive compiler inputs are hashed
 separately; the candidate commit does not establish their Git provenance.
 Compiler analysis defaults to build-owned scratch and is retained under
 `BUILD_DIRECTORY/analysis` when produced; it does not write into the installed
-distribution. The output directory must not exist. Failed builds retain failed gate evidence
-and are refused by the shared upload reader.
+distribution. The output directory must not exist. Gate results record `outcome` as `passed`,
+`failed`, or `errored`, alongside the compatibility `passed` boolean. Failed
+policy checks can feed compiler repair rounds. A gate or harness tool fault stops
+the build immediately: `report.json`, `report.md`, `version.json` and the binding's
+JSON output report status `errored`, with exception type, message and traceback
+summary. No later gate or model round runs after the fault, and errored evidence
+never becomes `repair_errors`. Startup faults retain an error report under the
+requested output directory; they may have no artifact or provenance. Failed and
+errored builds are refused by the shared upload reader.
 
 The host must install the locked Python dependencies, Nim 2.2.10 and the native
 helpers using [native preparation](tools/native_build.py), and install Hermes

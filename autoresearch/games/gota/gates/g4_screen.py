@@ -1,57 +1,54 @@
 """G4: seeds 1..10, side-balanced Glory/win-rate comparison; regressions advisory."""
 import hashlib
-import subprocess
 from pathlib import Path
 
-from . import GateContext, GateResult
+from . import GateContext, GateResult, PolicyFailure, gate_run
 from .native import NATIVE_MODE, measure
 
 
 def metrics(row: dict, slots: range) -> dict:
     ticks = row['ticks']
     if ticks <= 0:
-        raise ValueError('Missing positive runtime duration')
+        raise PolicyFailure('Missing positive runtime duration')
     scores, xp = row['scores'], row['total_xp']
     if len(scores) != 10 or len(xp) != 10:
-        raise ValueError('Incomplete ten-seat screen results')
+        raise PolicyFailure('Incomplete ten-seat screen results')
     return {'glory': sum(max(0, xp[i]) * 1440 // ticks if scores[i] == 1 else 0
                          for i in slots) / 5,
             'win_rate': sum(scores[i] for i in slots) / 5}
 
 
+@gate_run
 def run(artifact: Path, context: GateContext) -> GateResult:
-    try:
-        if set(context.seeds) != set(range(1, 11)) or len(context.seeds) != 10:
-            return GateResult(False, {'error': 'Screen requires each seed 1..10'})
-        if context.baseline is None or context.max_ticks < 31200:
-            return GateResult(False, {'error': 'Baseline and full episode tick budget required'})
-        identical = (hashlib.sha256(artifact.read_bytes()).digest()
-                     == hashlib.sha256(context.baseline.read_bytes()).digest())
-        rows = []
-        candidate, baseline = [], []
-        for seed in context.seeds:
-            for blue in (False, True):
-                report = measure(artifact, context, seed,
-                                 None if identical else context.baseline,
-                                 False if identical else blue)
-                runtime = report.get('runtime', {})
-                if report.get('ok') is not True or not runtime.get('decisions'):
-                    raise ValueError(f'Seed {seed}: missing runtime or BASIC failure')
-                candidate_slots = range(5, 10) if blue else range(5)
-                baseline_slots = range(5) if blue else range(5, 10)
-                a, b = metrics(runtime, candidate_slots), metrics(runtime, baseline_slots)
-                candidate.append(a)
-                baseline.append(b)
-                rows.append({'seed': seed, 'candidate_blue': blue,
-                             'candidate': a, 'baseline': b})
-        averages = {name: sum(row[name] for row in candidate) / len(candidate)
-                    for name in ('glory', 'win_rate')}
-        reference = {name: sum(row[name] for row in baseline) / len(baseline)
-                     for name in averages}
-        regression = any(averages[name] < reference[name] for name in averages)
-        return GateResult(True, {'advisory': True, 'regression': regression,
-                                 'native_mode': dict(NATIVE_MODE),
-                                 'candidate': averages, 'baseline': reference, 'rows': rows,
-                                 'mode': 'identical-source mirror' if identical else 'paired teams'})
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-        return GateResult(False, {'error': str(error)})
+    if set(context.seeds) != set(range(1, 11)) or len(context.seeds) != 10:
+        raise ValueError('Screen requires each seed 1..10')
+    if context.baseline is None or context.max_ticks < 31200:
+        raise ValueError('Baseline and full episode tick budget required')
+    identical = (hashlib.sha256(artifact.read_bytes()).digest()
+                 == hashlib.sha256(context.baseline.read_bytes()).digest())
+    rows = []
+    candidate, baseline = [], []
+    for seed in context.seeds:
+        for blue in (False, True):
+            report = measure(artifact, context, seed,
+                             None if identical else context.baseline,
+                             False if identical else blue)
+            runtime = report.get('runtime', {})
+            if report.get('ok') is not True or not runtime.get('decisions'):
+                raise PolicyFailure(f'Seed {seed}: missing runtime or BASIC failure')
+            candidate_slots = range(5, 10) if blue else range(5)
+            baseline_slots = range(5) if blue else range(5, 10)
+            a, b = metrics(runtime, candidate_slots), metrics(runtime, baseline_slots)
+            candidate.append(a)
+            baseline.append(b)
+            rows.append({'seed': seed, 'candidate_blue': blue,
+                         'candidate': a, 'baseline': b})
+    averages = {name: sum(row[name] for row in candidate) / len(candidate)
+                for name in ('glory', 'win_rate')}
+    reference = {name: sum(row[name] for row in baseline) / len(baseline)
+                 for name in averages}
+    regression = any(averages[name] < reference[name] for name in averages)
+    return GateResult('passed', {'advisory': True, 'regression': regression,
+                             'native_mode': dict(NATIVE_MODE),
+                             'candidate': averages, 'baseline': reference, 'rows': rows,
+                             'mode': 'identical-source mirror' if identical else 'paired teams'})

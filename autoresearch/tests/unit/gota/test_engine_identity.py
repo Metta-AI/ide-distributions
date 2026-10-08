@@ -91,7 +91,7 @@ def test_direct_gate_fetches_manifest_and_propagates_pin(tmp_path, monkeypatch):
     def run(artifact, context):
         assert context.engine_commit == 'b' * 40
         assert json.loads(context.manifest.read_text()) == current
-        return GateResult(True, {})
+        return GateResult('passed', {})
     monkeypatch.setattr(g1_lint, 'run', run)
     assert gates.main() == 0
     assert json.loads((tmp_path / 'engine_identity.json').read_text())['commit'] == 'b' * 40
