@@ -1,5 +1,6 @@
 ---
 name: gota
+source: {repo: https://github.com/Metta-AI/polyworld, pin: coworld_manifest}
 bindings:
   build: python3 games/gota/tools/deferred.py build
   local_check: python3 -m games.gota.gates
@@ -74,3 +75,16 @@ softmax tool. C6 remains authoritative: verify player identity with the exact
 credential immediately before every mutation. This game adapter provides no
 alternate credential, direct coworld upload, or identity cache. Wire the binding
 to the authoritative shared tool when that backend exists.
+
+## Hosted evaluation
+
+`evaluate --results RESULTS_JSON --json` returns `data.episodes`, one entry per
+seat with `seat`, the real integer seed, status and metrics. It validates all
+ten scores/XP values, ticks and outcome. The positional seat command above
+continues to return one metric object. The binding does not infer policy identity.
+
+The source pin resolves from `game.runnable.source_url` in the Coworld manifest.
+The observed 2026.10.7.2 manifest used
+`https://github.com/Metta-AI/polyworld/tree/801749e509e888b423ba44ee2188946c22e3ba85/examples/gods_of_the_arena`.
+NOTES-5 reports live 2026.10.8.1 / 02eda3d3; that newer engine is not qualified by
+the earlier M1. Build/gate pin following is a separate follow-on.
