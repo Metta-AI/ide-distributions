@@ -24,6 +24,14 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
 - ``submit <E>``: ``softmax_tool.submit``, the only path to a real league submission.
 - ``leaderboard``: our leaderboard champion and the confirmed current champion (A9).
+- ``game-version``: ``{league_id, game_version}``, the league's current game version
+  (``Softmax.game_version``; the version noise records and designs must match, C10).
+- ``standings``: ``{league_id, rows}``, the league standings (``Softmax.standings``), read-only.
+- ``league-episodes [--league L] --limit N --out rows.jsonl``: up to N completed league
+  episodes (``Softmax.league_episodes``), each mapped through the game's evaluate binding
+  into EpisodeRows (``softmax_tool.league``), written as JSONL for
+  ``stats ingest --league``. Prints ``{league_id, episodes, rows, out, game_versions}``.
+  ``--league`` defaults to the game's league.
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
@@ -38,17 +46,22 @@ import itertools
 import json
 import math
 import os
+import tempfile
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from autoresearch import runctx
 from autoresearch.cli import register_group
 from autoresearch.games.loader import GameError, load_game
+from autoresearch.io.docs import write_text
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.promotion import PromotionError, champion_status
+from autoresearch.runtime.xp_poll import binding_evaluate
 from autoresearch.softmax_tool.client import CreditsUnavailable
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
+from autoresearch.softmax_tool.league import episode_rows
 from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
 from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
@@ -112,11 +125,15 @@ def _run(handler):
     return run
 
 
-def _league_id() -> str:
+def _game():
     name = os.environ.get(GAME_ENV)
     if not name:
         raise BadArguments(f"{GAME_ENV} is not set")
-    return load_game(_REPO_ROOT, name).league_id
+    return load_game(_REPO_ROOT, name)
+
+
+def _league_id() -> str:
+    return _game().league_id
 
 
 # --- XP mapping (pure) ---
@@ -408,6 +425,40 @@ def _leaderboard(ctx, sm, args) -> dict:
     }
 
 
+def _game_version(ctx, sm, args) -> dict:
+    league_id = _league_id()
+    return {"league_id": league_id, "game_version": sm.game_version(league_id)}
+
+
+def _standings(ctx, sm, args) -> dict:
+    league_id = _league_id()
+    return {"league_id": league_id, "rows": sm.standings(league_id)}
+
+
+def _league_episodes(ctx, sm, args) -> dict:
+    if args.limit < 1:
+        raise BadArguments("--limit must be positive")
+    game = _game()
+    league_id = args.league or game.league_id
+    current = sm.game_version(league_id)
+    evaluate = binding_evaluate(game, _REPO_ROOT)
+    episodes = sm.league_episodes(league_id, args.limit)
+    rows = []
+    with tempfile.TemporaryDirectory(prefix="league-episodes-") as workdir:
+        for episode in episodes:
+            rows += episode_rows(episode, evaluate, Path(workdir), current)
+    out = Path(args.out)
+    write_text(out, "".join(json.dumps(asdict(row), sort_keys=True) + "\n" for row in rows))
+    return {
+        "league_id": league_id,
+        "episodes": len(episodes),
+        "rows": len(rows),
+        "out": str(out),
+        "current_game_version": current,
+        "game_versions": sorted({row.game_version for row in rows}),
+    }
+
+
 # --- parser ---
 
 
@@ -461,6 +512,17 @@ def setup(parser: argparse.ArgumentParser) -> None:
     )
 
     command(commands, "leaderboard", _leaderboard, "our leaderboard and current champion")
+    command(commands, "game-version", _game_version, "the league's current game version")
+    command(commands, "standings", _standings, "league standings (read-only)")
+    sub = command(
+        commands,
+        "league-episodes",
+        _league_episodes,
+        "league episodes as EpisodeRow JSONL for stats ingest --league (read-only)",
+    )
+    sub.add_argument("--league", help="league id (default: the game's league)")
+    sub.add_argument("--limit", type=int, required=True, help="most episodes to read")
+    sub.add_argument("--out", required=True, help="EpisodeRow JSONL file to write")
 
 
 register_group("softmax", setup)

@@ -6,7 +6,8 @@ gets a fixed mean shift in score (-2..+2) so a statistical test can tell policie
 
 ``--results <results.json>`` is the evaluate binding's hosted-XP mode (xp-poll): it reads one
 XP request's ``results.json`` (the fake platform's format: ``{seed?, episodes: [{episode,
-score, errors, seed?}]}``) and prints each episode's outcome metrics.
+score, errors, seed?, seat?}]}``) and prints each episode's outcome metrics. A league
+episode's results (``softmax league-episodes``) have one entry per seat, with ``seat``.
 """
 
 import argparse
@@ -70,8 +71,9 @@ def results_metrics(path: str) -> dict:
             "status": "failed" if episode.get("failed") else "completed",
             "metrics": {name: episode[name] for name in METRICS},
         }
-        if "seed" in episode:
-            entry["seed"] = episode["seed"]
+        for key in ("seed", "seat"):
+            if key in episode:
+                entry[key] = episode[key]
         episodes.append(entry)
     return {"episodes": episodes}
 

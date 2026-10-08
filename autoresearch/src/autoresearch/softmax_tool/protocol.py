@@ -79,6 +79,24 @@ class Softmax(Protocol):
     def submit(self, policy_version_id: str, league_id: str) -> str: ...
     def submissions(self, player_id: str) -> list[dict]: ...
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None: ...
+    def league_episodes(self, league_id: str, limit: int) -> list[dict]:
+        """Up to ``limit`` completed league episodes, read-only. Each is a dict::
+
+            {episode_id, round_id, seed, game_version, coworld_id,
+             seats: [{position, policy_version_id, player_id, is_filler}],
+             results: <the game's raw results.json object>}
+
+        ``policy_version_id`` is the opaque ``<name>:v<N>`` label (None for a human seat).
+        """
+        ...
+
+    def standings(self, league_id: str) -> list[dict]:
+        """League standings, read-only: one row per (division, player)::
+
+        {division_id, division_name, level, rank, player_id, player_name, score,
+         rounds_played}
+        """
+        ...
 
 
 def from_env(env: Mapping[str, str], canonical: Path) -> Softmax:

@@ -1,0 +1,6 @@
+{
+  "episodes": [
+    {"episode": 0, "seat": 0, "score": 61.0, "errors": 1},
+    {"episode": 0, "seat": 1, "score": 44.5, "errors": 3}
+  ]
+}

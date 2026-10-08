@@ -17,6 +17,13 @@ Seeds (A12): like the platform, a spec's ``game_config_overrides.seed`` pins the
 episodes to that seed. Results of a seeded request depend only on (seed, our roster policy,
 episode index), so the same seed and policy give the same episode in any request; unseeded
 results depend on the request id.
+
+League reads: ``league_episodes`` is generated, not stored. Episode ``i`` plays seed
+``1000 + i // 3`` with ``LEAGUE_POLICIES[i % 3]`` in seat 0 and ``LEAGUE_HOUSE`` in seat 1, so
+each seed is played by three policies against the same opponent (paired noise is measurable).
+Its ``results`` (``{seed, game_version, episodes: [{episode, seat, seed, score, errors}]}``) is
+what fakegame's evaluate binding reads; score is a policy shift plus a shared per-seed term plus
+per-policy noise. ``standings`` is two house players plus our player once it has submitted.
 """
 
 import hashlib
@@ -34,6 +41,9 @@ FAULTS_ENV = "AUTORESEARCH_FAKE_FAULTS"
 DEFAULT_PLAYER_ID = "ply_fake"
 DEFAULT_CREDITS = 100
 DEFAULT_EPISODES = 2
+LEAGUE_POLICIES = ("fake-alpha:v1", "fake-beta:v1", "fake-gamma:v1")
+LEAGUE_HOUSE = "fake-house:v1"
+LEAGUE_FIRST_SEED = 1000
 
 
 def parse_faults(env: Mapping[str, str]) -> dict[str, str]:
@@ -51,6 +61,40 @@ def fault(env: Mapping[str, str], name: str) -> str | None:
 
 def _short_hash(*parts: object) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:12]
+
+
+def _unit(*parts: object) -> float:
+    return int(_short_hash(*parts), 16) / 16**12
+
+
+def _league_metrics(policy: str, seed: int) -> dict:
+    score = 50 + (_unit(policy, "shift") - 0.5) * 4
+    score += (_unit(seed, "board") - 0.5) * 8 + (_unit(policy, seed, "own") - 0.5) * 2
+    return {"score": round(score, 4), "errors": int(_unit(policy, seed, "errors") * 5)}
+
+
+def _league_episode(league_id: str, index: int, game_version: str) -> dict:
+    seed = LEAGUE_FIRST_SEED + index // len(LEAGUE_POLICIES)
+    policies = (LEAGUE_POLICIES[index % len(LEAGUE_POLICIES)], LEAGUE_HOUSE)
+    return {
+        "episode_id": f"ereq_fake_{index:05d}",
+        "round_id": f"round_fake_{index // 30:03d}",
+        "seed": seed,
+        "game_version": game_version,
+        "coworld_id": "cow_fake",
+        "seats": [
+            {"position": seat, "policy_version_id": policy, "player_id": None, "is_filler": False}
+            for seat, policy in enumerate(policies)
+        ],
+        "results": {
+            "seed": seed,
+            "game_version": game_version,
+            "episodes": [
+                {"episode": 0, "seat": seat, "seed": seed, **_league_metrics(policy, seed)}
+                for seat, policy in enumerate(policies)
+            ],
+        },
+    }
 
 
 def _roster_policy(spec: dict) -> str | None:
@@ -268,3 +312,28 @@ class FakeSoftmax:
             if s["league_id"] == league_id
         ]
         return matching[-1] if matching else None
+
+    # --- league reads ---------------------------------------------------
+
+    def league_episodes(self, league_id: str, limit: int) -> list[dict]:
+        version = self.game_version(league_id)
+        return [_league_episode(league_id, index, version) for index in range(limit)]
+
+    def standings(self, league_id: str) -> list[dict]:
+        board = [("ply_house_a", "House A", 61.5, 12), ("ply_house_b", "House B", 48.25, 12)]
+        if self.leaderboard_champion(self._player_id, league_id) is not None:
+            board.append((self._player_id, "Autoresearch", 55.0, 1))
+        board.sort(key=lambda row: -row[2])
+        return [
+            {
+                "division_id": "div_fake",
+                "division_name": "Fake Division",
+                "level": 1,
+                "rank": rank,
+                "player_id": player_id,
+                "player_name": name,
+                "score": score,
+                "rounds_played": rounds,
+            }
+            for rank, (player_id, name, score, rounds) in enumerate(board, start=1)
+        ]
