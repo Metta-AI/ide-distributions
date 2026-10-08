@@ -49,7 +49,7 @@ Primary command (read-only, uses the player credential):
 - `standings` prints `{"ok": true, "data": {"league_id", "rows"}}`. Each row has `division_id`, `division_name`, `level`, `rank`, `player_id`, `player_name`, `score`, `rounds_played`. The code reads `coworld results <league>` (divisions) and then `coworld results <division>` (entries). Source: `src/autoresearch/softmax_tool/client.py`, method `standings`.
 - `leaderboard` prints our champion policy version (`leaderboard_champion`) and the ledger champion (`current_champion`, `note`). Use it to record which policy version is measured.
 
-Read-only alternative without the autoresearch CLI (project-pinned coworld 0.1.57, not the global one):
+Read-only alternative without the autoresearch CLI (project-pinned coworld 0.1.58, not the global one):
 
 ```sh
 uv run --locked coworld results league_3c60897b-25cf-4b37-9d1a-8554c1198f28 --json   # divisions

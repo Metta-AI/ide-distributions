@@ -5,7 +5,7 @@ credential immediately before acting and raises ``IdentityError`` unless it is a
 is ``AUTORESEARCH_PLAYER_ID`` with an unexpired token (C6). Nothing about identity is cached.
 
 Policy identifiers: ``upload-policy`` prints only ``Upload complete: <name>:v<N>`` and ``submit``
-takes ``<name>:v<N>`` (coworld 0.1.57 has no ``--json`` for either). The ``policy_version_id`` this
+takes ``<name>:v<N>`` (coworld 0.1.58 has no ``--json`` for either). The ``policy_version_id`` this
 client returns from ``upload``, accepts in ``submit``, and returns from ``leaderboard_champion`` is
 therefore that label, which the platform resolves uniquely. Submission rows still carry the UUID
 under ``policy_version.id`` next to ``policy_version.label``.
