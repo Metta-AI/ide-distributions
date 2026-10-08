@@ -72,6 +72,7 @@ def test_fresh_bootstrap_seeds_pushes_and_creates_the_board(tmp_path):
     assert "doctrine-version:" in (canonical / "AGENTS.md").read_text()
     gitignore = (canonical / ".gitignore").read_text().splitlines()
     assert ".supervisor/runtime/" in gitignore and ".worktrees/" in gitignore
+    assert ".scratch/" in gitignore  # card scratch files never reach card finish commits
     assert gitops.git(canonical, "remote", "get-url", "origin") == str(origin)
     assert gitops.git(origin, "rev-parse", "main") == gitops.head(canonical)
     assert gitops.git(canonical, "status", "--porcelain") == ""
@@ -251,7 +252,11 @@ def test_existing_canonical_gets_missing_gitignore_lines(tmp_path):
     run(ctx, env, queue)
 
     assert ".supervisor/runtime/" in (ctx.canonical / ".gitignore").read_text()
+    assert ".scratch/" in (ctx.canonical / ".gitignore").read_text().splitlines()
     assert gitops.git(ctx.canonical, "status", "--porcelain") == ""
+    (ctx.canonical / ".scratch").mkdir()
+    (ctx.canonical / ".scratch" / "experiment.json").write_text("{}")
+    assert gitops.git(ctx.canonical, "status", "--porcelain") == ""  # ignored
     assert os.path.exists(ctx.canonical / ".git")
 
 

@@ -45,7 +45,9 @@ GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 REMOTE = "origin"
 BRANCH = "main"
-GITIGNORE_LINES = (".supervisor/runtime/", ".worktrees/")
+# .scratch/ holds a card worker's scratch files (skills write there, never /tmp or $HOME), so
+# card finish does not commit them.
+GITIGNORE_LINES = (".supervisor/runtime/", ".worktrees/", ".scratch/")
 DOCTRINE_DIR = Path("doctrine")
 DOCTRINE_FILES = ("research-agent.md", "communication.md")
 VERSION_HEADER = re.compile(r"\A<!-- doctrine-version: (\S+) -->")
