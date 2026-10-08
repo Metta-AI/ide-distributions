@@ -96,7 +96,10 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
 6. Call the native `kanban_complete` tool. Give a `summary` of one to three sentences, and
    give the `data` object of the `card finish` envelope as `metadata`. List the card ids you
    made with `kanban_create`, if any, in `created_cards` (normally none: request cards with
-   `queue request create`).
+   `queue request create`). The `summary` is required: a call without it fails with
+   "provide at least one of: summary (preferred), result". Do not set `board`; the tool
+   uses this card's board. For example:
+   `{"summary": "Created H-… and requested its experiment card.", "metadata": {<data>}}`
    Serial fallback: when the `kanban_complete` tool does not exist, `card finish` alone
    ends the card.
 7. Stop. After `card finish` the plugin blocks every file write in this card.
