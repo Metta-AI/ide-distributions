@@ -12,7 +12,7 @@ import jsonschema
 import pytest
 import yaml
 from support.board import Board, Worker, new_hypothesis
-from support.keeper_driver import KeeperDriver
+from support.keeper_host import PLENTY, no_hermes
 from support.promotion_board import design_dict
 
 from autoresearch.cli import main as cli_main
@@ -24,7 +24,7 @@ from autoresearch.queue.file_queue import FileQueue
 from autoresearch.queue.requests import load_schema
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import promotion
+from autoresearch.runtime import promotion, queue_keeper
 from autoresearch.runtime.admission import STALE_EPOCH, admit_and_create, board_epoch
 from autoresearch.runtime.briefing import BriefingInputs
 from autoresearch.runtime.promotion import CHAMPION_PATH, adopt, stage_champion, submit_promotion
@@ -519,6 +519,48 @@ def _softmax_cli(monkeypatch, capsys, restored: "RestoredHost", worker: Worker, 
     return payload["data"]
 
 
+class Keeper:
+    """Runs the real queue-keeper over a restored host until it settles."""
+
+    def __init__(self, restored: "RestoredHost", sm: FakeSoftmax, game):
+        self.restored, self.sm, self.game = restored, sm, game
+        self.env = {
+            "HERMES_HOME": str(restored.home),
+            "AUTORESEARCH_PLAYER_ID": DEFAULT_PLAYER_ID,
+            "AUTORESEARCH_GAME": "fakegame",
+            "AUTORESEARCH_SKIP_OPENROUTER_CHECK": "1",
+        }
+
+    def run_once(self) -> queue_keeper.KeeperRun:
+        result = queue_keeper.run(
+            self.restored.ctx(),
+            self.restored.queue,
+            self.sm,
+            self.game,
+            datetime.datetime.now(datetime.UTC),
+            env=self.env,
+            profile=PROFILE,
+            runner=no_hermes,
+            disk_free=lambda _path: PLENTY,
+        )
+        assert result.exit_code == 0 and result.failures == {}, result.failures
+        return result
+
+    def snapshot(self) -> tuple:
+        """Canonical HEAD and every card's (task, state, assignee): what a run can change."""
+        cards = tuple(sorted((c.task_id, c.state, c.assignee) for c in self.restored.queue.list()))
+        return gitops.head(self.restored.canonical), cards
+
+    def run_until_quiescent(self, limit: int = 10) -> list[queue_keeper.KeeperRun]:
+        runs = []
+        for _ in range(limit):
+            before = self.snapshot()
+            runs.append(self.run_once())
+            if self.snapshot() == before:
+                return runs
+        raise AssertionError(f"queue-keeper did not settle in {limit} runs")
+
+
 def test_restore_from_the_remote_alone(host, tmp_path, game, monkeypatch, capsys):
     old = _old_host_before_loss(host)
 
@@ -534,7 +576,7 @@ def test_restore_from_the_remote_alone(host, tmp_path, game, monkeypatch, capsys
     shutil.copy(host.canonical / state, canonical / state)
     platform = FakeSoftmax(canonical, {})
     restored = RestoredHost(home, canonical, FileQueue(home / "board"))
-    keeper = KeeperDriver(restored.ctx(), restored.queue, platform, game, GAME_VERSION)
+    keeper = Keeper(restored, platform, game)
 
     runs = keeper.run_until_quiescent()
 

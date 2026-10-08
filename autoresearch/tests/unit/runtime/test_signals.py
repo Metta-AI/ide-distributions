@@ -415,3 +415,11 @@ def test_a_signal_that_clears_and_returns_escalates_again(board):
     _iterations(board, 3, start=10)
     assert "escalation" in _codes(_compute(board, now=later))
     assert len(_outbox_help(board)) == 2
+
+
+def test_failed_queue_keeper_steps_are_signals(board):
+    signals = _compute(board, step_failures={"kb": "ValueError: bad claim", "push": "rejected"})
+    found = {(s.code, s.entity) for s in signals}
+    assert ("keeper_step_failed", "kb") in found and ("keeper_step_failed", "push") in found
+    [kb] = [s for s in signals if s.entity == "kb"]
+    assert "ValueError: bad claim" in kb.detail

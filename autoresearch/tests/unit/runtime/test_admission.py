@@ -244,3 +244,51 @@ def test_card_file_lists_inbound_routed_to_its_request(canonical, ctx, queue, ga
 
     card_file = canonical.root / ".supervisor" / "runtime" / "cards" / f"{result.task_id}.json"
     assert read_json(card_file)["responsible_inbound"] == [inbound_id]
+
+
+def test_terminal_rejection_on_rerun_drops_the_orphan_task(canonical, ctx, queue, game):
+    """Crash after create, then the rerun rejects (here: a ref no longer resolves): the
+    unassigned task the crash left on the board is dropped, not left as an orphan."""
+    hypothesis = f"ar://hypothesis/{canonical.hypothesis_id}"
+    spec = make_spec(refs=[hypothesis])
+    crashing = CrashOnceQueue(queue, "create_unassigned", after=True)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        _admit(ctx, crashing, spec, game)
+    [orphan] = queue.list()
+    path = next(canonical.layout.hypotheses.glob(f"{canonical.hypothesis_id}*"))
+    path.unlink()
+    gitops.commit_all(canonical.root, "hypothesis gone")
+
+    result = _admit(ctx, queue, spec, game)
+
+    assert not result.ok and _receipt(canonical, spec)["state"] == "rejected"
+    card = queue.get(orphan.task_id)
+    assert card.state == "completed" and card.runs[-1].outcome == "dropped"
+
+
+def test_transient_rejection_keeps_the_task_for_a_later_run(canonical, ctx, queue, game):
+    spec = make_spec(mode="experimentation")
+    crashing = CrashOnceQueue(queue, "create_unassigned", after=True)
+    canonical.write_noise()
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        _admit(ctx, crashing, spec, game)
+    canonical.write_noise("66")  # the noise record is no longer current
+
+    result = _admit(ctx, queue, spec, game)
+
+    assert result.reasons == ["needs_calibration"]
+    assert [card.state for card in queue.list()] == ["pending"]
+
+
+def test_briefing_inputs_may_depend_on_the_task_id(canonical, ctx, queue, game):
+    seen = []
+
+    def inputs(task_id):
+        seen.append(task_id)
+        return BriefingInputs(signals=[f"for {task_id}"])
+
+    result = admit_and_create(ctx, queue, make_spec(), PROFILE, inputs, game, GAME_VERSION)
+
+    assert seen == [result.task_id]
+    briefing = canonical.root / ".supervisor" / "runtime" / "briefings" / f"{result.task_id}.md"
+    assert f"for {result.task_id}" in briefing.read_text()

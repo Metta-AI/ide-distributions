@@ -49,14 +49,18 @@ def pause(queue: Queue, ledger: Path, reason: str) -> list[str]:
 
 def resume(queue: Queue, ledger: Path) -> list[str]:
     """Reassign exactly the recorded cards that are still pending and unassigned; clear the
-    pause. Return the task ids reassigned."""
+    pause. A recorded card that is no longer on the board (a lost board) is skipped. Return
+    the task ids reassigned."""
     canonical = canonical_of(ledger)
     path = pause_path(ledger)
     if not path.exists():
         return []
+    on_board = {card.task_id: card for card in queue.list()}
     reassigned = []
     for task_id, assignee in read_json(path)["tasks"].items():
-        card = queue.get(task_id)
+        card = on_board.get(task_id)
+        if card is None:
+            continue
         if card.state == "pending" and card.assignee is None:
             queue.assign(task_id, assignee)
             reassigned.append(task_id)

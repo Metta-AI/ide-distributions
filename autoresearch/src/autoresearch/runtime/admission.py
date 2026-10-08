@@ -22,9 +22,14 @@ commits (``readmit <Q-id>``). After that, ``admit_and_create`` finishes steps 3-
 Rejections for ``TRANSIENT_REASONS`` write no receipt, so the request is retried on a later
 run (after calibration lands, or after resume). Any other rejection is terminal: a
 ``rejected`` receipt (``reject <Q-id>``). ``planning_owned`` is terminal because the caller
-moves the request into the planning backlog.
+moves the request into the planning backlog. A terminal rejection on a rerun after a crash
+between step 2 and the receipt also drops the unassigned task step 2 left on the board.
+
+Briefing inputs may be a function of the task id (queue-keeper builds them per card, after
+the task exists).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,6 +59,8 @@ PLANNING_OWNED = "planning_owned"
 PAUSED = "paused"
 STALE_EPOCH = "stale_epoch"
 TRANSIENT_REASONS = frozenset({NEEDS_CALIBRATION, PAUSED})
+
+Inputs = BriefingInputs | Callable[[str], BriefingInputs]
 
 
 @dataclass
@@ -137,7 +144,7 @@ def _save_receipt(canonical: Path, path: Path, receipt: dict, message: str) -> N
 
 
 def _write_runtime_files(
-    ctx: RunContext, spec: CardSpec, task_id: str, inputs: BriefingInputs, pending: bool
+    ctx: RunContext, spec: CardSpec, task_id: str, inputs: Inputs, pending: bool
 ) -> None:
     """Write ``runtime/cards/<task>.json`` and the briefing. ``finished`` and
     ``responsible_inbound`` already in the card file are kept; the inbound routed to this
@@ -162,11 +169,23 @@ def _write_runtime_files(
             "responsible_inbound": responsible,
         },
     )
+    if callable(inputs):
+        inputs = inputs(task_id)
     briefing = build_briefing(ctx.canonical, spec, task_id, inputs)
     write_text(runtime / "briefings" / f"{task_id}.md", briefing)
 
 
-def _reject(ctx: RunContext, path: Path, spec: CardSpec, reasons: list[str]) -> AdmissionResult:
+def _drop_orphans(queue: Queue, spec: CardSpec, reason: str) -> None:
+    """Drop the pending cards of ``spec``'s request: a crash after ``create_unassigned``
+    and before the receipt left one, and the request is now rejected for good."""
+    for card in queue.list("pending"):
+        if card.spec.request_id == spec.request_id:
+            queue.drop(card.task_id, f"request rejected: {reason}")
+
+
+def _reject(
+    ctx: RunContext, queue: Queue, path: Path, spec: CardSpec, reasons: list[str]
+) -> AdmissionResult:
     if not TRANSIENT_REASONS.intersection(reasons):
         receipt = {
             "request_id": spec.request_id,
@@ -177,6 +196,7 @@ def _reject(ctx: RunContext, path: Path, spec: CardSpec, reasons: list[str]) -> 
         }
         with canonical_lock(ctx.canonical):
             _save_receipt(ctx.canonical, path, receipt, f"reject {spec.request_id}")
+        _drop_orphans(queue, spec, receipt["reason"])
     return AdmissionResult(ok=False, task_id=None, reasons=reasons)
 
 
@@ -185,7 +205,7 @@ def admit_and_create(
     queue: Queue,
     spec: CardSpec,
     profile: str,
-    inputs: BriefingInputs,
+    inputs: Inputs,
     game: Game,
     game_version: str,
 ) -> AdmissionResult:
@@ -202,7 +222,7 @@ def admit_and_create(
         with canonical_lock(canonical):
             reasons = admit(canonical, spec, queue, game, game_version)
         if reasons:
-            return _reject(ctx, path, spec, reasons)
+            return _reject(ctx, queue, path, spec, reasons)
         task_id = queue.create_unassigned(
             spec,
             branch=f"card/{spec.request_id}",

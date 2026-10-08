@@ -151,9 +151,10 @@ def _inbound(task_id: str, inbound: list[dict]) -> list[str]:
             "",
         ]
     for message in urgent_elsewhere:
+        handler = message.get("responsible_task") or "the planning card"
         lines.append(
             f"- {message.get('id')} ({message.get('kind')}, urgent): read-only, "
-            f"handled by {message.get('responsible_task')}"
+            f"handled by {handler}"
         )
     return lines
 

@@ -88,3 +88,9 @@ def test_inbound_responsible_in_full_others_urgent_marked_handled(canonical):
 def test_empty_inputs(canonical):
     text = build_briefing(canonical.root, make_spec(), TASK, BriefingInputs())
     assert text.startswith(f"<!-- autoresearch-briefing task={TASK} -->")
+
+
+def test_urgent_inbound_with_no_responsible_card_names_the_planning_card(canonical):
+    inbound = [{"id": "I-x", "kind": "steer", "urgency": "now", "body": "B"}]
+    text = build_briefing(canonical.root, make_spec(), "K-me", _inputs(inbound=inbound))
+    assert "handled by None" not in text and "handled by the planning card" in text

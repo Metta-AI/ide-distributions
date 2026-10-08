@@ -72,3 +72,17 @@ def test_resume_skips_tasks_no_longer_pending(canonical, queue):
 
 def test_resume_without_pause_is_a_noop(canonical, queue):
     assert resume(queue, canonical.layout.ledger) == []
+
+
+def test_resume_skips_a_recorded_task_that_is_gone(canonical, queue, tmp_path):
+    from autoresearch.queue.file_queue import FileQueue
+
+    ledger = canonical.layout.ledger
+    kept = _create(queue, "autoresearch")
+    pause(queue, ledger, "identity failure")
+    lost_board = FileQueue(tmp_path / "other-board")  # the recorded task is not on it
+    lost_board.ensure_board()
+
+    assert resume(lost_board, ledger) == []
+    assert not (ledger / "pause.json").exists()
+    assert queue.get(kept).assignee is None

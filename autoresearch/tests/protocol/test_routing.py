@@ -539,3 +539,52 @@ def test_task_rejected_by_admission_gets_a_runtime_note_with_the_reason(board):
     record = _delivery(board, task)
     assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
     _assert_clean(board)
+
+
+# --- Task 3.9: release taken topics; planning requests in the backlog ---
+
+
+def _drop_receipt(board: Board, worker) -> None:
+    receipt = board.committed(board.receipt_path(worker.request_id))
+    receipt["state"] = "dropped"
+    receipt["history"].append({"state": "dropped", "at": "2026-10-07T01:00:00+00:00"})
+    write_json(board.receipt_path(worker.request_id), receipt)
+    gitops.commit_paths(
+        board.canonical,
+        [board.receipt_path(worker.request_id).relative_to(board.canonical).as_posix()],
+        "drop",
+    )
+
+
+def test_a_taken_topic_is_released_when_its_planning_card_is_dropped(board):
+    planner = board.admit(mode="planning")
+    steer = _send(board, "steer", text="Towers now.", urgency="now", proposed_topic=TOPIC)
+    _route(board)
+    entry_path = board.ledger / "backlog" / f"{steer}.json"
+    assert board.committed(entry_path)["taken_by"] == planner.task_id
+    _drop_receipt(board, planner)
+    board.queue.drop(planner.task_id, "dropped by planning")
+
+    _route(board)
+
+    assert board.committed(entry_path)["taken_by"] is None
+    assert any("Towers" in line for line in planning_backlog(board.canonical, "K-next"))
+    _assert_clean(board)
+
+
+def test_a_planning_request_in_the_backlog_is_shown_to_the_next_planning_card(board):
+    from autoresearch.queue.card import CardSpec
+
+    spec = CardSpec("Q-01K00000000000000000000000", "Plan jungle", "planning", "Jungle.", [],
+                    "planner", "P2")  # fmt: skip
+    with canonical_lock(board.canonical):
+        path = routing.backlog_request(board.canonical, spec, "planning is owned")
+        gitops.commit_paths(board.canonical, [path.relative_to(board.canonical).as_posix()], "b")
+    assert any("Plan jungle" in line for line in planning_backlog(board.canonical))
+
+    planner = board.admit(mode="planning")
+    _route(board)
+
+    assert board.committed(path)["taken_by"] == planner.task_id
+    assert any("Plan jungle" in line for line in planning_backlog(board.canonical, planner.task_id))
+    assert planning_backlog(board.canonical, "K-other") == []

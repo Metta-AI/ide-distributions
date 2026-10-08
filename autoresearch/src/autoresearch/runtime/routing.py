@@ -43,6 +43,12 @@ The planning backlog is one file per entry, ``.supervisor/ledger/backlog/<I-id>.
 (C4: no shared append-only files); ``planning_backlog`` lists the open entries for a
 planning briefing. ``inbound_for_briefing`` gives the inbound a card's briefing shows.
 
+Taken entries. A ``proposed_topic`` entry, and a ``request`` entry (a planning request that
+admission rejected because planning was owned, ``backlog_request``; file
+``backlog/<Q-id>.json``), is taken by one planning card (``taken_by``) and then hidden from
+other planning briefings. When the taking card's request is dropped, superseded or rejected
+the entry is released (``taken_by: null``) for the next planning card.
+
 Acknowledgement happens at publication (``comms.publisher.acknowledge_inbound``).
 """
 
@@ -76,6 +82,9 @@ from autoresearch.runtime.ledger import canonical_lock, now_iso
 
 URGENT = "now"
 CLOSED_RECEIPT_STATES = ("rejected", "published", "superseded", "dropped")
+# A taken backlog entry goes back to the backlog when its taker's request ends in one of these.
+RELEASING_STATES = ("rejected", "superseded", "dropped")
+TAKEN_SOURCES = ("proposed_topic", "request")
 TITLE_LIMIT = 60
 SUMMARY_LIMIT = 160
 NO_ONE = {"task_id": None, "request_id": None, "backlog": False}
@@ -266,6 +275,27 @@ def _write_topic_entry(canonical: Path, message: dict) -> Path:
         "created_at": now_iso(),
     }
     path = delivery.backlog_path(canonical, message["id"])
+    write_json(path, entry)
+    return path
+
+
+def backlog_request(canonical: Path, spec: CardSpec, reason: str) -> Path:
+    """Write the planning-backlog entry for a planning request admission rejected because
+    planning was owned (C11: merged into the backlog, not a second card). The caller commits
+    it, under the canonical lock."""
+    entry = {
+        "id": spec.request_id,
+        "source": "request",
+        "kind": "planning",
+        "author": spec.created_by,
+        "summary": _one_line(f"{spec.title}: {spec.why}", SUMMARY_LIMIT),
+        "proposed_topic": None,
+        "request": {"title": spec.title, "why": spec.why, "refs": list(spec.refs)},
+        "reason": reason,
+        "taken_by": None,
+        "created_at": now_iso(),
+    }
+    path = delivery.backlog_path(canonical, spec.request_id)
     write_json(path, entry)
     return path
 
@@ -559,8 +589,22 @@ def _resolve(
         }
         paths.append(delivery.write_record(canonical, updated))
         actions.append(Action("bound", inbound_id, request_id=request_id, task_id=task_id))
+    taker_state = {
+        task["task_id"]: receipt["state"]
+        for receipt in receipts.values()
+        for task in receipt.get("tasks", [])
+    }
     for inbound_id, entry in delivery.backlog_entries(canonical).items():
-        if entry.get("source") != "proposed_topic" or entry.get("taken_by") is not None:
+        if entry.get("source") not in TAKEN_SOURCES:
+            continue
+        taker = entry.get("taken_by")
+        if taker is not None and taker_state.get(taker) in RELEASING_STATES:
+            path = delivery.backlog_path(canonical, inbound_id)
+            write_json(path, entry | {"taken_by": None})
+            paths.append(path)
+            actions.append(Action("topic_released", inbound_id, task_id=taker))
+            continue
+        if taker is not None:
             continue
         bound = _open_planning_task(ctx, queue, inbound_id)
         if bound is None:
@@ -639,7 +683,7 @@ def planning_backlog(canonical: Path, task_id: str | None = None) -> list[str]:
     lines = []
     for inbound_id, entry in delivery.backlog_entries(canonical).items():
         record = records.get(inbound_id)
-        if entry.get("source") == "proposed_topic":
+        if entry.get("source") in TAKEN_SOURCES:
             if entry.get("taken_by") not in (None, task_id):
                 continue
         elif (

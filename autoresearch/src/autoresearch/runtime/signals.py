@@ -50,6 +50,9 @@ Signals and their data sources:
 - ``credits_exhausted``: preflight read 0 credits (FakeSoftmax), or an experiment is
   ``awaiting-credits`` (the real client cannot read credits, A10; a CreditDenied moves the
   experiment there).
+- ``keeper_step_failed``: a queue-keeper step raised (``step_failures``, step name -> error);
+  queue-keeper contains the failure and passes it here, so a step that keeps failing escalates
+  like any other signal.
 
 TODO (no data source yet; these return nothing):
 
@@ -92,6 +95,7 @@ MERGE_HOTSPOT = "merge_hotspot"
 ESCALATION = "escalation"
 IDENTITY_MISMATCH = "identity_mismatch"
 CREDITS_EXHAUSTED = "credits_exhausted"
+KEEPER_STEP_FAILED = "keeper_step_failed"
 NOT_ESCALATED = frozenset({ESCALATION, IDENTITY_MISMATCH})
 
 STATE_FILE = "signals.json"
@@ -159,6 +163,7 @@ class _Inputs:
     now: datetime.datetime
     cfg: SignalConfig
     preflight: PreflightResult | None
+    step_failures: dict[str, str] = field(default_factory=dict)
     handoffs: list[dict] = field(default_factory=list)  # oldest first
     experiments: list[dict] = field(default_factory=list)
     state: dict = field(default_factory=dict)
@@ -416,6 +421,13 @@ def _credits_exhausted(inputs: _Inputs) -> list[_Raw]:
     return [_Raw(CREDITS_EXHAUSTED, None, "; ".join(parts) + ". Other work continues.")]
 
 
+def _keeper_step_failed(inputs: _Inputs) -> list[_Raw]:
+    return [
+        _Raw(KEEPER_STEP_FAILED, step, f"queue-keeper step {step} failed: {error}")
+        for step, error in sorted(inputs.step_failures.items())
+    ]
+
+
 DETECTORS = (
     _spinning,
     _build_failure_loop,
@@ -429,6 +441,7 @@ DETECTORS = (
     _merge_hotspot,
     _identity_mismatch,
     _credits_exhausted,
+    _keeper_step_failed,
 )
 
 
@@ -520,12 +533,13 @@ def compute_signals(
     *,
     preflight: PreflightResult | None = None,
     allow_no_remote: bool = False,
+    step_failures: dict[str, str] | None = None,
 ) -> list[Signal]:
     """The signals that fire now, with persistence and escalation (module docstring).
 
     ``preflight`` is this run's preflight result (identity, credits); ``allow_no_remote`` is
-    for the escalation help_request (tests, local runs). The caller must not hold the
-    canonical lock."""
+    for the escalation help_request (tests, local runs); ``step_failures`` are queue-keeper
+    steps that raised (step -> error). The caller must not hold the canonical lock."""
     cfg = cfg or SignalConfig()
     canonical = ctx.canonical
     inputs = _Inputs(
@@ -534,6 +548,7 @@ def compute_signals(
         now=now,
         cfg=cfg,
         preflight=preflight,
+        step_failures=dict(step_failures or {}),
         handoffs=_handoffs(canonical),
         experiments=_records(canonical, "experiment"),
         state=_load_state(ctx),
