@@ -84,3 +84,53 @@ def test_post_compile_change_cannot_get_receipt(cached):
     (engine / 'src/extra.nim').write_text('discard')
     with pytest.raises(ValueError, match='changed during compilation'):
         native_build.finish_build(binary, before, 'gate_probe', pin, tools=tools)
+
+
+def test_prepare_populates_empty_cache_at_exact_pin(tmp_path, monkeypatch):
+    monkeypatch.delenv('GOTA_DEPENDENCY_ROOT', raising=False)
+    upstream = tmp_path / 'upstream'
+    dependency = tmp_path / 'dependency'
+    dep_pin = commit(dependency, {'src/library.nim': 'discard\n'})
+    pin = commit(upstream, {'config.nims': '# config\n',
+                          'coworld/dependencies.lock': f'library 1 {dependency} {dep_pin}\n'})
+    tools = tmp_path / 'relocated install/tools'
+    clone = native_build.prepare(pin, tools=tools, engine_source=str(upstream))
+    assert native_build.repository(clone, pin)['commit'] == pin
+    assert native_build.repository(clone / 'tmp/coworld/deps/library', dep_pin)['commit'] == dep_pin
+    assert native_build.prepare(pin, tools=tools, engine_source=str(upstream)) == clone
+    (clone / 'config.nims').write_text('changed')
+    with pytest.raises(subprocess.CalledProcessError):
+        native_build.prepare(pin, tools=tools, engine_source=str(upstream))
+
+
+def test_prepare_supports_distinct_pins_and_refuses_changed_dependency(tmp_path, monkeypatch):
+    monkeypatch.delenv('GOTA_DEPENDENCY_ROOT', raising=False)
+    upstream = tmp_path / 'upstream'
+    dependency = tmp_path / 'dependency'
+    dep_pin = commit(dependency, {'src/library.nim': 'discard\n'})
+    first = commit(upstream, {'config.nims': '# old config\n',
+                            'coworld/dependencies.lock': f'library 1 {dependency} {dep_pin}\n'})
+    (upstream / 'config.nims').write_text('# new config\n')
+    subprocess.run(['git', '-C', str(upstream), 'add', '.'], check=True)
+    subprocess.run(['git', '-C', str(upstream), '-c', 'user.name=Test',
+                    '-c', 'user.email=test@invalid', 'commit', '-m', 'next pin'],
+                   check=True, capture_output=True)
+    second = native_build.git(upstream, 'rev-parse', 'HEAD')
+    tools = tmp_path / 'install/tools'
+    old = native_build.prepare(first, tools=tools, engine_source=str(upstream))
+    new = native_build.prepare(second, tools=tools, engine_source=str(upstream))
+    assert old != new
+    assert native_build.git(old, 'rev-parse', 'HEAD') == first
+    assert native_build.git(new, 'rev-parse', 'HEAD') == second
+    (new / 'tmp/coworld/deps/library/src/library.nim').write_text('changed\n')
+    with pytest.raises(subprocess.CalledProcessError):
+        native_build.prepare(second, tools=tools, engine_source=str(upstream))
+
+
+def test_offline_build_does_not_prepare_missing_sources(tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail('offline build attempted source preparation')
+
+    monkeypatch.setattr(native_build, 'prepare', forbidden)
+    with pytest.raises(FileNotFoundError):
+        native_build.build('gate_probe', '0' * 40, tools=tmp_path / 'tools')

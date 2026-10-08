@@ -85,8 +85,9 @@ Pandas is now a locked project dependency; no pandas overlay is needed.
 
 ## Offline native tools
 
-No helper fetches a repository or installs a dependency. Establish the exact
-source/dependency caches first, retaining the real Polyworld config.nims and Nim
+Build and receipt-validation helpers never fetch or install dependencies. The
+explicit setup command fetches pinned Git sources (see [gate setup](../../gates/README.md)).
+Establish the exact source/dependency caches first, retaining the real Polyworld config.nims and Nim
 2.2.10. Both builders use `tools/native_build.py`. Compilation and cached acceptance check
 every dependencies.lock Git pin, tracked cleanliness, tracked file content hashes,
 additional source files, and the actual configuration chain reported by Nim. They
@@ -96,6 +97,7 @@ and the output executable SHA-256. Receipt files use `.receipt.json`; the older
 three-file `.fingerprint` sidecar is no longer authoritative:
 
 ```sh
+uv run --locked python games/gota/tools/native_build.py prepare 801749e509e888b423ba44ee2188946c22e3ba85
 sh games/gota/tools/build_nim.sh 801749e509e888b423ba44ee2188946c22e3ba85 gate_probe
 sh games/gota/tools/build_gota_match.sh
 ```

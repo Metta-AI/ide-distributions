@@ -307,6 +307,8 @@ All copied compiler code, runtime, inputs, and destination test files are listed
 Current gates and compiler helpers target live 2026.10.7.2 / Polyworld
 801749e509e888b423ba44ee2188946c22e3ba85. Historical recording evidence above
 retains its original pin. Both native builders now require populated, verified
-offline caches and never fetch. Current harness/context source inventory and
+offline caches and never fetch. Explicit `native_build.py prepare COMMIT` now
+populates those caches from pinned Git sources; see [gate setup](gates/README.md).
+The pytest setup is a local test shim, not runtime hosting. Current harness/context source inventory and
 adoption decisions are in [compiler provenance](compiler/PROVENANCE.md); live
 verification is in [the refresh finding](../../docs/plans/findings/gota-live-refresh-2026-10-07.md).

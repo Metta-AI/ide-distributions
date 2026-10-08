@@ -1,7 +1,8 @@
 """Offline native build receipts shared by gate and match executables.
 
 A receipt binds verified Git pins, actual source/config/dependency contents,
-compiler/options and the executable bytes. Nothing is fetched or installed.
+compiler/options and the executable bytes. Build and validation stay offline.
+The explicit prepare command fetches only pinned source/dependency commits.
 """
 from __future__ import annotations
 
@@ -43,6 +44,45 @@ def source_cache(commit: str, tools: Path) -> Path:
     if primary.is_dir() and git(primary, 'rev-parse', 'HEAD') == commit:
         return primary
     return tools / f'.cache/polyworld-{commit[:8]}'
+
+
+def populate(directory: Path, source: str, pin: str) -> None:
+    """Fetch one exact Git commit into a new cache; never repair user changes."""
+    if directory.exists():
+        repository(directory, pin)
+        return
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    staging = directory.with_name(directory.name + f'.prepare.{os.getpid()}')
+    try:
+        execute(['git', 'init', str(staging)])
+        execute(['git', '-C', str(staging), 'fetch', '--depth=1', source, pin])
+        execute(['git', '-C', str(staging), 'checkout', '--detach', pin])
+        repository(staging, pin)
+        staging.rename(directory)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def prepare(commit: str, *, tools=TOOLS, engine_source=None, dependency_root=None) -> Path:
+    """Explicit source setup, separate from offline compilation and receipts.
+
+    Local Git mirrors can seed both engine and dependency caches without network
+    access. Sources are still checked against the engine and lockfile pins.
+    """
+    if not re.fullmatch('[0-9a-f]{40}', commit):
+        raise ValueError('prepare requires the complete engine commit')
+    source = engine_source or os.environ.get('GOTA_ENGINE_SOURCE',
+                                            'https://github.com/Metta-AI/polyworld.git')
+    mirror = dependency_root or os.environ.get('GOTA_DEPENDENCY_ROOT')
+    clone = source_cache(commit, tools)
+    populate(clone, source, commit)
+    for line in (clone / 'coworld/dependencies.lock').read_text().splitlines():
+        if line.strip():
+            name, _, url, pin = line.split()
+            populate(clone / 'tmp/coworld/deps' / name,
+                     str(Path(mirror) / name) if mirror else url, pin)
+    return clone
 
 
 def repository(directory: Path, commit: str) -> dict:
@@ -151,6 +191,9 @@ def finish_build(binary: Path, before: dict, target: str, commit: str, *, tools=
 def build(target: str, commit: str, *, tools=TOOLS) -> Path:
     clone = source_cache(commit, tools)
     output = tools / f'bin/{target}-{commit[:8]}'
+    if not clone.is_dir():
+        raise FileNotFoundError(
+            f'native sources missing: {clone}; run native_build.py prepare {commit} first')
     try:
         validate(output, target, commit, tools=tools)
         return output
@@ -182,10 +225,10 @@ def build(target: str, commit: str, *, tools=TOOLS) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('target', choices=sorted(TARGETS))
+    parser.add_argument('target', choices=sorted(TARGETS | {'prepare'}))
     parser.add_argument('commit')
     args = parser.parse_args()
-    print(build(args.target, args.commit))
+    print(prepare(args.commit) if args.target == 'prepare' else build(args.target, args.commit))
 
 
 if __name__ == '__main__':

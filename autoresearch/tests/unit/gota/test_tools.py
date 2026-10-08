@@ -98,7 +98,9 @@ def test_replay_stats_rejects_changed_result(expander, tmp_path, field, error):
 
 def test_native_draw_result_validation(expander, tmp_path):
     """Exercise the expander's shared result seam with a real engine World."""
-    clone = TOOLS / '.cache/polyworld'
+    from games.gota.tools.native_build import source_cache
+
+    clone = source_cache('5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd', TOOLS)
     source = clone / 'examples/gods_of_the_arena/tools/lab_draw_test.nim'
     source.write_text("""import std/json
 import sim, content, replay_outcome

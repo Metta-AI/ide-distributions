@@ -76,9 +76,29 @@ five bytes; `PRINT "X"; 12;` emits two events and three bytes; empty `PRINT` emi
 one newline event and one byte. Tests measure all three through actual engine
 callbacks. Failed VMs fail the gate even if they stopped before emitting all text.
 
-Native build requires Nim 2.x (verified with 2.2.10), Git, and network on first
-use. `tools/build_nim.sh` synchronizes the engine's pinned dependencies and caches
-ignored binaries; compiler/runtime errors and missing tools produce failed gates.
+Native build requires Nim 2.2.10 and Git. Populate pinned engine and dependency
+sources explicitly before building (commands from `autoresearch/`):
+
+```sh
+uv run --locked python games/gota/tools/native_build.py prepare 801749e509e888b423ba44ee2188946c22e3ba85
+sh games/gota/tools/build_nim.sh 801749e509e888b423ba44ee2188946c22e3ba85 gate_probe
+sh games/gota/tools/build_gota_match.sh
+```
+
+`prepare` fetches the exact engine commit and every commit in its
+`coworld/dependencies.lock`. It refuses existing dirty or wrong-pin sources.
+Set `GOTA_ENGINE_SOURCE` to a local Git mirror and `GOTA_DEPENDENCY_ROOT` to a
+directory of dependency Git mirrors named by the lockfile for offline setup.
+Neither variable changes required pins. Build and receipt validation never fetch.
+Builders cache ignored binaries; compiler/runtime errors and missing tools produce
+failed gates. Receipts include effective absolute compiler/configuration paths;
+after moving an install, rebuild to produce valid receipts at the new location.
+No parent repository Git metadata is required, so a `git archive` install works.
+
+The GotA pytest session explicitly prepares current and recorded engine pins and
+builds the current probe and match runner. A cold session therefore needs network
+access or local mirrors and the same native tools. Replay tests build their
+historical helpers offline after setup.
 Unit tests use short real native simulations and recorded telemetry fixtures.
 The fixture envelope assembled by a test is a parser test, not a new episode.
 Full manifest and ten-seed execution evidence is recorded separately in provenance.
