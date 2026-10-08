@@ -233,3 +233,14 @@ Source: Hermes v0.21.5 (`v2026.9.24`, `f97608f`), read-only.
 - **Auto-update.** Hermes has no automatic update. It only runs a passive check (banner and CLI) that `updates.check: false` turns off (`hermes_cli/banner.py` `check_for_updates`; default in `hermes_cli/config_defaults.py`). `hermes profile update` and `hermes update` run only when an operator starts them. Bootstrap sets `updates.check: false` ("auto-update off").
 - **Curator and shipped skills.** There is no per-skill exclusion key. The curator touches only skills with a `created_by: agent` record (or `agent_created: true`) and, when `curator.prune_builtins` is true, bundled built-ins (`tools/skill_usage.py` `list_agent_created_skill_names`, `is_curation_eligible`). Skills shipped by a distribution have neither, so they are excluded by default; bootstrap pins `curator.prune_builtins: false`. Caveat: `hermes curator adopt <skill>` flips the opt-in flag, so an operator must not adopt a shipped skill.
 - **`skills.create_dir`** exists (`agent/skill_utils.py` `get_skill_create_dir`, used by `tools/skill_manager_tool.py`); new skills land there instead of `skills/`.
+
+## delegate_task and Kanban (read-only queue commands in delegate children, 2026-10-08)
+
+Observed on the EC2 box: inside a `delegate_task` child, `hermes kanban --board <b> list --json` fails with `delegate_task child contexts cannot mutate Kanban tasks or boards`.
+
+Source evidence (Hermes v2026.9.24 / v0.21.5):
+
+- The fence is `agent/delegation_context.py:kanban_path_is_fenced`. It is true for an in-process delegate child (a ContextVar) or a spawned descendant carrying the env marker `HERMES_DELEGATED_CHILD_CONTEXT`. Hermes treats it as a trust boundary ("the durable trust boundary is in kanban_db"), so stripping the marker env from a subprocess would bypass it. We do not do that.
+- Hermes intends reads to work. `hermes_cli/kanban_db_connect.py:connect` opens fenced paths read-only (`?mode=ro`). The CLI denylist (`hermes_cli/kanban.py:_DELEGATED_CHILD_DENIED_ACTIONS`) does not include `list` or `show`.
+- Root cause: `_cmd_list` (`hermes_cli/kanban.py:418`) calls `kb.recompute_ready(conn)` first, a write transaction (`kanban_db.py:2128`). `write_txn` asserts the fence (`kanban_db_connect.py:1201`) and raises the error. `_cmd_show` only reads, so it should work; `board_exists` is affected because it uses `list`.
+- Fix: `KanbanQueue` falls back to a read-only sqlite read of `<root>/kanban/boards/<slug>/kanban.db` (A2) only when `list` or `show` fails with a message containing `cannot mutate Kanban`. Rows map to the same JSON shape as the CLI. Differences: no `recompute_ready` promotion (all of todo/ready/triage/scheduled map to `pending`, so cards are unaffected), and archived tasks are hidden, as in the CLI. Mutating commands (`create`, `assign`, `complete`, ...) still go through the CLI and fail closed.

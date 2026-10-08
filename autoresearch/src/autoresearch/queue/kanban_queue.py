@@ -8,6 +8,7 @@ and JSON fields are verified in docs/plans/findings/hermes-facts.md (Hermes v0.2
 
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 from dataclasses import asdict
@@ -28,6 +29,14 @@ _STATE_BY_STATUS = {
 }
 
 
+# Columns the queue reads, matching the fields of the Hermes JSON output.
+_SELECT_TASKS = (
+    "SELECT id, title, body, assignee, status, priority FROM tasks WHERE status != 'archived'"
+)
+_SELECT_TASK = "SELECT id, title, body, assignee, status, priority FROM tasks WHERE id = ?"
+_SELECT_RUNS = "SELECT id, ended_at, outcome, metadata FROM task_runs WHERE task_id = ? ORDER BY id"
+
+
 class KanbanError(RuntimeError):
     """A Hermes Kanban command failed or Hermes is not installed."""
 
@@ -35,6 +44,9 @@ class KanbanError(RuntimeError):
         super().__init__(f"{' '.join(argv)}: {stderr.strip()}")
         self.argv = argv
         self.stderr = stderr
+
+
+_DELEGATE_FENCE_MESSAGE = "cannot mutate Kanban"
 
 
 class KanbanQueue:
@@ -69,6 +81,59 @@ class KanbanQueue:
     def _kanban(self, *args: str) -> str:
         return self._hermes("kanban", "--board", self.board, *args)
 
+    def _list_tasks(self) -> list[dict]:
+        """``kanban list --json``; read straight from the board DB inside a delegate child.
+
+        ``hermes kanban list`` runs ``recompute_ready`` (a write), which Hermes refuses in
+        ``delegate_task`` children. The refusal is the same on every call, so fall back to a
+        read-only DB read only for that message; mutating commands never take this path.
+        """
+        try:
+            return json.loads(self._kanban("list", "--json"))
+        except KanbanError as error:
+            if _DELEGATE_FENCE_MESSAGE not in error.stderr:
+                raise
+            return self._read_board_db(error.argv, _SELECT_TASKS)
+
+    def _show_task(self, task_id: str) -> dict:
+        """``kanban show --json`` as ``{"task": ..., "runs": [...]}`` (same fallback as list)."""
+        try:
+            return json.loads(self._kanban("show", task_id, "--json"))
+        except KanbanError as error:
+            if _DELEGATE_FENCE_MESSAGE not in error.stderr:
+                raise
+            tasks = self._read_board_db(error.argv, _SELECT_TASK, (task_id,))
+            if not tasks:
+                raise KanbanError(error.argv, f"no such task: {task_id}") from None
+            runs = self._read_board_db(error.argv, _SELECT_RUNS, (task_id,))
+            for run in runs:
+                run["metadata"] = json.loads(run["metadata"]) if run["metadata"] else None
+            return {"task": tasks[0], "runs": runs}
+
+    def _board_db_path(self) -> Path:
+        """``<root>/kanban/boards/<slug>/kanban.db`` (hermes-facts A2); root as Hermes resolves it."""
+        if override := self._env.get("HERMES_KANBAN_HOME", "").strip():
+            root = Path(override).expanduser()
+        elif home := self._env.get("HERMES_HOME", "").strip():
+            home_path = Path(home).expanduser()
+            root = home_path.parent.parent if home_path.parent.name == "profiles" else home_path
+        else:
+            root = Path.home() / ".hermes"
+        if self.board == "default":
+            return root / "kanban.db"
+        return root / "kanban" / "boards" / self.board / "kanban.db"
+
+    def _read_board_db(self, argv: list[str], query: str, params: tuple = ()) -> list[dict]:
+        db_path = self._board_db_path()
+        if not db_path.exists():
+            raise KanbanError(argv, f"board {self.board!r} does not exist")
+        connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            return [dict(row) for row in connection.execute(query, params)]
+        finally:
+            connection.close()
+
     @staticmethod
     def _parse_spec(task: dict) -> CardSpec:
         """The CardSpec in the task body; ValueError for a task we did not create."""
@@ -92,7 +157,7 @@ class KanbanQueue:
     def board_exists(self) -> bool:
         """False when Hermes reports the board missing (A2: its DB or list entry is gone)."""
         try:
-            self._kanban("list", "--json")
+            self._list_tasks()
         except KanbanError as error:
             if "does not exist" in error.stderr:
                 return False
@@ -120,7 +185,7 @@ class KanbanQueue:
         self._kanban("assign", task_id, assignee or "none")
 
     def get(self, task_id: str) -> Card:
-        shown = json.loads(self._kanban("show", task_id, "--json"))
+        shown = self._show_task(task_id)
         task = shown["task"]
         try:
             spec = self._parse_spec(task)
@@ -140,7 +205,7 @@ class KanbanQueue:
         Costs one ``show`` per card because the list JSON carries no runs.
         """
         cards = []
-        for task in json.loads(self._kanban("list", "--json")):
+        for task in self._list_tasks():
             if state is not None and _STATE_BY_STATUS[task["status"]] != state:
                 continue
             try:

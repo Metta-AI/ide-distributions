@@ -7,6 +7,7 @@ from the real Hermes v0.21.5 output recorded in docs/plans/findings/hermes-facts
 """
 
 import json
+import sqlite3
 import stat
 from dataclasses import asdict
 
@@ -291,3 +292,84 @@ def test_hermes_home_passed_in_environment(tmp_path):
 
     KanbanQueue("b", "p", run=run, hermes_home=tmp_path).ensure_board()
     assert seen["HERMES_HOME"] == str(tmp_path)
+
+
+# -- read-only commands inside a Hermes delegate_task child --
+
+FENCE_ERROR = "kanban: delegate_task child contexts cannot mutate Kanban tasks or boards"
+
+
+@pytest.fixture
+def fenced(fake, tmp_path, monkeypatch):
+    """Hermes refuses list/show (as in a delegate child); the board DB is on disk."""
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    home = tmp_path / "hermes-home"
+    db_path = home / "kanban" / "boards" / "board1" / "kanban.db"
+    db_path.parent.mkdir(parents=True)
+    db = sqlite3.connect(db_path)
+    db.executescript(
+        "CREATE TABLE tasks (id TEXT, title TEXT, body TEXT, assignee TEXT, status TEXT,"
+        " priority INTEGER);"
+        "CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,"
+        " outcome TEXT, metadata TEXT);"
+    )
+    body = json.dumps(asdict(SPEC))
+    db.executemany(
+        "INSERT INTO tasks VALUES (?, 'Probe', ?, ?, ?, 33)",
+        [
+            ("t_ready", body, None, "ready"),
+            ("t_run", body, "prof", "running"),
+            ("t_gone", body, None, "archived"),
+            ("t_foreign", "not json", None, "ready"),
+        ],
+    )
+    db.executemany(
+        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?)",
+        [
+            (1, "t_run", 5, "completed", '{"outcome": "dropped"}'),
+            (2, "t_run", None, None, None),
+        ],
+    )
+    db.commit()
+    db.close()
+    for command in ("list", "show"):
+        fake.reply(command, code=1, stderr=FENCE_ERROR)
+    return KanbanQueue("board1", "prof", hermes_home=home)
+
+
+def test_list_in_delegate_child_reads_the_board_db(fenced):
+    cards = {card.task_id: card for card in fenced.list()}
+    assert set(cards) == {"t_ready", "t_run"}  # archived hidden, foreign body skipped
+    assert cards["t_ready"].state == "pending"
+    assert cards["t_run"].assignee == "prof"
+    assert [(r.run_id, r.terminal, r.outcome) for r in cards["t_run"].runs] == [
+        ("1", True, "dropped"),
+        ("2", False, None),
+    ]
+    assert fenced.list("pending")[0].task_id == "t_ready"
+
+
+def test_get_in_delegate_child_reads_the_board_db(fenced):
+    assert fenced.get("t_ready").spec == SPEC
+    with pytest.raises(KanbanError, match="no such task"):
+        fenced.get("t_missing")
+    with pytest.raises(KanbanError, match="no autoresearch card body"):
+        fenced.get("t_foreign")
+
+
+def test_board_exists_in_delegate_child(fenced, tmp_path):
+    assert fenced.board_exists()
+    other = KanbanQueue("nope", "prof", hermes_home=tmp_path / "hermes-home")
+    assert not other.board_exists()
+
+
+def test_mutations_are_never_routed_around_the_fence(fenced, fake):
+    fake.reply("assign", code=1, stderr=FENCE_ERROR)
+    with pytest.raises(KanbanError, match="cannot mutate"):
+        fenced.assign("t_ready", "prof")
+
+
+def test_other_list_failures_are_not_swallowed(fake, queue):
+    fake.reply("list", code=1, stderr="kanban: database is locked")
+    with pytest.raises(KanbanError, match="locked"):
+        queue.list()
