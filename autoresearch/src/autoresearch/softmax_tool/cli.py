@@ -41,6 +41,11 @@ mutating call. The profile ``.env`` is read only to refuse: when it sets ``IDENT
 to other values (the operator changed the player since this worker started, and the next
 preflight pauses the agent), every command fails with ``identity``. The ``.env`` is never a
 source of identity, because a worker could write it.
+
+Prints one JSON envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false, "error": {"reason",
+"message", "details"?}}``. Exit codes: 0 done (including a credit denial), 1 refused or failed
+(``identity``, a guard's reason, ``platform``, ...), 2 bad arguments or no profile context,
+3 the pinned softmax/coworld executable is missing.
 """
 
 import argparse
