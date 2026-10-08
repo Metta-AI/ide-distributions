@@ -35,3 +35,22 @@ Verified 2026-10-07 against coworld 0.1.57, softmax-cli 0.26.38 (both pinned in 
 ## Policy identifiers
 - `upload-policy` and `submit` have no `--json` and work with `<name>:v<N>` labels, so the real client uses the label as `policy_version_id` (upload returns it, submit takes it, `leaderboard_champion` returns it). Rows from `submissions` carry both `policy_version.id` (UUID) and `policy_version.label`.
 - `submit` without `--player` lets the server pick the account's default player, so the client always passes `--player $AUTORESEARCH_PLAYER_ID`.
+
+## Player read of league episodes (2026-10-07)
+
+Probe of whether a Player-only credential (Games Bond, `ply_f39295d0-…`, no `--elevated`) can read league episodes of GotA (`league_3c60897b-…`). Pinned `uv run --locked coworld` (0.1.57) with an isolated temp HOME holding only the user token; `coworld player use` then `softmax status` showed `subject_type: player`, `subject_id: ply_f39295d0-…`. The real `~/.softmax/credentials.yaml` sha256 was identical before and after; the temp HOME was deleted. Read-only commands only.
+
+| # | Command | Exit | Data? | Fields seen (redacted) |
+|---|---|---|---|---|
+| 1 | `coworld rounds --league <L> --status completed --limit 3 --json` | 0 | yes | `entries[]` with `id` (`round_…`), `round_number` (1320), `round_config.entrant_attributions[]` (subject_id, policy_version_id) |
+| 2 | `coworld episodes --round <round_id> --limit 5 --json` | 0 | yes, 5 rows, all `completed` | `id` (`ereq_…`), `status`, `coworld_id`, `round_id`, `policy_version_ids`, `replay_url` (signed, not recorded) |
+| 3 | `coworld episodes <ereq_id> --json` | 0 | yes | `coworld_version` (2026.10.7.2), `variant_name` (Competition), `game_config.seed` (2026, config value), top-level `seed` null, `participants[]` (position, `label` such as `pawgod:v27`, `policy_version_id`, `player_name`, `is_filler`), `scores[]` and `participant_scores[]` per seat |
+| 4 | `coworld episode-results <ereq_id>` (no `--json`; prints JSON) | 0 | yes | `scores` (10 ints), `ticks`, `seed` (per-episode, e.g. 1450878938), `outcome` (`BlueTeam`), `banked_gold`, `returned`, `total_xp` (10 ints) |
+| 5 | `coworld episode-stats <ereq_id> --json` | 0 | yes | `policy_stats[]` with position, policy_version_id, policy_name/version, `avg_reward`; `game_stats` empty |
+
+Notes:
+- The episodes were not owned by Games Bond (other players' ladder round), so the COOKBOOK claim that `episode-results` is team-only and per-episode lookup is owner-only does not hold for coworld 0.1.57 against the live platform: no 403 anywhere.
+- Two seeds exist: `game_config.seed` (2026) is a config value; the real per-episode seed is `results.json` `seed`. Use the latter for noise calibration. The detail row's top-level `seed` was null in this sample.
+- Seat order is `participants[].position`, which lines up with the 10-element arrays in `episode-results`.
+
+**Verdict: PASS.** A Player-only credential can list rounds, list episodes per round, and read per-episode detail, results.json (seed, scores, outcome, total_xp) and per-seat policy ids and labels for league episodes. The `league_episodes` path in `client.py` is viable as a Player.
