@@ -10,7 +10,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 3. Abort a stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
-5. ``process_handoffs`` with publication (C3, C5). Staged messages the publisher skipped
+5. ``process_handoffs`` with publication (C3, C5), then the MEMORY.md snapshot
+   (``memory_snapshot``). Staged messages the publisher skipped
    (invalid envelope) are reported once each by a runtime note (marker
    ``ledger/skipped-staged/<M-id>.json``).
 6. KB: lint ``analyze`` + ``apply``, compaction (claims pending re-verification are kept), and
@@ -90,6 +91,7 @@ from autoresearch.runtime.blocked import handle_blocked
 from autoresearch.runtime.bootstrap import REPO_ROOT, BootstrapResult, bootstrap
 from autoresearch.runtime.briefing import BriefingInputs
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of
+from autoresearch.runtime.memory_snapshot import snapshot_memory
 from autoresearch.runtime.merge import find_orphan_done, process_handoffs
 from autoresearch.runtime.pause import is_paused, pause, pause_path, resume
 from autoresearch.runtime.planning import planning_request
@@ -592,6 +594,7 @@ def _run_steps(
     run.handoffs = (
         _step(run, ctx, "handoffs", process_handoffs, ctx, queue, store, publish=publish) or []
     )
+    _step(run, ctx, "memory_snapshot", snapshot_memory, ctx)
     _step(run, ctx, "skipped_staged", report_skipped, canonical, run.published, allow_no_remote)
     _step(run, ctx, "kb", kb_step, canonical, now)
     _step(run, ctx, "push", push_early, canonical)

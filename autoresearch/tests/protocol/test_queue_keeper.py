@@ -71,6 +71,19 @@ def test_identity_failure_on_the_first_tick_pauses_and_asks_for_help(tmp_path):
     assert card.spec.mode == "planning" and card.assignee == PROFILE
 
 
+def test_tick_snapshots_hermes_memory_into_canonical(host):
+    host.tick(at(0))
+    memory = host.home / "memories" / "MEMORY.md"
+    memory.parent.mkdir(exist_ok=True)
+    memory.write_text("lesson one\n")
+
+    run = host.tick(at(1))
+
+    assert run.failures == {}
+    assert gitops.show(host.canonical, "HEAD", ".supervisor/hermes-memory.md") == b"lesson one\n"
+    assert host.remote_head() == host.head()  # pushed with main
+
+
 # --- the full scripted timeline ---
 
 
