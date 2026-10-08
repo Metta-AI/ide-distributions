@@ -20,8 +20,8 @@ a second time; it never skips straight to a repair.
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoresearch.comms.publisher import OUTBOX_DIR, publish_runtime
-from autoresearch.io.docs import read_json, write_json
+from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
 from autoresearch.runctx import RunContext
@@ -44,14 +44,6 @@ class BlockedAction:
 
 def blocked_marker_path(canonical: Path, task_id: str) -> Path:
     return ledger_of(canonical) / "health" / "blocked" / f"{task_id}.json"
-
-
-def _outbox_has(canonical: Path, title: str) -> bool:
-    for path in (Path(canonical) / OUTBOX_DIR).glob("*.json"):
-        message = read_json(path)
-        if isinstance(message, dict) and message.get("title") == title:
-            return True
-    return False
 
 
 def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction:
@@ -95,7 +87,7 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
             )
             commit_runtime_request(canonical, repair_blocked_marker(task_id), spec)
             request_id = marked_request(canonical, repair_blocked_marker(task_id)).stem
-        if not _outbox_has(canonical, title):
+        if not outbox_has_title(canonical, title, exact=True):
             follow_up = (
                 f"Repair request {request_id} redoes its work."
                 if request_id
@@ -106,7 +98,16 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
                 f"runtime requeued it. {follow_up} Please check the Hermes logs for the cause "
                 f"(credentials, circuit breaker) and fix it."
             )
-            publish_runtime(canonical, "help_request", title, body, [], allow_no_remote)
+            publish_runtime(
+                canonical,
+                "help_request",
+                title,
+                body,
+                [],
+                allow_no_remote,
+                priority=REPAIR_PRIORITY,
+                expects_response=True,
+            )
         marker = blocked_marker_path(canonical, task_id)
         write_json(marker, record | {"state": REPAIRED, "repair_request": request_id})
         commit(canonical, [marker], f"health: blocked card {task_id} needs repair")

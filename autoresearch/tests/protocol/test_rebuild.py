@@ -272,7 +272,7 @@ def test_rebuild_lifecycle_cards(host, tmp_path):
         f"upload:{built}@{epoch}",
         f"launch:{uploaded}:1",  # launch_attempts + 1: the attempt about to be made
         f"launch:{awaiting}:3",
-        f"review:{evaluated}",
+        f"review:{evaluated}:n0",  # n: the XP requests in the record (none recorded here)
         f"promote:{promote}@{epoch}",
         f"planning:rebuild:{epoch}",
     }

@@ -71,7 +71,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoresearch.comms.publisher import OUTBOX_DIR, publish_runtime
+from autoresearch.comms.publisher import outbox_has_title, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -488,14 +488,6 @@ def _escalated_episode(canonical: Path, key: str) -> dict | None:
     return max(episodes, key=lambda marker: marker["first_seen"]) if episodes else None
 
 
-def _outbox_has(canonical: Path, text: str) -> bool:
-    for path in (Path(canonical) / OUTBOX_DIR).glob("*.json"):
-        message = read_json(path)
-        if isinstance(message, dict) and text in str(message.get("title", "")):
-            return True
-    return False
-
-
 def _escalate(ctx: RunContext, signal: Signal, first_iteration: int, allow_no_remote: bool):
     """Publish one runtime help_request for this episode of ``signal`` and commit its marker
     (once per episode). Takes the canonical lock."""
@@ -507,7 +499,7 @@ def _escalate(ctx: RunContext, signal: Signal, first_iteration: int, allow_no_re
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not _outbox_has(canonical, prefix):
+        if not outbox_has_title(canonical, prefix):
             body = (
                 f"The self-monitoring signal {signal.key} first fired at {signal.first_seen} and "
                 f"still fires {signal.count - 1} iterations later, after the agent's response. "

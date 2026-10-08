@@ -8,12 +8,15 @@ Every runtime job builds markers here, never by hand.
 - ``launch:<E>:<attempt>``: the XP launch about to be made; ``attempt`` is
   ``lifecycle.launch_attempts + 1`` (C12). The card runs ``xp recover`` first, so a repeated
   launch never duplicates an XP request.
-- ``launch:<E>:<attempt>:r<denials>``: xp-poll's relaunch of an ``awaiting-credits``
-  experiment after its ``denials``-th consecutive credit denial (A10). A denial does not
-  count as a launch, so the relaunch reuses the attempt (creating only the missing requests);
-  the denial count keeps each relaunch's marker distinct.
-- ``review:<E>``: review a completed evaluation. No epoch: the open-request coverage check
-  prevents a second card while one is open.
+- ``launch:<E>:<attempt>:after:<next_launch_after>``: xp-poll's relaunch of an
+  ``awaiting-credits`` experiment (A10). A denial does not count as a launch, so the relaunch
+  reuses the attempt (creating only the missing requests). The key is the denial itself:
+  ``lifecycle.next_launch_after`` is set anew by every denial, so each denial gets exactly one
+  relaunch. (``credit_denials`` would not do: it resets after a successful batch, so a later
+  denial would repeat an old marker and never be relaunched.)
+- ``review:<E>:n<count>``: review a completed evaluation; ``count`` is the number of entries
+  in the experiment's ``xp_requests``, so a later batch gets its own review. The open-request
+  coverage check still prevents a second card while one is open.
 - ``build:<E>@<epoch>``, ``upload:<E>@<epoch>``, ``promote:<E>@<epoch>``: lifecycle steps
   that only a board rebuild requests; the epoch lets a later rebuild ask again.
 - ``calibrate:<game_version>``: the C10 calibration card.
@@ -30,8 +33,8 @@ def launch_marker(experiment: str, next_attempt: int) -> str:
     return f"launch:{experiment}:{next_attempt}"
 
 
-def relaunch_marker(experiment: str, attempt: int, denials: int) -> str:
-    return f"launch:{experiment}:{attempt}:r{denials}"
+def relaunch_marker(experiment: str, attempt: int, next_launch_after: str) -> str:
+    return f"launch:{experiment}:{attempt}:after:{next_launch_after}"
 
 
 def next_launch_attempt(experiment: dict) -> int:
@@ -39,8 +42,9 @@ def next_launch_attempt(experiment: dict) -> int:
     return int((experiment.get("lifecycle") or {}).get("launch_attempts", 0)) + 1
 
 
-def review_marker(experiment: str) -> str:
-    return f"review:{experiment}"
+def review_marker(experiment: dict) -> str:
+    """The review marker of ``experiment`` (its record) for its current XP requests."""
+    return f"review:{experiment['id']}:n{len(experiment.get('xp_requests') or [])}"
 
 
 def build_marker(experiment: str, epoch: str) -> str:

@@ -66,7 +66,8 @@ def test_blocked_card_is_requeued_once_then_repaired_with_one_help_request(host)
     [request] = [r for r in host.requests() if r["id"] == action.repair_request]
     assert f"[repair-blocked:{card.task_id}]" in request["spec"]["why"]
     assert request["spec"]["mode"] == card.spec.mode
-    assert len(_help(host, card.task_id)) == 1
+    [help_request] = _help(host, card.task_id)
+    assert help_request["expects_response"] and help_request["priority"] == "P1"
 
     assert _check(host, at(4)).blocked == []  # nothing more for this card
     assert len(_help(host, card.task_id)) == 1

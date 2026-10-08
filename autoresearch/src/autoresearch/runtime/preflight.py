@@ -8,14 +8,16 @@ Host config (A3). One gateway per host runs the Kanban dispatcher with the host 
 profile's ``kanban.*`` config. When the profile home is ``<root>/profiles/<name>``, preflight
 reads ``<root>/config.yaml`` (read only) and fails when ``kanban.default_assignee`` is set
 (unassigned cards would run, breaking pause, C7), when ``kanban.dispatch_profiles`` is set and
-leaves out our profile, or when ``kanban.dispatch_in_gateway`` is false. Any other home layout
-skips the check with a warning.
+leaves out our profile, or when ``kanban.dispatch_in_gateway`` is false. A config that cannot
+be read or parsed fails too: pause safety depends on it. Any other home layout skips the
+check with a warning.
 
 OpenRouter (A5). ``GET https://openrouter.ai/api/v1/key`` with the key; ``limit_remaining``
 below ``OPENROUTER_MIN_CREDIT_USD`` fails (Hermes would retry 402s forever). A cron script
 under the gateway never receives provider keys (hermes-facts item 7), so the key comes from
 the environment or else the profile ``.env``. No key, or ``AUTORESEARCH_SKIP_OPENROUTER_CHECK=1``
-(fake-Softmax test runs), skips the check with a warning; a failed request is a warning too.
+(fake-Softmax test runs), skips the check with a warning; a failed request or a response
+without a numeric ``limit_remaining`` is a warning too.
 The key never appears in a reason or warning.
 """
 
@@ -71,8 +73,14 @@ def host_config_problems(hermes_home: Path) -> tuple[list[str], list[str]]:
     if root is None:
         return [], [f"host config not checked: {hermes_home} is not <root>/profiles/<name>"]
     path = root / "config.yaml"
-    config = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
-    kanban = (config or {}).get("kanban") or {}
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
+        return [f"host config {path} cannot be read: {type(error).__name__}: {error}"], []
+    config = config or {}
+    if not isinstance(config, dict) or not isinstance(config.get("kanban") or {}, dict):
+        return [f"host config {path} is not a mapping with a kanban mapping"], []
+    kanban = config.get("kanban") or {}
     profile = Path(hermes_home).name
     reasons = []
     if kanban.get("default_assignee"):
@@ -119,11 +127,12 @@ def openrouter_problems(
     try:
         payload = json.loads(http_get(OPENROUTER_KEY_URL, {"Authorization": f"Bearer {key}"}))
         remaining = (payload.get("data") or {}).get("limit_remaining")
+        remaining = None if remaining is None else float(remaining)
     except Exception as error:  # noqa: BLE001 - a lookup failure must not pause the agent
         return [], [f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
-    if remaining is not None and float(remaining) < OPENROUTER_MIN_CREDIT_USD:
+    if remaining is not None and remaining < OPENROUTER_MIN_CREDIT_USD:
         reason = (
-            f"OpenRouter key has ${float(remaining):.2f} left, below "
+            f"OpenRouter key has ${remaining:.2f} left, below "
             f"${OPENROUTER_MIN_CREDIT_USD:.0f}: top it up (A5)"
         )
         return [reason], []

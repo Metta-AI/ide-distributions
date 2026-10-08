@@ -183,3 +183,22 @@ def test_openrouter_request_failure_is_a_warning(tmp_path):
     result = host_run(tmp_path, None, env={"OPENROUTER_API_KEY": "sk-x"}, http_get=http)
     assert result.ok and any("network down" in w for w in result.warnings)
     assert not any("sk-x" in w for w in result.warnings)
+
+
+def test_malformed_host_config_fails(tmp_path):
+    home = tmp_path / "root" / "profiles" / "autoresearch"
+    home.mkdir(parents=True)
+    for index, text in enumerate(("kanban: [unclosed\n", "- a list\n", "kanban: 3\n")):
+        (tmp_path / "root" / "config.yaml").write_text(text)
+        env = {"AUTORESEARCH_PLAYER_ID": "ply_a"}
+        sm = FakeSoftmax(tmp_path / str(index), env, clock=lambda: NOW)
+        result = preflight(
+            env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB), hermes_home=home
+        )
+        assert not result.ok and any("host config" in r for r in result.reasons), text
+
+
+def test_non_numeric_openrouter_limit_is_a_warning(tmp_path):
+    http = FakeHttp({"data": {"limit_remaining": "lots"}})
+    result = host_run(tmp_path, None, env={"OPENROUTER_API_KEY": "sk-x"}, http_get=http)
+    assert result.ok and any("OpenRouter credit unavailable" in w for w in result.warnings)

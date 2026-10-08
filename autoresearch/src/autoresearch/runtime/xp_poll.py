@@ -26,14 +26,15 @@ uncommitted are rewritten (an uncommitted index entry for the request is replace
 duplicated).
 
 ``evaluating``: review. When every latest request is terminal (completed or failed) and each
-completed one has evidence, one runtime review request (marker ``review:<E>``, P1, refs the
+completed one has evidence, one runtime review request (marker ``review:<E>:n<count of xp_requests>``, P1, refs the
 experiment) is committed, unless an open request already covers the experiment.
 
 ``awaiting-credits``: relaunch (A10). When ``lifecycle.next_launch_after`` has passed (the
 softmax tool sets it on a credit denial: 30 minutes, doubling, capped at 8 hours), the credit
 balance is not known to be 0 (only FakeSoftmax can read it; a Player credential cannot), and
 no open request covers the experiment, one runtime launch request with marker
-``launch:<E>:<attempt>:r<credit_denials>`` (``markers.relaunch_marker``). The card runs
+``launch:<E>:<attempt>:after:<next_launch_after>`` (``markers.relaunch_marker``: one relaunch
+per denial). The card runs
 ``xp recover`` and then ``xp create`` with the same attempt, which creates only the requests
 still missing, so a relaunch never duplicates an XP request.
 
@@ -207,6 +208,19 @@ class _Fetched:
     game_version: str
 
 
+def _arm_policy(experiment: dict, design: EvaluationDesign, handle: XpHandle) -> str:
+    """The policy version the request's arm ran. Raises rather than guess: rows labelled with
+    the wrong policy would silently corrupt the paired comparison."""
+    if handle.arm == "baseline":
+        return design.baseline_version
+    if handle.arm != "candidate":
+        raise ValueError(f"XP {handle.request_id} has unknown arm {handle.arm!r}")
+    policy = (experiment.get("candidate_binding") or {}).get("platform_policy_version_id")
+    if not policy:
+        raise ValueError(f"{experiment['id']} has no candidate_binding policy version")
+    return policy
+
+
 def _fetch(
     ctx: RunContext,
     sm: Softmax,
@@ -225,11 +239,7 @@ def _fetch(
     if not results_paths:
         raise ArtifactsIncomplete(f"XP {handle.request_id} has no results.json yet")
     design = EvaluationDesign.from_dict(experiment["evaluation_design"])
-    policies = {
-        "candidate": (experiment.get("candidate_binding") or {}).get("platform_policy_version_id"),
-        "baseline": design.baseline_version,
-    }
-    policy = policies.get(handle.arm) or policies["candidate"]
+    policy = _arm_policy(experiment, design, handle)
     files, rows = [], []
     game_version = ""
     for path in results_paths:
@@ -305,8 +315,9 @@ def _experiment_refs(experiment: dict) -> list[str]:
 
 
 def _request_review(
-    canonical: Path, experiment_id: str, completed: int, failed: int
+    canonical: Path, experiment: dict, completed: int, failed: int
 ) -> CardSpec | None:
+    experiment_id = experiment["id"]
     why = (
         f"The XP requests of {experiment_id} finished: {completed} completed, {failed} failed. "
         f"Episode rows are in {EVIDENCE_XP_DIR}/{experiment_id}/*/rows.jsonl (evidence index "
@@ -327,7 +338,7 @@ def _request_review(
     with canonical_lock(canonical):
         if _covered(canonical, experiment_id):
             return None
-        return commit_runtime_request(canonical, review_marker(experiment_id), spec)
+        return commit_runtime_request(canonical, review_marker(experiment), spec)
 
 
 def _credits_known_zero(sm: Softmax) -> bool:
@@ -342,12 +353,13 @@ def _request_relaunch(
 ) -> CardSpec | None:
     lifecycle = experiment.get("lifecycle") or {}
     after = _parse_time(lifecycle.get("next_launch_after"))
-    if after is not None and now < after:
-        return None
-    if _credits_known_zero(sm):
+    if after is None:  # the softmax tool sets it with every denial
+        raise ValueError(f"{experiment['id']} is awaiting-credits without next_launch_after")
+    if now < after or _credits_known_zero(sm):
         return None
     denials = int(lifecycle.get("credit_denials", 0))
-    marker = relaunch_marker(experiment["id"], next_launch_attempt(experiment), denials)
+    attempt = next_launch_attempt(experiment)
+    marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
     reason = f"relaunch after credit denial {denials}; the backoff has passed"
     marker, title, why, mode = launch_step(experiment, reason, marker)
     spec = CardSpec("", title, mode, why, _experiment_refs(experiment), RUNTIME, CARD_PRIORITY)
@@ -402,7 +414,7 @@ def poll_experiment(
         )
         if all(state in TERMINAL for state in states) and evidenced:
             review = _request_review(
-                canonical, experiment_id, states.count("completed"), states.count("failed")
+                canonical, experiment, states.count("completed"), states.count("failed")
             )
             if review is not None:
                 result.reviews.append(review)

@@ -3,6 +3,7 @@ card when an evaluation finishes, and relaunch of ``awaiting-credits`` experimen
 credit backoff with no duplicate XP request."""
 
 import argparse
+import dataclasses
 import datetime
 import json
 
@@ -22,7 +23,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import xp_poll
-from autoresearch.runtime.markers import relaunch_marker, review_marker
+from autoresearch.runtime.markers import relaunch_marker
 from autoresearch.softmax_tool import cli as softmax_cli
 from autoresearch.softmax_tool.protocol import XpStatus
 from autoresearch.softmax_tool.xp import ArtifactsIncomplete
@@ -86,7 +87,7 @@ def _rows(host: Host, experiment: str) -> list[EpisodeRow]:
 
 
 def _review_requests(host: Host, experiment: str) -> list[dict]:
-    marker = f"[{review_marker(experiment)}]"
+    marker = f"[review:{experiment}:n"
     return [r for r in host.requests() if marker in r.get("spec", {}).get("why", "")]
 
 
@@ -192,6 +193,35 @@ def test_unknown_status_keeps_polling_and_incomplete_artifacts_retry(host):
     assert len(third.evidence) == 1 and len(third.reviews) == 1
 
 
+class UnknownArm:
+    """FakeSoftmax whose recovered requests carry an arm the design does not have."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def xp_recover(self, experiment):
+        return [dataclasses.replace(h, arm=None) for h in self.inner.xp_recover(experiment)]
+
+
+def test_unknown_arm_or_missing_binding_fails_instead_of_mislabelling(host):
+    experiment = _experiment(host, "evaluating")
+    _launch_all(host, experiment)
+
+    unknown = _poll(host, at(1), UnknownArm(host.sm))
+    assert "unknown arm" in unknown.failures[experiment] and unknown.evidence == []
+
+    assert _evidence(host) == []
+
+    # The record store refuses to unset a binding, so check the lookup itself.
+    [handle, *_] = host.sm.xp_recover(experiment)
+    unbound = {"id": experiment, "candidate_binding": None}
+    with pytest.raises(ValueError, match="candidate_binding"):
+        xp_poll._arm_policy(unbound, DESIGN, dataclasses.replace(handle, arm="candidate"))
+
+
 # --- awaiting-credits: relaunch after the backoff, no duplicate XP ---
 
 
@@ -226,7 +256,9 @@ def test_credit_denial_relaunches_after_backoff_without_duplicate_xp(host, monke
     _set_fake_state(host, credits=100)
     due = _poll(host, backoff_end + datetime.timedelta(minutes=2))
     [launch] = due.launches
-    assert f"[{relaunch_marker(experiment, 1, 1)}]" in launch.why
+    assert f"[{relaunch_marker(experiment, 1, meta['lifecycle']['next_launch_after'])}]" in (
+        launch.why
+    )
     assert "xp recover" in launch.why and "--attempt 1" in launch.why
     assert _poll(host, backoff_end + datetime.timedelta(minutes=3)).launches == []  # once
 
@@ -244,3 +276,79 @@ def test_credit_denial_relaunches_after_backoff_without_duplicate_xp(host, monke
     final = _poll(host, backoff_end + datetime.timedelta(minutes=6))
     assert len(final.evidence) == 2 and len(final.reviews) == 1
     assert len(_evidence(host)) == len(planned)
+
+
+class _Clock(datetime.datetime):
+    """Stands in for the softmax tool's ``datetime``, so each denial's backoff is distinct."""
+
+    current = T0
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.current
+
+
+def _relaunch_and_merge(host: Host, experiment: str, batch: int, now: datetime.datetime):
+    """xp-poll requests the relaunch; queue-keeper admits it; the worker relaunches batch
+    ``batch`` (same attempt) and the card merges. Returns the relaunch request."""
+    _set_fake_state(host, credits=100)
+    [launch] = _poll(host, now).launches
+    host.tick(now + datetime.timedelta(minutes=1))
+    worker = host.claim("experimentation")
+    assert worker.card.spec.request_id == launch.request_id
+    args = argparse.Namespace(experiment=experiment, batch=batch, attempt=1, batches=2)
+    assert not softmax_cli._xp_create(worker.ctx, host.sm, args)["credit_denied"]
+    worker.finish()
+    host.tick(now + datetime.timedelta(minutes=2))
+    return launch
+
+
+def _review_and_merge(host: Host, now: datetime.datetime) -> list:
+    """xp-poll requests the review; its card is admitted, worked and merged."""
+    reviews = _poll(host, now).reviews
+    host.tick(now + datetime.timedelta(minutes=1))
+    host.claim("experimentation").finish()
+    host.tick(now + datetime.timedelta(minutes=2))
+    return reviews
+
+
+def test_each_denial_gets_its_own_relaunch_and_each_batch_its_own_review(host, monkeypatch):
+    """credit_denials resets after a successful batch, so a later denial must not reuse an
+    earlier relaunch's marker (it would never be relaunched); a later batch gets its own
+    review."""
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    monkeypatch.setattr(softmax_cli, "datetime", _Clock)
+    experiment = _experiment(host, "uploaded")
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+
+    def deny(batch: int, at_time: datetime.datetime) -> datetime.datetime:
+        _Clock.current = at_time
+        _set_fake_state(host, credits=1)
+        args = argparse.Namespace(experiment=experiment, batch=batch, attempt=1, batches=2)
+        assert softmax_cli._xp_create(launcher, host.sm, args)["credit_denied"]
+        gitops.commit_all(host.canonical, f"launch batch {batch}: credit denied")
+        meta, _ = host.store.load(experiment)
+        assert meta["status"] == "awaiting-credits"
+        assert meta["lifecycle"]["credit_denials"] == 1  # reset by the success in between
+        return datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+
+    # Batch 1: denied, relaunched, reviewed.
+    first_backoff = deny(1, at(1))
+    first = _relaunch_and_merge(host, experiment, 1, first_backoff + datetime.timedelta(minutes=1))
+    assert f"[{relaunch_marker(experiment, 1, first_backoff.isoformat())}]" in first.why
+    [review_1] = _review_and_merge(host, first_backoff + datetime.timedelta(minutes=10))
+    assert f"[review:{experiment}:n2]" in review_1.why
+
+    # Batch 2: denied again much later; the new denial gets a new relaunch.
+    second_backoff = deny(2, at(120))
+    assert second_backoff != first_backoff
+    second = _relaunch_and_merge(
+        host, experiment, 2, second_backoff + datetime.timedelta(minutes=1)
+    )
+    assert second.request_id != first.request_id
+    assert f"[{relaunch_marker(experiment, 1, second_backoff.isoformat())}]" in second.why
+
+    [review_2] = _review_and_merge(host, second_backoff + datetime.timedelta(minutes=10))
+    assert f"[review:{experiment}:n4]" in review_2.why
+    assert len(_review_requests(host, experiment)) == 2

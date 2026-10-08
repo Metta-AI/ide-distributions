@@ -14,6 +14,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
 from autoresearch.runtime import queue_keeper, xp_poll
+from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
 from autoresearch.runtime.signals import KEEPER_STEP_FAILED
 
@@ -146,7 +147,8 @@ def test_full_timeline(host):
     poll = xp_poll.run(host.ctx, host.sm, host.game, at(121), env=host.env)
     assert sorted(poll.evidence) == sorted(h.request_id for h in handles)
     [review] = poll.reviews
-    assert f"[review:{experiment}]" in review.why
+    review_key = review_marker(host.store.load(experiment)[0])
+    assert f"[{review_key}]" in review.why
 
     # Tick 7: the review card (and the new planning card) are admitted.
     run7 = host.tick(at(122))
@@ -170,7 +172,7 @@ def test_full_timeline(host):
             rf"^merge card/{experiment_request} ",
             rf"^runtime request {run6.planning.request_id} \[planning:",
             rf"^xp-poll: evidence EV-\w+ for {handles[0].request_id} ",
-            rf"^runtime request {review.request_id} \[review:{experiment}\]$",
+            rf"^runtime request {review.request_id} \[{re.escape(review_key)}\]$",
             rf"^admit {review.request_id}$",
         ],
         host.subjects(),
@@ -214,6 +216,65 @@ def test_a_failing_step_is_contained_and_becomes_a_signal(host, monkeypatch):
     assert any(s.code == KEEPER_STEP_FAILED and s.entity == "kb" for s in result.signals)
     log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
     assert "step kb failed: ValueError: kb exploded" in log
+
+
+def test_a_raising_preflight_pauses_and_asks_for_help(host, monkeypatch):
+    host.tick(at(0))
+
+    def broken(*args, **kwargs):
+        raise ValueError("limit_remaining is not a number")
+
+    monkeypatch.setattr(queue_keeper, "preflight", broken)
+    result = host.tick(at(1))
+
+    assert result.paused and not result.preflight.ok
+    assert result.preflight.reasons == [
+        "preflight raised: ValueError: limit_remaining is not a number"
+    ]
+    assert result.admitted == []  # nothing is admitted while paused
+    assert len(_help_requests(host, "Agent paused")) == 1
+
+
+def test_a_step_failing_every_run_escalates_once_per_episode(host, monkeypatch):
+    state = {"broken": True}
+
+    def kb(*args, **kwargs):
+        if state["broken"]:
+            raise ValueError("kb exploded")
+
+    monkeypatch.setattr(queue_keeper, "kb_step", kb)
+    for minute in range(4):
+        assert host.tick(at(minute)).escalated == []
+    assert host.tick(at(4)).escalated == ["kb"]  # the 5th consecutive failing run
+    assert host.tick(at(5)).escalated == []
+    [help_request] = _help_requests(host, "step kb failing")
+    assert "kb exploded" in help_request["body"]
+
+    state["broken"] = False
+    host.tick(at(6))  # the episode ends
+    state["broken"] = True
+    for minute in range(7, 12):
+        host.tick(at(minute))
+    assert len(_help_requests(host, "step kb failing")) == 2
+
+
+def test_a_step_failing_for_over_an_hour_escalates(host, monkeypatch):
+    def kb(*args, **kwargs):
+        raise ValueError("kb exploded")
+
+    monkeypatch.setattr(queue_keeper, "kb_step", kb)
+    assert host.tick(at(0)).escalated == []
+    assert host.tick(at(61)).escalated == ["kb"]  # two runs, but failing for more than 1 h
+
+
+def test_repeated_bootstrap_failure_escalates(host, monkeypatch):
+    host.tick(at(0))  # canonical exists, so the help_request can be published
+    failed = queue_keeper.BootstrapResult(ok=False, error="BootstrapError: remote unreadable")
+    monkeypatch.setattr(queue_keeper, "bootstrap", lambda *args, **kwargs: failed)
+    results = [host.tick(at(minute)) for minute in range(1, 7)]
+    assert all(result.exit_code == 1 for result in results)
+    assert [result.escalated for result in results].count(["bootstrap"]) == 1
+    assert len(_help_requests(host, "step bootstrap failing")) == 1
 
 
 def test_stale_merge_head_is_aborted(host):

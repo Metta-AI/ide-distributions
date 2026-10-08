@@ -4,8 +4,9 @@
 Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
-2. ``preflight`` (C6, A3, A5, A10). On failure: pause (C7), one runtime ``help_request`` per
-   pause, and stop (exit 0). No admission while paused.
+2. ``preflight`` (C6, A3, A5, A10). On failure, including a preflight that raises: pause
+   (C7), one runtime ``help_request`` per pause, and stop (exit 0). No admission while
+   paused.
 3. Abort a stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
@@ -33,7 +34,9 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 Failure containment: each step after preflight runs in ``_step``; a step that raises is
 logged to ``.supervisor/runtime/keeper.log`` and becomes a ``keeper_step_failed`` signal
 input, and the run goes on with the later steps. A failed bootstrap stops the run with exit
-1; everything else exits 0. Only one run at a time (``runtime/queue_keeper.run.lock``): a run
+1; everything else exits 0. A step (bootstrap included) that fails in 5 consecutive runs or
+for more than an hour gets one runtime ``help_request`` per failure episode
+(``escalate_step_failures``). Only one run at a time (``runtime/queue_keeper.run.lock``): a run
 that finds it held exits 0 at once.
 
 Each step takes the canonical lock itself (it is not re-entrant); network calls run outside
@@ -53,7 +56,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
-from autoresearch.comms.publisher import OUTBOX_DIR, PublishResult, publish_hook, publish_runtime
+from autoresearch.comms.publisher import (
+    PublishResult,
+    outbox_has_title,
+    publish_hook,
+    publish_runtime,
+)
 from autoresearch.games.loader import Game, load_game
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -104,6 +112,9 @@ PUSH_STATE_FILE = "push_state.json"
 FAILURES_FILE = "keeper_failures.json"
 SIGNAL_LINES_FILE = "signal_lines.json"
 PUSH_FAILURE_LIMIT = 3
+STEP_FAILURES_FILE = "step_failures.json"
+STEP_FAILURE_RUNS = 5  # consecutive failing runs of one step before a help_request ...
+STEP_FAILURE_AGE = datetime.timedelta(hours=1)  # ... or this long failing, whichever first
 REMOTE = "origin"
 PUSH_REFSPECS = ["HEAD:refs/heads/main", "refs/heads/card/*:refs/heads/card/*"]
 GAME_ENV = "AUTORESEARCH_GAME"
@@ -135,6 +146,7 @@ class KeeperRun:
     resumed: list[str] | None = None
     pushed: bool | None = None  # None: no remote (allowed) or the push step failed
     failures: dict[str, str] = field(default_factory=dict)
+    escalated: list[str] = field(default_factory=list)  # steps whose help_request went out
 
     def summary(self) -> dict:
         return {
@@ -180,14 +192,6 @@ def _step(run: KeeperRun, ctx: RunContext, name: str, fn: Callable, *args, **kwa
         return None
 
 
-def _outbox_has(canonical: Path, title: str) -> bool:
-    for path in (Path(canonical) / OUTBOX_DIR).glob("*.json"):
-        message = read_json(path)
-        if isinstance(message, dict) and message.get("title") == title:
-            return True
-    return False
-
-
 # --- pause ---
 
 
@@ -204,7 +208,7 @@ def pause_for_preflight(
     pause(queue, ledger_of(canonical), f"preflight failed: {reasons}")
     with canonical_lock(canonical):
         title = _pause_title(canonical)
-        if _outbox_has(canonical, title):
+        if outbox_has_title(canonical, title, exact=True):
             return
         body = (
             f"queue-keeper preflight failed, so the agent is paused: no new cards start and "
@@ -262,7 +266,7 @@ def report_skipped(canonical: Path, results: list[PublishResult], allow_no_remot
             if committed_json(canonical, marker) is not None:
                 continue
             title = f"Staged message {message_id} was not published"
-            if not _outbox_has(canonical, title):
+            if not outbox_has_title(canonical, title, exact=True):
                 body = (
                     f"The staged message comms/staged/{message_id}.json does not satisfy the "
                     f"message envelope, so it stays unpublished:\n\n"
@@ -343,6 +347,74 @@ def push_step(ctx: RunContext, allow_no_remote: bool) -> bool | None:
         },
     )
     return ok
+
+
+def _publish_step_help(ctx: RunContext, step: str, entry: dict, allow_no_remote: bool) -> None:
+    canonical = ctx.canonical
+    title = f"queue-keeper step {step} failing since {entry['since']}"
+    with canonical_lock(canonical):
+        if outbox_has_title(canonical, title, exact=True):
+            return
+        body = (
+            f"The queue-keeper step {step} has failed in {entry['runs']} consecutive runs "
+            f"since {entry['since']}. Last error: {entry['error']}. The other steps go on, but "
+            f"whatever this step does is not happening. Details are in "
+            f".supervisor/runtime/{LOG_FILE}."
+        )
+        publish_runtime(
+            canonical,
+            "help_request",
+            title,
+            body,
+            [],
+            allow_no_remote,
+            priority="P1",
+            expects_response=True,
+        )
+
+
+def escalate_step_failures(
+    ctx: RunContext,
+    failures: Mapping[str, str],
+    now: datetime.datetime,
+    allow_no_remote: bool,
+    *,
+    all_steps_ran: bool,
+) -> list[str]:
+    """One runtime ``help_request`` per failure episode of a step that keeps failing.
+
+    Signal escalation counts handoff iterations, so a step that fails every run (and may be
+    the reason no handoffs arrive) would never escalate there. This counts runs instead, in
+    ``runtime/step_failures.json``: ``{step: {since, runs, error, help_sent}}``. A step that
+    fails in ``STEP_FAILURE_RUNS`` consecutive runs, or has been failing for more than
+    ``STEP_FAILURE_AGE``, gets one help_request for the episode (title names the step and
+    ``since``; ``help_sent`` and the outbox dedupe it). A run in which the step does not fail
+    ends the episode; steps after preflight only count as not failing when the run got
+    through all of them (not on a paused run). Bootstrap failures count too; their
+    help_request goes out once canonical exists to publish from. Returns the steps escalated.
+    """
+    state = _read_state(ctx, STEP_FAILURES_FILE, {})
+    kept = {step: entry for step, entry in state.items() if step in failures}
+    if not all_steps_ran:  # unknown whether the steps that did not run would have failed
+        kept |= {step: entry for step, entry in state.items() if step != "bootstrap"}
+    escalated = []
+    for step, error in sorted(failures.items()):
+        entry = dict(kept.get(step) or {"since": now.isoformat(), "runs": 0, "help_sent": False})
+        entry["runs"] = int(entry["runs"]) + 1
+        entry["error"] = error
+        since = datetime.datetime.fromisoformat(entry["since"])
+        due = entry["runs"] >= STEP_FAILURE_RUNS or now - since > STEP_FAILURE_AGE
+        if due and not entry["help_sent"] and (ctx.canonical / ".git").exists():
+            try:
+                _publish_step_help(ctx, step, entry, allow_no_remote)
+            except Exception as problem:  # noqa: BLE001 - retried on the next run
+                _log(ctx, f"could not report failing step {step}: {problem}")
+            else:
+                entry["help_sent"] = True
+                escalated.append(step)
+        kept[step] = entry
+    write_json(runtime_dir(ctx) / STEP_FAILURES_FILE, kept)
+    return escalated
 
 
 def _briefing_inputs(
@@ -491,10 +563,10 @@ def _run_steps(
     canonical = ctx.canonical
     try:
         run.preflight = preflight(env, sm, canonical, now, **preflight_kwargs)
-    except Exception as error:  # noqa: BLE001 - a broken preflight stops the run, logged
-        run.failures["preflight"] = f"{type(error).__name__}: {error}"
+    except Exception as error:  # noqa: BLE001 - a preflight that cannot finish has failed
         _log(ctx, f"preflight raised: {error}\n{traceback.format_exc()}")
-        return
+        reason = f"preflight raised: {type(error).__name__}: {error}"
+        run.preflight = PreflightResult(ok=False, reasons=[reason])
     for warning in run.preflight.warnings:
         _log(ctx, f"preflight warning: {warning}")
     if not run.preflight.ok:
@@ -581,6 +653,10 @@ def run(
             if not result.bootstrap.ok:
                 _log(ctx, f"bootstrap failed: {result.bootstrap.error}")
                 result.exit_code = 1
+                result.failures["bootstrap"] = result.bootstrap.error or "unknown error"
+                result.escalated = escalate_step_failures(
+                    ctx, result.failures, now, allow_no_remote, all_steps_ran=False
+                )
                 return result
             if bootstrap_only:
                 return result
@@ -601,6 +677,9 @@ def run(
                 signal_config=signal_config or SignalConfig(),
             )
             write_json(runtime_dir(ctx) / FAILURES_FILE, result.failures)
+            result.escalated = escalate_step_failures(
+                ctx, result.failures, now, allow_no_remote, all_steps_ran=not result.paused
+            )
     except LockTimeout:
         result.skipped = True
     return result

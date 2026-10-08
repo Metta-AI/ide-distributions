@@ -210,3 +210,25 @@ def test_existing_canonical_gets_missing_gitignore_lines(tmp_path):
     assert ".supervisor/runtime/" in (ctx.canonical / ".gitignore").read_text()
     assert gitops.git(ctx.canonical, "status", "--porcelain") == ""
     assert os.path.exists(ctx.canonical / ".git")
+
+
+def test_unreadable_remote_fails_instead_of_seeding(tmp_path):
+    # A network or auth failure must not look like "no main": seeding would diverge from a
+    # remote that may already hold the workspace.
+    ctx, env, _, queue = setup(tmp_path)
+    env["AUTORESEARCH_WORKSPACE_REMOTE"] = str(tmp_path / "unreachable.git")
+    result = run(ctx, env, queue)
+    assert not result.ok and "ls-remote failed" in result.error
+    assert not (ctx.canonical / ".git").exists()
+
+
+def test_relative_remote_is_relative_to_hermes_home(tmp_path, monkeypatch):
+    ctx, env, origin, queue = setup(tmp_path)
+    env["AUTORESEARCH_WORKSPACE_REMOTE"] = "../../origin.git"  # from <tmp>/profiles/autoresearch
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # the job's working directory must not matter
+    result = run(ctx, env, queue)
+    assert result.ok, result.error
+    assert gitops.git(ctx.canonical, "remote", "get-url", "origin") == str(origin.resolve())
+    assert gitops.git(origin, "rev-parse", "main") == gitops.head(ctx.canonical)

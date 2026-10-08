@@ -8,10 +8,13 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    Hermes's ``tirith`` and is never cleaned, A6), and in the profile ``.env``
    ``AUTORESEARCH_CLI`` (the shim's absolute path) and ``HERMES_WRITE_SAFE_ROOT`` (canonical).
 4. The canonical workspace. When it has no git repository: clone it from
-   ``AUTORESEARCH_WORKSPACE_REMOTE`` if the remote has a ``main`` (a new host restoring from
-   the remote), else seed it from ``games/<game>/seed/`` with ``AGENTS.md`` (from
+   ``AUTORESEARCH_WORKSPACE_REMOTE`` (a relative path is relative to ``HERMES_HOME``) if the
+   remote has a ``main`` (a new host restoring from the remote), else seed it from ``games/<game>/seed/`` with ``AGENTS.md`` (from
    ``doctrine/research-agent.md``, or a placeholder until Plan 03 Task 4.1 ships doctrine),
-   ``.gitignore`` and ``.supervisor/ledger/``, then commit and push ``main``. An existing
+   ``.gitignore`` and ``.supervisor/ledger/``, then commit and push ``main``. Only a
+   successful ``ls-remote`` decides between the two: when the remote cannot be read
+   (network, auth), bootstrap fails and the next run retries, so a host never seeds a
+   history that diverges from the remote's. An existing
    workspace only gets missing ``.gitignore`` lines (committed) and an ``origin`` remote when
    it has none.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
@@ -101,11 +104,25 @@ def set_env_lines(path: Path, values: dict[str, str]) -> bool:
     return True
 
 
-def _remote_has_main(remote: str) -> bool:
+def resolve_remote(remote: str, home: Path) -> str:
+    """A relative local path is relative to ``HERMES_HOME`` (never to the job's working
+    directory); URLs (``scheme://``, ``user@host:path``) and absolute paths are unchanged."""
+    if "://" in remote or Path(remote).is_absolute():
+        return remote
+    if ":" in remote.split("/", 1)[0]:  # scp-like host:path
+        return remote
+    return str((Path(home) / remote).resolve())
+
+
+def _remote_has_main(remote: str, home: Path) -> bool:
+    """Whether ``remote`` has a ``main``, answered only by a successful ``ls-remote``. Any
+    git failure (network, auth, missing repository) raises: seeding a fresh workspace when
+    the remote may hold one would create a divergent history. Bootstrap fails and the next
+    run retries."""
     try:
-        output = gitops.git(Path.cwd(), "ls-remote", remote, f"refs/heads/{BRANCH}")
-    except gitops.GitError:
-        return False
+        output = gitops.git(Path(home), "ls-remote", remote, f"refs/heads/{BRANCH}")
+    except gitops.GitError as error:
+        raise BootstrapError(f"cannot read {remote} (ls-remote failed): {error}") from error
     return bool(output.strip())
 
 
@@ -159,8 +176,8 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     missing = [line for line in GITIGNORE_LINES if line not in lines]
     if missing:
-        write_text(path, "\n".join([*lines, *missing]) + "\n")
         with canonical_lock(canonical):
+            write_text(path, "\n".join([*lines, *missing]) + "\n")
             gitops.commit_paths(canonical, [".gitignore"], "bootstrap: .gitignore runtime dirs")
         result.actions.append(f"added {missing} to .gitignore")
     remotes = gitops.git(canonical, "remote").split()
@@ -182,12 +199,14 @@ def _ensure_workspace(
 ) -> None:
     canonical = ctx.canonical
     remote = env.get(REMOTE_ENV) or None
+    if remote:
+        remote = resolve_remote(remote, ctx.hermes_home)
     if (canonical / ".git").exists():
         _update_existing(canonical, remote, result)
         return
     if not remote:
         raise BootstrapError(f"{REMOTE_ENV} is not set: it is required to create the workspace")
-    if _remote_has_main(remote):
+    if _remote_has_main(remote, ctx.hermes_home):
         _clone(canonical, remote, result)
     else:
         _seed(canonical, env.get(GAME_ENV) or DEFAULT_GAME, remote, repo_root, result)

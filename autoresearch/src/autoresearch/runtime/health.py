@@ -27,9 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
-from autoresearch.comms.publisher import OUTBOX_DIR, publish_runtime
+from autoresearch.comms.publisher import outbox_has_title, publish_runtime
 from autoresearch.io import gitops
-from autoresearch.io.docs import read_json
 from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.queue.base import Queue
 from autoresearch.queue.select import queue_from_env
@@ -85,14 +84,6 @@ def credential_problem(sm: Softmax, now: datetime.datetime) -> tuple[str, str] |
     return None
 
 
-def _outbox_has(canonical: Path, title: str) -> bool:
-    for path in (Path(canonical) / OUTBOX_DIR).glob("*.json"):
-        message = read_json(path)
-        if isinstance(message, dict) and message.get("title") == title:
-            return True
-    return False
-
-
 def _report(
     ctx: RunContext, kind: str, problem: str, now: datetime.datetime, result: HealthRun
 ) -> None:
@@ -100,7 +91,7 @@ def _report(
     canonical = ctx.canonical
     title = f"Health: {kind} problem ({now.astimezone(datetime.UTC):%Y-%m-%d})"
     with canonical_lock(canonical):
-        if _outbox_has(canonical, title):
+        if outbox_has_title(canonical, title, exact=True):
             return
         body = (
             f"The health check found a problem: {problem}. Research cards may fail until it "

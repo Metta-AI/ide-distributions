@@ -107,6 +107,18 @@ def _outbox_files(canonical: Path) -> dict[str, tuple[int, Path]]:
     return found
 
 
+def outbox_has_title(canonical: Path, text: str, *, exact: bool = False) -> bool:
+    """True if a published message's title contains ``text`` (equals it, with ``exact``).
+    Runtime jobs use it to avoid publishing the same help_request or note twice when a crash
+    lands between publishing and committing their own dedupe marker."""
+    for _seq, path in _outbox_files(Path(canonical)).values():
+        message = read_json(path)
+        title = str(message.get("title", "")) if isinstance(message, dict) else ""
+        if (title == text) if exact else (text in title):
+            return True
+    return False
+
+
 def receipt_path(canonical: Path, message_id: str) -> Path:
     return canonical / RECEIPTS_DIR / f"{message_id}.json"
 

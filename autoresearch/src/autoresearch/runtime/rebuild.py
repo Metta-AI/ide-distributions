@@ -42,7 +42,7 @@ next run (the unfinished-rebuild rule above brings it back, in the same epoch):
    Markers come from ``runtime.markers`` (shared with queue-keeper and xp-poll). Launch is
    ``launch:<E>:<launch_attempts + 1>`` (the attempt about to be made), and the launch card
    says to run ``xp recover`` before any create, so a rebuilt launch never duplicates an XP
-   request. Review is ``review:<E>``. Build, upload and promote carry the epoch
+   request. Review is ``review:<E>:n<count of xp_requests>``. Build, upload and promote carry the epoch
    (``build:<E>@<epoch>``), so a later rebuild can ask again.
 5. ``promotion.reconcile`` (C8): with the new epoch a dead ``submitted`` holder gets its
    recovery request.
@@ -62,7 +62,7 @@ from pathlib import Path
 import jsonschema
 from ulid import ULID
 
-from autoresearch.comms.publisher import OUTBOX_DIR, publish_runtime
+from autoresearch.comms.publisher import outbox_has_title, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -248,14 +248,6 @@ def problem_marker_path(canonical: Path, request_id: str) -> Path:
     return ledger_of(canonical) / "rebuild-problems" / f"{request_id}.json"
 
 
-def _outbox_has(canonical: Path, text: str) -> bool:
-    for path in (Path(canonical) / OUTBOX_DIR).glob("*.json"):
-        message = read_json(path)
-        if isinstance(message, dict) and text in str(message.get("title", "")):
-            return True
-    return False
-
-
 def _unrecoverable(ctx: RunContext, receipt: dict, allow_no_remote: bool) -> None:
     """A request rebuild must re-admit but cannot (its spec is not committed): publish one
     runtime help_request naming it and close its receipt as ``rejected{reason}``, in one
@@ -271,7 +263,7 @@ def _unrecoverable(ctx: RunContext, receipt: dict, allow_no_remote: bool) -> Non
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not _outbox_has(canonical, title):
+        if not outbox_has_title(canonical, title):
             body = (
                 f"After the work board was lost, request {request_id} (admitted, no handoff) "
                 f"had to be re-admitted, but its spec cards/requests/{request_id}.json is not "
@@ -385,7 +377,7 @@ def _lifecycle_step(
         return None if after is not None and now < after else launch_step(experiment, REBUILT)
     if status == "evaluating" and _xp_completed(sm, eid):
         why = f"The XP requests of {eid} completed (board rebuilt). Review the results."
-        return review_marker(eid), f"Review {eid}", why, "experimentation"
+        return review_marker(experiment), f"Review {eid}", why, "experimentation"
     decision = experiment.get("decision") or {}
     if (
         status == "reviewed"

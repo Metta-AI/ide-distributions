@@ -66,7 +66,7 @@ from pathlib import Path
 import jsonschema
 from ulid import ULID
 
-from autoresearch.comms.publisher import publish_runtime
+from autoresearch.comms.publisher import outbox_has_title, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -784,7 +784,7 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
     canonical = ctx.canonical
     key = f"promote-recover-help:{promotion.id}"
     title = f"Promotion {promotion.id} needs an operator ({key})"
-    if not _outbox_has_title(canonical, key):
+    if not outbox_has_title(canonical, key):
         body = (
             f"Promotion {promotion.id} submitted {promotion.platform_policy_version_id} "
             f"(submission {promotion.submission_id}) for {promotion.experiment}, but "
@@ -799,13 +799,6 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
     updated = replace(promotion, help_requested=True, updated_at=now_iso())
     _save(canonical, updated, f"promotion {promotion.id}: help requested")
     return Action("help_requested", promotion.id, title)
-
-
-def _outbox_has_title(canonical: Path, key: str) -> bool:
-    for path in (Path(canonical) / "comms" / "outbox").glob("*.json"):
-        if key in str(read_json(path).get("title", "")):
-            return True
-    return False
 
 
 def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
