@@ -1,0 +1,13 @@
+replay saved: /coworld/replay (861497 actions)
+result: time limit
+seeds: match 2026, map 54
+simulated: 1300.00 s in 30.5880 s (42.5x real time)
+draft: 100.00 s, battle: 1200.00 s
+gods: red 400 hp, blue 400 hp
+towers: red 9, blue 9
+hash: 00000000203E8B25 map 0000000099EBA3A6
+heroes: red L9 L8 L10 L9 L8, blue L8 L9 L9 L8 L7
+economy: red 14953 XP / 7140 gold, blue 13784 XP / 7215 gold
+xp: red 3004 2380 3600 3381 2588, blue 2472 3363 3450 2536 1963
+scripts: 10/10 active, 288200 decisions
+Coworld episode completed after 31200 ticks.
