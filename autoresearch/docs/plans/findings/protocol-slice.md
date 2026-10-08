@@ -77,11 +77,14 @@ figure lags by minutes, so per-run deltas in the test report can read 0.
 3. **FakeSoftmax `whoami` echoed the expected player** (`6c316b0`), so a wrong
    `AUTORESEARCH_PLAYER_ID` could never fail C6 in fake mode. A fake credential may name its
    player (`player_id`), and `whoami` reports it.
-4. **A running worker kept its old identity** (`4b0525d`). Hermes fixes a worker's env at
-   spawn (verified: a terminal command after a `.env` edit still saw the old value), so after
-   a `.env` change preflight paused the agent while a running worker still acted as before.
-   The softmax tool now reads `SOFTMAX_PLAYER_CREDENTIAL` and `AUTORESEARCH_PLAYER_ID` from
-   `$HERMES_HOME/.env` at each call.
+4. **A running worker kept its old identity** (`4b0525d`, corrected by `5f45ab5`). Hermes
+   fixes a worker's env at spawn (verified: a terminal command after a `.env` edit still saw
+   the old value), so after a `.env` change preflight paused the agent while a running worker
+   still acted as before. The softmax tool keeps its spawn-time identity for `whoami` and the
+   mutating call, and refuses every command (`identity`: "profile identity changed since this
+   worker started") when the profile `.env` sets `SOFTMAX_PLAYER_CREDENTIAL` or
+   `AUTORESEARCH_PLAYER_ID` to other values. (`4b0525d` first read the identity from the
+   `.env`; review found a worker could write that file, so the `.env` may only refuse.)
 5. **Worker commands had no card context** (`63d748c`), the most serious one. Hermes v0.21.5
    removes `HERMES_KANBAN_TASK` and `HERMES_KANBAN_RUN_ID` from every subprocess of a worker
    (`agent/delegation_context.py` `scrub_kanban_env`), under both dispatchers. So
@@ -97,6 +100,19 @@ figure lags by minutes, so per-run deltas in the test report can read 0.
 7. **A planning card's orphan repair was rejected as `planning_owned`** (`175a4cd`; same
    source). Runtime follow-ups (created by the runtime, with an `ar://handoff/` ref) now
    continue the card's planning ownership instead of competing for it.
+
+Review fix round 1 (2026-10-08):
+
+- `5b37ccc`: fix 7 decided by provenance: a request is a runtime follow-up only when the
+  committed handoff record (or orphan marker) names it as `follow_up_request`; card-branch
+  requests with `created_by: runtime` fail handoff validation.
+- `be4897e`: the plugin blocks `python -c` and `execute_code` text that names the profile
+  `.env` (with `HERMES_HOME` or the home path) or `.softmax`; the general interpreter-write
+  gap is listed as residual risk in `plugin/policy.py`.
+- `0b4211f`: the worker record (fix 5) is written first, with `started_at`; a failed write
+  removes the old record and is logged, so a retry never inherits the previous run id;
+  `serial_current.json` wins when it names the same worktree.
+- Run 6 on this code: **PASSED** (8.5 min; 8 sessions; Hermes estimate $0.16).
 
 Test-only issues, fixed in the test: the shell lacks `$HERMES_KANBAN_RUN_ID` (card bodies now
 take RUN and TASK from the briefing), `gitops.show` returns bytes, and `hermes kanban log`
