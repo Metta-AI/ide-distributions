@@ -285,10 +285,12 @@ disposable.
 - **Policy** (`plugin/policy.py`): `kanban_create` and `kanban_link` are refused in every
   agent session, card or not. So is the shell route: `hermes kanban <action>` (also behind
   `env -u`, `bash -c`, `python -m hermes_cli…`, `python -c`/`execute_code` text) for every
-  action that writes the board. The list is Hermes' own delegate-fence list
-  (`hermes_cli/kanban.py` `_DELEGATED_CHILD_DENIED_ACTIONS`, and the `boards` actions in
-  `_DELEGATED_CHILD_DENIED_BOARD_ACTIONS`); our skills use none of them. Reads (`show`, `list`,
-  `boards list`) pass. `config.yaml` `approvals.deny` adds coarse `hermes kanban create*` and
+  action except an allowlist of reads (`list`/`ls`, `show`, `tail`, `watch`, `stats`, `log`,
+  `runs`, `context`, `assignees`, `diagnostics`/`diag`, `attachments`, `notify-list`; after
+  `boards`: `list`/`ls`, `show`/`current`). Writes that Hermes' own fence list misses (such as
+  `set-model`) and actions a newer Hermes adds are refused by default. Our skills use no
+  `hermes kanban` command at all. The policy's residual-risk list names what it cannot see
+  (a `hermes_cli.kanban_db` import, raw sqlite on the board DB, `h=$(which hermes); "$h" …`). `config.yaml` `approvals.deny` adds coarse `hermes kanban create*` and
   `link*` globs. Hermes' delegate fence (`HERMES_DELEGATED_CHILD_CONTEXT` on every worker
   subprocess) is a second layer in card workers only: it is cooperative (`env -u` removes it)
   and absent in non-card sessions. Every refusal names the card-request path:

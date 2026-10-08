@@ -343,12 +343,27 @@ KANBAN_WRITE_COMMANDS = [
     "hermes kanban unlink t_1 t_2",
     """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'create', 'x'])\"""",
     "echo $(hermes kanban create x)",
+    # an allowlist of reads: writes Hermes' fence list misses, and future actions, are refused
+    "hermes kanban set-model t_1 some/model",
+    "hermes kanban some-future-action t_1",
+    "hermes kanban --board create set-model t_1 m",
+    "hermes kanban boards export -o /tmp/x.tar.gz",
+    "hermes kanban boards some-future-action",
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'set-model', 'x'])\"""",
 ]
 KANBAN_READ_COMMANDS = [
     "hermes kanban show t_1 --json",
     "hermes kanban list --status blocked",
+    "hermes kanban ls",
+    "hermes kanban --board autoresearch runs t_1 --json",
+    "hermes -p autoresearch kanban --board=autoresearch context t_1",
+    "hermes kanban diag --json",
+    "hermes kanban tail t_1",
     "hermes kanban boards list",
+    "hermes kanban boards current",
+    "hermes kanban",
     'git commit -m "do not hermes kanban create"',
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'show', 't_1'])\"""",
 ]
 
 
