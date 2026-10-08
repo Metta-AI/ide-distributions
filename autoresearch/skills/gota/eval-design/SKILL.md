@@ -78,6 +78,25 @@ BASIC baseline uses the explicit prebuilt path below;
 local gate success proves mechanism, not hosted strength. Failed/partial evidence
 cannot support a promotion. This design skill does not itself authorize spending.
 
+## Build tool faults
+
+For either compiler or prebuilt builds, read the build JSON and retained reports
+before continuing. A build with `status: errored` is a tool fault, not a strategy
+problem. Stop this build path; do not retry the build or rewrite the candidate or
+STRATEGY to repair it. Preserve the build directory and receipts.
+
+Follow core `communicate`: write `.scratch/build-error.md` with the exact reported
+error (type, message and traceback summary), the absolute build directory, and
+what command was attempted. Stage the request through the shared CLI:
+
+```sh
+"$AUTORESEARCH_CLI" comms stage help_request --title "GotA build tool fault" --body-file .scratch/build-error.md --expects-response
+```
+
+Record the same error, build directory and staged message ID in this card's
+journal. Leave the build path blocked pending a tooling fix; do not treat its
+error as policy evidence or a strategy repair task.
+
 
 ## Missing baseline: exact prebuilt path in the same card
 
@@ -114,6 +133,3 @@ For an already valid built experiment, the existing upload command is:
 "$AUTORESEARCH_CLI" softmax upload <E-id> --build-dir <ABS_FRESH_BUILD>
 "$AUTORESEARCH_CLI" records show <E-id>
 ```
-
-An `errored` build is a tool fault: send a `help_request` with its error and build
-directory, journal the fault, and do not retry or change the strategy to repair it.

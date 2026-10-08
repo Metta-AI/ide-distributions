@@ -35,6 +35,12 @@ Games Bond champion assertion.
 
 ## Procedure and outputs
 
+If the witnessed failure is a build with `status: errored`, it is a tool fault,
+not a strategy problem. Follow `eval-design`'s **Build tool faults** procedure:
+stage a `help_request` with the exact error and absolute build directory, record
+it in the card's journal, and stop without retrying the build or rewriting the
+candidate or STRATEGY. Do not form policy hypotheses from that tooling error.
+
 Use after `replay-inspection`, with core `diagnose`. Start with witness evidence,
 not a low aggregate score. Check the refuted lever before creating another idea:
 
