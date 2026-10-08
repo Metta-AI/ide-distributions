@@ -1692,7 +1692,7 @@
     </table>
 
     <h3>Envelope</h3>
-    <p>Essential fields: <code>id</code>, <code>seq</code>, <code>created</code>, <code>from</code> (<code>research-agent | runtime</code>), <code>iteration</code>, <code>kind</code>, <code>title</code>, a Markdown <code>body</code> for a human, <code>refs[]</code>, <code>priority</code>, <code>expects_response</code>, <code>thread</code>, <code>in_reply_to</code>, <code>supersedes</code>, <code>expires</code>.</p>
+    <p>Essential fields: <code>id</code>, <code>seq</code>, <code>created</code>, <code>from</code> (<code>research-agent | runtime</code>), <code>iteration</code>, <code>kind</code>, <code>title</code>, a Markdown <code>body</code> written for the Preston-role agent, which rephrases it for its human, <code>refs[]</code>, <code>priority</code>, <code>expects_response</code>, <code>thread</code>, <code>in_reply_to</code>, <code>supersedes</code>, <code>expires</code>.</p>
     <p>Messages are immutable. Status is derived: <code>open</code>, <code>answered</code>, <code>withdrawn</code>, or <code>expired</code>.</p>
 
     <h3>References</h3>
@@ -1705,7 +1705,7 @@
       <li><code>seen</code>: <code>ids[]</code>. An adapter uses it to mark messages read. The runtime uses it to tell unread messages from unanswered ones when it escalates.</li>
       <li><code>task</code>: <code>title</code>, <code>mode</code>, <code>why</code>, <code>refs</code>, <code>priority</code>. An external service, for example the IDE through a comms adapter, uses it to request work. The runtime validates it and converts it into a card. The card’s <code>created_by</code> is the message id. The service never writes the queue directly.</li>
     </ul>
-    <p>All four carry <code>author</code> and <code>on_behalf_of</code> (<code>human | agent</code>). The agent acknowledges each <code>reply</code> and <code>steer</code>. It acknowledges a <code>task</code> when the task’s card completes.</p>
+    <p>All four carry <code>author</code>. Every inbound message from the Preston-role agent carries the full authority of the human it serves, because the human never connects to the system directly. The agent acknowledges each <code>reply</code> and <code>steer</code>. It acknowledges a <code>task</code> when the task’s card completes.</p>
   </section>
 
   <!-- ============ 8 ============ -->
@@ -1815,7 +1815,8 @@
         <tr><td>2026-10-06</td><td>Rev 3</td><td>Next actions moved from <code>plan.md</code> into a work queue of cards: Pending, Claimed, or Completed. Up to 2 iterations ran at the same time, with at most one evaluation in flight. Concurrency rules: a worktree per iteration, serial merges, one writer per entity, and a promotion lock. Planning became a fifth mode, and plan handoff became card completion. Also five doctrine rules, the skills <code>complete-card</code>, <code>queue</code>, and <code>groom-queue</code>, the tool <code>queue</code>, and three signals.</td></tr>
         <tr><td>2026-10-06</td><td>Rev 4</td><td>Changes from James’s second review, which approved most proposals. Topics link to any STRATEGY component. Measured metric noise sets δ and N. Planning runs on a fixed schedule. External services request cards with the inbound kind <code>task</code>. Doctrine rules gained IDs and versions. Each card gets its own briefing. Scouting builds opponent models. Several evaluations can run at once, and a credit refusal pauses one. Also stale-claim compaction, globally unique IDs, hub split and merge, and card priorities P0 to P5.</td></tr>
         <tr><td>2026-10-06</td><td>Approved</td><td>James approved the whole document. Status labels left the body. The remaining open questions became the defaults in <a href="#parameters">§10</a>. History, decisions, research, alternatives, and alignment notes moved to these appendices.</td></tr>
-      </tbody>
+              <tr><td>2026-10-07</td><td>Amendment</td><td>Two decisions from the Runtime review: message bodies are written for the Preston-role agent, and Preston&rsquo;s inbound messages carry the human&rsquo;s full authority (the <code>on_behalf_of</code> field is removed). See <a href="#decision-log">Appendix B</a>.</td></tr>
+</tbody>
     </table>
   </section>
 
@@ -1864,7 +1865,9 @@
         <tr><td>Oct 6</td><td>Hubs split on size or topic drift and merge on overlap.</td><td>“Our size limit should be configurable and empirically grounded.”</td><td>Review comment</td></tr>
         <tr><td>Oct 6</td><td>Card priority is an enum, <code>P0</code> to <code>P5</code>.</td><td>“Priority should be an enum, maybe? P0-P5?”</td><td>Review comment</td></tr>
         <tr><td>Oct 6</td><td>James approved the whole document. The remaining open questions became configurable defaults.</td><td>Each open question already had a default. <a href="#parameters">§10</a> lists them.</td><td>James</td></tr>
-      </tbody>
+              <tr><td>Oct 7</td><td>Message bodies are written for the Preston-role agent. Preston rephrases them for the human.</td><td>Preston is the only reader of the outbox. It relays and adapts messages for its human.</td><td>James, Runtime review</td></tr>
+        <tr><td>Oct 7</td><td>Every inbound message from Preston carries the human&rsquo;s full authority. The <code>on_behalf_of</code> field is removed.</td><td>The human never connects to the system directly. Preston acts in the human&rsquo;s place.</td><td>James, Runtime review</td></tr>
+</tbody>
     </table>
   </section>
 

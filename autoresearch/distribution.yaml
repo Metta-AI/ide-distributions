@@ -1,0 +1,37 @@
+name: autoresearch
+version: 0.1.0
+description: Autonomous research agent that improves game policies and reports through a file-based comms interface.
+hermes_requires: ">=0.21.5"
+env_requires:
+  - name: OPENROUTER_API_KEY
+    required: true
+    description: OpenRouter API key for the research model.
+  - name: SOFTMAX_PLAYER_CREDENTIAL
+    required: true
+    description: >-
+      Credential of the Softmax player account the agent acts as, as JSON
+      {"token": "ply_...", "expires_at": "<ISO 8601>"} (one entry of
+      player_sessions.<server>.cache written by `coworld player use <ply_id>`).
+  - name: AUTORESEARCH_PLAYER_ID
+    required: true
+    description: Id of that Softmax player.
+  - name: AUTORESEARCH_WORKSPACE_REMOTE
+    required: true
+    description: Git remote URL of the canonical workspace repository.
+  - name: OPENROUTER_MODEL
+    required: false
+    default: moonshotai/kimi-k3
+    description: Model id on OpenRouter. Overrides the model in config.yaml.
+  - name: AUTORESEARCH_GAME
+    required: false
+    default: gota
+    description: Game to research. A directory name under games/.
+  - name: AUTORESEARCH_QUEUE
+    required: false
+    description: Set to "file" to use the serial fallback queue instead of Hermes Kanban.
+  - name: AUTORESEARCH_WORKSPACE
+    required: false
+    description: Path of the canonical workspace. Default is $HERMES_HOME/workspace.
+  - name: AUTORESEARCH_SOFTMAX
+    required: false
+    description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.

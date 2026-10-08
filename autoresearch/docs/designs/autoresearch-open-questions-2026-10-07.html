@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autoresearch Open Questions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Merriweather+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============ Ink & Print tokens ============ */
+  :root {
+    --bg: #fffdf4;            /* cream paper */
+    --surface: #fffaf0;
+    --surface-alt: #f8f6ef;
+    --fg: #111827;            /* warm near-black — never pure #000 */
+    --fg-subtle: #555555;
+    --fg-muted: #999999;
+    --ink-navy: #1a3875;
+    --ink-sage: #6e8050;
+    --ink-terracotta: #b36e4e;
+    --ink-gold: #d4a853;
+    --accent: #859ebe;
+    --accent-soft: #eef2f7;
+    --cta: #0e2758;
+    --cta-foreground: #fffdf4;
+    --border: #e4dac8;
+    --border-strong: #d4c9b5;
+    --border-subtle: #f0ebe1;
+    --serif: 'Merriweather', Georgia, serif;
+    --sans: 'Merriweather Sans', 'Helvetica Neue', sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ============ Page grid: reading column + comment rail ============ */
+  .dc-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 0;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  article#doc {
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+    min-width: 0;
+  }
+
+  /* ============ Typography ============ */
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+  }
+  header.masthead { border-bottom: 2px solid var(--border-strong); padding-bottom: 20px; margin-bottom: 32px; }
+  header.masthead h1 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 8px 0 10px;
+  }
+  header.masthead .context { color: var(--fg-subtle); font-size: 13.5px; margin: 0; }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-navy);
+    margin: 48px 0 12px;
+  }
+  h3 { font-family: var(--serif); font-weight: 700; font-size: 16.5px; margin: 32px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--ink-navy); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--cta); }
+  strong { font-weight: 700; }
+  ul, ol { padding-left: 24px; margin: 0 0 14px; }
+  li { margin-bottom: 4px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* Key-points opener: every section starts with scannable bullets */
+  .key-points {
+    list-style: none;
+    padding: 0 0 0 2px;
+    margin: 0 0 18px;
+  }
+  .key-points li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+  .key-points li::before { content: '—'; position: absolute; left: 0; color: var(--ink-gold); font-weight: 700; }
+
+  /* ============ TOC ============ */
+  nav.toc { margin: 28px 0 8px; }
+  nav.toc ol { list-style: none; padding: 0; column-count: 2; column-gap: 40px; margin: 10px 0 0; }
+  nav.toc li { margin-bottom: 5px; break-inside: avoid; }
+  nav.toc a { text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
+  nav.toc .toc-num { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); margin-right: 8px; }
+
+  /* ============ Tables ============ */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 18px 0 22px;
+    font-size: 13.5px;
+  }
+  th {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    text-align: left;
+    padding: 6px 12px 6px 0;
+    border-bottom: 2px solid var(--border-strong);
+  }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; font-feature-settings: 'tnum' 1; }
+
+  /* ============ Figures ============ */
+  figure { margin: 24px 0 28px; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+  figcaption .fig-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    color: var(--ink-navy);
+    margin-right: 8px;
+  }
+
+  /* ============ Code & citations ============ */
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 16px 0 20px;
+  }
+  pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+  .cite {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg-subtle);
+    background: var(--surface-alt);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  /* Superscript source references — body prose never carries raw file paths.
+     Full citation lives in the title (hover) and in the numbered Sources list. */
+  sup.ref { line-height: 0; }
+  sup.ref a {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-navy);
+    text-decoration: none;
+    padding: 0 1px;
+  }
+  sup.ref a:hover { text-decoration: underline; }
+  ol.sources { margin: 12px 0; padding-left: 30px; }
+  ol.sources li {
+    font-size: 13px;
+    padding: 2px 0;
+  }
+  ol.sources li::marker {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--ink-navy);
+  }
+  ol.sources li:target { background: var(--accent-soft); }
+
+  /* ============ Callouts ============ */
+  .callout { padding: 12px 16px; margin: 18px 0; font-size: 13.5px; border-radius: 3px; }
+  .callout .callout-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .callout-info { background: var(--accent-soft); }
+  .callout-info .callout-label { color: var(--ink-navy); }
+  .callout-warn { background: rgba(179, 110, 78, 0.08); border-left: 3px solid var(--ink-terracotta); }
+  .callout-warn .callout-label { color: var(--ink-terracotta); }
+  .callout-open { background: rgba(212, 168, 83, 0.10); }
+  .callout-open .callout-label { color: #8a6a1f; }
+
+  /* Decision record */
+  .decision { border-top: 1px solid var(--border); padding: 14px 0 4px; margin: 14px 0; }
+  .decision .decision-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-sage); }
+  .decision p { margin-top: 6px; }
+
+  @media (max-width: 1100px) {
+    .dc-page { grid-template-columns: minmax(0, 1fr); }
+    article#doc { width: 100%; }
+  }
+  @media (max-width: 640px) {
+    article#doc { padding: 32px 16px 96px; }
+    .cite { white-space: normal; overflow-wrap: anywhere; }
+    td code, li code, p code { overflow-wrap: anywhere; }
+    nav.toc ol { column-count: 1; }
+    table { display: block; overflow-x: auto; }
+  }
+  @media print {
+    #dc-sidebar, #dc-fab, #dc-toggle { display: none !important; }
+    .dc-page { grid-template-columns: 1fr; }
+  }
+
+  /* ============ Status labels: Decided / Proposed / Open ============ */
+  .tag {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.6;
+    padding: 0 7px;
+    border-radius: 999px;
+    vertical-align: 2px;
+    margin-left: 6px;
+    white-space: nowrap;
+  }
+  .tag:first-child { margin-left: 0; }
+  .tag-decided { color: var(--ink-sage); background: rgba(110, 128, 80, 0.13); }
+  .tag-proposed { color: var(--ink-terracotta); background: rgba(179, 110, 78, 0.12); }
+  .tag-default { color: #4b6a8a; background: rgba(133, 158, 190, 0.18); }
+  .tag-open { color: #8a6a1f; background: rgba(212, 168, 83, 0.20); }
+  .legend { font-size: 13.5px; color: var(--fg-subtle); margin: 0 0 8px; }
+  .legend dl { margin: 6px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+  .legend dt { margin: 0; }
+  .legend dd { margin: 0; }
+  td .tag { margin-left: 0; }
+
+  /* replies rendered under a comment (from the comment's `replies` array) */
+  .dc-replies { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
+  .dc-reply-author { font-family: var(--sans); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-navy); }
+  .dc-reply-text { font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; margin-top: 2px; }
+  .dc-reply-text a { color: var(--ink-navy); word-break: break-all; }
+
+
+  /* ============ Collapsible sections ============ */
+  details.sec > summary { display: block; list-style: none; cursor: pointer; border-radius: 3px; }
+  details.sec > summary::-webkit-details-marker { display: none; }
+  details.sec > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  details.sec > summary h2 { position: relative; padding-left: 18px; margin: 30px 0 10px; }
+  details.sec > summary h2::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 0.5em;
+    border-left: 6px solid var(--fg-muted);
+    border-top: 4.5px solid transparent;
+    border-bottom: 4.5px solid transparent;
+    transition: transform 0.15s ease;
+  }
+  details.sec[open] > summary h2::before { transform: rotate(90deg); }
+  details.sec > summary:hover h2::before { border-left-color: var(--ink-navy); }
+  .sec-controls { margin: 2px 0 0; font-size: 12px; color: var(--fg-muted); }
+  .sec-controls button {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-navy);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 3px;
+  }
+  .sec-controls button:hover { color: var(--cta); }
+  @media print {
+    .sec-controls { display: none; }
+    details.sec > summary h2 { padding-left: 0; }
+    details.sec > summary h2::before { display: none; }
+  }
+
+  /* ================================================================
+     DC-COMMENTS BEGIN — styles (copy verbatim; do not modify)
+     ================================================================ */
+  ::highlight(dc-hl) { background: rgba(212, 168, 83, 0.28); }
+  ::highlight(dc-hl-active) { background: rgba(212, 168, 83, 0.6); }
+
+  #dc-fab {
+    position: absolute;
+    z-index: 40;
+    display: none;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--cta-foreground);
+    background: var(--cta);
+    border: 1px solid #0a1c42;
+    border-radius: 3px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #dc-fab:hover { background: var(--ink-navy); }
+
+  #dc-sidebar {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    padding: 24px 20px 60px;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  #dc-sidebar h2.dc-title {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+    margin: 0 0 4px;
+  }
+  .dc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 18px; }
+  .dc-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .dc-btn:hover { background: var(--surface-alt); }
+  .dc-btn:focus-visible, #dc-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dc-empty { color: var(--fg-muted); font-style: italic; }
+  .dc-item { border-top: 1px solid var(--border-subtle); padding: 12px 0; cursor: pointer; }
+  .dc-item.dc-resolved { opacity: 0.5; }
+  .dc-quote {
+    border-left: 2px solid var(--ink-gold);
+    padding-left: 8px;
+    color: var(--fg-subtle);
+    font-style: italic;
+    font-size: 12px;
+    margin-bottom: 6px;
+    overflow-wrap: break-word;
+  }
+  .dc-orphan-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-terracotta);
+    background: rgba(179, 110, 78, 0.12);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .dc-text { white-space: pre-wrap; overflow-wrap: break-word; }
+  .dc-item textarea {
+    width: 100%;
+    min-height: 64px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 6px 8px;
+    resize: vertical;
+  }
+  .dc-item textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dc-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--fg-muted); }
+  .dc-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .dc-meta .dc-del { margin-left: auto; color: var(--ink-terracotta); background: none; border: none; font-size: 11px; cursor: pointer; padding: 0; }
+  .dc-meta .dc-del:hover { text-decoration: underline; }
+  #dc-status { font-size: 11px; color: var(--ink-sage); min-height: 16px; margin-top: 8px; }
+
+  #dc-toggle { display: none; }
+  @media (max-width: 1100px) {
+    #dc-sidebar {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 320px;
+      max-width: 90vw;
+      transform: translateX(100%);
+      transition: transform 200ms ease-out;
+      z-index: 50;
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+    }
+    #dc-sidebar.dc-open { transform: translateX(0); }
+    #dc-toggle {
+      display: block;
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 51;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--cta-foreground);
+      background: var(--cta);
+      border: 1px solid #0a1c42;
+      border-radius: 999px;
+      padding: 9px 15px;
+      cursor: pointer;
+    }
+  }
+  /* ============ DC-COMMENTS END — styles ============ */
+</style>
+</head>
+<body>
+<div class="dc-page">
+<article id="doc">
+  <header class="masthead">
+    <span class="eyebrow">Open questions · 2026-10-07 · For James and Rohit</span>
+    <h1>Autoresearch: Open Questions</h1>
+    <p class="context">Questions the design cannot answer alone. Each section explains one question in plain English: the background, why it matters, what the answer depends on, the options, and a suggested starting point. Details are in the <a href="autoresearch-runtime-2026-10-06.html">Runtime design</a> and the <a href="autoresearch-system-design-2026-10-06.html">System Design</a>.</p>
+  </header>
+  <section id="summary">
+    <h2>How to use this</h2>
+    <p>Open a question, read it, and decide. A suggested starting point is a default, not a recommendation to skip the discussion. Select any text to leave a comment, then use Copy JSON in the sidebar to send the answers back.</p>
+    <p>Questions 1 to 4 are about how Preston connects. Questions 5 to 9 are about hosting, logins, models, and the league. Questions 10 to 16 are about the repository, limits, and edge cases.</p>
+  </section>
+  <nav class="toc">
+    <span class="eyebrow">Questions</span>
+    <p class="sec-controls"><button type="button" data-sec="open">Expand all</button><span aria-hidden="true"> · </span><button type="button" data-sec="close">Collapse all</button></p>
+    <ol><li><span class="toc-num">1</span><a href="#q-connection">How will Preston connect to the research system?</a></li><li><span class="toc-num">2</span><a href="#q-push-pull">Does Preston need to be told about new messages, or will it check for them?</a></li><li><span class="toc-num">3</span><a href="#q-snapshot">Is a pointer to a saved version enough, or must messages carry copies?</a></li><li><span class="toc-num">4</span><a href="#q-compat">What do we promise when the message format changes?</a></li><li><span class="toc-num">5</span><a href="#q-remote">Where does the workspace backup live, and how does the machine get permission to push to it?</a></li><li><span class="toc-num">6</span><a href="#q-player-login">Can the system request evaluation games with only a Player login?</a></li><li><span class="toc-num">7</span><a href="#q-token-refresh">Who keeps the Player login fresh while the system runs for days?</a></li><li><span class="toc-num">8</span><a href="#q-model">Which AI model does the system use, and what are the backups?</a></li><li><span class="toc-num">9</span><a href="#q-league">Which league does the system compete in?</a></li><li><span class="toc-num">10</span><a href="#q-repo-home">Where does the research system&#x27;s repository live?</a></li><li><span class="toc-num">11</span><a href="#q-compiler-code">How do we bring the Paintbot compiler code into the project?</a></li><li><span class="toc-num">12</span><a href="#q-iteration-limits">How long can one research step run?</a></li><li><span class="toc-num">13</span><a href="#q-merge">When two research steps finish, how are their changes combined?</a></li><li><span class="toc-num">14</span><a href="#q-queue-backup">Does the work-queue database need a backup?</a></li><li><span class="toc-num">15</span><a href="#q-min-games">What is the minimum number of games before the system can promote a new policy in GotA?</a></li><li><span class="toc-num">16</span><a href="#q-loose-messages">What happens to a message from Preston that matches no current work?</a></li></ol>
+  </nav>
+
+  <details class="sec" id="q-connection">
+    <summary><h2>1 · How will Preston connect to the research system?</h2></summary>
+    <p><strong>Background.</strong> Preston is the assistant that talks with the user in the IDE. It is not part of our system. It reads our system&#x27;s files and sends it messages. We have built the message format and a simple file-and-command-line connection. We have not built a network connection, because we do not know which kind Preston needs.</p>
+    <p><strong>Why it matters.</strong> We can only build one network connection by Friday. If we pick the wrong kind, Preston cannot talk to the research system at all.</p>
+    <p><strong>What the answer depends on.</strong> Who builds Preston and where it runs. If Preston runs on the same machine, plain files can be enough. If it runs elsewhere, it needs a network connection. It also depends on whether the IDE talks to our system directly or through the Softmax backend.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>WebSockets (a live, two-way connection)</li><li>Webhooks (each side calls a web address when something happens)</li><li>A2A (a standard protocol for agents talking to agents, which Hermes supports)</li><li>MCP (a standard protocol for giving an agent tools and data)</li></ul>
+    <p><strong>Suggested starting point.</strong> Ask whoever builds Preston which one they already use, and match it.</p>
+    <p><strong>Who.</strong> James and Rohit, with Aaron</p>
+  </details>
+  <details class="sec" id="q-push-pull">
+    <summary><h2>2 · Does Preston need to be told about new messages, or will it check for them?</h2></summary>
+    <p><strong>Background.</strong> The research system writes messages (findings, questions, help requests) into an outbox. Each message has a running number, so a reader can ask for everything after the last number it saw.</p>
+    <p><strong>Why it matters.</strong> If Preston only checks when a user opens the page, a help request can sit unread for hours. If Preston must hear at once, we need a notification path, and that is more work.</p>
+    <p><strong>What the answer depends on.</strong> How quickly a human must see a help request, and whether Preston is always running or only starts when a user opens the IDE.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Preston checks for new messages (simplest)</li><li>We notify Preston when a message arrives (more work, faster)</li></ul>
+    <p><strong>Suggested starting point.</strong> Start with checking. Add notifications only for help requests if users miss them.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+  <details class="sec" id="q-snapshot">
+    <summary><h2>3 · Is a pointer to a saved version enough, or must messages carry copies?</h2></summary>
+    <p><strong>Background.</strong> Messages do not copy the research notes they talk about. They point at them, and each pointer says which saved version of the workspace it means (a git commit). Notes change later, so the pointer lets Preston see the note as it was when the message was written.</p>
+    <p><strong>Why it matters.</strong> This works only if Preston&#x27;s connection can fetch an old version of a note. If it cannot, Preston sees the current note, and that note can say something different from what the message meant.</p>
+    <p><strong>What the answer depends on.</strong> Whether every connection we build can serve old versions from git. Our own command-line tool can.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Pointers only. Every connection must serve old versions (smaller, and our suggestion)</li><li>Messages also carry a short copy of the relevant text (works everywhere, bigger and repetitive)</li></ul>
+    <p><strong>Suggested starting point.</strong> Pointers only.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+  <details class="sec" id="q-compat">
+    <summary><h2>4 · What do we promise when the message format changes?</h2></summary>
+    <p><strong>Background.</strong> The research system writes messages in a defined format (version 0). Preston&#x27;s connection reads them. The format will change as we learn.</p>
+    <p><strong>Why it matters.</strong> Without a promise, any change can break Preston&#x27;s connection without warning.</p>
+    <p><strong>What the answer depends on.</strong> How often each side can be updated, and who maintains Preston&#x27;s connection.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Within version 0 we only add things (new optional fields, new message types), and readers ignore what they do not know. Anything that removes or renames a field becomes version 1, and both sides update together.</li><li>No promise. Update both sides each time</li></ul>
+    <p><strong>Suggested starting point.</strong> The first option.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+  <details class="sec" id="q-remote">
+    <summary><h2>5 · Where does the workspace backup live, and how does the machine get permission to push to it?</h2></summary>
+    <p><strong>Background.</strong> All research results live in one git repository, the workspace. We decided that it always pushes to a remote copy after every change. That copy is the backup, the way to move to another machine, and the way to share results.</p>
+    <p><strong>Why it matters.</strong> Without a remote and push permission, the system has no backup. A lost machine loses all research.</p>
+    <p><strong>What the answer depends on.</strong> Where the system runs (Nous hosting or our machine), who owns the remote repository, and how secrets reach the machine. Also how large the workspace gets: game replays are big files, and git handles big files poorly.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>A private GitHub repository per user, with a key that can only push to that repository</li><li>Another git host Rohit prefers</li></ul>
+    <p><strong>Suggested starting point.</strong> One private GitHub repository per user. Keep replays out of git and store only their fingerprints and download links.</p>
+    <p><strong>Who.</strong> Rohit, with James</p>
+  </details>
+  <details class="sec" id="q-player-login">
+    <summary><h2>6 · Can the system request evaluation games with only a Player login?</h2></summary>
+    <p><strong>Background.</strong> The system acts as one Softmax Player. Uploads and submissions belong to the Player. Our earlier tools found that evaluation-game requests (XP requests) belong to the user account, not the Player. A Player login was not able to read them.</p>
+    <p><strong>Why it matters.</strong> If that is still true, the system cannot run its experiments with only a Player login, and the identity design must change.</p>
+    <p><strong>What the answer depends on.</strong> How the current Softmax platform assigns ownership of XP requests. This is a quick test, not a debate.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Player login works for everything (no change)</li><li>The system also needs a user login, limited to XP requests</li></ul>
+    <p><strong>Suggested starting point.</strong> Test it first thing. If it fails, ask the platform owners for a Player-scoped way to request XP.</p>
+    <p><strong>Who.</strong> James (test), Rohit (if it fails)</p>
+  </details>
+  <details class="sec" id="q-token-refresh">
+    <summary><h2>7 · Who keeps the Player login fresh while the system runs for days?</h2></summary>
+    <p><strong>Background.</strong> A Player login token lasts about a day. The research system runs for days. Our forum agent lost its access for five days when its login went stale.</p>
+    <p><strong>Why it matters.</strong> When the token expires, the system stops working until someone notices.</p>
+    <p><strong>What the answer depends on.</strong> The hosting choice and whether Softmax offers long-lived tokens for automated players.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>The host refreshes the token automatically</li><li>Softmax issues a long-lived token for automated players</li><li>A human refreshes it when the system asks for help</li></ul>
+    <p><strong>Suggested starting point.</strong> Automatic refresh by the host. The system already checks the token every minute and asks for help when it is about to expire.</p>
+    <p><strong>Who.</strong> Rohit</p>
+  </details>
+  <details class="sec" id="q-model">
+    <summary><h2>8 · Which AI model does the system use, and what are the backups?</h2></summary>
+    <p><strong>Background.</strong> The system&#x27;s thinking runs on a model reached through OpenRouter. If the main model fails or is overloaded, Hermes can switch to backup models, but only if we list them.</p>
+    <p><strong>Why it matters.</strong> The model sets both the quality of the research and the cost. Spending limits are enforced outside the system (Rohit).</p>
+    <p><strong>What the answer depends on.</strong> Budget, what OpenRouter access Rohit sets up, and how well each model works inside Hermes. That last one is untested.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>A strong OpenAI model first (Hermes and similar tools are tuned for them), with one or two backups</li><li>A cheaper model, with a stronger one only for hard steps</li></ul>
+    <p><strong>Suggested starting point.</strong> A strong model first, plus one backup. Compare models once the baseline runs.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+  <details class="sec" id="q-league">
+    <summary><h2>9 · Which league does the system compete in?</h2></summary>
+    <p><strong>Background.</strong> The goal for this week is a policy in the top half of the Gods of the Arena leaderboard. Submissions go to a specific league, and the system needs its id.</p>
+    <p><strong>Why it matters.</strong> The wrong league means the result does not count toward the goal.</p>
+    <p><strong>What the answer depends on.</strong> Which leaderboard counts as &#x27;the&#x27; GotA leaderboard for the baseline.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>The GotA Competition league</li><li>Another league</li></ul>
+    <p><strong>Suggested starting point.</strong> The GotA Competition league, if that is the one the team watches.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+  <details class="sec" id="q-repo-home">
+    <summary><h2>10 · Where does the research system&#x27;s repository live?</h2></summary>
+    <p><strong>Background.</strong> The autoresearch folder will become a Hermes &#x27;profile distribution&#x27;: a git repository that Hermes installs with one command. Today it is a folder inside the ide-mvp repository.</p>
+    <p><strong>Why it matters.</strong> Hermes installs a distribution from a repository address. A separate repository is the cleanest way to install, tag versions, and update.</p>
+    <p><strong>What the answer depends on.</strong> Whether the team wants the IDE parts and the research system in one repository or two.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Its own repository, for example Metta-AI/autoresearch</li><li>Stay inside ide-mvp and install from the folder</li></ul>
+    <p><strong>Suggested starting point.</strong> Its own repository once the first version works. Stay in ide-mvp until then.</p>
+    <p><strong>Who.</strong> James, with Rohit</p>
+  </details>
+  <details class="sec" id="q-compiler-code">
+    <summary><h2>11 · How do we bring the Paintbot compiler code into the project?</h2></summary>
+    <p><strong>Background.</strong> The system turns a written strategy into game code with a compiler that James built for another game (Paintbot). That code sits on an unmerged branch with about 8 commits that were never pushed.</p>
+    <p><strong>Why it matters.</strong> Copying code from an unmerged branch makes its history hard to trace.</p>
+    <p><strong>What the answer depends on.</strong> Whether the Paintbot branch is ready for review.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Push and merge the Paintbot branch first, then copy from main</li><li>Copy from a fixed commit and note it</li></ul>
+    <p><strong>Suggested starting point.</strong> Copy from a fixed commit now, and record which one. Merge the branch when convenient.</p>
+    <p><strong>Who.</strong> James</p>
+  </details>
+  <details class="sec" id="q-iteration-limits">
+    <summary><h2>12 · How long can one research step run?</h2></summary>
+    <p><strong>Background.</strong> Each research step (one work card) is one AI session. We decided that there is no hard time limit. Hermes can still cap the number of actions in a session and can send a soft &#x27;wrap up&#x27; reminder.</p>
+    <p><strong>Why it matters.</strong> Without any cap, a confused session can spend a lot of money before the stuck-detection notices.</p>
+    <p><strong>What the answer depends on.</strong> Cost tolerance, and how long real steps take once we can measure them.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>A cap on actions per session (for example 150) plus a soft reminder at 45 minutes</li><li>No cap at first. Measure, then set one</li></ul>
+    <p><strong>Suggested starting point.</strong> Set a generous action cap and the reminder, then adjust from real data.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+  <details class="sec" id="q-merge">
+    <summary><h2>13 · When two research steps finish, how are their changes combined?</h2></summary>
+    <p><strong>Background.</strong> Up to two steps run at the same time, each in its own copy of the workspace. When a step ends, its changes go back into the main copy, one at a time.</p>
+    <p><strong>Why it matters.</strong> The method decides how readable the history is and how often conflicts happen.</p>
+    <p><strong>What the answer depends on.</strong> Whether the team values a straight-line history (easier to read) or an exact record of each step (easier to trace).</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Replay each step&#x27;s changes on top of the main copy (straight-line history)</li><li>Merge each step as a unit (exact record)</li></ul>
+    <p><strong>Suggested starting point.</strong> Merge each step as a unit. The record of which step changed what matters more here than a tidy history.</p>
+    <p><strong>Who.</strong> James</p>
+  </details>
+  <details class="sec" id="q-queue-backup">
+    <summary><h2>14 · Does the work-queue database need a backup?</h2></summary>
+    <p><strong>Background.</strong> The list of pending work cards lives in a small database inside Hermes, not in the workspace. It does not travel when the system moves to another machine. The planning step can rebuild the list from the workspace.</p>
+    <p><strong>Why it matters.</strong> A backup avoids a gap after a crash, but it adds one more thing to maintain.</p>
+    <p><strong>What the answer depends on.</strong> How well the rebuild works in practice.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>No backup. Rebuild the list when needed</li><li>Back it up with the rest of the machine</li></ul>
+    <p><strong>Suggested starting point.</strong> No backup. Test the rebuild.</p>
+    <p><strong>Who.</strong> Rohit</p>
+  </details>
+  <details class="sec" id="q-min-games">
+    <summary><h2>15 · What is the minimum number of games before the system can promote a new policy in GotA?</h2></summary>
+    <p><strong>Background.</strong> Before the system replaces its league champion, it must win a fair comparison over enough games. The number of games is calculated from how noisy the game results are, but each game also needs a floor that the calculation can never go below.</p>
+    <p><strong>Why it matters.</strong> Without a floor, the system can promote on too little evidence early on, before it has measured the noise.</p>
+    <p><strong>What the answer depends on.</strong> How noisy GotA results are. For reference, one earlier promotion by another team&#x27;s research loop used 88 paired games.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>A fixed floor such as 40 games per side</li><li>Measure the noise from league data first, then set the floor</li></ul>
+    <p><strong>Suggested starting point.</strong> Start with 40 per side and adjust once the noise is measured.</p>
+    <p><strong>Who.</strong> James</p>
+  </details>
+  <details class="sec" id="q-loose-messages">
+    <summary><h2>16 · What happens to a message from Preston that matches no current work?</h2></summary>
+    <p><strong>Background.</strong> Each work step sees only urgent messages and messages about its own work. A non-urgent reply or instruction about something nobody is working on has no defined path. The same is true for a malformed request to create new work.</p>
+    <p><strong>Why it matters.</strong> Such a message can wait unseen, and the user thinks the system ignored it.</p>
+    <p><strong>What the answer depends on.</strong> How often this happens. That is unknown until Preston exists.</p>
+    <p><strong>Options.</strong></p>
+    <ul><li>Turn every such message into a work card</li><li>Give it to the next planning step</li><li>Reject a malformed request with a reply that explains why</li></ul>
+    <p><strong>Suggested starting point.</strong> Give loose messages to the next planning step (it runs every 2 hours), and reject malformed requests with an explanation.</p>
+    <p><strong>Who.</strong> James and Rohit</p>
+  </details>
+</article>
+
+<!-- ================================================================
+     DC-COMMENTS BEGIN — markup + script (copy verbatim; do not modify)
+     ================================================================ -->
+<aside id="dc-sidebar" aria-label="Comments">
+  <h2 class="dc-title">Comments <span id="dc-count"></span></h2>
+  <div class="dc-actions">
+    <button class="dc-btn" id="dc-export">Export JSON</button>
+    <button class="dc-btn" id="dc-copy">Copy JSON</button>
+    <button class="dc-btn" id="dc-import">Import…</button>
+    <input type="file" id="dc-file" accept=".json,application/json" hidden>
+  </div>
+  <div id="dc-status" role="status"></div>
+  <div id="dc-list"><p class="dc-empty">No comments yet. Select text in the document to add one.</p></div>
+</aside>
+<button id="dc-fab" type="button">+ Comment</button>
+<button id="dc-toggle" type="button">Comments</button>
+<!-- Preload slot: a renderer may put a dc-comments/1 `comments` array here (each comment optionally carrying `replies`). Merged by id into the stored comments on load. Leave empty otherwise. -->
+<script id="dc-preload" type="application/json"></script>
+
+<script>
+(() => {
+  'use strict';
+  const FORMAT = 'dc-comments/1';
+  const CTX = 32; // prefix/suffix context length, chars
+  const doc = document.getElementById('doc');
+  const fab = document.getElementById('dc-fab');
+  const listEl = document.getElementById('dc-list');
+  const countEl = document.getElementById('dc-count');
+  const statusEl = document.getElementById('dc-status');
+  const sidebar = document.getElementById('dc-sidebar');
+  const storeKey = 'dc:' + document.title;
+
+  let comments = []; // {id, exact, prefix, suffix, text, created, resolved}
+  let ranges = new Map(); // id -> Range (null if orphaned)
+  let seq = 0;
+
+  // ---- text indexing: one global string over #doc's text nodes ----
+  function docText() {
+    const r = document.createRange();
+    r.selectNodeContents(doc);
+    return r.toString();
+  }
+  function globalOffset(container, offset) {
+    const r = document.createRange();
+    r.setStart(doc, 0);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  }
+  function offsetsToRange(start, end) {
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    let pos = 0, range = document.createRange(), haveStart = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode, len = node.data.length;
+      if (!haveStart && pos + len >= start) {
+        range.setStart(node, start - pos);
+        haveStart = true;
+      }
+      if (haveStart && pos + len >= end) {
+        range.setEnd(node, end - pos);
+        return range;
+      }
+      pos += len;
+    }
+    return null;
+  }
+
+  // ---- anchoring: TextQuoteSelector-style exact + prefix/suffix ----
+  function selectorFromRange(range) {
+    const text = docText();
+    const start = globalOffset(range.startContainer, range.startOffset);
+    const end = globalOffset(range.endContainer, range.endOffset);
+    return {
+      exact: text.slice(start, end),
+      prefix: text.slice(Math.max(0, start - CTX), start),
+      suffix: text.slice(end, end + CTX),
+    };
+  }
+  function locate(c) {
+    const text = docText();
+    let i = text.indexOf(c.prefix + c.exact + c.suffix);
+    if (i >= 0) return offsetsToRange(i + c.prefix.length, i + c.prefix.length + c.exact.length);
+    i = text.indexOf(c.exact);
+    if (i >= 0) return offsetsToRange(i, i + c.exact.length);
+    return null;
+  }
+  function reanchorAll() {
+    ranges = new Map(comments.map(c => [c.id, locate(c)]));
+    paint();
+  }
+
+  // ---- painting via CSS Custom Highlight API ----
+  const hl = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  const hlActive = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  if (hl) { CSS.highlights.set('dc-hl', hl); CSS.highlights.set('dc-hl-active', hlActive); }
+  function paint(activeId) {
+    if (!hl) return;
+    hl.clear(); hlActive.clear();
+    for (const [id, r] of ranges) {
+      if (!r) continue;
+      (id === activeId ? hlActive : hl).add(r);
+    }
+  }
+
+  // ---- persistence (best-effort; file:// storage varies by browser) ----
+  function save() {
+    try { localStorage.setItem(storeKey, JSON.stringify(comments)); } catch (e) { /* unavailable on some file:// setups */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      if (raw) comments = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- sidebar rendering ----
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ''; }, 2500);
+  }
+  function sortedComments() {
+    const pos = c => {
+      const r = ranges.get(c.id);
+      return r ? globalOffset(r.startContainer, r.startOffset) : Infinity; // orphans last
+    };
+    return [...comments].sort((a, b) => pos(a) - pos(b));
+  }
+  function render(editingId) {
+    countEl.textContent = comments.length ? '(' + comments.length + ')' : '';
+    listEl.textContent = '';
+    if (!comments.length) {
+      const p = document.createElement('p');
+      p.className = 'dc-empty';
+      p.textContent = 'No comments yet. Select text in the document to add one.';
+      listEl.appendChild(p);
+      return;
+    }
+    for (const c of sortedComments()) {
+      const item = document.createElement('div');
+      item.className = 'dc-item' + (c.resolved ? ' dc-resolved' : '');
+      item.dataset.id = c.id;
+
+      const quote = document.createElement('div');
+      quote.className = 'dc-quote';
+      quote.textContent = c.exact.length > 90 ? c.exact.slice(0, 90) + '…' : c.exact;
+      if (!ranges.get(c.id)) {
+        const tag = document.createElement('span');
+        tag.className = 'dc-orphan-tag';
+        tag.textContent = 'orphaned';
+        quote.appendChild(tag);
+      }
+      item.appendChild(quote);
+
+      if (c.id === editingId) {
+        const ta = document.createElement('textarea');
+        ta.value = c.text;
+        ta.placeholder = 'Write a comment… (⌘/Ctrl+Enter to save, Esc to cancel)';
+        ta.addEventListener('keydown', e => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
+          if (e.key === 'Escape') cancel();
+        });
+        ta.addEventListener('click', e => e.stopPropagation());
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'dc-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.style.marginTop = '6px';
+        saveBtn.addEventListener('click', e => { e.stopPropagation(); commit(); });
+        function commit() {
+          c.text = ta.value.trim();
+          if (!c.text) return cancel();
+          save(); render();
+        }
+        function cancel() {
+          if (!c.text) { comments = comments.filter(x => x.id !== c.id); ranges.delete(c.id); paint(); }
+          save(); render();
+        }
+        item.appendChild(ta);
+        item.appendChild(saveBtn);
+        listEl.appendChild(item);
+        requestAnimationFrame(() => ta.focus());
+        continue;
+      }
+
+      const text = document.createElement('div');
+      text.className = 'dc-text';
+      text.textContent = c.text;
+      item.appendChild(text);
+
+      if (Array.isArray(c.replies) && c.replies.length) {
+        const box = document.createElement('div');
+        box.className = 'dc-replies';
+        for (const r of c.replies) {
+          const who = document.createElement('div');
+          who.className = 'dc-reply-author';
+          who.textContent = 'Reply from ' + (r.author || 'agent') + (r.created ? ' · ' + String(r.created).slice(0, 10) : '');
+          const body = document.createElement('div');
+          body.className = 'dc-reply-text';
+          for (const part of String(r.text || '').split(/(https?:\/\/[^\s)]+)/g)) {
+            if (/^https?:\/\//.test(part)) {
+              const a = document.createElement('a');
+              a.href = part; a.target = '_blank'; a.rel = 'noopener';
+              a.textContent = part;
+              a.addEventListener('click', e => e.stopPropagation());
+              body.appendChild(a);
+            } else body.appendChild(document.createTextNode(part));
+          }
+          box.append(who, body);
+        }
+        item.appendChild(box);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'dc-meta';
+      const when = document.createElement('span');
+      when.textContent = c.created.slice(0, 10);
+      const resolved = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!c.resolved;
+      cb.addEventListener('click', e => e.stopPropagation());
+      cb.addEventListener('change', () => { c.resolved = cb.checked; save(); render(); });
+      resolved.append(cb, 'resolved');
+      const del = document.createElement('button');
+      del.className = 'dc-del';
+      del.textContent = 'delete';
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        comments = comments.filter(x => x.id !== c.id);
+        ranges.delete(c.id);
+        paint(); save(); render();
+      });
+      meta.append(when, resolved, del);
+      item.appendChild(meta);
+
+      item.addEventListener('click', () => {
+        const r = ranges.get(c.id);
+        if (!r) return flash('Anchor not found in this version of the document.');
+        const rect = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + rect.top - 160, behavior: 'smooth' });
+        paint(c.id);
+        setTimeout(() => paint(), 2000);
+      });
+      // double-click text to edit
+      text.addEventListener('dblclick', e => { e.stopPropagation(); render(c.id); });
+      listEl.appendChild(item);
+    }
+  }
+
+  // ---- selection -> floating Comment button ----
+  document.addEventListener('mouseup', e => {
+    if (fab.contains(e.target)) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { fab.style.display = 'none'; return; }
+      const range = sel.getRangeAt(0);
+      if (!doc.contains(range.commonAncestorContainer) || !range.toString().trim()) {
+        fab.style.display = 'none';
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      fab.style.display = 'block';
+      fab.style.left = Math.min(rect.right + 8 + window.scrollX, window.scrollX + document.documentElement.clientWidth - 120) + 'px';
+      fab.style.top = (rect.top + window.scrollY - 4) + 'px';
+      fab.dataset.pending = '1';
+    }, 0);
+  });
+  fab.addEventListener('click', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const c = Object.assign({ id: 'c' + Date.now().toString(36) + (seq++), text: '', created: new Date().toISOString(), resolved: false }, selectorFromRange(range));
+    comments.push(c);
+    ranges.set(c.id, range.cloneRange());
+    paint(c.id);
+    sel.removeAllRanges();
+    fab.style.display = 'none';
+    sidebar.classList.add('dc-open');
+    render(c.id);
+  });
+
+  // ---- export / import ----
+  function payload() {
+    return JSON.stringify({
+      format: FORMAT,
+      doc: document.title,
+      exported: new Date().toISOString(),
+      comments: comments,
+    }, null, 2);
+  }
+  document.getElementById('dc-export').addEventListener('click', () => {
+    const blob = new Blob([payload()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (document.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'doc') + '.comments.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash('Downloaded.');
+  });
+  document.getElementById('dc-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(payload()); flash('Copied to clipboard.'); }
+    catch (e) { flash('Clipboard blocked — use Export instead.'); }
+  });
+  document.getElementById('dc-import').addEventListener('click', () => document.getElementById('dc-file').click());
+  document.getElementById('dc-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(raw => {
+      const data = JSON.parse(raw);
+      if (data.format !== FORMAT || !Array.isArray(data.comments)) { flash('Not a dc-comments file.'); return; }
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of data.comments) byId.set(c.id, c);
+      comments = [...byId.values()];
+      reanchorAll(); save(); render();
+      flash('Imported ' + data.comments.length + ' comment(s).');
+    }).catch(() => flash('Could not parse that file.'));
+    e.target.value = '';
+  });
+
+  document.getElementById('dc-toggle').addEventListener('click', () => sidebar.classList.toggle('dc-open'));
+
+  // ---- init ----
+  load();
+  // Merge the renderer's preloaded comments (with replies) by id: a stored
+  // comment keeps its own text/resolved state and takes the preloaded replies.
+  try {
+    const pre = document.getElementById('dc-preload');
+    const preloaded = pre && pre.textContent.trim() ? JSON.parse(pre.textContent) : [];
+    if (Array.isArray(preloaded) && preloaded.length) {
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of preloaded) {
+        const existing = byId.get(c.id);
+        if (existing) { if (c.replies) existing.replies = c.replies; }
+        else byId.set(c.id, c);
+      }
+      comments = [...byId.values()];
+      save();
+    }
+  } catch (e) { /* malformed preload: ignore */ }
+  reanchorAll();
+  render();
+})();
+</script>
+<!-- ============ DC-COMMENTS END ============ -->
+</div>
+<script>
+/* Collapsible sections: open the right section on in-page navigation, on print,
+   and when a comment in the sidebar is clicked. Kept outside the DC-COMMENTS block. */
+(function () {
+  const secs = () => Array.from(document.querySelectorAll('#doc details.sec'));
+
+  // Open every <details> that holds el. A section id opens its own <details>.
+  function openFor(el) {
+    if (!el) return;
+    if (el.matches('section')) {
+      const own = el.querySelector(':scope > details.sec');
+      if (own) own.open = true;
+    }
+    for (let d = el.closest('details'); d; d = d.parentElement ? d.parentElement.closest('details') : null) d.open = true;
+  }
+  function targetOf(hash) {
+    if (!hash || hash.length < 2 || hash[0] !== '#') return null;
+    try { return document.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { return null; }
+  }
+  function reveal(hash) {
+    const el = targetOf(hash);
+    if (!el) return;
+    openFor(el);
+    el.scrollIntoView();
+  }
+
+  // In-page links (contents, cross-references, citations). Capture phase, so the
+  // section opens before the browser scrolls to the target.
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openFor(targetOf(a.getAttribute('href')));
+  }, true);
+  window.addEventListener('hashchange', () => reveal(location.hash));
+  if (location.hash) {
+    reveal(location.hash);
+    window.addEventListener('load', () => reveal(location.hash));
+  }
+
+  // Expand all / Collapse all
+  document.querySelectorAll('[data-sec]').forEach(btn => btn.addEventListener('click', () => {
+    const open = btn.dataset.sec === 'open';
+    secs().forEach(d => { d.open = open; });
+  }));
+
+  // Print: open everything, then restore the reader's state.
+  let saved = null;
+  window.addEventListener('beforeprint', () => {
+    saved = secs().map(d => d.open);
+    secs().forEach(d => { d.open = true; });
+  });
+  window.addEventListener('afterprint', () => {
+    if (!saved) return;
+    secs().forEach((d, i) => { d.open = saved[i]; });
+    saved = null;
+  });
+
+  // Comment sidebar: highlights are painted with the CSS Custom Highlight API, so
+  // there is no element to find. Match the comment's quote against each section's
+  // text and open the sections that hold it, before the comment script scrolls.
+  const norm = s => s.replace(/\s+/g, ' ').trim();
+  document.addEventListener('click', e => {
+    const item = e.target.closest('.dc-item');
+    if (!item || e.target.closest('button, textarea, input, label, a')) return;
+    const q = item.querySelector('.dc-quote');
+    if (!q) return;
+    const quote = norm(q.textContent.replace(/…$/, ''));
+    if (!quote) return;
+    const all = Array.from(document.querySelectorAll('#doc details'));
+    let hits = all.filter(d => norm(d.textContent).includes(quote));
+    if (!hits.length) {
+      const head = quote.slice(0, 40);
+      hits = all.filter(d => norm(d.textContent).includes(head));
+    }
+    hits.forEach(openFor);
+  }, true);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/receipt.json",
+  "title": "Request receipt at .supervisor/ledger/requests/<Q-id>.json: the request's single durable state machine (Overview C3).",
+  "type": "object",
+  "required": ["request_id", "state", "history"],
+  "properties": {
+    "request_id": {"type": "string", "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "state": {"enum": ["rejected", "admitted", "handed_off", "published", "superseded", "dropped"]},
+    "mode": {"enum": ["investigation", "scouting", "experimentation", "maintenance", "planning"]},
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "board_epoch"],
+        "properties": {"task_id": {"type": "string"}, "board_epoch": {"type": "string"}}
+      }
+    },
+    "handed_off": {
+      "type": "object",
+      "required": ["task_id", "run_id"],
+      "properties": {"task_id": {"type": "string"}, "run_id": {"type": "string"}}
+    },
+    "merge_sha": {"type": "string"},
+    "superseded_by": {"type": "string"},
+    "reason": {"type": "string"},
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["state", "at"],
+        "properties": {
+          "state": {"enum": ["rejected", "admitted", "handed_off", "published", "superseded", "dropped"]},
+          "at": {"type": "string"}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"state": {"const": "admitted"}}}, "then": {"required": ["tasks"]}},
+    {"if": {"properties": {"state": {"const": "handed_off"}}}, "then": {"required": ["handed_off"]}},
+    {"if": {"properties": {"state": {"const": "published"}}}, "then": {"required": ["merge_sha"]}},
+    {"if": {"properties": {"state": {"const": "superseded"}}}, "then": {"required": ["superseded_by"]}},
+    {"if": {"properties": {"state": {"const": "rejected"}}}, "then": {"required": ["reason"]}}
+  ]
+}

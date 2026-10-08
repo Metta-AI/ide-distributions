@@ -1,0 +1,10 @@
+name: autoresearch
+version: 0.1.0
+description: Policy hooks for the autoresearch agent (tool guard, briefing injection, event log).
+author: autoresearch
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - on_session_end
+  - pre_llm_call
+  - kanban_task_completed

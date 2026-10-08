@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/inbound.json",
+  "title": "Inbound delivery record at .supervisor/ledger/inbound/<I-id>.json (Overview C11). Written by the runtime only (runtime.routing, and the publish hook for acknowledgements). The inbound message itself stays immutable at comms/inbox/<I-id>.json.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "kind", "received_at", "state", "responsible", "acknowledged_by", "late", "history"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^I-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "kind": {"enum": ["reply", "steer", "task", "seen"]},
+    "received_at": {"type": "string", "minLength": 1},
+    "state": {"enum": ["received", "routed", "acknowledged"]},
+    "responsible": {
+      "description": "The one responsible card: a task id once known, the card request (Q-id) it was routed to, and/or backlog=true for the planning backlog (bound to a planning card's task id when one takes it). All null/false for a seen, or for a task rejected with a runtime note.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "request_id", "backlog"],
+      "properties": {
+        "task_id": {"type": ["string", "null"]},
+        "request_id": {"type": ["string", "null"], "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}$"},
+        "backlog": {"type": "boolean"}
+      }
+    },
+    "acknowledged_by": {"description": "The published message (M-id) that acknowledged it; null until then (and for a seen).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "late": {"description": "A reply that arrived after the expires time of the message it answers.", "type": "boolean"},
+    "thread": {"description": "Thread key of the outbound message it answers (its thread, else its id); absent when it answers nothing.", "type": "string"},
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["state", "at"],
+        "properties": {
+          "state": {"enum": ["received", "routed", "acknowledged"]},
+          "at": {"type": "string"},
+          "note": {"type": "string"}
+        }
+      }
+    }
+  }
+}

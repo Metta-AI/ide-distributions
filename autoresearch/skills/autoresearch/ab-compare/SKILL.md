@@ -1,0 +1,47 @@
+---
+name: ab-compare
+description: Use when computing paired A/B statistics for a review.
+---
+
+# A/B compare
+
+This skill implements the statistics of System Design §5.5 (review and decision): matched
+A/B statistics with paired bootstrap intervals, under the frozen design. It adapts
+optimizer-seed `ab-compare`. `review-xp` calls it.
+
+Doctrine upheld: D-06, D-09.
+
+## Reads and writes
+
+- Reads: the episode rows of the baseline and candidate arms, the frozen evaluation design.
+- Writes: `stats/rows/<E-id>.jsonl` and `stats/outcomes/<E-id>.json` (the stored outcome
+  that `softmax submit` checks), and the metrics of the Result.
+
+## Procedure
+
+1. Collect the rows (see `fetch-artifacts` step 6):
+   `cat evidence/xp/<E-id>/*/rows.jsonl > .scratch/<E-id>-rows.jsonl`
+2. Ingest them against the frozen design. It drops duplicates, failed episodes, and rows
+   with the wrong game version, seats, or seed:
+   `"$AUTORESEARCH_CLI" stats ingest --experiment <E-id> --rows .scratch/<E-id>-rows.jsonl`
+   Read `data.report`: `kept`, `duplicates`, `failed`, `wrong_version`, `wrong_seats`,
+   `wrong_seed`, `missing_metrics`. Many dropped rows can make the Result invalid.
+3. Apply the decision rule. The champion comes from the promotion ledger and the
+   leaderboard; do not pass `--champion` inside a card:
+   `"$AUTORESEARCH_CLI" stats evaluate <E-id>`
+4. Read `data`: `promote_eligible`, `failures` (for example `n_short:…`,
+   `primary_not_significant:<m>`, `guardrail_breach:<m>`, `performance_slip:<m>`,
+   `baseline_not_champion`), and `per_metric` (`mean_signed_diff`, `ci`, `threshold`,
+   `passed` per metric; larger is always better after the sign). Copy `per_metric` and the
+   pair count into the Result metrics, with units.
+5. Report the pairing of the design (`seed_and_opponents` or `seed_only`) in the Result
+   analysis.
+
+## Failure handling
+
+- Do not peek and stop. N was committed with the rule (D-09). Evaluate only when every
+  request is terminal.
+- `stats evaluate` exit 1 "champion unknown" or "champion mismatch": the ledger and the
+  leaderboard disagree, or the champion changed. Record it; the review decision is `hold`
+  and a re-evaluation against the new champion is the follow-up card.
+- Never edit `stats/rows/` or `stats/outcomes/` by hand. `softmax submit` checks their hashes.
