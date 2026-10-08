@@ -299,6 +299,13 @@ def test_finished_card_still_allows_reads_trusted_cli_and_completion(layout):
     assert _terminal(layout, "git status && ls notes 2>/dev/null", card=FINISHED)[0]
 
 
+def test_kanban_block_is_allowed_before_and_after_card_finish(layout):
+    """A tool fault ends with ``card finish`` and then ``kanban_block`` (D-26)."""
+    args = {"reason": "tool-fault: x", "kind": "needs_input"}
+    assert tool_policy("kanban_block", args, layout.ctx(), WORKING)[0]
+    assert tool_policy("kanban_block", args, layout.ctx(), FINISHED)[0]
+
+
 def test_kanban_complete_needs_card_finish_first(layout):
     """Without ``card finish`` there is no handoff, so completing would drop the work."""
     allowed, reason = tool_policy("kanban_complete", {"summary": "s"}, layout.ctx(), WORKING)

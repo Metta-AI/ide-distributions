@@ -185,13 +185,12 @@ class KanbanQueue:
         return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome)
 
     @staticmethod
-    def _block_reason(status: str, runs: list[dict]) -> str | None:
-        """Hermes ends the blocking run with the block reason as its summary."""
-        if status != "blocked":
-            return None
-        for run in reversed(runs):
-            if run["outcome"] == "blocked":
-                return run.get("summary")
+    def _blocking_run(status: str, runs: list[dict]) -> dict | None:
+        """The run a worker's block ended, if the card is blocked and that run is the latest.
+        Hermes ends it with the block reason as its summary. A card the circuit breaker parked
+        later has no ``blocked`` run after it, so an old reason is never read as current."""
+        if status == "blocked" and runs and runs[-1]["outcome"] == "blocked":
+            return runs[-1]
         return None
 
     # -- Queue protocol --
@@ -237,13 +236,15 @@ class KanbanQueue:
             spec = self._parse_spec(task)
         except ValueError as error:
             raise KanbanError(["kanban", "show", task_id], str(error)) from error
+        blocking = self._blocking_run(task["status"], shown["runs"])
         return Card(
             task_id=task["id"],
             spec=spec,
             state=_STATE_BY_STATUS[task["status"]],
             assignee=task["assignee"],
             runs=[self._run_info(run) for run in shown["runs"]],
-            block_reason=self._block_reason(task["status"], shown["runs"]),
+            block_reason=blocking.get("summary") if blocking else None,
+            block_run_id=str(blocking["id"]) if blocking else None,
         )
 
     def list(self, state: str | None = None) -> list[Card]:

@@ -36,11 +36,12 @@ def _help(host: Host, text: str) -> list[dict]:
     return [m for m in host.outbox() if m["kind"] == "help_request" and text in m["title"]]
 
 
-def _block(host: Host, task_id: str, reason: str | None = None) -> None:
+def _block(host: Host, task_id: str, reason: str | None = None, run: str = "r-1") -> None:
     path = host.queue.directory / "cards" / f"{task_id}.json"
     record = read_json(path)
     record["state"] = "blocked"
     record["block_reason"] = reason
+    record["block_run_id"] = run
     write_json(path, record)
 
 
@@ -90,6 +91,34 @@ def test_tool_fault_block_is_not_requeued_or_repaired_and_asks_for_help_once(hos
     assert _check(host, at(3)).blocked == []  # idempotent
     assert len(_help(host, card.task_id)) == 1
     assert host.remote_head() == host.head() and host.clean()
+
+
+def test_a_tool_fault_in_a_later_run_is_reported_again(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "tool-fault: first", run="r-1")
+    _check(host, at(2))
+    _block(host, card.task_id, "tool-fault: second", run="r-2")
+    second = _check(host, at(3))
+    [action] = second.blocked
+    assert action.action == "tool-fault"
+    assert len(_help(host, card.task_id)) == 2
+
+
+def test_tool_fault_after_a_requeue_is_reported_without_repair(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id)
+    assert [a.action for a in _check(host, at(2)).blocked] == ["requeued"]
+    _block(host, card.task_id, "tool-fault: x", run="r-2")
+    assert [a.action for a in _check(host, at(3)).blocked] == ["tool-fault"]
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+
+
+def test_ordinary_block_after_a_tool_fault_is_requeued(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "tool-fault: x")
+    _check(host, at(2))
+    _block(host, card.task_id, None, run="r-2")  # e.g. the breaker, after a human unblock
+    assert [a.action for a in _check(host, at(3)).blocked] == ["requeued"]
 
 
 def test_other_block_reasons_are_requeued_as_before(host):

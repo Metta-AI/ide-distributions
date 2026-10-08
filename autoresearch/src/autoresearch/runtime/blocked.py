@@ -13,11 +13,20 @@ Per blocked card, tracked by the committed marker
    the promotion-recovery card is its only follow-up (A11); the help_request still goes out.
 3. Later: nothing more. The blocked card stays blocked for a human to inspect.
 
-A card blocked with a reason starting ``tool-fault:`` (doctrine: the agent hit a broken
+A card the worker blocked with a reason starting ``tool-fault:`` (doctrine D-26: a broken
 binding, CLI or gate) skips all of that. A requeue or repair would redo the same broken
 step, so the card is never requeued and gets no repair request. It gets one runtime
-``help_request`` quoting the reason (marker ``{state: tool-fault}``) and stays blocked for a
-human. The agent has already sent its own help_request; this one covers a crashed worker.
+``help_request`` quoting the reason and naming the block's run, and the marker becomes
+``{state: tool-fault, block_run_id}``; the card stays blocked for a human. The marker is
+keyed on the run, so a later tool-fault block (another run) is reported again. The agent also
+sends its own help_request, which reaches canonical with its handoff (``card finish`` runs
+before ``kanban_block``); this one covers the runtime's view and a worker that crashed. If a
+human unblocks the card and a later non-tool-fault block follows, the marker is ignored and
+the card follows the ordinary requeue-then-repair path.
+
+Hermes limit: a second ``kanban_block`` with the same kind after an unblock (D-26 uses
+``needs_input``) is routed to ``triage``, which the Queue reports as ``pending``, so this
+module never sees it. That repeat is reported only by the agent's own help_request.
 
 The queue change comes before the commit, so a crash between them at worst requeues a card
 a second time; it never skips straight to a repair.
@@ -124,7 +133,7 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
 
 def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool) -> BlockedAction:
     task_id = card.task_id
-    title = f"Card {task_id} is blocked by a tool fault"
+    title = f"Card {task_id} is blocked by a tool fault (run {card.block_run_id})"
     with canonical_lock(canonical):
         if not outbox_has_title(canonical, title, exact=True):
             body = (
@@ -150,6 +159,7 @@ def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool)
                 "task_id": task_id,
                 "request_id": card.spec.request_id,
                 "state": TOOL_FAULT,
+                "block_run_id": card.block_run_id,
                 "reason": reason,
             },
         )
@@ -161,17 +171,21 @@ def handle_blocked(
     ctx: RunContext, queue: Queue, allow_no_remote: bool = False
 ) -> list[BlockedAction]:
     """Requeue each blocked card once, then repair; a ``tool-fault:`` block only asks for
-    help (module docstring). The caller must not
-    hold the canonical lock."""
+    help (module docstring). The caller must not hold the canonical lock."""
     canonical = ctx.canonical
     actions = []
     for card in queue.list("blocked"):
         record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
         reason = card.block_reason or ""
         if reason.startswith(TOOL_FAULT_PREFIX):
-            if record is None or record["state"] != TOOL_FAULT:
+            reported = (
+                record is not None
+                and record["state"] == TOOL_FAULT
+                and record.get("block_run_id") == card.block_run_id
+            )
+            if not reported:
                 actions.append(_tool_fault(canonical, card, reason, allow_no_remote))
-        elif record is None:
+        elif record is None or record["state"] == TOOL_FAULT:
             actions.append(_requeue(canonical, queue, card))
         elif record["state"] == REQUEUED:
             actions.append(_repair(canonical, card, record, allow_no_remote))

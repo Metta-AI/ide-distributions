@@ -246,6 +246,16 @@ class CardRun:
                 "doctrine_version": 1}  # fmt: skip
         return self.store.create("journal", meta, "Did things.\n\n## Decisions\n\n- none\n")
 
+    def block_for_tool_fault(self, command: str, error: str) -> dict:
+        """The D-26 sequence: journal, staged help_request, ``card finish --outcome blocked``,
+        then ``kanban_block`` with a ``tool-fault:`` reason."""
+        self.journal()
+        stage(Layout(self.worktree), "help_request", f"{command} failed", error, [])
+        result = finish(self.ctx, "blocked")
+        assert result.ok, result.problems
+        self.host.queue.block(self.task_id, self.run_id, f"tool-fault: {command}: {error}")
+        return result.record
+
     def finish(self, outcome: str = "done") -> dict:
         self.journal()
         result = finish(self.ctx, outcome)

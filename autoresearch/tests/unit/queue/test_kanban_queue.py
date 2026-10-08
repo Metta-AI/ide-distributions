@@ -145,7 +145,18 @@ def test_get_exposes_the_block_reason_of_a_blocked_card(fake, queue):
         {"id": 2, "outcome": "blocked", "ended_at": 9, "summary": "tool-fault: build crashed"},
     ]
     fake.reply("show", {"task": task_json("blocked"), "runs": runs})
-    assert queue.get("t_abc").block_reason == "tool-fault: build crashed"
+    card = queue.get("t_abc")
+    assert (card.block_reason, card.block_run_id) == ("tool-fault: build crashed", "2")
+
+
+def test_an_older_block_reason_is_not_current_after_a_later_run(fake, queue):
+    runs = [
+        {"id": 1, "outcome": "blocked", "ended_at": 5, "summary": "tool-fault: old"},
+        {"id": 2, "outcome": "crashed", "ended_at": 9, "summary": None},
+    ]
+    fake.reply("show", {"task": task_json("blocked"), "runs": runs})
+    card = queue.get("t_abc")
+    assert (card.block_reason, card.block_run_id) == (None, None)
 
 
 def test_block_reason_is_none_without_a_blocked_run_or_a_blocked_card(fake, queue):
@@ -352,6 +363,16 @@ def fenced(fake, tmp_path, monkeypatch):
     for command in ("list", "show"):
         fake.reply(command, code=1, stderr=FENCE_ERROR)
     return KanbanQueue("board1", "prof", hermes_home=home)
+
+
+def test_delegate_child_reads_the_block_reason_from_the_board_db(fenced, tmp_path):
+    db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
+    db.execute("UPDATE tasks SET status = 'blocked' WHERE id = 't_ready'")
+    db.execute("INSERT INTO task_runs VALUES (5, 't_ready', 9, 'blocked', NULL, 'tool-fault: x')")
+    db.commit()
+    db.close()
+    card = fenced.get("t_ready")
+    assert (card.state, card.block_reason, card.block_run_id) == ("blocked", "tool-fault: x", "5")
 
 
 def test_list_in_delegate_child_reads_the_board_db(fenced):

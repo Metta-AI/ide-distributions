@@ -501,6 +501,27 @@ def test_blocked_card_is_requeued_once_then_repaired(host):
     assert host.tick(at(4)).blocked == []  # nothing more
 
 
+def test_tool_fault_sequence_publishes_the_agents_help_request_and_keeps_the_card_blocked(host):
+    host.tick(at(0))
+    host.tick(at(1))
+    worker = host.claim()
+    worker.block_for_tool_fault("softmax build E-1", "FileNotFoundError: gate.py")
+
+    run = host.tick(at(2))
+    assert [a.action for a in run.blocked] == ["tool-fault"]
+    assert host.queue.get(worker.task_id).state == "blocked"
+    [agent_help] = _help_requests(host, "softmax build E-1 failed")  # merged via the handoff
+    assert "FileNotFoundError" in agent_help["body"]
+    [runtime_help] = _help_requests(host, "blocked by a tool fault")
+    assert worker.task_id in runtime_help["title"]
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+
+    assert host.tick(at(3)).blocked == []  # nothing more
+    assert len(_help_requests(host, "softmax build E-1 failed")) == 1
+    assert len(_help_requests(host, "blocked by a tool fault")) == 1
+    assert host.clean()
+
+
 def test_main_builds_the_run_from_the_environment(host, monkeypatch, capsys):
     import json
 
