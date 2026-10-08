@@ -149,14 +149,14 @@ The store is `{"jobs": [ … ], "updated_at": "…"}`. A shipped `cron/jobs.json
 - The worker's `pwd` printed `<canon>/.worktrees/X` (and `/Y`, `/G`); `write_file` wrote `<canon>/.worktrees/X/result.txt`. The dispatcher sets `TERMINAL_CWD` to the workspace (`kanban_db_dispatch.py:2838`).
 - Every worker answered `agents: TANGERINE-7` with no file-read tool call (tool sequence: `kanban_show`, `terminal`, `terminal`, `write_file`, `kanban_complete`). The stored system prompt of all four sessions contains "The following project context files have been loaded and should be followed: ## AGENTS.md # Probe AGENTS.md …TANGERINE-7".
 
-## 11. Tool calling through OpenRouter — PARTIAL: glm-5.3-flash PASS, glm-5.3 PASS, kimi-k3 UNVERIFIED
+## 11. Tool calling through OpenRouter — PASS: glm-5.3-flash PASS, glm-5.3 PASS, kimi-k3 PASS (re-run 2026-10-08)
 Each card (per-task `--model <id> --provider openrouter`): run one terminal command, run a command that the plugin blocks, write `result.txt` with the file tool, call `kanban_complete`.
 
 | Model | Task | Result | Evidence |
 |---|---|---|---|
 | `z-ai/glm-5.3-flash` | t_562ab168 (CLI dispatcher), t_9774331c (gateway dispatcher) | PASS | run `done/completed`, 12 s; all 5 tool calls; correct `result.txt` |
 | `z-ai/glm-5.3` | t_fabe650a | PASS | run `done/completed`, 16 s; all 5 tool calls; correct `result.txt` |
-| `moonshotai/kimi-k3` | t_fa134c3a | UNVERIFIED | two runs `rate_limited`: OpenRouter `HTTP 402: … You requested up to 131072 tokens, but can only afford 63269` |
+| `moonshotai/kimi-k3` | t_fa134c3a (2026-10-07); t_c21ebe63 (2026-10-08) | UNVERIFIED, then PASS | 2026-10-07: two runs `rate_limited` (OpenRouter `HTTP 402: … can only afford 63269`). 2026-10-08 with a funded key: run `done/completed`, 13 s, all 4 tool calls, correct `result.txt` (below) |
 
 Why kimi-k3 is blocked:
 - The broker key `openrouter.inference` had `limit 500, usage 499.05, limit_remaining 0.949` USD (from `GET /api/v1/key`). The broker description says "$50 hard limit"; the key's real limit is $500 and it is nearly used up.
@@ -166,6 +166,20 @@ Why kimi-k3 is blocked:
 - This is a decision for James: top up or raise the broker key, then re-run this one card (the probe setup can be rebuilt in minutes). Amendment A5.
 
 Approximate spend: four glm runs plus one direct kimi call, all below $0.05.
+
+**kimi-k3 re-run, 2026-10-08 (Plan 01 Task 5.1, dedicated test key with $100 limit): PASS.**
+Fresh install of this distribution (plugin enabled) in a throwaway `HERMES_HOME`, one card
+created with `--model moonshotai/kimi-k3 --provider openrouter --max-retries 1 --assignee`,
+dispatched with `hermes -p <profile> kanban --board <b> dispatch`. Card: run `pwd`, write
+`result.txt` with the file tool, call `kanban_complete`.
+- Run `done/completed` in 13 s (claim to end). Tool calls (plugin `tool_events.jsonl`):
+  `kanban_show`, `terminal`, `write_file`, `kanban_complete`. `result.txt` held
+  `kimi ok: <worktree path>`, so the terminal output reached the model correctly.
+- Session usage (`state.db` `sessions`): 10 messages, 4 tool calls, 38,369 input tokens,
+  653 output tokens, 62,912 cache-read tokens, 56 reasoning tokens; Hermes estimated cost
+  $0.059. OpenRouter key usage rose by $0.0008 right after the run (the key's `usage`
+  figure can lag); either way well under $0.10.
+- The 131072-token reservation (A5) did not matter with a funded key: no 402.
 
 ## Commands for Task 2.2
 All take `--board <slug>` right after `kanban`. Verified on v0.21.5 unless marked "source".
