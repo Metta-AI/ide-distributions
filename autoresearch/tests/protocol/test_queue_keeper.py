@@ -311,6 +311,39 @@ def test_stale_merge_head_is_aborted(host):
     assert host.remote_head() == host.head()
 
 
+def test_crash_after_merge_fault_exits_before_publish_then_publishes_once(host, monkeypatch):
+    """``AUTORESEARCH_FAKE_FAULTS=crash_after=merge`` kills the run between the merge commit
+    and publication (the protocol slice's fault, Plan 01 Task 5.1); the next run publishes
+    the merged handoff's message exactly once."""
+    host.tick(at(0))
+    host.tick(at(1))  # admits the planning request
+    planner = host.claim()
+    planner.stage_note("Plan: crash test")
+    record = planner.finish()
+    handoff = host.ledger / "handoffs" / record["card"] / f"{record['run_id']}.json"
+    exits = []
+
+    def fake_exit(code):
+        exits.append(code)
+        raise SystemExit(code)
+
+    monkeypatch.setattr(queue_keeper.os, "_exit", fake_exit)
+    host.env["AUTORESEARCH_FAKE_FAULTS"] = "crash_after=merge"
+    with pytest.raises(SystemExit):
+        host.tick(at(2))
+    assert exits == [queue_keeper.CRASH_EXIT]
+    assert host.committed(handoff)["state"] == "merged"
+    assert host.outbox() == []
+
+    host.env["AUTORESEARCH_FAKE_FAULTS"] = ""
+    run = host.tick(at(3))
+    assert run.failures == {}, run.failures
+    assert host.committed(handoff)["state"] == "published"
+    assert [(m["seq"], m["title"]) for m in host.outbox()] == [(1, "Plan: crash test")]
+    host.tick(at(4))
+    assert len(host.outbox()) == 1
+
+
 def test_three_failed_pushes_raise_one_help_request(host):
     host.tick(at(0))
     gitops.git(host.canonical, "remote", "set-url", "origin", str(host.tmp_path / "gone.git"))

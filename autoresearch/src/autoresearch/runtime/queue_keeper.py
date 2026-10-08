@@ -39,6 +39,10 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
+Fault injection (tests only): ``AUTORESEARCH_FAKE_FAULTS=crash_after=merge`` makes the process
+exit at once (``os._exit``, like a kill) after a handoff's merge commit and before its
+publication, so recovery from that crash can be tested on a real install.
+
 Failure containment: each step after preflight runs in ``_step``; a step that raises is
 logged to ``.supervisor/runtime/keeper.log`` and becomes a ``keeper_step_failed`` signal
 input, and the run goes on with the later steps. A failed bootstrap stops the run with exit
@@ -113,6 +117,7 @@ from autoresearch.runtime.routing import (
     route_all,
 )
 from autoresearch.runtime.signals import QUEUE_GROWTH, SignalConfig, compute_signals
+from autoresearch.softmax_tool.fake import fault
 from autoresearch.softmax_tool.protocol import Softmax
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 
@@ -131,6 +136,7 @@ GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
 LATE_STEPS = ("planning", "orphans", "blocked", "proposals", "resume", "push_final")
+CRASH_EXIT = 70  # exit code of an injected crash (module docstring)
 
 
 @dataclass
@@ -627,6 +633,8 @@ def _run_steps(
     )
 
     def publish(target: Path, merge_sha: str, handoff: dict) -> None:
+        if fault(env, "crash_after") == "merge":
+            os._exit(CRASH_EXIT)  # the injected crash: no cleanup, like a kill
         run.published.append(publish_hook(target, merge_sha, handoff, allow_no_remote))
 
     store = RecordStore(Layout(canonical))
