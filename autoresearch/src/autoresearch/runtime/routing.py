@@ -499,6 +499,21 @@ def _route_reply(
     return _route_to_thread_or_backlog(ctx, queue, record, message)
 
 
+def _route_nudge(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    spec = CardSpec(
+        request_id="",
+        title=f"Nudge {message['id']}",
+        mode="investigation",
+        why=f"Nudge: {message['text']}",
+        refs=[],
+        created_by=message["id"],
+        priority="P1",
+    )
+    return _route_to_request(ctx.canonical, record, f"nudge:{record['id']}", spec)
+
+
 # One handler per inbound kind of the registry (``comms.kinds``); the kind registry
 # conformance test checks that the two sets are the same. Records come from messages
 # validated against the registry, so a record's kind is always here; removing a kind while
@@ -508,6 +523,7 @@ HANDLERS = {
     "task": _route_task,
     "steer": _route_steer,
     "reply": _route_reply,
+    "nudge": _route_nudge,
 }
 
 
