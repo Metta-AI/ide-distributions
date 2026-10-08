@@ -258,7 +258,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Protocol slice on the real Kanban dispatcher with recovery tests | Plan 01 Task 5.1 | **PASS: GO** (2026-10-08, [protocol-slice.md](protocol-slice.md)). |
 | Serial fallback queue | Plan 01 Task 5.2 | **NOT SHIPPED.** Built only if 5.1 fails. |
 | kimi-k3 tool calling inside Hermes | A5 | **PASS** (2026-10-08, hermes-facts item 11). |
-| Full research cycle on the fake game, real cheap model, 90 minutes, with `credits=0` injection | Plan 03 Task 6.0 (`tests/integration/test_fake_cycle.py`) | **PASS** (2026-10-08, glm-5.3; runs 1 and 3 passed, about 30 min each; [fake-cycle.md](fake-cycle.md)). |
+| Full research cycle on the fake game, real cheap model, 90 minutes, with `credits=0` injection | Plan 03 Task 6.0 (`tests/integration/test_fake_cycle.py`) | **PASS** (2026-10-08, glm-5.3; runs 1 and 3 passed, about 30 min each; [fake-cycle.md](fake-cycle.md)). The operator steer named the lever (patience) and waived the replay gate; the D-05 first-replay question stays open for Task 6.1. |
 | Real research cycle on GotA (calibration, planning, investigation, experiment, XP, review, promotion) | Plan 03 Task 6.1 | **NOT RUN.** Needs `games/gota` and the compiler build binding (Plan 02). Record in `findings/first-real-cycle.md`. |
 | Compiler M1 baseline (semantic to policy, with goal tracing) | Plan 02 | **UNVERIFIED.** Not shown in this repository at this commit. |
 | Upload and submit as a Player | Plan 03 Task 3.x | Documented as working in the coworld-player-swap skill; the submit path was **not re-tested live** (`player-xp-probe.md`). **UNVERIFIED.** |

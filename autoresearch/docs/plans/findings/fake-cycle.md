@@ -1,6 +1,6 @@
 # Finding: full research cycle on the fake game (Plan 03 Task 6.0)
 
-**Verdict: PASS.** Runs 1 and 3 passed every assertion (run 3 on the final code, with both product fixes); run 2 reached every stage, including a published promotion, but failed the no-duplicate-XP assertion, which found bug 2. Each passing cycle took about 30 minutes of the 90-minute budget.
+**Verdict: PASS.** Runs 1 and 3 passed every assertion (run 3 with both product fixes of the run, before review fix round 1); run 2 reached every stage, including a published promotion, but failed the no-duplicate-XP assertion, which found bug 2. Each passing cycle took about 30 minutes of the 90-minute budget.
 2026-10-08, run by Claude for James.
 
 Test: `tests/integration/test_fake_cycle.py` (marker `hermes`, `ad5e8a9`). Run it with:
@@ -52,14 +52,18 @@ Stage times are seconds after the gateway started.
 
 ## Wall time and cost
 
+Hermes estimates (last column) are Hermes's own per-session cost estimates; they add up to about
+$1.27 and are not comparable with the key's usage below, which is higher and may also carry
+other agents' calls on the same key.
+
 | Run | Result | Cycle | Sessions | Tokens (input / output / cache read) | Hermes estimate |
 |---|---|---|---|---|---|
 | 1 | **PASSED** | 29.2 min | 8 | 656k / 42k / 5.9M | $0.48 |
 | 2 | Failed one assertion: 6 duplicate XP requests (bug 2). Every stage reached, promotion `published`. | 29.2 min | 8 | 560k / 36k / 5.0M | $0.40 |
-| 3 | **PASSED** on the final code | 31.2 min | 7 | 415k / 35k / 5.1M | $0.39 |
+| 3 | **PASSED** (on `ad5e8a9`+`4569558`; before review fix `9cce176`) | 31.2 min | 7 | 415k / 35k / 5.1M | $0.39 |
 
-OpenRouter key usage for the whole task: **$2.89** (usage 2.908 before run 1, 5.797 after run 3; the key may also carry other agents' calls) (`GET /api/v1/key` usage 2.908 before
-run 1). Budget was $15. The key's `usage` lags by minutes, so a per-run delta can read 0.
+OpenRouter key usage for the whole task: **$2.89** by `GET /api/v1/key` (usage 2.908 before
+run 1, 5.797 after run 3). Budget was $15. The key's `usage` lags by minutes, so a per-run delta can read 0.
 
 ## Bugs found and fixed (each its own commit with a test)
 
@@ -76,7 +80,16 @@ run 1). Budget was $15. The key's `usage` lags by minutes, so a per-run delta ca
    attempt rule (`lifecycle.launch_attempts` is never incremented, so the attempt was a free
    model choice). `xp create` now refuses a new attempt while the batch's latest attempt
    lacks requests (`attempt_incomplete`, naming the attempt to rerun) and an attempt that
-   skips a number (`bad_attempt`). Retrying a complete attempt stays possible.
+   skips a number (`bad_attempt`). Review fix round 1 (`9cce176`) closed the rest of the
+   hole: a complete attempt could still be repeated (the runtime relaunch completes attempt
+   1, then a self-requested card runs `--attempt 2`). A new attempt now also needs a failed
+   or cancelled request in the latest attempt (`attempt_not_needed` otherwise), so relaunches
+   that run one after another never repeat a healthy attempt. Not covered: two relaunchers
+   at the same moment (no cross-process lock), and a `--batches` change between launches.
+   Run 3 ran with the first guard but predates the second, and no self-requested relaunch
+   happened in it, so neither guard was exercised: its "no duplicate XP" result rests on the
+   agent's behaviour in that run, not on the guards. The guards are proven by unit
+   tests (`tests/unit/softmax/test_softmax_cli.py`), not by a rerun of the paid cycle.
 
 Skill fix:
 
@@ -101,7 +114,8 @@ relaunch fits in 90 minutes.
   A plugin cannot add the field to the call; if this persists with kimi-k3, a plugin block
   message with the exact call shape is the next step.
 - **The design card requested its own relaunch card** (run 2) although `xp-request` says the
-  XP poller makes it. With bug 2 fixed, such a card can only fill the missing requests.
+  XP poller makes it. With bug 2 fixed (both rounds), such a card can only fill the missing
+  requests of the latest attempt, or start a new attempt after a failed request.
 - **No replay before the first experiment.** D-05 asks for a replay before a strategy change,
   and XP is the only replay source. A fresh install has no XP yet, so the first hypothesis
   needs another source (here the steer named the documentation). On GotA the first cycle

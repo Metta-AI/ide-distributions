@@ -57,6 +57,8 @@ Run each binding from `"$AR_HOME"` with absolute paths.
 - `local_check`: `python3 games/fakegame/tools/fake_build.py --check <candidate> --json`.
 - `upload`: not used by agents; `"$AUTORESEARCH_CLI" softmax upload` uploads.
 - `evaluate`: `python3 games/fakegame/tools/fake_eval.py --results <results.json> --json`
-  (used by xp-poll and `softmax league-episodes`); `--policy <id> --seed <n>` is a local run.
+  (used by xp-poll and `softmax league-episodes`). `--policy <id> --seed <n>` is a local run
+  for debugging only: it scores by a hash of the policy id and does **not** follow the
+  Mechanics above, so never use it as evidence (D-04).
 - `replay_inspect`: `python3 games/fakegame/tools/fake_eval.py --replay --policy <id> --seed
   <n> --json` prints a per-tick summary. Fake XP requests store no replay files.
