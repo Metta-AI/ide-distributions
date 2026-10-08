@@ -7,7 +7,9 @@
   softmax tool behind `"$AUTORESEARCH_CLI"` may mutate the platform);
 - force pushes, ref deletions and pushes to `main`/`master` from model commands;
 - model writes outside the worker worktree (C2; scratch files go to `<worktree>/.scratch/`),
-  every model write after `card finish` (C3), and `memory` writes outside planning cards.
+  every model write after `card finish` (C3), and `memory` writes outside planning cards;
+- the native `kanban_complete` on a card before `card finish` ran (C3): a completed run with no
+  handoff record leaves its work unmerged.
 
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
 (`tools/terminal_tool.py`
@@ -136,6 +138,10 @@ RAW_MUTATION = (
     "this command contains a raw platform mutation or player switch; "
     'use the "$AUTORESEARCH_CLI" softmax commands.'
 )
+NOT_FINISHED = (
+    'run "$AUTORESEARCH_CLI" card finish --outcome <o> first: it records the handoff; '
+    "kanban_complete without it leaves this card's work unmerged."
+)
 FINISHED = "this card is finished (`card finish` ran); no further writes."
 SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
 
@@ -166,6 +172,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
             return ALLOW
         if tool_name == "memory":
             return guard.memory()
+        if tool_name == "kanban_complete" and card is not None and not guard.finished:
+            return _block(NOT_FINISHED)
         if tool_name == "execute_code":
             code = args.get("code")
             if isinstance(code, str) and BLOCKED_TEXT.search(code):

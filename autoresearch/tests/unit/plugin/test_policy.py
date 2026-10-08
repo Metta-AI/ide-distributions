@@ -246,7 +246,7 @@ FILE_TOOL_CASES = [
     ("read_file", {"path": "{canon}/AGENTS.md"}, True),
     ("search_files", {"pattern": "x", "path": "{canon}"}, True),
     ("web_search", {"query": "coworld submit"}, True),
-    ("kanban_complete", {"summary": "done"}, True),
+    ("kanban_complete", {"summary": "done"}, False),  # before card finish
     ("skill_manage", {"operations": [{"action": "create", "name": "x", "content": "y"}]}, True),
     ("write_file", {"path": ".scratch/notes.txt", "content": "x"}, True),
     ("write_file", {"path": "a\x00b", "content": "x"}, True),
@@ -296,6 +296,15 @@ def test_finished_card_still_allows_reads_trusted_cli_and_completion(layout):
     assert tool_policy("kanban_complete", {"summary": "s"}, ctx, FINISHED)[0]
     assert _terminal(layout, '"$AUTORESEARCH_CLI" card status', card=FINISHED)[0]
     assert _terminal(layout, "git status && ls notes 2>/dev/null", card=FINISHED)[0]
+
+
+def test_kanban_complete_needs_card_finish_first(layout):
+    """Without ``card finish`` there is no handoff, so completing would drop the work."""
+    allowed, reason = tool_policy("kanban_complete", {"summary": "s"}, layout.ctx(), WORKING)
+    assert not allowed and '"$AUTORESEARCH_CLI" card finish --outcome <o>' in reason
+    assert tool_policy("kanban_complete", {"summary": "s"}, layout.ctx(), FINISHED)[0]
+    no_card = layout.ctx(worker=False)
+    assert tool_policy("kanban_complete", {"summary": "s"}, no_card, None)[0]
 
 
 @pytest.mark.parametrize(
