@@ -12,7 +12,7 @@ from autoresearch.runtime.ledger import canonical_lock
 
 NOW = datetime.datetime(2026, 10, 7, 12, tzinfo=datetime.UTC)
 PAST = "2026-10-07T00:00:00+00:00"
-FUTURE = "2026-10-08T00:00:00+00:00"
+FUTURE = "2099-01-01T00:00:00+00:00"
 
 
 @pytest.fixture
