@@ -58,7 +58,7 @@ D-20. **Point, don’t restate.** Messages reference entities with `ar://` refs.
 
 ## Cards and the shared workspace
 
-D-21. **Work only on your claimed card.**
+D-21. **Work only on your claimed card.** Before an expensive or platform-visible step (an XP launch, an upload, a submission), check the cards running now (`queue list --state claimed`, also listed at the start of your card) and do not duplicate their work.
 
 D-22. **Create follow-up cards for further work.** Do not do that work in this iteration.
 
