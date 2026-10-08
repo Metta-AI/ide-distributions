@@ -24,7 +24,7 @@ You are implementing **autoresearch v0**: an autonomous research agent for the S
 - **Models (open-weight only):** primary `moonshotai/kimi-k3`, fallback `z-ai/glm-5.3`, tests and protocol slice `z-ai/glm-5.3-flash`, all through OpenRouter.
 - **GotA league:** `league_3c60897b-25cf-4b37-9d1a-8554c1198f28`. League score "Emmett's Glory" (winning heroes' lifetime XP per simulated minute; 0 on loss/draw/timeout). Performance guardrails: `glory` and `win_rate`. Live coworld version 2026.10.6.1.
 - **Credentials:** one Player credential per install; a Player-only token can create/read/download XP (verified). Use player **Games Bond** (`ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1`) for any live test so James Botts's league entry is untouched. For live probes, isolate credentials in a temporary `HOME` (copy only the user token) so `~/.softmax/credentials.yaml` is never changed; delete the temp copy afterwards. Get service credentials (OpenRouter key etc.) from the metta token broker (`python3 ~/coding/metta/scripts/token_broker_client.py scopes`, then `exec --scope … --reason "…" -- <cmd>`), not from Vault or ambient AWS.
-- **Versions:** Hermes v0.21.5 via `uv tool install git+https://github.com/NousResearch/hermes-agent@v2026.9.24` (PyPI lags). coworld 0.1.57 and softmax-cli 0.26.38 pinned in the project; the global uv-tool coworld is stale (0.1.38), so never rely on it.
+- **Versions:** Hermes v0.21.5 via `uv tool install git+https://github.com/NousResearch/hermes-agent@v2026.9.24` (PyPI lags). coworld 0.1.58 and softmax-cli 0.26.38 pinned in the project; the global uv-tool coworld is stale (0.1.38), so never rely on it.
 
 ## Repository and git state
 - Repo `~/coding/ide-mvp` (GitHub `Metta-AI/ide-mvp`, private; **use `gh`, not Graphite** for this repo).

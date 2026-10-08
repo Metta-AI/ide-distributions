@@ -11,7 +11,7 @@ dependencies = [
     "python-ulid",
     "scipy",
     "pandas",
-    "coworld==0.1.57",
+    "coworld==0.1.58",
     "softmax-cli==0.26.38",
 ]
 
