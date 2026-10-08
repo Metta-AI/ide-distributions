@@ -82,24 +82,39 @@ def committed_inputs(source: Path) -> dict[str, str]:
     """Git verifies the index AND working copy; untracked input is never a committed input."""
     paths = source_files(source)
     relative = []
+    installed = []
     for path in paths:
         if path.is_symlink() or not path.is_file():
             raise pw_cli.UsageError(f'input must be a regular file: {path}')
-        try:
+        if path.is_relative_to(REPO):
             relative.append(str(path.relative_to(REPO)))
-        except ValueError:
-            raise pw_cli.UsageError(f'source must be inside {REPO}') from None
-    scopes = relative + [str(source.parent.relative_to(REPO) / 'skills'),
-                         str(source.parent.relative_to(REPO) / 'comms.md'),
-                         str(source.parent.relative_to(REPO) / 'packing.json'),
-                         str(COMPILER.relative_to(REPO))]
+        elif os.environ.get('GOTA_CANDIDATE_REPO'):
+            installed.append(path)
+        else:
+            raise pw_cli.UsageError(f'source must be inside {REPO}')
+    scopes = relative + [str(source.parent.relative_to(REPO) / name)
+                         for name in ('skills', 'comms.md', 'packing.json')]
+    if COMPILER.is_relative_to(REPO):
+        scopes.append(str(COMPILER.relative_to(REPO)))
     dirty = git('status', '--porcelain', '--untracked-files=all', '--', *scopes)
     tracked = set(git('ls-files', '--', *relative).splitlines())
     missing = set(relative) - tracked
     if dirty or missing:
         raise pw_cli.UsageError('commit compiler and strategy inputs before building:\n' +
                                dirty + '\n' + '\n'.join(sorted(missing)))
-    return {name: digest(REPO / name) for name in relative}
+    # A development distribution must still have clean, tracked compiler inputs.
+    distribution = LAB.parents[3]
+    probe = subprocess.run(['git', '-C', str(distribution), 'rev-parse', '--show-toplevel'],
+                           capture_output=True, text=True, check=False)
+    if installed and probe.returncode == 0:
+        root = Path(probe.stdout.strip())
+        names = [str(path.relative_to(root)) for path in installed]
+        dirty = git('status', '--porcelain', '--untracked-files=all', '--', *names, str(COMPILER.relative_to(root)), root=root)
+        tracked = set(git('ls-files', '--', *names, root=root).splitlines())
+        if dirty or set(names) - tracked:
+            raise pw_cli.UsageError('commit installed compiler inputs before building: ' + dirty)
+    return {**{name: digest(REPO / name) for name in relative},
+            **{str(path): digest(path) for path in installed}}
 
 
 def assert_inputs(order: dict) -> None:
@@ -403,6 +418,16 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         if hermes:
             environment['OPENROUTER_MODEL'] = order['compiler']['model']
             environment['TERMINAL_CWD'] = str(root)
+            if os.environ.get('GOTA_COMPILER_HERMES_HOME'):
+                environment['HERMES_HOME'] = os.environ['GOTA_COMPILER_HERMES_HOME']
+                environment['HERMES_WRITE_SAFE_ROOT'] = str(root)
+                for name in list(environment):
+                    if name.startswith('HERMES_KANBAN_') or name in ('HERMES_PROFILE', 'HERMES_PROFILE_NAME'):
+                        environment.pop(name)
+                environment['TIRITH_BIN'] = str(Path(environment['HERMES_HOME']) / 'bin/tirith')
+                environment.pop('TIRITH_ENABLED', None)
+                environment.pop('TIRITH_FAIL_OPEN', None)
+
         stream_path = stage / f'hermes-stream-{root.name}.jsonl'
         with (stage / 'agent.log').open('a') as log, (stream_path.open('w') if hermes else nullcontext(log)) as stream:
             try:

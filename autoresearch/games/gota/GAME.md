@@ -2,9 +2,9 @@
 name: gota
 source: {repo: https://github.com/Metta-AI/polyworld, pin: coworld_manifest}
 bindings:
-  build: python3 games/gota/tools/deferred.py build
+  build: python3 games/gota/tools/build.py
   local_check: python3 -m games.gota.gates
-  upload: python3 games/gota/tools/deferred.py upload
+  upload: python3 games/gota/tools/upload.py
   evaluate: python3 games/gota/tools/evaluate.py
   replay_inspect: python3 games/gota/tools/replay_stats.py
 reference_types:
@@ -64,27 +64,44 @@ These spellings match Polyworld `801749e5` (the live 2026.10.7.2 source);
 metrics never become guessed zeros. Comparisons require at least 40 episodes;
 calibration can raise that floor.
 
-## Deferred backends
+## Build and upload
 
-The `build` binding exits 2 with an actionable gap: Phase C Task 2.5 must supply
-`games/gota/tools/build.py`, compile through PW, run shared gates, and write build
-provenance. The current adapter does not claim a successful build.
+`build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --manifest MANIFEST --json`
+compiles the committed `CANDIDATE_DIRECTORY/STRATEGY.md` with Hermes and runs G1–G5.
+The candidate may be `WORKSPACE/strategy/candidates/E` in a worker Git worktree;
+the installed distribution may be a separate Git archive. Commit the candidate
+input closure (strategy, skills, packing, comms) first. Development installations
+also require clean tracked compiler inputs. Archive compiler inputs are hashed
+separately; the candidate commit does not establish their Git provenance.
+The output directory must not exist. Failed builds retain failed gate evidence
+and are refused by the shared upload reader.
 
-The `upload` binding exits 2: Plan 03 Tasks 3.3/3.4 must provide the guarded shared
-softmax tool. C6 remains authoritative: verify player identity with the exact
-credential immediately before every mutation. This game adapter provides no
-alternate credential, direct coworld upload, or identity cache. Wire the binding
-to the authoritative shared tool when that backend exists.
+The host must install the locked Python dependencies, Nim 2.2.10 and the native
+helpers using [native preparation](tools/native_build.py), and install Hermes
+v0.21.5. Set `GOTA_HERMES_PYTHON` to that Hermes installation's Python executable,
+`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `GOTA_TIRITH_BIN` to an officially
+installed, verified executable tirith scanner. The adapter creates a separate compiler
+Hermes home, copies that scanner into its fresh home and synchronously verifies readiness before
+model execution, and restricts child writes to compiler scratch. Host provisioning
+and credentials remain the installer's responsibility.
 
-## Hosted evaluation
+Supply a downloaded Coworld manifest with `--manifest` or `GOTA_MANIFEST`.
+`game.runnable.source_url` must contain the qualified Polyworld commit
+`801749e509e888b423ba44ee2188946c22e3ba85`; bootstrap does not supply a manifest.
 
-`evaluate --results RESULTS_JSON --json` returns `data.episodes`, one entry per
-seat with `seat`, the real integer seed, status and metrics. It validates all
-ten scores/XP values, ticks and outcome. The positional seat command above
-continues to return one metric object. The binding does not infer policy identity.
+`evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
+per seat with the real integer seed. The shared XP consumer must select its
+subject seats and aggregate teammates before treating episodes as independent.
+The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
+--seat N` retains the local metric-object form.
 
-The source pin resolves from `game.runnable.source_url` in the Coworld manifest.
-The observed 2026.10.7.2 manifest used
-`https://github.com/Metta-AI/polyworld/tree/801749e509e888b423ba44ee2188946c22e3ba85/examples/gods_of_the_arena`.
-NOTES-5 reports live 2026.10.8.1 / 02eda3d3; that newer engine is not qualified by
-the earlier M1. Build/gate pin following is a separate follow-on.
+`upload E --build-dir BUILD_DIRECTORY` delegates to
+`"$AUTORESEARCH_CLI" softmax upload E --build-dir BUILD_DIRECTORY`. Set the variable
+to the installed shared CLI executable. That shared tool performs the C6 identity
+check immediately before mutation; this wrapper has no alternate upload route.
+
+## Qualification scope
+
+NOTES-5 reports live 2026.10.8.1 / Polyworld 02eda3d3. This adapter currently
+requires the M1-qualified 2026.10.7.2 pin; it refuses a newer manifest rather than
+claiming qualification. Dynamic engine following is a separate follow-on.

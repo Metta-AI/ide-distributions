@@ -247,3 +247,95 @@ def test_chat_stream_usage_rejects_invalid_receipts(mode):
     stream = 'not-json\n' if mode == 'malformed' else ''.join(json.dumps(event) + '\n' for event in events)
     with pytest.raises(ValueError, match='Hermes chat stream'):
         sb.chat_stream_usage(stream, 'test/model')
+
+
+def test_compiler_child_isolates_outer_profile(generation, monkeypatch):
+    order, stage = generation
+    home = stage / 'isolated-home'
+    monkeypatch.setenv('GOTA_COMPILER_HERMES_HOME', str(home))
+    monkeypatch.setenv('HERMES_HOME', '/outer/profile')
+    monkeypatch.setenv('HERMES_PROFILE', 'autoresearch')
+    monkeypatch.setenv('HERMES_KANBAN_TASK', 'outer-task')
+    monkeypatch.setenv('TIRITH_ENABLED', 'false')
+    original = sb.subprocess.run
+    def isolated(command, **kwargs):
+        if command[0] == 'hermes':
+            env = kwargs['env']
+            assert env['HERMES_HOME'] == str(home)
+            assert env['HERMES_WRITE_SAFE_ROOT'] == str(kwargs['cwd'])
+            assert env['TIRITH_BIN'] == str(home / 'bin/tirith')
+            assert 'HERMES_PROFILE' not in env
+            assert 'HERMES_KANBAN_TASK' not in env
+            assert 'TIRITH_ENABLED' not in env
+        return original(command, **kwargs)
+    monkeypatch.setattr(sb.subprocess, 'run', isolated)
+    sb.generate(order)
+
+
+def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypatch, tmp_path):
+    """Real source closure/prepare/generate/assemble/finalize; external gates/security fake only."""
+    import importlib.util
+    import types
+
+    import gota_gates
+    import gota_host
+
+    from autoresearch.softmax_tool.upload import _read_build
+
+    _, _ = generation
+    distribution = Path(__file__).resolve().parents[4]
+    seed = distribution / 'games/gota/seed/strategy/STRATEGY.md'
+    archive = tmp_path / 'archive/autoresearch'
+    for original in sb.source_files(seed):
+        destination = archive / original.relative_to(distribution)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(original, destination)
+    worker = tmp_path / 'worker'
+    candidate = worker / 'strategy/candidates/E'
+    candidate.mkdir(parents=True)
+    source = candidate / 'STRATEGY.md'
+    shutil.copyfile(seed, source)
+    original_git = sb.git
+    for args in (('init',), ('add', '.'), ('-c', 'user.name=Test', '-c', 'user.email=test@invalid', 'commit', '-m', 'seed')):
+        original_git(*args, root=worker)
+    monkeypatch.setattr(sb, 'REPO', worker)
+    monkeypatch.setattr(sb, 'git', lambda *args, root=worker: original_git(*args, root=root))
+    lab = archive / 'games/gota/compiler'
+    monkeypatch.setattr(sb, 'LAB', lab)
+    monkeypatch.setattr(sb, 'COMPILER', lab / 'strategy/compiler')
+    monkeypatch.setattr(gota_host, 'BASELINE', archive / 'tests/fixtures/gota/v13-live.bas')
+    monkeypatch.setenv('FAKE_UNIT_ROOT', str(distribution / 'tests/fixtures/gota/v13_units'))
+    monkeypatch.setenv('OPENROUTER_MODEL', 'test/openweight')
+    monkeypatch.setenv('GOTA_HERMES_PYTHON', '/fake/security-python')
+    scanner = tmp_path / 'fake-tirith'
+    scanner.write_text('fake security boundary')
+    scanner.chmod(0o755)
+    monkeypatch.setenv('GOTA_TIRITH_BIN', str(scanner))
+    guarded = sb.subprocess.run
+    def processes(command, **kwargs):
+        if command[0] == '/fake/security-python':
+            home = Path(kwargs['env']['HERMES_HOME'])
+            return types.SimpleNamespace(stdout=str(home / 'bin/tirith'), returncode=0)
+        return guarded(command, **kwargs)  # generation fixture rejects real backend/processes
+    monkeypatch.setattr(sb.subprocess, 'run', processes)
+    monkeypatch.setattr(gota_gates, 'verify', lambda *a, **k: {
+        f'G{i}': {'passed': True, 'summary': 'fake gates only'} for i in range(1, 6)})
+    spec = importlib.util.spec_from_file_location('archive_build_binding', distribution / 'games/gota/tools/build.py')
+    binding = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(binding)
+    monkeypatch.setattr(binding, 'ROOT', archive)
+    monkeypatch.setattr(binding, 'TOOLS', lab / 'tools')
+    manifest = tmp_path / 'manifest.json'
+    manifest.write_text(json.dumps({'game': {'runnable': {'source_url':
+        f'https://github.com/Metta-AI/polyworld/tree/{gota_host.POLYWORLD_COMMIT}/examples/gods_of_the_arena'}}}))
+    out = tmp_path / 'separate-build-output'
+    result = binding.build(candidate, out, manifest)
+    assert result['ok']
+    version, artifact = _read_build(out)
+    assert version['source_commit'] == original_git('rev-parse', 'HEAD', root=worker)
+    assert version['source_path'] == 'strategy/candidates/E/STRATEGY.md'
+    assert version['strategy_sha256'] == sb.digest(source)
+    assert version['policy_sha256'] == sb.digest(artifact)
+    assert version['driver']['installed_commit'] is None
+    assert str(lab / 'tools/strategy_build.py') in version['compiler']['installed_source_hashes']
+    assert not (archive.parent / '.git').exists()
