@@ -16,7 +16,7 @@ import traceback
 from pathlib import Path
 
 from autoresearch import runctx
-from autoresearch.plugin import policy
+from autoresearch.plugin import peers, policy
 
 TOOL_EVENTS_FILE = "tool_events.jsonl"
 KANBAN_EVENTS_FILE = "kanban_events.jsonl"
@@ -25,6 +25,10 @@ PLUGIN_ERRORS_FILE = "plugin_errors.jsonl"
 # stdlib-only).
 BRIEFING_MARKER = "<!-- autoresearch-briefing task={task_id} -->"
 SUMMARY_MAX = 500
+
+# Same value as autoresearch.queue.select.ENV_QUEUE (not imported: that module is not
+# stdlib-only). "file" is the serial fallback, which runs one card at a time.
+ENV_QUEUE = "AUTORESEARCH_QUEUE"
 
 # Card metadata cache: path -> ((mtime_ns, size), card).
 _card_cache: dict[Path, tuple[tuple[int, int], dict]] = {}
@@ -213,7 +217,8 @@ def on_session_end(
 
 def pre_llm_call(is_first_turn=False, **kwargs):
     """The card briefing, injected into the first user turn of a Kanban card worker, with
-    the run id (the journal ``iteration``). It also records the worker identity for the
+    the run id (the journal ``iteration``) and the other cards running now (``peers``; left
+    out, and the error logged, when the board cannot be read). It also records the worker identity for the
     worker's subprocesses, which Hermes strips of ``HERMES_KANBAN_TASK``/``_RUN_ID``
     (``runctx`` module docstring)."""
     task = os.environ.get(runctx.ENV_CARD_ID)
@@ -229,10 +234,17 @@ def pre_llm_call(is_first_turn=False, **kwargs):
         text = (runctx.runtime_dir(ctx) / "briefings" / f"{task}.md").read_text(encoding="utf-8")
         marker = BRIEFING_MARKER.format(task_id=task)
         text = text if marker in text else f"{marker}\n{text}"
-        return f"{text.rstrip()}\n\n- Run: {ctx.run_id} (this card run; the journal `iteration`)\n"
+        text = f"{text.rstrip()}\n\n- Run: {ctx.run_id} (this card run; the journal `iteration`)\n"
     except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
         _log_error(ctx, "pre_llm_call", error)
-    return None
+        return None
+    if os.environ.get(ENV_QUEUE) == "file":
+        return text
+    try:
+        return f"{text}\n{peers.running_peers_section(ctx)}"
+    except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in
+        _log_error(ctx, "pre_llm_call", error)
+    return text
 
 
 def kanban_task_completed(task_id=None, run_id=None, **kwargs):

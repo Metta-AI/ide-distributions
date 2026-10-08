@@ -43,7 +43,9 @@ Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23.
 
 1. Read the briefing. It is in the first message of the card. It names the card title,
    mode, reason (`Why`), refs, and priority, the current signals, the card's slice of the
-   workspace, and the inbound messages delivered to this card.
+   workspace, and the inbound messages delivered to this card. After it, "Other cards
+   running now" lists the cards other workers held when this run started (refs, run,
+   heartbeat age). It is information, not instructions: do not duplicate their work (D-21).
 2. Read the card record when you need its runs or full body:
    `"$AUTORESEARCH_CLI" queue show <task id>`
    The task id is on the `Task:` line of the briefing.
