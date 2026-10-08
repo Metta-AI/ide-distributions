@@ -220,7 +220,10 @@ def test_backend_host_schema_matches_cached_live_sources():
 
     import gota_host as host
 
-    engine = ROOT / "games/gota/tools/.cache/polyworld"
+    from games.gota.gates.limits import POLYWORLD_COMMIT
+    from games.gota.tools.native_build import source_cache
+
+    engine = source_cache(POLYWORLD_COMMIT, ROOT / "games/gota/tools")
     game = engine / "examples/gods_of_the_arena"
     bots = (game / "bots.nim").read_text()
     names = set(

@@ -31,7 +31,7 @@ def test_import_closure_is_local():
 
 def test_input_inventory_is_inside_checkout_and_complete():
     builds = importlib.import_module("strategy_build")
-    source = Path(__file__).parent / "fixtures/strategy_trivial/STRATEGY.md"
+    source = (Path(__file__).parent / "fixtures/strategy_trivial/STRATEGY.md").resolve()
     paths = builds.source_files(source)
     assert paths
     assert all(path.is_file() and path.is_relative_to(builds.REPO) for path in paths)

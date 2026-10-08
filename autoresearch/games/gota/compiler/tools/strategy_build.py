@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -283,13 +284,40 @@ def agent_command(agent: str, model: str, directory: Path) -> list[str]:
         return ['claude', '-p', '--model', model, '--safe-mode', '--dangerously-skip-permissions',
                 '--tools', 'Read,Write,Edit,Glob,Grep', '--output-format', 'text']
     if agent == 'hermes':
-        return ['hermes', '-z', '--query-file', str(directory / 'prompt.txt'), '-t', 'file',
-                '--max-turns', '40', '--usage-file', str(directory / 'usage.json'),
+        return ['hermes', 'chat', '--oneshot', '--format', 'stream-json',
+                '--query-file', str(directory / 'prompt.txt'), '-t', 'file', '--max-turns', '40',
                 '--model', model, '--provider', 'openrouter']
     if agent != 'codex':
         raise pw_cli.UsageError(f'unknown compiler agent: {agent}', ['claude', 'codex', 'hermes'])
     return ['codex', 'exec', '--ignore-user-config', '--ephemeral', '--sandbox', 'workspace-write',
             '--model', model, '-C', str(directory), '-']
+
+
+def chat_stream_usage(stream: str, model: str) -> dict:
+    """Derive a labeled main-session token receipt from official Hermes JSONL output."""
+    try:
+        records = [json.loads(line) for line in stream.splitlines() if line.strip()]
+        if not all(isinstance(record, dict) for record in records):
+            raise ValueError('non-object record')
+        starts = [record for record in records if record.get('type') == 'system' and record.get('subtype') == 'init']
+        results = [record for record in records if record.get('type') == 'result']
+        if len(starts) != 1 or len(results) != 1 or records[0] != starts[0] or records[-1] != results[0]:
+            raise ValueError('expected one initial init and one terminal result')
+        start, result = starts[0], results[0]
+        if start.get('model') != model or not isinstance(start.get('session_id'), str) or not start['session_id']:
+            raise ValueError('wrong model or missing session')
+        if result.get('session_id') != start['session_id'] or type(result.get('exit_code')) is not int or result['exit_code'] != 0:
+            raise ValueError('wrong session or unsuccessful result')
+        fields = {'input': 'input_tokens', 'output': 'output_tokens', 'total': 'total_tokens',
+                  'cache_read': 'cache_read_tokens', 'cache_write': 'cache_write_tokens'}
+        tokens = result['tokens']
+        if not isinstance(tokens, dict) or any(type(tokens.get(key)) is not int or tokens[key] < 0 for key in fields):
+            raise ValueError('invalid token counts')
+        return {'source': 'hermes-chat-stream-json', 'model': model, 'session_id': start['session_id'],
+                'stream_sha256': hashlib.sha256(stream.encode()).hexdigest(), 'records': records,
+                **{name: tokens[key] for key, name in fields.items()}}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f'Hermes chat stream receipt invalid: {exc}') from exc
 
 
 def copy_unit_inputs(stage: Path, root: Path, generated: list[str], authored: dict[str, Path]) -> None:
@@ -344,9 +372,16 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
                 'previous_guesses': previous_guesses, 'repair_errors': errors or [],
                 'baseline_bindings': packing_bindings(REPO / order['source_path'])}
         dump(root / 'work_order.json', work)
+        specs = root / 'context/specs'
+        specs.mkdir()
+        for key, component in order['components'].items():
+            (specs / f'{key}.md').write_text(component['compiled_text'])
         if (stage / 'report_draft.json').exists():
             shutil.copyfile(stage / 'report_draft.json', root / 'report_draft.json')
-        prompt = ('Read AGENTS.md and work_order.json. Generate only the listed components into units/<ID>.bas. '
+        prompt = ('Read AGENTS.md and work_order.json. Read context/specs/<ID>.md for each listed component; '
+                  'these files contain the exact full specification with readable original line breaks. '
+                  'Use these files rather than the escaped compiled_text JSON lines. '
+                  'Generate only the listed components into units/<ID>.bas. '
                   'Read context/LESSONS.md and context/policy-surface.md. The components include their exact '
                   'source hashes and declared interfaces. Write report_draft.json with guesses and gaps. '
                   'Do not edit any other path or run Git commands. Do not commit. '
@@ -363,17 +398,16 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         head = git('rev-parse', 'HEAD', root=root)
         refs = git('show-ref', root=root)
         allowed = {f'units/{key}.bas' for key in generated} | {'report_draft.json'}
-        if hermes:
-            allowed.add('usage.json')
         command = agent_command(order['compiler']['agent'], order['compiler']['model'], root)
         environment = os.environ.copy()
         if hermes:
             environment['OPENROUTER_MODEL'] = order['compiler']['model']
             environment['TERMINAL_CWD'] = str(root)
-        with (stage / 'agent.log').open('a') as log:
+        stream_path = stage / f'hermes-stream-{root.name}.jsonl'
+        with (stage / 'agent.log').open('a') as log, (stream_path.open('w') if hermes else nullcontext(log)) as stream:
             try:
                 completed = subprocess.run(command, input=None if hermes else prompt, cwd=root, text=True, env=environment,
-                                           stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+                                           stdout=stream if hermes else log, stderr=log if hermes else subprocess.STDOUT, timeout=timeout)
             except subprocess.TimeoutExpired:
                 raise RuntimeError(f'compiler timed out after {timeout}s; see {stage}/agent.log') from None
         after = snapshot(root)
@@ -386,6 +420,9 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
             raise RuntimeError('compiler write-scope violation: ' + ', '.join(violations))
         if completed.returncode:
             raise RuntimeError(f'compiler exited {completed.returncode}; see {stage}/agent.log')
+        if hermes:
+            dump(root / 'usage.json', chat_stream_usage(stream_path.read_text(), order['compiler']['model']))
+            allowed.add('usage.json')
         for name in allowed:
             path = root / name
             if not path.is_file() or path.is_symlink() or path.resolve().parent not in (root, root / 'units'):
