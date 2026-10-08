@@ -1,5 +1,7 @@
 """Exercise hosted evaluation through actual shared consumers."""
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -32,3 +34,13 @@ def test_real_shared_evaluate_and_league_consumers(tmp_path):
     with pytest.raises(RuntimeError, match='real integer seed'):
         evaluate(path)
 
+
+
+def test_hosted_non_object_fails_without_traceback(tmp_path):
+    path = tmp_path / 'results.json'
+    path.write_text('[]')
+    completed = subprocess.run([sys.executable, str(ROOT / 'games/gota/tools/evaluate.py'),
+        '--results', str(path), '--json'], capture_output=True, text=True, check=False)
+    assert completed.returncode == 2
+    assert 'must contain an object' in completed.stderr
+    assert 'Traceback' not in completed.stderr

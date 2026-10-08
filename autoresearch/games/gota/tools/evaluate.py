@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract one subject seat's metrics from one completed episode results.json."""
+"""Extract one seat locally, or all seats in the hosted data.episodes envelope."""
 import argparse
 import json
 import math
@@ -48,6 +48,8 @@ def main() -> int:
         if path is None or (args.results_flag and args.results):
             raise ValueError('supply exactly one results path')
         data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise TypeError('results.json must contain an object')
         if args.results_flag:
             seed = data.get('seed')
             if isinstance(seed, bool) or not isinstance(seed, int):
