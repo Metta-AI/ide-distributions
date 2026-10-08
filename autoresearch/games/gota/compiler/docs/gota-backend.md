@@ -47,7 +47,8 @@ uv run --locked --offline python games/gota/compiler/tools/pw_strategy.py compil
 ```
 
 The second command invokes a real model and requires separately authorized
-credentials and credit. It has **not** been run for Task 2.4. No claim of real M1
+credentials and credit. Authorized Task 2.4 attempts have run, but no generated
+build has qualified M1 yet. No claim of real M1
 completion follows from the local fixture results below. Hermes is the default
 backend; explicit `--agent claude` and `--agent codex` remain supported. The default
 model is configured in `strategy/compiler/config.json`; explicit `--model` wins,
@@ -55,14 +56,27 @@ followed by `OPENROUTER_MODEL` for Hermes. Use the explicitly selected dry-run m
 then the approved `OPENROUTER_MODEL` value. Prepare checks the selected CLI version;
 tests only use local fakes and never probe a real agent executable.
 
-Hermes v0.21.5 dispatch uses `hermes --usage-file usage.json chat --oneshot
+Hermes v0.21.5 dispatch uses `hermes chat --oneshot --format stream-json
 --query-file prompt.txt -t file --max-turns 40 --model MODEL --provider openrouter`.
-The usage flag belongs to the top-level parser; query-file and max-turns belong
-to `chat`. Top-level `-z` takes a prompt argument and cannot replace this form. The process receives
-`TERMINAL_CWD` for its isolated scratch directory and the selected
-`OPENROUTER_MODEL`. The scratch snapshot contains the work order, exact baseline,
+`chat` enforces the turn limit; its top-level `--usage-file` flag is parsed but
+not forwarded to the chat runner. Top-level `-z` owns native usage-file writing
+but does not forward a turn limit, so it cannot meet this compiler contract.
+
+The driver retains each original stdout JSONL stream and derives a labeled
+`hermes-chat-stream-json` receipt after validating exactly one initial `init`,
+one terminal successful `result`, the requested model, a matching nonempty
+session ID and nonnegative integer token counts. The receipt retains every
+record and the raw stream SHA256. These are genuine cumulative main-session
+input/output/total/cache counts from Hermes, not a native `--usage-file` ledger.
+Cost, API-call, reasoning-token and auxiliary-call coverage are absent; reconcile
+provider balances and conservative token-price estimates separately. Failed or
+interrupted streams remain retained evidence and cannot qualify generation.
+
+The process receives `TERMINAL_CWD` for its isolated scratch directory and the
+selected `OPENROUTER_MODEL`. The scratch snapshot contains the work order, exact baseline,
 compiler ABI/lessons, live host JSON and GotA/Bassy/structures context before
-execution. Only requested units, report_draft.json and usage.json may change.
+execution. The model may change only requested units and report_draft.json; the driver
+writes the validated usage.json receipt afterward.
 Symlink/missing outputs, unexpected writes, Git index/ref changes and nonzero exit
 fail closed. Usage receipts are retained for successfully validated generation
 attempts, including when later assembly or gates fail. Rejected or failed

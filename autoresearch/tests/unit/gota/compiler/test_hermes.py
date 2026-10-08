@@ -32,14 +32,14 @@ import json, os, pathlib, sys, subprocess
 if '--version' in sys.argv:
     print('fake Hermes v0.21.5'); sys.exit()
 a = sys.argv[1:]
-assert a[0] == '--usage-file' and pathlib.Path(a[1]).name == 'usage.json'
-assert a[2:4] == ['chat', '--oneshot']
+assert a[:4] == ['chat', '--oneshot', '--format', 'stream-json']
+assert '--usage-file' not in a
 assert a[a.index('-t')+1] == 'file'
 assert a[a.index('--max-turns')+1] == '40'
 assert a[a.index('--model')+1] == os.environ['OPENROUTER_MODEL'] == 'test/openweight'
 p = pathlib.Path(a[a.index('--query-file')+1])
 assert 'work_order.json' in p.read_text()
-u = pathlib.Path(a[a.index('--usage-file')+1])
+u = pathlib.Path('usage.json')
 mode = os.environ.get('FAKE_MODE', '')
 for key in json.loads(pathlib.Path('work_order.json').read_text())['generate']:
     fixture = os.environ.get('FAKE_UNIT_ROOT')
@@ -50,7 +50,9 @@ assert pathlib.Path('context/structures.bas').is_file()
 assert pathlib.Path('context/gota-guide.md').is_file()
 assert pathlib.Path('context/bassy-language.md').is_file()
 pathlib.Path('report_draft.json').write_text('{"guesses": [], "gaps": []}')
-u.write_text('{"input_tokens": 123, "output_tokens": 45}')
+print(json.dumps({'type':'system', 'subtype':'init', 'model':os.environ['OPENROUTER_MODEL'], 'session_id':'fake-session'}))
+if mode != 'usage_missing':
+    print(json.dumps({'type':'result', 'session_id':'fake-session', 'exit_code':0, 'tokens':{'input':123,'output':45,'total':168,'cache_read':0,'cache_write':0}}))
 if mode == 'prohibited': pathlib.Path('context/base.bas').write_text('changed')
 if mode == 'prompt': p.write_text('changed')
 if mode == 'extra': pathlib.Path('unexpected.txt').write_text('changed')
@@ -60,8 +62,7 @@ if mode in ('symlink','missing'):
     pathlib.Path('units/C.idle.bas').unlink()
     if mode == 'symlink': pathlib.Path('units/C.idle.bas').symlink_to('../context/base.bas')
 if mode == 'usage_symlink':
-    u.unlink(); u.symlink_to('context/base.bas')
-if mode == 'usage_missing': u.unlink()
+    u.symlink_to('context/base.bas')
 if mode == 'nonzero': sys.exit(7)
 ''')
     binary.chmod(0o755)
@@ -88,10 +89,11 @@ def test_fake_hermes_outputs_and_usage(generation):
 @pytest.mark.parametrize('mode,match', [('prohibited','write-scope'), ('prompt','write-scope'),
     ('extra','write-scope'), ('index','write-scope'), ('refs','write-scope'),
     ('symlink','regular output'), ('missing','regular output'),
-    ('usage_symlink','regular output'), ('usage_missing','regular output'), ('nonzero','exited 7')])
+    ('usage_symlink','write-scope'), ('usage_missing','Hermes chat stream'), ('nonzero','exited 7')])
 def test_fake_hermes_rejects_bad_outputs(generation, monkeypatch, mode, match):
     monkeypatch.setenv('FAKE_MODE', mode)
-    with pytest.raises(RuntimeError, match=match):
+    error_type = ValueError if mode == 'usage_missing' else RuntimeError
+    with pytest.raises(error_type, match=match):
         sb.generate(generation[0])
 
 
@@ -206,3 +208,37 @@ def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys, de
     sb.dump(build / 'version.json', version)
     with pytest.raises(pw_cli.UsageError, match='committed source: goals'):
         goal_audit.main(argv)
+
+
+def test_chat_stream_usage_is_explicit_and_cumulative():
+    events = [
+        {'type': 'system', 'subtype': 'init', 'model': 'test/model', 'session_id': 'session-1'},
+        {'type': 'text', 'text': 'done'},
+        {'type': 'result', 'session_id': 'session-1', 'exit_code': 0,
+         'tokens': {'input': 123, 'output': 45, 'total': 188, 'cache_read': 20, 'cache_write': 0}},
+    ]
+    stream = ''.join(json.dumps(event) + '\n' for event in events)
+    receipt = sb.chat_stream_usage(stream, 'test/model')
+    assert receipt['source'] == 'hermes-chat-stream-json'
+    assert receipt['input_tokens'] == 123 and receipt['cache_read_tokens'] == 20
+    assert receipt['records'] == events
+    assert len(receipt['stream_sha256']) == 64
+    assert 'estimated_cost_usd' not in receipt and 'api_calls' not in receipt
+
+
+@pytest.mark.parametrize('mode', ['missing', 'malformed', 'model', 'session', 'exit', 'tokens', 'duplicate'])
+def test_chat_stream_usage_rejects_invalid_receipts(mode):
+    events = [
+        {'type': 'system', 'subtype': 'init', 'model': 'test/model', 'session_id': 'session-1'},
+        {'type': 'result', 'session_id': 'session-1', 'exit_code': 0,
+         'tokens': {'input': 123, 'output': 45, 'total': 168, 'cache_read': 0, 'cache_write': 0}},
+    ]
+    if mode == 'missing': events.pop()
+    if mode == 'model': events[0]['model'] = 'wrong/model'
+    if mode == 'session': events[1]['session_id'] = 'wrong-session'
+    if mode == 'exit': events[1]['exit_code'] = 1
+    if mode == 'tokens': events[1]['tokens']['input'] = -1
+    if mode == 'duplicate': events.append(events[-1])
+    stream = 'not-json\n' if mode == 'malformed' else ''.join(json.dumps(event) + '\n' for event in events)
+    with pytest.raises(ValueError, match='Hermes chat stream'):
+        sb.chat_stream_usage(stream, 'test/model')
