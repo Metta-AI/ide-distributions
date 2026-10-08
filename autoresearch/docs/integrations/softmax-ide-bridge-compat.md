@@ -129,3 +129,34 @@ Getting the variable wrong:
   with a runtime note, and the rejections are final. The bridge closes those IDE tasks on the
   note. Fixing the variable does not bring them back: the bridge must send them again with new
   ids (new task keys). Check the variable before the bridge sends its first message.
+
+## Outbox messages are not written for humans: add a translation step
+
+Outbox messages are written for a Preston-role agent that can read the whole workspace
+(`doctrine/communication.md`: "It tells the human what matters, in its own words."). They carry
+message and record ids, `ar://` references and assumed context on purpose. The bridge says every
+outbox message in the IDE chat as `<title>\n\n<body>`, and it uses the acknowledging note as the IDE
+task's outcome text, so a coach sees the agent-facing text verbatim. Two real messages from a
+live run show the problem:
+
+- A task acknowledgement, which becomes the IDE task's outcome:
+  `Task I-01M4EJ7ABV097KEMKSBV76N9T9 done` / `Card t_6c0a018c (request
+  Q-01M4EJ9RQMHVH6XK3N4T760MNB) created for inbound task I-01M4EJ7ABV097KEMKSBV76N9T9, finished
+  with outcome 'done' and was published at f5e50b4909eb…`.
+- A research note listing four `ar://hypothesis/H-…` references, with unexplained terms
+  ("kill-steal", "hysteresis band") and a pointer to a journal entry.
+
+What changes on each side:
+
+- **The bridge (recommended):** pass each outbox message through the Hermes chat agent the
+  bridge already runs, with an instruction such as "tell the coach what this means and whether
+  they need to do anything". Say the result in chat. The agent can resolve the `ar://` references
+  with the profile CLI (`"$AUTORESEARCH_CLI" comms resolve <uri>`). Keep the raw message available
+  as a detail. Use the same plain text for the task outcome when closing an IDE task.
+- **The distribution:** runtime acknowledgements (the first example) are being rewritten to say
+  in plain words what the card did, with ids moved out of the text and into `refs`. That makes them
+  useful to Preston, but they remain agent-facing. The translation step is still the place where
+  text becomes fit for a human.
+
+Our own test console (`autoresearch-shim/`) does the same: its feed shows the chat agent's
+plain-language version of each message by default, and the raw message behind "Details".
