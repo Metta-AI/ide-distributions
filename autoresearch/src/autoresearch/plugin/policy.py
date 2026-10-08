@@ -14,7 +14,8 @@
 - forging inbound messages (C11: inbound carries the human's full authority): the trusted
   `comms inbound` command in any agent session, any write into the canonical workspace's
   `comms/inbox/` (every session, cards or not), and `python -c`/`execute_code` text that names
-  `comms/inbox`. Only external agents write the inbox (Runtime 9.2). The real boundary is the
+  `comms/inbox` and looks like a write (``CODE_WRITE_HINT``; reads pass). Only external
+  agents write the inbox (Runtime 9.2). The real boundary is the
   OS user: run external writers as their own user and set `AUTORESEARCH_INBOX_WRITERS`, so
   queue-keeper adopts only files they own (`comms.inbound.adopt_direct_writes`).
 
@@ -171,9 +172,20 @@ SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
 INBOX_WRITE = (
     "the inbox (comms/inbox/) is written only by external agents: an inbound message carries "
     "the human's authority (C11). To tell the human something, stage an outbound message with "
-    '"$AUTORESEARCH_CLI" comms stage.'
+    '"$AUTORESEARCH_CLI" comms stage; to read an inbound message use comms get <id>.'
 )
 INBOX_DIR_TEXT = "comms/inbox"
+# Interpreter code naming the inbox is refused only when it also looks like a write; a read
+# (`print(open(".../comms/inbox/x.json").read())`) passes. Literal and best effort, like the
+# identity-file check.
+CODE_WRITE_HINT = re.compile(
+    r"""['"][rwax]?[wax+][bt]?['"]|write|rename|replace|symlink|link|copy|move|touch|mkdir"""
+    r"""|unlink|remove|rmtree|chmod|truncate|dump"""
+)
+
+
+def _code_writes_inbox(code: str) -> bool:
+    return INBOX_DIR_TEXT in code and bool(CODE_WRITE_HINT.search(code))
 
 
 class _Blocked(Exception):
@@ -213,7 +225,7 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
                 )
             if isinstance(code, str) and guard.names_identity_files(code):
                 return _block(IDENTITY_FILES)
-            if isinstance(code, str) and INBOX_DIR_TEXT in code:
+            if isinstance(code, str) and _code_writes_inbox(code):
                 return _block(INBOX_WRITE)
             return ALLOW
     except _Blocked as blocked:
@@ -474,7 +486,7 @@ class _Guard:
                         raise _Blocked(RAW_MUTATION)
                     if self.names_identity_files(code):
                         raise _Blocked(IDENTITY_FILES)
-                    if INBOX_DIR_TEXT in code:
+                    if _code_writes_inbox(code):
                         raise _Blocked(INBOX_WRITE)
                 return words[index:]
             elif name in SHELLS:
@@ -923,7 +935,12 @@ def _shell_commands(command: str) -> list[list[str]]:
 def exit_program(command: str) -> str | None:
     """The program whose status a shell command line exits with: the last simple command (of
     the last pipeline or list), without env assignments or prefixes such as ``time``. The
-    repeated-tool-error signal judges an exit code by it (``grep`` exit 1 is "no match")."""
+    repeated-tool-error signal judges an exit code by it (``grep`` exit 1 is "no match").
+
+    Known limit (accepted for v0): a short-circuiting ``&&``/``||`` list can exit with an
+    earlier command's status (``grep -q x f && echo yes`` exits 1 from ``grep``), but this
+    returns the last program (``echo``), so such a "no match" counts as an error. Lines with
+    ``|`` or ``;`` are right."""
     for words in reversed(_shell_commands(command)):
         program = next(
             (

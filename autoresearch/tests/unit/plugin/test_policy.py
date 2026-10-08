@@ -429,6 +429,9 @@ def test_file_tools_and_code_cannot_write_the_inbox(layout):
     code = {"code": "open('workspace/comms/inbox/x.json', 'w')"}
     assert not tool_policy("execute_code", code, ctx, None)[0]
     # Reading the inbox and the other comms commands stay allowed.
+    read = {"code": "print(open('workspace/comms/inbox/x.json').read())"}
+    assert tool_policy("execute_code", read, ctx, None)[0]
+    assert _terminal(layout, "python3 -c \"import json; json.load(open('{canon}/comms/inbox/x'))\"")[0]
     assert _terminal(layout, "cat {canon}/comms/inbox/x.json")[0]
     assert _terminal(layout, '"$AUTORESEARCH_CLI" comms get x:task:1')[0]
 
