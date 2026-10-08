@@ -69,3 +69,33 @@ Validation: eight new parser tests failed before implementation. The corrected
 contained Hermes/dispatch suite passed31 tests in10.60s. Ruff remains eight
 inherited driver diagnostics; test file and new helper introduce no diagnostics.
 Documentation audit updated the backend guide and this finding before commit.
+
+## Readable specification context
+
+The first clean-stream attempt `b1b32b33-2` failed the unchanged write-scope guard:
+the model wrote probe_cap.txt to measure the reader's long-line cap. Its tools
+could not read full compiled_text values from escaped JSON lines. This was an
+input presentation defect, not a reason to permit extra outputs. No gates ran.
+
+Every component's exact compiled_text now also lives in a normal multiline
+`context/specs/<ID>.md` scratch input before the initial snapshot. The prompt
+directs the model there. The work order, source text, source hashes, interfaces,
+baseline and output scope remain unchanged. Current C.farm text has18original
+lines with longest932characters; K.config has55lines with longest545. No wrapping,
+truncation, semantic rewrite or authored policy substitution is introduced.
+
+The fake first reproduced missing context files, then verifies full specification
+bytes in both trivial and full-v13 generation. New probe-file and spec-edit cases
+prove the snapshot guard still rejects those writes. Focused Hermes/dispatch
+validation:33passed in11.11s. Documentation audit updated the backend reference
+and this finding before commit.
+
+Clean-stream setup requires the supported tirith scanner installed before agent
+startup. On a fresh home Hermes asynchronously downloads it and cli.py:981 prints
+a startup warning to stdout, corrupting its JSONL protocol. The retained task-local
+tirith0.4.2 executable hasSHA256
+873d8834902dbc47f339f79088d0a839f8932f5a8c34dcaedacb60fa6f2d0922.
+The execution wrapper copies this verified executable into each new isolated home,
+checks its version, and calls the sanctioned interpreter's ensure_installed()
+which resolves it synchronously. No security setting or parser check is disabled.
+This is a local environment preflight; runtime hosting remains out of scope.

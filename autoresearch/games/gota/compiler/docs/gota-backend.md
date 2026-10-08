@@ -74,6 +74,10 @@ interrupted streams remain retained evidence and cannot qualify generation.
 
 The process receives `TERMINAL_CWD` for its isolated scratch directory and the
 selected `OPENROUTER_MODEL`. The scratch snapshot contains the work order, exact baseline,
+and every component's byte-identical full specification in `context/specs/<ID>.md`.
+The prompt directs the model to these ordinary multiline files because Hermes
+file tools truncate the long escaped compiled_text lines in JSON. Specs stay
+read-only under the snapshot guard; probe files remain prohibited. It also contains
 compiler ABI/lessons, live host JSON and GotA/Bassy/structures context before
 execution. The model may change only requested units and report_draft.json; the driver
 writes the validated usage.json receipt afterward.

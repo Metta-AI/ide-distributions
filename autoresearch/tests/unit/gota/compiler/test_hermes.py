@@ -39,9 +39,12 @@ assert a[a.index('--max-turns')+1] == '40'
 assert a[a.index('--model')+1] == os.environ['OPENROUTER_MODEL'] == 'test/openweight'
 p = pathlib.Path(a[a.index('--query-file')+1])
 assert 'work_order.json' in p.read_text()
+assert 'context/specs/<ID>.md' in p.read_text()
 u = pathlib.Path('usage.json')
 mode = os.environ.get('FAKE_MODE', '')
-for key in json.loads(pathlib.Path('work_order.json').read_text())['generate']:
+work = json.loads(pathlib.Path('work_order.json').read_text())
+for key in work['generate']:
+    assert pathlib.Path('context/specs', key+'.md').read_text() == work['components'][key]['compiled_text']
     fixture = os.environ.get('FAKE_UNIT_ROOT')
     text = pathlib.Path(fixture, key+'.bas').read_text() if fixture else 'fake '+key
     pathlib.Path('units', key+'.bas').write_text(text)
@@ -56,6 +59,8 @@ if mode != 'usage_missing':
 if mode == 'prohibited': pathlib.Path('context/base.bas').write_text('changed')
 if mode == 'prompt': p.write_text('changed')
 if mode == 'extra': pathlib.Path('unexpected.txt').write_text('changed')
+if mode == 'probe': pathlib.Path('probe_cap.txt').write_text('changed')
+if mode == 'spec': pathlib.Path('context/specs/C.idle.md').write_text('changed')
 if mode == 'index': subprocess.run(['git','add','units'],check=True)
 if mode == 'refs': subprocess.run(['git','branch','bad'],check=True)
 if mode in ('symlink','missing'):
@@ -87,7 +92,7 @@ def test_fake_hermes_outputs_and_usage(generation):
 
 
 @pytest.mark.parametrize('mode,match', [('prohibited','write-scope'), ('prompt','write-scope'),
-    ('extra','write-scope'), ('index','write-scope'), ('refs','write-scope'),
+    ('extra','write-scope'), ('probe','write-scope'), ('spec','write-scope'), ('index','write-scope'), ('refs','write-scope'),
     ('symlink','regular output'), ('missing','regular output'),
     ('usage_symlink','write-scope'), ('usage_missing','Hermes chat stream'), ('nonzero','exited 7')])
 def test_fake_hermes_rejects_bad_outputs(generation, monkeypatch, mode, match):

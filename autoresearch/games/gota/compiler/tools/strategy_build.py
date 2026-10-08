@@ -372,9 +372,16 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
                 'previous_guesses': previous_guesses, 'repair_errors': errors or [],
                 'baseline_bindings': packing_bindings(REPO / order['source_path'])}
         dump(root / 'work_order.json', work)
+        specs = root / 'context/specs'
+        specs.mkdir()
+        for key, component in order['components'].items():
+            (specs / f'{key}.md').write_text(component['compiled_text'])
         if (stage / 'report_draft.json').exists():
             shutil.copyfile(stage / 'report_draft.json', root / 'report_draft.json')
-        prompt = ('Read AGENTS.md and work_order.json. Generate only the listed components into units/<ID>.bas. '
+        prompt = ('Read AGENTS.md and work_order.json. Read context/specs/<ID>.md for each listed component; '
+                  'these files contain the exact full specification with readable original line breaks. '
+                  'Use these files rather than the escaped compiled_text JSON lines. '
+                  'Generate only the listed components into units/<ID>.bas. '
                   'Read context/LESSONS.md and context/policy-surface.md. The components include their exact '
                   'source hashes and declared interfaces. Write report_draft.json with guesses and gaps. '
                   'Do not edit any other path or run Git commands. Do not commit. '
