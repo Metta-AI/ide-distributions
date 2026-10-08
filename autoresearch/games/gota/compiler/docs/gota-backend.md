@@ -47,8 +47,9 @@ uv run --locked --offline python games/gota/compiler/tools/pw_strategy.py compil
 ```
 
 The second command invokes a real model and requires separately authorized
-credentials and credit. Authorized Task 2.4 attempts have run, but no generated
-build has qualified M1 yet. No claim of real M1
+credentials and credit. Task 2.4 qualified real Hermes/Kimi build
+`00a0bdcc-2` locally; the flash attempts remained unqualified. See
+[the M1 execution finding](../../../../docs/plans/findings/compiler-task-2.4-m1.md). No claim of real M1
 completion follows from the local fixture results below. Hermes is the default
 backend; explicit `--agent claude` and `--agent codex` remain supported. The default
 model is configured in `strategy/compiler/config.json`; explicit `--model` wins,

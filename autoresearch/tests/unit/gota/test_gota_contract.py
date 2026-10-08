@@ -94,12 +94,17 @@ def test_invalid_seat(seat):
     assert 'seat' in result.stderr
 
 
-@pytest.mark.parametrize('name,gap', [('build', 'Task 2.5'), ('upload', 'C6')])
-def test_deferred_bindings_fail_closed(name, gap):
-    result = binding(name)
-    assert result.returncode != 0
-    assert gap in result.stderr
-    assert not result.stdout
+def test_build_requires_candidate_and_output():
+    result = binding('build')
+    assert result.returncode == 2
+    assert 'candidate, --out' in result.stderr
+
+
+def test_upload_requires_shared_cli(monkeypatch):
+    monkeypatch.delenv('AUTORESEARCH_CLI', raising=False)
+    result = binding('upload')
+    assert result.returncode == 2
+    assert 'AUTORESEARCH_CLI' in result.stdout
 
 
 def test_segment_resolver(tmp_path):

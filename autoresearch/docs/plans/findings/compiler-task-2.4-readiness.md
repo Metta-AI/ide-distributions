@@ -1,5 +1,9 @@
 # Task 2.4 local M1 readiness
 
+This is the historical pre-C3 readiness record. Real local M1 qualification completed
+on 2026-10-08; see [the execution finding](compiler-task-2.4-m1.md) for the generated
+artifact, twenty-seed oracle, bound audits and spending limits.
+
 C2 accepted the recorded containment incident and authorized local-only resumption.
 NOTES-2 made committed `personal_labs_gota@09d3ed28` the primary GotA reference and
 refreshed the engine to live `801749e5` / 2026.10.7.2. See the

@@ -27,7 +27,7 @@ from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
 LAB = TOOLS.parent
-REPO = LAB.parents[3]
+REPO = Path(os.environ.get('GOTA_CANDIDATE_REPO', LAB.parents[3])).resolve()
 RELEASE_ENV = TOOLS / "release.env"
 BUILD_TOOLS = "paintbot_pw_lab/tools/build_tools.sh"
 BUILD_NATIVE = "paintbot_pw_lab/tools/build_native.sh"

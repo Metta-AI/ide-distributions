@@ -291,3 +291,20 @@ later assembly/gate failures). Failed generation totals require provider usage
 reconciliation; retained receipts alone are not complete spend accounting. The
 backend guide states this limitation and the native receipt boundary above. No
 native implementation, gameplay behavior, or model execution changed in this wave.
+
+### Task 2.5 installed binding
+
+The build adapter retains this M1-qualified port. `GOTA_CANDIDATE_REPO` separates
+worker Git provenance from an installed distribution: candidate inputs remain
+clean tracked Git inputs, development compiler inputs retain the same requirement,
+and compiler files from an archive are immutable hashed inputs. Absolute installed
+input keys are rechecked during generation, assembly and finalization. The adapter
+records their combined identity under `driver.installed_source_sha256`; an archive
+has no asserted compiler Git commit. Existing M1 artifacts are unchanged.
+
+The compiler child uses `GOTA_COMPILER_HERMES_HOME` supplied by the adapter, a
+fresh home containing the host's officially installed scanner. The supported
+`ensure_installed()` readiness check must resolve that copy before generation.
+Hermes Kanban/profile environment selectors are removed from the child; its write
+root is its disposable compiler unit repository. Stream parsing and post-process
+write-scope/index/ref validation remain unchanged.
