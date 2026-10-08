@@ -506,7 +506,6 @@ HANDLERS = {
     "task": _route_task,
     "steer": _route_steer,
     "reply": _route_reply,
-    "ping": _route_seen,
 }
 
 
