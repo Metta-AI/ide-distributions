@@ -73,7 +73,7 @@ from autoresearch.comms.inbound import INBOX_WRITERS_ENV, inbox_writers
 from autoresearch.comms.publisher import (
     STAGED_DIR,
     PublishResult,
-    outbox_has_key,
+    already_published,
     publish_hook,
     publish_message,
 )
@@ -258,7 +258,7 @@ def pause_for_preflight(
     with canonical_lock(canonical):
         paused_at = read_json(pause_path(ledger_of(canonical)))["paused_at"]
         message = runtime_messages.agent_paused(reasons, paused_at)
-        if outbox_has_key(canonical, message.key):
+        if already_published(canonical, message):
             return
         publish_message(
             canonical, message, allow_no_remote, priority="P0", expects_response=True
@@ -313,7 +313,7 @@ def report_skipped(canonical: Path, results: list[PublishResult], allow_no_remot
             message = runtime_messages.staged_not_published(
                 message_id, _staged_title(canonical, message_id), problems
             )
-            if not outbox_has_key(canonical, message.key):
+            if not already_published(canonical, message):
                 publish_message(canonical, message, allow_no_remote)
             write_json(marker, {"id": message_id, "problems": problems})
             commit(canonical, [marker], f"publish: skipped staged {message_id} reported")
@@ -416,7 +416,7 @@ def _publish_step_help(ctx: RunContext, step: str, entry: dict, allow_no_remote:
         step, entry["runs"], entry["since"], entry["error"], f".supervisor/runtime/{LOG_FILE}"
     )
     with canonical_lock(canonical):
-        if outbox_has_key(canonical, message.key):
+        if already_published(canonical, message):
             return
         publish_message(
             canonical, message, allow_no_remote, priority="P1", expects_response=True

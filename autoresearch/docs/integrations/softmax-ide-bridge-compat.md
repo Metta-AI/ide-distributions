@@ -170,11 +170,14 @@ What changes on each side:
 - **The distribution (done):** every runtime-generated message now says in plain words what
   happened and what, if anything, the reader must do (`src/autoresearch/comms/runtime_messages.py`).
   The first example now reads `Done: <task title>`, and its body is the card's own completion
-  summary: the `summary` it gave `kanban_complete`, else the opening paragraph of its journal,
-  then what follows from the outcome and the titles of the messages the card sent. Ids and commits
-  moved into `refs` and the additive `about` field. These messages are still agent-facing, and the
-  card's summary is the agent's own words (it may name records or `ar://` references), so the
-  translation step is still the place where text becomes fit for a human.
+  summary, then what follows from the outcome and the titles of the messages the card sent. The
+  summary is the one the card's run ended with on the board (the `summary` it gave
+  `kanban_complete`, which complete-card asks to be plain sentences for the coach), or the
+  opening paragraph of its journal when the board summary names ids. When both name ids, each id
+  is replaced by what it names ("the hypothesis", "the card", "a commit"). Ids and commits moved
+  into `refs` and the additive `about` field. These messages are still agent-facing and partly
+  the agent's own words, so the translation step is still the place where text becomes fit for a
+  human.
 
 Our own test console (`autoresearch-shim/`) does the same: its feed shows the chat agent's
 plain-language version of each message by default, and the raw message behind "Details".

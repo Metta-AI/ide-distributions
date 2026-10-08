@@ -182,7 +182,7 @@ class KanbanQueue:
     def _run_info(run: dict) -> RunInfo:
         # Drops are recorded as outcome "completed" by Hermes; our metadata says "dropped".
         outcome = (run.get("metadata") or {}).get("outcome") or run["outcome"]
-        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome)
+        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome, run.get("summary"))
 
     @staticmethod
     def _blocking_run(status: str, runs: list[dict]) -> dict | None:

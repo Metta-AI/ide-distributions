@@ -6,7 +6,7 @@ Skill sweep. Hermes writes agent-created skills to ``$HERMES_HOME/local/skills-s
 skill directory (one with a ``SKILL.md``) that is new or changed into canonical
 ``skills-proposed/<name>/`` (replacing what was there), commits it, and publishes one runtime
 ``suggestion`` with ref ``ar://skill-proposal/<name>``. The suggestion's ``runtime_key``
-carries the skill's content hash, so a crash between the commit and the publication is finished by the
+(before 2026-10-08: its title) carries the skill's content hash, so a crash between the commit and the publication is finished by the
 next run, and an unchanged skill is never suggested twice. A changed skill's new suggestion
 ``supersedes`` the previous open one.
 
@@ -25,7 +25,7 @@ from pathlib import Path
 
 from autoresearch.comms import delivery, runtime_messages
 from autoresearch.comms.inbound import derived_status, parse_time
-from autoresearch.comms.publisher import publish_message
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.comms.reader import read_since
 from autoresearch.io import gitops
 from autoresearch.runctx import RunContext
@@ -64,8 +64,19 @@ def _outbox(canonical: Path) -> list[dict]:
 
 
 def _previous_suggestion(outbox: list[dict], name: str) -> str | None:
-    prefix = runtime_messages.skill_proposal_key_prefix(name)
-    found = [m["id"] for m in outbox if str(m.get("runtime_key", "")).startswith(prefix)]
+    """The latest suggestion for skill ``name``: by ``runtime_key``, or by its title if it was
+    published before runtime_key existed."""
+    key_prefix = runtime_messages.skill_proposal_key_prefix(name)
+    title_prefix = runtime_messages.skill_proposal_legacy_prefix(name)
+    found = [
+        m["id"]
+        for m in outbox
+        if m.get("kind") == "suggestion"
+        and (
+            str(m.get("runtime_key", "")).startswith(key_prefix)
+            or str(m.get("title", "")).startswith(title_prefix)
+        )
+    ]
     return found[-1] if found else None
 
 
@@ -89,9 +100,9 @@ def sweep_skills(ctx: RunContext, allow_no_remote: bool = False) -> list[str]:
             message = runtime_messages.skill_proposal(
                 skill.name, _tree_hash(staged), SKILLS_PROPOSED, gitops.head(canonical)
             )
-            outbox = _outbox(canonical)
-            if any(m.get("runtime_key") == message.key for m in outbox):
+            if already_published(canonical, message):
                 continue
+            outbox = _outbox(canonical)
             publish_message(
                 canonical,
                 message,

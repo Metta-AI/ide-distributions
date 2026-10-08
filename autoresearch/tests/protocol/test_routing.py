@@ -8,7 +8,7 @@ import jsonschema
 import pytest
 from support.board import Board
 
-from autoresearch.comms import publisher
+from autoresearch.comms import publisher, runtime_messages
 from autoresearch.comms.inbound import derived_status, submit_inbound
 from autoresearch.comms.publisher import publish_hook, publish_runtime
 from autoresearch.comms.reader import read_since, seen_path
@@ -172,24 +172,38 @@ def _finished_task_card(board: Board, title: str = "Scout"):
     return task, worker
 
 
-def test_task_acknowledgement_quotes_the_cards_kanban_summary_and_its_messages(board):
+def test_task_acknowledgement_quotes_the_runs_summary_and_the_cards_messages(board):
     task, worker = _finished_task_card(board)
     stage(Layout(worker.worktree), "highlight", "Towers win lanes", "Found it.", [])
-    worker.finish(outcome="partial")
-    events = board.canonical / ".supervisor" / "runtime" / "kanban_events.jsonl"
-    events.parent.mkdir(parents=True, exist_ok=True)
-    summary = {"task_id": worker.task_id, "run_id": worker.run_id, "summary": "Towers win."}
-    stale = summary | {"run_id": "older", "summary": "Old run."}
-    lines = [{"event": "kanban_task_completed"} | event for event in (stale, summary)]
-    events.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    worker.finish(outcome="partial", terminal=False)
+    board.queue.finish(worker.task_id, worker.run_id, "partial", summary="Towers win.")
 
     board.process(publish=local_hook)
 
     [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
     assert ack["title"] == "Partly done: Scout"
     assert ack["body"] == (
-        "Towers win. The rest of the work continues in a follow-up card. "
+        "Towers win. The rest of the task is not done yet. "
         "The agent also sent: “Towers win lanes”."
+    )
+
+
+def test_a_summary_that_names_ids_gives_way_to_the_journal_or_is_made_plain(board):
+    task, worker = _finished_task_card(board)
+    stage(Layout(worker.worktree), "help_request", "Stuck on H-01K6Z3V8QX0000000000000000", "B", [])
+    worker.finish(outcome="blocked", terminal=False)
+    ids_summary = f"Created {board.hypothesis} and requested its experiment card."
+    board.queue.finish(worker.task_id, worker.run_id, "blocked", summary=ids_summary)
+
+    board.process(publish=local_hook)
+
+    [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert ack["body"] == (
+        "Did things. The agent needs help to go on; its help request says what it needs. "
+        "The agent also sent: “Stuck on the hypothesis”."
+    )
+    assert runtime_messages.plainest_summary([ids_summary, f"See ar://claim/C-x at {'a1' * 6}."]) == (
+        "Created the hypothesis and requested its experiment card."
     )
 
 

@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from autoresearch.comms import runtime_messages
-from autoresearch.comms.publisher import outbox_has_key, publish_message
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
@@ -112,7 +112,7 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
         message = runtime_messages.card_blocked_twice(
             card.spec.title, task_id, card.spec.request_id, request_id, _refs(card)
         )
-        if not outbox_has_key(canonical, message.key):
+        if not already_published(canonical, message):
             publish_message(
                 canonical,
                 message,
@@ -132,7 +132,7 @@ def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool)
         card.spec.title, reason, task_id, card.spec.request_id, str(card.block_run_id), _refs(card)
     )
     with canonical_lock(canonical):
-        if not outbox_has_key(canonical, message.key):
+        if not already_published(canonical, message):
             publish_message(
                 canonical,
                 message,

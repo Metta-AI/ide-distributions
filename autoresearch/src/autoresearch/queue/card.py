@@ -27,6 +27,7 @@ class RunInfo:
     run_id: str
     terminal: bool
     outcome: str | None
+    summary: str | None = None  # what the run ended with (kanban_complete summary, block reason)
 
 
 @dataclass

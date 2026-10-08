@@ -67,7 +67,7 @@ import jsonschema
 from ulid import ULID
 
 from autoresearch.comms import runtime_messages
-from autoresearch.comms.publisher import outbox_has_key, publish_message
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -800,7 +800,7 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
         candidate_sha=promotion.candidate_sha,
         refs=[{"uri": f"ar://experiment/{promotion.experiment}"}],
     )
-    if not outbox_has_key(canonical, message.key):
+    if not already_published(canonical, message):
         publish_message(canonical, message, allow_no_remote=True)
     updated = replace(promotion, help_requested=True, updated_at=now_iso())
     _save(canonical, updated, f"promotion {promotion.id}: help requested")

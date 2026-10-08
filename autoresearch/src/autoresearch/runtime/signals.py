@@ -79,7 +79,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch.comms import runtime_messages
-from autoresearch.comms.publisher import outbox_has_key, publish_message
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -260,10 +260,11 @@ def _thrash(inputs: _Inputs) -> list[_Raw]:
     for experiment in inputs.experiments:
         lever = experiment.get("lever")
         if experiment.get("status") in OPEN_EXPERIMENT_STATES and lever in refuted:
+            # No ids in the text: the experiment is the signal's entity (a ref when it
+            # escalates), and the refuted claim is the one on this lever.
             detail = (
-                f"experiment {experiment['id']} acts on lever {lever}, which refuted mechanism "
-                f"claim {refuted[lever]} covers; it needs new evidence that meets the claim's "
-                f"revise_if"
+                f"an open experiment acts on lever {lever}, which a refuted mechanism claim "
+                f"covers; it needs new evidence that meets the claim's revise_if"
             )
             found.append(_Raw(THRASH, experiment["id"], detail))
     return found
@@ -527,7 +528,7 @@ def _escalate(ctx: RunContext, signal: Signal, first_iteration: int, allow_no_re
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not outbox_has_key(canonical, message.key):  # its key names the episode
+        if not already_published(canonical, message):  # its key names the episode
             publish_message(canonical, message, allow_no_remote)
         record = {
             "key": signal.key,

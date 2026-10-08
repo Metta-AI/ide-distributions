@@ -93,13 +93,16 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
      outcome is already set, so its body cannot change any more: put new information in the
      records or requests you fix, not in the journal.
    - Exit 2: no card worker context. Stop and report it in your final message.
-6. Call the native `kanban_complete` tool. Give a `summary` of one to three sentences, and
-   give the `data` object of the `card finish` envelope as `metadata`. List the card ids you
-   made with `kanban_create`, if any, in `created_cards` (normally none: request cards with
-   `queue request create`). The `summary` is required: a call without it fails with
+6. Call the native `kanban_complete` tool. Give a `summary` of one to three plain sentences
+   for the coach, and give the `data` object of the `card finish` envelope as `metadata`. When
+   the card came from an inbound `task`, the runtime quotes this summary as the task's outcome,
+   and the coach reads it as written. So say what you found or produced, findings first, in
+   plain words. Put no ids, `ar://` refs or commits in it: they are in `metadata`. List the card
+   ids you made with `kanban_create`, if any, in `created_cards` (normally none: request cards
+   with `queue request create`). The `summary` is required: a call without it fails with
    "provide at least one of: summary (preferred), result". Do not set `board`; the tool
    uses this card's board. For example:
-   `{"summary": "Created H-… and requested its experiment card.", "metadata": {<data>}}`
+   `{"summary": "andre opens with a two-tower push. I wrote a hypothesis that waiting for kill range beats it, and asked for an experiment to test it.", "metadata": {<data>}}`
    Serial fallback: when the `kanban_complete` tool does not exist, `card finish` alone
    ends the card.
 7. Stop. After `card finish` the plugin blocks every file write in this card.

@@ -6,8 +6,10 @@ import datetime
 import pytest
 from support.keeper_host import Host, Usage
 
+from autoresearch.comms.publisher import publish_runtime
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runtime import health
+from autoresearch.runtime.ledger import canonical_lock
 
 T0 = datetime.datetime.now(datetime.UTC)
 GB = 1024**3
@@ -130,6 +132,20 @@ def test_other_block_reasons_are_requeued_as_before(host):
     [card] = host.queue.list("pending")
     _block(host, card.task_id, "circuit breaker open")
     assert [a.action for a in _check(host, at(2)).blocked] == ["requeued"]
+
+
+def test_a_help_request_published_before_runtime_key_existed_still_counts(host):
+    """Upgrade: today's disk problem published under the old title is not repeated."""
+    day = f"{at(2).astimezone(datetime.UTC):%Y-%m-%d}"
+    with canonical_lock(host.canonical):
+        publish_runtime(
+            host.canonical, "help_request", f"Health: disk problem ({day})", "Old.", [],
+            allow_no_remote=True,
+        )  # fmt: skip
+
+    _check(host, at(2), free=GB // 4)
+
+    assert [m["title"] for m in host.outbox()] == [f"Health: disk problem ({day})"]
 
 
 def test_low_disk_raises_one_help_request_a_day(host):

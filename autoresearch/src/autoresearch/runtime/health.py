@@ -28,7 +28,7 @@ from pathlib import Path
 
 from autoresearch import runctx
 from autoresearch.comms import runtime_messages
-from autoresearch.comms.publisher import outbox_has_key, publish_message
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.queue.base import Queue
@@ -94,7 +94,7 @@ def _report(
         kind, problem, f"{now.astimezone(datetime.UTC):%Y-%m-%d}"
     )
     with canonical_lock(canonical):
-        if outbox_has_key(canonical, message.key):
+        if already_published(canonical, message):
             return
         publish_message(canonical, message, allow_no_remote=True, expects_response=True)
     result.published.append(message.title)

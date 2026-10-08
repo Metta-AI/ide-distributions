@@ -10,11 +10,12 @@ import pytest
 import yaml
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
-from autoresearch.comms.publisher import PublishResult
+from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import queue_keeper, xp_poll
+from autoresearch.runtime import proposals, queue_keeper, xp_poll
+from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
 from autoresearch.runtime.signals import KEEPER_STEP_FAILED
@@ -445,6 +446,31 @@ def _stage_skill(host: Host, name: str, text: str) -> None:
 
 def _suggestions(host: Host) -> list[dict]:
     return [m for m in host.outbox() if m["kind"] == "suggestion"]
+
+
+def test_a_skill_proposed_before_runtime_key_existed_is_not_proposed_again(host):
+    """Upgrade: a suggestion titled the old way (``Skill proposal: <name> (<hash>)``, no
+    runtime_key) still counts, and a later change supersedes it."""
+    host.tick(at(0))
+    _stage_skill(host, "farm-faster", "# Farm faster\n")
+    staged = proposals._files(host.home / "local" / "skills-staging" / "farm-faster")
+    with canonical_lock(host.canonical):
+        publish_runtime(
+            host.canonical,
+            "suggestion",
+            f"Skill proposal: farm-faster ({proposals._tree_hash(staged)})",
+            "Reply adopt, reject, or revise.",
+            [{"uri": "ar://skill-proposal/farm-faster", "rev": host.head()}],
+            allow_no_remote=True,
+            expects_response=True,
+        )
+
+    assert host.tick(at(1)).skills == []
+    [legacy] = _suggestions(host)
+
+    _stage_skill(host, "farm-faster", "# Farm faster v2\n")
+    assert host.tick(at(2)).skills == ["farm-faster"]
+    assert _suggestions(host)[-1]["supersedes"] == legacy["id"]
 
 
 def test_staged_skills_are_proposed_once_and_reraised_daily(host):

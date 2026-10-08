@@ -65,7 +65,7 @@ import jsonschema
 from ulid import ULID
 
 from autoresearch.comms import runtime_messages
-from autoresearch.comms.publisher import outbox_has_key, publish_message
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -266,7 +266,7 @@ def _unrecoverable(ctx: RunContext, receipt: dict, allow_no_remote: bool) -> Non
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not outbox_has_key(canonical, message.key):
+        if not already_published(canonical, message):
             publish_message(canonical, message, allow_no_remote)
         path = receipt_path(ledger_of(canonical), request_id)
         rejected = receipt | {

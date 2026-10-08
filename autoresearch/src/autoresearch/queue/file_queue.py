@@ -154,7 +154,7 @@ class FileQueue:
             self._save_record(best)
             return self._to_card(best)
 
-    def finish(self, task_id: str, run_id: str, outcome: str) -> None:
+    def finish(self, task_id: str, run_id: str, outcome: str, summary: str | None = None) -> None:
         with file_lock(self._lock_path):
             record = self._load_record(task_id)
             run = next((r for r in record["runs"] if r["run_id"] == run_id), None)
@@ -166,6 +166,7 @@ class FileQueue:
                 raise ValueError(f"run {run_id} already finished with outcome {run['outcome']!r}")
             run["terminal"] = True
             run["outcome"] = outcome
+            run["summary"] = summary
             record["state"] = "completed"
             self._save_record(record)
 

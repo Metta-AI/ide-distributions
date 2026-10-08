@@ -64,13 +64,10 @@ from autoresearch.comms.envelope import (
 from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
-from autoresearch.plugin.adapters import KANBAN_EVENTS_FILE
 from autoresearch.records.registry import entity_of_id
 
 OUTBOX_DIR = "comms/outbox"
 INBOX_DIR = "comms/inbox"
-# Written by the plugin's kanban_task_completed hook (runctx.runtime_dir).
-KANBAN_EVENTS = f".supervisor/runtime/{KANBAN_EVENTS_FILE}"
 SUMMARY_LIMIT = 600  # characters of a card's summary quoted in its task acknowledgement
 REFERENCED_RECORDS = 10  # journal and created records a task acknowledgement refers to
 STAGED_DIR = "comms/staged"
@@ -121,13 +118,19 @@ def _outbox_files(canonical: Path) -> dict[str, tuple[int, Path]]:
     return found
 
 
-def outbox_has_key(canonical: Path, key: str) -> bool:
-    """True if a published message has ``runtime_key`` == ``key``. Runtime jobs use it to
+def already_published(canonical: Path, message: RuntimeMessage) -> bool:
+    """True if the outbox holds a message with ``message``'s ``runtime_key``, or (published
+    before runtime_key existed) a title containing its ``legacy_title``. Runtime jobs use it to
     publish a help_request or note once, also when a crash lands between publishing and
     committing their own dedupe marker (``runtime_messages``)."""
     for _seq, path in _outbox_files(Path(canonical)).values():
-        message = read_json(path)
-        if isinstance(message, dict) and message.get("runtime_key") == key:
+        published = read_json(path)
+        if not isinstance(published, dict):
+            continue
+        if message.key is not None and published.get("runtime_key") == message.key:
+            return True
+        title = published.get("title")
+        if message.legacy_title and isinstance(title, str) and message.legacy_title in title:
             return True
     return False
 
@@ -430,31 +433,9 @@ def _is_responsible(record: dict, handoff: dict) -> bool:
     )
 
 
-def _kanban_summary(canonical: Path, card: str, run_id: str) -> str | None:
-    """The ``summary`` the card gave ``kanban_complete``, as the plugin's
-    ``kanban_task_completed`` hook recorded it. That file is disposable runtime state and the
-    serial fallback has none, so a missing file or event is normal."""
-    try:
-        lines = (canonical / KANBAN_EVENTS).read_text(encoding="utf-8").splitlines()
-    except OSError:
+def _clip(text: str | None) -> str | None:
+    if not isinstance(text, str):
         return None
-    for line in reversed(lines):
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if (
-            isinstance(event, dict)
-            and event.get("event") == "kanban_task_completed"
-            and event.get("task_id") == card
-            and str(event.get("run_id")) == str(run_id)
-        ):
-            summary = event.get("summary")
-            return _clip(summary) if isinstance(summary, str) else None
-    return None
-
-
-def _clip(text: str) -> str | None:
     line = " ".join(text.split())
     if len(line) > SUMMARY_LIMIT:
         line = line[:SUMMARY_LIMIT].rsplit(" ", 1)[0] + "…"
@@ -475,16 +456,16 @@ def _journal(canonical: Path, handoff: dict) -> tuple[str | None, str | None]:
     return (str(journal_id) if journal_id else None), _clip(paragraph)
 
 
-def _sent_titles(canonical: Path, card: str) -> list[str]:
-    """Titles of the messages this card published, in outbox order."""
-    titles = []
+def _sent(canonical: Path, card: str) -> list[dict]:
+    """The messages this card published, in outbox order."""
+    sent = []
     for _seq, path in sorted(_outbox_files(canonical).values()):
         message = read_json(path)
         if not isinstance(message, dict) or message.get("card") != card:
             continue
         if message.get("from") == FROM_AGENT and isinstance(message.get("title"), str):
-            titles.append(message["title"])
-    return titles
+            sent.append(message)
+    return sent
 
 
 def _ack_refs(handoff: dict, journal_id: str | None) -> list[dict]:
@@ -516,21 +497,27 @@ def _task_acknowledgement(
 ) -> str:
     """The runtime note acknowledging an inbound ``task`` (published once: a rerun after a
     crash finds the note already in the outbox). Its title is the task as the sender phrased
-    it plus the outcome; its body is the card's own completion summary (its Kanban summary,
-    else the opening of its journal), then what follows from the outcome and the titles of
-    the messages the card sent. Ids and commits go into ``refs`` and ``about``."""
+    it plus the outcome; its body is the card's own completion summary, then what follows from
+    the outcome and the titles of the messages the card sent. The summary is the one the run
+    ended with on the board (``run_summary``, from ``process_handoffs``) or the opening of the
+    card's journal, whichever names no ids (``runtime_messages.plainest_summary``). Ids and
+    commits go into ``refs`` and ``about``."""
     found = find_reply(canonical, inbound_id, FROM_RUNTIME)
     if found is not None:
         return found
     journal_id, journal_summary = _journal(canonical, handoff)
     outcome = str(handoff.get("outcome"))
+    sent = _sent(canonical, handoff["card"])
     message = runtime_messages.task_acknowledgement(
         task_title=_task_title(canonical, inbound_id),
         outcome=outcome,
-        summary=_kanban_summary(canonical, handoff["card"], handoff["run_id"]) or journal_summary,
-        sent_titles=_sent_titles(canonical, handoff["card"]),
+        summary=runtime_messages.plainest_summary(
+            [_clip(handoff.get("run_summary")), journal_summary]
+        ),
+        sent_titles=[message["title"] for message in sent],
         backlog=backlog,
         has_journal=journal_id is not None,
+        asked_for_help=any(message.get("kind") == "help_request" for message in sent),
         refs=_ack_refs(handoff, journal_id),
         about={
             "card": handoff["card"],

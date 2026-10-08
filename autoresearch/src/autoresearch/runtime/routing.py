@@ -358,10 +358,8 @@ def _task_problems(canonical: Path, message: dict) -> list[str]:
     for uri in message["refs"]:
         try:
             resolve(canonical, uri)
-        except ResolveError as error:
-            problems.append(
-                f"refs: {uri} does not point to anything in the workspace ({error})"
-            )
+        except ResolveError:  # its text names a commit; the uri says what is missing
+            problems.append(f"refs: {uri} does not point to anything in the workspace")
     return problems
 
 

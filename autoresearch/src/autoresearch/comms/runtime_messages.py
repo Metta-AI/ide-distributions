@@ -13,14 +13,23 @@ fields (``schemas/comms/envelope.outbound.json``):
   ``merge_commit``, ...), for a reader that needs to look further. A note answering an inbound
   also has ``outcome``: the card outcome (``done``, ``partial``, ...), or ``rejected``.
 - ``runtime_key``: a stable key the runtime uses to publish a message only once
-  (``publisher.outbox_has_key``).
+  (``publisher.already_published``). Messages published before ``runtime_key`` existed
+  (2026-10-08) carried their key in the title instead; a builder sets ``legacy_title`` to that
+  old title, so a message published before the upgrade still counts and is not repeated.
+
+The card's own words (its summary, the titles of its messages) go into a task
+acknowledgement too. They should be plain already (complete-card asks for that), but when they
+name ids anyway, ``plain_ids`` replaces each id with what it names ("the hypothesis").
 
 Each builder here returns a ``RuntimeMessage``; ``publisher.publish_message`` publishes it.
 ``tests/contract/comms/test_runtime_messages.py`` publishes every builder and checks that no
 id or commit reaches the text, and that runtime code publishes nothing else.
 """
 
+import re
 from dataclasses import dataclass, field
+
+from autoresearch.ids import ENTITY_PREFIXES
 
 TITLE_LIMIT = 120
 OUTCOME_WORDS = {
@@ -38,19 +47,33 @@ _NO_SUMMARY = {
     "failed": "The agent could not do this task and left no summary.",
     "blocked": "The agent stopped work on this task and left no summary.",
 }
-# What follows from the outcome, for the reader.
+# What follows from the outcome, for the reader. ``partial`` creates no follow-up card in the
+# runtime: what is left may wait on credits or the XP poller, or need a new task.
 _NEXT = {
-    "partial": "The rest of the work continues in a follow-up card.",
+    "partial": "The rest of the task is not done yet.",
     "dropped": "No more work will be done on it. Send a new task if it still matters.",
     "failed": "No more work will be done on it. Send a new task if it still matters.",
-    "blocked": "The agent needs help to go on; its help request says what it needs.",
 }
+_BLOCKED_ASKED = "The agent needs help to go on; its help request says what it needs."
+_BLOCKED_SILENT = "The agent needs help to go on, but it sent no help request about it."
 # ``about.outcome`` of a note that answers an inbound it did not act on, so a reader such as
 # the IDE bridge can tell a rejection from a card outcome without parsing the title.
 REJECTED = "rejected"
 _SENT_LISTED = 3
 _UNRESOLVED_REF = "unresolved ref "
 _REBUILD_LOST = "board rebuild could not re-admit "
+
+# Ids and commits as they appear in free text: an ar:// reference, a record or runtime id
+# (``H-<ULID>``, ``Q-<ULID>``, ``K-<ULID>``, ...), a Kanban task id (``t_6c0a018c``), or a
+# commit (7 to 40 hex characters with at least one digit and one letter).
+ID_TOKEN = re.compile(
+    r"ar://[^\s,;)\]]+"
+    r"|\b[A-Z]{1,3}-[0-9A-HJKMNP-TV-Z]{26}\b"
+    r"|\bt_[0-9a-f]{4,}\b"
+    r"|\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b"
+)
+_NAME_BY_PREFIX = {prefix: name for name, prefix in ENTITY_PREFIXES.items()}
+_NAME_BY_PREFIX.update({"Q": "request", "I": "inbound message", "K": "card", "P": "promotion"})
 
 
 @dataclass(frozen=True)
@@ -61,6 +84,7 @@ class RuntimeMessage:
     refs: list = field(default_factory=list)
     about: dict[str, str] = field(default_factory=dict)
     key: str | None = None  # the runtime_key: published once
+    legacy_title: str | None = None  # its title before runtime_key existed (never published)
 
     def fields(self) -> dict:
         """The additive envelope fields of this message."""
@@ -85,6 +109,11 @@ def _about(**ids) -> dict[str, str]:
     return {name: str(value) for name, value in ids.items() if value not in (None, "", [])}
 
 
+def _count(items: list, noun: str) -> str:
+    """ "its recovery card" for one item, "all 3 recovery cards" for more."""
+    return f"its {noun}" if len(items) == 1 else f"all {len(items)} {noun}s"
+
+
 def _bullets(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
@@ -93,6 +122,37 @@ def _quoted_list(titles: list[str]) -> str:
     shown = [f"“{_line(title, 80)}”" for title in titles[:_SENT_LISTED]]
     more = len(titles) - len(shown)
     return "; ".join(shown) + (f"; and {more} more" if more else "")
+
+
+def _plain_id(match: re.Match) -> str:
+    token = match.group(0)
+    if token.startswith("ar://"):
+        return f"the {token.removeprefix('ar://').split('/', 1)[0].split('#', 1)[0]}"
+    if token.startswith("t_"):
+        return "the card"
+    prefix, dash, _ = token.partition("-")
+    if dash:
+        return f"the {_NAME_BY_PREFIX.get(prefix, 'record')}"
+    return "a commit"
+
+
+def has_ids(text: str) -> bool:
+    return ID_TOKEN.search(text) is not None
+
+
+def plain_ids(text: str) -> str:
+    """``text`` with each id or commit replaced by what it names: ``ar://hypothesis/H-…`` and
+    ``H-…`` become "the hypothesis", ``t_…`` "the card", a commit "a commit"."""
+    return ID_TOKEN.sub(_plain_id, text)
+
+
+def plainest_summary(candidates: list[str | None]) -> str | None:
+    """The first candidate summary that names no ids; else the first one, ids made plain."""
+    present = [text for text in candidates if text and text.strip()]
+    for text in present:
+        if not has_ids(text):
+            return text
+    return plain_ids(present[0]) if present else None
 
 
 # --- inbound task: acknowledgement and rejection ---
@@ -105,12 +165,14 @@ def task_acknowledgement(
     sent_titles: list[str],
     backlog: bool,
     has_journal: bool,
+    asked_for_help: bool,
     refs: list,
     about: dict[str, str],
 ) -> RuntimeMessage:
     """The note that closes an inbound ``task`` once its card is published (C11). ``summary``
-    is the card's own completion summary, if it left one; ``sent_titles`` the titles of the
-    messages the card published."""
+    is the card's own completion summary, if it left one (``plainest_summary``);
+    ``sent_titles`` the titles of the messages the card published; ``asked_for_help``
+    whether one of them is a ``help_request``."""
     parts = []
     if backlog:
         parts.append("A planning card that was already open took this task on with its other work.")
@@ -122,8 +184,11 @@ def task_acknowledgement(
             parts.append("Its journal entry has the details.")
     if outcome in _NEXT:
         parts.append(_NEXT[outcome])
+    if outcome == "blocked":
+        parts.append(_BLOCKED_ASKED if asked_for_help else _BLOCKED_SILENT)
     if sent_titles:
-        parts.append(f"The agent also sent: {_quoted_list(sent_titles)}.")
+        titles = [plain_ids(title) for title in sent_titles]
+        parts.append(f"The agent also sent: {_quoted_list(titles)}.")
     lead = OUTCOME_WORDS.get(outcome, str(outcome).capitalize())
     title = _title(lead, task_title or "your task")
     return RuntimeMessage("note", title, " ".join(parts), refs, about)
@@ -193,7 +258,11 @@ def health_problem(kind: str, problem: str, day: str) -> RuntimeMessage:
         "until it is fixed. Please fix it on the host."
     )
     return RuntimeMessage(
-        "help_request", f"Health check: {kind} problem", body, key=f"health:{kind}:{day}"
+        "help_request",
+        f"Health check found a problem: {kind}",
+        body,
+        key=f"health:{kind}:{day}",
+        legacy_title=f"Health: {kind} problem ({day})",
     )
 
 
@@ -219,6 +288,7 @@ def card_blocked_twice(
         refs,
         _about(card=task_id, request=request_id, repair_request=repair_request),
         key=f"blocked-twice:{task_id}",
+        legacy_title=f"Card {task_id} is blocked again after a requeue",
     )
 
 
@@ -238,6 +308,7 @@ def card_tool_fault(
         refs,
         _about(card=task_id, request=request_id, run=run_id),
         key=f"tool-fault:{task_id}:{run_id}",
+        legacy_title=f"Card {task_id} is blocked by a tool fault (run {run_id})",
     )
 
 
@@ -247,8 +318,13 @@ def card_tool_fault(
 def signal_persists(
     code: str, entity: str | None, detail: str, first_seen: str, iterations: int
 ) -> RuntimeMessage:
-    """A self-monitoring signal still fires after the agent's response (one per episode)."""
+    """A self-monitoring signal still fires after the agent's response (one per episode). An
+    ``entity`` that is a record id (thrash: the experiment) becomes a ref."""
     key = code if entity is None else f"{code}:{entity}"
+    refs = []
+    entity_name = _NAME_BY_PREFIX.get(entity.partition("-")[0]) if entity else None
+    if entity and ID_TOKEN.fullmatch(entity) and entity_name in ENTITY_PREFIXES:
+        refs.append({"uri": f"ar://{entity_name}/{entity}", "role": "subject"})
     body = (
         f"One of the agent's self-checks keeps firing: {detail}. It first fired at "
         f"{first_seen} and still fires {iterations} iterations (card runs) later, after the "
@@ -258,8 +334,10 @@ def signal_persists(
         "help_request",
         _title("Warning sign not clearing", code.replace("_", " ")),
         body,
+        refs,
         about=_about(signal=key),
         key=f"signal:{key}@{first_seen}",
+        legacy_title=f"Signal {key} (since {first_seen}) persists",
     )
 
 
@@ -272,7 +350,11 @@ def agent_paused(reasons: str, paused_at: str) -> RuntimeMessage:
         "preflight check passes."
     )
     return RuntimeMessage(
-        "help_request", "Agent paused: preflight failed", body, key=f"paused:{paused_at}"
+        "help_request",
+        "Agent paused: preflight failed",
+        body,
+        key=f"paused:{paused_at}",
+        legacy_title=f"Agent paused at {paused_at}",
     )
 
 
@@ -299,6 +381,7 @@ def staged_not_published(
         body,
         about=_about(message=message_id),
         key=f"skipped-staged:{message_id}",
+        legacy_title=f"Staged message {message_id} was not published",
     )
 
 
@@ -330,6 +413,7 @@ def step_failing(step: str, runs: int, since: str, error: str, log_path: str) ->
         f"queue-keeper step {step} failing",
         body,
         key=f"step-failing:{step}:{since}",
+        legacy_title=f"queue-keeper step {step} failing since {since}",
     )
 
 
@@ -348,11 +432,11 @@ def promotion_stuck(
 ) -> RuntimeMessage:
     """A promotion's recovery attempts are exhausted; an operator must act."""
     body = (
-        f"A promotion submitted a new policy, but its {len(recovery_requests)} recovery cards "
-        "all ended without recording the new champion. No more recovery cards will be made, "
-        "and no new promotion can start, until an operator records the champion file "
-        f"{champion_path} from the candidate, or aborts the promotion. This message's `about` "
-        "field names the candidate's ref and commit."
+        f"A promotion submitted a new policy, but {_count(recovery_requests, 'recovery card')} "
+        "ended without recording the new champion. No more recovery cards will be made, and no "
+        "new promotion can start, until an operator records the champion file "
+        f"{champion_path} from the candidate, or aborts the promotion. The candidate's ref and "
+        "commit are in this message's details (`about`)."
     )
     about = _about(
         promotion=promotion_id,
@@ -369,6 +453,7 @@ def promotion_stuck(
         refs,
         about,
         key=f"promote-recover-help:{promotion_id}",
+        legacy_title=f"(promote-recover-help:{promotion_id})",
     )
 
 
@@ -386,6 +471,7 @@ def request_lost_in_rebuild(request_id: str, mode: str | None) -> RuntimeMessage
         body,
         about=_about(request=request_id),
         key=f"rebuild-lost:{request_id}",
+        legacy_title=f"Request {request_id} lost in a board rebuild",
     )
 
 
@@ -402,11 +488,18 @@ def skill_proposal(name: str, tree_hash: str, directory: str, rev: str) -> Runti
         body,
         refs,
         key=f"{skill_proposal_key_prefix(name)}{tree_hash}",
+        legacy_title=f"{skill_proposal_legacy_prefix(name)}{tree_hash})",
     )
 
 
 def skill_proposal_key_prefix(name: str) -> str:
     return f"skill-proposal:{name}:"
+
+
+def skill_proposal_legacy_prefix(name: str) -> str:
+    """The start of a skill proposal's title before runtime_key existed: ``Skill proposal:
+    <name> (<tree hash>)``."""
+    return f"Skill proposal: {name} ("
 
 
 def proposal_still_open(message: dict, rev: str) -> RuntimeMessage:
