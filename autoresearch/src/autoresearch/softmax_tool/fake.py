@@ -169,7 +169,9 @@ class FakeSoftmax:
         return self._operate("credits", self._current_credits, persist=False)
 
     def game_version(self, league_id: str) -> str:
-        return self._operate("game_version", lambda state: state["game_version"], persist=False)
+        return self._operate(
+            "game_version", lambda state: str(state["game_version"]).strip(), persist=False
+        )
 
     def game_source_pin(self, league_id: str) -> str | None:
         return self._operate(

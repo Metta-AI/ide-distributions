@@ -90,7 +90,10 @@ def has_current_noise(canonical: Path, game_version: str) -> bool:
     if content is None:
         return False
     record = yaml.safe_load(content)
-    return isinstance(record, dict) and str(record.get("game_version")) == str(game_version)
+    return (
+        isinstance(record, dict)
+        and str(record.get("game_version")).strip() == str(game_version).strip()
+    )
 
 
 def _planning_owned(canonical: Path, spec: CardSpec, queue: Queue) -> bool:

@@ -295,25 +295,36 @@ def kb_step(
 ) -> None:
     """Code-citation renewal (when the game source pin changed), stale marking (when the game
     version is known), lint apply, compaction and generated views (System Design §3.5); one
-    commit, which also records a new game source pin."""
+    commit, which also records a new game source pin.
+
+    A renewal failure does not stop the rest: the pin stays unrecorded (the next run retries),
+    the other KB work is committed, and the error is raised afterwards so the step is logged
+    as failed and escalates. ``cards/requests`` is committed as a directory, so
+    re-verification requests a failed earlier renewal left uncommitted are committed too."""
     layout = Layout(canonical)
     version = str(game_version).strip() if game_version else ""
+    renewal_error: Exception | None = None
     with canonical_lock(canonical):
         extra: list[Path] = []
         if pin is not None and (pin.old is None or version):
-            if pin.old is not None and pin.checkout is not None:
-                before = set(layout.card_requests.glob("*.json"))
-                renew_code_citations(
-                    layout, pin.checkout, pin.old, pin.new, current_version=version, now=now
-                )
-                extra += sorted(set(layout.card_requests.glob("*.json")) - before)
-            extra.append(record_pin(canonical, pin, now))
+            try:
+                if pin.old is not None and pin.checkout is not None:
+                    renew_code_citations(
+                        layout, pin.checkout, pin.old, pin.new, current_version=version, now=now
+                    )
+                extra.append(record_pin(canonical, pin, now))
+            except Exception as error:  # noqa: BLE001 - re-raised after the commit below
+                renewal_error = error
         if version:
             mark_stale(layout, version, now)
         kb_apply(layout, analyze(layout), now)
         compact(layout, now, pending_reverify=pending_reverification(layout))
         write_generated(layout)
+        if layout.card_requests.exists():
+            extra.append(layout.card_requests)
         commit(canonical, [layout.kb, *extra], "kb: lint fixes, compaction, generated views")
+    if renewal_error is not None:  # _step logs it and counts the kb step as failed
+        raise RuntimeError(f"code-citation renewal failed: {renewal_error}") from renewal_error
 
 
 def _remote_main(canonical: Path) -> str | None:
@@ -606,6 +617,7 @@ def _run_steps(
 
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
     game_version = _step(run, ctx, "game_version", sm.game_version, game.league_id)
+    game_version = str(game_version).strip() if game_version is not None else None
     _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm)
     run.rebuilt = (
         _step(

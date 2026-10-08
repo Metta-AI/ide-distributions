@@ -117,6 +117,12 @@ def test_experimentation_needs_noise_for_current_game_version(canonical, ctx, qu
     assert _admit(ctx, queue, spec, game).ok
 
 
+def test_noise_version_compares_without_surrounding_whitespace(canonical, queue, game):
+    spec = make_spec(mode="experimentation", refs=[f"ar://hypothesis/{canonical.hypothesis_id}"])
+    canonical.write_noise(game_version=f" {GAME_VERSION} ")
+    assert admit(canonical.root, spec, queue, game, f"{GAME_VERSION}\n") == []
+
+
 def test_non_experimentation_needs_no_noise(canonical, queue, game):
     assert admit(canonical.root, make_spec(mode="scouting"), queue, game, GAME_VERSION) == []
 

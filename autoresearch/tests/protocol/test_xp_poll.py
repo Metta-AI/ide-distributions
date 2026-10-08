@@ -374,3 +374,22 @@ def test_each_denial_gets_its_own_relaunch_and_each_batch_its_own_review(host, m
     [review_2] = _review_and_merge(host, second_backoff + datetime.timedelta(minutes=10))
     assert f"[review:{experiment}:n4]" in review_2.why
     assert len(_review_requests(host, experiment)) == 2
+
+
+def test_padded_versions_are_stripped_so_ingest_keeps_the_rows(host, monkeypatch):
+    experiment = _experiment(host, "evaluating")
+    handles = _launch_all(host, experiment)
+    real_artifacts = host.sm.xp_artifacts
+
+    def padded(handle, dest):  # a results.json whose game_version has stray whitespace
+        paths = real_artifacts(handle, dest)
+        results = read_json(paths[0])
+        write_json(paths[0], {**results, "game_version": f" {GAME_VERSION}\n"})
+        return paths
+
+    monkeypatch.setattr(host.sm, "xp_artifacts", padded)
+    _poll(host, at(1))
+    rows = _rows(host, experiment)
+    assert len(rows) == len(handles) and {r.game_version for r in rows} == {GAME_VERSION}
+    kept, report = ingest(rows, DESIGN)
+    assert report.wrong_version == 0 and len(kept) == len(rows)

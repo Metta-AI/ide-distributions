@@ -93,7 +93,7 @@ class SoftmaxClient:
         return self._cli.run_json("coworld", ["show", coworld_id])
 
     def game_version(self, league_id: str) -> str:
-        return self._league_coworld(league_id)["version"]
+        return str(self._league_coworld(league_id)["version"]).strip()
 
     def game_source_pin(self, league_id: str) -> str | None:
         """The full commit sha in ``manifest.game.runnable.source_url`` of the league's

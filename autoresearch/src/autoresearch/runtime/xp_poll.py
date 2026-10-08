@@ -161,7 +161,7 @@ def _rows(
         rows.append(
             EpisodeRow(
                 episode_id=f"{handle.request_id}:{episode.get('episode', index)}",
-                game_version=str(results.get("game_version") or game_version),
+                game_version=str(results.get("game_version") or game_version).strip(),
                 policy_version=policy,
                 seed=int(seed),
                 seats=tuple(design.seats),
@@ -218,7 +218,7 @@ def _fetch(
     game_version = ""
     for path in results_paths:
         results = json.loads(path.read_text(encoding="utf-8"))
-        game_version = str(results.get("game_version") or league_version())
+        game_version = str(results.get("game_version") or league_version()).strip()
         rows += _rows(results, evaluate(path), handle, design, policy, game_version)
         files.append(
             (
@@ -417,7 +417,7 @@ def run(
 
     def league_version() -> str:
         if "version" not in league:
-            league["version"] = sm.game_version(game.league_id)
+            league["version"] = str(sm.game_version(game.league_id)).strip()
         return league["version"]
 
     try:

@@ -620,3 +620,34 @@ def _set_fake(host: Host, **values) -> None:
     path = host.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
     state = read_json(path) if path.exists() else host.sm._initial_state()
     write_json(path, {**state, **values})
+
+
+def test_a_renewal_failure_keeps_the_pin_and_still_runs_the_kb_step(host, tmp_path, monkeypatch):
+    from autoresearch.paths import Layout
+    from autoresearch.runtime.game_source import PinUpdate
+
+    host.tick(at(0))
+    claim = _claim(host, GAME_VERSION)
+    ledger = host.canonical / ".supervisor" / "ledger" / "game_source.json"
+    write_json(ledger, {"pin": "a" * 40, "repo": "r", "updated_at": "t"})
+    gitops.commit_all(host.canonical, "pin a")
+    layout = Layout(host.canonical)
+    partial = layout.card_requests / "Q-partial.json"
+
+    def broken(layout_, checkout, old, new, *, current_version, now):
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_text("{}\n")  # a request written before the failure
+        raise ValueError("diff exploded")
+
+    monkeypatch.setattr(queue_keeper, "renew_code_citations", broken)
+    pin = PinUpdate("b" * 40, "a" * 40, "r", tmp_path)
+    with pytest.raises(RuntimeError, match="renewal failed"):
+        queue_keeper.kb_step(host.canonical, at(1), "fake-2", pin)
+
+    assert read_json(ledger)["pin"] == "a" * 40  # unrecorded: the next run retries
+    assert host.store.load(claim)[0]["status"] == "stale"  # stale marking still ran
+    assert gitops.git(host.canonical, "status", "--porcelain") == ""  # incl. the request
+
+    monkeypatch.setattr(queue_keeper, "renew_code_citations", lambda *a, **k: None)
+    queue_keeper.kb_step(host.canonical, at(2), "fake-2", pin)
+    assert read_json(ledger)["pin"] == "b" * 40

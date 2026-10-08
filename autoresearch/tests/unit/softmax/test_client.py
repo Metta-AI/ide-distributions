@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,10 @@ def test_game_source_pin_is_none_without_a_pinned_source_url(env, runner, tmp_pa
     runner.on("coworld", "leagues", response=completed(recorded("leagues_get.json")))
     runner.on("coworld", "show", response=completed(recorded("coworld_show.json")))
     assert make(env, runner, tmp_path).game_source_pin(LEAGUE_ID) is None
+
+
+def test_game_version_is_stripped(env, runner, tmp_path):
+    shown = json.loads(recorded("coworld_show.json"))
+    runner.on("coworld", "leagues", response=completed(recorded("leagues_get.json")))
+    runner.on("coworld", "show", response=completed(json.dumps({**shown, "version": " 7.1\n"})))
+    assert make(env, runner, tmp_path).game_version(LEAGUE_ID) == "7.1"
