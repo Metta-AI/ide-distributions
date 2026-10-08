@@ -51,6 +51,10 @@ Doctrine upheld: D-03, D-06, D-11.
   `communicate`), and finish `blocked`.
 - Reason `no_binding`: the experiment is not uploaded. Run `build-upload` first.
 - Reason `empty_batch`: `--batches` is larger than the seeds allow. Use fewer batches.
+- Reason `attempt_incomplete`: an earlier attempt of the batch still lacks requests (for
+  example after a credit denial). Rerun `xp create` with the attempt the message names. It
+  creates only the missing requests. A new attempt would repeat every request.
+- Reason `bad_attempt`: the attempt skips a number. Use the attempt the message names.
 - Reason `platform`, or a crash mid-batch: run the same `xp create` command again with the
   same `--batch` and `--attempt`. It creates only what is missing. After a second failure,
   finish `partial` and say so in the journal.

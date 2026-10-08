@@ -20,7 +20,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   by ``credit_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
   the worker's environment, read before any request is created); ``lifecycle.credit_denials``
   counts consecutive denials. Rerunning the same ``--batch``/``--attempt`` later creates only
-  the missing requests.
+  the missing requests. A new attempt (one with no request yet in the batch) is refused while
+  the batch's latest attempt still lacks requests (``attempt_incomplete``: rerun that attempt)
+  or when it skips a number (``bad_attempt``), so a relaunch never starts a second full set.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
@@ -326,6 +328,29 @@ def _record_xp(store, experiment: str, entries: list[dict]) -> dict:
     return meta
 
 
+def check_new_attempt(recovered: list[XpHandle], planned: list, batch: int, attempt: int) -> None:
+    """Refuse a new ``attempt`` of ``batch`` while its latest attempt is incomplete or when it
+    skips a number (module docstring). ``planned`` is ``xp_specs`` for the batch."""
+    attempts = {handle.attempt for handle in recovered if handle.batch == batch}
+    if not attempts or attempt in attempts:
+        return
+    latest = max(attempts)
+    if attempt != latest + 1:
+        raise Refused(
+            "bad_attempt",
+            f"batch {batch} has attempts {sorted(attempts)}; a new attempt must be {latest + 1}",
+        )
+    have = {(h.seed, h.arm) for h in recovered if (h.batch, h.attempt) == (batch, latest)}
+    missing = [(seed, arm) for seed, arm, _ in planned if (seed, arm) not in have]
+    if missing:
+        raise Refused(
+            "attempt_incomplete",
+            f"batch {batch} attempt {latest} still lacks {len(missing)} request(s); rerun "
+            f"xp create with --attempt {latest} to create only those (a new attempt would "
+            f"repeat every request)",
+        )
+
+
 def _xp_create(ctx, sm, args) -> dict:
     base = backoff_base(os.environ)
     store = worker_store(ctx)
@@ -344,6 +369,7 @@ def _xp_create(ctx, sm, args) -> dict:
     # what is missing, and requests the platform has but the record lacks are backfilled first.
     recovered = sm.xp_recover(experiment)
     _record_xp(store, experiment, [_xp_entry(h, policies.get(h.arm)) for h in recovered])
+    check_new_attempt(recovered, planned, args.batch, args.attempt)
     existing = {
         (handle.seed, handle.arm): handle
         for handle in recovered

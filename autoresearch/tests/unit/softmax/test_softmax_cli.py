@@ -332,6 +332,28 @@ def test_xp_create_credit_denied_mid_batch_reports_missing_and_relaunch_fills_th
     assert meta["lifecycle"]["credit_denials"] == 0
 
 
+def test_xp_create_refuses_a_new_attempt_while_the_last_is_incomplete(board, launch):
+    """Fake cycle run 2: after a credit denial the agent relaunched with --attempt 2 and
+    repeated every request. A new attempt must wait until the latest one is complete."""
+    worker, experiment = launch  # seeds (1, 2): four requests per attempt
+    env = base_env(board, worker)
+    _set_fake_credits(board, 3)
+    softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    _set_fake_credits(board, 100)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 1 and data["error"]["reason"] == "attempt_incomplete", data
+    assert "--attempt 1" in data["error"]["message"]
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
+    assert code == 1 and data["error"]["reason"] == "bad_attempt", data
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 3  # nothing new
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and [(r["seed"], r["arm"]) for r in data["data"]["created"]] == [
+        (2, "baseline")
+    ]
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(data["data"]["created"]) == 4  # a complete attempt may be retried
+
+
 def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launch):
     worker, experiment = launch
     env = base_env(board, worker, **{FAULTS_ENV: "credits=0"})
