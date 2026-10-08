@@ -62,3 +62,11 @@ Run each binding from `"$AR_HOME"` with absolute paths.
   Mechanics above, so never use it as evidence (D-04).
 - `replay_inspect`: `python3 games/fakegame/tools/fake_eval.py --replay --policy <id> --seed
   <n> --json` prints a per-tick summary. Fake XP requests store no replay files.
+
+## Baseline build
+
+The baseline is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.md` (the seed
+strategy). Build it with the `build` binding:
+`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/baseline --json`,
+check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
+then upload it with `"$AUTORESEARCH_CLI" softmax upload-baseline --build-dir <worktree>/.scratch/build/baseline`.

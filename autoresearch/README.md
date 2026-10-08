@@ -193,6 +193,13 @@ Read state with the CLI:
 
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
+On a fresh install there is no champion and no baseline policy version. The first
+experimentation card bootstraps one by itself (amendment A14): it builds the game's baseline
+(the `## Baseline build` section of `games/<game>/GAME.md`) and runs
+`"$AUTORESEARCH_CLI" softmax upload-baseline --build-dir <build dir>`. The baseline is only the
+comparison champion until the first promotion; it is never submitted. Check it with
+`"$AUTORESEARCH_CLI" softmax leaderboard` (field `baseline`).
+
 Where things live:
 
 | What | Where |

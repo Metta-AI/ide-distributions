@@ -58,6 +58,13 @@
         "string",
         "null"
       ]
+    },
+    "role": {
+      "enum": [
+        "candidate",
+        "baseline"
+      ],
+      "description": "candidate (default when absent): built for an experiment and bound to it. baseline: the first-install comparison baseline (amendment A14), uploaded by softmax upload-baseline with experiment null; supersedes names the baseline it replaces."
     }
   },
   "additionalProperties": true

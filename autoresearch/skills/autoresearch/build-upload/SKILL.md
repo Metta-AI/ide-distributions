@@ -40,7 +40,9 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 5. Upload. The tool checks the identity, uploads, creates the version record, and binds it
    to the experiment (status `uploaded`):
    `"$AUTORESEARCH_CLI" softmax upload <E-id> --build-dir .scratch/build/<E-id>`
-   Keep `data.version_id` and `data.platform_policy_version_id` for the journal.
+   Keep `data.version_id` and `data.platform_policy_version_id` for the journal. This
+   uploads the candidate only. A fresh install's baseline is uploaded by `experiment`
+   step 3 with `softmax upload-baseline`, never with `softmax upload`.
 6. Go on with `xp-request`.
 
 ## Failure handling

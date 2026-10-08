@@ -630,6 +630,7 @@ def test_leaderboard(board):
         "player_id": PLAYER,
         "leaderboard_champion": BASELINE_PV,
         "current_champion": BASELINE_PV,
+        "baseline": None,
         "note": "",
     }
 

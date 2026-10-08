@@ -17,7 +17,8 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 - Reads: hypotheses, Topics, refuted mechanism claims, `strategy/STRATEGY.md`, versions,
   the game contract (`game show`), the current game version (`softmax game-version`), and
   the noise record `stats/metric-noise.yaml` (through `stats design`).
-- Writes: the experiment record (`E-…`), the candidate
+- Writes: on a fresh install, the baseline build (in `.scratch/`) and its version record
+  (`softmax upload-baseline`); the experiment record (`E-…`), the candidate
   `strategy/candidates/<E-id>/STRATEGY.md`, the hypothesis state, and the journal.
 
 ## Procedure
@@ -30,8 +31,22 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    Reopen a refuted lever only with evidence that meets the claim's `revise_if`.
 3. Find the baseline: the current champion.
    `"$AUTORESEARCH_CLI" softmax leaderboard`
-   Use `current_champion` (a platform policy version id) as the baseline. If it is null,
-   stop: send a `help_request` and finish `blocked`.
+   Use `current_champion` (a platform policy version id) as the baseline. If it is null and
+   `baseline.platform_policy_version_id` is set (a baseline this card already uploaded), use
+   that. Otherwise this is a fresh install with no uploaded baseline: bootstrap it in this
+   card (A14) and do not park the experiment:
+   1. Read the `## Baseline build` section of `GAME.md` (see `queue` for its path and
+      `AR_HOME`). Build the baseline with the game's `build` binding as it says, from
+      `"$AR_HOME"`, into `<worktree>/.scratch/build/baseline`. Every non-advisory gate must
+      pass.
+   2. Run the game's `local_check` binding on it the same way (D-04: never evidence).
+   3. Upload it as the baseline. The tool checks the identity, refuses failed or errored
+      builds, records a version with `role: baseline`, and returns the same version when
+      run again with the same build:
+      `"$AUTORESEARCH_CLI" softmax upload-baseline --build-dir .scratch/build/baseline`
+   4. Use `data.platform_policy_version_id` as the baseline. Write `data.version_id` and the
+      platform id in the journal's Decisions ("bootstrapped the baseline"). The baseline
+      becomes the comparison champion when this card merges; it is never a promotion.
 4. Attack the design before you spend on it: does the metric measure the mechanism, or only
    a correlate? Can the evaluation shape show the effect? What else could produce the
    predicted signal? Is N affordable? Redesign when an answer is bad.
@@ -55,10 +70,10 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    Also write the prediction if the hypothesis is true and if it is false. They must differ.
 8. Create the experiment, still without its evaluation design:
    `"$AUTORESEARCH_CLI" records new experiment --meta-file .scratch/experiment.json --body-file .scratch/experiment.md --slug <slug>`
-   with `{"hypothesis": "<H-id>", "mode": "experimentation", "lever": …, "baseline": "<champion>", "change": {"components": […], "description": …}, "environment": {"game_id": "<$AUTORESEARCH_GAME>", "game_version": "<data.game_version of step 6>"}, "status": "designed", "xp_requests": [], "results": [], "lifecycle": {"launch_attempts": 0}}`.
+   with `{"hypothesis": "<H-id>", "mode": "experimentation", "lever": …, "baseline": "<baseline of step 3>", "change": {"components": […], "description": …}, "environment": {"game_id": "<$AUTORESEARCH_GAME>", "game_version": "<data.game_version of step 6>"}, "status": "designed", "xp_requests": [], "results": [], "lifecycle": {"launch_attempts": 0}}`.
 9. Freeze the evaluation design from the noise record (D-09). Write the request to
    `.scratch/design-request.json`:
-   `{"baseline_version": "<champion of step 3>", "seats": [<our seat slots>], "opponents": ["<fixed policy ref>" or "random", …], "seeds": [<unique integers, one candidate/baseline pair each>], "primary_metrics": [{"name", "direction", "min_effect"}], "guardrails": [{"name", "direction", "tolerance"}]}`
+   `{"baseline_version": "<baseline of step 3>", "seats": [<our seat slots>], "opponents": ["<fixed policy ref>" or "random", …], "seeds": [<unique integers, one candidate/baseline pair each>], "primary_metrics": [{"name", "direction", "min_effect"}], "guardrails": [{"name", "direction", "tolerance"}]}`
    (optional `"k"`, default 0.5). Fixed policy refs give true pairing; `"random"` gives
    seed-only pairing. Then:
    `"$AUTORESEARCH_CLI" stats design <E-id> --request-file .scratch/design-request.json`
@@ -94,6 +109,19 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
   - `version_mismatch`: the experiment's `environment.game_version` is not the current
     version. Update it with `records update` (still `designed`) and rerun.
   - `not_designed`: the design is already frozen. Never change it.
+- `softmax upload-baseline` exit 1, by `error.reason`:
+  - `gates_failed` or `bad_build`: the game's baseline does not build. Do not upload, and
+    do not substitute a candidate. Journal the gate output, send a `help_request` and finish
+    `blocked`.
+  - `identity`: as in `build-upload` (stop, `help_request`, finish `blocked`).
+  - `champion_exists`: a champion exists after all (a promotion is published, or our
+    leaderboard has an entry). Run `softmax leaderboard` again and use `current_champion`;
+    if it is still null, the ledger and the leaderboard disagree: send a `help_request` and
+    finish `blocked`.
+  - `baseline_exists`: another baseline is current. Use `baseline` of `softmax leaderboard`;
+    never pass `--supersedes` unless a card asks you to replace the baseline.
+  - `platform`: a retry is safe (the same build reuses its version). After a second failure,
+    finish `partial`.
 - The hypothesis is not in the card refs: do not change it. Request a card that names it.
 - If you cannot finish the build in this card, request a "Build <E-id>" card as in the
   `needs_calibration` case and finish `partial`. The runtime makes a build card by itself

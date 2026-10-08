@@ -32,8 +32,17 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
+- ``upload-baseline --build-dir D [--supersedes V]``: ``softmax_tool.upload.upload_baseline``,
+  the first-install bootstrap (A14): upload a passed build as the baseline version, with no
+  experiment, when there is no champion. Prints ``{version_id, platform_policy_version_id,
+  role, supersedes}``; experiments cite the platform id as ``baseline_version``. Refusals:
+  ``champion_exists``, ``baseline_exists`` (another baseline is current: ``--supersedes`` it),
+  ``bad_supersedes``, and the build reader's ``gates_failed``/``bad_build``.
 - ``submit <E>``: ``softmax_tool.submit``, the only path to a real league submission.
-- ``leaderboard``: our leaderboard champion and the confirmed current champion (A9).
+- ``leaderboard``: our leaderboard champion, the confirmed current champion (A9; before any
+  league entry, the current baseline in canonical, A14) and the current ``baseline``
+  (``{version_id, platform_policy_version_id}`` or null) as the card sees it: its worktree
+  in a card, so a baseline uploaded in this card shows before the merge.
 - ``game-version``: ``{league_id, game_version}``, the league's current game version
   (``Softmax.game_version``; the version noise records and designs must match, C10).
 - ``standings``: ``{league_id, rows}``, the league standings (``Softmax.standings``), read-only.
@@ -77,8 +86,9 @@ from autoresearch.cli import register_group
 from autoresearch.games.bindings import binding_evaluate
 from autoresearch.games.loader import GameError, load_game
 from autoresearch.io.docs import write_text
+from autoresearch.paths import Layout
 from autoresearch.queue.select import queue_from_env
-from autoresearch.records.store import RecordNotFound, RecordProblems
+from autoresearch.records.store import RecordNotFound, RecordProblems, RecordStore
 from autoresearch.runtime.preflight import env_file_value
 from autoresearch.runtime.promotion import PromotionError, champion_status
 from autoresearch.softmax_tool.client import CreditsUnavailable
@@ -88,7 +98,8 @@ from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
 from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.submit import submit
-from autoresearch.softmax_tool.upload import upload, worker_store
+from autoresearch.softmax_tool.upload import upload, upload_baseline, worker_store
+from autoresearch.softmax_tool.versions import current_baseline
 from autoresearch.softmax_tool.xp import ARMS, ArtifactsIncomplete
 from autoresearch.stats.design import DesignError, EvaluationDesign
 
@@ -494,6 +505,19 @@ def _upload(ctx, sm, args) -> dict:
     }
 
 
+def _upload_baseline(ctx, sm, args) -> dict:
+    player = os.environ.get(PLAYER_ENV) or None
+    version_id, platform_id = upload_baseline(
+        ctx, sm, Path(args.build_dir), _league_id(), player_id=player, supersedes=args.supersedes
+    )
+    return {
+        "version_id": version_id,
+        "platform_policy_version_id": platform_id,
+        "role": "baseline",
+        "supersedes": args.supersedes,
+    }
+
+
 def _submit(ctx, sm, args) -> dict:
     queue = queue_from_env(os.environ, ctx)
     player = os.environ.get(PLAYER_ENV, "")
@@ -507,11 +531,15 @@ def _leaderboard(ctx, sm, args) -> dict:
     player_id = sm.whoami().player_id
     on_board = sm.leaderboard_champion(player_id, league_id)
     current, note = champion_status(ctx, sm, league_id)
+    # The baseline as this card sees it (its worktree; canonical outside a card), so a card
+    # sees the baseline it just uploaded before its merge makes it the champion.
+    baseline = current_baseline(RecordStore(Layout(ctx.worker or ctx.canonical)))
     return {
         "league_id": league_id,
         "player_id": player_id,
         "leaderboard_champion": on_board,
         "current_champion": current,
+        "baseline": asdict(baseline) if baseline else None,
         "note": note,
     }
 
@@ -606,6 +634,15 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub = command(commands, "upload", _upload, "upload a build and bind it to the experiment")
     sub.add_argument("experiment")
     sub.add_argument("--build-dir", required=True)
+
+    sub = command(
+        commands,
+        "upload-baseline",
+        _upload_baseline,
+        "first install: upload a build as the baseline version when there is no champion",
+    )
+    sub.add_argument("--build-dir", required=True)
+    sub.add_argument("--supersedes", help="the current baseline version id this one replaces")
 
     sub = command(commands, "submit", _submit, "submit the promoted candidate (guarded, C8)")
     sub.add_argument("experiment")
