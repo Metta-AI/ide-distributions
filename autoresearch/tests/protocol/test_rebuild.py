@@ -244,6 +244,7 @@ def test_handed_off_request_gets_no_card_and_is_adopted(host, tmp_path, game):
 
 
 def test_rebuild_lifecycle_cards(host, tmp_path):
+    host.store.update(host.hypothesis, {"topics": [host.topic]})
     designed, _ = host.experiment("designed")
     built, _ = host.experiment("built")
     uploaded, version = host.experiment("uploaded")
@@ -284,6 +285,11 @@ def test_rebuild_lifecycle_cards(host, tmp_path):
     assert "--attempt 1" in launch.why
     assert launch.refs == [f"ar://experiment/{uploaded}", f"ar://version/{version}"]
     assert by_marker[f"promote:{promote}@{epoch}"].mode == "maintenance"
+    # The review card names the hypothesis and its Topics, so the review may update them (D-23).
+    assert by_marker[f"review:{evaluated}:n0"].refs[-2:] == [
+        f"ar://hypothesis/{host.hypothesis}",
+        f"ar://topic/{host.topic}",
+    ]
     for spec in runtime_specs:
         request = host.follow_up(spec.request_id)
         assert request is not None and request["spec"]["created_by"] == "runtime"

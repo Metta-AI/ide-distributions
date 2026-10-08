@@ -27,7 +27,9 @@ duplicated).
 
 ``evaluating``: review. When every latest request is terminal (completed or failed) and each
 completed one has evidence, one runtime review request (marker ``review:<E>:n<count of xp_requests>``, P1, refs the
-experiment) is committed, unless an open request already covers the experiment.
+experiment, its hypothesis and the hypothesis's Topics, ``rebuild.review_refs``, so the
+review may update them under D-23) is committed, unless an open request already covers the
+experiment.
 
 ``awaiting-credits``: relaunch (A10). When ``lifecycle.next_launch_after`` has passed (the
 softmax tool sets it on a credit denial: 30 minutes, doubling, capped at 8 hours), the credit
@@ -68,7 +70,7 @@ from autoresearch.runtime.bootstrap import REPO_ROOT
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
 from autoresearch.runtime.markers import next_launch_attempt, relaunch_marker, review_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request
-from autoresearch.runtime.rebuild import launch_step, open_experiment_refs
+from autoresearch.runtime.rebuild import launch_step, open_experiment_refs, review_refs
 from autoresearch.softmax_tool.protocol import Softmax, XpHandle, XpStatus
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.xp import ArtifactsIncomplete
@@ -331,7 +333,7 @@ def _request_review(
         f"Review {experiment_id}",
         "experimentation",
         why,
-        [f"ar://experiment/{experiment_id}"],
+        [f"ar://experiment/{experiment_id}", *review_refs(canonical, experiment)],
         RUNTIME,
         CARD_PRIORITY,
     )

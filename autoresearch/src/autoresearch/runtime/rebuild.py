@@ -43,7 +43,9 @@ next run (the unfinished-rebuild rule above brings it back, in the same epoch):
    ``launch:<E>:<launch_attempts + 1>`` (the attempt about to be made), and the launch card
    says to run ``xp recover`` before any create, so a rebuilt launch never duplicates an XP
    request. Review is ``review:<E>:n<count of xp_requests>``. Build, upload and promote carry the epoch
-   (``build:<E>@<epoch>``), so a later rebuild can ask again.
+   (``build:<E>@<epoch>``), so a later rebuild can ask again. A review card also refs the
+   experiment's hypothesis and that hypothesis's existing Topics (``review_refs``), so the
+   review's hypothesis and Topic updates pass the card's ref check (D-23).
 5. ``promotion.reconcile`` (C8): with the new epoch a dead ``submitted`` holder gets its
    recovery request.
 6. Calibration (C10): ``calibrate:<game_version>`` when no noise record is current.
@@ -69,7 +71,7 @@ from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import load_schema
-from autoresearch.records.store import RecordStore
+from autoresearch.records.store import RecordNotFound, RecordStore
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion
 from autoresearch.runtime.admission import (
@@ -322,6 +324,26 @@ def open_experiment_refs(canonical: Path) -> set[str]:
     return refs
 
 
+def review_refs(canonical: Path, experiment: dict) -> list[str]:
+    """``ar://hypothesis/<H>`` for the experiment's hypothesis, then ``ar://topic/<T>`` for each
+    of its Topics that exists in canonical. Empty when the hypothesis is missing, so a review
+    card never names a ref that would fail admission."""
+    store = RecordStore(Layout(canonical))
+    hypothesis = experiment.get("hypothesis")
+    try:
+        meta, _ = store.load(hypothesis)
+    except (RecordNotFound, ValueError, TypeError):
+        return []
+    refs = [f"ar://hypothesis/{hypothesis}"]
+    for topic in meta.get("topics") or []:
+        try:
+            store.path_of(topic)
+        except (RecordNotFound, ValueError):
+            continue
+        refs.append(f"ar://topic/{topic}")
+    return refs
+
+
 def _promoted(canonical: Path, experiment: str) -> bool:
     for path in (Path(canonical) / promotion.HISTORY_DIR_REL).glob("P-*.json"):
         record = read_json(path)
@@ -409,6 +431,8 @@ def _lifecycle_cards(
         binding = experiment.get("candidate_binding") or {}
         if binding.get("version_id"):
             refs.append(f"ar://version/{binding['version_id']}")
+        if experiment.get("status") == "evaluating":  # the review step
+            refs += review_refs(canonical, experiment)
         spec = CardSpec("", title, mode, why, refs, RUNTIME, LIFECYCLE_PRIORITY)
         with canonical_lock(canonical):
             new = commit_runtime_request(canonical, marker, spec)

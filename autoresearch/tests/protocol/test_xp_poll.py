@@ -30,6 +30,15 @@ from autoresearch.softmax_tool.xp import ArtifactsIncomplete
 from autoresearch.stats.ingest import EpisodeRow, ingest, pair
 
 T0 = datetime.datetime.now(datetime.UTC)
+TOPIC = {
+    "title": "Score",
+    "objective": "Score more.",
+    "metrics": [{"name": "score", "direction": "up"}],
+    "guardrails": [],
+    "origin": {"kind": "human"},
+    "priority": 1,
+    "status": "open",
+}
 
 
 def at(minutes: float) -> datetime.datetime:
@@ -46,9 +55,16 @@ def host(tmp_path) -> Host:
 def _experiment(host: Host, status: str) -> str:
     """An experiment bound to a candidate, walked to ``status`` and committed in canonical."""
     store = host.store
+    topic = store.create("topic", dict(TOPIC))
     hypothesis = store.create(
         "hypothesis",
-        {"statement": "S.", "prediction": "P.", "topics": [], "lever": "SK.x", "state": "proposed"},
+        {
+            "statement": "S.",
+            "prediction": "P.",
+            "topics": [topic, "T-01K6Z3V8QXAAAAAAAAAAAAAAAA"],  # the second does not exist
+            "lever": "SK.x",
+            "state": "proposed",
+        },
         "H.\n",
     )
     walk = ("built", "uploaded", "evaluating")
@@ -125,7 +141,13 @@ def test_completed_evaluation_writes_evidence_and_requests_one_review(host):
     assert report.kept == len(rows)
     assert len(pair(kept, DESIGN, CANDIDATE_PV)) == len(DESIGN.seeds)
     [review] = _review_requests(host, experiment)
-    assert review["spec"]["refs"] == [f"ar://experiment/{experiment}"]
+    meta, _ = host.store.load(experiment)
+    [topic] = host.store.find("topic")
+    assert review["spec"]["refs"] == [
+        f"ar://experiment/{experiment}",
+        f"ar://hypothesis/{meta['hypothesis']}",
+        f"ar://topic/{topic}",  # existing Topics only, so admission resolves every ref
+    ]
     assert (
         review["spec"]["priority"] == "P1" and f"evidence/xp/{experiment}" in review["spec"]["why"]
     )
