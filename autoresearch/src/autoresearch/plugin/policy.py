@@ -133,6 +133,12 @@ SECRET_WORD = re.compile(
 )
 SIGNATURE_WORDS = 5
 SIGNATURE_MAX = 120
+# Setup commands skipped when choosing the command that names a terminal call.
+SIGNATURE_SETUP_PROGRAMS = {
+    "cd", "pushd", "popd", "mkdir", "export", "set", "source", ".", "true", "umask",
+}
+# Wrapper words dropped from the front of the signature.
+SIGNATURE_PREFIX_WORDS = {"time"}
 # Hermes tools/patch_parser.py _OP_MARKERS (matched at line start).
 V4A_PATH = re.compile(
     r"^\*\*\*\s*(?:Update|Add|Delete|Move)\s+File:\s*(.+?)\s*$", re.MULTILINE
@@ -864,18 +870,31 @@ def _trusted_cli_words(ctx: RunContext) -> set:
 # --- signatures ---
 
 
+def _signature_command(commands: list[list[str]]) -> list[str]:
+    """The simple command that names a call: the first one that is not setup. Workers prefix
+    nearly every command with ``cd "$HERMES_KANBAN_WORKSPACE" &&`` (and often ``mkdir -p``),
+    so the first simple command alone would give every call the same signature."""
+    for words in commands:
+        program = next((w for w in words if not ASSIGNMENT.match(w)), None)
+        if program is not None and program not in SIGNATURE_SETUP_PROGRAMS:
+            return words
+    return commands[0] if commands else []
+
+
 def command_signature(tool_name: str, args: dict) -> str:
     """Short, secret-free form of a call for the repeated-tool-error signal."""
     args = args if isinstance(args, dict) else {}
     if tool_name == "terminal" and isinstance(args.get("command"), str):
         command = args["command"]
         try:
-            first = next(_simple_commands(_tokenize(_split_heredocs(command)[0])))[0]
-        except (ValueError, StopIteration):
-            first = command.split()
+            tokens = _tokenize(_split_heredocs(command)[0])
+            commands = [words for words, *_ in _simple_commands(tokens)]
+        except ValueError:
+            commands = [command.split()]
+        first = _signature_command(commands)
         words = []
         for word in first:
-            if ASSIGNMENT.match(word) and not words:
+            if not words and (ASSIGNMENT.match(word) or word in SIGNATURE_PREFIX_WORDS):
                 continue
             if SECRET_WORD.search(word):
                 break

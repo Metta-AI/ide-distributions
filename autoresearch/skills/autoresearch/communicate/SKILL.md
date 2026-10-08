@@ -48,6 +48,8 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
 6. To see the state of an earlier message, for example whether a question has an answer:
    `"$AUTORESEARCH_CLI" comms status <M-id>`
    `"$AUTORESEARCH_CLI" comms get <M-id>`
+   `comms get <inbound id>` prints an inbound message; your briefing already shows the ones
+   delivered to this card.
 
 ## Proposals
 

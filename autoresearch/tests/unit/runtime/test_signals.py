@@ -191,28 +191,64 @@ def test_plateau_after_d_days_without_promotion(board):
     assert "plateau" in _codes(_compute(board, now=later))
 
 
-def _tool_event(board: Board, minutes_ago: float, tool="terminal", error_type="Timeout"):
+def _tool_event(
+    board: Board,
+    minutes_ago: float,
+    run: str = "1",
+    error_type="Timeout",
+    signature="terminal: $AUTORESEARCH_CLI softmax league-episodes",
+    exit_code=None,
+    task="t_1",
+):
     path = board.canonical / ".supervisor" / "runtime" / "tool_events.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     moment = NOW - datetime.timedelta(minutes=minutes_ago)
-    event = {"ts": moment.timestamp(), "tool": tool, "status": "error", "error_type": error_type}
+    event = {
+        "ts": moment.timestamp(), "task": task, "run": run, "tool": "terminal",
+        "status": "error", "error_type": error_type, "cmd_signature": signature,
+        "exit_code": exit_code,
+    }
     with path.open("a") as handle:
         handle.write(json.dumps(event) + "\n")
 
 
-def test_repeated_tool_error_three_times(board):
-    _tool_event(board, 10)
-    _tool_event(board, 5)
-    _tool_event(board, 3, error_type="Other")
+def test_repeated_tool_error_same_command_in_three_runs(board):
+    _tool_event(board, 10, run="1")
+    _tool_event(board, 5, run="2")
+    _tool_event(board, 3, run="3", error_type="Other")
+    _tool_event(board, 2, run="3", signature="terminal: $AUTORESEARCH_CLI queue list")
     assert "repeated_tool_error" not in _codes(_compute(board))
-    _tool_event(board, 1)
+    _tool_event(board, 1, run="1", task="t_2")
     [signal] = _compute(board)
-    assert (signal.code, signal.entity) == ("repeated_tool_error", "terminal:Timeout")
+    assert signal.code == "repeated_tool_error"
+    assert signal.entity == "terminal: $AUTORESEARCH_CLI softmax league-episodes [Timeout]"
+
+
+def test_retries_inside_one_run_count_once(board):
+    for minutes in (5, 4, 3, 2, 1):
+        _tool_event(board, minutes, run="1")
+    assert _compute(board) == []
+
+
+def test_unrelated_failures_do_not_add_up(board):
+    """The box run: ten terminal failures of different commands in two hours escalated."""
+    for run, signature in enumerate(["ls strategy", "sed -n 1,80p", "head -c 2000", "cat x"]):
+        _tool_event(board, 10 - run, run=str(run), signature=f"terminal: {signature}")
+    assert _compute(board) == []
+
+
+def test_grep_without_match_is_not_an_error(board):
+    for run in ("1", "2", "3"):
+        _tool_event(board, 5, run=run, signature="terminal: grep -l opponent", exit_code=1)
+    assert _compute(board) == []
+    for run in ("1", "2", "3"):
+        _tool_event(board, 4, run=run, signature="terminal: grep -l opponent", exit_code=2)
+    assert "repeated_tool_error" in _codes(_compute(board))
 
 
 def test_old_tool_errors_do_not_count(board):
-    for minutes in (600, 590, 580):
-        _tool_event(board, minutes)
+    for minutes, run in ((600, "1"), (590, "2"), (580, "3")):
+        _tool_event(board, minutes, run=run)
     assert _compute(board) == []
 
 

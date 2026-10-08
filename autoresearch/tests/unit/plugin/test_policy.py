@@ -359,6 +359,22 @@ def test_command_signature_strips_env_and_secrets():
     assert command_signature("terminal", {"command": 'echo "unterminated'}).startswith("terminal")
 
 
+def test_command_signature_skips_setup_commands():
+    """Workers start nearly every command with cd; the signature names the real command."""
+    command = (
+        'cd "$HERMES_KANBAN_WORKSPACE" && mkdir -p .scratch && "$AUTORESEARCH_CLI" softmax '
+        "league-episodes --league L --limit 200"
+    )
+    assert command_signature("terminal", {"command": command}) == (
+        "terminal: $AUTORESEARCH_CLI softmax league-episodes --league L"
+    )
+    timed = 'cd "$W" && time "$AUTORESEARCH_CLI" stats noise'
+    assert command_signature("terminal", {"command": timed}) == (
+        "terminal: $AUTORESEARCH_CLI stats noise"
+    )
+    assert command_signature("terminal", {"command": "cd /tmp"}) == "terminal: cd /tmp"
+
+
 def test_absolute_cli_path_is_trusted_through_a_symlink(layout, tmp_path):
     link = tmp_path / "cli-link"
     link.symlink_to(layout.cli)

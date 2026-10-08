@@ -166,12 +166,24 @@ def test_post_tool_call_records_a_tool_event(worker_env):
     event = _lines(worker_env / "tool_events.jsonl")[0]
     assert set(event) == {
         "ts", "task", "run", "tool", "status", "error_type", "duration_ms", "cmd_signature",
+        "exit_code",
     }
     assert (event["task"], event["run"], event["tool"]) == ("t_1", "r_1", "terminal")
     assert (event["status"], event["error_type"], event["duration_ms"]) == (
         "error", "tool_error", 12,
     )
     assert event["cmd_signature"] == "terminal: curl"
+    assert event["exit_code"] is None  # the result carried no exit code
+
+
+def test_post_tool_call_records_the_terminal_exit_code(worker_env):
+    adapters.post_tool_call(
+        tool_name="terminal", args={"command": "grep -q x f"}, status="error",
+        error_type="tool_error", result='{"output": "", "exit_code": 1, "error": null}',
+    )
+    adapters.post_tool_call(tool_name="terminal", args={"command": "ls"}, result="not json")
+    first, second = _lines(worker_env / "tool_events.jsonl")
+    assert (first["exit_code"], second["exit_code"]) == (1, None)
 
 
 def test_session_end_and_task_completed_append_kanban_events(worker_env):

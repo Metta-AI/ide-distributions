@@ -14,7 +14,8 @@ not found, unresolvable), 2 bad arguments or no workspace.
   ``N`` or after C's cursor; ``--advance`` then moves C's cursor to ``last_seq``. The listing
   and ``last_seq`` come from one commit snapshot (``rev`` in the data), so a publication
   that lands meanwhile is left for the next read. Data: ``{messages, last_seq, cursor, rev}``.
-- ``get <seq|M-id>``, ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
+- ``get <seq|M-id|inbound id>`` (an inbound message as committed in ``comms/inbox/``),
+  ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
   data: ``{id, published, seq, published_rev, seen_by}`` plus, for a published message, the
   derived ``state`` (open | answered | withdrawn | expired) and ``late``.
 - ``inbound KIND (--json J | --file F) --author A``: an external agent submits a
@@ -30,7 +31,7 @@ from pathlib import Path
 
 from autoresearch import runctx
 from autoresearch.cli import register_group
-from autoresearch.comms import reader
+from autoresearch.comms import delivery, reader
 from autoresearch.comms.envelope import PRIORITIES, MessageProblems
 from autoresearch.comms.inbound import (
     INBOUND_KINDS,
@@ -128,8 +129,14 @@ def _list(args) -> int:
 
 
 def _get(args) -> int:
-    key = int(args.key) if args.key.isdigit() else args.key
-    return _ok(reader.get(_canonical(args), key))
+    canonical = _canonical(args)
+    if args.key.isdigit() or args.key.startswith("M-"):
+        key = int(args.key) if args.key.isdigit() else args.key
+        return _ok(reader.get(canonical, key))
+    message = delivery.inbox(canonical).get(args.key)
+    if message is None:
+        raise LookupError(f"no published or inbound message {args.key!r}")
+    return _ok(message)
 
 
 def _status(args) -> int:
@@ -215,8 +222,8 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--advance", action="store_true", help="move the cursor to last_seq")
     sub.add_argument("--all-kinds", action="store_true", help="include unknown kinds")
 
-    sub = command("get", _get, "one published message by seq or M-id")
-    sub.add_argument("key", metavar="SEQ|M-ID")
+    sub = command("get", _get, "one published message (seq or M-id) or inbound message (its id)")
+    sub.add_argument("key", metavar="SEQ|M-ID|INBOUND-ID")
 
     sub = command("status", _status, "publication, seen and derived status of a message")
     sub.add_argument("message_id", metavar="M-ID")

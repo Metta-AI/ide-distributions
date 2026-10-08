@@ -107,9 +107,21 @@ def pre_tool_call(tool_name=None, args=None, task_id=None, **kwargs):
     return None
 
 
+def _exit_code(result) -> int | None:
+    """The ``exit_code`` of a terminal result (a JSON object string), else None. Hermes marks
+    every non-zero exit as a tool error; the signal needs the code to tell a grep that
+    matched nothing from a real failure."""
+    try:
+        value = json.loads(result) if isinstance(result, str) else result
+    except ValueError:
+        return None
+    code = value.get("exit_code") if isinstance(value, dict) else None
+    return code if isinstance(code, int) and not isinstance(code, bool) else None
+
+
 def post_tool_call(
     tool_name=None, args=None, status=None, error_type=None, error_message=None,
-    duration_ms=None, **kwargs,
+    duration_ms=None, result=None, **kwargs,
 ):
     ctx = None
     try:
@@ -118,6 +130,7 @@ def post_tool_call(
             "ts": time.time(), "task": ctx.card_id, "run": ctx.run_id, "tool": tool_name,
             "status": status, "error_type": error_type, "duration_ms": duration_ms,
             "cmd_signature": policy.command_signature(tool_name or "", args or {}),
+            "exit_code": _exit_code(result) if tool_name == "terminal" else None,
         })
     except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
         _log_error(ctx, "post_tool_call", error)

@@ -34,8 +34,11 @@ Signals and their data sources:
   the signal fires and the agent answers it (explain, or change course).
 - ``plateau``: M experiments reviewed since the last published promotion, or D days since
   it (since the canonical root commit when nothing was ever promoted).
-- ``repeated_tool_error``: the same tool and error type 3 times within
-  ``tool_error_window`` in ``runtime/tool_events.jsonl`` (the plugin's post_tool_call log).
+- ``repeated_tool_error``: the same command signature and error type failed in 3 card runs
+  (iterations) within ``tool_error_window``, from ``runtime/tool_events.jsonl`` (the plugin's
+  post_tool_call log; ``cmd_signature`` skips setup such as ``cd ... &&``). Retries inside
+  one run count once: Hermes's own loop guard answers those. Exit 1 of a program whose 1
+  means "no match" or "false" (``grep``, ``test``, ``diff``, ...) is not an error.
 - ``long_iterations``: the last 3 journals (by ``started``) each ran over 45 minutes.
 - ``stale_plan``: ``plan.md`` unchanged for 6 iterations while no experiment was reviewed
   and no promotion published.
@@ -101,6 +104,8 @@ NOT_ESCALATED = frozenset({ESCALATION, IDENTITY_MISMATCH})
 STATE_FILE = "signals.json"
 TOOL_EVENTS_FILE = "tool_events.jsonl"  # written by plugin.adapters.post_tool_call
 OK_TOOL_STATUSES = frozenset({None, "", "ok", "success", "completed"})
+# Exit status 1 of these programs is an answer (no match, false, files differ), not a failure.
+EXIT_1_ANSWERS = frozenset({"grep", "egrep", "fgrep", "rg", "test", "[", "diff", "cmp"})
 OPEN_EXPERIMENT_STATES = frozenset({"designed", "built", "uploaded", "evaluating"})
 SAMPLE_EVERY = datetime.timedelta(hours=1)
 
@@ -294,21 +299,35 @@ def _tool_events(inputs: _Inputs) -> list[dict]:
     return events
 
 
+def _tool_error(event: dict) -> str | None:
+    """The error type of a tool event, or None when it is not a failure."""
+    error = event.get("error_type") or (
+        None if event.get("status") in OK_TOOL_STATUSES else event.get("status")
+    )
+    if not error:
+        return None
+    signature = str(event.get("cmd_signature") or "")
+    program = signature.removeprefix("terminal: ").split(" ", 1)[0]
+    if event.get("exit_code") == 1 and program in EXIT_1_ANSWERS:
+        return None
+    return error
+
+
 def _repeated_tool_error(inputs: _Inputs) -> list[_Raw]:
     cutoff = (inputs.now - inputs.cfg.tool_error_window).timestamp()
-    counts: Counter = Counter()
+    runs: dict[str, set] = {}
     for event in _tool_events(inputs):
         if not isinstance(event.get("ts"), int | float) or event["ts"] < cutoff:
             continue
-        error = event.get("error_type") or (
-            None if event.get("status") in OK_TOOL_STATUSES else event.get("status")
-        )
+        error = _tool_error(event)
         if error:
-            counts[f"{event.get('tool')}:{error}"] += 1
+            signature = event.get("cmd_signature") or event.get("tool")
+            key = f"{signature} [{error}]"
+            runs.setdefault(key, set()).add((event.get("task"), event.get("run")))
     return [
-        _Raw(REPEATED_TOOL_ERROR, key, f"{key} failed {count} times recently")
-        for key, count in sorted(counts.items())
-        if count >= inputs.cfg.tool_error_repeats
+        _Raw(REPEATED_TOOL_ERROR, key, f"{key} failed in {len(found)} card runs recently")
+        for key, found in sorted(runs.items())
+        if len(found) >= inputs.cfg.tool_error_repeats
     ]
 
 
