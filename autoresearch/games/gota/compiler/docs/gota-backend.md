@@ -55,8 +55,10 @@ followed by `OPENROUTER_MODEL` for Hermes. Use the explicitly selected dry-run m
 then the approved `OPENROUTER_MODEL` value. Prepare checks the selected CLI version;
 tests only use local fakes and never probe a real agent executable.
 
-Hermes dispatch uses `-z --query-file prompt.txt -t file --max-turns 40
---usage-file usage.json --model MODEL --provider openrouter`. The process receives
+Hermes v0.21.5 dispatch uses `hermes --usage-file usage.json chat --oneshot
+--query-file prompt.txt -t file --max-turns 40 --model MODEL --provider openrouter`.
+The usage flag belongs to the top-level parser; query-file and max-turns belong
+to `chat`. Top-level `-z` takes a prompt argument and cannot replace this form. The process receives
 `TERMINAL_CWD` for its isolated scratch directory and the selected
 `OPENROUTER_MODEL`. The scratch snapshot contains the work order, exact baseline,
 compiler ABI/lessons, live host JSON and GotA/Bassy/structures context before

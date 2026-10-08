@@ -32,7 +32,9 @@ import json, os, pathlib, sys, subprocess
 if '--version' in sys.argv:
     print('fake Hermes v0.21.5'); sys.exit()
 a = sys.argv[1:]
-assert a[0] == '-z' and a[a.index('-t')+1] == 'file'
+assert a[0] == '--usage-file' and pathlib.Path(a[1]).name == 'usage.json'
+assert a[2:4] == ['chat', '--oneshot']
+assert a[a.index('-t')+1] == 'file'
 assert a[a.index('--max-turns')+1] == '40'
 assert a[a.index('--model')+1] == os.environ['OPENROUTER_MODEL'] == 'test/openweight'
 p = pathlib.Path(a[a.index('--query-file')+1])

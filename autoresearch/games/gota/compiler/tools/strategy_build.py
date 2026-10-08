@@ -283,8 +283,8 @@ def agent_command(agent: str, model: str, directory: Path) -> list[str]:
         return ['claude', '-p', '--model', model, '--safe-mode', '--dangerously-skip-permissions',
                 '--tools', 'Read,Write,Edit,Glob,Grep', '--output-format', 'text']
     if agent == 'hermes':
-        return ['hermes', '-z', '--query-file', str(directory / 'prompt.txt'), '-t', 'file',
-                '--max-turns', '40', '--usage-file', str(directory / 'usage.json'),
+        return ['hermes', '--usage-file', str(directory / 'usage.json'), 'chat', '--oneshot',
+                '--query-file', str(directory / 'prompt.txt'), '-t', 'file', '--max-turns', '40',
                 '--model', model, '--provider', 'openrouter']
     if agent != 'codex':
         raise pw_cli.UsageError(f'unknown compiler agent: {agent}', ['claude', 'codex', 'hermes'])
