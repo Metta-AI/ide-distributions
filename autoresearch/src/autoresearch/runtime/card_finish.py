@@ -75,7 +75,9 @@ def _checked_context(ctx: RunContext, outcome: str) -> tuple[Path, str, str]:
         raise FinishUsageError(f"outcome must be one of {', '.join(OUTCOMES)}; got {outcome!r}")
     if ctx.worker is None or not ctx.card_id or not ctx.run_id:
         raise FinishUsageError(
-            "card finish needs a card worker context (worktree, task id and run id)"
+            "card finish needs a card worker context (worktree, task id and run id); in a "
+            "Kanban worker the plugin records them on the first turn in "
+            ".supervisor/runtime/workers/ (failures: .supervisor/runtime/plugin_errors.jsonl)"
         )
     return ctx.worker, ctx.card_id, ctx.run_id
 

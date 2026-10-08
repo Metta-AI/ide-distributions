@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+from autoresearch import runctx
 from autoresearch.runctx import from_env, ledger_dir, record_worker_identity, runtime_dir
 
 
@@ -72,3 +75,35 @@ def test_worker_identity_record_for_another_worktree_is_ignored(tmp_path):
     worktree = tmp_path / "workspace" / ".worktrees" / "Q-1"
     ctx = from_env({"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_WORKSPACE": str(worktree)})
     assert ctx.card_id is None and ctx.run_id is None
+
+
+def test_a_retry_whose_record_write_fails_never_inherits_the_old_run(tmp_path, monkeypatch):
+    worktree = tmp_path / "workspace" / ".worktrees" / "Q-1"
+    home_env = {"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_WORKSPACE": str(worktree)}
+    first = from_env(home_env | {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "7"})
+    record_worker_identity(first)
+    record = json.loads((tmp_path / "workspace/.supervisor/runtime/workers/Q-1.json").read_text())
+    assert record["run_id"] == "7" and isinstance(record["started_at"], float)
+
+    def broken_replace(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runctx.os, "replace", broken_replace)
+    retry = from_env(home_env | {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "9"})
+    with pytest.raises(OSError):
+        record_worker_identity(retry)
+    ctx = from_env(home_env)
+    assert ctx.card_id is None and ctx.run_id is None  # commands fail clearly, not as run 7
+
+
+def test_serial_current_naming_this_worktree_wins_over_a_worker_record(tmp_path):
+    worktree = tmp_path / "workspace" / ".worktrees" / "Q-1"
+    home_env = {"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_WORKSPACE": str(worktree)}
+    record_worker_identity(
+        from_env(home_env | {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "7"})
+    )
+    runtime = tmp_path / "workspace/.supervisor/runtime"
+    (runtime / "serial_current.json").write_text(
+        json.dumps({"task_id": "K-2", "run_id": "r-2", "worker": str(worktree)})
+    )
+    assert (from_env(home_env).card_id, from_env(home_env).run_id) == ("K-2", "r-2")

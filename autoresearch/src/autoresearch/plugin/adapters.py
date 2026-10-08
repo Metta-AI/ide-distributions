@@ -150,7 +150,10 @@ def pre_llm_call(is_first_turn=False, **kwargs):
     ctx = None
     try:
         ctx = _run_context()
-        runctx.record_worker_identity(ctx)
+        try:  # first, before anything that can fail: a stale record must never survive
+            runctx.record_worker_identity(ctx)
+        except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in
+            _log_error(ctx, "pre_llm_call", error)
         text = (runctx.runtime_dir(ctx) / "briefings" / f"{task}.md").read_text(encoding="utf-8")
         marker = BRIEFING_MARKER.format(task_id=task)
         text = text if marker in text else f"{marker}\n{text}"

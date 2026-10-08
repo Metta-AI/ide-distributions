@@ -6,12 +6,14 @@ from every subprocess of a Kanban worker (``agent/delegation_context.py``
 not see them; ``HERMES_KANBAN_WORKSPACE`` does survive. The plugin, which runs inside the
 worker process, records the identity on the worker's first turn
 (``record_worker_identity``) in ``runtime/workers/<worktree name>.json``, and ``from_env``
-reads it back for a worktree when the variables are missing. Model writes there are blocked
+reads it back for a worktree when the variables are missing (the serial fallback's
+``serial_current.json`` wins when it names the same worktree). Model writes there are blocked
 by the plugin's write policy (outside the worktree).
 """
 
 import json
 import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,15 +58,27 @@ def _read_worker_identity(canonical: Path, worker: Path) -> dict:
 
 
 def record_worker_identity(ctx: "RunContext") -> None:
-    """Record the card and run of this worker for its subprocesses (module docstring)."""
+    """Record the card and run of this worker for its subprocesses (module docstring),
+    replacing any earlier run's record. If the write fails, the earlier record is removed
+    before the error is raised, so a retried run never inherits the previous run id (its
+    commands then fail for lack of card context instead)."""
     if ctx.worker is None or not ctx.card_id or not ctx.run_id:
         return
     path = worker_identity_path(ctx.canonical, ctx.worker)
-    record = {"task_id": ctx.card_id, "run_id": ctx.run_id, "worker": str(ctx.worker)}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(record))
-    os.replace(temporary, path)
+    record = {
+        "task_id": ctx.card_id,
+        "run_id": ctx.run_id,
+        "worker": str(ctx.worker),
+        "started_at": time.time(),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(record))
+        os.replace(temporary, path)
+    except OSError:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def from_env(env: Mapping[str, str] = os.environ) -> RunContext:
@@ -74,7 +88,12 @@ def from_env(env: Mapping[str, str] = os.environ) -> RunContext:
     card_id = env.get(ENV_CARD_ID)
     run_id = env.get(ENV_RUN_ID)
     if card_id is None and worker:
-        recorded = _read_worker_identity(canonical, Path(worker))
+        serial = _read_serial_current(canonical)
+        recorded = (
+            serial
+            if serial.get("worker") == worker
+            else _read_worker_identity(canonical, Path(worker))
+        )
         card_id = recorded.get("task_id")
         run_id = recorded.get("run_id", run_id)
     if card_id is None:

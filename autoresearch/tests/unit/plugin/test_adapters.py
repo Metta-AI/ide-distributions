@@ -118,7 +118,25 @@ def test_pre_llm_call_records_the_worker_identity_and_names_the_run(worker_env, 
     text = adapters.pre_llm_call(is_first_turn=True)
     assert "- Run: r_1" in text
     record = json.loads((worker_env / "workers" / "Q-1.json").read_text())
+    assert record.pop("started_at") > 0
     assert record == {"task_id": "t_1", "run_id": "r_1", "worker": str(layout.worker)}
+
+
+def test_a_failed_identity_record_is_logged_and_the_stale_one_removed(worker_env, monkeypatch):
+    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
+    stale = worker_env / "workers" / "Q-1.json"
+    stale.parent.mkdir()
+    stale.write_text('{"task_id": "t_1", "run_id": "r_0"}')
+
+    def broken_replace(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(adapters.runctx.os, "replace", broken_replace)
+    text = adapters.pre_llm_call(is_first_turn=True)
+    assert "- Run: r_1" in text  # the briefing still goes in
+    assert not stale.exists()
+    errors = _lines(worker_env / "plugin_errors.jsonl")
+    assert errors[0]["hook"] == "pre_llm_call" and "disk full" in errors[0]["error"]
 
 
 def test_pre_llm_call_adds_a_missing_marker(worker_env):
