@@ -59,6 +59,8 @@ PLANNING_OWNED = "planning_owned"
 PAUSED = "paused"
 STALE_EPOCH = "stale_epoch"
 TRANSIENT_REASONS = frozenset({NEEDS_CALIBRATION, PAUSED})
+RUNTIME = "runtime"  # created_by of runtime-written requests
+HANDOFF_REF = "ar://handoff/"
 
 Inputs = BriefingInputs | Callable[[str], BriefingInputs]
 
@@ -119,7 +121,8 @@ def admit(
 ) -> list[str]:
     """Reasons to reject ``spec`` (empty: admissible). Checks: not paused (C7); every ref
     resolves at canonical HEAD; experimentation has a noise record for ``game_version`` (C10);
-    planning has no other owner (C11). ``game`` is for game-declared ref types (Task 3.5)."""
+    planning has no other owner (C11), unless it is a runtime follow-up of a card's handoff.
+    ``game`` is for game-declared ref types (Task 3.5)."""
     del game  # used once the resolver supports game reference types
     if is_paused(ledger_of(canonical)):
         return [PAUSED]
@@ -128,9 +131,20 @@ def admit(
         return reasons
     if spec.mode == "experimentation" and not has_current_noise(canonical, game_version):
         return [NEEDS_CALIBRATION]
-    if spec.mode == "planning" and _planning_owned(canonical, spec, queue):
+    if (
+        spec.mode == "planning"
+        and not is_runtime_follow_up(spec)
+        and _planning_owned(canonical, spec, queue)
+    ):
         return [PLANNING_OWNED]
     return []
+
+
+def is_runtime_follow_up(spec: CardSpec) -> bool:
+    """A repair/reconcile request the runtime wrote for an existing card's handoff (its refs
+    name ``ar://handoff/...``). It carries on that card's work, so for a planning card it
+    continues the same planning ownership (C11) instead of competing for it."""
+    return spec.created_by == RUNTIME and any(ref.startswith(HANDOFF_REF) for ref in spec.refs)
 
 
 def board_epoch(ledger: Path) -> str:

@@ -150,6 +150,22 @@ def test_second_planning_card_rejected_until_first_publishes(canonical, ctx, que
     assert admit(canonical.root, second, queue, game, GAME_VERSION) == []
 
 
+def test_runtime_follow_up_of_a_planning_card_continues_its_ownership(canonical, ctx, queue, game):
+    """A repair/reconcile request the runtime writes for a planning card's handoff (or its
+    missing handoff) is that card's work, not a second planner: it is not ``planning_owned``,
+    else the card's work is silently dropped."""
+    first = make_spec(mode="planning")
+    assert _admit(ctx, queue, first, game).ok
+    task_id = _receipt(canonical, first)["tasks"][0]["task_id"]
+    write_json(canonical.layout.ledger / "handoffs" / task_id / "1.json", {"state": "repair"})
+    gitops.commit_all(canonical.root, "handoff")
+    follow_up = make_spec(mode="planning", refs=[f"ar://handoff/{task_id}/1"])
+    follow_up.created_by = "runtime"
+    assert admit(canonical.root, follow_up, queue, game, GAME_VERSION) == []
+    planner = make_spec(mode="planning", refs=[f"ar://handoff/{task_id}/1"])
+    assert admit(canonical.root, planner, queue, game, GAME_VERSION) == ["planning_owned"]
+
+
 def test_planning_card_on_the_queue_without_receipt_owns_planning(canonical, queue, game):
     scheduled = make_spec(mode="planning")
     queue.create_unassigned(scheduled, "card/x", canonical.root / ".worktrees" / "x")
