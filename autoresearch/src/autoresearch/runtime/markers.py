@@ -17,6 +17,8 @@ Every runtime job builds markers here, never by hand.
 - ``build:<E>@<epoch>``, ``upload:<E>@<epoch>``, ``promote:<E>@<epoch>``: lifecycle steps
   that only a board rebuild requests; the epoch lets a later rebuild ask again.
 - ``calibrate:<game_version>``: the C10 calibration card.
+- ``repair-blocked:<task-id>``: the repair card for a card Hermes blocked twice
+  (``blocked.handle_blocked``).
 - ``planning:<YYYY-MM-DD-HH>`` (cadence slot start), ``planning:growth:<YYYY-MM-DD>`` (queue
   growth signal), ``planning:rebuild:<epoch>`` (after a board rebuild).
 """
@@ -55,6 +57,10 @@ def promote_marker(experiment: str, epoch: str) -> str:
 
 def calibrate_marker(game_version: str) -> str:
     return f"calibrate:{game_version}"
+
+
+def repair_blocked_marker(task_id: str) -> str:
+    return f"repair-blocked:{task_id}"
 
 
 def planning_marker(slot_start: datetime.datetime) -> str:

@@ -27,6 +27,7 @@ from autoresearch.queue.card import Card, CardSpec
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
+from autoresearch.runtime.markers import repair_blocked_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 
 REQUEUED = "requeued"
@@ -43,10 +44,6 @@ class BlockedAction:
 
 def blocked_marker_path(canonical: Path, task_id: str) -> Path:
     return ledger_of(canonical) / "health" / "blocked" / f"{task_id}.json"
-
-
-def repair_marker(task_id: str) -> str:
-    return f"repair-blocked:{task_id}"
 
 
 def _outbox_has(canonical: Path, title: str) -> bool:
@@ -96,8 +93,8 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
                 RUNTIME,
                 REPAIR_PRIORITY,
             )
-            commit_runtime_request(canonical, repair_marker(task_id), spec)
-            request_id = marked_request(canonical, repair_marker(task_id)).stem
+            commit_runtime_request(canonical, repair_blocked_marker(task_id), spec)
+            request_id = marked_request(canonical, repair_blocked_marker(task_id)).stem
         if not _outbox_has(canonical, title):
             follow_up = (
                 f"Repair request {request_id} redoes its work."
