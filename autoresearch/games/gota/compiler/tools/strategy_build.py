@@ -512,6 +512,7 @@ def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
                                     'previous_build', 'compiler', 'engine', 'created', 'intent')}
     version.update(backend='gota', status=status, gates=gates, driver={'repo_commit': order['source_commit'], 'dirty': False},
                    policy_sha256=digest(stage / 'policy.bas') if (stage / 'policy.bas').exists() else None)
+    version['native_builds'] = read(stage / 'native_provenance.json') if (stage / 'native_provenance.json').exists() else {}
     version['artifact_hashes'] = {str(p.relative_to(stage)): digest(p) for p in stage.rglob('*')
                                   if p.is_file() and p.name != 'version.json' and p.suffix != '.log'}
     dump(stage / 'version.json', version)

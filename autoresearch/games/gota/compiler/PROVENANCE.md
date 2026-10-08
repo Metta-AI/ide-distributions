@@ -244,3 +244,30 @@ harness readiness only. Real M1 generation, G gates and twenty-seed equivalence
 remain blocked on OpenRouter credit. The supported GotA audit checks immutable
 build/map/source and native loaded policies before claiming trace coverage; every
 goal claim and semantic predicate remains unmeasurable.
+
+
+### Task 2.4 fix round 1: native evidence trust boundaries
+
+Independent review found wrapper, symmetric trace-consistency, audit binary-binding
+and native cache provenance gaps. The session guard now rejects env wrappers
+outright, recognizes resolved wrapper names and retains its strict fake harness.
+Oracle validation reconciles requested setup/config, phase progression, per-phase
+tick totals, draft/battle decisions and legal completion reasons even when both
+input streams are identically invalid.
+
+New authored `tools/native_build.py` (relative to games/gota) supplies one receipt
+contract to both existing native builders. It verifies engine/dependency Git pins,
+tracked source content, additional source files, copied canonical helpers, actual
+Nim config chain, compiler/options and executable SHA-256. Compilation compares
+its complete inputs before/after; cache reads validate the same closure and output.
+Gates validate the binary-reported engine/Bassy identity and retain receipts in
+measurement files. Compiler verification captures distinct gate/match identities,
+checks the gate used the captured identity, and finalization retains immutable
+native provenance. Oracle --build and goal-audit --build require that expected
+match identity; different valid-shaped hashes no longer qualify.
+
+The old three-file fingerprint receipts and original seed-1 results remain
+historical evidence, not the authoritative build identity for new compiles.
+Focused regressions and fresh short native equality/mismatch evidence are recorded
+in the local task report. No model/credential/remote action was added by this fix.
+The Minor failed-Hermes-usage finding remains explicitly deferred to parent triage.

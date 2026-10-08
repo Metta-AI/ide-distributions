@@ -40,11 +40,22 @@ def verify(build_id: str, *, context: GateContext | None = None, manifest: Path 
         measurements={},
         compiler_map=builds.read(stage / "map.json"),
     )
+    from games.gota.gates.limits import POLYWORLD_COMMIT
+    from games.gota.tools.native_build import TOOLS, validate
+    native_builds = {
+        'gate_probe': validate(context.native_binary, 'gate_probe', POLYWORLD_COMMIT),
+        'gota_match': validate(TOOLS / 'bin' / f'gota_match-{POLYWORLD_COMMIT[:8]}',
+                               'gota_match', POLYWORLD_COMMIT),
+    }
+    builds.dump(stage / 'native_provenance.json', native_builds)
     gates = {}
     for name, module in zip(
         ("G1", "G2", "G3", "G4", "G5"), (g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry)
     ):
         result = module.run(policy, context)
+        for measurement in context.measurements.values():
+            if measurement.get('native_build') != native_builds['gate_probe']:
+                raise ValueError('gate used a different native build from verification provenance')
         gates[name] = {"passed": result.ok, "summary": result.details}
         if name == "G1" and errors:
             gates[name] = {"passed": False, "summary": {"lint": errors, "compile": result.details}}

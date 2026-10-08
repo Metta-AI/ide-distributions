@@ -62,3 +62,19 @@ by the implementer after C2. The parent separately performed the NOTES-2-authori
 isolated live verification/download, with no model/broker/spend action. The earlier incident must not be described as a clean local-only session.
 Real M1, twenty-seed generated-policy proof, competitive evidence and Task 2.5 have
 not run. Local readiness is subject to independent review and OpenRouter credit.
+
+
+## Independent review fix round 1
+
+The first review rejected local readiness on four evidence/containment gaps.
+The fixes reject env wrapper escapes, reject symmetric inconsistent oracle traces,
+bind audit/oracle executables to immutable expected native provenance, and replace
+mtime/three-file cache checks with one full native source/config/dependency/output
+receipt used by match and gate builds. Verification stores the identities actually
+used, and finalization retains them separately. New binary receipts replace the
+old fingerprint sidecar as the authority. See the backend guide and compiler
+provenance for the exact contract; focused results are appended to the task report.
+
+Disk space fell below the future M1 4-GiB preflight during this fix. No unrelated
+cleanup occurred. Local code readiness is subject to re-review, and execution
+readiness additionally requires disk space and the still-blocked model credit.

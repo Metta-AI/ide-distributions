@@ -30,10 +30,13 @@ def evidence(tmp_path):
                'candidate_seats': list(range(5)), 'seat_policy_sha256': [sha256(policy)] * 10,
                'seat_policy_sha1': [hashlib.sha1(policy.read_bytes()).hexdigest()] * 10,
                'artifacts': {p.name: sha256(p) for p in tmp_path.iterdir() if p.name != 'policy.bas'}}
+    expected_native = {'binary_sha256': 'a' * 64, 'fingerprint': 'b' * 64}
+    receipt['native_build'] = expected_native
     (tmp_path / 'identity.json').write_text(json.dumps(receipt))
     for seat in range(10):
         (tmp_path / f'policy-{seat}.bas').write_bytes(policy.read_bytes())
-    version = {'engine': {'commit': POLYWORLD_COMMIT}, 'artifact_hashes': {'policy.bas': sha256(policy)}}
+    version = {'engine': {'commit': POLYWORLD_COMMIT}, 'artifact_hashes': {'policy.bas': sha256(policy)},
+               'native_builds': {'gota_match': expected_native}}
     return tmp_path, version, receipt
 
 
@@ -42,14 +45,18 @@ def test_native_identity_accepts_bound_policy(evidence):
     assert verify_native_identity(directory, version)['candidate_seats'] == list(range(5))
 
 
-@pytest.mark.parametrize('mismatch', ['build', 'policy', 'engine', 'seat', 'log', 'fingerprint'])
+@pytest.mark.parametrize('mismatch', ['build', 'policy', 'engine', 'seat', 'log', 'fingerprint', 'binary', 'valid_fingerprint', 'native_receipt', 'missing_expected'])
 def test_native_identity_rejects_mismatch(evidence, mismatch):
     directory, version, receipt = evidence
+    if mismatch == 'native_receipt': receipt['native_build'] = {'binary_sha256': '3' * 64, 'fingerprint': '4' * 64}
+    if mismatch == 'missing_expected': version.pop('native_builds')
     if mismatch == 'build': version['artifact_hashes']['policy.bas'] = '0' * 64
     if mismatch == 'policy': receipt['seat_policy_sha1'][0] = '0' * 40
     if mismatch == 'engine': version['engine']['commit'] = '0' * 40
     if mismatch == 'seat': receipt['candidate_seats'] = [5, 6, 7, 8, 9]
     if mismatch == 'log': (directory / 'seat-0.log').write_text('changed')
+    if mismatch == 'binary': receipt['binary_sha256'] = '3' * 64
+    if mismatch == 'valid_fingerprint': receipt['binary_fingerprint'] = '4' * 64
     if mismatch == 'fingerprint': receipt['binary_fingerprint'] = ''
     (directory / 'identity.json').write_text(json.dumps(receipt))
     with pytest.raises(ValueError):

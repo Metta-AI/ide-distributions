@@ -186,6 +186,14 @@ def test_shared_gate_order_and_advisory_screen(tmp_path, monkeypatch):
     )
     assert not gota_gates.verify("abcdef12-1", context=GateContext(tmp_path))["G4"]["passed"]
 
+    def swapped_native(artifact, context):
+        context.measurements['changed'] = {'native_build': {'different': True}}
+        return GateResult(True, {})
+
+    monkeypatch.setattr(gota_gates.g1_lint, 'run', swapped_native)
+    with pytest.raises(ValueError, match='different native build'):
+        gota_gates.verify('abcdef12-1', context=GateContext(tmp_path))
+
 
 def test_source_inventory_includes_backend_and_shared_gate_closure(tmp_path):
     import strategy_build as builds
@@ -376,7 +384,7 @@ def test_cached_probe_rejects_missing_and_stale(tmp_path, monkeypatch):
     os.utime(binary, (1, 1))
     for name in ("gate_probe.nim", "replay_outcome.nim", "build_nim.sh"):
         (tools / name).write_text("new source")
-    with pytest.raises(RuntimeError, match="stale native gate probe"):
+    with pytest.raises(FileNotFoundError, match="receipt.json"):
         host.cached_probe()
 
 
@@ -472,18 +480,20 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
 
     def budget(candidate, context):
         assert context.measurements == {}
-        context.measurements['current-candidate'] = candidate.read_text()
+        context.measurements['current-candidate'] = {'text': candidate.read_text(), 'native_build': {}}
         return GateResult(not (first_failure == 'G3' and len(episodes) == 1), {})
 
     real_g5 = gota_gates.g5_telemetry.run
 
     def g5(candidate, context):
         assert context.episode_dir == episodes[-1]
-        assert context.measurements['current-candidate'] == candidate.read_text()
+        assert context.measurements['current-candidate']['text'] == candidate.read_text()
         result = real_g5(candidate, context)
         telemetry.append((context.episode_dir, result))
         return result
 
+    from games.gota.tools import native_build
+    monkeypatch.setattr(native_build, 'validate', lambda *args, **kwargs: {})
     monkeypatch.setattr(gota_gates.g2_episode.subprocess, 'run', episode_runner)
     monkeypatch.setattr(gota_gates.g3_budget, 'run', budget)
     monkeypatch.setattr(gota_gates.g5_telemetry, 'run', g5)

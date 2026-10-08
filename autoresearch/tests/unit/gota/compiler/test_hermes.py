@@ -153,8 +153,12 @@ def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys):
     order = sb.prepare(source, agent='hermes', model='test/openweight', full=True, milestone='m1')
     sb.generate(order)
     sb.assemble_build(order['build_id'])
+    native_fixture = {'gota_match': {'binary_sha256': 'a' * 64, 'fingerprint': 'b' * 64}}
+    sb.dump(sb.build_path(order['build_id'], staged=True) / 'native_provenance.json', native_fixture)
     build = sb.finalize(order, {f'G{i}': {'passed': True, 'summary': 'test fixture only'} for i in range(1, 6)})
     _, version, mapping, _ = strategy_audit.load_build(order['build_id'])
+    assert version['artifact_hashes']['native_provenance.json'] == sb.digest(build / 'native_provenance.json')
+    assert version['native_builds'] == native_fixture
     logs = temporary / 'native-fixture'
     logs.mkdir()
     policy = (build / 'policy.bas').read_bytes()
@@ -162,17 +166,20 @@ def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys):
     for seat in range(10):
         (logs / f'policy-{seat}.bas').write_bytes(policy)
         (logs / f'seat-{seat}.log').write_text(
-            'PWD v=3 g=G.survive,G.farm,G.finish t=1 r=1 c=1 i=0,0,0 h=0 p=0 f=0\n')
+            f'PWD v=3 g=G.survive,G.farm,G.finish t={seat + 1} r=1 c=1 i=0,0,0 h=0 p=0 f=0\n'
+            'PWD v=3 g=G.survive,G.farm,G.finish t=11 r=1 c=1 i=0,0,0 h=0 p=0 f=0\n')
     sb.dump(logs / 'job.json', {'seed': 1, 'ticks': 1, 'draft': 'open', 'oracle': True})
     sb.dump(logs / 'result.json', {'engine': POLYWORLD_COMMIT, 'bassy': BASSY_COMMIT,
-        'config': {}, 'ticks': 1, 'battle_ticks': 1, 'outcome': 'time_limit',
+        'config': {'seed': 1, 'max_ticks': 1, 'draft_mode': 'open'}, 'ticks': 11, 'draft_ticks': 10, 'battle_ticks': 1, 'outcome': 'time_limit',
         'heroes': [{'slot': seat, 'policy_source_sha1': source_sha1, 'vm_failed': False,
-                    'decisions': 1} for seat in range(10)]})
-    (logs / 'trace.jsonl').write_text(json.dumps({'type': 'tick', 'tick': 1, 'phase': 'battle',
-                                                'decision_order': list(range(100, 110)), 'actions': []})+'\n')
+                    'decisions': 2} for seat in range(10)]})
+    rows = [{'type': 'tick', 'tick': seat + 1, 'phase': 'draft', 'decision_order': [100 + seat], 'actions': []} for seat in range(10)]
+    rows.append({'type': 'tick', 'tick': 11, 'phase': 'battle', 'decision_order': list(range(100, 110)), 'actions': []})
+    (logs / 'trace.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
     artifacts = ['job.json', 'result.json', 'trace.jsonl'] + [f'seat-{seat}.log' for seat in range(10)]
     sb.dump(logs / 'identity.json', {'engine': POLYWORLD_COMMIT, 'bassy': BASSY_COMMIT,
-        'binary_sha256': 'a' * 64, 'binary_fingerprint': 'b' * 64, 'seed': 1,
+        'binary_sha256': 'a' * 64, 'binary_fingerprint': 'b' * 64,
+        'native_build': native_fixture['gota_match'], 'seed': 1,
         'max_battle_ticks': 1, 'candidate_seats': list(range(5)),
         'seat_policy_sha256': [version['policy_sha256']] * 10, 'seat_policy_sha1': [source_sha1] * 10,
         'artifacts': {name: sb.digest(logs / name) for name in artifacts}})

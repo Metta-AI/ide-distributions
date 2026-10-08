@@ -12,7 +12,6 @@ import fcntl
 import hashlib
 import json
 import math
-import os
 import statistics
 import subprocess
 import sys
@@ -26,36 +25,17 @@ DEFAULT_TICKS = 28_800
 BUILD_COMMAND = "games/gota/tools/build_gota_match.sh"
 
 
-def build_fingerprint() -> str:
-    """Hash canonical JSON of the three build-input digests and Nim's version line."""
-    try:
-        version = subprocess.run(['nim', '--version'], check=True, capture_output=True, text=True).stdout.splitlines()[0]
-        inputs = {name: hashlib.sha256((TOOLS / name).read_bytes()).hexdigest()
-                  for name in ('gota_match.nim', 'build_gota_match.sh', 'engine.env')}
-    except (OSError, subprocess.CalledProcessError, IndexError) as error:
-        raise gota_cli.EnvironmentMissing(f'Cannot fingerprint engine build inputs: {error}', BUILD_COMMAND) from error
-    inputs['nim_version'] = version
-    return hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+def binary_identity() -> dict:
+    """Validate the full native input/output receipt before accepting this cache."""
+    import native_build
+    commit = gota_cli.engine()['POLYWORLD_COMMIT']
+    path = TOOLS / 'bin' / f'gota_match-{commit[:8]}'
+    return native_build.validate(path, 'gota_match', commit)
 
 
 def binary() -> Path:
-    path = TOOLS / "bin" / f"gota_match-{gota_cli.engine()['POLYWORLD_COMMIT'][:8]}"
-    if not path.is_file() or not os.access(path, os.X_OK):
-        raise gota_cli.EnvironmentMissing(f"Missing engine binary {path}", BUILD_COMMAND)
-    try:
-        recorded = path.with_suffix('.fingerprint').read_text().strip()
-    except OSError as error:
-        raise gota_cli.EnvironmentMissing(f"Missing engine build fingerprint for {path}", BUILD_COMMAND) from error
-    if recorded != build_fingerprint():
-        raise gota_cli.EnvironmentMissing(f"Stale engine binary {path}: build fingerprint differs", BUILD_COMMAND)
-    return path
-
-
-def binary_identity() -> dict[str, str]:
-    """Validated executable identity for build provenance; stale binaries are refused."""
-    path = binary()
-    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-            'fingerprint': path.with_suffix('.fingerprint').read_text().strip()}
+    binary_identity()
+    return TOOLS / 'bin' / f"gota_match-{gota_cli.engine()['POLYWORLD_COMMIT'][:8]}"
 
 
 class EngineError(RuntimeError):

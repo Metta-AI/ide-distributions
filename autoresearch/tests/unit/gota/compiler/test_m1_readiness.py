@@ -95,3 +95,17 @@ END
                                'seats': [str(policy)] * 10, 'out': str(directory)}))
     subprocess.run([str(cached_binary()), 'match', str(job)], check=True, capture_output=True, timeout=30)
     assert (directory / 'seat-0.log').read_text().splitlines()[:5] == ['1,0', '2,1', '3,1', '4,1', '5,2']
+
+
+def test_oracle_refuses_other_native_build_before_execution(tmp_path, monkeypatch):
+    import pytest
+
+    from games.gota.tools import equivalence, native_build
+
+    monkeypatch.setattr(equivalence, 'cached_binary', lambda: tmp_path / 'never-executed')
+    monkeypatch.setattr(native_build, 'validate', lambda *args, **kwargs: {'fingerprint': 'actual'})
+    output = tmp_path / 'oracle'
+    with pytest.raises(ValueError, match='differs from immutable'):
+        equivalence.run(equivalence.BASELINE, output, seeds=[1], ticks=1,
+                        expected_native={'fingerprint': 'different'})
+    assert not output.exists()

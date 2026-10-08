@@ -125,6 +125,11 @@ def verify_native_identity(directory: Path, version: dict) -> dict:
             or not job.get('oracle') or 'roster' in job
             or receipt.get('seed') != job['seed'] or receipt.get('max_battle_ticks') != job['ticks']):
         raise ValueError('native evidence setup/seat mismatch')
+    expected = version.get('native_builds', {}).get('gota_match')
+    if (expected is None or receipt.get('native_build') != expected
+            or receipt.get('binary_sha256') != expected['binary_sha256']
+            or receipt.get('binary_fingerprint') != expected['fingerprint']):
+        raise ValueError('native binary differs from immutable build provenance')
     for field in ('binary_sha256', 'binary_fingerprint'):
         digest = receipt.get(field, '')
         if len(digest) != 64 or any(char not in '0123456789abcdef' for char in digest):

@@ -2,6 +2,10 @@
 import std/[os, json, strutils]
 include examples/gods_of_the_arena/bots
 
+const
+  PolyworldCommit {.strdefine.} = ""
+  BassyCommit {.strdefine.} = ""
+
 let source = readFile(paramStr(2))
 let output = paramStr(3)
 var report = %*{"ok": false}
@@ -73,4 +77,6 @@ try:
     report["ok"] = %(errors.len == 0 and decisions > 0)
 except CatchableError as error:
   report = %*{"ok": false, "error": error.msg}
+report["engine"] = %PolyworldCommit
+report["bassy"] = %BassyCommit
 writeFile(output, $report)

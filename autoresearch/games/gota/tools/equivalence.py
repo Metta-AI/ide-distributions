@@ -45,7 +45,9 @@ def checked_stream(records):
     """Validate complete scheduling evidence, including decisions with no commands."""
     header = None
     counts = [0] * 10
+    draft_decisions = [0] * 10
     tick = 0
+    draft_ticks = battle_ticks = 0
     ended = False
     for row in records:
         if not isinstance(row, dict):
@@ -58,16 +60,22 @@ def checked_stream(records):
         if header is None:
             if kind != 'header' or any(key not in row for key in SETUP_KEYS):
                 raise ValueError('missing trace header/setup')
-            if (row['schema'] != 1 or row['hero_ids'] != list(range(100, 110))
+            if (type(row['seed']) is not int or type(row['max_battle_ticks']) is not int
+                    or row['schema'] != 1 or row['hero_ids'] != list(range(100, 110))
                     or row['candidate_seats'] != list(range(5))
                     or row['draft_mode'] != 'open' or row['max_battle_ticks'] < 1
                     or row['engine'] != POLYWORLD_COMMIT or row['bassy'] != BASSY_COMMIT):
                 raise ValueError('unsupported trace setup')
+            config = row['config']
+            if (not isinstance(config, dict) or config.get('seed') != row['seed']
+                    or config.get('max_ticks') != row['max_battle_ticks']
+                    or config.get('draft_mode') != row['draft_mode']):
+                raise ValueError('trace config contradicts requested setup')
             header = row
             yield {key: row[key] for key in SETUP_KEYS}
             continue
         if kind == 'tick':
-            if row.get('tick') != tick + 1:
+            if type(row.get('tick')) is not int or row['tick'] != tick + 1:
                 raise ValueError('missing, repeated, or out-of-order tick')
             tick += 1
             order = row.get('decision_order')
@@ -76,10 +84,18 @@ def checked_stream(records):
                     or any(hero not in range(100, 110) for hero in order)
                     or phase not in ('draft', 'battle')
                     or (phase == 'draft' and len(order) > 1)
-                    or (phase == 'battle' and len(order) not in (0, 10))):
+                    or (phase == 'battle' and len(order) != 10)):
                 raise ValueError('invalid or incomplete decision order')
+            if phase == 'draft':
+                if battle_ticks:
+                    raise ValueError('draft phase resumed after battle')
+                draft_ticks += 1
+            else:
+                battle_ticks += 1
             for hero in order:
                 counts[hero - 100] += 1
+                if phase == 'draft':
+                    draft_decisions[hero - 100] += 1
             actions = row.get('actions')
             if not isinstance(actions, list):
                 raise ValueError('missing action stream')
@@ -101,13 +117,16 @@ def checked_stream(records):
         elif kind == 'end':
             if (not tick or row.get('complete') is not True or row.get('errors') != []
                     or row.get('ticks') != tick or row.get('seat_decisions') != counts
-                    or any(count <= 0 for count in counts)
-                    or type(row.get('battle_ticks')) is not int
-                    or (row['battle_ticks'] < header['max_battle_ticks']
-                        and row.get('outcome') not in ('RedTeam', 'BlueTeam', 'draw'))):
+                    or any(count <= 0 for count in counts) or any(count <= 0 for count in draft_decisions)
+                    or any(type(row.get(name)) is not int for name in ('ticks', 'battle_ticks', 'draft_ticks'))
+                    or row.get('battle_ticks') != battle_ticks or row.get('draft_ticks') != draft_ticks
+                    or draft_ticks + battle_ticks != tick or battle_ticks < 1
+                    or battle_ticks > header['max_battle_ticks']
+                    or row.get('outcome') not in ('RedTeam', 'BlueTeam', 'draw', 'time_limit')
+                    or (row['outcome'] == 'time_limit' and battle_ticks != header['max_battle_ticks'])):
                 raise ValueError('incomplete/error trace or missing decisions')
             ended = True
-            yield {key: row[key] for key in ('type', 'ticks', 'battle_ticks', 'seat_decisions')}
+            yield {key: row[key] for key in ('type', 'ticks', 'battle_ticks', 'draft_ticks', 'outcome', 'seat_decisions')}
         else:
             raise ValueError(f'unknown trace record: {kind}')
     if not ended:
@@ -144,20 +163,26 @@ def completed_stream(directory: Path, seed: int, ticks: int):
            'config': result['config']}
     yield from read_stream(directory / 'trace.jsonl')
     yield {'type': 'end', 'ticks': result['ticks'], 'battle_ticks': result['battle_ticks'],
+           'draft_ticks': result['draft_ticks'],
            'complete': True, 'outcome': result['outcome'],
            'errors': [hero['vm_error'] for hero in result['heroes'] if hero['vm_failed']],
            'seat_decisions': [hero['decisions'] for hero in result['heroes']]}
 
 
-def run(candidate: Path, output: Path, *, seeds=range(1, 21), ticks=28800, opponent=BASELINE) -> dict:
+def run(candidate: Path, output: Path, *, seeds=range(1, 21), ticks=28800, opponent=BASELINE, expected_native=None) -> dict:
     seeds = tuple(seeds)
     candidate, opponent = candidate.resolve(), opponent.resolve()
     if sha256(BASELINE) != BASELINE_SHA256:
         raise ValueError('exact v13-live baseline hash mismatch')
     binary = cached_binary()
+    from games.gota.tools.native_build import validate
+    native_identity = validate(binary, 'gota_match', POLYWORLD_COMMIT)
+    if expected_native is not None and native_identity != expected_native:
+        raise ValueError('oracle binary differs from immutable compiler native provenance')
     output.mkdir(parents=True, exist_ok=False)
     identities = {'engine': POLYWORLD_COMMIT, 'binary_sha256': sha256(binary),
-                  'binary_fingerprint': binary.with_suffix('.fingerprint').read_text().strip(),
+                  'binary_fingerprint': native_identity['fingerprint'],
+                  'native_build': native_identity,
                   'bassy': BASSY_COMMIT,
                   'reference_sha256': BASELINE_SHA256, 'candidate_sha256': sha256(candidate),
                   'opponent_sha256': sha256(opponent), 'draft_mode': 'open',
@@ -193,6 +218,8 @@ def run(candidate: Path, output: Path, *, seeds=range(1, 21), ticks=28800, oppon
                 results.append({'seed': seed, 'equivalent': False,
                                 'error': f'{name} native process failed: {completed.returncode}'})
                 break
+            if validate(binary, 'gota_match', POLYWORLD_COMMIT) != native_identity:
+                raise ValueError('native identity changed during oracle run')
             result = json.loads((directory / 'result.json').read_text())
             if (result.get('engine') != POLYWORLD_COMMIT or result.get('bassy') != BASSY_COMMIT
                     or [hero.get('policy_source_sha1') for hero in result['heroes']] != loaded_sha1
@@ -218,11 +245,25 @@ def run(candidate: Path, output: Path, *, seeds=range(1, 21), ticks=28800, oppon
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('candidate', type=Path)
+    parser.add_argument('candidate', type=Path, nargs='?')
+    parser.add_argument('--build', help='checked immutable build; binds expected oracle executable')
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        report = run(args.candidate, args.out)
+        expected = None
+        if args.build:
+            if args.candidate is not None:
+                parser.error('use --build or a fixture candidate, not both')
+            sys.path.insert(0, str(ROOT / 'games/gota/compiler/tools'))
+            from strategy_audit import load_build
+            path, version, _, _ = load_build(args.build)
+            args.candidate = path / 'policy.bas'
+            expected = version.get('native_builds', {}).get('gota_match')
+            if expected is None:
+                raise ValueError('build has no verified native oracle provenance')
+        elif args.candidate is None:
+            parser.error('candidate or --build is required')
+        report = run(args.candidate, args.out, expected_native=expected)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f'{error}\n')
     print(json.dumps(report))

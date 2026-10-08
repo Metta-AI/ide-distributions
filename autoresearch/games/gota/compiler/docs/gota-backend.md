@@ -83,17 +83,25 @@ Pandas is now a locked project dependency; no pandas overlay is needed.
 
 No helper fetches a repository or installs a dependency. Establish the exact
 source/dependency caches first, retaining the real Polyworld config.nims and Nim
-2.2.10. Before compilation the builder checks every dependencies.lock Git pin and tracked
-cleanliness. Cached acceptance separately checks the recorded build fingerprint:
+2.2.10. Both builders use `tools/native_build.py`. Compilation and cached acceptance check
+every dependencies.lock Git pin, tracked cleanliness, tracked file content hashes,
+additional source files, and the actual configuration chain reported by Nim. They
+also check the canonical/copied helper bytes, compiler executable/version, options,
+and the output executable SHA-256. Receipt files use `.receipt.json`; the older
+three-file `.fingerprint` sidecar is no longer authoritative:
 
 ```sh
 sh games/gota/tools/build_nim.sh 801749e509e888b423ba44ee2188946c22e3ba85 gate_probe
 sh games/gota/tools/build_gota_match.sh
 ```
 
-The latter hashes its source, build script, engine.env and Nim version into a
-binary fingerprint checked before use. G1/G3/G4 use the cached gate probe and
-reject missing/stale files. Historical replay tools may use a separately
+The input closure is compared before and after compilation; changed inputs cannot
+receive a trusted receipt. Gate and match reads validate the same receipt contract,
+including executable bytes, before accepting a cache. Gates retain their actual
+native receipts in measurement files. Verification captures distinct gate-probe
+and match receipts in `native_provenance.json`, checks the gate actually used that
+identity, and retains both receipts in immutable finalization. A full input check
+measured about 1.4 seconds locally; checks run before/after native invocations. Historical replay tools may use a separately
 populated `.cache/polyworld-<sha8>` checkout and matching dependency cache; the
 builder never changes a checkout or fetches missing objects. Historical replay
 fixtures retain their original recording pin.
@@ -104,7 +112,7 @@ After a finalized compiler build, use its immutable policy artifact:
 
 ```sh
 uv run --locked --offline python games/gota/tools/equivalence.py \
-  games/gota/compiler/strategy/compiled/BUILD-ID/policy.bas --out /path/to/new-oracle-dir
+  --build BUILD-ID --out /path/to/new-oracle-dir
 uv run --locked --offline python games/gota/tools/goal_audit.py --build BUILD-ID \
   --logs /path/to/new-oracle-dir/seed-1-candidate --out /path/to/goal-audit-seed-1.json
 ```
@@ -120,13 +128,18 @@ The baseline SHA-256 must be
 No roster is forced. The actual engine determines decision order; command capture
 records attempted commands, including rejected actions, with arguments and order.
 All five candidate action streams must match at every tick. PRINT is excluded;
-missing ticks, missing/no-action decisions, malformed data, VM failure or truncated
-runs fail. Receipt files bind setup, binary fingerprint, engine/Bassy, opponent
+missing ticks, missing decisions, malformed data, VM failure or truncated
+runs fail. Config seed/mode/budget must agree with the requested setup; phase
+progression and observed draft/battle totals must agree with the completion
+record. Timeout requires the full requested battle duration. Receipt files bind setup, binary fingerprint, engine/Bassy, opponent
 hashes, loaded policy source hashes, logs and traces. Policies are snapshotted
 before loading and native source SHA1 is checked against snapshot SHA1/SHA256.
 This is trajectory identity against fixed opponents, not competitive qualification.
 
-The supported GotA audit verifies immutable build artifacts and reconstructs the
+Oracle `--build` verifies the immutable build and requires its retained match
+receipt; positional candidate paths are only the explicit fixture exploration
+mode. The supported GotA audit compares the recorded executable hash and full
+native receipt to that same immutable expected identity, then verifies build artifacts and reconstructs the
 map from committed source using the existing load_build path. It binds the native
 receipt's first five policies to that build, verifies evidence hashes and engine,
 and attributes valid PWD labels within the 24-tick heartbeat to actual decisions.

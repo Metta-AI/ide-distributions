@@ -30,6 +30,9 @@ softmax-cli 0.26.38 through locked-project offline `uv run --with` invocations.
 
 ## Evidence and limits
 
+- All native measurements retain a verified source/config/dependency/output build
+  receipt and validate the engine/Bassy identity reported by the executable. Cache
+  acceptance uses that receipt, not file timestamps.
 - G1 compiles using the actual GotA host schema and `heroVmLimits` in Polyworld
   `801749e509e888b423ba44ee2188946c22e3ba85`; it is not a lexical syntax estimate.
 - G2 executes all ten seats through pinned coworld and reads back staged artifact

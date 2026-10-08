@@ -51,3 +51,25 @@ def test_symlink_chain_cannot_hide_agent_name(tmp_path):
     alias.symlink_to(agent)
     with pytest.raises(RuntimeError, match='real agent'):
         guard.check_spawn(str(alias), [str(alias)])
+
+
+@pytest.mark.parametrize('arguments', [
+    ['env', '/bin/sh', '-c', '/not-a-real-agent-install/hermes'],
+    ['env', 'PATH=/outside-root', 'hermes', '--version'],
+])
+def test_env_wrappers_fail_closed_with_full_argv(tmp_path, arguments):
+    guard._state['root'] = tmp_path.resolve()
+    fake = tmp_path / 'hermes'
+    fake.write_text('fake')
+    fake.chmod(0o755)
+    with pytest.raises(RuntimeError, match='test blocked'):
+        guard.check_spawn('/usr/bin/env', arguments, {'PATH': str(tmp_path)})
+
+
+@pytest.mark.parametrize('target,arguments', [('/bin/sh', ['alias', '-c', 'hermes']),
+                                           ('/usr/bin/env', ['alias', 'hermes'])])
+def test_resolved_wrapper_names_fail_closed(tmp_path, target, arguments):
+    alias = tmp_path / 'alias'
+    alias.symlink_to(target)
+    with pytest.raises(RuntimeError, match='test blocked'):
+        guard.check_spawn(str(alias), arguments)

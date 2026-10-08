@@ -81,12 +81,6 @@ def cached_probe() -> Path:
     path = ROOT / "games/gota/tools/bin" / f"gate_probe-{POLYWORLD_COMMIT[:8]}"
     if not path.is_file():
         raise FileNotFoundError(f"cached native gate probe required: {path}")
-    sources = [
-        ROOT / "games/gota/tools" / name
-        for name in ("gate_probe.nim", "replay_outcome.nim", "build_nim.sh")
-    ]
-    if any(source.stat().st_mtime_ns > path.stat().st_mtime_ns for source in sources):
-        raise RuntimeError(
-            f"stale native gate probe: {path}; rebuild with the pinned offline toolchain"
-        )
+    from games.gota.tools.native_build import validate
+    validate(path, 'gate_probe', POLYWORLD_COMMIT, tools=ROOT / 'games/gota/tools')
     return path

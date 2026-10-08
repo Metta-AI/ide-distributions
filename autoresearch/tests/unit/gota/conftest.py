@@ -42,15 +42,12 @@ def check_spawn(executable, arguments, environment=None, cwd=None):
         if root is None or not resolved.is_relative_to(root):
             raise RuntimeError(f'test blocked real agent executable: {candidate}')
     args = shlex.split(arguments) if isinstance(arguments, str) else list(arguments)
-    if candidate.name in SHELLS and any(arg.startswith('-') and 'c' in arg[1:] for arg in args[1:]):
+    if names & SHELLS and any(arg.startswith('-') and 'c' in arg[1:] for arg in args[1:]):
         # A shell can alter PATH, expand aliases, or conceal a command after a
         # separator. Owned tests have no need for shell expressions.
         raise RuntimeError('test blocked shell command string; use direct argv')
-    if candidate.name == 'env':
-        for token in args[1:]:
-            if not token.startswith('-') and '=' not in token:
-                check_spawn(token, [token], environment, cwd)
-                break
+    if 'env' in names:
+        raise RuntimeError('test blocked env wrapper; use direct argv and explicit env')
 
 
 def _audit(event, args):
