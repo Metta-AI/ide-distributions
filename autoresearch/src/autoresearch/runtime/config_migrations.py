@@ -59,6 +59,10 @@ APPROVAL_DENY = [
     "git push -f*",
     "git push*--force*",
     "git push* -f*",
+    "hermes kanban create*",
+    "hermes kanban link*",
+    "hermes kanban --board * create*",
+    "hermes kanban --board * link*",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 

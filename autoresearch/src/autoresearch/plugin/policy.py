@@ -11,9 +11,14 @@
   every model write after `card finish` (C3), and `memory` writes outside planning cards;
 - the native `kanban_complete` on a card before `card finish` ran (C3): a completed run with no
   handoff record leaves its work unmerged;
-- the native `kanban_create` and `kanban_link` in every agent session (C3, C7): a task a model
+- Kanban board writes in every agent session (C3, C7): the native `kanban_create` and
+  `kanban_link`, and `hermes kanban <action>` from a shell or code for every action that
+  writes the board (``KANBAN_WRITE_ACTIONS``, Hermes' own delegate-fence list). A task a model
   creates with an assignee is dispatched with no admission, no receipt and no pause control.
-  Cards come only from `queue request create` requests that queue-keeper admits;
+  Cards come only from `queue request create` requests that queue-keeper admits. Hermes'
+  delegate fence (``HERMES_DELEGATED_CHILD_CONTEXT`` on every worker subprocess) is a second
+  layer in card workers; it is cooperative (``env -u`` removes it) and absent in non-card
+  sessions, so the policy does not rely on it;
 - forging inbound messages (C11: inbound carries the human's full authority): the trusted
   `comms inbound` command in any agent session, any write into the canonical workspace's
   `comms/inbox/` (every session, cards or not), and `python -c`/`execute_code` text that names
@@ -97,6 +102,33 @@ _SEP = r"[\s'\",\[\]]+"
 BLOCKED_TEXT = re.compile(
     rf"\bcoworld{_SEP}(submit|upload-policy|player{_SEP}use|xp-request{_SEP}create)\b"
     rf"|\bsoftmax{_SEP}log(in|out)\b"
+)
+# `hermes kanban <action>` actions that write the board: Hermes' own delegate-fence list
+# (hermes_cli/kanban.py _DELEGATED_CHILD_DENIED_ACTIONS and, after `boards`,
+# _DELEGATED_CHILD_DENIED_BOARD_ACTIONS, v0.21.5). Our skills use none of them: cards are
+# requested with `queue request create`, and a worker ends its run with the native tools.
+KANBAN_WRITE_ACTIONS = frozenset({
+    "init", "create", "swarm", "assign", "reclaim", "reassign", "link", "unlink",
+    "claim", "comment", "attach", "attach-rm", "complete", "edit", "block",
+    "schedule", "unblock", "promote", "archive", "dispatch", "daemon", "repair",
+    "heartbeat", "notify-subscribe", "notify-unsubscribe", "specify", "decompose",
+    "request-review", "request-changes", "reopen-review", "gc",
+})
+KANBAN_BOARD_WRITE_ACTIONS = frozenset({
+    "create", "new", "rm", "remove", "delete", "switch", "use", "rename",
+    "set-default-workdir", "import",
+})
+HERMES_PROGRAMS = {"hermes", "hermes_cli"}  # `python -m hermes_cli.main` unwraps to hermes_cli
+_WORD = r"[^\s'\",\[\]]+"
+_KANBAN_ACTIONS = "|".join(
+    sorted((re.escape(a) for a in KANBAN_WRITE_ACTIONS | KANBAN_BOARD_WRITE_ACTIONS), key=len,
+           reverse=True)
+)
+# Text form of the same rule, for code and unparsed commands (best effort, like BLOCKED_TEXT):
+# `hermes`, up to three words, `kanban`, up to three words, a write action.
+KANBAN_WRITE_TEXT = re.compile(
+    rf"\bhermes(?:_cli\S*)?{_SEP}(?:{_WORD}{_SEP}){{0,3}}?kanban{_SEP}"
+    rf"(?:{_WORD}{_SEP}){{0,3}}?(?:{_KANBAN_ACTIONS})(?![\w-])"
 )
 
 # Words skipped at the start of a simple command (shell keywords and no-option prefixes).
@@ -206,6 +238,15 @@ def _block(reason: str) -> tuple[bool, str]:
     return False, PREFIX + reason
 
 
+def _refuse_text(text: str) -> None:
+    """Raise `_Blocked` when text we cannot parse as commands (a script, code, an unparsed
+    line) names a raw platform mutation, a player switch or a Kanban board write."""
+    if KANBAN_WRITE_TEXT.search(text):
+        raise _Blocked(CARD_REQUEST)
+    if BLOCKED_TEXT.search(text):
+        raise _Blocked(RAW_MUTATION)
+
+
 def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) -> tuple[bool, str]:
     """Decide one tool call: `(allowed, reason)`. `card` is `runtime/cards/<task>.json` or None."""
     args = args if isinstance(args, dict) else {}
@@ -230,6 +271,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
             return _block(NOT_FINISHED)
         if tool_name == "execute_code":
             code = args.get("code")
+            if isinstance(code, str) and KANBAN_WRITE_TEXT.search(code):
+                return _block(CARD_REQUEST)
             if isinstance(code, str) and BLOCKED_TEXT.search(code):
                 return _block(
                     "code that runs a raw platform mutation or player switch is blocked; "
@@ -355,14 +398,13 @@ class _Guard:
                 continue
             before = text[:substitution.start].rstrip()
             # `sh -c "$(...)"`, `eval $(...)`: the output is a script we cannot see.
-            if EXECUTES_OUTPUT.search(before) and BLOCKED_TEXT.search(substitution.body):
-                raise _Blocked(RAW_MUTATION)
+            if EXECUTES_OUTPUT.search(before):
+                _refuse_text(substitution.body)
             # `$(which coworld) submit`: the output is the command word.
             if not substitution.quoted and before[-1:] in ("", *COMMAND_STARTERS):
                 words = substitution.body.split()
                 head = words[-1].strip("'\"") if words else ""
-                if BLOCKED_TEXT.search(f"{head} {text[substitution.end:]}"):
-                    raise _Blocked(RAW_MUTATION)
+                _refuse_text(f"{head} {text[substitution.end:]}")
         try:
             tokens = _tokenize(_replace_substitutions(text, substitutions))
         except ValueError as error:
@@ -386,8 +428,7 @@ class _Guard:
                     notes.append(note)
 
     def _unparsed(self, command: str, why: str, notes: list[str]) -> None:
-        if BLOCKED_TEXT.search(command):
-            raise _Blocked(RAW_MUTATION)
+        _refuse_text(command)
         notes.append(f"unparsed shell allowed ({why})")
 
     def _cd(self, words: list[str], cwd: Path) -> Path:
@@ -430,6 +471,8 @@ class _Guard:
             return []
         if name == "coworld":
             self._check_coworld(operands)
+        elif name in HERMES_PROGRAMS:
+            _check_hermes(operands)
         elif name == "softmax" and {"login", "logout"} & set(operands[:2]):
             raise _Blocked("`softmax login/logout` switches the player identity.")
         elif name == "git":
@@ -480,8 +523,7 @@ class _Guard:
                 return []
             elif name == "ssh":
                 host = _skip_options(words, index + 1, SSH_VALUE_OPTIONS)
-                if BLOCKED_TEXT.search(" ".join(words[host + 1:])):
-                    raise _Blocked(RAW_MUTATION)
+                _refuse_text(" ".join(words[host + 1:]))
                 return []
             elif re.fullmatch(r"python[0-9.]*", name):
                 rest = words[index + 1:]
@@ -494,8 +536,7 @@ class _Guard:
                 if "-c" in rest:
                     code_at = index + 1 + rest.index("-c") + 1
                     code = words[code_at] if code_at < len(words) else ""
-                    if BLOCKED_TEXT.search(code):
-                        raise _Blocked(RAW_MUTATION)
+                    _refuse_text(code)
                     if self.names_identity_files(code):
                         raise _Blocked(IDENTITY_FILES)
                     if _code_writes_inbox(code):
@@ -519,8 +560,7 @@ class _Guard:
         """A `-c` / `eval` script. A substitution anywhere in it produces script text we
         cannot see, so its body is checked for blocked phrases."""
         for substitution in _substitutions(script):
-            if BLOCKED_TEXT.search(substitution.body):
-                raise _Blocked(RAW_MUTATION)
+            _refuse_text(substitution.body)
         self._walk_shell(script, cwd, depth + 1, notes)
 
     def _check_stdin_script(self, line: "_Line", cwd: Path, depth: int, notes: list[str]):
@@ -528,10 +568,10 @@ class _Guard:
         here-string, a pipe or a process substitution."""
         for text in line.bodies + line.herestrings:
             self._walk_shell(text, cwd, depth + 1, notes)
-        if any(BLOCKED_TEXT.search(body) for body in line.process_bodies):
-            raise _Blocked(RAW_MUTATION)
-        if line.piped and BLOCKED_TEXT.search(line.raw):
-            raise _Blocked(RAW_MUTATION)
+        for body in line.process_bodies:
+            _refuse_text(body)
+        if line.piped:
+            _refuse_text(line.raw)
 
     def _check_coworld(self, operands: list[str]) -> None:
         # Every operand is scanned: global options with values (`--server x`, `--env prod`)
@@ -580,6 +620,21 @@ class _Guard:
                 inner = [w for w in core[start:] if w not in {";", "+", "{}"}]
                 return self._inspect(inner, cwd, depth, notes, line)
         return []
+
+
+def _check_hermes(operands: list[str]) -> None:
+    """`hermes ... kanban <action>` that writes the board. Every operand after `kanban` is
+    scanned, as in `_check_coworld`: `--board <slug>` and `-p <profile>` values can sit
+    anywhere. Over-blocking an odd operand is the safe direction."""
+    if "kanban" not in operands:
+        return
+    after = operands[operands.index("kanban") + 1:]
+    task_words, board_words = after, []
+    if "boards" in after:  # `kanban [--board x] boards <board action>`
+        split = after.index("boards")
+        task_words, board_words = after[:split], after[split + 1:]
+    if KANBAN_WRITE_ACTIONS & set(task_words) or KANBAN_BOARD_WRITE_ACTIONS & set(board_words):
+        raise _Blocked(CARD_REQUEST)
 
 
 class _Line:
