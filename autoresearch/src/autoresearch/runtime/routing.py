@@ -500,7 +500,9 @@ def _route_reply(
 
 
 # One handler per inbound kind of the registry (``comms.kinds``); the kind registry
-# conformance test checks that the two sets are the same.
+# conformance test checks that the two sets are the same. Records come from messages
+# validated against the registry, so a record's kind is always here; removing a kind while
+# records of it remain would make routing raise (KeyError) until they are dealt with.
 HANDLERS = {
     "seen": _route_seen,
     "task": _route_task,

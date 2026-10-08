@@ -1,9 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "autoresearch/comms/inbound/seen.json",
+  "$id": "comms/inbound/seen.json",
   "title": "Inbound seen (ar-comms/0): marks published messages as read by its author. Each id must be a published message (workspace check published_ids).",
   "x-autoresearch": {
     "direction": "inbound",
+    "ack": "none",
     "summary": "Marks published messages as read by its author; nobody acknowledges it.",
     "describe": ["seen: {ids}"],
     "checks": ["published_ids"]

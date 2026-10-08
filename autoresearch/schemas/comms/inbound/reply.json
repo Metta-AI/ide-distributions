@@ -1,9 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "autoresearch/comms/inbound/reply.json",
+  "$id": "comms/inbound/reply.json",
   "title": "Inbound reply (ar-comms/0): an answer to a published outbound message.",
   "x-autoresearch": {
     "direction": "inbound",
+    "ack": "card",
     "summary": "An answer to a published message (in_reply_to): a choice, text, or both.",
     "describe": ["Reply to {in_reply_to}.", " Choice: {choice}.", " {text}"]
   },
@@ -23,7 +24,7 @@
     "in_reply_to": {
       "description": "The M-id of the outbound message this answers.",
       "type": "string",
-      "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$",
+      "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$",
       "x-message": "a message id (M-...) is required"
     },
     "choice": {"description": "The option chosen, when the message offered options."},

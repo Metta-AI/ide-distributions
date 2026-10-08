@@ -163,7 +163,7 @@ The layout, registry, handler table, examples and conformance test are as design
    `in_reply_to` for the M-id shape only, not that it is published. That behaviour is kept, so it is a schema
    pattern, not a check. The example in section 1 was wrong.
 3. **`describe` is a list of format-string parts**, joined with no separator; a part is left out when a field
-   it names is missing, null or `""`. One format string cannot reproduce today's briefing text, which has
+   it names is missing or falsy (the old code's truthiness). One format string cannot reproduce today's briefing text, which has
    optional pieces (a reply's choice and text, a steer's proposed topic).
 4. **No handler name in `x-autoresearch`.** `routing.HANDLERS` is keyed by kind name, and the test checks that
    its keys equal the registry's inbound kinds. A handler name in the schema would be a second copy.
@@ -190,6 +190,30 @@ The layout, registry, handler table, examples and conformance test are as design
 11. **Bridge provenance.** The examples were made from `bridge.py` at metta main `86b1a3c5`; the bridge last
     changed in `e76aa6a2`, and its message models and `deliver()` are the same as at `8b6042db`.
 
-Not done, and worth knowing when adding an inbound kind: whether a card must acknowledge a kind is still code
-(`runtime.handoff.ACK_REQUIRED_KINDS = {"reply", "steer"}`), as are the kind-specific rules in routing (a
-`reply` decides lateness and derived status). A new kind defaults to "no acknowledgement required".
+12. **Review round 1 additions.**
+    - `x-autoresearch.ack` (`card` | `runtime` | `none`) on every inbound kind. `handoff.ACK_REQUIRED_KINDS`
+      is derived from it and `publisher.acknowledge_inbound` branches on it, so acknowledgement is no
+      longer code per kind. `x-autoresearch.expects_response` (outbound) replaces `kind == "question"` in
+      `build_message`. The test checks both against the doctrine columns and the communicate skill.
+    - `$id`s are paths under `schemas/` (`comms/inbound/task.json`, `message.json`), not
+      `autoresearch/comms/...`, so a plain `jsonschema` user resolves the `$ref`s by reading files. The
+      README has the recipe and the test runs it as written. This is relative to `schemas/`, not
+      `schemas/comms/`, so that `message.json` (which lives in `schemas/`) resolves the same way.
+    - Anchored patterns end in `(?!\n)$`: `jsonschema` matches with `re.search`, where `$` also matches
+      before a final newline, so `"preston\n"` passed the author rule and a direct-write `seen` then made
+      routing raise on every run. The author pattern is now the one consumer-name rule:
+      `reader.check_consumer` validates with it (`kinds.is_consumer_name`).
+    - Old acceptance is kept: an inbound `schema` value is not checked, and `created`/`received_at` are not
+      typed (the runtime's `parse_time` check on direct writes is the rule, as before). An empty
+      `received_at` with a valid `created` was accepted before and then made routing raise when the
+      delivery record was written; `delivery.inbox` now treats an empty `received_at` as missing.
+      *Proposal, not shipped:* require `created` to be a string and `received_at`, when present, a
+      non-empty one; reject a `schema` other than `ar-comms/0` only once there is an `ar-comms/1`.
+    - The README index lists kind, direction and schema file only; the meaning stays in the schema.
+    - Declined: a test that `doctrine/VERSION` is bumped when `communication.md` changes. It needs a
+      stored hash, which is one more place to edit per kind; the README checklist says to bump it.
+    - A routing record of a kind not in `HANDLERS` raises, as documented at `HANDLERS`; records come from
+      validated messages, so this happens only if a kind is removed while its records remain.
+
+Still code, by design: the kind-specific behaviour in routing (a `reply` decides lateness and derived
+status; `task` rejection notes) and the `seen` ledger written at submission.

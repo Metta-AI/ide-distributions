@@ -1,9 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "autoresearch/comms/inbound/steer.json",
+  "$id": "comms/inbound/steer.json",
   "title": "Inbound steer (ar-comms/0): direction from the human, which outranks the agent's own plan.",
   "x-autoresearch": {
     "direction": "inbound",
+    "ack": "card",
     "summary": "Direction that outranks the agent's plan; urgency now gets a P0 card, and it may propose a topic.",
     "describe": [
       "Steer (urgency {urgency}): {text}",

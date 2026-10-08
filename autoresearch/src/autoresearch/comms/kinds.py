@@ -5,9 +5,13 @@ direction's envelope (``envelope.outbound.json`` or ``envelope.inbound.json``) w
 ``allOf``. Its ``x-autoresearch`` keyword holds what code needs beyond the shape:
 
 - ``direction``: ``outbound`` (agent to coach) or ``inbound`` (coach to agent);
-- ``summary``: one line, for the README index and CLI help;
+- ``summary``: one line, for CLI help;
+- ``expects_response`` (outbound, default false): the message's default ``expects_response``;
+- ``ack`` (inbound): who acknowledges it once it is routed to a card: ``card`` (the card
+  stages a note in reply; card finish requires it), ``runtime`` (the runtime publishes a note
+  when the card publishes) or ``none``;
 - ``describe`` (inbound): the text a briefing shows, as format-string parts joined with no
-  separator. A part is left out when a field it names is missing, null or ``""``;
+  separator. A part is left out when a field it names is missing or falsy;
 - ``checks`` (inbound): names of the checks that need the workspace (``comms.inbound.CHECKS``).
 
 Everything else that lists kinds reads this module: ``envelope.KINDS``,
@@ -46,6 +50,8 @@ class Kind:
     schema: dict
     describe: tuple[str, ...] = ()
     checks: tuple[str, ...] = ()
+    ack: Literal["card", "runtime", "none"] | None = None  # inbound only
+    expects_response: bool = False  # outbound only: the default
 
 
 def _schema_files() -> list[Path]:
@@ -71,6 +77,8 @@ def _registry() -> tuple[Registry, dict[str, dict[str, Kind]]]:
                 schema=schema,
                 describe=tuple(meta.get("describe", ())),
                 checks=tuple(meta.get("checks", ())),
+                ack=meta.get("ack"),
+                expects_response=meta.get("expects_response", False),
             )
     return registry, kinds
 
@@ -80,6 +88,18 @@ def schema_validator(schema_id: str) -> Draft202012Validator:
     """A validator for the schema with this ``$id``, resolving refs between the schemas."""
     registry, _ = _registry()
     return Draft202012Validator(registry.contents(schema_id), registry=registry)
+
+
+@functools.cache
+def _author_validator() -> Draft202012Validator:
+    envelope = _registry()[0].contents("comms/envelope.inbound.json")
+    return Draft202012Validator(envelope["properties"]["author"])
+
+
+def is_consumer_name(text) -> bool:
+    """True if ``text`` passes the inbound envelope's ``author`` rule, the one consumer-name
+    rule (``reader.check_consumer`` uses it for cursor and seen-record names)."""
+    return _author_validator().is_valid(text)
 
 
 def outbound_kinds() -> tuple[str, ...]:
@@ -116,7 +136,7 @@ def problems(direction: Direction, message) -> list[str]:
         return ["a message must be a JSON object"]
     kind = message.get("kind")
     known = _registry()[1][direction].get(kind) if isinstance(kind, str) else None
-    schema_id = known.schema["$id"] if known else f"autoresearch/comms/envelope.{direction}.json"
+    schema_id = known.schema["$id"] if known else f"comms/envelope.{direction}.json"
     errors = schema_validator(schema_id).iter_errors(message)
     found = sorted({problem for error in errors for problem in _problems_of(error)})
     if isinstance(kind, str) and known is None:
@@ -134,7 +154,7 @@ def _present(message: dict, field: str) -> bool:
         value, _ = string.Formatter().get_field(field, (), message)
     except (KeyError, IndexError, TypeError):
         return False
-    return value is not None and value != ""
+    return bool(value)
 
 
 def describe(message: dict) -> str:

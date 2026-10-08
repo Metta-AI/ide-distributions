@@ -80,11 +80,11 @@ def build_message(
     expires: str | None = None,
     **fields,
 ) -> dict:
-    """A new message with a fresh ``M-`` id. ``expects_response`` defaults to True for a
-    ``question`` only. ``fields`` adds optional envelope fields (``in_reply_to``, ``thread``)
+    """A new message with a fresh ``M-`` id. ``expects_response`` defaults to the kind's
+    ``x-autoresearch.expects_response`` (True for a ``question`` only). ``fields`` adds optional envelope fields (``in_reply_to``, ``thread``)
     or any additive field."""
     if expects_response is None:
-        expects_response = kind == "question"
+        expects_response = kind in KINDS and kinds.get("outbound", kind).expects_response
     return {
         **fields,
         "schema": SCHEMA_VERSION,

@@ -17,6 +17,7 @@ import frontmatter
 import jsonschema
 import yaml
 
+from autoresearch.comms import kinds
 from autoresearch.comms.envelope import FROM_AGENT, FROM_RUNTIME, message_problems
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -39,9 +40,12 @@ STAGED_DIR = "comms/staged/"
 # A card branch must not touch these: generated views and runtime-owned bookkeeping.
 FORBIDDEN_FILES = ("kb/index.md",)
 FORBIDDEN_DIRS = ("kb/_generated/", ".supervisor/", "comms/outbox/", "comms/inbox/")
-# Inbound kinds the responsible card must answer with a staged ``in_reply_to`` message. A
-# ``task`` is acknowledged by the runtime when its card publishes (C11); ``seen`` needs none.
-ACK_REQUIRED_KINDS = frozenset({"reply", "steer"})
+# Inbound kinds the responsible card must answer with a staged ``in_reply_to`` message: those
+# with ``x-autoresearch.ack`` ``card`` (``comms.kinds``). A ``task`` is acknowledged by the
+# runtime when its card publishes (C11); ``seen`` needs none.
+ACK_REQUIRED_KINDS = frozenset(
+    name for name in kinds.inbound_kinds() if kinds.get("inbound", name).ack == "card"
+)
 ACK_KIND = "note"  # the staged message kind that acknowledges an inbound
 # The only non-record files a card may delete.
 DELETABLE_DIRS = (STAGED_DIR, REQUESTS_DIR + "/")

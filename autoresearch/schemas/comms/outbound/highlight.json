@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "autoresearch/comms/outbound/highlight.json",
+  "$id": "comms/outbound/highlight.json",
   "title": "Outbound highlight (ar-comms/0)",
   "x-autoresearch": {
     "direction": "outbound",

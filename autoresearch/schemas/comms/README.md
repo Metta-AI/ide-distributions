@@ -1,40 +1,80 @@
 # `ar-comms/0`: the message contract
 
 These schemas are the published contract between the research agent and external agents (a
-Preston-role agent, the Softmax IDE bridge). They are JSON Schema 2020-12, and each file's `$id`
-is `autoresearch/comms/<path>`, so a consumer registers them all and resolves the `$ref`s between
-them. The runtime validates with the same files (`autoresearch.comms.kinds`).
+Preston-role agent, the Softmax IDE bridge). They are JSON Schema 2020-12. Each file's `$id` is
+its path under `schemas/` (for example `comms/inbound/task.json`), so `$ref`s resolve by reading
+files from that directory (see "Validating with these schemas"). The runtime validates with the
+same files (`autoresearch.comms.kinds`).
 
 - `envelope.outbound.json`: the fields every outbound message has (agent to coach,
   `comms/outbox/<seq:08d>-<M-id>.json`). `../message.json` is an alias of it.
 - `envelope.inbound.json`: the fields every inbound message has (coach to agent,
   `comms/inbox/<id>.json`).
 - `outbound/<kind>.json`, `inbound/<kind>.json`: one schema per kind, the envelope plus that
-  kind's own fields. `x-autoresearch` holds the metadata the runtime reads: `direction`,
-  `summary`, and for inbound kinds `describe` (the briefing text) and `checks` (rules that need
-  the workspace, such as "these ids are published"; implemented in `autoresearch.comms.inbound`).
+  kind's own fields. `x-autoresearch` holds the metadata the runtime reads:
+  - `direction` and `summary` (one line, used in CLI help);
+  - outbound: `expects_response`, the default of that field (default false);
+  - inbound: `ack`, who acknowledges it once it is routed to a card: `card` (the card stages a
+    `note` in reply, and card finish requires it), `runtime` (the runtime publishes a note when
+    the card publishes) or `none`;
+  - inbound: `describe`, the briefing text, as format-string parts (a part is left out when a
+    field it names is missing or empty), and `checks`, rules that need the workspace (such as
+    "these ids are published"; implemented in `autoresearch.comms.inbound`).
 - `examples/<direction>/<kind>/*.json`: valid messages.
 - `examples/invalid/<direction>/<kind>/*.json`: invalid messages. Each has a `_why`, which is
   text that one of its problems contains.
 
 Versioning is additive within `ar-comms/0`: new optional fields and new kinds may appear.
-Readers ignore fields and kinds they do not know.
+Readers ignore fields and kinds they do not know. An inbound message's `schema` field is not
+checked.
+
+Anchored patterns end in `(?!\n)$`, because in Python's `re` (which `jsonschema` uses) `$` also
+matches before a final newline.
 
 ## Kinds
 
-| Kind | Direction | Meaning |
-| --- | --- | --- |
-| `help_request` | outbound | The agent is stuck or blocked and says what it tried. |
-| `highlight` | outbound | One notable event: a supported or falsified hypothesis, a verified claim, a promotion, a surprising result. |
-| `note` | outbound | A decision or status change a human should know; with in_reply_to, the acknowledgement of an inbound message. |
-| `question` | outbound | A choice where human judgement adds value; a reply is expected. |
-| `suggestion` | outbound | Something a human can do, such as raise credits or look at a replay; also each skill or doctrine proposal. |
-| `reply` | inbound | An answer to a published message (in_reply_to): a choice, text, or both. |
-| `seen` | inbound | Marks published messages as read by its author; nobody acknowledges it. |
-| `steer` | inbound | Direction that outranks the agent's plan; urgency now gets a P0 card, and it may propose a topic. |
-| `task` | inbound | A request for work: it becomes its own card request with these fields. |
+What each kind means is its schema's `x-autoresearch.summary` and `title`.
 
-The meaning column is each schema's `x-autoresearch.summary`, word for word.
+| Kind | Direction | Schema |
+| --- | --- | --- |
+| `help_request` | outbound | `outbound/help_request.json` |
+| `highlight` | outbound | `outbound/highlight.json` |
+| `note` | outbound | `outbound/note.json` |
+| `question` | outbound | `outbound/question.json` |
+| `suggestion` | outbound | `outbound/suggestion.json` |
+| `reply` | inbound | `inbound/reply.json` |
+| `seen` | inbound | `inbound/seen.json` |
+| `steer` | inbound | `inbound/steer.json` |
+| `task` | inbound | `inbound/task.json` |
+
+## Validating with these schemas
+
+With `jsonschema` 4.18 or later, in Python. Run it from the `autoresearch/` directory of an
+ide-mvp checkout, or set `SCHEMAS` to its `schemas/` directory:
+
+```python
+import json
+from pathlib import Path
+
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
+
+SCHEMAS = Path("schemas")  # each schema's $id is its path under this directory
+
+
+def retrieve(uri: str) -> Resource:
+    return Resource.from_contents(json.loads((SCHEMAS / uri).read_text(encoding="utf-8")))
+
+
+def problems(message: dict, schema: str) -> list[str]:
+    """schema: for example "comms/inbound/task.json", or "message.json" for any outbound message."""
+    validator = Draft202012Validator({"$ref": schema}, registry=Registry(retrieve=retrieve))
+    return [error.message for error in validator.iter_errors(message)]
+```
+
+`tests/contract/comms/test_kind_registry.py` runs this block, as it is written here, on the
+examples. Any tool that resolves a relative `$ref` against the referring file's path (ajv with
+the files loaded by path, check-jsonschema) resolves them the same way.
 
 ## Problems
 
@@ -46,7 +86,9 @@ at its own path, with that property's `x-message` (or `required`).
 ## The Softmax IDE bridge examples
 
 `examples/inbound/task/ide-bridge-task.json` and `examples/inbound/steer/ide-bridge-stop.json`
-are the exact bytes the bridge's `deliver()` writes: `InboundTask(...).model_dump_json()` and
+(and `examples/inbound/task/ide-bridge-task-fractional-seconds.json`, a `created` with
+microseconds as the bridge's default `datetime.now(UTC)` gives) are the exact bytes the bridge's
+`deliver()` writes: `InboundTask(...).model_dump_json()` and
 `InboundSteer(...).model_dump_json()`, made with pydantic 2.12.3 (the version in metta's
 `uv.lock`) from `packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py` at
 metta main `86b1a3c5e0348b3e72980fa6230f005318e634fa`. The bridge file last changed in
@@ -64,13 +106,17 @@ that closes a bridge task.
 ## Adding a kind
 
 1. Write `outbound/<kind>.json` or `inbound/<kind>.json`: copy a kind of the same direction, set
-   `$id`, `kind.const`, and `x-autoresearch` (`direction`, `summary`; inbound: `describe`, and
-   `checks` if it needs the workspace). Give each rule an `x-message`.
+   `$id`, `kind.const`, and `x-autoresearch` (`direction`, `summary`; outbound:
+   `expects_response` if true; inbound: `ack`, `describe`, and `checks` if it needs the
+   workspace). Give each rule an `x-message`.
 2. Add at least one valid example under `examples/<direction>/<kind>/`, and an invalid example
    with a `_why` for each rule.
 3. Inbound only: add a routing handler to `HANDLERS` in `src/autoresearch/runtime/routing.py`,
    and the implementation of any new check to `CHECKS` in `src/autoresearch/comms/inbound.py`.
-4. Add the kind's row to the table above, to `doctrine/communication.md` (and bump
-   `doctrine/VERSION`), and, if outbound, to `skills/autoresearch/communicate/SKILL.md`.
+4. Add the kind's row to the table above and to `doctrine/communication.md` (its "Reply
+   expected" or "Acknowledge it" column must agree with the schema), and bump
+   `doctrine/VERSION` so installed profiles re-seed `AGENTS.md`. Outbound: add a row to
+   `skills/autoresearch/communicate/SKILL.md`. Inbound with `ack: card`: name it in that
+   skill's "Acknowledge each" step.
 5. Run `uv run --locked pytest tests/contract/comms/test_kind_registry.py`. It fails on any
    place that is missing the kind, and on any kind a document lists that has no schema.

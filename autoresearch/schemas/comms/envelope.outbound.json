@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "autoresearch/comms/envelope.outbound.json",
+  "$id": "comms/envelope.outbound.json",
   "title": "Outbound message envelope, schema ar-comms/0 (Overview C5, System Design 7): the fields every outbound kind has. Staged by a card worker at comms/staged/<M-id>.json, published by the runtime at comms/outbox/<seq:08d>-<M-id>.json. The seq in the file name is an integer equal to the message's seq (a reader such as the Softmax IDE bridge skips files by it), and title and body are always strings. Versioning is additive within ar-comms/0: writers may add optional fields and new kinds, and readers must ignore unknown fields and unknown kinds. Each kind is one schema, outbound/<kind>.json (index: README.md). This envelope does not check the kind, so a reader that validates with it accepts a newer kind; writers validate against the kind's own schema (autoresearch.comms.kinds). Status (open, answered, withdrawn, expired) is never stored: it is derived from later messages and inbound replies (autoresearch.comms.inbound.derived_status).",
   "type": "object",
   "additionalProperties": true,
@@ -10,7 +10,7 @@
   ],
   "properties": {
     "schema": {"const": "ar-comms/0"},
-    "id": {"type": "string", "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "id": {"type": "string", "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
     "created": {"description": "ISO 8601 time the message was written.", "type": "string", "minLength": 1},
     "from": {"enum": ["research-agent", "runtime"]},
     "iteration": {"description": "Iteration (journal iteration) of the card run that wrote it; null if none (runtime messages).", "type": ["integer", "null"], "minimum": 0},
@@ -28,7 +28,7 @@
           "rev": {
             "description": "Workspace commit the reference is read at. A staged message may use \"@result\" (the commit its card merges as); the publisher replaces it with that merge commit.",
             "type": "string",
-            "pattern": "^(@result|[0-9a-f]{40})$"
+            "pattern": "^(@result|[0-9a-f]{40})(?!\\n)$"
           },
           "role": {"enum": ["subject", "evidence", "context"]},
           "note": {"type": "string"}
@@ -38,11 +38,11 @@
     "priority": {"description": "Same scale as card priority: P0 (most urgent) to P5.", "enum": ["P0", "P1", "P2", "P3", "P4", "P5"]},
     "expects_response": {"type": "boolean"},
     "thread": {"type": "string", "minLength": 1},
-    "in_reply_to": {"description": "Id of the message (M-id) or inbound message (an I-id, or an external agent's own id such as <player id>:task:<key>) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
-    "supersedes": {"description": "Id of an earlier message this one replaces (that message becomes withdrawn).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "in_reply_to": {"description": "Id of the message (M-id) or inbound message (an I-id, or an external agent's own id such as <player id>:task:<key>) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(?!\\n)$"},
+    "supersedes": {"description": "Id of an earlier message this one replaces (that message becomes withdrawn).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
     "expires": {"description": "ISO 8601 time after which an unanswered message is expired; null for never.", "type": ["string", "null"], "minLength": 1},
     "card": {"description": "Outbox only: the task id of the card whose handoff published it (set by the publisher, never by the worker); a reply's thread is routed by it.", "type": "string", "minLength": 1},
     "seq": {"description": "Outbox only: the gap-free sequence number.", "type": "integer", "minimum": 1},
-    "published_rev": {"description": "Outbox only: canonical commit the message was published at (for a staged message, the merge commit that brought it in).", "type": "string", "pattern": "^[0-9a-f]{40}$"}
+    "published_rev": {"description": "Outbox only: canonical commit the message was published at (for a staged message, the merge commit that brought it in).", "type": "string", "pattern": "^[0-9a-f]{40}(?!\\n)$"}
   }
 }
