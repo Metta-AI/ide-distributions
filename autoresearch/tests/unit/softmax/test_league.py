@@ -12,7 +12,6 @@ from autoresearch.cli import main
 from autoresearch.softmax_tool.client import SoftmaxClient
 from autoresearch.softmax_tool.fake import LEAGUE_HOUSE, LEAGUE_POLICIES, FakeSoftmax
 from autoresearch.softmax_tool.league import episode_rows
-from autoresearch.softmax_tool.platform_cli import SoftmaxCliError
 
 from .conftest import LEAGUE_ID, completed, synthetic
 
@@ -129,11 +128,14 @@ def test_real_league_episodes_read_rounds_then_episodes(env, runner):
     episodes = sm.league_episodes(LEAGUE_ID, 10)
     assert len(episodes) == 1  # the failed episode request is skipped
     episode = episodes[0]
-    assert episode["episode_id"] == EREQ and episode["seed"] == 4242
-    assert episode["game_version"] == "65" and episode["round_id"] == ROUND
+    # The seed is results.json's per-episode seed (the detail's seed is null, and
+    # game_config.seed is a config value); the version is the detail's coworld_version.
+    assert episode["episode_id"] == EREQ and episode["seed"] == 1450878938
+    assert episode["game_version"] == "2026.10.7.2" and episode["round_id"] == ROUND
     assert [s["policy_version_id"] for s in episode["seats"]] == ["hero:v7", "rival:v4"]
-    assert episode["results"]["episodes"][1]["seat"] == 1
+    assert episode["results"]["scores"] == [61, 44]
     argvs = runner.argvs()
+    assert not any(a[:2] == ["coworld", "show"] for a in argvs)
     assert [
         "coworld",
         "rounds",
@@ -154,11 +156,12 @@ def test_real_league_episodes_stop_at_limit(env, runner):
     assert len(sm.league_episodes(LEAGUE_ID, 1)) == 1
 
 
-def test_real_episode_results_403_names_the_team_only_route(env, runner):
-    denied = completed(stderr="Error: Request failed (403) for /v2/...", returncode=1)
-    sm = SoftmaxClient(env, run=league_runner(runner, denied))
-    with pytest.raises(SoftmaxCliError, match="team-only"):
-        sm.league_episodes(LEAGUE_ID, 5)
+def test_real_version_falls_back_to_coworld_show(env, runner):
+    detail = json.loads(synthetic("coworld_episode_detail.json"))
+    del detail["coworld_version"]
+    league_runner(runner).on("coworld", "episodes", EREQ, response=completed(json.dumps(detail)))
+    [episode] = SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 5)
+    assert episode["game_version"] == "65"
 
 
 def test_real_standings_walk_the_division_ladder(env, runner):

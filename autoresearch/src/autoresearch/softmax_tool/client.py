@@ -15,12 +15,15 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
 - ``league_episodes``: ``coworld rounds --league L --status completed --json`` (cursor pages) →
   ``coworld episodes --round R --json`` (cursor pages of ``V2EpisodeRequestSummary``; only
   ``status == "completed"`` rows) → per episode ``coworld episodes <ereq> --json``
-  (``V2EpisodeRequestRow``: ``seed``, ``coworld_id``, ``participants`` with ``position`` and the
-  ``<name>:v<N>`` ``label``) and ``coworld episode-results <ereq>`` (prints the raw results JSON;
-  it has no ``--json`` flag). The game version is ``coworld show <coworld_id> --json``
-  ``version``, cached per Coworld. There is no league-wide episode listing, so episodes are
-  reached through rounds. Caveat: coworld's COOKBOOK lists ``episode-results`` as team-only
-  (403 for other accounts); a 403 is reported as ``SoftmaxCliError`` naming that.
+  (``V2EpisodeRequestRow``: ``coworld_id``, ``coworld_version``, ``participants`` with
+  ``position`` and the ``<name>:v<N>`` ``label``) and ``coworld episode-results <ereq>``
+  (prints the raw results JSON; it has no ``--json`` flag). There is no league-wide episode
+  listing, so episodes are reached through rounds. A Player credential can read all of these
+  for other players' league episodes (live probe, ``docs/plans/findings/softmax-client.md``).
+- Seed: the per-episode seed is ``results["seed"]``. The detail row's top-level ``seed`` was
+  null live, and ``game_config.seed`` is a config value, not the episode's seed.
+- Game version: the detail's ``coworld_version``; only when it is missing,
+  ``coworld show <coworld_id> --json`` ``version`` (cached per Coworld).
 - ``standings``: ``coworld results <league_id> --json`` (the division ladder:
   ``[{id, name, level, member_count}]``) → ``coworld results <div_id> --json`` per division
   (``LeaderboardEntryPublic``: ``rank``, ``player_id``, ``player_name``, ``score``,
@@ -187,26 +190,24 @@ class SoftmaxClient:
     def _league_episode(self, episode_id: str, versions: dict[str, str]) -> dict:
         detail = self._cli.run_json("coworld", ["episodes", episode_id])
         coworld_id = detail.get("coworld_id")
-        if coworld_id and coworld_id not in versions:
-            versions[coworld_id] = self._cli.run_json("coworld", ["show", coworld_id])["version"]
-        try:
-            raw = self._cli.run("coworld", ["episode-results", episode_id]).stdout
-        except SoftmaxCliError as error:
-            if "403" in str(error):
-                raise SoftmaxCliError(
-                    f"episode-results {episode_id} is not readable with this credential "
-                    f"(coworld documents it as team-only): {error}"
-                ) from None
-            raise
+        version = detail.get("coworld_version")
+        if not version and coworld_id:
+            if coworld_id not in versions:
+                versions[coworld_id] = self._cli.run_json("coworld", ["show", coworld_id])[
+                    "version"
+                ]
+            version = versions[coworld_id]
+        raw = self._cli.run("coworld", ["episode-results", episode_id]).stdout
         try:
             results = json.loads(raw)
         except json.JSONDecodeError as error:
             raise SoftmaxCliError(f"episode-results {episode_id} is not JSON: {error}") from None
+        seed = results.get("seed") if isinstance(results, dict) else None
         return {
             "episode_id": episode_id,
             "round_id": detail.get("round_id"),
-            "seed": detail.get("seed"),
-            "game_version": versions.get(coworld_id) if coworld_id else None,
+            "seed": seed if seed is not None else detail.get("seed"),
+            "game_version": str(version).strip() if version else None,
             "coworld_id": coworld_id,
             "seats": [_seat(p) for p in sorted(detail["participants"], key=_position)],
             "results": results,
