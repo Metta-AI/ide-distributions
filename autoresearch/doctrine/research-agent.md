@@ -68,4 +68,9 @@ D-24. **Never edit generated files:** `kb/index.md`, backlinks, and contradictio
 
 D-25. **The champion STRATEGY.md changes only through a promotion.**
 
-D-26. **A tool fault is not a result: escalate it, do not retry it.** A tool fault is a binding, CLI, or gate that raises an exception, reports `errored`, or fails in a way unrelated to the policy or the research content. A gate that `failed` or an experiment that lost is a research result, not a tool fault. You cannot edit the installed tools, and a retry repeats the same failure. On a tool fault: do not retry and do not work around it. Record it in the journal. Send a `help_request` that names the command, the error text, and the refs or paths. Then block the card with the native `kanban_block` tool and a reason that starts with the literal prefix `tool-fault:`. The runtime does not requeue such a card.
+D-26. **A tool fault is not a result: escalate it, do not retry it.** A tool fault is a failure of our own tooling, not of the policy or the research. Signs: a traceback or exception from a binding or CLI (for example `FileNotFoundError` in a build), a gate that reports `errored`, or a CLI envelope with reason `tool_missing`. A gate that `failed`, an experiment that lost, an `identity` refusal, and a retryable `platform` refusal are not tool faults. You cannot edit the installed tools, and a retry repeats the same failure. On a tool fault, do not retry and do not work around it. Run this sequence, with this order:
+1. Record the fault in the journal (its Decisions section) and set its outcome to `blocked`.
+2. Stage a `help_request` that names the command, the error text, and the refs or paths.
+3. Run `card finish --outcome blocked`. This merges the journal and the help request.
+4. Call the native `kanban_block` tool with `reason` `tool-fault: <command>: <error>` and `kind` `needs_input`, instead of `kanban_complete`.
+The runtime does not requeue or repair a card with a `tool-fault:` reason.

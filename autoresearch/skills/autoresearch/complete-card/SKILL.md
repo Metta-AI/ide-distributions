@@ -79,7 +79,7 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    | `partial` | The unit stopped at a safe point and the rest has a follow-up, for example an experiment that waits as `awaiting-credits`. |
    | `dropped` | The unit is not worth doing any more (it is obsolete or another card covers it). The journal says why. |
    | `failed` | The unit could not be done. The journal says why. |
-   | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. For a tool fault, follow D-26: the block reason starts with `tool-fault:`. |
+   | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. For a tool fault, see "Tool fault" below. |
 
    Set the outcome only right before `card finish`: after it the journal is frozen. To drop a
    different card that has not started, a planning card uses `queue request drop` (see
@@ -103,6 +103,21 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    Serial fallback: when the `kanban_complete` tool does not exist, `card finish` alone
    ends the card.
 7. Stop. After `card finish` the plugin blocks every file write in this card.
+
+## Tool fault
+
+A tool fault (D-26) is a traceback, an `errored` gate, or a `tool_missing` failure of our own
+tooling. It is not a research result. Do not retry it. In this order:
+
+1. Write the fault in the journal's Decisions section and set the journal outcome to
+   `blocked`.
+2. Stage a `help_request` (see `communicate`) with the command, the error text, and the refs
+   or paths.
+3. `"$AUTORESEARCH_CLI" card finish --outcome blocked`. This merges the journal and the help
+   request.
+4. Call the native `kanban_block` tool instead of `kanban_complete`, with
+   `reason` `tool-fault: <command>: <error>` and `kind` `needs_input`. The runtime then
+   neither requeues nor repairs the card.
 
 ## Failure handling
 

@@ -55,9 +55,11 @@ Doctrine upheld: D-03, D-06, D-11.
   example after a credit denial). Rerun `xp create` with the attempt the message names. It
   creates only the missing requests. A new attempt would repeat every request.
 - Reason `bad_attempt`: the attempt skips a number. Use the attempt the message names.
-- Reason `platform`, or a crash mid-batch: run the same `xp create` command again with the
+- Reason `attempt_not_needed`: the latest attempt is complete and nothing failed. Do not
+  relaunch; the runtime makes the review card.
+- Reason `platform` (a refusal, not a tool fault), or a crash mid-batch: run the same `xp create` command again with the
   same `--batch` and `--attempt`. It creates only what is missing. After a second failure,
   finish `partial` and say so in the journal.
 - Lost handles: `softmax xp recover <E-id>` lists every request tagged for the experiment,
   and `xp create` backfills any missing from the record.
-- A binding, CLI, or gate raises an exception, reports `errored`, or fails for a reason unrelated to the policy or research content (a tool fault): do not retry it. Follow D-26: journal it, send a `help_request`, and block the card with a reason that starts with `tool-fault:`.
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `complete-card`, "Tool fault").

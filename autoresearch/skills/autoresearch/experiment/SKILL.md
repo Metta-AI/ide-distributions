@@ -98,4 +98,4 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 - If you cannot finish the build in this card, request a "Build <E-id>" card as in the
   `needs_calibration` case and finish `partial`. The runtime makes a build card by itself
   only when it rebuilds a lost board.
-- A binding, CLI, or gate raises an exception, reports `errored`, or fails for a reason unrelated to the policy or research content (a tool fault): do not retry it. Follow D-26: journal it, send a `help_request`, and block the card with a reason that starts with `tool-fault:`.
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `complete-card`, "Tool fault").

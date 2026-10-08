@@ -34,7 +34,7 @@ For a skill proposal, add the ref `ar://skill-proposal/<name>`.
 
 1. Findings first (D-19). Put the answer in the first sentence. Do not start with background. An unanswered question stays owed.
 2. Teach before you ask (D-19). Do not ask for a strategic choice that depends on mechanics you have not explained. Explain the mechanics in the same message, or point to the claim that explains them.
-3. Keep the backstage backstage (D-19). Do not describe tool errors, retries, or internal steps unless they change what the human must do.
+3. Keep the backstage backstage (D-19). Do not describe tool errors, retries, or internal steps unless they change what the human must do. A tool fault (D-26) always does.
 4. Never send an empty message (D-19). Every message needs a clear title and a body with content.
 5. Point, do not restate (D-20). Refer to entities with `ar://` refs. Do not copy their content into the body.
 6. Send one `highlight` for each event that is listed in the `highlight` row above. Do not send a second one for the same event. These highlight events are the events that D-20 means by "§5.7".

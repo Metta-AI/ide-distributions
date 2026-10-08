@@ -40,6 +40,13 @@ def test_every_rule_code_used_in_src_exists():
     assert used <= set(rule_ids())
 
 
+def test_tool_fault_rule_names_the_exact_block_call():
+    text = (DOCTRINE / "research-agent.md").read_text(encoding="utf-8")
+    rule = text[text.index("D-26.") :]
+    for required in ("kanban_block", "needs_input", "tool-fault:", "card finish --outcome blocked"):
+        assert required in rule
+
+
 def test_communication_lists_exactly_the_outbound_kinds():
     text = (DOCTRINE / "communication.md").read_text(encoding="utf-8")
     section = text.split("## The five outbound kinds")[1].split("\n## ")[0]
