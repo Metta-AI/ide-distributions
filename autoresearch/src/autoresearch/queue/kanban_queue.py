@@ -46,6 +46,8 @@ class KanbanError(RuntimeError):
         self.stderr = stderr
 
 
+# Substring of Hermes' fence error (kanban_db.py:147, raised from write_txn at
+# kanban_db_connect.py:~1201 and from the CLI guard at kanban.py:153).
 _DELEGATE_FENCE_MESSAGE = "cannot mutate Kanban"
 
 
@@ -107,32 +109,64 @@ class KanbanQueue:
                 raise KanbanError(error.argv, f"no such task: {task_id}") from None
             runs = self._read_board_db(error.argv, _SELECT_RUNS, (task_id,))
             for run in runs:
-                run["metadata"] = json.loads(run["metadata"]) if run["metadata"] else None
+                run["metadata"] = self._tolerant_json_object(run["metadata"])
             return {"task": tasks[0], "runs": runs}
 
+    @staticmethod
+    def _tolerant_json_object(text: str | None) -> dict | None:
+        """Run metadata is free-form text; anything that is not a JSON object becomes None."""
+        try:
+            value = json.loads(text) if text else None
+        except ValueError:
+            return None
+        return value if isinstance(value, dict) else None
+
     def _board_db_path(self) -> Path:
-        """``<root>/kanban/boards/<slug>/kanban.db`` (hermes-facts A2); root as Hermes resolves it."""
-        if override := self._env.get("HERMES_KANBAN_HOME", "").strip():
-            root = Path(override).expanduser()
-        elif home := self._env.get("HERMES_HOME", "").strip():
-            home_path = Path(home).expanduser()
-            root = home_path.parent.parent if home_path.parent.name == "profiles" else home_path
-        else:
-            root = Path.home() / ".hermes"
-        if self.board == "default":
+        """The board DB path, resolved like Hermes ``kanban_db_path`` (kanban_db.py:495-510).
+
+        ``HERMES_KANBAN_DB`` (injected into every dispatcher worker) wins; else the default
+        board is ``<root>/kanban.db``, any other board ``<root>/kanban/boards/<slug>/kanban.db``
+        (hermes-facts A2).
+        """
+        if pinned := self._env.get("HERMES_KANBAN_DB", "").strip():
+            return Path(pinned).expanduser()
+        root = self._hermes_root()
+        slug = self.board.strip().lower()
+        if slug == "default":
             return root / "kanban.db"
-        return root / "kanban" / "boards" / self.board / "kanban.db"
+        return root / "kanban" / "boards" / slug / "kanban.db"
+
+    def _hermes_root(self) -> Path:
+        """``HERMES_KANBAN_HOME``, else Hermes ``get_default_hermes_root()`` (hermes_constants.py:217).
+
+        Replicated, not imported: Hermes is a separate install. Non-Windows branch only.
+        """
+        if override := self._env.get("HERMES_KANBAN_HOME", "").strip():
+            return Path(override).expanduser()
+        native_home = Path.home() / ".hermes"
+        env_home = self._env.get("HERMES_HOME", "").strip()
+        if not env_home:
+            return native_home
+        home = Path(os.path.expanduser(os.path.expandvars(env_home)))
+        try:
+            home.resolve().relative_to(native_home.resolve())
+        except ValueError:  # custom root: <root>/profiles/<name> -> <root>, else HERMES_HOME itself
+            return home.parent.parent if home.parent.name == "profiles" else home
+        return native_home
 
     def _read_board_db(self, argv: list[str], query: str, params: tuple = ()) -> list[dict]:
         db_path = self._board_db_path()
         if not db_path.exists():
             raise KanbanError(argv, f"board {self.board!r} does not exist")
-        connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
         try:
-            return [dict(row) for row in connection.execute(query, params)]
-        finally:
-            connection.close()
+            connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+            connection.row_factory = sqlite3.Row
+            try:
+                return [dict(row) for row in connection.execute(query, params)]
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            raise KanbanError(argv, f"read-only board DB read failed: {error}") from error
 
     @staticmethod
     def _parse_spec(task: dict) -> CardSpec:

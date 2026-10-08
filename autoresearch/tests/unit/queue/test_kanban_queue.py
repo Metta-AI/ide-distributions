@@ -373,3 +373,66 @@ def test_other_list_failures_are_not_swallowed(fake, queue):
     fake.reply("list", code=1, stderr="kanban: database is locked")
     with pytest.raises(KanbanError, match="locked"):
         queue.list()
+
+
+def test_board_db_path_follows_hermes_resolution(tmp_path, monkeypatch):
+    for name in ("HERMES_KANBAN_DB", "HERMES_KANBAN_HOME", "HERMES_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "user"))
+    native = tmp_path / "user" / ".hermes"
+    custom = tmp_path / "custom"
+
+    def db_path(board="b1", **env):
+        for name, value in env.items():
+            monkeypatch.setenv(name, str(value))
+        try:
+            return KanbanQueue(board, "p")._board_db_path()
+        finally:
+            for name in env:
+                monkeypatch.delenv(name)
+
+    assert db_path() == native / "kanban" / "boards" / "b1" / "kanban.db"
+    assert db_path("Default ") == native / "kanban.db"
+    assert db_path("B1") == native / "kanban" / "boards" / "b1" / "kanban.db"
+    # a profile dir under the native home, or a non-profile dir under it, resolves to the native root
+    assert db_path(HERMES_HOME=native / "profiles" / "x") == db_path()
+    assert db_path(HERMES_HOME=native / "other") == db_path()
+    # outside the native home: <root>/profiles/<name> -> <root>, anything else is the root itself
+    assert (
+        db_path(HERMES_HOME=custom / "profiles" / "x")
+        == custom / "kanban" / "boards" / "b1" / "kanban.db"
+    )
+    assert (
+        db_path(HERMES_HOME=custom / "plain")
+        == custom / "plain" / "kanban" / "boards" / "b1" / "kanban.db"
+    )
+    # HERMES_KANBAN_HOME beats HERMES_HOME; HERMES_KANBAN_DB beats everything
+    kanban_home = tmp_path / "kh"
+    assert db_path(HERMES_HOME=custom, HERMES_KANBAN_HOME=kanban_home) == (
+        kanban_home / "kanban" / "boards" / "b1" / "kanban.db"
+    )
+    pinned = tmp_path / "pinned.db"
+    assert db_path(HERMES_KANBAN_HOME=kanban_home, HERMES_KANBAN_DB=pinned) == pinned
+
+
+def test_delegate_child_reads_the_pinned_db(fenced, tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "HERMES_KANBAN_DB", str(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
+    )
+    queue = KanbanQueue("some-other-board", "prof", hermes_home=tmp_path / "unrelated")
+    assert {card.task_id for card in queue.list()} == {"t_ready", "t_run"}
+
+
+def test_malformed_run_metadata_and_corrupt_db_are_tolerated(fenced, tmp_path):
+    db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
+    db.execute("INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json')")
+    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]')")
+    db.commit()
+    db.close()
+    assert [r.outcome for r in fenced.get("t_ready").runs] == ["completed", "completed"]
+
+
+def test_unreadable_board_db_raises_kanban_error(fenced, tmp_path):
+    (tmp_path / "hermes-home/kanban/boards/board1/kanban.db").write_text("not a database")
+    with pytest.raises(KanbanError, match="board DB read failed"):
+        fenced.list()
