@@ -83,14 +83,18 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
   - `needs_calibration`: no noise record for the current game version. Do not compute a
     design by hand. Store the request on the experiment so a later card can freeze it:
     `"$AUTORESEARCH_CLI" records update <E-id> --patch-file .scratch/design-patch.json`
-    with `{"evaluation_design_request": <the request>}`. Finish `partial`; the runtime runs a
-    calibration card first (C10), and the "Build E-…" card freezes the design
-    (`build-upload` step 0).
+    with `{"evaluation_design_request": <the request>}`. Still do steps 10 and 11 (the
+    candidate STRATEGY and the hypothesis under-test), then request the build card; its
+    `build-upload` step 0 freezes the design, and admission holds it until the calibration
+    card has written the noise record (C10):
+    `"$AUTORESEARCH_CLI" queue request create --title "Build <E-id>" --mode experimentation --why "design frozen after calibration; build and upload" --ref ar://experiment/<E-id> --ref ar://hypothesis/<H-id>`
+    Then finish `partial`.
   - `bad_request`: the message names the problem (an empty primary list, a metric that is
     also a performance guardrail, fewer seeds than `n_min`). Fix the request and rerun.
   - `version_mismatch`: the experiment's `environment.game_version` is not the current
     version. Update it with `records update` (still `designed`) and rerun.
   - `not_designed`: the design is already frozen. Never change it.
 - The hypothesis is not in the card refs: do not change it. Request a card that names it.
-- If you cannot finish the build in this card, finish `partial`. The runtime's rebuild path
-  makes a "Build E-…" card for a `designed` experiment.
+- If you cannot finish the build in this card, request a "Build <E-id>" card as in the
+  `needs_calibration` case and finish `partial`. The runtime makes a build card by itself
+  only when it rebuilds a lost board.
