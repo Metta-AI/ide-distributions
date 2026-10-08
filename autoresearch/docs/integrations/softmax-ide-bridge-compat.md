@@ -6,6 +6,12 @@ Checked on 2026-10-08 against `autoresearch/docs/integrations/softmax-ide-bridge
 bridge-shaped files into `comms/inbox/` the way the bridge does (whole file, then rename, no commit),
 runs `route_all`, finishes the card, and reads `comms/outbox/` the way the bridge does.
 
+**The contract is published** in [`schemas/comms/`](../../schemas/comms/README.md): one JSON Schema
+per message kind on two envelopes, with valid and invalid example messages. The bridge's two messages
+are in it as examples, byte for byte what `bridge.py`'s `deliver()` writes (provenance in that README),
+and the contract test above writes exactly those files. The bridge can validate against these schemas
+from a pinned ide-mvp commit instead of keeping its own copies of the shapes.
+
 **Verdict: compatible**, after the fixes on our side listed below (branch
 `jboggs/autoresearch-v0-impl`). One field the bridge sends is outside §7 (`on_behalf_of`), and the
 acknowledgement has a few behaviours the bridge should know about (see "Notes for the bridge").
@@ -24,7 +30,7 @@ that contract:
 | Bridge behaviour | Before | Now |
 |---|---|---|
 | Writes `comms/inbox/<id>.json` itself and never commits | Routing read only files committed at HEAD, so bridge messages were never seen | queue-keeper adopts direct writes each run (`comms.inbound.adopt_direct_writes`): a valid regular file is committed with the exact bytes it validated; an invalid one (or a symlink, or a file whose owner is not allowed) is left as it is, gets one runtime `note` in reply to its id, and its id is recorded in `.supervisor/ledger/inbound-rejected/` for good |
-| Ids `<player_id>:task:<key>` and `<player_id>:stop:<key>` | Delivery records and `in_reply_to` accepted only `I-<ULID>` | An inbound id is any `[A-Za-z0-9][A-Za-z0-9._:-]{0,199}` without `..` (`INBOUND_ID`), except ids shaped like an outbox key (`M-...` or all digits); `schemas/inbound.json` and `schemas/message.json` follow it |
+| Ids `<player_id>:task:<key>` and `<player_id>:stop:<key>` | Delivery records and `in_reply_to` accepted only `I-<ULID>` | An inbound id is any `[A-Za-z0-9][A-Za-z0-9._:-]{0,199}` without `..` (`INBOUND_ID`), except ids shaped like an outbox key (`M-...` or all digits); `schemas/inbound.json`, `schemas/comms/envelope.inbound.json` and the outbound envelope (`schemas/comms/envelope.outbound.json`, alias `schemas/message.json`) follow it |
 | `author: coach:<player_id>` | The author rule (consumer name) rejected `:` | `:` is allowed |
 | `created`, no `received_at` | Routing required `received_at` | `created` is required and kept as the writer's claim; the delivery record's `received_at` is the time queue-keeper received the file (lateness uses it) |
 | Waits while `comms/outbox/` is missing | The outbox appeared only with the first publication, which can be hours after install | Bootstrap creates `comms/inbox/` and `comms/outbox/` on every queue-keeper run |
@@ -37,8 +43,8 @@ that contract:
   harmless, but the bridge should stop sending it.
 - **The bridge doc's "What is not exercised yet" section is stale.** It says no runtime consumes the
   inbox and that the message models wait for "the distribution publishes its schema and contract
-  tests". The runtime now consumes direct writes, and the schemas (`schemas/message.json`,
-  `schemas/inbound.json`) and the contract test above exist.
+  tests". The runtime now consumes direct writes, and the published schemas (`schemas/comms/`)
+  and the contract test above exist.
 
 ## Checked and matching
 
@@ -51,7 +57,7 @@ that contract:
 - Outbox files are `comms/outbox/<seq:08d>-<M-id>.json` (zero-padded to 8 digits). The `seq` in the
   name is the `seq` in the file. Every message has `id`, `seq`, `kind`, `title` and `body`, with the
   meanings the bridge assumes. **`in_reply_to` is present only when the message answers something**;
-  it is absent, not `null`, otherwise (`schemas/message.json`: optional string; `thread` is the same).
+  it is absent, not `null`, otherwise (`schemas/comms/envelope.outbound.json`: optional string; `thread` is the same).
   On the box today 4 of 9 outbox messages have it. The bridge's `Outbound` model must default it to
   `None`.
 - Task acknowledgement: when the task's card is published, the runtime publishes a `note`

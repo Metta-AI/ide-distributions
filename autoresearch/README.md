@@ -223,6 +223,9 @@ agent's own workers run as the workspace user, and the plugin blocking their inb
 best effort. See
 [softmax-ide-bridge-compat.md](docs/integrations/softmax-ide-bridge-compat.md).
 
+The message contract (every outbound and inbound kind, as JSON Schema with example messages)
+is [`schemas/comms/`](schemas/comms/README.md); that README also says how to add a kind.
+
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a
 `keeper_step_failed` signal. The agent pauses itself when preflight fails (identity,
 expired credential, low disk, low OpenRouter credit, wrong host Kanban config). It sends

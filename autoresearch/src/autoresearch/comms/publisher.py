@@ -44,7 +44,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoresearch.comms import delivery
+from autoresearch.comms import delivery, kinds
 from autoresearch.comms.envelope import (
     FROM_AGENT,
     FROM_RUNTIME,
@@ -429,17 +429,21 @@ def _task_acknowledgement(
 
 def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = False) -> None:
     """After a handoff's messages are published: move each routed inbound this card is
-    responsible for to ``acknowledged`` (C11). A ``reply``/``steer`` is acknowledged by the
-    card's own published ``note`` with ``in_reply_to`` (its ``card`` must be this handoff's
-    card; validation required the note); a ``task``
-    by a runtime note published here. One the card did not answer stays ``routed``; routing
+    responsible for to ``acknowledged`` (C11), as its kind's ``x-autoresearch.ack`` says
+    (``comms.kinds``). ``card`` (``reply``, ``steer``): the card's own published ``note`` with
+    ``in_reply_to`` (its ``card`` must be this handoff's card; validation required the note).
+    ``runtime`` (``task``): a runtime note published here. ``none``: left as it is. One the
+    card did not answer stays ``routed``; routing
     returns it to the planning backlog once the card's request is closed. Under the lock;
     idempotent."""
     changed = []
     for inbound_id, record in delivery.records(canonical).items():
         if record["state"] != "routed" or not _is_responsible(record, handoff):
             continue
-        if record["kind"] == "task":
+        ack = kinds.get("inbound", record["kind"]).ack
+        if ack == "none":
+            continue
+        if ack == "runtime":
             backlog = record["responsible"]["backlog"]
             message_id = _task_acknowledgement(
                 canonical, inbound_id, handoff, backlog, allow_no_remote

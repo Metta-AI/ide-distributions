@@ -12,7 +12,8 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
    (``comms.delivery``; state ``received``), with ``thread`` (the thread of the outbound
    message it answers: its ``thread``, else its id) and ``late`` (a reply after that
    message's ``expires``). One commit.
-2. **Route** each ``received`` record, one commit per message:
+2. **Route** each ``received`` record, one commit per message, by its kind's handler
+   (``HANDLERS``, one per inbound kind of the registry ``comms.kinds``):
 
    - ``seen``: nothing to do (the seen ledger was written on submission) -> ``acknowledged``.
    - ``task``: checked again (shape, and its refs must resolve at HEAD). Invalid -> a runtime
@@ -62,7 +63,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoresearch.comms import delivery
+from autoresearch.comms import delivery, kinds
 from autoresearch.comms.envelope import FROM_RUNTIME
 from autoresearch.comms.inbound import (
     adopt_direct_writes,
@@ -128,33 +129,6 @@ def _checkpoint(step: str) -> None:
 def _one_line(text: str, limit: int) -> str:
     line = " ".join(str(text).split())
     return line if len(line) <= limit else line[: limit - 1] + "…"
-
-
-def _describe(message: dict) -> str:
-    """The full text of an inbound message for a briefing."""
-    kind = message["kind"]
-    if kind == "reply":
-        parts = [f"Reply to {message['in_reply_to']}."]
-        if message.get("choice"):
-            parts.append(f"Choice: {message['choice']}.")
-        if message.get("text"):
-            parts.append(str(message["text"]))
-        return " ".join(parts)
-    if kind == "steer":
-        text = f"Steer (urgency {message['urgency']}): {message['text']}"
-        topic = message.get("proposed_topic")
-        if isinstance(topic, dict):
-            text += (
-                f"\n\nProposed topic: {topic.get('title')} — {topic.get('objective')} "
-                f"(priority {topic.get('priority')})"
-            )
-        return text
-    if kind == "task":
-        return (
-            f"Task: {message['title']} (mode {message['mode']}, priority "
-            f"{message['priority']}). Why: {message['why']}"
-        )
-    return f"{kind}: {message.get('ids')}"
 
 
 def _committed_json_dir(canonical: Path, directory: str) -> list[dict]:
@@ -261,7 +235,7 @@ def _write_backlog_entry(canonical: Path, message: dict) -> Path:
         "source": "inbound",
         "kind": message["kind"],
         "author": message.get("author"),
-        "summary": _one_line(_describe(message), SUMMARY_LIMIT),
+        "summary": _one_line(kinds.describe(message), SUMMARY_LIMIT),
         "proposed_topic": message.get("proposed_topic"),
         "created_at": now_iso(),
     }
@@ -373,8 +347,7 @@ def planning_owned(canonical: Path, queue: Queue) -> bool:
 
 
 def _task_problems(canonical: Path, message: dict) -> list[str]:
-    payload = {key: message.get(key) for key in ("title", "mode", "why", "refs", "priority")}
-    problems = inbound_problems(canonical, "task", payload, message.get("author"))
+    problems = inbound_problems(canonical, message)
     if problems:
         return problems
     for uri in message["refs"]:
@@ -477,28 +450,37 @@ def _task_spec(message: dict) -> CardSpec:
     )
 
 
-def _route_one(
+def _route_seen(
     ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
 ) -> list[Action]:
-    canonical, kind, inbound_id = ctx.canonical, record["kind"], record["id"]
-    if kind == "seen":
-        done = delivery.moved(record, "acknowledged", note="seen recorded")
-        commit_and_push(
-            canonical, [delivery.write_record(canonical, done)], f"inbound {inbound_id}: seen"
+    done = delivery.moved(record, "acknowledged", note="seen recorded")
+    commit_and_push(
+        ctx.canonical, [delivery.write_record(ctx.canonical, done)], f"inbound {record['id']}: seen"
+    )
+    return [Action("acknowledged", record["id"])]
+
+
+def _route_task(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    canonical, inbound_id = ctx.canonical, record["id"]
+    problems = _task_problems(canonical, message)
+    if problems:
+        body = f"Inbound task {inbound_id} was not turned into a card:\n\n" + "\n".join(
+            f"- {problem}" for problem in problems
         )
-        return [Action("acknowledged", inbound_id)]
-    if kind == "task":
-        problems = _task_problems(canonical, message)
-        if problems:
-            body = f"Inbound task {inbound_id} was not turned into a card:\n\n" + "\n".join(
-                f"- {problem}" for problem in problems
-            )
-            title = f"Task {inbound_id} rejected"
-            return _answer_with_note(canonical, record, title, body, allow_no_remote)
-        if message["mode"] == "planning" and planning_owned(canonical, queue):
-            return _route_to_backlog(canonical, record, message, "planning is owned")
-        return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
-    if kind == "steer" and message.get("urgency") == URGENT:
+        title = f"Task {inbound_id} rejected"
+        return _answer_with_note(canonical, record, title, body, allow_no_remote)
+    if message["mode"] == "planning" and planning_owned(canonical, queue):
+        return _route_to_backlog(canonical, record, message, "planning is owned")
+    return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
+
+
+def _route_steer(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    canonical, inbound_id = ctx.canonical, record["id"]
+    if message.get("urgency") == URGENT:
         extra: list[Path] = []
         mode = "planning" if message.get("proposed_topic") else "investigation"
         if mode == "planning" and planning_owned(canonical, queue):
@@ -506,9 +488,33 @@ def _route_one(
             extra.append(_write_topic_entry(canonical, message))
         spec = _steer_spec(message, mode)
         return _route_to_request(canonical, record, f"steer:{inbound_id}", spec, extra)
-    if kind == "steer" and message.get("proposed_topic"):
+    if message.get("proposed_topic"):
         return _route_to_backlog(canonical, record, message, "proposed topic")
     return _route_to_thread_or_backlog(ctx, queue, record, message)
+
+
+def _route_reply(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    return _route_to_thread_or_backlog(ctx, queue, record, message)
+
+
+# One handler per inbound kind of the registry (``comms.kinds``); the kind registry
+# conformance test checks that the two sets are the same. Records come from messages
+# validated against the registry, so a record's kind is always here; removing a kind while
+# records of it remain would make routing raise (KeyError) until they are dealt with.
+HANDLERS = {
+    "seen": _route_seen,
+    "task": _route_task,
+    "steer": _route_steer,
+    "reply": _route_reply,
+}
+
+
+def _route_one(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    return HANDLERS[record["kind"]](ctx, queue, record, message, allow_no_remote)
 
 
 # --- receive, resolve ---
@@ -704,7 +710,7 @@ def _briefing_entry(message: dict, record: dict, responsible_task: str | None) -
         "kind": message["kind"],
         "urgency": message.get("urgency"),
         "author": message.get("author"),
-        "body": _describe(message),
+        "body": kinds.describe(message),
         "late": record["late"],
         "responsible_task": responsible_task,
     }

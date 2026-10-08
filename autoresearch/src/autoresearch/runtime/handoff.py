@@ -17,6 +17,7 @@ import frontmatter
 import jsonschema
 import yaml
 
+from autoresearch.comms import kinds
 from autoresearch.comms.envelope import FROM_AGENT, FROM_RUNTIME, message_problems
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -39,9 +40,12 @@ STAGED_DIR = "comms/staged/"
 # A card branch must not touch these: generated views and runtime-owned bookkeeping.
 FORBIDDEN_FILES = ("kb/index.md",)
 FORBIDDEN_DIRS = ("kb/_generated/", ".supervisor/", "comms/outbox/", "comms/inbox/")
-# Inbound kinds the responsible card must answer with a staged ``in_reply_to`` message. A
-# ``task`` is acknowledged by the runtime when its card publishes (C11); ``seen`` needs none.
-ACK_REQUIRED_KINDS = frozenset({"reply", "steer"})
+# Inbound kinds the responsible card must answer with a staged ``in_reply_to`` message: those
+# with ``x-autoresearch.ack`` ``card`` (``comms.kinds``). A ``task`` is acknowledged by the
+# runtime when its card publishes (C11); ``seen`` needs none.
+ACK_REQUIRED_KINDS = frozenset(
+    name for name in kinds.inbound_kinds() if kinds.get("inbound", name).ack == "card"
+)
 ACK_KIND = "note"  # the staged message kind that acknowledges an inbound
 # The only non-record files a card may delete.
 DELETABLE_DIRS = (STAGED_DIR, REQUESTS_DIR + "/")
@@ -138,7 +142,7 @@ def _json_at(repo: Path, sha: str, path: str):
 
 
 def _message_problems(path: str, message) -> list[str]:
-    """A staged message must pass ``schemas/message.json`` with a known kind, be ``from``
+    """A staged message must pass its kind's schema (``comms.kinds``), be ``from``
     ``research-agent``, use its id as its file name, and carry no outbox-only fields."""
     problems = [f"{path}: staged message: {problem}" for problem in message_problems(message)]
     if not isinstance(message, dict):

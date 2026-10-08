@@ -1,6 +1,10 @@
 """Contract with the Softmax IDE bridge (``docs/integrations/softmax-ide-bridge.md`` on main;
 compatibility notes in ``docs/integrations/softmax-ide-bridge-compat.md``).
 
+The bridge's messages are the published examples ``schemas/comms/examples/inbound/task/
+ide-bridge-task.json`` and ``.../steer/ide-bridge-stop.json``: the exact bytes its ``deliver()``
+writes (provenance in ``schemas/comms/README.md``).
+
 The bridge is an L0 file adapter (Runtime 9.2): it writes ``comms/inbox/<id>.json`` itself,
 whole then renamed, with its own id, and never commits. It reads ``comms/outbox/<seq>-<id>.json``
 (``id``, ``seq``, ``kind``, ``title``, ``body``, ``in_reply_to``) and treats a ``note`` whose
@@ -16,7 +20,8 @@ import jsonschema
 import pytest
 from support.board import Board
 
-from autoresearch.comms.inbound import submit_inbound
+from autoresearch.comms.inbound import InboundProblems, submit_inbound
+from autoresearch.comms.kinds import COMMS_SCHEMAS
 from autoresearch.comms.publisher import publish_hook, publish_runtime
 from autoresearch.comms.reader import read_since
 from autoresearch.comms.stage import stage
@@ -28,6 +33,9 @@ from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.routing import route_all
 
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
+EXAMPLES = COMMS_SCHEMAS / "examples" / "inbound"
+TASK_BYTES = (EXAMPLES / "task" / "ide-bridge-task.json").read_bytes()
+STOP_BYTES = (EXAMPLES / "steer" / "ide-bridge-stop.json").read_bytes()
 PLAYER = "ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1"
 TASK_ID = f"{PLAYER}:task:tsk_42"
 STOP_ID = f"{PLAYER}:stop:tsk_42"
@@ -49,30 +57,23 @@ def _envelope(message_id: str, kind: str) -> dict:
 
 
 def bridge_task(**fields) -> dict:
-    return _envelope(TASK_ID, "task") | {
-        "title": "Profile macromackie's opening",
-        "mode": "scouting",
-        "why": "They lead the division. Done when an opponent model exists.",
-        "refs": [],
-        "priority": "P2",
-    } | fields
+    return json.loads(TASK_BYTES) | fields
 
 
-def bridge_stop(title: str = "Profile macromackie's opening") -> dict:
-    return _envelope(STOP_ID, "steer") | {
-        "text": f"Stop task {TASK_ID}: {title}",
-        "urgency": "now",
-    }
+def bridge_stop() -> dict:
+    return json.loads(STOP_BYTES)
 
 
-def bridge_write(board: Board, message: dict) -> bytes:
-    """Write like the bridge: the whole file to a temp name, then rename; no commit."""
+def bridge_write(board: Board, message: dict | bytes) -> bytes:
+    """Write like the bridge: the whole file to a temp name, then rename; no commit. Bytes
+    are written as they are (the published examples); a dict as JSON."""
+    data = message if isinstance(message, bytes) else json.dumps(message, indent=2).encode()
+    message_id = json.loads(data)["id"]
     inbox = Layout(board.canonical).comms_inbox
     inbox.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(message, indent=2).encode()
-    temp = inbox / f".{message['id']}.json.tmp"
+    temp = inbox / f".{message_id}.json.tmp"
     temp.write_bytes(data)
-    os.replace(temp, inbox / f"{message['id']}.json")
+    os.replace(temp, inbox / f"{message_id}.json")
     return data
 
 
@@ -124,7 +125,7 @@ def _finish_card_for(board: Board, request_id: str, ack_for: str | None = None):
 
 
 def test_bridge_task_becomes_a_card_and_its_note_closes_the_ide_task(board):
-    written = bridge_write(board, bridge_task())
+    written = bridge_write(board, TASK_BYTES)
 
     actions = _route(board)
 
@@ -143,7 +144,8 @@ def test_bridge_task_becomes_a_card_and_its_note_closes_the_ide_task(board):
     _finish_card_for(board, request["id"])
 
     acks = [
-        (name, message) for name, message in _outbox_files(board)
+        (name, message)
+        for name, message in _outbox_files(board)
         if message.get("in_reply_to") == TASK_ID
     ]
     [(name, ack)] = acks
@@ -155,9 +157,9 @@ def test_bridge_task_becomes_a_card_and_its_note_closes_the_ide_task(board):
 
 
 def test_bridge_stop_steer_gets_an_urgent_card_that_must_answer_it(board):
-    bridge_write(board, bridge_task())
+    bridge_write(board, TASK_BYTES)
     _route(board)
-    bridge_write(board, bridge_stop())
+    bridge_write(board, STOP_BYTES)
 
     _route(board)
 
@@ -335,10 +337,61 @@ def test_crash_recovery_keeps_the_real_problems(board):
     bridge_write(board, bridge_task(mode="strategy"))
     with canonical_lock(board.canonical):  # the note was published, then the run crashed
         publish_runtime(
-            board.canonical, "note", "Inbound rejected", "B", [], allow_no_remote=True,
+            board.canonical,
+            "note",
+            "Inbound rejected",
+            "B",
+            [],
+            allow_no_remote=True,
             in_reply_to=TASK_ID,
         )
     _route(board)
     rejection = board.committed(board.ledger / "inbound-rejected" / f"{TASK_ID}.json")
     assert any("mode" in problem for problem in rejection["problems"])
     assert len(_runtime_notes(board, TASK_ID)) == 1
+
+
+# --- review round 2: newline-anchored rules, old acceptance kept ---
+
+
+def test_a_seen_with_a_trailing_newline_author_is_rejected_and_routing_goes_on(board):
+    """Regression: the schema once accepted ``author: "coach:p\\n"`` (Python ``$`` matches
+    before a final newline), and writing that author's seen record then raised on every
+    routing run."""
+    with canonical_lock(board.canonical):
+        publish_runtime(board.canonical, "note", "One", "B", [], allow_no_remote=True)
+    [published] = read_since(board.canonical, "t", after=0)
+    bad_id = f"{PLAYER}:seen:nl"
+    bridge_write(
+        board, _envelope(bad_id, "seen") | {"author": "coach:p\n", "ids": [published["id"]]}
+    )
+    bridge_write(board, TASK_BYTES)
+
+    actions = _route(board)
+
+    assert ("write_rejected", bad_id) in _kinds(actions)
+    assert ("adopted", TASK_ID) in _kinds(actions)
+    rejection = board.committed(board.ledger / "inbound-rejected" / f"{bad_id}.json")
+    assert any(problem.startswith("author:") for problem in rejection["problems"])
+    assert _route(board) == []
+
+
+def test_comms_inbound_refuses_a_trailing_newline_author(board):
+    with canonical_lock(board.canonical):
+        publish_runtime(board.canonical, "note", "One", "B", [], allow_no_remote=True)
+    [published] = read_since(board.canonical, "t", after=0)
+    with pytest.raises(InboundProblems):  # before: written, then ValueError, left untracked
+        submit_inbound(board.canonical, "seen", {"ids": [published["id"]]}, "x\n")
+    assert gitops.git(board.canonical, "status", "--porcelain", "--", "comms/inbox") == ""
+
+
+def test_old_acceptance_is_kept_for_schema_and_an_empty_received_at(board):
+    message = bridge_task(schema="ar-comms/1", received_at="")
+    bridge_write(board, message)
+    assert ("adopted", TASK_ID) in _kinds(_route(board))
+
+
+def test_a_created_time_with_microseconds_is_adopted(board):
+    data = (EXAMPLES / "task" / "ide-bridge-task-fractional-seconds.json").read_bytes()
+    bridge_write(board, data)
+    assert ("adopted", json.loads(data)["id"]) in _kinds(_route(board))

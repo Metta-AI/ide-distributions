@@ -6,7 +6,7 @@ These rules cover every message you send. Rules D-19 and D-20 in the research-ag
 
 A Preston-role agent reads them. It can read every file in the workspace. It tells the human what matters, in its own words. Write for that agent: put the finding and the question in the message, and point to the workspace for detail.
 
-You never send a message and then wait. The system delivers messages when a reader comes. The answer arrives in a later card run (see "Inbound messages").
+You never send a message and then wait. The system delivers messages when a reader comes. The answer arrives in a later card run (see "Inbound kinds").
 
 ## How to send
 
@@ -18,7 +18,7 @@ Stage each message in your worktree. The runtime publishes it when your card com
 
 Useful options: `--priority P0..P5`, `--expects-response` or `--no-expects-response`, `--thread`, `--in-reply-to <M-ID>`, `--supersedes <M-ID>`, `--expires <time>`. A message cannot be edited after it is published. To correct one, send a new message with `--supersedes`.
 
-## The five outbound kinds
+## Outbound kinds
 
 | Kind | Use it for | Reply expected |
 | --- | --- | --- |
@@ -52,12 +52,15 @@ The types are: topic, hypothesis, experiment, result, version, claim, hub, lesso
 
 To read a reference, run `"$AUTORESEARCH_CLI" comms resolve <uri> [--rev <commit>]`.
 
-## Inbound messages
+## Inbound kinds
 
-There are four inbound kinds: `reply`, `steer`, `seen`, and `task`. The briefing of your card lists the messages that were delivered to it.
+The briefing of your card lists the inbound messages that were delivered to it.
 
-- Acknowledge every `reply` and every `steer` (D-02). Send a `note` with `--in-reply-to <M-ID>`. State the outcome: applied, declined with a reason, or noted.
-- Do not acknowledge a `task`. The runtime acknowledges it when the card that was created from it publishes.
-- A `seen` message only marks other messages as read. Do not acknowledge it.
-- A steer outranks your own plan (D-02).
-- Card completion checks that each delivered `reply` and `steer` has an acknowledgement.
+| Kind | What it is | Acknowledge it |
+| --- | --- | --- |
+| `reply` | An answer to one of your messages: a choice, text, or both. | Yes (D-02). Send a `note` with `--in-reply-to <inbound id>`. State the outcome: applied, declined with a reason, or noted. |
+| `steer` | Direction from the human. A steer outranks your own plan (D-02). | Yes, the same way as a `reply`. |
+| `task` | A request for work. The runtime makes a card from it. | No. The runtime acknowledges it when the card that was created from it publishes. |
+| `seen` | It only marks other messages as read. | No. |
+
+Card completion checks that each delivered `reply` and `steer` has an acknowledgement.

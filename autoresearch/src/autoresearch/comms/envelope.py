@@ -1,8 +1,10 @@
-"""The ``ar-comms/0`` message envelope (``schemas/message.json``; Overview C5, System Design 7).
+"""The ``ar-comms/0`` outbound message envelope (``schemas/comms/envelope.outbound.json``,
+also at its old path ``schemas/message.json``; Overview C5, System Design 7).
 
 Versioning is additive within ``ar-comms/0``: new optional fields and new kinds may appear, and
-readers ignore what they do not know. Writers are stricter: ``message_problems`` also requires
-the kind to be one of ``KINDS``, so this version never emits a kind its own readers skip.
+readers ignore what they do not know. Writers are stricter: ``message_problems`` validates
+against the kind's own schema and requires the kind to be one of ``KINDS`` (the registry's
+outbound kinds, ``comms.kinds``), so this version never emits a kind its own readers skip.
 
 Essential fields (System Design 7): ``id``, ``seq`` (outbox), ``created``, ``from``
 (``research-agent`` | ``runtime``), ``iteration``, ``kind``, ``title``, ``body``, ``refs``,
@@ -13,23 +15,18 @@ Essential fields (System Design 7): ``id``, ``seq`` (outbox), ``created``, ``fro
 """
 
 import datetime
-import functools
-import json
 from dataclasses import dataclass
-from pathlib import Path
 
-from jsonschema import Draft202012Validator
-
+from autoresearch.comms import kinds
 from autoresearch.ids import new_id
 
 SCHEMA_VERSION = "ar-comms/0"
-KINDS = ("note", "question", "suggestion", "help_request", "highlight")
+KINDS = kinds.outbound_kinds()
 PRIORITIES = ("P0", "P1", "P2", "P3", "P4", "P5")
 DEFAULT_PRIORITY = "P2"  # the card default
 RESULT_REV = "@result"  # staged ref rev: replaced by the merge SHA at publication
 FROM_AGENT = "research-agent"
 FROM_RUNTIME = "runtime"
-_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "message.json"
 
 
 class MessageProblems(ValueError):
@@ -83,11 +80,11 @@ def build_message(
     expires: str | None = None,
     **fields,
 ) -> dict:
-    """A new message with a fresh ``M-`` id. ``expects_response`` defaults to True for a
-    ``question`` only. ``fields`` adds optional envelope fields (``in_reply_to``, ``thread``)
+    """A new message with a fresh ``M-`` id. ``expects_response`` defaults to the kind's
+    ``x-autoresearch.expects_response`` (True for a ``question`` only). ``fields`` adds optional envelope fields (``in_reply_to``, ``thread``)
     or any additive field."""
     if expects_response is None:
-        expects_response = kind == "question"
+        expects_response = kind in KINDS and kinds.get("outbound", kind).expects_response
     return {
         **fields,
         "schema": SCHEMA_VERSION,
@@ -106,25 +103,11 @@ def build_message(
     }
 
 
-@functools.cache
-def _validator() -> Draft202012Validator:
-    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema)
-
-
 def message_problems(message, outbox: bool = False) -> list[str]:
     """Problems of a message this version writes; ``outbox`` adds the published-form rules
     (``seq`` and ``published_rev`` present, no ``@result`` rev left)."""
-    if not isinstance(message, dict):
-        return ["a message must be a JSON object"]
-    problems = []
-    for error in sorted(_validator().iter_errors(message), key=str):
-        location = "/".join(str(part) for part in error.absolute_path) or "(message)"
-        problems.append(f"{location}: {error.message}")
-    if isinstance(message.get("kind"), str) and message["kind"] not in KINDS:
-        problems.append(f"kind: {message['kind']!r} is not one of {', '.join(KINDS)}")
-    if outbox:
+    problems = kinds.problems("outbound", message)
+    if outbox and isinstance(message, dict):
         for name in ("seq", "published_rev"):
             if name not in message:
                 problems.append(f"{name}: required in a published message")

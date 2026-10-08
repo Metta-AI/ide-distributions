@@ -66,11 +66,11 @@ def _committed_dir(
 
 def inbox(canonical: Path, skipped: list[str] | None = None) -> dict[str, dict]:
     """Inbound id -> inbound message, as committed at HEAD, sorted by id. A message an
-    external agent wrote directly has no ``received_at``: it gets its delivery record's (the
-    time the runtime received it), or now before the record exists. Unreadable entries go to
-    ``skipped``."""
+    external agent wrote directly has no ``received_at`` (or an empty one, which adoption
+    accepts when ``created`` is valid): it gets its delivery record's (the time the runtime
+    received it), or now before the record exists. Unreadable entries go to ``skipped``."""
     messages = _committed_dir(canonical, INBOX_DIR, skipped)
-    missing = [message for message in messages.values() if "received_at" not in message]
+    missing = [message for message in messages.values() if not message.get("received_at")]
     if missing:
         known = records(canonical)
         for message in missing:

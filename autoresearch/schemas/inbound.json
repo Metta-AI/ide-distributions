@@ -6,8 +6,8 @@
   "additionalProperties": true,
   "required": ["id", "kind", "received_at", "state", "responsible", "acknowledged_by", "late", "history"],
   "properties": {
-    "id": {"description": "The inbound id: an I-id from comms inbound, or the external agent's own id for a file it wrote directly (comms.inbound.INBOUND_ID).", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
-    "kind": {"enum": ["reply", "steer", "task", "seen"]},
+    "id": {"description": "The inbound id: an I-id from comms inbound, or the external agent's own id for a file it wrote directly (comms.inbound.INBOUND_ID).", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(?!\\n)$"},
+    "kind": {"description": "The inbound message's kind: one of the inbound kinds in comms/inbound/ (the registry; the message was validated against it).", "type": "string", "minLength": 1},
     "received_at": {"type": "string", "minLength": 1},
     "state": {"enum": ["received", "routed", "acknowledged"]},
     "responsible": {
@@ -17,11 +17,11 @@
       "required": ["task_id", "request_id", "backlog"],
       "properties": {
         "task_id": {"type": ["string", "null"]},
-        "request_id": {"type": ["string", "null"], "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}$"},
+        "request_id": {"type": ["string", "null"], "pattern": "^Q-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
         "backlog": {"type": "boolean"}
       }
     },
-    "acknowledged_by": {"description": "The published message (M-id) that acknowledged it; null until then (and for a seen).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}$"},
+    "acknowledged_by": {"description": "The published message (M-id) that acknowledged it; null until then (and for a seen).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
     "late": {"description": "A reply that arrived after the expires time of the message it answers.", "type": "boolean"},
     "thread": {"description": "Thread key of the outbound message it answers (its thread, else its id); absent when it answers nothing.", "type": "string"},
     "history": {

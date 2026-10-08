@@ -180,7 +180,7 @@ def test_unknown_additive_fields_and_kinds_are_ignored_by_the_reader(board, pres
         (
             "steer",
             {"text": "Look at towers", "urgency": "next", "proposed_topic": {"title": "Towers"}},
-            "proposed_topic.objective",
+            "proposed_topic/objective",  # schema locations use / (comms.kinds)
         ),
         ("reply", {"in_reply_to": "M-1", "text": "yes"}, "in_reply_to"),
         ("reply", {"in_reply_to": "M-01K6Z3V8QX0000000000000000"}, "choice or text"),
