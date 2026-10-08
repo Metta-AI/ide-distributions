@@ -4,14 +4,15 @@ rule selection / adaptation arithmetic against the Python reference (in the real
 local handoff engine is built)."""
 import re
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 TOOLS = Path(__file__).resolve().parents[4] / "games/gota/compiler/tools"
 sys.path.insert(0, str(TOOLS))
-import strategy_basic as sb  # noqa: E402
-import strategy_format as sf  # noqa: E402
+import strategy_basic as sb
+import strategy_format as sf
 
 RUNTIME = TOOLS.parent / "strategy" / "compiler" / "runtime"
 
@@ -249,13 +250,13 @@ def test_assemble_is_deterministic_and_copies_runtime_verbatim(tmp_path):
 
 def test_agent_header_is_replaced(tmp_path):
     units = dict(TRIVIAL_UNITS, **{"K.position": "' unit K.position sha256:stale\n" + TRIVIAL_UNITS["K.position"]})
-    strategy, out = build(tmp_path, TRIVIAL, units)
+    _strategy, out = build(tmp_path, TRIVIAL, units)
     assert out["units"]["K.position"].count("' unit ") == 1
     assert "stale" not in out["units"]["K.position"]
 
 
 def test_generated_tables(tmp_path):
-    strategy, out = build(tmp_path, RICH, RICH_UNITS)
+    _strategy, out = build(tmp_path, RICH, RICH_UNITS)
     tables = out["units"]["generated.tables"]
     assert "c_idle__speed = 12 ' @tune 6 48 6" in tables
     assert "st_commitment__min_hold = 20 ' @tune 0 48 4" in tables
@@ -447,7 +448,7 @@ def replay_reference(strategy: sf.Strategy, seat: int, lines: list[tuple[str, di
     flags = [0]
     logged_rule = logged_held = None
     checked = 0
-    for t in range(0, max(by_tick) + 1):
+    for t in range(max(by_tick) + 1):
         events = by_tick.get(t, [])
         for kind, f in events:
             if kind == "PWP" and f["a"] > 0:
@@ -524,7 +525,7 @@ def test_runtime_matches_reference_in_engine(tmp_path, interrupt_at):
         assert [(f["r"], f["o"], f["p"]) for f in snapshot] == [(1, 500, 0), (2, 100, 0)]
         assert replay_reference(strategy, seat, lines) >= 290
         pwd_ticks = [f["t"] for kind, f in lines if kind == "PWD"]
-        assert all(b - a <= 24 for a, b in zip(pwd_ticks, pwd_ticks[1:]))
+        assert all(b - a <= 24 for a, b in pairwise(pwd_ticks))
 
 
 def test_belief_lines_in_engine(tmp_path):
@@ -592,7 +593,7 @@ def _record(tmp_path, text, units, ticks, edit=None):
 
 
 def test_shout_and_pwc_in_engine(tmp_path):
-    strategy, text = _record(tmp_path, SHOUTS, dict(TRIVIAL_UNITS, **{"COM.grenade_out": SHOUT_UNIT}), 60)
+    _strategy, text = _record(tmp_path, SHOUTS, dict(TRIVIAL_UNITS, **{"COM.grenade_out": SHOUT_UNIT}), 60)
     assert "BASIC error" not in text
     starts = [f["t"] for kind, f in parse_log_text(text) if kind == "PWE" and f["e"] == 1]
     sends = [f for kind, f in parse_log_text(text) if kind == "PWC"]
