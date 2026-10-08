@@ -76,11 +76,11 @@ KEYWORDS = {
 }
 
 
-def cached_probe() -> Path:
+def cached_probe(commit=POLYWORLD_COMMIT) -> Path:
     """Never fetch/build implicitly; Phase C is explicitly offline."""
-    path = ROOT / "games/gota/tools/bin" / f"gate_probe-{POLYWORLD_COMMIT[:8]}"
+    path = ROOT / "games/gota/tools/bin" / f"gate_probe-{commit[:8]}"
     if not path.is_file():
         raise FileNotFoundError(f"cached native gate probe required: {path}")
     from games.gota.tools.native_build import validate
-    validate(path, 'gate_probe', POLYWORLD_COMMIT, tools=ROOT / 'games/gota/tools')
+    validate(path, 'gate_probe', commit, tools=ROOT / 'games/gota/tools')
     return path

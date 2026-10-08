@@ -16,6 +16,7 @@ def verify(build_id: str, *, context: GateContext | None = None, manifest: Path 
     stage = builds.build_path(build_id, staged=True)
     order = builds.read(stage / "work_order.json")
     builds.assert_inputs(order)
+    commit = order['engine']['commit']
     strategy = parse_strategy(builds.REPO / order["source_path"], backend="gota")
     errors = [d.to_dict() for d in lint_strategy(strategy) if d.level == "error"]
     policy = stage / "policy.bas"
@@ -27,7 +28,8 @@ def verify(build_id: str, *, context: GateContext | None = None, manifest: Path 
         context = GateContext(
             stage / "verify",
             baseline=BASELINE,
-            native_binary=cached_probe(),
+            engine_commit=commit,
+            native_binary=cached_probe(commit),
             manifest=Path(manifest) if manifest else None,
         )
     context.work_dir.mkdir(parents=True, exist_ok=True)
@@ -35,18 +37,26 @@ def verify(build_id: str, *, context: GateContext | None = None, manifest: Path 
     context = replace(
         context,
         work_dir=Path(mkdtemp(prefix="attempt-", dir=context.work_dir)),
-        native_binary=context.native_binary or cached_probe(),
+        native_binary=context.native_binary or cached_probe(commit),
+        engine_commit=commit,
         episode_dir=None,
         measurements={},
         compiler_map=builds.read(stage / "map.json"),
     )
-    from games.gota.gates.limits import POLYWORLD_COMMIT
     from games.gota.tools.native_build import TOOLS, validate
     native_builds = {
-        'gate_probe': validate(context.native_binary, 'gate_probe', POLYWORLD_COMMIT),
-        'gota_match': validate(TOOLS / 'bin' / f'gota_match-{POLYWORLD_COMMIT[:8]}',
-                               'gota_match', POLYWORLD_COMMIT),
+        'gate_probe': validate(context.native_binary, 'gate_probe', commit),
+        'gota_match': validate(TOOLS / 'bin' / f'gota_match-{commit[:8]}',
+                               'gota_match', commit),
     }
+    from games.gota.tools.native_build import fingerprint
+    engine = order['engine']
+    if engine.get('manifest_sha256'):
+        if context.manifest is None or fingerprint(builds.read(context.manifest)) != engine['manifest_sha256']:
+            raise ValueError('manifest changed after engine resolution')
+        expected = engine['native_fingerprints']
+        if any(receipt['fingerprint'] != expected[target] for target, receipt in native_builds.items()):
+            raise ValueError('native build changed after engine resolution')
     builds.dump(stage / 'native_provenance.json', native_builds)
     gates = {}
     for name, module in zip(

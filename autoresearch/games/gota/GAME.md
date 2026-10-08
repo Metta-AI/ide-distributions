@@ -33,7 +33,7 @@ The PW semantic compiler is the only candidate build path. COM is not supported.
 Run bindings from the `autoresearch/` distribution root with the project environment.
 Append the arguments below to the exact front-matter command.
 
-- `local_check ARTIFACT --manifest MANIFEST --baseline BASELINE --work-dir OUTPUT`
+- `local_check ARTIFACT --baseline BASELINE --work-dir OUTPUT`
   runs the existing shared G1–G5 gates. See [gate reference](gates/README.md).
 - `evaluate RESULTS_JSON --seat N` prints one JSON metric object for one subject
   seat in one episode. Seat is required; no seat is guessed from a policy name.
@@ -66,7 +66,7 @@ calibration can raise that floor.
 
 ## Build and upload
 
-`build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --manifest MANIFEST --json`
+`build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json`
 compiles the committed `CANDIDATE_DIRECTORY/STRATEGY.md` with Hermes and runs G1–G5.
 The candidate may be `WORKSPACE/strategy/candidates/E` in a worker Git worktree;
 the installed distribution may be a separate Git archive. Commit the candidate
@@ -85,9 +85,29 @@ Hermes home, copies that scanner into its fresh home and synchronously verifies 
 model execution, and restricts child writes to compiler scratch. Host provisioning
 and credentials remain the installer's responsibility.
 
-Supply a downloaded Coworld manifest with `--manifest` or `GOTA_MANIFEST`.
-`game.runnable.source_url` must contain the qualified Polyworld commit
-`801749e509e888b423ba44ee2188946c22e3ba85`; bootstrap does not supply a manifest.
+Online builds resolve the current league through `"$AUTORESEARCH_CLI" softmax
+game-version` and the shared credential-preserving platform transport. Set
+`AUTORESEARCH_GAME=gota`, `AUTORESEARCH_CLI`, `HERMES_HOME`, and the profile's
+`SOFTMAX_PLAYER_CREDENTIAL` before building. The canonical Coworld manifest is
+fetched and retained as `BUILD_DIRECTORY/coworld_manifest.json`. The receipt in
+`version.json.engine` records the Coworld version/id, runnable source URL, full
+engine and Bassy commits, manifest hash, native fingerprints and host contract hash.
+Native preparation fetches only these exact engine/dependency commits; no model
+runs before their receipts and the supported scalar/record/storage/limit contract
+have been checked. A release with a changed host contract fails with an explicit
+unsupported-contract error and needs compiler review.
+
+`--manifest PATH` is optional online: when supplied, it must match the fetched
+live manifest exactly. Historical builds require explicit `--offline --manifest
+PATH` (or `--offline` with `GOTA_MANIFEST`); only this mode selects `engine.env`'s
+historical pin. Lookup, auth, manifest and native failures never fall back offline.
+The direct `local_check` command follows the same rules and writes its identity
+and fetched manifest into its fresh work directory.
+
+```sh
+uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/E --out /workspace/versions/new --json
+uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/E --out /workspace/versions/historical-new --offline --manifest /path/to/2026.10.7.2-manifest.json --json
+```
 
 `evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
 per seat with the real integer seed. The shared XP consumer must select its
@@ -102,6 +122,10 @@ check immediately before mutation; this wrapper has no alternate upload route.
 
 ## Qualification scope
 
-NOTES-5 reports live 2026.10.8.1 / Polyworld 02eda3d3. This adapter currently
-requires the M1-qualified 2026.10.7.2 pin; it refuses a newer manifest rather than
-claiming qualification. Dynamic engine following is a separate follow-on.
+Live readback on 2026-10-08 resolved 2026.10.8.1 / Polyworld
+`02eda3d34d0e7cc3ae1986d2ab57482a04cbe08a`; native preparation, baseline compilation,
+the supported host contract, and one full native 31200-tick mirror match were
+checked locally. All ten seats ran with no VM errors. This does not extend the
+prior paid M1 semantic qualification, which remains bound to its immutable
+2026.10.7.2 / `801749e509e888b423ba44ee2188946c22e3ba85` receipts. The historical
+oracle and audit keep those identities; a new engine needs its own qualification.
