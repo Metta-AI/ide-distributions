@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from autoresearch.softmax_tool.fake import FakeSoftmax
+from autoresearch.softmax_tool.identity import IdentityError
 from autoresearch.softmax_tool.protocol import CreditDenied, XpHandle, from_env
 
 SPEC = {"episodes": 3}
@@ -35,6 +36,19 @@ def test_default_identity_and_env_player(tmp_path):
     assert (ident.subject_type, ident.player_id) == ("player", "ply_x")
     assert ident.expires_at > datetime.now(UTC) + timedelta(hours=23)
     assert make(tmp_path / "b").whoami().player_id == "ply_fake"
+
+
+def test_whoami_answers_for_the_credential_not_the_expected_player(tmp_path):
+    """A fake credential that names its player (``player_id``) is who whoami reports, so a
+    wrong ``AUTORESEARCH_PLAYER_ID`` is caught (C6) as it is on the real platform."""
+    credential = json.dumps({"token": "t", "expires_at": "2099-01-01T00:00:00Z",
+                             "player_id": "ply_a"})  # fmt: skip
+    sm = make(tmp_path, AUTORESEARCH_PLAYER_ID="ply_wrong", SOFTMAX_PLAYER_CREDENTIAL=credential)
+    assert sm.whoami().player_id == "ply_a"
+    with pytest.raises(IdentityError, match="ply_wrong"):
+        sm.submit("pv_1", "lg_1")
+    plain = make(tmp_path / "b", AUTORESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="fake")
+    assert plain.whoami().player_id == "ply_x"  # no player in the credential: the expected one
 
 
 def test_identity_faults(tmp_path):

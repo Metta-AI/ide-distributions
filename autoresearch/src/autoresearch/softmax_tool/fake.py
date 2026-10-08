@@ -9,6 +9,11 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 (creating a new XP request raises once N exist, like the platform's pending-request cap), and
 ``crash_after=<label>`` (read by runtime code through :func:`fault`).
 
+``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
+JSON with a ``player_id`` (a fake-only field), that is the player; otherwise the credential is
+taken to belong to ``AUTORESEARCH_PLAYER_ID``. So a wrong ``AUTORESEARCH_PLAYER_ID`` with a
+credential that names its player fails the C6 check, as on the real platform.
+
 Like the real client, the mutating calls (``upload``, a new ``xp_create``, ``submit``) re-check
 ``whoami`` first and raise ``IdentityError`` unless it is the expected unexpired Player (C6), so
 an ``identity=``, ``player=`` or ``expires_in=`` fault stops a running worker at the boundary.
@@ -27,6 +32,7 @@ per-policy noise. ``standings`` is two house players plus our player once it has
 """
 
 import hashlib
+import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,6 +44,7 @@ from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle,
 from autoresearch.softmax_tool.xp import handle_order
 
 FAULTS_ENV = "AUTORESEARCH_FAKE_FAULTS"
+CREDENTIAL_ENV = "SOFTMAX_PLAYER_CREDENTIAL"
 DEFAULT_PLAYER_ID = "ply_fake"
 DEFAULT_CREDITS = 100
 DEFAULT_EPISODES = 2
@@ -57,6 +64,16 @@ def parse_faults(env: Mapping[str, str]) -> dict[str, str]:
 
 def fault(env: Mapping[str, str], name: str) -> str | None:
     return parse_faults(env).get(name)
+
+
+def credential_player(env: Mapping[str, str]) -> str | None:
+    """The ``player_id`` a fake credential names, or None (module docstring)."""
+    try:
+        credential = json.loads(env.get(CREDENTIAL_ENV) or "")
+    except ValueError:
+        return None
+    player = credential.get("player_id") if isinstance(credential, dict) else None
+    return player if isinstance(player, str) and player else None
 
 
 def _short_hash(*parts: object) -> str:
@@ -117,6 +134,7 @@ class FakeSoftmax:
         self._state_path = runtime_dir / "fake_softmax.json"
         self._lock_path = runtime_dir / "fake_softmax.lock"
         self._player_id = env.get("AUTORESEARCH_PLAYER_ID") or DEFAULT_PLAYER_ID
+        self._credential_player = credential_player(env) or self._player_id
         self._faults = parse_faults(env)
         self._clock = clock
 
@@ -152,7 +170,7 @@ class FakeSoftmax:
         lifetime = timedelta(seconds=float(self._faults.get("expires_in", 24 * 3600)))
         identity = Identity(
             subject_type="user" if self._faults.get("identity") == "user" else "player",
-            player_id=self._faults.get("player", self._player_id),
+            player_id=self._faults.get("player", self._credential_player),
             expires_at=self._clock() + lifetime,
         )
         return self._operate("whoami", lambda _state: identity, persist=False)
