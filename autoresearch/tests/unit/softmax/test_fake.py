@@ -111,6 +111,32 @@ def test_fake_honors_seed_override_and_tags_seed_and_arm(tmp_path):
     assert results(first)["episodes"] != results(other_seed)["episodes"]
 
 
+def test_seeded_results_follow_the_uploaded_parameters(tmp_path):
+    """Fake mechanics: a policy that differs only in ``patience`` plays the same score on every
+    seed and fewer errors (module docstring), so the fake research cycle has a real lever."""
+    sm = make(tmp_path)
+
+    def uploaded(name, **parameters):
+        artifact = tmp_path / f"{name}.json"
+        artifact.write_text(json.dumps({"policy": name, "parameters": parameters}))
+        return sm.upload(artifact, name)
+
+    base = uploaded("base", aggression=3, patience=5)
+    calm = uploaded("calm", aggression=3, patience=8)
+
+    def episode(policy, seed):
+        handle = sm.xp_create("E-1", 1, 1, seeded_spec(seed, policy), seed=seed, arm=policy)
+        (path,) = sm.xp_artifacts(handle, tmp_path / handle.request_id)
+        return json.loads(path.read_text())["episodes"][0]
+
+    pairs = [(episode(base, seed), episode(calm, seed)) for seed in range(30)]
+    assert all(b["score"] == c["score"] for b, c in pairs)
+    mean_errors = [sum(e[i]["errors"] for e in pairs) / len(pairs) for i in (0, 1)]
+    assert mean_errors[0] - mean_errors[1] > 2
+    unknown = episode("pv_never_uploaded", 3)  # default parameters, noise keyed on the id
+    assert set(unknown) >= {"score", "errors", "seed"}
+
+
 def test_fail_after_persists_then_raises(tmp_path):
     sm = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="fail_after=submit")
     pv = sm.upload(tmp_path / "a", "a")
