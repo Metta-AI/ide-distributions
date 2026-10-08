@@ -202,6 +202,7 @@ Where things live:
 | Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
+| Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
 | Hermes logs, cron output | `$PROFILE/logs/`, `$PROFILE/cron/` |
 | Card worktrees | `$PROFILE/workspace/.worktrees/` |

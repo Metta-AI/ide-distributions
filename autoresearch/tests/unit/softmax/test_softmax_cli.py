@@ -513,6 +513,87 @@ def test_xp_create_needs_a_binding(board):
 # --- upload, submit, leaderboard ---
 
 
+# --- per-experiment lock (two relaunchers at the same moment) ---
+
+HOLD_LOCK = """
+import sys
+from autoresearch.io.locks import file_lock
+with file_lock(sys.argv[1], timeout_s=10):
+    print("held", flush=True)
+    sys.stdin.read()  # hold until the test closes stdin
+"""
+
+
+def _hold_lock_in_another_process(path):
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_LOCK, str(path)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+    )
+    assert holder.stdout.readline().strip() == "held"
+    return holder
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["xp", "create", "{E}", "--batch", "1", "--attempt", "1"],
+        ["upload", "{E}", "--build-dir", "/nonexistent"],
+        ["submit", "{E}"],
+    ],
+    ids=["xp-create", "upload", "submit"],
+)
+def test_mutations_refuse_busy_while_another_process_holds_the_experiment(
+    board, launch, monkeypatch, capsys, argv
+):
+    """``xp create``, ``upload`` and ``submit`` of one experiment take one cross-process lock
+    first: a second process waits a bounded time, then refuses with ``busy`` and does
+    nothing. The lock is released when the command ends."""
+    worker, experiment = launch
+    for name, value in base_env(board, worker).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(softmax_cli, "LOCK_WAIT_S", 0.2)
+    argv = [word.format(E=experiment) for word in argv]
+    lock = board.canonical / ".supervisor" / "runtime" / "locks" / f"xp-{experiment}.lock"
+    holder = _hold_lock_in_another_process(lock)
+    try:
+        code = main(["softmax", *argv])
+        payload = json.loads(capsys.readouterr().out)
+        assert code == 1 and payload["error"]["reason"] == "busy", payload
+        assert experiment in payload["error"]["message"]
+        assert "queue list --state claimed" in payload["error"]["message"]
+        assert worker.store.load(experiment)[0].get("xp_requests") in (None, [])
+    finally:
+        holder.stdin.close()
+        holder.wait(timeout=10)
+
+
+def test_xp_create_runs_once_the_other_process_releases_the_lock(board, launch, monkeypatch,
+                                                                  capsys):
+    from autoresearch.io.locks import file_lock
+
+    worker, experiment = launch
+    for name, value in base_env(board, worker).items():
+        monkeypatch.setenv(name, value)
+    lock = board.canonical / ".supervisor" / "runtime" / "locks" / f"xp-{experiment}.lock"
+    holder = _hold_lock_in_another_process(lock)
+    holder.stdin.close()  # released while this process waits (LOCK_WAIT_S is the default)
+    code = main(["softmax", "xp", "create", experiment, "--batch", "1", "--attempt", "1"])
+    holder.wait(timeout=10)
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and len(payload["data"]["created"]) == 4, payload
+    with file_lock(lock, timeout_s=0):  # not held after the command
+        pass
+
+
+def test_an_experiment_id_that_is_not_an_e_id_is_a_bad_argument(board, launch):
+    worker, _ = launch
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", "../../x", "--batch", "1", "--attempt", "1"
+    )
+    assert code == 2 and data["error"]["reason"] == "bad_arguments"
+    assert not (board.canonical / ".supervisor" / "runtime" / "locks").exists()
+
+
 def test_upload_from_fakegame_build(board):
     from records.fixtures import EXP_DESIGNED
 

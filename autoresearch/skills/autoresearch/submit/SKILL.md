@@ -48,6 +48,7 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | `champion_unknown` | Ledger and leaderboard disagree. | Send a `help_request`. Finish `blocked`. |
 | `champion_mismatch` | The champion changed since the evaluation. | Request "Re-evaluate E-…" (mode experimentation, refs the experiment and version). Finish `done`. |
 | `promotion_refused` | The lock is held, the champion is not the baseline, or a push failed. If `details.request_id` is set, the runtime already requested the re-evaluation card. | Finish `partial`. |
+| `busy` | Another card is running `xp create`, `upload` or `submit` for this experiment now. | Do not submit again. Finish `partial`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
 | `platform` | The platform failed. | Finish `partial`. The promotion state stays recoverable. |
 

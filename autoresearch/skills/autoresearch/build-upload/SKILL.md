@@ -51,6 +51,9 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
   Stop. Send a `help_request` (see `communicate`) and finish `blocked`.
 - Reason `platform`: the platform refused the upload. This is not a tool fault, and a retry is safe (the tool reuses the version when
   the artifact hash is the same). After a second failure, finish `partial`.
+- Reason `busy`: another card is running `xp create`, `upload` or `submit` for this
+  experiment now. This is not a tool fault. Do not upload a second time: check
+  `queue list --state claimed`, record it in the journal, and finish `partial`.
 - Exit 3 (`tool_missing`): the pinned platform tool is missing. This is a tool fault: follow
   the D-26 sequence (see `complete-card`, "Tool fault").
 - A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `complete-card`, "Tool fault").

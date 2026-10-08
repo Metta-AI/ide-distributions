@@ -27,8 +27,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   the next number (``bad_attempt``), the batch's latest attempt has every request
   (``attempt_incomplete``: rerun that attempt), and at least one of those requests is
   ``failed`` (``attempt_not_needed``; read with ``xp_status``). So no relaunch, however many
-  run one after another, repeats a healthy attempt. Not covered: two relaunchers running at
-  the same moment (no lock across processes), and a ``--batches`` change between runs.
+  run one after another, repeats a healthy attempt. Two relaunchers at the same moment run
+  one after the other (the experiment lock, below), so the second sees what the first
+  created. Not covered: a ``--batches`` change between runs.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
@@ -46,6 +47,13 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   is written once, when the read is complete.
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
+
+Experiment lock. ``xp create``, ``upload`` and ``submit`` hold a per-experiment lock for the
+whole command: ``fcntl.flock`` on ``.supervisor/runtime/locks/xp-<E>.lock`` in the canonical
+workspace, shared by every worker on the host. A second command for the same experiment waits
+up to ``LOCK_WAIT_S`` (60 s), then refuses with ``busy`` and does nothing. The kernel releases
+the lock when the process exits, so a crashed worker never leaves it held. The experiment
+argument must be an ``E-`` id (``bad_arguments`` otherwise), because it names the lock file.
 
 Identity is the spawn-time one (C6, C7). Each command uses the credential and expected player
 id in its own environment (what Hermes gave the worker when it started) for ``whoami`` and the
@@ -68,6 +76,8 @@ import os
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -76,7 +86,9 @@ from autoresearch import runctx
 from autoresearch.cli import register_group
 from autoresearch.games.bindings import binding_evaluate
 from autoresearch.games.loader import GameError, load_game
+from autoresearch.ids import parse_id
 from autoresearch.io.docs import write_text
+from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.preflight import env_file_value
@@ -100,6 +112,7 @@ IDENTITY_ENV = ("SOFTMAX_PLAYER_CREDENTIAL", PLAYER_ENV)
 BACKOFF_BASE = timedelta(minutes=30)
 BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
 BACKOFF_CAP = timedelta(hours=8)
+LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
 
 
 class BadArguments(ValueError):
@@ -164,6 +177,30 @@ def _run(handler):
         return EXIT_OK
 
     return run
+
+
+@contextmanager
+def experiment_lock(ctx, experiment: str) -> Iterator[None]:
+    """Hold the experiment's cross-process lock (module docstring), or refuse ``busy``."""
+    try:
+        prefix, _ = parse_id(experiment)
+    except ValueError:
+        prefix = None
+    if prefix != "E":
+        raise BadArguments(f"{experiment!r} is not an experiment id (E-<ULID>)")
+    path = runctx.runtime_dir(ctx) / "locks" / f"xp-{experiment}.lock"
+    with ExitStack() as held:
+        try:  # only the acquisition: a LockTimeout from the command itself is not "busy"
+            held.enter_context(file_lock(path, timeout_s=LOCK_WAIT_S))
+        except LockTimeout:
+            raise Refused(
+                "busy",
+                f"another process is running xp create, upload or submit for {experiment} "
+                f"(waited {LOCK_WAIT_S:g} s). See who: "
+                '"$AUTORESEARCH_CLI" queue list --state claimed. Do not duplicate a peer\'s '
+                "work; rerun later only if it is still needed",
+            ) from None
+        yield
 
 
 def _game():
@@ -370,6 +407,11 @@ def check_new_attempt(
 
 def _xp_create(ctx, sm, args) -> dict:
     base = backoff_base(os.environ)
+    with experiment_lock(ctx, args.experiment):
+        return _xp_create_locked(ctx, sm, args, base)
+
+
+def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     store = worker_store(ctx)
     experiment = args.experiment
     meta, _ = store.load(experiment)
@@ -485,7 +527,8 @@ def _xp_artifacts(ctx, sm, args) -> dict:
 
 def _upload(ctx, sm, args) -> dict:
     player = os.environ.get(PLAYER_ENV) or None
-    version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player)
+    with experiment_lock(ctx, args.experiment):
+        version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player)
     binding = worker_store(ctx).load(args.experiment)[0]["candidate_binding"]
     return {
         "experiment": args.experiment,
@@ -497,9 +540,11 @@ def _upload(ctx, sm, args) -> dict:
 def _submit(ctx, sm, args) -> dict:
     queue = queue_from_env(os.environ, ctx)
     player = os.environ.get(PLAYER_ENV, "")
-    return submit(
-        ctx, queue, sm, args.experiment, _league_id(), player, candidate=args.candidate_path
-    )
+    league_id = _league_id()
+    with experiment_lock(ctx, args.experiment):
+        return submit(
+            ctx, queue, sm, args.experiment, league_id, player, candidate=args.candidate_path
+        )
 
 
 def _leaderboard(ctx, sm, args) -> dict:
