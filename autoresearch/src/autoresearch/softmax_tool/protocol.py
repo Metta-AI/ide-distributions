@@ -1,6 +1,6 @@
 """The Softmax platform boundary: the only way core code touches Softmax."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -88,8 +88,9 @@ class Softmax(Protocol):
     def submit(self, policy_version_id: str, league_id: str) -> str: ...
     def submissions(self, player_id: str) -> list[dict]: ...
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None: ...
-    def league_episodes(self, league_id: str, limit: int) -> list[dict]:
-        """Up to ``limit`` completed league episodes, read-only. Each is a dict::
+    def league_episodes(self, league_id: str, limit: int) -> Iterable[dict]:
+        """Up to ``limit`` completed league episodes, read-only, in listing order (the real
+        client yields them as they arrive). Each is a dict::
 
             {episode_id, round_id, seed, game_version, coworld_id,
              seats: [{position, policy_version_id, player_id, is_filler}],

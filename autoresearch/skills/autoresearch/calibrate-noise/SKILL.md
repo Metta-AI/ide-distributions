@@ -33,7 +33,9 @@ Doctrine upheld: D-04, D-09.
 3. Fetch league episodes as episode rows (read-only; each episode goes through the game's
    evaluate binding):
    `"$AUTORESEARCH_CLI" softmax league-episodes --league <league_id> --limit 200 --out .scratch/league-rows.jsonl`
-   Read `data.rows` and `data.game_versions`.
+   Run it in the foreground with a terminal `timeout` of 600. 200 episodes take a few
+   minutes; a progress line goes to stderr every 10 episodes. Read `data.rows` and
+   `data.game_versions`. The file is written only when the read is complete.
 4. Add completed XP rows of the same version, if any:
    `cat .scratch/league-rows.jsonl evidence/xp/*/*/rows.jsonl > .scratch/noise-rows.jsonl`
    (when there are no XP rows, use `.scratch/league-rows.jsonl` alone). Rows of other game
@@ -41,7 +43,8 @@ Doctrine upheld: D-04, D-09.
 5. Ingest them as league rows:
    `"$AUTORESEARCH_CLI" stats ingest --league <league_id> --rows .scratch/noise-rows.jsonl --game-version <game_version> --game "$AUTORESEARCH_GAME"`
    Read `data.report.kept`. With fewer than 10 rows per metric the record is weak; fetch
-   more episodes (a larger `--limit`) or say so in the journal.
+   more episodes (`--limit 400` at most: each episode costs two platform calls) or say so
+   in the journal.
 6. Compute and write the record for every outcome metric, citing the evidence you used
    (the XP evidence entries, if any):
    `"$AUTORESEARCH_CLI" stats noise --league <league_id> --game-version <game_version> --metrics <m1,m2> --evidence <ar://evidence/EV-…>`

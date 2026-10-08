@@ -33,7 +33,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   episodes (``Softmax.league_episodes``), each mapped through the game's evaluate binding
   into EpisodeRows (``softmax_tool.league``), written as JSONL for
   ``stats ingest --league``. Prints ``{league_id, episodes, rows, out, game_versions}``.
-  ``--league`` defaults to the game's league.
+  ``--league`` defaults to the game's league. Episodes are evaluated as they arrive (the real
+  client fetches 4 at a time); a progress line goes to stderr every 10 episodes, and ``--out``
+  is written once, when the read is complete.
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
@@ -55,7 +57,9 @@ import itertools
 import json
 import math
 import os
+import sys
 import tempfile
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -479,6 +483,13 @@ def _standings(ctx, sm, args) -> dict:
     return {"league_id": league_id, "rows": sm.standings(league_id)}
 
 
+LEAGUE_PROGRESS_EVERY = 10  # episodes between progress lines on stderr
+
+
+def _progress(text: str, started: float) -> None:
+    print(f"league-episodes: {text} ({time.monotonic() - started:.0f} s)", file=sys.stderr)
+
+
 def _league_episodes(ctx, sm, args) -> dict:
     if args.limit < 1:
         raise BadArguments("--limit must be positive")
@@ -486,16 +497,22 @@ def _league_episodes(ctx, sm, args) -> dict:
     league_id = args.league or game.league_id
     current = str(sm.game_version(league_id)).strip()
     evaluate = binding_evaluate(game, _REPO_ROOT)
-    episodes = sm.league_episodes(league_id, args.limit)
     rows = []
+    episodes = 0
+    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="league-episodes-") as workdir:
-        for episode in episodes:
+        # Each episode is evaluated as it arrives, so a binding error shows at once.
+        for episode in sm.league_episodes(league_id, args.limit):
             rows += episode_rows(episode, evaluate, Path(workdir), current)
-    out = Path(args.out)
+            episodes += 1
+            if episodes % LEAGUE_PROGRESS_EVERY == 0:
+                _progress(f"{episodes}/{args.limit} episodes, {len(rows)} rows", started)
+    _progress(f"done: {episodes} episodes, {len(rows)} rows", started)
+    out = Path(args.out)  # written once, complete: a file that exists holds the whole read
     write_text(out, "".join(json.dumps(asdict(row), sort_keys=True) + "\n" for row in rows))
     return {
         "league_id": league_id,
-        "episodes": len(episodes),
+        "episodes": episodes,
         "rows": len(rows),
         "out": str(out),
         "current_game_version": current,
