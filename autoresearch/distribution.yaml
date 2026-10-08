@@ -32,6 +32,13 @@ env_requires:
   - name: AUTORESEARCH_WORKSPACE
     required: false
     description: Path of the canonical workspace. Default is $HERMES_HOME/workspace.
+  - name: AUTORESEARCH_INBOX_WRITERS
+    required: false
+    description: >-
+      Comma-separated uids or user names allowed to write comms/inbox/ directly (an
+      external agent such as the Softmax IDE bridge, run as its own user). When set, only
+      inbox files they own are adopted. When unset, any valid file is adopted and
+      queue-keeper logs that direct writes are unauthenticated.
   - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
     required: false
     default: "30"

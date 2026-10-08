@@ -5,7 +5,9 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
 
 0. **Adopt.** Files an external agent wrote into ``comms/inbox/`` directly are committed when
    valid (``comms.inbound.adopt_direct_writes``); an invalid one gets a runtime ``note`` in
-   reply to its id, once, and is never delivered.
+   reply to its id, once, its id is recorded in ``.supervisor/ledger/inbound-rejected/`` and
+   is final. A committed inbox entry that does not parse is skipped (action ``unreadable``)
+   so one bad file never stops routing.
 1. **Receive.** Every committed ``comms/inbox/<id>.json`` without a delivery record gets one
    (``comms.delivery``; state ``received``), with ``thread`` (the thread of the outbound
    message it answers: its ``thread``, else its id) and ``late`` (a reply after that
@@ -103,8 +105,9 @@ BACKLOG = {"task_id": None, "request_id": None, "backlog": True}
 class Action:
     """One thing ``route_all`` did: ``adopted`` (a direct inbox write committed), ``received``,
     ``card_requested``, ``routed_to_card``,
-    ``backlogged``, ``rejected`` (a task or a direct write answered with a note),
-    ``acknowledged`` (a seen),
+    ``backlogged``, ``rejected`` (a task answered with a note), ``write_rejected`` (a direct
+    inbox write answered with a note),
+    ``acknowledged`` (a seen), ``unreadable`` (a committed inbox entry that does not parse),
     ``bound`` (a record got its task id) or ``returned`` (back to the backlog)."""
 
     kind: str
@@ -514,26 +517,32 @@ def _route_one(
 def _reject_direct_writes(
     canonical: Path, rejected: dict[str, list[str]], allow_no_remote: bool
 ) -> list[Action]:
-    """Answer (once) each invalid file an external agent wrote into the inbox with a runtime
-    note in reply to its id. The file is not committed, so it gets no delivery record."""
-    actions = []
+    """Answer each newly rejected direct inbox write with one runtime note in reply to its
+    id, then record the rejection (``delivery.write_rejection``): the id is final. The file
+    is never committed, so it gets no delivery record. A note found already (a crash before
+    the record) is reused."""
+    actions, paths = [], []
     for inbound_id, problems in sorted(rejected.items()):
-        if find_reply(canonical, inbound_id, FROM_RUNTIME) is not None:
-            continue
+        message_id = find_reply(canonical, inbound_id, FROM_RUNTIME)
         body = (
             f"The inbound message {inbound_id} in comms/inbox/ is not valid and was not "
             "delivered: " + "; ".join(problems) + ". Write a corrected message with a new id."
         )
-        publish_runtime(
-            canonical,
-            "note",
-            f"Inbound {inbound_id} rejected",
-            body,
-            [],
-            allow_no_remote=allow_no_remote,
-            in_reply_to=inbound_id,
-        )
-        actions.append(Action("rejected", inbound_id, body))
+        if message_id is None:
+            result = publish_runtime(
+                canonical,
+                "note",
+                f"Inbound {inbound_id} rejected",
+                body,
+                [],
+                allow_no_remote=allow_no_remote,
+                in_reply_to=inbound_id,
+            )
+            message_id = message_id_of_seq(canonical, result.seq)
+            actions.append(Action("write_rejected", inbound_id, body))
+        paths.append(delivery.write_rejection(canonical, inbound_id, problems, message_id))
+    if paths:
+        commit_and_push(canonical, paths, f"inbound: {len(paths)} direct writes rejected")
     return actions
 
 
@@ -602,10 +611,12 @@ def _resolve(
             continue
         responsible = record["responsible"]
         receipt = receipts.get(responsible["request_id"]) if responsible["request_id"] else None
-        if receipt is not None and receipt["state"] in CLOSED_RECEIPT_STATES:
-            written, done = _closed(ctx, record, receipt, inbox[inbound_id], allow_no_remote)
-            paths += written
-            actions += done
+        closed = receipt is not None and receipt["state"] in CLOSED_RECEIPT_STATES
+        if closed:
+            if inbound_id in inbox:  # an unreadable entry is reported, not resolved
+                written, done = _closed(ctx, record, receipt, inbox[inbound_id], allow_no_remote)
+                paths += written
+                actions += done
             continue
         if receipt is not None:
             task_id = _current_task(receipt)
@@ -654,20 +665,28 @@ def _resolve(
     return actions
 
 
-def route_all(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> list[Action]:
+def route_all(
+    ctx: RunContext,
+    queue: Queue,
+    allow_no_remote: bool = False,
+    inbox_writers: frozenset[int] | None = None,
+) -> list[Action]:
     """Receive, route and resolve every inbound message (C11); see the module docstring.
     Takes the canonical lock: the caller must not hold it. Idempotent; safe to rerun after
-    a crash at any point. ``allow_no_remote`` is for runtime notes (tests, local runs)."""
+    a crash at any point. ``allow_no_remote`` is for runtime notes (tests, local runs);
+    ``inbox_writers`` restricts adoption to files those uids own (``comms.inbound``)."""
     canonical = ctx.canonical
     actions: list[Action] = []
     with canonical_lock(canonical):
-        adopted, rejected = adopt_direct_writes(canonical)
-        actions += [Action("adopted", inbound_id) for inbound_id in adopted]
-        actions += _reject_direct_writes(canonical, rejected, allow_no_remote)
-        inbox = delivery.inbox(canonical)
+        adoption = adopt_direct_writes(canonical, inbox_writers)
+        actions += [Action("adopted", inbound_id) for inbound_id in adoption.adopted]
+        actions += _reject_direct_writes(canonical, adoption.rejected, allow_no_remote)
+        skipped: list[str] = []
+        inbox = delivery.inbox(canonical, skipped)
+        actions += [Action("unreadable", path) for path in skipped]
         actions += _receive(canonical, inbox)
         for inbound_id, record in delivery.records(canonical).items():
-            if record["state"] == "received":
+            if record["state"] == "received" and inbound_id in inbox:
                 actions += _route_one(ctx, queue, record, inbox[inbound_id], allow_no_remote)
         actions += _resolve(ctx, queue, inbox, allow_no_remote)
     return actions

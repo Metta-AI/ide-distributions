@@ -11,6 +11,10 @@ runs `route_all`, finishes the card, and reads `comms/outbox/` the way the bridg
 acknowledgement has a few behaviours the bridge should know about (see "Notes for the bridge").
 The bridge's `Outbound` model must treat `in_reply_to` as optional (see "Checked and matching").
 
+**Action for Rohit: run the bridge as its own OS user and set `AUTORESEARCH_INBOX_WRITERS`** to that
+user in the profile `.env` (see "Trust: who may write the inbox"). Without it, direct writes are
+unauthenticated.
+
 ## Fixed on our side
 
 The bridge matches §7 and Runtime §9.2 (the L0 file adapter: "Each inbound message is one JSON file
@@ -19,10 +23,10 @@ that contract:
 
 | Bridge behaviour | Before | Now |
 |---|---|---|
-| Writes `comms/inbox/<id>.json` itself and never commits | Routing read only files committed at HEAD, so bridge messages were never seen | queue-keeper adopts direct writes each run (`comms.inbound.adopt_direct_writes`): a valid file is committed unchanged; an invalid one is left as it is and gets one runtime `note` in reply to its id |
-| Ids `<player_id>:task:<key>` and `<player_id>:stop:<key>` | Delivery records and `in_reply_to` accepted only `I-<ULID>` | An inbound id is any `[A-Za-z0-9][A-Za-z0-9._:-]{0,199}` without `..` (`INBOUND_ID`); `schemas/inbound.json` and `schemas/message.json` follow it |
+| Writes `comms/inbox/<id>.json` itself and never commits | Routing read only files committed at HEAD, so bridge messages were never seen | queue-keeper adopts direct writes each run (`comms.inbound.adopt_direct_writes`): a valid regular file is committed with the exact bytes it validated; an invalid one (or a symlink, or a file whose owner is not allowed) is left as it is, gets one runtime `note` in reply to its id, and its id is recorded in `.supervisor/ledger/inbound-rejected/` for good |
+| Ids `<player_id>:task:<key>` and `<player_id>:stop:<key>` | Delivery records and `in_reply_to` accepted only `I-<ULID>` | An inbound id is any `[A-Za-z0-9][A-Za-z0-9._:-]{0,199}` without `..` (`INBOUND_ID`), except ids shaped like an outbox key (`M-...` or all digits); `schemas/inbound.json` and `schemas/message.json` follow it |
 | `author: coach:<player_id>` | The author rule (consumer name) rejected `:` | `:` is allowed |
-| `created`, no `received_at` | Routing required `received_at` | `created` stands for `received_at` (lateness, delivery record) |
+| `created`, no `received_at` | Routing required `received_at` | `created` is required and kept as the writer's claim; the delivery record's `received_at` is the time queue-keeper received the file (lateness uses it) |
 | Waits while `comms/outbox/` is missing | The outbox appeared only with the first publication, which can be hours after install | Bootstrap creates `comms/inbox/` and `comms/outbox/` on every queue-keeper run |
 
 ## Where the bridge deviates from §7 (not changed on our side)
@@ -31,9 +35,10 @@ that contract:
   inbound message from the Preston-role agent carries the human's full authority (§7 Inbound; Runtime
   §9.2 "Preston carries the human's authority"). We keep unknown fields and ignore this one, so it is
   harmless, but the bridge should stop sending it.
-- **The bridge doc is stale in two places.** "No runtime consumes the inbox today" is no longer true,
-  and the schema and contract tests it waits for now exist (`schemas/message.json`,
-  `schemas/inbound.json`, the contract test above).
+- **The bridge doc's "What is not exercised yet" section is stale.** It says no runtime consumes the
+  inbox and that the message models wait for "the distribution publishes its schema and contract
+  tests". The runtime now consumes direct writes, and the schemas (`schemas/message.json`,
+  `schemas/inbound.json`) and the contract test above exist.
 
 ## Checked and matching
 
@@ -68,14 +73,46 @@ that contract:
    decides what to do (for example drop the task's card if it is still pending). If the task's card is
    already running or finished, its `Task <id> done` note can still arrive after the stop. The bridge
    should not reopen or re-complete an IDE task it has cancelled.
-4. **A rejected file is final.** An invalid direct write stays in `comms/inbox/` uncommitted and is
-   never delivered. A corrected message needs a new id (with this id scheme, a new task key), because
-   the old file is never re-read as new.
+4. **A rejected id is final.** An invalid direct write stays in `comms/inbox/` uncommitted and is
+   never delivered, and its id is recorded in `.supervisor/ledger/inbound-rejected/`. Rewriting the
+   file under the same id does nothing: the runtime note is the one answer. A corrected message needs
+   a new id (with this id scheme, a new task key). A file that is still not JSON 5 minutes after it
+   was last modified is rejected too; write whole files and rename them into place.
 5. **Latency.** queue-keeper runs every minute; adoption, routing and the card request happen in one
    run. The card then waits for a free slot.
-6. **File access on the host.** The workspace on the box is owned by the `autoresearch` user with mode
-   `0700`. The bridge must write as that user (or the deployment must give it write access to
-   `comms/inbox/` only, and read access to `comms/outbox/`, as Runtime §9.2 L0 describes). Files it
-   writes must be readable by `autoresearch`.
+6. **File access on the host: see "Trust" below.** Do not run the bridge as the `autoresearch` user.
 7. **Ids with `:`** are fine on Linux and in git. A checkout of the workspace remote on Windows cannot
    hold them; macOS can.
+
+## Trust: who may write the inbox
+
+An inbound message carries the full authority of the human (§7, C11): a `reply` can answer the
+agent's own question, a `steer` with urgency `now` gets a P0 card. So whoever can write
+`comms/inbox/` speaks for the coach. The agent's own card workers run as the workspace user
+(`autoresearch`), so if the bridge runs as that user too, nothing below the file layer can tell
+a bridge message from one a worker forged. Runtime §9.3 says the file layer enforces the
+single-writer rule with file permissions, which needs a separate user.
+
+What we do:
+
+- The Hermes plugin refuses, in every agent session, the `comms inbound` command and any write
+  that resolves into the canonical `comms/inbox/` (file tools and shell redirects, `cp`, `tee`,
+  ...), plus `python -c`/`execute_code` text that names `comms/inbox`. `comms inbound` itself
+  refuses to run inside a card worker. This is best effort: a constructed path in interpreter code
+  passes (policy docstring, "Residual risk").
+- Adoption takes regular files only (no symlinks), and when `AUTORESEARCH_INBOX_WRITERS` is set
+  (comma-separated uids or user names), only files owned by one of those users. Any other file is
+  rejected with a runtime note, which also makes a forgery attempt visible to the human. When it is
+  unset, queue-keeper adopts any valid file and logs in `keeper.log` that direct writes are
+  unauthenticated.
+
+What the deployment should do:
+
+1. Run the bridge as its own user, for example `ide-bridge`.
+2. Give that user write access to `comms/inbox/` only, and read access to `comms/outbox/`, for
+   example a group that owns `comms/inbox/` (mode `2770`, setgid so files keep the group) and
+   includes both users. The bridge also needs search (`x`) permission on the directories above it
+   (the profile and workspace are `0700` on the box today). Files the bridge writes must be
+   readable by `autoresearch` (umask `007` or `027`).
+3. Set `AUTORESEARCH_INBOX_WRITERS=ide-bridge` in the profile `.env`. It is on
+   `terminal.env_passthrough`, so queue-keeper sees it under the gateway.

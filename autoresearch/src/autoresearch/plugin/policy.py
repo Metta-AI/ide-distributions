@@ -10,7 +10,13 @@
 - model writes outside the worker worktree (C2; scratch files go to `<worktree>/.scratch/`),
   every model write after `card finish` (C3), and `memory` writes outside planning cards;
 - the native `kanban_complete` on a card before `card finish` ran (C3): a completed run with no
-  handoff record leaves its work unmerged.
+  handoff record leaves its work unmerged;
+- forging inbound messages (C11: inbound carries the human's full authority): the trusted
+  `comms inbound` command in any agent session, any write into the canonical workspace's
+  `comms/inbox/` (every session, cards or not), and `python -c`/`execute_code` text that names
+  `comms/inbox`. Only external agents write the inbox (Runtime 9.2). The real boundary is the
+  OS user: run external writers as their own user and set `AUTORESEARCH_INBOX_WRITERS`, so
+  queue-keeper adopts only files they own (`comms.inbound.adopt_direct_writes`).
 
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
 (`tools/terminal_tool.py`
@@ -45,6 +51,8 @@ blocked command, not an adversary. Known unhandled forms:
   text that names the identity files (the profile `.env` with `HERMES_HOME` or its path, or
   `.softmax`); a constructed path passes. The softmax tool therefore never takes identity
   from the `.env` (it only refuses when the `.env` differs from its spawn-time identity).
+  The same holds for `comms/inbox`: a constructed path passes the literal check, which is why
+  inbox adoption also checks the file owner when `AUTORESEARCH_INBOX_WRITERS` is set.
 The other layers are the approvals.deny globs in config.yaml (coarse, matched by Hermes
 before execution) and the softmax tool's `whoami` identity check immediately before every
 platform mutation (C6), which a raw `coworld` call cannot pass through.
@@ -160,6 +168,12 @@ NOT_FINISHED = (
 )
 FINISHED = "this card is finished (`card finish` ran); no further writes."
 SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
+INBOX_WRITE = (
+    "the inbox (comms/inbox/) is written only by external agents: an inbound message carries "
+    "the human's authority (C11). To tell the human something, stage an outbound message with "
+    '"$AUTORESEARCH_CLI" comms stage.'
+)
+INBOX_DIR_TEXT = "comms/inbox"
 
 
 class _Blocked(Exception):
@@ -199,6 +213,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
                 )
             if isinstance(code, str) and guard.names_identity_files(code):
                 return _block(IDENTITY_FILES)
+            if isinstance(code, str) and INBOX_DIR_TEXT in code:
+                return _block(INBOX_WRITE)
             return ALLOW
     except _Blocked as blocked:
         return _block(str(blocked))
@@ -228,6 +244,7 @@ class _Guard:
         self.base = ctx.worker or Path.cwd()
         self.home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
         self.softmax_dir = _real(self.home / ".softmax")
+        self.inbox_dir = _real(ctx.canonical / INBOX_DIR_TEXT)
         self.trusted = _trusted_cli_words(ctx)
 
     def names_identity_files(self, text: str) -> bool:
@@ -267,11 +284,15 @@ class _Guard:
         if resolved is None:
             if ".softmax" in expanded:
                 raise _Blocked(SOFTMAX_WRITE)
+            if INBOX_DIR_TEXT in expanded:
+                raise _Blocked(INBOX_WRITE)
             if self.finished:
                 raise _Blocked(FINISHED)
             return f"unresolved write target {target!r}"
         if _within(resolved, self.softmax_dir):
             raise _Blocked(SOFTMAX_WRITE)
+        if _within(resolved, self.inbox_dir):
+            raise _Blocked(INBOX_WRITE)
         if self.finished:
             raise _Blocked(FINISHED)
         if self.worker is not None and not _within(resolved, self.worker):
@@ -360,8 +381,17 @@ class _Guard:
         if not core:
             return []
         first = core[0]
-        if first in self.trusted or (os.path.isabs(first) and _real(Path(first)) in self.trusted):
-            return []
+        trusted = first in self.trusted or (
+            os.path.isabs(first) and _real(Path(first)) in self.trusted
+        )
+        if trusted or os.path.basename(first) == "autoresearch":
+            # `python -m autoresearch ...` unwraps to `autoresearch ...` too.
+            if [word for word in core[1:] if not word.startswith("-")][:2] == [
+                "comms", "inbound",
+            ]:
+                raise _Blocked(INBOX_WRITE)
+            if trusted:
+                return []
         if first.startswith("$"):  # `c=coworld; $c submit`
             first = _expand_variables(first, line.variables)
         # `coworld@latest`, `coworld==1.0` (uvx / uv tool run package specs)
@@ -444,6 +474,8 @@ class _Guard:
                         raise _Blocked(RAW_MUTATION)
                     if self.names_identity_files(code):
                         raise _Blocked(IDENTITY_FILES)
+                    if INBOX_DIR_TEXT in code:
+                        raise _Blocked(INBOX_WRITE)
                 return words[index:]
             elif name in SHELLS:
                 mode, script_at = _shell_mode(words, index + 1)

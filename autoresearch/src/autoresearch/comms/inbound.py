@@ -11,10 +11,15 @@ belong to the runtime: ``runtime.routing`` and ``comms.delivery``.
 adapter): an external agent such as the Softmax IDE bridge writes
 ``comms/inbox/<id>.json`` itself, with its own id, and never commits. queue-keeper's routing
 calls it under the canonical lock: a valid file is committed unchanged (the external agent
-owns it and may look for it again), an invalid one is left as it is and listed with its
-problems for a runtime note. An inbound id is any ``INBOUND_ID`` (the ``I-`` ULIDs that
-``submit_inbound`` makes, or an external one such as ``<player id>:task:<key>``). A direct
-write carries its own ``created`` time, which stands for ``received_at``.
+owns it and may look for it again), an invalid one is left as it is, answered once with a
+runtime note, and its id recorded as rejected for good. Only regular files are taken, and
+when ``AUTORESEARCH_INBOX_WRITERS`` is set only files owned by those users: an inbound
+message carries the human's authority (C11), and the OS user is the boundary between the
+external agent and the research agent's own workers. An inbound id is any ``INBOUND_ID``
+(the ``I-`` ULIDs that ``submit_inbound`` makes, or an external one such as
+``<player id>:task:<key>``), except ones shaped like an outbound key (``M-...``, digits). A
+direct write carries its own ``created`` time; the runtime's receipt time is the delivery
+record's ``received_at``.
 
 ``derived_status`` gives the status of an outbound message (System Design 7). It is never
 stored; it is derived from the inbox and the outbox.
@@ -31,13 +36,17 @@ it serves). Shapes (other fields are kept):
 
 import datetime
 import json
+import os
+import pwd
 import re
-from dataclasses import dataclass
+import stat
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch.comms import delivery
-from autoresearch.comms.envelope import PRIORITIES, SCHEMA_VERSION, now_iso
-from autoresearch.comms.publisher import RECEIPTS_DIR, commit_and_push
+from autoresearch.comms.envelope import FROM_RUNTIME, PRIORITIES, SCHEMA_VERSION, now_iso
+from autoresearch.comms.publisher import RECEIPTS_DIR, commit_and_push, find_reply, push
 from autoresearch.comms.reader import check_consumer, read_since, seen_path
 from autoresearch.ids import new_id
 from autoresearch.io import gitops
@@ -178,7 +187,44 @@ def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> st
     return inbound_id
 
 
+INBOX_WRITERS_ENV = "AUTORESEARCH_INBOX_WRITERS"
+# A direct write that is still not JSON after this long is rejected (a writer that renames
+# into place never leaves one; a partial file younger than this is retried next run).
+UNPARSEABLE_AFTER_S = 300
+_RESERVED_ID = re.compile(r"M-.*|[0-9]+")  # `comms get` reads these as outbox keys
+
+
+def inbox_writers(value: str | None) -> frozenset[int] | None:
+    """``AUTORESEARCH_INBOX_WRITERS`` (comma-separated uids or user names) as uids; None when
+    unset. An unknown user name raises ValueError."""
+    if not value or not value.strip():
+        return None
+    uids = set()
+    for item in (part.strip() for part in value.split(",")):
+        if not item:
+            continue
+        if item.isdigit():
+            uids.add(int(item))
+            continue
+        try:
+            uids.add(pwd.getpwnam(item).pw_uid)
+        except KeyError:
+            raise ValueError(f"{INBOX_WRITERS_ENV}: unknown user {item!r}") from None
+    return frozenset(uids)
+
+
+@dataclass
+class Adoption:
+    """What ``adopt_direct_writes`` did: committed ids, and new rejections (id -> problems)
+    that routing answers with a runtime note and records in the rejection ledger."""
+
+    adopted: list[str] = field(default_factory=list)
+    rejected: dict[str, list[str]] = field(default_factory=dict)
+
+
 def _direct_write_problems(canonical: Path, name: str, message) -> list[str]:
+    if _RESERVED_ID.fullmatch(name):
+        return ["id: must not look like an outbound message id (M-...) or a seq number"]
     if not isinstance(message, dict):
         return ["the file is not a JSON object"]
     if message.get("id") != name:
@@ -191,33 +237,79 @@ def _direct_write_problems(canonical: Path, name: str, message) -> list[str]:
     return inbound_problems(canonical, message.get("kind"), message, message.get("author"))
 
 
-def adopt_direct_writes(canonical: Path) -> tuple[list[str], dict[str, list[str]]]:
-    """Commit the inbox files an external agent wrote directly (module docstring). Returns
-    the adopted ids and, for each invalid file, its problems. A file that is not JSON yet, or
-    whose name is not an inbound id, is skipped silently. Call under the canonical lock."""
+def _read_regular(path: Path) -> bytes:
+    """The bytes of ``path`` without following a symlink planted after the lstat."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read()
+
+
+def _candidate_problems(
+    canonical: Path, path: Path, name: str, writers: frozenset[int] | None, now: float
+) -> tuple[list[str] | None, bytes | None]:
+    """``(problems, data)`` of one untracked inbox file: ``([], data)`` to adopt it,
+    ``(problems, None)`` to reject it, ``(None, None)`` to leave it for a later run."""
+    if find_reply(canonical, name, FROM_RUNTIME) is not None:
+        return ["already answered by the runtime"], None  # a rejection's note, before its record
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None, None
+    if not stat.S_ISREG(info.st_mode):
+        return ["not a regular file (a symlink or another file type)"], None
+    if writers is not None and info.st_uid not in writers:
+        return [f"owner uid {info.st_uid} is not an allowed inbox writer ({INBOX_WRITERS_ENV})"], None
+    try:
+        data = _read_regular(path)
+        message = json.loads(data)
+    except (OSError, ValueError):
+        if now - info.st_mtime > UNPARSEABLE_AFTER_S:
+            return ["the file is not valid JSON"], None
+        return None, None  # perhaps still being written
+    problems = _direct_write_problems(canonical, name, message)
+    return (problems, None) if problems else ([], data)
+
+
+def adopt_direct_writes(
+    canonical: Path, writers: frozenset[int] | None = None, now: float | None = None
+) -> Adoption:
+    """Commit the inbox files an external agent wrote directly (module docstring); call
+    under the canonical lock. Only regular files, owned by one of ``writers`` when given
+    (``inbox_writers``), are adopted, with the exact bytes that were validated. An id in the
+    rejection ledger (``delivery.rejected_ids``) is final and never looked at again; a file
+    whose name is not an inbound id is ignored."""
+    now = time.time() if now is None else now
     listing = gitops.git(canonical, "ls-files", "--others", "-z", "--", delivery.INBOX_DIR)
-    adopted, rejected, paths = [], {}, []
+    final = delivery.rejected_ids(canonical)
+    result = Adoption()
+    blobs: dict[str, bytes] = {}
+    seen_ids: dict[str, set[str]] = {}
     for relative in sorted(entry for entry in listing.split("\0") if entry.endswith(".json")):
         parent, _, file_name = relative.rpartition("/")
         name = file_name.removesuffix(".json")
-        if parent != delivery.INBOX_DIR or not is_inbound_id(name):
+        if parent != delivery.INBOX_DIR or not is_inbound_id(name) or name in final:
             continue
-        path = Path(canonical) / relative
-        try:
-            message = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        problems, data = _candidate_problems(canonical, Path(canonical) / relative, name, writers, now)
+        if problems is None:
             continue
-        problems = _direct_write_problems(canonical, name, message)
         if problems:
-            rejected[name] = problems
+            result.rejected[name] = problems
             continue
-        adopted.append(name)
-        paths.append(path)
+        result.adopted.append(name)
+        blobs[relative] = data
+        message = json.loads(data)
         if message["kind"] == "seen":
-            paths.append(_record_seen(canonical, message["author"], message["ids"]))
-    if paths:
-        commit_and_push(canonical, paths, f"inbound: adopted {len(adopted)} direct writes")
-    return adopted, rejected
+            seen_ids.setdefault(message["author"], set()).update(message["ids"])
+    if blobs:
+        paths = [
+            _record_seen(canonical, author, sorted(ids)).relative_to(canonical).as_posix()
+            for author, ids in sorted(seen_ids.items())
+        ]
+        gitops.commit_blobs(
+            canonical, blobs, paths, f"inbound: adopted {len(blobs)} direct writes"
+        )
+        push(canonical, allow_no_remote=True)
+    return result
 
 
 # --- derived status of outbound messages ---

@@ -401,3 +401,33 @@ def test_interpreter_text_naming_identity_files_is_blocked(layout, code):
 def test_interpreter_text_about_other_env_files_is_allowed(layout):
     code = "print(open('notes/.env.example').read())"
     assert tool_policy("execute_code", {"code": code}, layout.ctx(), WORKING)[0]
+
+
+INBOX_FORGERIES = [
+    '"$AUTORESEARCH_CLI" comms inbound steer --author coach:x --json "{{}}"',
+    '{cli} comms inbound task --author james --file .scratch/t.json',
+    "cd {canon} && python -m autoresearch comms inbound reply --author p --json '{{}}'",
+    "echo '{{}}' > {canon}/comms/inbox/x:task:1.json",
+    "cp .scratch/t.json {canon}/comms/inbox/",
+    "cd {canon}/comms/inbox && tee x.json < /dev/null",
+    "python3 -c \"open('{canon}/comms/inbox/x.json','w').write('{{}}')\"",
+]
+
+
+@pytest.mark.parametrize("command", INBOX_FORGERIES)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_inbound_forgery_is_blocked_in_every_agent_session(layout, command, card):
+    """C11: an inbound message carries the human's authority; only external agents send it."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed and "comms/inbox" in reason
+
+
+def test_file_tools_and_code_cannot_write_the_inbox(layout):
+    ctx = layout.ctx(worker=False)
+    target = {"path": str(layout.canonical / "comms" / "inbox" / "x.json"), "content": "{}"}
+    assert not tool_policy("write_file", target, ctx, None)[0]
+    code = {"code": "open('workspace/comms/inbox/x.json', 'w')"}
+    assert not tool_policy("execute_code", code, ctx, None)[0]
+    # Reading the inbox and the other comms commands stay allowed.
+    assert _terminal(layout, "cat {canon}/comms/inbox/x.json")[0]
+    assert _terminal(layout, '"$AUTORESEARCH_CLI" comms get x:task:1')[0]

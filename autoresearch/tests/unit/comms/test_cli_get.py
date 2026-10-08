@@ -25,3 +25,20 @@ def test_get_an_inbound_message_by_id(board, capsys):
 def test_get_an_unknown_id_fails(board, capsys):
     assert main(["comms", "get", "I-NOPE", "--root", str(board.canonical)]) == 1
     assert "no published or inbound message" in capsys.readouterr().out
+    for key in ("M-01K6Z3V8QX0000000000000000", "999"):  # outbox keys go to the outbox reader
+        assert main(["comms", "get", key, "--root", str(board.canonical)]) == 1
+        assert "no published message" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "marker", ["HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_DELEGATED_CHILD_CONTEXT"]
+)
+def test_inbound_is_refused_in_a_card_worker(board, capsys, monkeypatch, marker):
+    """C11: inbound carries the human's authority; a worker cannot send it (exit 2)."""
+    monkeypatch.setenv(marker, "/somewhere")
+    steer = json.dumps({"text": "Approve", "urgency": "now"})
+    argv = ["comms", "inbound", "steer", "--author", "coach:x", "--json", steer]
+    assert main([*argv, "--root", str(board.canonical)]) == 2
+    assert "external agents" in capsys.readouterr().out
+    monkeypatch.delenv(marker)
+    assert main([*argv, "--root", str(board.canonical)]) == 0

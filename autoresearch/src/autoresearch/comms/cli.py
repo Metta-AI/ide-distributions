@@ -19,7 +19,8 @@ not found, unresolvable), 2 bad arguments or no workspace.
   data: ``{id, published, seq, published_rev, seen_by}`` plus, for a published message, the
   derived ``state`` (open | answered | withdrawn | expired) and ``late``.
 - ``inbound KIND (--json J | --file F) --author A``: an external agent submits a
-  ``reply``, ``steer``, ``task`` or ``seen`` (``comms.inbound``).
+  ``reply``, ``steer``, ``task`` or ``seen`` (``comms.inbound``). Refused (exit 2) in a card
+  worker (``WORKER_ENV_MARKERS``); the plugin blocks it in every agent session too.
 
 Every command except ``stage`` works on the canonical workspace (``--root`` overrides it).
 """
@@ -27,6 +28,7 @@ Every command except ``stage`` works on the canonical workspace (``--root`` over
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
 
 from autoresearch import runctx
@@ -164,7 +166,17 @@ def _resolve(args) -> int:
     return _ok(data)
 
 
+# Set in every Kanban worker and its subprocesses (Hermes strips HERMES_KANBAN_TASK from
+# subprocesses, but these survive; hermes-facts "delegate_task and Kanban").
+WORKER_ENV_MARKERS = (runctx.ENV_WORKER, runctx.ENV_CARD_ID, "HERMES_DELEGATED_CHILD_CONTEXT")
+
+
 def _inbound(args) -> int:
+    if any(os.environ.get(name) for name in WORKER_ENV_MARKERS):
+        raise BadArguments(
+            "comms inbound is for external agents; a card worker cannot submit inbound "
+            "messages (C11). Stage an outbound message with comms stage."
+        )
     text = _read_file(args.file) if args.file is not None else args.json
     payload = _json_object(text, "--json")
     inbound_id = submit_inbound(_canonical(args), args.kind, payload, author=args.author)

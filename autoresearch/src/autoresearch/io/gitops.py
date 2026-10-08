@@ -10,8 +10,12 @@ class GitError(RuntimeError):
         self.stderr = stderr
 
 
-def _run(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=False)
+def _run(
+    repo: Path, *args: str, check: bool = True, input: bytes | None = None
+) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, check=False, input=input
+    )
     if check and result.returncode != 0:
         raise GitError(args, result.stderr.decode(errors="replace"))
     return result
@@ -42,6 +46,21 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> str | None:
     if _run(repo, "diff", "--cached", "--quiet", "--", *paths, check=False).returncode == 0:
         return None
     git(repo, "commit", "-m", message, "--", *paths)
+    return head(repo)
+
+
+def commit_blobs(repo: Path, blobs: dict[str, bytes], paths: list[str], message: str) -> str:
+    """Commit ``blobs`` (repo-relative path -> exact bytes, as regular files, whatever the
+    working tree holds now) plus the working-tree content of ``paths``. Refuses (GitError)
+    when the index already differs from HEAD, so nothing else rides along."""
+    if _run(repo, "diff", "--cached", "--quiet", check=False).returncode != 0:
+        raise GitError(("commit_blobs",), "the index has staged changes")
+    for path, data in blobs.items():
+        blob = _run(repo, "hash-object", "-w", "--stdin", input=data).stdout.decode().strip()
+        git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+    if paths:
+        git(repo, "add", "-A", "--", *paths)
+    git(repo, "commit", "-m", message)
     return head(repo)
 
 

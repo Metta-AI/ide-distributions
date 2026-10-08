@@ -10,17 +10,20 @@ whole then renamed, with its own id, and never commits. It reads ``comms/outbox/
 import functools
 import json
 import os
+import time
 
 import jsonschema
 import pytest
 from support.board import Board
 
-from autoresearch.comms.publisher import publish_hook
+from autoresearch.comms.publisher import publish_hook, publish_runtime
 from autoresearch.comms.reader import read_since
 from autoresearch.comms.stage import stage
 from autoresearch.io import gitops
 from autoresearch.paths import Layout
 from autoresearch.queue.requests import load_schema
+from autoresearch.runtime import queue_keeper
+from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.routing import route_all
 
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
@@ -72,8 +75,17 @@ def bridge_write(board: Board, message: dict) -> bytes:
     return data
 
 
-def _route(board: Board):
-    return route_all(board.ctx(), board.queue, allow_no_remote=True)
+def _route(board: Board, writers: frozenset[int] | None = None):
+    return route_all(board.ctx(), board.queue, allow_no_remote=True, inbox_writers=writers)
+
+
+def _kinds(actions) -> list[tuple[str, str]]:
+    return [(action.kind, action.inbound_id) for action in actions]
+
+
+def _runtime_notes(board: Board, inbound_id: str) -> list[dict]:
+    published = read_since(board.canonical, "t", after=0)
+    return [m for m in published if m.get("in_reply_to") == inbound_id]
 
 
 def _committed(board: Board, relative: str) -> bytes | None:
@@ -122,7 +134,9 @@ def test_bridge_task_becomes_a_card_and_its_note_closes_the_ide_task(board):
     assert request["spec"]["created_by"] == TASK_ID
     assert (request["spec"]["mode"], request["spec"]["priority"]) == ("scouting", "P2")
     record = _delivery(board, TASK_ID)
-    assert record["state"] == "routed" and record["received_at"] == "2026-10-08T20:00:00Z"
+    assert record["state"] == "routed"
+    # The runtime's receipt time, not the writer's claim (`created` can be backdated).
+    assert record["received_at"] != "2026-10-08T20:00:00Z"
     assert _route(board) == []  # a second run adopts and requests nothing
 
     _finish_card_for(board, request["id"])
@@ -176,3 +190,104 @@ def test_a_partial_or_misnamed_write_is_not_adopted(board):
 
     assert _route(board) == []
     assert gitops.git(board.canonical, "ls-files", "comms/inbox") == ""
+
+
+# --- hardening (review round 1) ---
+
+
+def test_a_symlink_is_rejected_and_other_writes_still_route(board, tmp_path):
+    target = tmp_path / "elsewhere.json"
+    target.write_text(json.dumps(bridge_stop()))
+    inbox = Layout(board.canonical).comms_inbox
+    inbox.mkdir(parents=True, exist_ok=True)
+    os.symlink(target, inbox / f"{STOP_ID}.json")
+    bridge_write(board, bridge_task())
+
+    actions = _route(board)
+
+    assert ("adopted", TASK_ID) in _kinds(actions)
+    assert ("write_rejected", STOP_ID) in _kinds(actions)
+    assert _committed(board, f"comms/inbox/{STOP_ID}.json") is None
+    [note] = _runtime_notes(board, STOP_ID)
+    assert "regular file" in note["body"]
+    assert len(_requests(board)) == 1 and _route(board) == []
+
+
+def test_an_unreadable_committed_inbox_entry_is_skipped(board):
+    inbox = Layout(board.canonical).comms_inbox
+    inbox.mkdir(parents=True, exist_ok=True)
+    (inbox / "broken.json").write_text("comms/elsewhere.json")  # e.g. a committed symlink blob
+    gitops.commit_paths(board.canonical, ["comms/inbox/broken.json"], "a bad entry")
+    bridge_write(board, bridge_task())
+
+    actions = _route(board)
+
+    assert ("unreadable", "comms/inbox/broken.json") in _kinds(actions)
+    assert len(_requests(board)) == 1  # routing went on
+
+
+def test_two_seen_writes_by_one_author_keep_every_id(board):
+    with canonical_lock(board.canonical):
+        for title in ("One", "Two"):
+            publish_runtime(board.canonical, "note", title, "B", [], allow_no_remote=True)
+    first, second = (m["id"] for m in read_since(board.canonical, "t", after=0))
+    for key, ids in (("1", [first]), ("2", [second])):
+        bridge_write(board, _envelope(f"{PLAYER}:seen:{key}", "seen") | {"ids": ids})
+
+    _route(board)
+
+    seen = board.committed(board.ledger / "seen" / f"coach:{PLAYER}.json")
+    assert seen["ids"] == sorted([first, second])
+
+
+def test_a_rejected_id_is_final_even_when_rewritten(board):
+    bridge_write(board, bridge_task(mode="strategy"))
+    _route(board)
+    rejection = board.committed(board.ledger / "inbound-rejected" / f"{TASK_ID}.json")
+    assert "mode" in " ".join(rejection["problems"])
+
+    bridge_write(board, bridge_task())  # now valid, same id
+    assert _route(board) == []
+    assert _committed(board, f"comms/inbox/{TASK_ID}.json") is None
+    assert _requests(board) == [] and len(_runtime_notes(board, TASK_ID)) == 1
+
+
+def test_only_allowed_owners_are_adopted(board):
+    bridge_write(board, bridge_task())
+    actions = _route(board, writers=frozenset({os.getuid() + 1}))
+    assert ("write_rejected", TASK_ID) in _kinds(actions)
+    [note] = _runtime_notes(board, TASK_ID)
+    assert "AUTORESEARCH_INBOX_WRITERS" in note["body"]
+
+    stop = bridge_stop()
+    bridge_write(board, stop)
+    assert ("adopted", STOP_ID) in _kinds(_route(board, writers=frozenset({os.getuid()})))
+
+
+@pytest.mark.parametrize("name", ["M-01K6Z3V8QX0000000000000000", "42"])
+def test_an_id_shaped_like_an_outbox_key_is_rejected(board, name):
+    bridge_write(board, bridge_task(id=name))
+    assert ("write_rejected", name) in _kinds(_route(board))
+
+
+def test_a_file_that_stays_unparseable_is_rejected(board):
+    inbox = Layout(board.canonical).comms_inbox
+    inbox.mkdir(parents=True, exist_ok=True)
+    path = inbox / f"{TASK_ID}.json"
+    path.write_text('{"id": "')
+    old = time.time() - 3600
+    os.utime(path, (old, old))
+    assert ("write_rejected", TASK_ID) in _kinds(_route(board))
+
+
+def test_keeper_warns_when_direct_writes_are_unauthenticated(board):
+    log = board.canonical / ".supervisor" / "runtime" / "keeper.log"
+    bridge_write(board, bridge_task())
+    queue_keeper._routing_step(board.ctx(), board.queue, {}, True)
+    assert "unauthenticated" in log.read_text()
+
+    log.unlink()
+    bridge_write(board, bridge_stop())
+    env = {"AUTORESEARCH_INBOX_WRITERS": str(os.getuid())}
+    queue_keeper._routing_step(board.ctx(), board.queue, env, True)
+    assert not log.exists() or "unauthenticated" not in log.read_text()

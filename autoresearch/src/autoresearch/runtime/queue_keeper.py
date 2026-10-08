@@ -68,6 +68,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
+from autoresearch.comms.inbound import INBOX_WRITERS_ENV, inbox_writers
 from autoresearch.comms.publisher import (
     PublishResult,
     outbox_has_title,
@@ -195,6 +196,25 @@ def _read_state(ctx: RunContext, name: str, default):
         return read_json(path) if path.exists() else default
     except ValueError:
         return default  # disposable: a damaged file starts over
+
+
+def _routing_step(ctx: RunContext, queue: Queue, env: Mapping[str, str], allow_no_remote: bool):
+    """Route inbound (C11). Direct inbox writes are adopted only from the users in
+    ``AUTORESEARCH_INBOX_WRITERS`` when it is set (an unknown user fails the step, so nothing
+    is adopted); when it is unset, a run that took direct writes logs that they are
+    unauthenticated."""
+    writers = inbox_writers(env.get(INBOX_WRITERS_ENV))
+    actions = route_all(ctx, queue, allow_no_remote=allow_no_remote, inbox_writers=writers)
+    if writers is None and any(a.kind in ("adopted", "write_rejected") for a in actions):
+        _log(
+            ctx,
+            f"warning: direct inbox writes are unauthenticated: {INBOX_WRITERS_ENV} is unset, "
+            "so any process running as the workspace user can write inbound messages",
+        )
+    for action in actions:
+        if action.kind == "unreadable":
+            _log(ctx, f"warning: committed inbox entry {action.inbound_id} is not a JSON object")
+    return actions
 
 
 def _step(run: KeeperRun, ctx: RunContext, name: str, fn: Callable, *args, **kwargs):
@@ -647,7 +667,7 @@ def _run_steps(
     _step(run, ctx, "kb", kb_step, canonical, now, game_version, pin)
     _step(run, ctx, "push", push_early, canonical)
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
-    _step(run, ctx, "routing", route_all, ctx, queue, allow_no_remote=allow_no_remote)
+    _step(run, ctx, "routing", _routing_step, ctx, queue, env, allow_no_remote)
     _step(run, ctx, "admission", admission_step, run, ctx, queue, game, game_version, profile, now)
     run.signals = (
         _step(

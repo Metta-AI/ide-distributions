@@ -85,6 +85,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
 | `AUTORESEARCH_QUEUE` | no | `file` selects the serial fallback queue (see below). |
+| `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
 | `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
@@ -214,8 +215,12 @@ Where things live:
 External agents send inbound messages in one of two ways: `"$AUTORESEARCH_CLI" comms inbound`
 (validates, gives an `I-` id, commits), or by writing `comms/inbox/<id>.json` directly with
 their own id and a `created` time (the Softmax IDE bridge does this). queue-keeper commits a
-valid direct write unchanged on its next run and answers an invalid one with a runtime
-`note` in reply to its id. See
+valid direct write unchanged on its next run. It answers an invalid one (or a symlink, or a
+file whose owner is not in `AUTORESEARCH_INBOX_WRITERS`) once with a runtime `note` in reply
+to its id and records the id in `.supervisor/ledger/inbound-rejected/`; a rejected id is
+final. Run the external agent as its own OS user and set `AUTORESEARCH_INBOX_WRITERS`: the
+agent's own workers run as the workspace user, and the plugin blocking their inbox writes is
+best effort. See
 [softmax-ide-bridge-compat.md](docs/integrations/softmax-ide-bridge-compat.md).
 
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a

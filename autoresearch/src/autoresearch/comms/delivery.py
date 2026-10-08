@@ -21,6 +21,9 @@ from autoresearch.runtime.ledger import now_iso
 
 INBOUND_DIR = ".supervisor/ledger/inbound"
 BACKLOG_DIR = ".supervisor/ledger/backlog"
+# One record per rejected direct inbox write: ``{id, problems, answered_by, at}``. A rejected
+# id is final; adoption never looks at that file again.
+REJECTED_DIR = ".supervisor/ledger/inbound-rejected"
 INBOX_DIR = "comms/inbox"
 _SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "inbound.json"
 
@@ -38,25 +41,56 @@ def backlog_path(canonical: Path, inbound_id: str) -> Path:
     return Path(canonical) / BACKLOG_DIR / f"{inbound_id}.json"
 
 
-def _committed_dir(canonical: Path, directory: str) -> dict[str, dict]:
-    """Stem -> JSON of every ``*.json`` committed at HEAD under ``directory``."""
+def _committed_dir(
+    canonical: Path, directory: str, skipped: list[str] | None = None
+) -> dict[str, dict]:
+    """Stem -> JSON object of every ``*.json`` committed at HEAD under ``directory``. An
+    entry that is not a JSON object is left out (and its path added to ``skipped``), so one
+    bad file never stops the readers."""
     listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{directory}/")
     found = {}
     for path in sorted(listing.splitlines()):
-        if path.endswith(".json"):
-            found[path.rsplit("/", 1)[-1].removesuffix(".json")] = json.loads(
-                gitops.show(canonical, "HEAD", path)
-            )
+        if not path.endswith(".json"):
+            continue
+        try:
+            value = json.loads(gitops.show(canonical, "HEAD", path))
+        except (TypeError, ValueError):
+            value = None
+        if not isinstance(value, dict):
+            if skipped is not None:
+                skipped.append(path)
+            continue
+        found[path.rsplit("/", 1)[-1].removesuffix(".json")] = value
     return found
 
 
-def inbox(canonical: Path) -> dict[str, dict]:
+def inbox(canonical: Path, skipped: list[str] | None = None) -> dict[str, dict]:
     """Inbound id -> inbound message, as committed at HEAD, sorted by id. A message an
-    external agent wrote directly has no ``received_at``; its ``created`` stands for it."""
-    messages = _committed_dir(canonical, INBOX_DIR)
-    for message in messages.values():
-        message.setdefault("received_at", message.get("created"))
+    external agent wrote directly has no ``received_at``: it gets its delivery record's (the
+    time the runtime received it), or now before the record exists. Unreadable entries go to
+    ``skipped``."""
+    messages = _committed_dir(canonical, INBOX_DIR, skipped)
+    missing = [message for message in messages.values() if "received_at" not in message]
+    if missing:
+        known = records(canonical)
+        for message in missing:
+            record = known.get(message.get("id"), {})
+            message["received_at"] = record.get("received_at") or now_iso()
     return messages
+
+
+def rejected_ids(canonical: Path) -> set[str]:
+    """Ids of rejected direct inbox writes, as committed at HEAD."""
+    listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{REJECTED_DIR}/")
+    return {path.rsplit("/", 1)[-1].removesuffix(".json") for path in listing.splitlines()}
+
+
+def write_rejection(canonical: Path, inbound_id: str, problems: list[str], answered_by: str):
+    """Write one rejection record; the caller commits the returned path."""
+    path = Path(canonical) / REJECTED_DIR / f"{inbound_id}.json"
+    record = {"id": inbound_id, "problems": problems, "answered_by": answered_by, "at": now_iso()}
+    write_json(path, record)
+    return path
 
 
 def records(canonical: Path) -> dict[str, dict]:
