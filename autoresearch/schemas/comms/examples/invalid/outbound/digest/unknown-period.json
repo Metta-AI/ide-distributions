@@ -1,0 +1,26 @@
+{
+  "_why": "period: must be one of",
+  "schema": "ar-comms/0",
+  "id": "M-01K6Z3V8QX0000000000000002",
+  "created": "2026-10-08T21:02:00+00:00",
+  "from": "research-agent",
+  "iteration": 7,
+  "kind": "digest",
+  "title": "Week 41 digest",
+  "body": "Two versions tested; v14 promoted.",
+  "refs": [
+    {
+      "uri": "ar://journal/J-0007#d2",
+      "rev": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "role": "subject"
+    }
+  ],
+  "priority": "P2",
+  "expects_response": false,
+  "supersedes": null,
+  "expires": null,
+  "card": "t_3f9a",
+  "seq": 2,
+  "published_rev": "5f0c6d8e2a9b4c1d7e3f6a8b9c0d1e2f3a4b5c6d",
+  "period": "hourly"
+}

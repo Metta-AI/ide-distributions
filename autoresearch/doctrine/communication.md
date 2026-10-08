@@ -27,6 +27,7 @@ Useful options: `--priority P0..P5`, `--expects-response` or `--no-expects-respo
 | `suggestion` | Something a human can do, for example raise credits or look at a replay. Also each skill proposal and each doctrine proposal. | Set per message. A skill proposal stays open until a reply. |
 | `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. | Set per message. |
 | `highlight` | One event: a supported or falsified hypothesis, a newly verified claim, a promotion, or a surprising result. | Set per message. |
+| `digest` | A periodic roll-up. | No. |
 
 For a skill proposal, add the ref `ar://skill-proposal/<name>`.
 
@@ -61,6 +62,7 @@ The briefing of your card lists the inbound messages that were delivered to it.
 | `reply` | An answer to one of your messages: a choice, text, or both. | Yes (D-02). Send a `note` with `--in-reply-to <inbound id>`. State the outcome: applied, declined with a reason, or noted. |
 | `steer` | Direction from the human. A steer outranks your own plan (D-02). | Yes, the same way as a `reply`. |
 | `task` | A request for work. The runtime makes a card from it. | No. The runtime acknowledges it when the card that was created from it publishes. |
+| `ping` | A liveness check. | No. The runtime acknowledges it. |
 | `seen` | It only marks other messages as read. | No. |
 
 Card completion checks that each delivered `reply` and `steer` has an acknowledgement.

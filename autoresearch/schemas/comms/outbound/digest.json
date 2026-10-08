@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/comms/outbound/digest.json",
+  "title": "Outbound digest (ar-comms/0)",
+  "x-autoresearch": {
+    "direction": "outbound",
+    "summary": "A periodic roll-up of what changed since the last digest."
+  },
+  "allOf": [{"$ref": "../envelope.outbound.json"}],
+  "required": ["period"],
+  "properties": {
+    "kind": {"const": "digest"},
+    "period": {"enum": ["daily", "weekly"], "x-message": "must be one of daily, weekly"}
+  }
+}

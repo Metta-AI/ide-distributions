@@ -29,6 +29,8 @@ Readers ignore fields and kinds they do not know.
 | `note` | outbound | A decision or status change a human should know; with in_reply_to, the acknowledgement of an inbound message. |
 | `question` | outbound | A choice where human judgement adds value; a reply is expected. |
 | `suggestion` | outbound | Something a human can do, such as raise credits or look at a replay; also each skill or doctrine proposal. |
+| `digest` | outbound | A periodic roll-up of what changed since the last digest. |
+| `ping` | inbound | Checks the agent is alive; acknowledged by the runtime at once. |
 | `reply` | inbound | An answer to a published message (in_reply_to): a choice, text, or both. |
 | `seen` | inbound | Marks published messages as read by its author; nobody acknowledges it. |
 | `steer` | inbound | Direction that outranks the agent's plan; urgency now gets a P0 card, and it may propose a topic. |

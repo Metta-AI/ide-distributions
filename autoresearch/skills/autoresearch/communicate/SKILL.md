@@ -25,6 +25,7 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
 | `suggestion` | Something a human can do, for example look at a replay. Also each doctrine proposal. |
 | `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. |
 | `highlight` | One message per event: a supported or falsified hypothesis, a newly verified claim, a promotion, or a surprising result. |
+| `digest` | A periodic roll-up. |
 
 ## Procedure
 
