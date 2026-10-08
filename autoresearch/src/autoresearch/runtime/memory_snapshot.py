@@ -23,6 +23,9 @@ def snapshot_memory(ctx: RunContext) -> bool:
     if not source.is_file():
         return False
     target = ctx.canonical / SNAPSHOT_RELATIVE
+    text = source.read_text(encoding="utf-8")
     with canonical_lock(ctx.canonical):
-        write_text(target, source.read_text(encoding="utf-8"))
+        if target.is_file() and target.read_text(encoding="utf-8") == text:
+            return False
+        write_text(target, text)
         return commit(ctx.canonical, [target], "memory: snapshot MEMORY.md") is not None

@@ -15,7 +15,7 @@ from autoresearch import cli
 DISTRIBUTION = Path(__file__).resolve().parents[2]
 README = (DISTRIBUTION / "README.md").read_text(encoding="utf-8")
 SHELL_FENCE = re.compile(r"^```(?:sh|bash)\n(.*?)^```", re.MULTILINE | re.DOTALL)
-BUILTINS = {"cd", "mkdir", "cp", "export"}
+BUILTINS = {"cd", "mkdir", "cp", "export", "set"}
 OPTIONAL_TOOLS = {"nim"}  # skipped when absent from the machine
 CLI_VARIABLE = "$AUTORESEARCH_CLI"
 
@@ -27,7 +27,11 @@ def shell_commands() -> list[list[str]]:
         for line in joined.splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
-                commands.append(shlex.split(line))
+                words = shlex.split(line)
+                while words and re.fullmatch(r"[A-Z_]+=\S*", words[0]):
+                    words.pop(0)  # leading VAR=value assignments
+                if words:
+                    commands.append(words)
     return commands
 
 
@@ -73,3 +77,13 @@ def test_cron_jobs_in_the_readme_are_shipped_jobs():
         if c[0] == "hermes" and "resume" in c and c[-1] != "resume"
     }
     assert named == shipped
+
+
+OPERATOR_SETUP = 'set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"'
+
+
+def test_operator_shell_setup_precedes_cli_examples():
+    assert OPERATOR_SETUP in README
+    assert README.index(OPERATOR_SETUP) < README.index('"' + CLI_VARIABLE + '" ')
+    assert 'export PROFILE="' in README
+    assert README.index('export PROFILE="') < README.index(OPERATOR_SETUP)

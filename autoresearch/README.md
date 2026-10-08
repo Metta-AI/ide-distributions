@@ -49,12 +49,23 @@ Or use the official `install.sh` from the Hermes repository on a host.
 hermes profile install /path/to/ide-mvp/autoresearch --name autoresearch
 ```
 
-This creates the profile `autoresearch` under `$HERMES_HOME/profiles/`. Use that name
-everywhere below. The Kanban board has the same name. The three cron jobs arrive paused.
+This creates the profile `autoresearch` under `<host root>/profiles/`. The host root is
+`~/.hermes` unless `HERMES_HOME` is set in your shell. Use that name everywhere below. The
+Kanban board has the same name. The three cron jobs arrive paused.
+
+Set `PROFILE` once. Every path below is relative to it:
+
+```sh
+export PROFILE="${HERMES_HOME:-$HOME/.hermes}/profiles/autoresearch"
+```
+
+Do not confuse the two homes. The host root holds all profiles. `$PROFILE` is the home of
+this one profile. The `autoresearch` command and the cron scripts need `HERMES_HOME` to be
+`$PROFILE`.
 
 ## Configure `.env`
 
-Create `$HERMES_HOME/profiles/autoresearch/.env` (mode 0600). Hermes never overwrites it.
+Create `$PROFILE/.env` (mode 0600). Hermes never overwrites it.
 
 ```dotenv
 OPENROUTER_API_KEY=sk-or-...
@@ -68,10 +79,10 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `OPENROUTER_API_KEY` | yes | Key for the research model. Hermes keeps it from model commands. |
 | `SOFTMAX_PLAYER_CREDENTIAL` | yes | The credential of the Softmax player the agent acts as. It is JSON with `token` and `expires_at` (ISO 8601): one entry of `player_sessions.<server>.cache` in the `~/.softmax/credentials.yaml` that `coworld player use <ply_id>` writes. A bare token is rejected. Player tokens last about 24 hours; preflight warns 2 hours before expiry and pauses at expiry. Format details: [softmax-client.md](docs/plans/findings/softmax-client.md). |
 | `AUTORESEARCH_PLAYER_ID` | yes | Id of that player. Every Softmax call checks that the credential belongs to it. |
-| `AUTORESEARCH_WORKSPACE_REMOTE` | yes | Git remote of the canonical workspace. **The repository must exist before the first run.** An empty repository is fine. A relative path is relative to `$HERMES_HOME`. |
+| `AUTORESEARCH_WORKSPACE_REMOTE` | yes | Git remote of the canonical workspace. **The repository must exist before the first run.** An empty repository is fine. A relative path is relative to `$PROFILE`. |
 | `OPENROUTER_MODEL` | no | Model id. Default `moonshotai/kimi-k3`, fallback `z-ai/glm-5.3`. |
 | `AUTORESEARCH_GAME` | no | Directory name under `games/`. Default `gota`. |
-| `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$HERMES_HOME/workspace`. |
+| `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
 | `AUTORESEARCH_QUEUE` | no | `file` selects the serial fallback queue (see below). |
 
@@ -119,10 +130,18 @@ hermes -p autoresearch cron list
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
 | `health` | every 15 minutes | Checks blocked cards, free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
-To start a `queue-keeper` run now, without waiting for the schedule:
+To start a `queue-keeper` run at the next scheduler tick instead of waiting for the
+schedule:
 
 ```sh
 hermes -p autoresearch cron run queue-keeper
+```
+
+`cron run` only marks the job. A running gateway runs it on its next tick, or you can run
+`hermes -p autoresearch cron tick` once by hand. To run only bootstrap (no cards):
+
+```sh
+HERMES_HOME="$PROFILE" python3 "$PROFILE/scripts/queue_keeper.py" --bootstrap-only
 ```
 
 The first `queue-keeper` run syncs the venv (`uv sync` from `uv.lock`), writes the CLI shim,
@@ -145,7 +164,21 @@ gaps).
 
 ## Operate
 
-Read state with the CLI. Use `"$AUTORESEARCH_CLI"` (it is in the profile `.env`):
+### Operator shell
+
+`AUTORESEARCH_CLI` is only in the profile `.env`, and the CLI needs `HERMES_HOME` to be the
+profile home. Softmax commands also need `SOFTMAX_PLAYER_CREDENTIAL` and
+`AUTORESEARCH_PLAYER_ID`. Prepare each operator shell like this (after `PROFILE` is set):
+
+```sh
+set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"
+```
+
+Now `HERMES_HOME` is the profile home in this shell. Run `hermes` commands for the host
+(`hermes config`, `hermes gateway`) in a different shell, or with `HERMES_HOME` unset.
+`hermes -p autoresearch ...` commands work in both.
+
+Read state with the CLI:
 
 ```sh
 "$AUTORESEARCH_CLI" queue list
@@ -160,18 +193,18 @@ Where things live:
 
 | What | Where |
 |---|---|
-| Profile home | `$HERMES_HOME/profiles/autoresearch/` |
-| Canonical workspace (git) | `<profile>/workspace/` |
-| Durable ledger (committed, pushed) | `<profile>/workspace/.supervisor/ledger/` |
-| Pause state | `<profile>/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
-| Disposable runtime state | `<profile>/workspace/.supervisor/runtime/` |
-| queue-keeper log | `<profile>/workspace/.supervisor/runtime/keeper.log` |
-| Hermes logs, cron output | `<profile>/logs/`, `<profile>/cron/` |
-| Card worktrees | `<profile>/workspace/.worktrees/` |
-| venv and CLI shim | `<profile>/local/venv/`, `<profile>/bin/autoresearch` |
-| Staged skills (not adopted) | `<profile>/local/skills-staging/` |
-| Hermes memory | `<profile>/memories/MEMORY.md` |
-| Memory snapshot (committed) | `<profile>/workspace/.supervisor/hermes-memory.md` |
+| Profile home | `$PROFILE/` |
+| Canonical workspace (git) | `$PROFILE/workspace/` |
+| Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
+| Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
+| Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
+| queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
+| Hermes logs, cron output | `$PROFILE/logs/`, `$PROFILE/cron/` |
+| Card worktrees | `$PROFILE/workspace/.worktrees/` |
+| venv and CLI shim | `$PROFILE/local/venv/`, `$PROFILE/bin/autoresearch` |
+| Staged skills (not adopted) | `$PROFILE/local/skills-staging/` |
+| Hermes memory | `$PROFILE/memories/MEMORY.md` |
+| Memory snapshot (committed) | `$PROFILE/workspace/.supervisor/hermes-memory.md` |
 
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a
 `keeper_step_failed` signal. The agent pauses itself when preflight fails (identity,
@@ -180,6 +213,10 @@ a help request. It resumes by itself when preflight passes again.
 
 ## Restore on a new host
 
+Privacy note: the memory snapshot is committed to the workspace and pushed to
+`AUTORESEARCH_WORKSPACE_REMOTE`. Anything the agent writes to memory is visible to everyone
+with access to that remote. queue-keeper writes the snapshot only when the content changed.
+
 The canonical workspace is a git repository, and queue-keeper pushes it to
 `AUTORESEARCH_WORKSPACE_REMOTE` on each run (`main` and the `card/*` branches). The Hermes
 memory is not in that repository by itself: queue-keeper copies it to
@@ -187,14 +224,19 @@ memory is not in that repository by itself: queue-keeper copies it to
 
 1. Install Hermes and the profile as above. Write the same `.env` (new credential if the
    old one expired).
-2. Run bootstrap once. When the remote has a `main`, bootstrap clones it into
-   `<profile>/workspace/`. It does not seed a new history.
+2. Run bootstrap once (this is the command that clones the workspace):
+
+```sh
+HERMES_HOME="$PROFILE" python3 "$PROFILE/scripts/queue_keeper.py" --bootstrap-only
+```
+
+   When the remote has a `main`, bootstrap clones it into `$PROFILE/workspace/`. It does
+   not seed a new history.
 3. Copy the memory snapshot back:
 
 ```sh
-mkdir -p "$HERMES_HOME/profiles/autoresearch/memories"
-cp "$HERMES_HOME/profiles/autoresearch/workspace/.supervisor/hermes-memory.md" \
-   "$HERMES_HOME/profiles/autoresearch/memories/MEMORY.md"
+mkdir -p "$PROFILE/memories"
+cp "$PROFILE/workspace/.supervisor/hermes-memory.md" "$PROFILE/memories/MEMORY.md"
 ```
 
 4. Resume the cron jobs. The board is new on a new host, so queue-keeper starts a new board
