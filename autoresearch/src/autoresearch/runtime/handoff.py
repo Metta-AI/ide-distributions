@@ -243,10 +243,11 @@ def _journal_outcome_problems(
     doc = _doc_at(repo, sha, path, "journal")
     journal_outcome = doc[0].get("outcome") if doc else None
     if journal_outcome is not None and journal_outcome != outcome:
-        return [
+        message = (
             f"{path}: journal outcome {journal_outcome!r} differs from the card finish "
             f"outcome {outcome!r}"
-        ]
+        )
+        return [message]
     return []
 
 
