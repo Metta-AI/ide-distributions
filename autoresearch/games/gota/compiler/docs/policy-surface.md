@@ -1,3 +1,4 @@
+<!-- Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: paintbot_pw_lab/docs/policy-surface.md -->
 <!-- Destination adaptation, Task 2.3. Original Paintbot source hash remains in ../PROVENANCE.md. -->
 # GotA compiler policy surface
 

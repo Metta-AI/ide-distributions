@@ -198,8 +198,9 @@ Pandas is now locked by shared dependency work merged at `ee140c52`.
 
 The primary GotA reference is `personal_labs_gota@09d3ed28d488fa965e36d4d4f6d99439952e18c7`.
 These files were copied from that exact Git commit (source-byte SHA-256 below),
-then adapted only where described. Context/host JSON bytes are unchanged. Native
-and Python helpers add destination paths, offline cache verification, ordered
+then adapted only where described. Context and host JSON destination bytes differ
+only by added per-file provenance comments or inert `_provenance` metadata; the
+original source hashes remain below. Native and Python helpers add destination paths, offline cache verification, ordered
 attempted-command capture, loaded-source hashes and immutable evidence receipts.
 
 | Destination relative to compiler | Source path | Source SHA-256 |
@@ -258,8 +259,11 @@ input streams are identically invalid.
 New authored `tools/native_build.py` (relative to games/gota) supplies one receipt
 contract to both existing native builders. It verifies engine/dependency Git pins,
 tracked source content, additional source files, copied canonical helpers, actual
-Nim config chain, compiler/options and executable SHA-256. Compilation compares
-its complete inputs before/after; cache reads validate the same closure and output.
+Nim executable/version/config chain, options, selected environment values and
+output executable SHA-256. Compilation compares
+the enumerated input set before/after; cache reads validate that same set and output.
+The receipt does not attest the external C compiler, Nim library/runtime source
+tree, or system/SDK, and does not establish reproducible-build completeness.
 Gates validate the binary-reported engine/Bassy identity and retain receipts in
 measurement files. Compiler verification captures distinct gate/match identities,
 checks the gate used the captured identity, and finalization retains immutable
@@ -270,4 +274,20 @@ The old three-file fingerprint receipts and original seed-1 results remain
 historical evidence, not the authoritative build identity for new compiles.
 Focused regressions and fresh short native equality/mismatch evidence are recorded
 in the local task report. No model/credential/remote action was added by this fix.
-The Minor failed-Hermes-usage finding remains explicitly deferred to parent triage.
+At this fix round, the Minor failed-Hermes-usage finding was deferred to parent triage.
+
+### Final whole-phase review corrections
+
+Hermes is now the configured default; explicit Claude/Codex selection remains
+supported. The fake-only default prepare regression checks `OPENROUTER_MODEL`
+precedence. Full per-file source headers are restored for adapted lessons and
+policy-surface documentation, and added to the four adopted context/host files.
+Tests remove only their provenance metadata and verify the original source hashes.
+Both baseline oracle files remain byte-identical. Runtime comments now describe
+structured namespaced storage.
+
+Usage receipts cover only successfully validated generation attempts (and survive
+later assembly/gate failures). Failed generation totals require provider usage
+reconciliation; retained receipts alone are not complete spend accounting. The
+backend guide states this limitation and the native receipt boundary above. No
+native implementation, gameplay behavior, or model execution changed in this wave.

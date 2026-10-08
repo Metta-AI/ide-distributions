@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 TOOLS = Path(__file__).resolve().parents[4] / "games/gota/compiler/tools"
 sys.path.insert(0, str(TOOLS))
 
@@ -36,10 +38,10 @@ def test_input_inventory_is_inside_checkout_and_complete():
     assert not any("personal_labs_paintbot_pw" in str(path) for path in paths)
 
 
-def test_provenance_config_does_not_change_agent_selection():
+def test_gota_default_is_hermes_with_explicit_backends():
     compiler = Path(__file__).resolve().parents[4] / "games/gota/compiler"
     config = json.loads((compiler / "strategy/compiler/config.json").read_text())
-    assert config["agent"] == "claude"
+    assert config["agent"] == "hermes"
     assert config["models"] == {"claude": "claude-opus-5-5", "codex": "gpt-6-astra",
                                 "hermes": "moonshotai/kimi-k3"}
 
@@ -50,3 +52,42 @@ def test_gate_body_keeps_pinned_bytes():
     assert data[0].startswith(b"# Vendored from personal_labs_paintbot_pw@")
     body = b"".join(data[1:])
     assert hashlib.sha256(body).hexdigest() == "c212518f9a5fe5f59c63f9c60d89459fa7c81de189d13eb8ad079f90c4681cb4"
+
+
+@pytest.mark.parametrize(('relative', 'source_hash'), [
+    ('context/gota-guide.md', 'cae705ba912fed790a5d6e68225084daf29b2aea47477e2065e715197da8a7fc'),
+    ('context/bassy-language.md', 'c8b3619608c107a25fed5d2f277c10eae42faaa4033d8c63e8479efc2f9633de'),
+    ('context/structures.bas', 'fef65b46b9881fa593fdb52d1d3ee40b2210a15f69e304a35238f70f1e58445c'),
+    ('host_surface.json', '0f77e77c2067114abde60de7de21780d0c70543766eb3ac13c276012c9998265'),
+])
+def test_gota_context_provenance_preserves_upstream_content(relative, source_hash):
+    compiler = TOOLS.parent / 'strategy/compiler'
+    data = (compiler / relative).read_bytes()
+    provenance = (
+        'Vendored from personal_labs_gota@09d3ed28d488fa965e36d4d4f6d99439952e18c7: '
+        f'gods_of_the_arena_lab/strategy/compiler/{relative}'
+    )
+    lines = data.splitlines(keepends=True)
+    if relative.endswith('.json'):
+        parsed = json.loads(data)
+        assert parsed.pop('_provenance') == provenance
+        body = b''.join(lines[:1] + lines[2:])
+        assert json.loads(body) == parsed
+    else:
+        header = f"' {provenance}" if relative.endswith('.bas') else f'<!-- {provenance} -->'
+        assert lines[0].decode().rstrip('\n') == header
+        body = b''.join(lines[1:])
+    assert hashlib.sha256(body).hexdigest() == source_hash
+
+
+@pytest.mark.parametrize(('destination', 'source'), [
+    ('strategy/compiler/LESSONS.md', 'paintbot_pw_lab/strategy/compiler/LESSONS.md'),
+    ('docs/policy-surface.md', 'paintbot_pw_lab/docs/policy-surface.md'),
+])
+def test_adapted_docs_retain_original_full_provenance(destination, source):
+    lines = (TOOLS.parent / destination).read_text().splitlines()
+    assert lines[0] == (
+        '<!-- Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: '
+        f'{source} -->'
+    )
+    assert lines[1].startswith(('<!-- Adapted from', '<!-- Destination adaptation'))

@@ -1,3 +1,4 @@
+<!-- Vendored from personal_labs_gota@09d3ed28d488fa965e36d4d4f6d99439952e18c7: gods_of_the_arena_lab/strategy/compiler/context/gota-guide.md -->
 # Gods of the Arena
 
 **New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.

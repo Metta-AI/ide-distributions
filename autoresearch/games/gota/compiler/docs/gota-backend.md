@@ -48,9 +48,10 @@ uv run --locked --offline python games/gota/compiler/tools/pw_strategy.py compil
 
 The second command invokes a real model and requires separately authorized
 credentials and credit. It has **not** been run for Task 2.4. No claim of real M1
-completion follows from the local fixture results below. The default model is
-configured in `strategy/compiler/config.json`; explicit `--model` wins, followed
-by `OPENROUTER_MODEL` for Hermes. Use the explicitly selected dry-run model first,
+completion follows from the local fixture results below. Hermes is the default
+backend; explicit `--agent claude` and `--agent codex` remain supported. The default
+model is configured in `strategy/compiler/config.json`; explicit `--model` wins,
+followed by `OPENROUTER_MODEL` for Hermes. Use the explicitly selected dry-run model first,
 then the approved `OPENROUTER_MODEL` value. Prepare checks the selected CLI version;
 tests only use local fakes and never probe a real agent executable.
 
@@ -61,8 +62,11 @@ Hermes dispatch uses `-z --query-file prompt.txt -t file --max-turns 40
 compiler ABI/lessons, live host JSON and GotA/Bassy/structures context before
 execution. Only requested units, report_draft.json and usage.json may change.
 Symlink/missing outputs, unexpected writes, Git index/ref changes and nonzero exit
-fail closed. Usage is retained separately for each attempt. Unknown backend names
-never fall through to another executable.
+fail closed. Usage receipts are retained for successfully validated generation
+attempts, including when later assembly or gates fail. Rejected or failed
+generation attempts do not retain a receipt; their totals require provider usage
+reconciliation. Retained receipts alone are not complete spend accounting. Unknown
+backend names never fall through to another executable.
 
 One compile invokes the agent 1–3 times, with up to 40 agent turns per invocation.
 Provider requests/retries and tokens are not a hard spend cap. The 3600-second
@@ -86,7 +90,8 @@ source/dependency caches first, retaining the real Polyworld config.nims and Nim
 2.2.10. Both builders use `tools/native_build.py`. Compilation and cached acceptance check
 every dependencies.lock Git pin, tracked cleanliness, tracked file content hashes,
 additional source files, and the actual configuration chain reported by Nim. They
-also check the canonical/copied helper bytes, compiler executable/version, options,
+also check the canonical/copied helper bytes, Nim executable/version, options,
+selected environment values,
 and the output executable SHA-256. Receipt files use `.receipt.json`; the older
 three-file `.fingerprint` sidecar is no longer authoritative:
 
@@ -95,15 +100,19 @@ sh games/gota/tools/build_nim.sh 801749e509e888b423ba44ee2188946c22e3ba85 gate_p
 sh games/gota/tools/build_gota_match.sh
 ```
 
-The input closure is compared before and after compilation; changed inputs cannot
-receive a trusted receipt. Gate and match reads validate the same receipt contract,
+The enumerated input set is compared before and after compilation; changes to it
+cannot receive a trusted receipt. Gate and match reads validate the same receipt
+contract,
 including executable bytes, before accepting a cache. Gates retain their actual
 native receipts in measurement files. Verification captures distinct gate-probe
 and match receipts in `native_provenance.json`, checks the gate actually used that
-identity, and retains both receipts in immutable finalization. A full input check
-measured about 1.4 seconds locally; checks run before/after native invocations. Historical replay tools may use a separately
-populated `.cache/polyworld-<sha8>` checkout and matching dependency cache; the
-builder never changes a checkout or fetches missing objects. Historical replay
+identity, and retains both receipts in immutable finalization. These receipts do
+not attest the external C compiler, Nim library/runtime source tree, or system/SDK.
+They bind the exact executable used, without claiming reproducible-build
+completeness. A check of the enumerated inputs measured about 1.4 seconds locally;
+checks run before/after native invocations. Historical replay tools may use a
+separately populated `.cache/polyworld-<sha8>` checkout and matching dependency
+cache; the builder never changes a checkout or fetches missing objects. Historical replay
 fixtures retain their original recording pin.
 
 ## Exact action oracle and honest goal audit

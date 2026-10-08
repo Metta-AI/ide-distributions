@@ -69,7 +69,7 @@ not run. Local readiness is subject to independent review and OpenRouter credit.
 The first review rejected local readiness on four evidence/containment gaps.
 The fixes reject env wrapper escapes, reject symmetric inconsistent oracle traces,
 bind audit/oracle executables to immutable expected native provenance, and replace
-mtime/three-file cache checks with one full native source/config/dependency/output
+mtime/three-file cache checks with one enumerated source/config/dependency/output
 receipt used by match and gate builds. Verification stores the identities actually
 used, and finalization retains them separately. New binary receipts replace the
 old fingerprint sidecar as the authority. See the backend guide and compiler
@@ -78,3 +78,25 @@ provenance for the exact contract; focused results are appended to the task repo
 Disk space fell below the future M1 4-GiB preflight during this fix. No unrelated
 cleanup occurred. Local code readiness is subject to re-review, and execution
 readiness additionally requires disk space and the still-blocked model credit.
+
+## Final whole-phase review corrections
+
+The default backend is Hermes, with explicit Claude/Codex choices retained. A
+guarded fake-only prepare regression verifies the default and `OPENROUTER_MODEL`
+precedence. All adopted context/host files now carry full per-file provenance;
+removing only that metadata restores their recorded upstream hashes. The adapted
+lessons and policy-surface headers retain their full original source identity.
+Baseline oracle bytes and executable runtime lines are unchanged.
+
+Usage receipts cover successfully validated generation attempts, including when
+later assembly/gates fail. Failed generation totals require provider reconciliation;
+retained receipts alone are not complete spend accounting. Native receipts bind
+the enumerated game/dependency/helper/Nim executable/config/options and output
+set, excluding external C compiler, Nim library/runtime and system/SDK attestation.
+They do not establish reproducible-build completeness. No native rerun was needed
+for this documentation/default correction; focused checks are in the task report.
+
+The parent subsequently recovered disk space, but the final-fix readback again
+fell below 4 GiB. Operators must repeat the preflight immediately before M1.
+Independent final review and fresh credit
+authorization remain required. This is not real M1 or Phase C completion.

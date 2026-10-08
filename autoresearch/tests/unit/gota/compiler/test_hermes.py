@@ -117,7 +117,8 @@ def test_fake_full_generation_assembles_specified_v13(generation, monkeypatch):
     assert result['budget']['array_cells'] == 157993
 
 
-def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys):
+@pytest.mark.parametrize('default_agent', [False, True])
+def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys, default_agent):
     """Exercise real source/map validation; only native evidence and gate results are fixtures."""
     import hashlib
 
@@ -150,7 +151,14 @@ def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys):
     sb.git('add', 'autoresearch')
     sb.git('-c', 'user.name=Test', '-c', 'user.email=test@invalid', 'commit', '-m', 'fixture inputs')
     monkeypatch.setenv('FAKE_UNIT_ROOT', str(root / 'tests/fixtures/gota/v13_units'))
-    order = sb.prepare(source, agent='hermes', model='test/openweight', full=True, milestone='m1')
+    if default_agent:
+        monkeypatch.setenv('OPENROUTER_MODEL', 'test/openweight')
+        order = sb.prepare(source, full=True, milestone='m1')
+    else:
+        order = sb.prepare(source, agent='hermes', model='test/openweight', full=True, milestone='m1')
+    assert order['compiler']['agent'] == 'hermes'
+    assert order['compiler']['model'] == 'test/openweight'
+    assert order['compiler']['cli_version'] == 'fake Hermes v0.21.5'
     sb.generate(order)
     sb.assemble_build(order['build_id'])
     native_fixture = {'gota_match': {'binary_sha256': 'a' * 64, 'fingerprint': 'b' * 64}}
