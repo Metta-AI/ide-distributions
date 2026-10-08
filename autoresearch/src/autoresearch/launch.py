@@ -21,6 +21,11 @@ def lock_sha(hermes_home: Path) -> str:
     return hashlib.sha256((hermes_home / "uv.lock").read_bytes()).hexdigest()
 
 
+def sync_argv(hermes_home: Path) -> list[str]:
+    """``--no-dev``: the production venv gets runtime dependencies only (no pytest, ruff)."""
+    return ["uv", "sync", "--frozen", "--no-dev", "--project", str(hermes_home)]
+
+
 def ensure_venv(hermes_home: Path, run=subprocess.run) -> bool:
     """Sync the venv if uv.lock changed since the last sync. Returns True if it synced."""
     local_dir = hermes_home / "local"
@@ -34,7 +39,7 @@ def ensure_venv(hermes_home: Path, run=subprocess.run) -> bool:
             return False
         env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv_dir)}
         try:
-            run(["uv", "sync", "--frozen", "--project", str(hermes_home)], env=env, check=True)
+            run(sync_argv(hermes_home), env=env, check=True)
         except FileNotFoundError as error:
             raise LaunchError(
                 "uv not found on PATH: install uv (https://docs.astral.sh/uv/)"

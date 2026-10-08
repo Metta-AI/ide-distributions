@@ -58,12 +58,13 @@ def test_payload_present(install):
 def test_launcher_bootstraps(install):
     result = bootstrap(install)
     summary = json.loads(result.stdout.strip().splitlines()[-1])
-    assert summary, result.stdout
+    assert summary["exit_code"] == 0 and summary["failures"] == {}, summary
 
     profile = install.profile_dir
     venv_python = profile / "local" / "venv" / "bin" / "python"
     assert venv_python.exists()
     assert (profile / "local" / "venv" / ".lock-sha").is_file()
+    assert not (profile / "local" / "venv" / "bin" / "pytest").exists()  # --no-dev
 
     shim = profile / "bin" / "autoresearch"
     assert shim.is_file() and os.access(shim, os.X_OK)
@@ -172,6 +173,9 @@ def test_worker_shell_finds_cli(worker_run):
 
 
 def test_plugin_loads_in_worker(worker_run):
+    # Contract of the committed post_tool_call stub (autoresearch.plugin.adapters): one JSON
+    # line per tool call with key "tool", in runtime_dir(ctx) / TOOL_EVENTS_FILE.
+    # TODO(Task 4.1): re-check the file and field names when the real policy replaces the stub.
     events = worker_run["canonical"] / ".supervisor" / "runtime" / "tool_events.jsonl"
     assert events.is_file()
     tools = [json.loads(line)["tool"] for line in events.read_text().splitlines()]
@@ -183,7 +187,10 @@ def test_plugin_loads_in_worker(worker_run):
 
 def test_update_preserves(install):
     profile = install.profile_dir
-    (profile / "workspace").mkdir(exist_ok=True)
+    bootstrap(install)  # bootstrapped state (venv, shim, .env line) must survive too
+    shim = profile / "bin" / "autoresearch"
+    venv_python = profile / "local" / "venv" / "bin" / "python"
+    cli_line = f"AUTORESEARCH_CLI={shim}"
     (profile / "workspace" / "x").write_text("user file\n")
     (profile / "memories").mkdir(exist_ok=True)
     (profile / "memories" / "MEMORY.md").write_text("remember this\n")
@@ -192,6 +199,7 @@ def test_update_preserves(install):
     marker = "# task-1.3 update marker\n"
     script = install.source / "scripts" / "queue_keeper.py"
     script.write_text(script.read_text() + marker)
+    assert marker not in (profile / "scripts" / "queue_keeper.py").read_text()
 
     install.hermes("profile", "update", install.profile, "-y")
 
@@ -200,3 +208,6 @@ def test_update_preserves(install):
     config = yaml.safe_load((profile / "config.yaml").read_text())
     assert config["kanban"]["max_in_progress"] == 3
     assert (profile / "scripts" / "queue_keeper.py").read_text().endswith(marker)
+    assert cli_line in (profile / ".env").read_text().splitlines()
+    assert venv_python.exists()
+    assert shim.is_file() and os.access(shim, os.X_OK)

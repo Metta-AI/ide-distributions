@@ -10,6 +10,7 @@ def test_sync_runs_once_per_lock(tmp_path):
     assert launch.ensure_venv(tmp_path, run=run) is True
     (tmp_path / "local" / "venv").mkdir(parents=True, exist_ok=True)
     assert launch.ensure_venv(tmp_path, run=run) is False and len(calls) == 1
+    assert calls[0] == ["uv", "sync", "--frozen", "--no-dev", "--project", str(tmp_path)]
     (tmp_path / "uv.lock").write_text("b")
     assert launch.ensure_venv(tmp_path, run=run) is True
 

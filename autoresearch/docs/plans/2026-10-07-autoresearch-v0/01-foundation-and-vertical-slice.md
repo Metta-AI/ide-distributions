@@ -79,7 +79,7 @@ Completed 2026-10-07; see `docs/plans/findings/player-xp-probe.md`. A Player-onl
 # launch.py (stdlib)
 class LaunchError(RuntimeError): ...
 def lock_sha(hermes_home: Path) -> str                           # sha256 of uv.lock
-def ensure_venv(hermes_home: Path, run=subprocess.run) -> bool   # under file lock local/venv.lock; runs `uv sync --frozen --project <home>` with UV_PROJECT_ENVIRONMENT=<home>/local/venv only if local/venv/.lock-sha != lock_sha; writes the stamp; returns True if it synced
+def ensure_venv(hermes_home: Path, run=subprocess.run) -> bool   # under file lock local/venv.lock; runs `uv sync --frozen --no-dev --project <home>` with UV_PROJECT_ENVIRONMENT=<home>/local/venv only if local/venv/.lock-sha != lock_sha; writes the stamp; returns True if it synced
 def main(job: str, argv: list[str] | None = None) -> int          # ensure_venv then os.execv(<venv>/bin/python, [py, "-m", f"autoresearch.runtime.{job}", *argv])
 ```
 Each `scripts/<job>.py`: insert `$HERMES_HOME/src` (or the repo root's `src`) into `sys.path`, `from autoresearch.launch import main`, `raise SystemExit(main("<job>"))`.
