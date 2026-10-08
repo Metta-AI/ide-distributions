@@ -16,13 +16,15 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    (network, auth), bootstrap fails and the next run retries, so a host never seeds a
    history that diverges from the remote's. An existing
    workspace only gets missing ``.gitignore`` lines (committed) and an ``origin`` remote when
-   it has none.
+   it has none. Seeded, cloned and existing workspaces get ``AGENTS.md`` re-seeded (one
+   canonical commit) when ``doctrine/VERSION`` differs from the version in its header.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
 A failure is returned in ``BootstrapResult.error``; queue-keeper then stops with exit 1.
 """
 
+import re
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -44,7 +46,9 @@ DEFAULT_GAME = "gota"
 REMOTE = "origin"
 BRANCH = "main"
 GITIGNORE_LINES = (".supervisor/runtime/", ".worktrees/")
-DOCTRINE_FILE = Path("doctrine") / "research-agent.md"
+DOCTRINE_DIR = Path("doctrine")
+DOCTRINE_FILES = ("research-agent.md", "communication.md")
+VERSION_HEADER = re.compile(r"\A<!-- doctrine-version: (\S+) -->")
 AGENTS_PLACEHOLDER = (
     "# Research agent doctrine\n\n"
     "Doctrine is not shipped yet: it arrives with Plan 03 Task 4.1, and bootstrap then seeds\n"
@@ -147,9 +151,40 @@ def _clone(canonical: Path, remote: str, result: BootstrapResult) -> None:
     result.actions.append(f"cloned canonical from {remote}")
 
 
+def _doctrine_version(repo_root: Path) -> str | None:
+    version_file = repo_root / DOCTRINE_DIR / "VERSION"
+    return version_file.read_text(encoding="utf-8").strip() if version_file.exists() else None
+
+
 def _agents_md(repo_root: Path) -> str:
-    doctrine = repo_root / DOCTRINE_FILE
-    return doctrine.read_text(encoding="utf-8") if doctrine.exists() else AGENTS_PLACEHOLDER
+    """The workspace ``AGENTS.md``: a version header, then the doctrine files."""
+    version = _doctrine_version(repo_root)
+    if version is None:
+        return AGENTS_PLACEHOLDER
+    header = (
+        f"<!-- doctrine-version: {version} -->\n"
+        "# Autoresearch standing instructions\n\n"
+        f'Doctrine version {version}. Run the autoresearch CLI as `"$AUTORESEARCH_CLI"`.\n\n'
+    )
+    parts = [
+        (repo_root / DOCTRINE_DIR / name).read_text(encoding="utf-8") for name in DOCTRINE_FILES
+    ]
+    return header + "\n".join(parts)
+
+
+def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult) -> None:
+    """Rewrite ``AGENTS.md`` when ``doctrine/VERSION`` differs from the header's version."""
+    wanted = _doctrine_version(repo_root)
+    if wanted is None:
+        return
+    path = canonical / "AGENTS.md"
+    current = VERSION_HEADER.match(path.read_text(encoding="utf-8")) if path.exists() else None
+    if current and current.group(1) == wanted:
+        return
+    with canonical_lock(canonical):
+        write_text(path, _agents_md(repo_root))
+        gitops.commit_paths(canonical, ["AGENTS.md"], f"bootstrap: doctrine version {wanted}")
+    result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
 
 
 def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: BootstrapResult):
@@ -203,11 +238,13 @@ def _ensure_workspace(
         remote = resolve_remote(remote, ctx.hermes_home)
     if (canonical / ".git").exists():
         _update_existing(canonical, remote, result)
+        _reseed_agents_md(canonical, repo_root, result)
         return
     if not remote:
         raise BootstrapError(f"{REMOTE_ENV} is not set: it is required to create the workspace")
     if _remote_has_main(remote, ctx.hermes_home):
         _clone(canonical, remote, result)
+        _reseed_agents_md(canonical, repo_root, result)
     else:
         _seed(canonical, env.get(GAME_ENV) or DEFAULT_GAME, remote, repo_root, result)
 

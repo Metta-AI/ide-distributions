@@ -69,7 +69,7 @@ def test_fresh_bootstrap_seeds_pushes_and_creates_the_board(tmp_path):
         AUTORESEARCH_DIR / "games" / GAME / "seed" / "plan.md"
     ).read_text()
     assert (canonical / "strategy" / "STRATEGY.md").exists()
-    assert "Plan 03 Task 4.1" in (canonical / "AGENTS.md").read_text()
+    assert "doctrine-version:" in (canonical / "AGENTS.md").read_text()
     gitignore = (canonical / ".gitignore").read_text().splitlines()
     assert ".supervisor/runtime/" in gitignore and ".worktrees/" in gitignore
     assert gitops.git(canonical, "remote", "get-url", "origin") == str(origin)
@@ -188,15 +188,58 @@ def test_bootstrap_failure_in_a_migration_is_reported(tmp_path):
     assert not result.ok and "hermes not found" in result.error
 
 
-def test_bootstrap_uses_doctrine_when_present(tmp_path):
-    ctx, env, _, queue = setup(tmp_path)
+def fake_repo(tmp_path: Path, version: str = "1") -> Path:
     repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "games").symlink_to(AUTORESEARCH_DIR / "games")
-    (repo / "doctrine").mkdir()
+    (repo / "doctrine").mkdir(parents=True, exist_ok=True)
+    if not (repo / "games").exists():
+        (repo / "games").symlink_to(AUTORESEARCH_DIR / "games")
     (repo / "doctrine" / "research-agent.md").write_text("# Real doctrine\n")
+    (repo / "doctrine" / "communication.md").write_text("# Real communication\n")
+    (repo / "doctrine" / "VERSION").write_text(version + "\n")
+    return repo
+
+
+def test_bootstrap_agents_md_is_header_plus_both_doctrine_files(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    result = run(ctx, env, queue, repo_root=fake_repo(tmp_path))
+    agents = (ctx.canonical / "AGENTS.md").read_text()
+    assert result.ok
+    assert agents.startswith("<!-- doctrine-version: 1 -->\n")
+    assert '"$AUTORESEARCH_CLI"' in agents.split("# Real doctrine")[0]
+    assert agents.index("# Real doctrine") < agents.index("# Real communication")
+
+
+def test_bootstrap_reseeds_agents_md_when_the_doctrine_version_changes(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    run(ctx, env, queue, repo_root=fake_repo(tmp_path))
+    head = gitops.head(ctx.canonical)
+
+    repo = tmp_path / "repo"
+    (repo / "doctrine" / "research-agent.md").write_text("# Doctrine v2\n")
+    run(ctx, env, queue, repo_root=repo)
+    assert gitops.head(ctx.canonical) == head  # text changed but VERSION did not
+
+    (repo / "doctrine" / "VERSION").write_text("2\n")
     result = run(ctx, env, queue, repo_root=repo)
-    assert result.ok and (ctx.canonical / "AGENTS.md").read_text() == "# Real doctrine\n"
+
+    agents = (ctx.canonical / "AGENTS.md").read_text()
+    assert result.ok and "<!-- doctrine-version: 2 -->" in agents and "# Doctrine v2" in agents
+    assert gitops.git(ctx.canonical, "rev-list", "--count", f"{head}..HEAD") == "1"
+    assert gitops.git(ctx.canonical, "status", "--porcelain") == ""
+
+
+def test_bootstrap_replaces_the_placeholder_once_doctrine_ships(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    bare = tmp_path / "bare"
+    (bare / "games").mkdir(parents=True)
+    (bare / "games").rmdir()
+    (bare / "games").symlink_to(AUTORESEARCH_DIR / "games")
+    run(ctx, env, queue, repo_root=bare)  # no doctrine/: placeholder
+    assert "Doctrine is not shipped yet" in (ctx.canonical / "AGENTS.md").read_text()
+
+    run(ctx, env, queue, repo_root=fake_repo(tmp_path))
+
+    assert "# Real doctrine" in (ctx.canonical / "AGENTS.md").read_text()
 
 
 def test_existing_canonical_gets_missing_gitignore_lines(tmp_path):
