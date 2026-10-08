@@ -530,3 +530,12 @@ def test_board_db_only_reads_the_db_without_running_hermes(fenced, fake, tmp_pat
     with pytest.raises(KanbanError, match="no such task"):
         queue.get("t_missing")
     assert fake.calls() == []
+
+
+def test_list_skips_a_card_removed_between_list_and_show(fake, queue):
+    fake.reply("list", [task_json("running", task_id="t_gone")])
+    fake.reply("show", code=1, stderr="no such task: t_gone")
+    assert queue.list() == []
+    fake.reply("show", code=1, stderr="kanban: database is locked")
+    with pytest.raises(KanbanError, match="locked"):
+        queue.list()

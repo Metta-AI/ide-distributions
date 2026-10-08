@@ -286,7 +286,8 @@ class KanbanQueue:
     def list(self, state: str | None = None) -> list[Card]:
         """Cards on the board (archived hidden), with runs; foreign tasks are skipped.
 
-        Costs one ``show`` per card because the list JSON carries no runs.
+        Costs one ``show`` per card because the list JSON carries no runs. A card deleted
+        between the list and its ``show`` is skipped.
         """
         cards = []
         for task in self._list_tasks():
@@ -296,7 +297,11 @@ class KanbanQueue:
                 self._parse_spec(task)
             except ValueError:
                 continue
-            cards.append(self.get(task["id"]))
+            try:
+                cards.append(self.get(task["id"]))
+            except KanbanError as error:
+                if "no such task" not in error.stderr:
+                    raise
         return cards
 
     def reprioritize(self, task_id: str, priority: Priority, order: int = 0) -> None:
