@@ -37,16 +37,14 @@ per file). Any other fragment is ignored and the whole document is returned.
 import json
 import os
 import re
-import shlex
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import frontmatter
 import yaml
 
-from autoresearch.games.loader import Game
+from autoresearch.games.loader import Game, binding_argv
 from autoresearch.io import gitops
 from autoresearch.paths import Layout
 from autoresearch.records.registry import entity_of_id, parse_record_path, record_dirs
@@ -268,20 +266,11 @@ def _apply_anchor(kind: str, anchor: str, content: bytes, uri: str) -> bytes:
 # --- game types ---
 
 
-def _game_command(command_line: str) -> list[str]:
-    command = shlex.split(command_line)
-    if command and command[0] == "python3":
-        return [sys.executable, *command[1:]]
-    if command and command[0].endswith(".py"):
-        return [sys.executable, *command]
-    return command
-
-
 def _resolve_game(canonical: Path, sha: str, game: Game, kind: str, rest: str, uri: str):
     if not rest:
         raise ResolveError(f"{uri!r}: a {kind} reference needs an id")
     env = os.environ | {GAME_ENV_WORKSPACE: str(canonical), GAME_ENV_REV: sha}
-    command = [*_game_command(game.reference_types[kind]), rest]
+    command = [*binding_argv(game.reference_types[kind]), rest]
     try:
         result = subprocess.run(
             command,

@@ -20,7 +20,9 @@ from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import queue_keeper
 from autoresearch.runtime.card_finish import finish
+from autoresearch.softmax_tool import cli as softmax_cli
 from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
+from autoresearch.stats.design import EvaluationDesign, MetricSpec
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[2]
 PROFILE = "autoresearch"
@@ -34,6 +36,70 @@ HYPOTHESIS = {
     "lever": "SK.last_hit",
     "state": "proposed",
 }
+
+
+BASELINE_PV = "autoresearch-fake:v0"
+CANDIDATE_PV = "autoresearch-fake:v1"
+LEAGUE = "fake-league"  # games/fakegame league_id
+VERSION = {
+    "parents": [],
+    "strategy_sha256": "1" * 64,
+    "source_commit": "2" * 40,
+    "artifact_sha256": "3" * 64,
+    "policy_name": "autoresearch-fake",
+}
+# The fakegame's outcome metrics; two seeds, so two candidate/baseline pairs (A12).
+DESIGN = EvaluationDesign(
+    GAME_VERSION,
+    BASELINE_PV,
+    (0, 1),
+    ("random", "opp:v3"),
+    (1, 2),
+    (
+        MetricSpec("score", "up", "primary", 1.0, None),
+        MetricSpec("errors", "down", "agent_guardrail", None, 0.5),
+    ),
+    0.5,
+    {},
+    2,
+    "rev1",
+)
+
+
+def evaluating_experiment(
+    store: RecordStore, hypothesis: str, walk=("built", "uploaded", "evaluating")
+) -> str:
+    """Create an experiment bound to ``CANDIDATE_PV`` and walk it through ``walk``."""
+    version = store.create("version", dict(VERSION))
+    experiment = store.create(
+        "experiment",
+        {
+            "hypothesis": hypothesis,
+            "parents": [],
+            "mode": "experimentation",
+            "lever": "SK.last_hit",
+            "baseline": "V-0",
+            "change": {"components": ["SK.last_hit"], "description": "Wait for range."},
+            "evaluation_design": DESIGN.to_dict(),
+            "environment": {"game_id": "fakegame", "game_version": GAME_VERSION},
+            "status": "designed",
+        },
+    )
+    for step in walk:
+        store.set_status(experiment, step)
+        if step == "uploaded":
+            binding = {"version_id": version, "platform_policy_version_id": CANDIDATE_PV}
+            store.update(experiment, {"candidate_binding": binding})
+    return experiment
+
+
+def launch_all(sm: FakeSoftmax, store: RecordStore, experiment: str) -> list:
+    """Create every XP request of batch 1, attempt 1 (as ``softmax xp create`` would)."""
+    meta, _ = store.load(experiment)
+    planned = softmax_cli.xp_specs(
+        meta["evaluation_design"], meta["candidate_binding"], LEAGUE, 1, 1
+    )
+    return [sm.xp_create(experiment, 1, 1, spec, seed=s, arm=a) for s, a, spec in planned]
 
 
 def no_hermes(argv: list[str], home: Path) -> None:

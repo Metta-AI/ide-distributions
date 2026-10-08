@@ -1,5 +1,7 @@
 """Load a game contract from ``games/<name>/GAME.md``. Core code never names a game."""
 
+import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -134,3 +136,14 @@ def load_game(repo_root: Path, name: str) -> Game:
         compiler=meta["compiler"],
         guide=body,
     )
+
+
+def binding_argv(command_line: str) -> list[str]:
+    """argv for a binding or resolver command line (run from the repo root): ``python3`` and
+    bare ``.py`` scripts run with the current interpreter."""
+    command = shlex.split(command_line)
+    if command and command[0] == "python3":
+        return [sys.executable, *command[1:]]
+    if command and command[0].endswith(".py"):
+        return [sys.executable, *command]
+    return command

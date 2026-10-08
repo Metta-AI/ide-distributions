@@ -7,13 +7,13 @@ import re
 
 import pytest
 import yaml
-from support.keeper_host import GAME_VERSION, PROFILE, Host
+from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
 from autoresearch.comms.publisher import PublishResult
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import queue_keeper
+from autoresearch.runtime import queue_keeper, xp_poll
 from autoresearch.runtime.queue_keeper import report_skipped
 from autoresearch.runtime.signals import KEEPER_STEP_FAILED
 
@@ -129,10 +129,30 @@ def test_full_timeline(host):
     assert host.receipt(experiment_request)["state"] == "admitted"
     assert host.store.find("hypothesis") == [hypothesis]
 
-    # Tick 6, two hours later: planning is due again.
+    # The experiment card builds, uploads and launches its paired XP evaluation.
+    experimenter = host.claim("experimentation")
+    experiment = evaluating_experiment(experimenter.store, hypothesis)
+    handles = launch_all(host.sm, experimenter.store, experiment)
+    experimenter.stage_note("Launched the waiting-for-range evaluation")
+    experimenter.finish()
+
+    # Tick 6, two hours later: the experiment merges, and planning is due again.
     run6 = host.tick(at(120))
     assert run6.planning is not None and run6.planning.request_id != planning_request
     assert run6.failures == {}
+    assert host.store.load(experiment)[0]["status"] == "evaluating"
+
+    # xp-poll: the XP requests complete; evidence is committed and a review is requested.
+    poll = xp_poll.run(host.ctx, host.sm, host.game, at(121), env=host.env)
+    assert sorted(poll.evidence) == sorted(h.request_id for h in handles)
+    [review] = poll.reviews
+    assert f"[review:{experiment}]" in review.why
+
+    # Tick 7: the review card (and the new planning card) are admitted.
+    run7 = host.tick(at(122))
+    assert run7.failures == {}
+    assert host.receipt(review.request_id)["state"] == "admitted"
+    assert host.receipt(run6.planning.request_id)["state"] == "admitted"
 
     # Canonical log, outbox and ledger.
     assert _subsequence(
@@ -147,7 +167,11 @@ def test_full_timeline(host):
             rf"^runtime request {calibration['id']} \[calibrate:{GAME_VERSION}\]$",
             rf"^admit {calibration['id']}$",
             rf"^admit {experiment_request}$",
+            rf"^merge card/{experiment_request} ",
             rf"^runtime request {run6.planning.request_id} \[planning:",
+            rf"^xp-poll: evidence EV-\w+ for {handles[0].request_id} ",
+            rf"^runtime request {review.request_id} \[review:{experiment}\]$",
+            rf"^admit {review.request_id}$",
         ],
         host.subjects(),
     ), host.subjects()
@@ -155,6 +179,7 @@ def test_full_timeline(host):
     assert outbox == [
         (1, "note", "research-agent", "Plan: last hits first"),
         (2, "note", "research-agent", "Found a lead on last hits"),
+        (3, "note", "research-agent", "Launched the waiting-for-range evaluation"),
     ]
     states = {
         rid: host.receipt(rid)["state"]
@@ -164,8 +189,10 @@ def test_full_timeline(host):
         planning_request: "published",
         investigation_request: "published",
         calibration["id"]: "published",
-        experiment_request: "admitted",
+        experiment_request: "published",
     }
+    evidence = sorted((host.canonical / "evidence" / "index").glob("EV-*.json"))
+    assert len(evidence) == len(handles)
     assert host.committed(host.ledger / "board.json")["epoch"] == "e1"
     assert (host.canonical / "kb" / "index.md").exists()  # generated views are committed
     assert host.remote_head() == host.head() and host.clean()

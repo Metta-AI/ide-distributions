@@ -8,6 +8,10 @@ Every runtime job builds markers here, never by hand.
 - ``launch:<E>:<attempt>``: the XP launch about to be made; ``attempt`` is
   ``lifecycle.launch_attempts + 1`` (C12). The card runs ``xp recover`` first, so a repeated
   launch never duplicates an XP request.
+- ``launch:<E>:<attempt>:r<denials>``: xp-poll's relaunch of an ``awaiting-credits``
+  experiment after its ``denials``-th consecutive credit denial (A10). A denial does not
+  count as a launch, so the relaunch reuses the attempt (creating only the missing requests);
+  the denial count keeps each relaunch's marker distinct.
 - ``review:<E>``: review a completed evaluation. No epoch: the open-request coverage check
   prevents a second card while one is open.
 - ``build:<E>@<epoch>``, ``upload:<E>@<epoch>``, ``promote:<E>@<epoch>``: lifecycle steps
@@ -22,6 +26,10 @@ import datetime
 
 def launch_marker(experiment: str, next_attempt: int) -> str:
     return f"launch:{experiment}:{next_attempt}"
+
+
+def relaunch_marker(experiment: str, attempt: int, denials: int) -> str:
+    return f"launch:{experiment}:{attempt}:r{denials}"
 
 
 def next_launch_attempt(experiment: dict) -> int:
