@@ -193,7 +193,7 @@ Not decided (**UNVERIFIED / open**):
 
 - Restore: follow README, "Restore on a new host". Summary: install Hermes and the profile, write the same `.env`, run bootstrap once (it clones the workspace from the remote), copy the memory snapshot back, resume the cron jobs. The new board starts a new epoch and queue-keeper rebuilds unfinished work (contract C12).
 - Tested locally: rebuild after board loss, `tests/protocol/test_rebuild.py`. **UNVERIFIED:** a full restore on a different machine from a real remote.
-- **Kanban go/no-go: NOT RUN.** The protocol slice on the real Kanban dispatcher (Plan 01 Task 5.1) is blocked, because the OpenRouter key has no credit (see 2.8). No decision exists. Until then, the default queue is Kanban (`AUTORESEARCH_QUEUE` unset). The serial fallback (`AUTORESEARCH_QUEUE=file`, Plan 01 Task 5.2) is **not shipped**: the `research-serial` job does not exist. If the slice fails, the fallback must be built before hosting.
+- **Kanban go/no-go: GO** (2026-10-08, [protocol-slice.md](protocol-slice.md)). The protocol slice passed on the real gateway dispatcher with real workers, after seven product fixes. The default queue is Kanban (`AUTORESEARCH_QUEUE` unset). The serial fallback (`AUTORESEARCH_QUEUE=file`, Plan 01 Task 5.2) is not built and is not needed for v0.
 
 ### 2.7 Known Hermes issues (summary of A1-A8 and A13)
 
@@ -205,7 +205,7 @@ Full text: `00-overview.md` and `hermes-facts.md`.
 | A2 | `kanban init` fails on a new board slug. | Bootstrap uses `hermes kanban boards create`. No action. Board databases are host-wide. |
 | A3 | One gateway dispatcher per host uses the host default profile config. | Set the three host settings (2.2). |
 | A4 | Under the gateway, a cron script gets only the names on `terminal.env_passthrough`. Worker terminals see the whole profile `.env` except provider keys. | The plugin, not env filtering, protects the Softmax credential (see 2.8, risk 1). |
-| A5 | Hermes sends no `max_tokens`. OpenRouter reserves 131072 output tokens per kimi-k3 call (about 1.97 USD of headroom per call). A 402 becomes `rate_limited` and retries about every 6 minutes without end. | Keep credit above the preflight threshold (default 10 USD). kimi-k3 tool calling inside Hermes is **UNVERIFIED**. glm-5.3 and glm-5.3-flash passed. |
+| A5 | Hermes sends no `max_tokens`. OpenRouter reserves 131072 output tokens per kimi-k3 call (about 1.97 USD of headroom per call). A 402 becomes `rate_limited` and retries about every 6 minutes without end. | Keep credit above the preflight threshold (default 10 USD). kimi-k3 tool calling inside Hermes **passed** on 2026-10-08 (hermes-facts item 11), as did glm-5.3 and glm-5.3-flash. |
 | A6 | `bin/` also holds Hermes's `tirith`. | Never clean `bin/`. |
 | A7 | In the gateway process, `HERMES_HOME` is the host root. | Code uses `hermes_constants.get_hermes_home()`. No action. |
 | A8 | Kanban run ids are integers per board, not global. | Handled in the handoff paths. No action. |
@@ -240,7 +240,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | README commands lint | `tests/unit/test_readme.py` (pytest) |
 | Install with real Hermes v0.21.5 in a throwaway home | `tests/integration/test_install.py` (marker `hermes`; run with `pytest -m hermes`; **not re-run for this document: UNVERIFIED today**) |
 | Config migrations, plugin loading, Kanban queue on real Hermes | `tests/integration/test_config_migrations.py`, `test_plugin_hermes.py`, `test_kanban_queue_hermes.py` (marker `hermes`; **not re-run for this document**) |
-| Hermes facts (11 items) | `findings/hermes-facts.md`: 9 PASS, 1 FAIL (config location, became A3), 1 PARTIAL (kimi-k3) |
+| Hermes facts (11 items) | `findings/hermes-facts.md`: 9 PASS, 1 FAIL (config location, became A3), kimi-k3 PASS on 2026-10-08 (was PARTIAL) |
 | Records, queue, runtime protocols: admission, handoff, merge, publication, promotion, pause, rebuild | `tests/unit/records`, `tests/unit/queue`, `tests/unit/runtime`, `tests/protocol/` (pytest, fake board) |
 | Plugin policy (block, inject) | `tests/unit/plugin/` (pytest); live hook behavior in workers: `hermes-facts.md` item 2 |
 | Comms interface | `tests/unit/comms`, `tests/contract/comms` (pytest) |
@@ -255,9 +255,9 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 
 | Item | Plan task | Status |
 |---|---|---|
-| Protocol slice on the real Kanban dispatcher with recovery tests | Plan 01 Task 5.1 | **NOT RUN.** Blocked on OpenRouter credit. This gives the Kanban go/no-go. |
+| Protocol slice on the real Kanban dispatcher with recovery tests | Plan 01 Task 5.1 | **PASS: GO** (2026-10-08, [protocol-slice.md](protocol-slice.md)). |
 | Serial fallback queue | Plan 01 Task 5.2 | **NOT SHIPPED.** Built only if 5.1 fails. |
-| kimi-k3 tool calling inside Hermes | A5 | **UNVERIFIED.** Needs credit. |
+| kimi-k3 tool calling inside Hermes | A5 | **PASS** (2026-10-08, hermes-facts item 11). |
 | Full research cycle on the fake game, real cheap model, 90 minutes, with `credits=0` injection | Plan 03 Task 6.0 (`tests/integration/test_fake_cycle.py`) | **NOT RUN.** The file does not exist at this commit. Cost and time go to `findings/fake-cycle.md`. |
 | Real research cycle on GotA (calibration, planning, investigation, experiment, XP, review, promotion) | Plan 03 Task 6.1 | **NOT RUN.** Needs `games/gota` and the compiler build binding (Plan 02). Record in `findings/first-real-cycle.md`. |
 | Compiler M1 baseline (semantic to policy, with goal tracing) | Plan 02 | **UNVERIFIED.** Not shown in this repository at this commit. |

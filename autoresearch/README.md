@@ -259,17 +259,16 @@ automatic update; `updates.check` is set to false so it does not even check.
 ## Known gaps
 
 - **Serial fallback is not shipped.** `AUTORESEARCH_QUEUE=file` selects the queue backend,
-  but the `research-serial` cron job and its pre-run script (Plan 01 Task 5.2) are built
-  only if the Kanban go/no-go selects them.
-- **The GotA game is not in `games/` yet** (Plan 02). Only `fakegame` and `_template`
-  exist, so `AUTORESEARCH_GAME=gota` cannot run until Plan 02 ships it. Nim is needed
-  for its replay tools.
+  but the `research-serial` cron job and its pre-run script (Plan 01 Task 5.2) are not
+  built: the Kanban go/no-go passed (GO, `docs/plans/findings/protocol-slice.md`), so Kanban
+  is the v0 queue.
+- **GotA build and upload bindings are in progress.** `games/gota` is merged (Plan 02), but
+  its real build and upload bindings are Plan 02 Task 2.5 (in progress). Nim is needed for
+  its replay tools.
 - **Curator.** Hermes has no key to exclude single skills from the curator. Shipped skills
   are safe because the curator only manages skills with an agent-created record, and
   `curator.prune_builtins` is set to false. Do not run `hermes curator adopt` on a shipped
   skill.
 - **Credits.** A Player credential cannot read credits (HTTP 403). Preflight only warns,
   and experiments that wait for credits are retried with backoff (A10).
-- **kimi-k3 tool calling inside Hermes is unverified** (A5). Re-check after the OpenRouter
-  key is topped up.
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
