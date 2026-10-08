@@ -17,14 +17,29 @@ Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24)
 `skill_manage` (it writes to `skills.create_dir`, the staging area queue-keeper sweeps, C9).
 
 Shell commands are tokenized with `shlex` and every simple command is inspected, including
-ones behind `&&`, `;`, `|`, subshells, `$(...)` and backticks (also inside double quotes),
-`bash -c`, `eval`, `xargs`, `find -exec`, `watch`, env prefixes and launcher wrappers
-(`uv run`, `uvx`, `python -m`, `sudo`, `strace`, ...). A shell reading its script from stdin
-(`... | sh`, `sh <<EOF`, `bash -s`) has its here-document bodies walked, and when piped the
-raw text is checked for blocked phrases. `ssh host <cmd>` is checked for blocked phrases.
-This is a best-effort parser, not a shell: it guards against a model reaching for a
-blocked command, not against an adversary. The approvals.deny globs in config.yaml are
-the coarse second layer.
+ones behind `&&`, `;`, `|`, subshells, `bash -c`, `eval`, `xargs`, `find -exec`, `watch`,
+`function` bodies, env prefixes and launcher wrappers (`uv run`, `uvx`, `python -m`, `sudo`,
+`strace`, ...). The bodies of `$(...)`, backticks (also inside double quotes and inside
+unquoted here-documents) and `<(...)`/`>(...)` are walked as commands. When a substitution's
+output becomes a script (`sh -c "$(...)"`, `eval $(...)`, `bash <(...)`, `source <(...)`) or
+a command word (`$(which coworld) submit`), its body text is checked for blocked phrases. A
+shell reading its script from stdin (`... | sh`, `sh <<EOF`, `sh <<< "..."`, `bash -s`) has
+its here-document and here-string text walked, and when piped the raw text is checked.
+`ssh host <cmd>` is checked for blocked phrases. Writes are found in redirections, file tools
+and the targets of common writers (`tee`, `sed -i`, `cp`/`mv`/`rm`/..., `curl -o`,
+`wget -O`, `tar -C`/`-f`, `unzip -d`, `scp`/`rsync` destinations, git write subcommands).
+
+Residual risk. This is a best-effort parser, not a shell: it stops a model reaching for a
+blocked command, not an adversary. Known unhandled forms:
+- a script file written (inside the worktree, which is allowed) and then executed;
+- positional-parameter and array tricks (`set -- coworld submit; "$@"`), indirect expansion,
+  variables set in an earlier tool call or exported from a sourced file;
+- aliases, shell functions defined earlier, renamed or copied binaries;
+- Python (or any language) code that calls coworld through a library or a constructed
+  string, beyond the literal-phrase check on `python -c` and `execute_code`.
+The other layers are the approvals.deny globs in config.yaml (coarse, matched by Hermes
+before execution) and the softmax tool's `whoami` identity check immediately before every
+platform mutation (C6), which a raw `coworld` call cannot pass through.
 
 Allowed calls return `(True, "")`, or `(True, "unparsed ...")` when a shell command could
 not be tokenized and was allowed anyway; the adapter logs that note.
@@ -48,6 +63,12 @@ DEVICE_TARGETS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"}
 PROTECTED_REFS = {"main", "master", "refs/heads/main", "refs/heads/master"}
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 COMMAND_STARTERS = ";&|(\n{"
+# Placeholders that replace substitutions before tokenizing (their bodies are walked apart).
+SUBSTITUTION_WORD = "__AR_SUBSTITUTION__"
+PROCESS_WORD = "__AR_PROCESS_SUBSTITUTION__"
+# Text before a substitution whose output is then run as a script.
+EXECUTES_OUTPUT = re.compile(r"(?:\beval|\b(?:sh|bash|zsh|dash|ksh)\s+-\w*c)\s*[\"']?$")
+SOURCE_COMMANDS = {"source", "."}
 MAX_NESTING = 5
 
 # Text that, found anywhere in a command we could not parse (or in code), means a raw
@@ -97,7 +118,8 @@ GIT_WRITE_SUBCOMMANDS = {
 }
 # File writers whose every operand is a write target.
 ALL_OPERAND_WRITERS = {"rm", "rmdir", "touch", "mkdir", "truncate", "shred", "unlink", "tee"}
-DESTINATION_WRITERS = {"cp", "install", "ln", "rsync"}
+DESTINATION_WRITERS = {"cp", "install", "ln", "rsync", "scp"}
+SCP_VALUE_OPTIONS = {"-P", "-i", "-o", "-F", "-l", "-S", "-c", "-J"}
 SECRET_WORD = re.compile(
     r"(?i)(token|key|secret|passw|bearer|authorization|credential)"
 )
@@ -239,21 +261,35 @@ class _Guard:
             self._unparsed(command, "nested too deeply", notes)
             return
         text, bodies = _split_heredocs(command)
-        for start, end, body in _substitutions(text):
-            self._walk_shell(body, cwd, depth + 1, notes)
-            # `$(which coworld) submit`: the substitution's output is the command word.
-            if text[:start].rstrip()[-1:] in ("", *COMMAND_STARTERS):
-                words = body.split()
+        for body, quoted in bodies:
+            if not quoted:  # an unquoted here-document expands its substitutions
+                for substitution in _substitutions(body):
+                    self._walk_shell(substitution.body, cwd, depth + 1, notes)
+        substitutions = _substitutions(text)
+        process_bodies = []
+        for substitution in substitutions:
+            self._walk_shell(substitution.body, cwd, depth + 1, notes)
+            if substitution.process:
+                process_bodies.append(substitution.body)
+                continue
+            before = text[:substitution.start].rstrip()
+            # `sh -c "$(...)"`, `eval $(...)`: the output is a script we cannot see.
+            if EXECUTES_OUTPUT.search(before) and BLOCKED_TEXT.search(substitution.body):
+                raise _Blocked(RAW_MUTATION)
+            # `$(which coworld) submit`: the output is the command word.
+            if not substitution.quoted and before[-1:] in ("", *COMMAND_STARTERS):
+                words = substitution.body.split()
                 head = words[-1].strip("'\"") if words else ""
-                if BLOCKED_TEXT.search(f"{head} {text[end:]}"):
+                if BLOCKED_TEXT.search(f"{head} {text[substitution.end:]}"):
                     raise _Blocked(RAW_MUTATION)
         try:
-            tokens = _tokenize(text.replace("`", " ( "))
+            tokens = _tokenize(_replace_substitutions(text, substitutions))
         except ValueError as error:
             self._unparsed(command, str(error), notes)
             return
-        line = _Line(raw=command, bodies=bodies)
-        for words, targets, piped in _simple_commands(tokens):
+        line = _Line(raw=command, bodies=[body for body, _ in bodies])
+        line.process_bodies = process_bodies
+        for words, targets, piped, herestrings in _simple_commands(tokens):
             if words and words[0] in ("cd", "pushd"):
                 cwd = self._cd(words, cwd)
                 continue
@@ -262,7 +298,7 @@ class _Guard:
                     name, value = word.split("=", 1)
                     line.variables[name] = value
                 continue
-            line.piped = piped
+            line.piped, line.herestrings, line.via_xargs = piped, herestrings, False
             for target in targets + self._inspect(words, cwd, depth, notes, line):
                 note = self.check_write(target, cwd)
                 if note:
@@ -295,6 +331,13 @@ class _Guard:
         # `coworld@latest`, `coworld==1.0` (uvx / uv tool run package specs)
         name = VERSION_SUFFIX.sub("", os.path.basename(first))
         operands = [word for word in core[1:] if not word.startswith("-")]
+        if line.via_xargs and name in {"coworld", "softmax"}:
+            raise _Blocked(
+                f"running {name} through xargs is blocked: its subcommand would come from input."
+            )
+        if name in SOURCE_COMMANDS:
+            self._check_stdin_script(line, cwd, depth, notes)
+            return []
         if name == "coworld":
             self._check_coworld(operands)
         elif name == "softmax" and {"login", "logout"} & set(operands[:2]):
@@ -316,6 +359,8 @@ class _Guard:
             name = os.path.basename(word)
             if ASSIGNMENT.match(word) or word in PREFIX_WORDS:
                 index += 1
+            elif word == "function":  # `function f { ...; }`: skip the keyword and the name
+                index += 2
             elif name == "timeout":
                 index = _skip_options(words, index + 1, {"-s", "-k", "--signal", "--kill-after"})
                 index += 1  # the duration
@@ -325,6 +370,7 @@ class _Guard:
                     if split + 1 < len(words):
                         self._walk_shell(" ".join(words[split + 1:]), cwd, depth + 1, notes)
                     return []
+                line.via_xargs = line.via_xargs or name == "xargs"
                 index = _skip_options(words, index + 1, OPTION_WRAPPERS[name])
             elif name == "uv":
                 verb = _skip_options(words, index + 1, UV_GLOBAL_VALUE_OPTIONS)
@@ -364,20 +410,34 @@ class _Guard:
             elif name in SHELLS:
                 mode, script_at = _shell_mode(words, index + 1)
                 if mode == "c" and script_at < len(words):
-                    self._walk_shell(words[script_at], cwd, depth + 1, notes)
-                elif mode == "stdin":
-                    # The script arrives on stdin: here-document bodies, or a pipe.
-                    for body in line.bodies:
-                        self._walk_shell(body, cwd, depth + 1, notes)
-                    if line.piped and BLOCKED_TEXT.search(line.raw):
-                        raise _Blocked(RAW_MUTATION)
+                    self._walk_script(words[script_at], cwd, depth, notes)
+                elif mode == "stdin" or (mode == "file" and PROCESS_WORD in words[index + 1:]):
+                    self._check_stdin_script(line, cwd, depth, notes)
                 return []
             elif name == "eval":
-                self._walk_shell(" ".join(words[index + 1:]), cwd, depth + 1, notes)
+                self._walk_script(" ".join(words[index + 1:]), cwd, depth, notes)
                 return []
             else:
                 return words[index:]
         return []
+
+    def _walk_script(self, script: str, cwd: Path, depth: int, notes: list[str]) -> None:
+        """A `-c` / `eval` script. A substitution anywhere in it produces script text we
+        cannot see, so its body is checked for blocked phrases."""
+        for substitution in _substitutions(script):
+            if BLOCKED_TEXT.search(substitution.body):
+                raise _Blocked(RAW_MUTATION)
+        self._walk_shell(script, cwd, depth + 1, notes)
+
+    def _check_stdin_script(self, line: "_Line", cwd: Path, depth: int, notes: list[str]):
+        """A shell (or `source`) whose script comes from stdin, a here-document, a
+        here-string, a pipe or a process substitution."""
+        for text in line.bodies + line.herestrings:
+            self._walk_shell(text, cwd, depth + 1, notes)
+        if any(BLOCKED_TEXT.search(body) for body in line.process_bodies):
+            raise _Blocked(RAW_MUTATION)
+        if line.piped and BLOCKED_TEXT.search(line.raw):
+            raise _Blocked(RAW_MUTATION)
 
     def _check_coworld(self, operands: list[str]) -> None:
         # Every operand is scanned: global options with values (`--server x`, `--env prod`)
@@ -435,6 +495,9 @@ class _Line:
         self.raw = raw
         self.bodies = bodies
         self.piped = False  # the current simple command reads from a pipe
+        self.herestrings: list[str] = []  # `<<< text` of the current simple command
+        self.via_xargs = False  # the current simple command runs under xargs
+        self.process_bodies: list[str] = []  # bodies of `<(...)` / `>(...)` on the line
         self.variables: dict[str, str] = {}
 
 
@@ -482,7 +545,10 @@ def _writer_targets(name: str, args: list[str]) -> list[str]:
                 return [args[index + 1]]
             if word.startswith("--target-directory="):
                 return [word.split("=", 1)[1]]
-        if len(operands) >= 2 and not (name == "rsync" and ":" in operands[-1]):
+        if name == "scp":
+            operands = _operands_skipping(args, SCP_VALUE_OPTIONS)
+        remote = name in {"rsync", "scp"} and ":" in operands[-1:][0] if operands else False
+        if len(operands) >= 2 and not remote:
             return [operands[-1]]
         return []
     if name == "sed" and any(w == "--in-place" or re.match(r"-i|--in-place=", w) for w in args):
@@ -491,7 +557,49 @@ def _writer_targets(name: str, args: list[str]) -> list[str]:
         return files if has_script_option else files[1:]
     if name == "dd":
         return [word[3:] for word in args if word.startswith("of=")]
+    if name == "curl":
+        return _option_values(args, "o", {"--output"})
+    if name == "wget":
+        values = _option_values(args, "OP", {"--output-document", "--directory-prefix"})
+        return [value for value in values if value != "-"]
+    if name == "unzip":
+        return _option_values(args, "d", set())
+    if name == "tar":
+        return _tar_targets(args)
     return []
+
+
+def _option_values(args: list[str], short: str, long: set[str]) -> list[str]:
+    """Values of `-o X`, `-sSo X` (a short cluster ending in the letter), `--output X` and
+    `--output=X`."""
+    values = []
+    for index, word in enumerate(args):
+        following = args[index + 1] if index + 1 < len(args) else None
+        if word.startswith("--"):
+            option, _, value = word.partition("=")
+            if option in long:
+                values.extend([value] if value else [following] if following else [])
+        elif word.startswith("-") and len(word) > 1 and word[-1] in short and following:
+            values.append(following)
+    return values
+
+
+def _tar_targets(args: list[str]) -> list[str]:
+    """`-C DIR` when extracting; `-f FILE` when creating. Short clusters may omit the dash
+    in the first argument (`tar xzf a.tgz`)."""
+    if not args:
+        return []
+    cluster = args[0] if re.fullmatch(r"[A-Za-z]+", args[0]) else ""
+    normalized = [f"-{cluster}", *args[1:]] if cluster else args
+    letters = "".join(w[1:] for w in normalized if w.startswith("-") and not w.startswith("--"))
+    extracting = "x" in letters or "--extract" in normalized or "--get" in normalized
+    creating = "c" in letters or "r" in letters or "u" in letters or "--create" in normalized
+    targets = []
+    if extracting:
+        targets += _option_values(normalized, "C", {"--directory"})
+    if creating:
+        targets += _option_values(normalized, "f", {"--file"})
+    return targets
 
 
 def _operands_skipping(args: list[str], value_options: set[str]) -> list[str]:
@@ -554,10 +662,11 @@ def _is_operator(token: str) -> bool:
 
 
 def _simple_commands(tokens: list[str]):
-    """Yield `(words, redirect_write_targets, piped)` for each simple command; `piped` is
-    True when the command reads from a `|`."""
+    """Yield `(words, redirect_write_targets, piped, herestrings)` for each simple command;
+    `piped` is True when the command reads from a `|`."""
     words: list[str] = []
     targets: list[str] = []
+    herestrings: list[str] = []
     piped = False
     index = 0
     while index < len(tokens):
@@ -570,48 +679,60 @@ def _simple_commands(tokens: list[str]):
             following = tokens[index + 1] if index + 1 < len(tokens) else None
             if words and words[-1].isdigit():
                 words.pop()  # a file-descriptor number such as the 2 of 2>
+            if token == "<<<" and following is not None and not _is_operator(following):
+                herestrings.append(following)
             if ">" in token and following is not None and not _is_operator(following):
                 duplicating = token.endswith("&") and (following.isdigit() or following == "-")
                 if not duplicating:
                     targets.append(following)
             index += 2 if following is not None and not _is_operator(following) else 1
             continue
-        yield words, targets, piped
+        yield words, targets, piped, herestrings
         piped = token in {"|", "|&"}
-        words, targets = [], []
+        words, targets, herestrings = [], [], []
         index += 1
-    yield words, targets, piped
+    yield words, targets, piped, herestrings
 
 
-def _split_heredocs(command: str) -> tuple[str, list[str]]:
-    """`(command without here-document bodies, the bodies)`. Bodies are data unless a shell
-    reads its script from stdin; the walk decides."""
+def _split_heredocs(command: str) -> tuple[str, list[tuple[str, bool]]]:
+    """`(command without here-document bodies, [(body, delimiter_quoted)])`. Bodies are data
+    unless a shell reads its script from stdin; an unquoted delimiter means the body's
+    substitutions run. The walk decides."""
     kept: list[str] = []
-    bodies: list[str] = []
-    pending: list[tuple[str, bool]] = []
+    bodies: list[tuple[str, bool]] = []
+    pending: list[tuple[str, bool, bool]] = []
     body: list[str] = []
     for line in command.split("\n"):
         if pending:
-            delimiter, strip_tabs = pending[0]
+            delimiter, strip_tabs, quoted = pending[0]
             if (line.lstrip("\t") if strip_tabs else line).strip() == delimiter:
                 pending.pop(0)
-                bodies.append("\n".join(body))
+                bodies.append(("\n".join(body), quoted))
                 body = []
             else:
                 body.append(line)
             continue
         kept.append(line)
         for match in HEREDOC.finditer(line):
-            if line[match.start():match.start() + 3] != "<<<":
-                pending.append((match.group(3), match.group(1) == "-"))
+            start = match.start()
+            here_string = line[start:start + 3] == "<<<" or line[start - 1:start] == "<"
+            if not here_string:
+                pending.append((match.group(3), match.group(1) == "-", bool(match.group(2))))
     if body:
-        bodies.append("\n".join(body))
+        bodies.append(("\n".join(body), pending[0][2]))
     return "\n".join(kept), bodies
 
 
-def _substitutions(text: str) -> list[tuple[int, int, str]]:
-    """`(start, end, body)` of each top-level `$(...)` and backtick substitution that the
-    shell would run: outside single quotes, inside double quotes or bare."""
+class _Substitution:
+    def __init__(self, start: int, end: int, body: str, quoted: bool, process: bool):
+        self.start, self.end, self.body = start, end, body
+        self.quoted = quoted  # inside double quotes: its output is one word of data
+        self.process = process  # `<(...)` / `>(...)`: its output is a file name
+
+
+def _substitutions(text: str) -> list[_Substitution]:
+    """Top-level `$(...)`, backtick and `<(...)`/`>(...)` substitutions that the shell would
+    run: outside single quotes (process substitutions also outside double quotes)."""
     found = []
     single = double = False
     index = 0
@@ -626,17 +747,37 @@ def _substitutions(text: str) -> list[tuple[int, int, str]]:
             double = not double
         elif not single and text.startswith("$(", index):
             end = _closing_paren(text, index + 2)
-            found.append((index, end, text[index + 2:end - 1]))
+            found.append(_Substitution(index, end, text[index + 2:end - 1], double, False))
+            index = end
+            continue
+        elif not single and not double and text[index:index + 2] in ("<(", ">("):
+            end = _closing_paren(text, index + 2)
+            found.append(_Substitution(index, end, text[index + 2:end - 1], False, True))
             index = end
             continue
         elif not single and char == "`":
             close = text.find("`", index + 1)
             end = len(text) if close < 0 else close + 1
-            found.append((index, end, text[index + 1:close if close >= 0 else len(text)]))
+            body = text[index + 1:close if close >= 0 else len(text)]
+            found.append(_Substitution(index, end, body, double, False))
             index = end
             continue
         index += 1
     return found
+
+
+def _replace_substitutions(text: str, substitutions: list[_Substitution]) -> str:
+    """The text with each unquoted substitution replaced by a placeholder word. Quoted ones
+    stay: they sit inside one shell word, and a `-c` / `eval` script needs to keep them."""
+    parts, cursor = [], 0
+    for substitution in substitutions:
+        if substitution.quoted:
+            continue
+        word = PROCESS_WORD if substitution.process else SUBSTITUTION_WORD
+        parts += [text[cursor:substitution.start], word]
+        cursor = substitution.end
+    parts.append(text[cursor:])
+    return "".join(parts)
 
 
 def _closing_paren(text: str, index: int) -> int:
