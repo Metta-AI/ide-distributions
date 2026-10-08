@@ -73,8 +73,13 @@ def problems(message: dict, schema: str) -> list[str]:
 ```
 
 `tests/contract/comms/test_kind_registry.py` runs this block, as it is written here, on the
-examples. Any tool that resolves a relative `$ref` against the referring file's path (ajv with
-the files loaded by path, check-jsonschema) resolves them the same way.
+examples.
+
+Other tools need the same mapping from `$id` to file. check-jsonschema 0.38.2 does not work
+out of the box (checked 2026-10-08): it resolves each file's relative `$id` against that file's
+own path, so `comms/inbound/task.json` becomes `comms/inbound/comms/inbound/task.json`, and its
+`$ref` to `../envelope.inbound.json` then names a file that does not exist. Other validators
+(ajv, ...) are not checked; register each schema under its `$id` before validating.
 
 ## Problems
 
