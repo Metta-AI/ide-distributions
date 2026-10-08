@@ -54,7 +54,9 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 - Reason `busy`: a process is running `xp create`, `upload` or `submit` for this experiment
   now; `error.details.holder` names it. This is not a tool fault. If `details.own_run` is
   `true`, it is your own earlier command: wait for it to finish and use its result, do not
-  upload again and do not finish `partial`. Otherwise another card holds it: do not upload a
+  upload again and do not finish `partial`. To wait, call the native `process_manage` tool
+  with action `wait` (or `poll`) and that command's `session_id`, then read the binding with
+  `"$AUTORESEARCH_CLI" records show <E-id>`. Otherwise another card holds it: do not upload a
   second time, record it in the journal, and finish `partial`.
 - Exit 3 (`tool_missing`): the pinned platform tool is missing. This is a tool fault: follow
   the D-26 sequence (see `complete-card`, "Tool fault").
