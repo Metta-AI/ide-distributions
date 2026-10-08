@@ -136,7 +136,7 @@ remains separate, especially because provenance comments alter runtime hashes.
 Ported tests plus four new local-import/input-inventory/config/gate-byte checks:
 **68 passed, 5 skipped** with `uv run --locked --with pandas pytest
  tests/unit/gota/compiler -q` (run from autoresearch). Shared pandas dependency
-is still pending; the isolated overlay is provisional. New code passes Ruff.
+was still pending then (it is now in `pyproject.toml` and `uv.lock`, added in `63c5d6b`); the isolated overlay was provisional. New code passes Ruff.
 Broad Ruff reports **116 inherited findings**, identical in count and every
 rule bucket to unchanged pinned source under the same destination config. No
 suppression or configuration changes were made; preserved source modes explain

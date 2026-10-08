@@ -49,6 +49,11 @@ Not sent yet: `reply` and `seen`. The IDE has no surface for answering a `questi
 
 ## What is not exercised yet
 
-No runtime consumes the inbox today; the acknowledgement path has been proved against fixture files only. The bridge's
+The distribution reads only inbox files committed at canonical HEAD (`comms.delivery.inbox`), and
+the supported way to add one is `"$AUTORESEARCH_CLI" comms inbound <kind> --author <name>`, which validates the
+message, assigns an `I-<ULID>` id, adds `schema` and `received_at`, and commits. A file the bridge writes directly into
+the working tree, with an id like `<player_id>:task:<key>` and an author like `coach:<player_id>` (a `:` is not
+allowed in a consumer name), is not read by queue-keeper. The bridge-to-distribution path is therefore not wired yet,
+and the acknowledgement path has been proved against fixture files only. The bridge's
 message models (`InboundTask`, `InboundSteer`, `Outbound` in `bridge.py`) are the place to update when the
 distribution publishes its schema and contract tests.

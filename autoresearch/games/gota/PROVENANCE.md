@@ -312,3 +312,8 @@ populates those caches from pinned Git sources; see [gate setup](gates/README.md
 The pytest setup is a local test shim, not runtime hosting. Current harness/context source inventory and
 adoption decisions are in [compiler provenance](compiler/PROVENANCE.md); live
 verification is in [the refresh finding](../../docs/plans/findings/gota-live-refresh-2026-10-07.md).
+
+Update 2026-10-08: online builds and gates no longer target a fixed release. They
+resolve the live engine and prepare its exact commits; only `--offline` selects the
+historical 2026.10.7.2 pin. See [the live-engine finding](../../docs/plans/findings/gota-live-engine.md)
+and "Build and upload" in [GAME.md](GAME.md).

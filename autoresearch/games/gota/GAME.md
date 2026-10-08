@@ -59,7 +59,7 @@ more lifetime XP than every teammate; ties are 0.
 
 The extractor requires all ten finite, nonnegative score and XP values, positive
 integer ticks, and a known outcome (`RedTeam`, `BlueTeam`, `draw`, `time_limit`).
-These spellings match Polyworld `801749e5` (the live 2026.10.7.2 source);
+These spellings match Polyworld `801749e5` (the 2026.10.7.2 source);
 `time_limit` is a timeout. It rejects invalid evidence and nonzero scores for nonwinning seats. Missing
 metrics never become guessed zeros. Comparisons require at least 40 episodes;
 calibration can raise that floor.
@@ -110,8 +110,8 @@ uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/
 ```
 
 `evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
-per seat with the real integer seed. The shared XP consumer must select its
-subject seats and aggregate teammates before treating episodes as independent.
+per seat with the real integer seed. xp-poll keeps only the design's seats and
+reduces them by the arithmetic mean, one row per episode (`games/_template/GAME.md`).
 The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 --seat N` retains the local metric-object form.
 

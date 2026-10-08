@@ -2,7 +2,8 @@
 
 **Completed locally on 2026-10-08.** Real Hermes/Kimi generation produced immutable
 build `00a0bdcc-2`, which passed G1–G5, the full twenty-seed native equivalence
-oracle, and twenty build-bound attribution audits. Task 2.5 has not begun. No
+oracle, and twenty build-bound attribution audits. Task 2.5 had not begun at that
+point (it is now done: [gota-task25-bindings.md](gota-task25-bindings.md)). No
 upload, hosted XP, publication, competitive qualification or goal-truth proof is
 part of this result.
 

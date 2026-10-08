@@ -144,7 +144,9 @@ Plan 01 Milestone 5 proves the protocols (finish → merge → publish, reconcil
 ## Dates and decisions (James, 2026-10-07)
 - **Goal: end of day Wed Oct 7.** Kanban go/no-go and the compiler target are both end of day today.
 - **Kanban:** if Plan 01 Task 5.1 has not passed by then, the serial fallback (Plan 01 Task 5.2) is the v0 path.
+  Outcome (2026-10-08): Task 5.1 passed, Kanban is GO (`../findings/protocol-slice.md`). The serial fallback (Task 5.2) was not built and is not needed for v0.
 - **Compiler:** there is **no BASIC fallback** (dropped by James). The semantic↔policy compiler, with full goal tracing, is the only build path; if it slips past the goal, the work continues on the compiler rather than switching paths.
+  Outcome (2026-10-08): the compiler passed M1 on Coworld 2026.10.7.2 (`../findings/compiler-task-2.4-m1.md`). The GotA build, evaluate and upload bindings (Plan 02 Task 2.5) exist and follow the live engine (`../findings/gota-task25-bindings.md`, `../findings/gota-live-engine.md`).
 - **Models:** open-weight only (James). Primary `moonshotai/kimi-k3` (top open-weight model on the BenchLM agentic leaderboard, 2026-10-07: #8, 69.7; Terminal-Bench 2.1 88.3), fallback `z-ai/glm-5.3` (#12, 67.5; MIT), tests `z-ai/glm-5.3-flash`. Plan 01 Task 0.2 verifies tool calling with each inside Hermes.
 - **League:** `league_3c60897b-25cf-4b37-9d1a-8554c1198f28` ("Gods of the Arena"). Its score is "Emmett's Glory": winning heroes' lifetime XP per simulated minute; losses, draws, and timeouts score zero.
 - **Player-only credential:** verified PASS on 2026-10-07 (`../findings/player-xp-probe.md`); C6 stands unchanged.
