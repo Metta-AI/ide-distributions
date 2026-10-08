@@ -75,8 +75,8 @@ Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23.
    | `experimentation`: design | `experiment`, `build-upload`, `xp-request` |
    | `experimentation`: "launch evaluation E-…" | `xp-request` |
    | `experimentation`: review of E-… | `fetch-artifacts`, `review-xp` (uses `ab-compare`) |
-   | `experimentation`: "promote E-…" or promotion recovery | `submit` |
-   | `maintenance` | `kb-maintenance`, `lessons`; a calibration card: `calibrate-noise` |
+   | `experimentation`: "Promote E-…" | `submit` |
+   | `maintenance` | `kb-maintenance`, `lessons`; a calibration card: `calibrate-noise`; "Recover promotion P-…": `submit` (recovery section) |
    | `planning` | `groom-queue` |
 
 8. For further work, request a follow-up card. Do not do that work in this card (D-22):
