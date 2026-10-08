@@ -70,7 +70,7 @@ def source_files(source: Path) -> list[Path]:
     paths.extend(LAB.parent.joinpath('tools').glob('*.py'))
     paths.extend(LAB.parent.joinpath('tools').glob('*.nim'))
     paths.extend([LAB.parent / 'tools/build_nim.sh', LAB.parent / 'tools/build_gota_match.sh',
-                  LAB.parent / 'tools/engine.env'])
+                  LAB.parent / 'tools/engine.env', LAB.parent / 'tools/host_contract.json'])
     paths.extend([LAB / 'tools/pw_strategy.py', LAB / 'tools/pw_intent.py', LAB / 'tools/release.env',
                   LAB / 'docs/policy-surface.md'])
     paths.extend(LAB / 'tools' / name for name in ('pw_local.py', 'pw_release.py', 'pw_cli.py',
@@ -198,7 +198,7 @@ def packing_bindings(source: Path) -> dict:
     return {}
 
 
-def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None, previous=None) -> dict:
+def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None, previous=None, engine_identity=None) -> dict:
     from strategy_format import parse_strategy, lint_strategy
     strategy = parse_strategy(source, backend="gota")
     packing_bindings(source)
@@ -223,7 +223,8 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
     current = component_map(strategy)
     # A runtime release can change BASIC semantics without changing strategy text.
     from gota_host import POLYWORLD_COMMIT
-    if prior and read(prior / 'version.json').get('engine', {}).get('commit') != POLYWORLD_COMMIT:
+    identity = engine_identity or {'tag': 'gota-2026.10.7.2', 'commit': POLYWORLD_COMMIT}
+    if prior and read(prior / 'version.json').get('engine', {}).get('commit') != identity['commit']:
         full = True
     statuses = changes(current, old_map, full)
     # Interfaces are source-declared, so dependency invalidation is known before the LLM runs.
@@ -270,7 +271,7 @@ def prepare(source: Path, *, agent=None, model=None, full=False, milestone=None,
                           'agent_sha256': digest(COMPILER / 'AGENT.md'),
                           'lessons_sha256': digest(COMPILER / 'LESSONS.md')},
              'backend': 'gota',
-             'engine': {'tag': 'gota-2026.10.7.2', 'commit': POLYWORLD_COMMIT},
+             'engine': identity,
              'created': datetime.now(timezone.utc).isoformat(), 'diagnostics': diagnostics}
     dump(stage / 'work_order.json', order)
     return order

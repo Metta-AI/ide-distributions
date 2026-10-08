@@ -155,7 +155,7 @@ def test_shared_gate_order_and_advisory_screen(tmp_path, monkeypatch):
     stage.mkdir()
     (stage / "policy.bas").write_text("x=1")
     builds.dump(stage / "map.json", {})
-    builds.dump(stage / "work_order.json", {"source_path": str(value.path), "source_hashes": {}})
+    builds.dump(stage / "work_order.json", {"source_path": str(value.path), "source_hashes": {}, "engine": {"commit": "801749e509e888b423ba44ee2188946c22e3ba85"}})
     monkeypatch.setattr(builds, "build_path", lambda *a, **kw: stage)
     monkeypatch.setattr(builds, "assert_inputs", lambda order: None)
     calls = []
@@ -452,7 +452,7 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
     artifact.write_text('candidate=1\n')
     mapping = sb.assemble(value, TRIVIAL_UNITS, RUNTIME, 'abcdef12-1', 'a' * 40)['map']
     builds.dump(stage / 'map.json', mapping)
-    builds.dump(stage / 'work_order.json', {'source_path': str(value.path), 'source_hashes': {}})
+    builds.dump(stage / 'work_order.json', {'source_path': str(value.path), 'source_hashes': {}, 'engine': {'commit': '801749e509e888b423ba44ee2188946c22e3ba85'}})
     compiler = tmp_path / 'compiler'
     manifest = tmp_path / 'manifest.json'
     builds.dump(compiler / 'config.json', {'gates': {'manifest': str(manifest)}})

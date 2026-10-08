@@ -47,7 +47,7 @@ def parser():
     return root
 
 
-def run(args, report):
+def run(args, report, *, engine_identity=None):
     report.release_tag = 'gota-2026.10.7.2'
     from strategy_format import parse_strategy, lint_strategy
     from gota_gates import verify
@@ -79,7 +79,8 @@ def run(args, report):
         if args.action == 'compile' and args.agent_timeout < 1:
             raise pw_cli.UsageError('--agent-timeout must be positive')
         order = builds.prepare(args.source.resolve(), agent=args.agent, model=args.model,
-                               full=args.full, milestone=args.milestone, previous=args.previous)
+                               full=args.full, milestone=args.milestone, previous=args.previous,
+                               engine_identity=engine_identity)
         stage = builds.build_path(order['build_id'], staged=True)
         if args.action == 'prepare':
             report.output(stage / 'work_order.json')

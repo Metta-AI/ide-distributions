@@ -320,6 +320,9 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     monkeypatch.setattr(sb.subprocess, 'run', processes)
     monkeypatch.setattr(gota_gates, 'verify', lambda *a, **k: {
         f'G{i}': {'passed': True, 'summary': 'fake gates only'} for i in range(1, 6)})
+    import pw_strategy  # Establish the canonical module for restoration after this isolated archive test.
+    monkeypatch.delitem(sys.modules, 'pw_strategy')
+    monkeypatch.setattr(sys, 'path', list(sys.path))
     spec = importlib.util.spec_from_file_location('archive_build_binding', distribution / 'games/gota/tools/build.py')
     binding = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(binding)
@@ -329,7 +332,9 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     manifest.write_text(json.dumps({'game': {'runnable': {'source_url':
         f'https://github.com/Metta-AI/polyworld/tree/{gota_host.POLYWORLD_COMMIT}/examples/gods_of_the_arena'}}}))
     out = tmp_path / 'separate-build-output'
-    result = binding.build(candidate, out, manifest)
+    from games.gota.tools import engine_identity
+    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
+    result = binding.build(candidate, out, manifest, offline=True)
     assert result['ok']
     version, artifact = _read_build(out)
     assert version['source_commit'] == original_git('rev-parse', 'HEAD', root=worker)

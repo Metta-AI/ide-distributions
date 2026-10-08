@@ -17,7 +17,7 @@ result = g1_lint.run(Path('candidate.bas'), context)
 From `autoresearch/`, run all five gates with the locked Python environment:
 
 ```sh
-uv run --locked --offline --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13-live.bas --baseline tests/fixtures/gota/v13-live.bas --manifest /path/to/coworld_manifest.json --work-dir /tmp/gota-gates-new
+uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13-live.bas --baseline tests/fixtures/gota/v13-live.bas --work-dir /tmp/gota-gates-new
 ```
 
 `--gate NAME` selects a gate and can repeat. Each result is printed as JSON;
@@ -25,16 +25,16 @@ uv run --locked --offline --python 3.12 python -m games.gota.gates tests/fixture
 ran and passed. A G4 behavior regression is advisory and does not change its exit
 status; missing or failed measurements do. Use a fresh work directory for G2.
 No command uploads or submits a policy. The manifest and container image must
-already be available for the intended live release. G2 pins coworld 0.1.57 and
-softmax-cli 0.26.38 through locked-project offline `uv run --with` invocations.
+already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
+`uv run`; it does not override the locked versions.
 
 ## Evidence and limits
 
 - All native measurements retain a verified source/config/dependency/output build
   receipt and validate the engine/Bassy identity reported by the executable. Cache
   acceptance uses that receipt, not file timestamps.
-- G1 compiles using the actual GotA host schema and `heroVmLimits` in Polyworld
-  `801749e509e888b423ba44ee2188946c22e3ba85`; it is not a lexical syntax estimate.
+- G1 compiles using the actual GotA host schema and limits at the resolved full
+  engine pin. The native receipt binds engine/Bassy source and executable bytes.
 - G2 executes all ten seats through pinned coworld and reads back staged artifact
   hashes, every completed private log, BASIC errors, ten active scripts, decisions,
   nonzero aggregate actions, and full results. Positive XP is compatibility
@@ -115,3 +115,18 @@ Compiler parsing still reports `compiler_trace_coverage: null`; full trace
 coverage, goal truth and semantic equivalence are separate validations.
 See [compiler backend](../compiler/docs/gota-backend.md) for the structured storage contract,
 configuration and exact scope of local fixture evidence.
+
+## Engine resolution
+
+The command resolves live league version and canonical Coworld runnable source
+through the shared CLI/transport, verifies their versions agree, prepares exact
+source/dependency pins, and checks the supported host contract before running
+gates. Configure the same profile/player environment as the build binding in
+[GAME.md](../GAME.md). It writes `engine_identity.json` and
+`coworld_manifest.json` in the work directory. Optional `--manifest PATH` must
+match that fetched manifest; explicit `--offline --manifest PATH` selects the
+historical pin without a network lookup. An online failure never falls back.
+
+Programmatic GateContext callers may set `engine_commit` explicitly. Its omitted
+value retains the historical test/audit pin; that default is not live resolution.
+Historical equivalence and goal audits retain their immutable M1 engine semantics.

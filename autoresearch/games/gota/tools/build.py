@@ -15,19 +15,16 @@ ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / 'games/gota/compiler/tools'
 
 
-def validate_manifest(path):
-    from games.gota.gates.limits import POLYWORLD_COMMIT
-    data = json.loads(path.read_text())
-    url = data['game']['runnable']['source_url']
-    if f'/tree/{POLYWORLD_COMMIT}/' not in url:
-        raise ValueError(f'manifest source_url must pin Polyworld {POLYWORLD_COMMIT}')
+def validate_manifest(path, *, offline=False):
+    from games.gota.tools.engine_identity import resolve
+    return resolve(path, offline=offline)
 
 
-def build(candidate, out, manifest, *, timeout=900):
+def build(candidate, out, manifest=None, *, timeout=900, offline=False):
     """Output is new and immutable; failure retains evidence without an upload envelope."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(TOOLS))
-    validate_manifest(manifest)
+    identity = validate_manifest(manifest, offline=offline)
     source = candidate / 'STRATEGY.md'
     repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     if out.exists():
@@ -39,8 +36,14 @@ def build(candidate, out, manifest, *, timeout=900):
         raise pw_cli.EnvironmentMissing('Hermes Python is not configured', 'set GOTA_HERMES_PYTHON to the installed Hermes Python')
     import pw_strategy
     import strategy_build as compiler
+
+    from games.gota.tools.engine_identity import provision
+    identity, _ = provision(identity)
     out.parent.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='.gota-build-', dir=out.parent))
+    resolved_manifest = identity.pop('manifest')
+    manifest = scratch / 'manifest.json'
+    manifest.write_text(json.dumps(resolved_manifest, indent=2) + '\n')
     home = scratch / 'hermes-home'
     (home / 'bin').mkdir(parents=True)
     scanner_source = os.environ.get('GOTA_TIRITH_BIN')
@@ -56,6 +59,8 @@ def build(candidate, out, manifest, *, timeout=900):
         ('from tools.tirith_security import ensure_installed; p = ensure_installed(); '
         'assert p, "tirith installation failed"; print(p)')],
         env=environment, capture_output=True, text=True, check=True, timeout=120)
+    if not ready.stdout.strip():
+        raise pw_cli.EnvironmentMissing('Hermes security readiness returned empty output', 'verify GOTA_HERMES_PYTHON and GOTA_TIRITH_BIN')
     scanner = Path(ready.stdout.strip().splitlines()[-1])
     if scanner.resolve() != (home / 'bin/tirith').resolve() or not os.access(scanner, os.X_OK):
         raise ValueError('Hermes security preflight did not return an installed tirith executable')
@@ -66,9 +71,10 @@ def build(candidate, out, manifest, *, timeout=900):
                                            '--manifest', str(manifest), '--agent-timeout', str(timeout)])
     report = pw_cli.Report('gota_build', json_mode=True)
     with contextlib.redirect_stdout(sys.stderr):
-        result = pw_strategy.run(args, report)
+        result = pw_strategy.run(args, report, engine_identity=identity)
     target = Path(result['build'])
     version = compiler.read(target / 'version.json')
+    version['engine'] = identity
     version['compiler']['security_scanner_sha256'] = hashlib.sha256(scanner.read_bytes()).hexdigest()
     version['artifact'] = 'policy.bas'
     version['strategy_sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -78,6 +84,7 @@ def build(candidate, out, manifest, *, timeout=900):
                          'installed_source_sha256': hashlib.sha256(json.dumps(installed, sort_keys=True).encode()).hexdigest(),
                          'installed_commit': None if installed else version['source_commit']}
     compiler.dump(target / 'version.json', version)
+    shutil.copyfile(manifest, target / 'coworld_manifest.json')
     target.rename(out)
     shutil.rmtree(scratch)
     return {'ok': version['status'] == 'passed', 'build_id': version['build_id'],
@@ -88,13 +95,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--out', required=True, type=Path)
-    parser.add_argument('--manifest', type=Path, default=os.environ.get('GOTA_MANIFEST'))
+    parser.add_argument('--manifest', type=Path, default=None)
+    parser.add_argument('--offline', action='store_true', help='explicit historical pinned engine; no live lookup')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     try:
-        if args.manifest is None:
-            raise ValueError('supply --manifest PATH or GOTA_MANIFEST (downloaded Coworld manifest)')
-        result = build(args.candidate.resolve(), args.out.resolve(), Path(args.manifest).resolve())
+        manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
+        result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, offline=args.offline)
     except SystemExit as error:
         if isinstance(error.code, int):
             raise
