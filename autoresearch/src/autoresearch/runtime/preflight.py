@@ -103,7 +103,8 @@ def host_config_problems(hermes_home: Path) -> tuple[list[str], list[str]]:
     return reasons, []
 
 
-def _env_file_value(path: Path, name: str) -> str | None:
+def env_file_value(path: Path, name: str) -> str | None:
+    """The value of ``name`` in the dotenv file at ``path`` (quotes stripped), or None."""
     if not path.exists():
         return None
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -121,7 +122,7 @@ def openrouter_problems(
         return [], [f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
     key = env.get(OPENROUTER_KEY_ENV)
     if not key and hermes_home is not None:
-        key = _env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
+        key = env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
     if not key:
         return [], [f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
     try:

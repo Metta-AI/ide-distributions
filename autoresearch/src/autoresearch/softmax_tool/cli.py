@@ -35,6 +35,13 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
+Identity is read at call time (C6, C7). Hermes fixes a worker's environment when it spawns
+the worker, but the profile ``.env`` can change while the worker runs (for example the operator
+sets another player id, and the next preflight pauses the agent). So each command first takes
+``IDENTITY_ENV`` (the credential and the expected player id) from ``$HERMES_HOME/.env`` when the
+file sets them; a running worker's mutating calls then use the same identity the next
+preflight checks.
+
 Prints one JSON envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false, "error": {"reason",
 "message", "details"?}}``. Exit codes: 0 done (including a credit denial), 1 refused or failed
 (``identity``, a guard's reason, ``platform``, ...), 2 bad arguments or no profile context,
@@ -58,6 +65,7 @@ from autoresearch.games.loader import GameError, load_game
 from autoresearch.io.docs import write_text
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
+from autoresearch.runtime.preflight import env_file_value
 from autoresearch.runtime.promotion import PromotionError, champion_status
 from autoresearch.softmax_tool.client import CreditsUnavailable
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
@@ -74,6 +82,7 @@ EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS, EXIT_TOOL_MISSING = 0, 1, 2, 3
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project root
 GAME_ENV = "AUTORESEARCH_GAME"
 PLAYER_ENV = "AUTORESEARCH_PLAYER_ID"
+IDENTITY_ENV = ("SOFTMAX_PLAYER_CREDENTIAL", PLAYER_ENV)
 BACKOFF_BASE = timedelta(minutes=30)
 BACKOFF_CAP = timedelta(hours=8)
 
@@ -94,12 +103,21 @@ def _fail(reason: str, message: str, code: int, details: dict | None = None) -> 
     return code
 
 
+def refresh_identity_env(hermes_home: Path) -> None:
+    """Set ``IDENTITY_ENV`` in this process from the profile ``.env`` (module docstring)."""
+    for name in IDENTITY_ENV:
+        value = env_file_value(Path(hermes_home) / ".env", name)
+        if value is not None:
+            os.environ[name] = value
+
+
 def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
             ctx = runctx.from_env()
         except KeyError as error:
             return _fail("bad_arguments", f"{error.args[0]} is not set", EXIT_BAD_ARGS)
+        refresh_identity_env(ctx.hermes_home)
         try:
             sm = softmax_from_env(os.environ, ctx.canonical)
             data = handler(ctx, sm, args)

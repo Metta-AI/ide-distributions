@@ -518,6 +518,25 @@ def test_submit_identity_fault_is_exit_1(board):
     assert not ledger.exists() or read_json(ledger)["stage"] != "intent"
 
 
+def test_submit_reads_the_identity_from_the_profile_env_at_call_time(board):
+    """A running worker's environment is fixed when Hermes spawns it, but the profile
+    ``.env`` may change while it runs (the operator sets another player id; preflight then
+    pauses). The softmax tool reads the identity names from the profile ``.env`` at each
+    call (C6, C7), so the running worker's submit is refused too."""
+    experiment, _ = board.reviewed_experiment()
+    worker = board.promoter(experiment)
+    credential = json.dumps({"token": "t", "expires_at": "2099-01-01T00:00:00Z",
+                             "player_id": PLAYER})  # fmt: skip
+    home = board.tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("AUTORESEARCH_PLAYER_ID=ply_wrong\nOTHER=1\n")
+    env = base_env(board, worker, SOFTMAX_PLAYER_CREDENTIAL=credential)  # spawn-time env
+    code, data = softmax(env, "submit", experiment)
+    assert code == 1 and data["error"]["reason"] == "identity", data
+    assert "ply_wrong" in data["error"]["message"]
+    assert load(board.canonical) is None  # refused before the promotion lock
+
+
 def test_leaderboard(board):
     code, data = softmax(base_env(board), "leaderboard")
     assert code == 0
