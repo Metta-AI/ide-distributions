@@ -40,6 +40,12 @@ class Card:
     # of the run the block ended. None for other parks, such as the circuit breaker.
     block_reason: str | None = None
     block_run_id: str | None = None
+    # Liveness, for workers checking their running peers: the run in flight (None when no run
+    # is open) and the latest heartbeat of that run, in epoch seconds (None before the first
+    # one; Hermes writes one at most every 60 s while the worker is active). FileQueue has no
+    # heartbeats.
+    current_run_id: str | None = None
+    last_heartbeat_at: int | None = None
 
 
 def kanban_priority(priority: Priority, order: int = 0) -> int:

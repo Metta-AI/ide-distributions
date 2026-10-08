@@ -58,6 +58,8 @@ def test_list_and_show(worker_env):
     code, out = run_cli(env, "list")
     assert code == 0 and out["ok"]
     assert [card["task_id"] for card in out["data"]["cards"]] == [task_id]
+    listed = out["data"]["cards"][0]
+    assert (listed["current_run_id"], listed["last_heartbeat_at"]) == (None, None)
     code, out = run_cli(env, "list", "--state", "claimed")
     assert code == 0 and out["data"]["cards"] == []
     code, out = run_cli(env, "show", task_id)

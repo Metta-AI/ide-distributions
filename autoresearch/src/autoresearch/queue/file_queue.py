@@ -50,6 +50,9 @@ class FileQueue:
             runs=[RunInfo(**run) for run in record["runs"]],
             block_reason=record.get("block_reason"),
             block_run_id=record.get("block_run_id"),
+            current_run_id=next(
+                (run["run_id"] for run in record["runs"] if not run["terminal"]), None
+            ),
         )
 
     # -- Queue protocol --
