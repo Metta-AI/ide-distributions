@@ -61,7 +61,6 @@ The briefing of your card lists the inbound messages that were delivered to it.
 | `reply` | An answer to one of your messages: a choice, text, or both. | Yes (D-02). Send a `note` with `--in-reply-to <inbound id>`. State the outcome: applied, declined with a reason, or noted. |
 | `steer` | Direction from the human. A steer outranks your own plan (D-02). | Yes, the same way as a `reply`. |
 | `task` | A request for work. The runtime makes a card from it. | No. The runtime acknowledges it when the card that was created from it publishes. |
-| `nudge` | A request for a quick card. | Yes, the same way as a `reply`. |
 | `seen` | It only marks other messages as read. | No. |
 
 Card completion checks that each delivered `reply` and `steer` has an acknowledgement.
