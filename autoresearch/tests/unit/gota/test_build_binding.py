@@ -84,10 +84,23 @@ def test_archive_distribution_and_candidate_committed_inputs(tmp_path, monkeypat
 @pytest.mark.parametrize('status,security', [('passed', 'ready'), ('failed', 'ready'), ('passed', 'empty')])
 def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, monkeypatch, status, security):
     import hashlib
+    import shutil
     import types
 
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    installed = tmp_path / 'distribution'
+    shutil.copytree(ROOT / 'games/gota', installed / 'games/gota',
+                    ignore=shutil.ignore_patterns('compiled', 'tmp', 'bin', '__pycache__'))
+    installed_spec = importlib.util.spec_from_file_location(
+        'installed_gota_build', installed / 'games/gota/tools/build.py')
+    module = importlib.util.module_from_spec(installed_spec)
+    installed_spec.loader.exec_module(module)
+    repository = tmp_path / 'repository'
+    subprocess.run(['git', 'init', str(repository)], check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(repository), '-c', 'user.name=Test',
+                    '-c', 'user.email=test@invalid', 'commit', '--allow-empty', '-m', 'base'],
+                   check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(repository), 'worktree', 'add', '--detach',
+                    str(tmp_path / 'worker')], check=True, capture_output=True)
     candidate = tmp_path / 'worker/strategy/candidates/E'
     candidate.mkdir(parents=True)
     source = candidate / 'STRATEGY.md'
@@ -111,6 +124,11 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
         dump=lambda p, data: p.write_text(json.dumps(data)))
     monkeypatch.setitem(sys.modules, 'strategy_build', compiler)
     def compile_fake(args, report, *, engine_identity=None):
+        import os
+        analysis = Path(os.environ['GOTA_ANALYSIS_DIR'])
+        assert analysis.is_relative_to(tmp_path)
+        analysis.mkdir(parents=True)
+        (analysis / 'evidence.json').write_text('{}')
         assert engine_identity['commit'] == POLYWORLD_COMMIT
         target = compiler.BUILDS / 'abcdef12-1'
         target.mkdir(parents=True)
@@ -137,6 +155,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
             _read_build(out)
         return
     assert result['ok']
+    assert (out / 'analysis/evidence.json').is_file()
     version, artifact = _read_build(out)
     assert artifact == out / 'policy.bas'
     assert version['strategy_sha256'] == hashlib.sha256(source.read_bytes()).hexdigest()
@@ -188,3 +207,54 @@ def test_main_defaults_online_without_manifest(tmp_path, monkeypatch):
         return {'ok': True}
     monkeypatch.setattr(module, 'build', fake_build)
     assert module.main() == 0
+
+
+def test_installed_compiler_gate_import_with_separate_worker_and_output(tmp_path):
+    """Installed compiler import and G5 reader must not assume candidate ancestry."""
+    import os
+    import shutil
+
+    installed = tmp_path / 'distribution'
+    tools = installed / 'games/gota/compiler/tools'
+    shutil.copytree(ROOT / 'games/gota/compiler/tools', tools,
+                    ignore=shutil.ignore_patterns('bin', '__pycache__'))
+    repository = tmp_path / 'repository'
+    repository.mkdir()
+    subprocess.run(['git', 'init', str(repository)], check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(repository), '-c', 'user.name=Test',
+                    '-c', 'user.email=test@invalid', 'commit', '--allow-empty', '-m', 'base'],
+                   check=True, capture_output=True)
+    worker = tmp_path / 'worker'
+    subprocess.run(['git', '-C', str(repository), 'worktree', 'add', '--detach', str(worker)],
+                   check=True, capture_output=True)
+    out = tmp_path / 'output'
+    out.mkdir()
+    shutil.copytree(ROOT / 'games/gota/gates', installed / 'games/gota/gates',
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copytree(ROOT / 'games/gota/tools', installed / 'games/gota/tools',
+                    ignore=shutil.ignore_patterns('bin', '__pycache__'))
+    program = '''
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]).parents[3]))
+sys.path.insert(0, sys.argv[1])
+import pw_intent, pw_cli
+assert pw_cli.default_out('pw_intent', 'episodes') == Path(sys.argv[2]) / 'analysis/pw_intent/episodes'
+mapping = {'codes': {}, 'rules': [], 'flag_words': 1}
+line = 'PWD v=2 t=0 r=0 c=0 i=0,0,0 h=0 p=0 f=0'
+assert pw_intent.parse_telemetry_line(line, mapping)
+from games.gota.gates import GateContext, g5_telemetry
+out = Path(sys.argv[2])
+(out / 'logs').mkdir()
+for seat in range(10):
+    (out / 'logs' / f'policy_agent_{seat}.log').write_text(line + '\\n')
+result = g5_telemetry.compiler_logs(GateContext(out, episode_dir=out, compiler_map=mapping))
+assert result.ok, result.details
+assert len(result.details['seats']) == 10
+'''
+    environment = dict(os.environ, GOTA_CANDIDATE_REPO=str(worker),
+                       GOTA_ANALYSIS_DIR=str(out / 'analysis'))
+    result = subprocess.run([sys.executable, '-c', program, str(tools), str(out)],
+                            cwd=worker, env=environment, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert not (installed / 'games/gota/compiler/analysis').exists()

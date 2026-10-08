@@ -34,13 +34,15 @@ def build(candidate, out, manifest=None, *, timeout=900, offline=False):
     python = os.environ.get('GOTA_HERMES_PYTHON')
     if not python:
         raise pw_cli.EnvironmentMissing('Hermes Python is not configured', 'set GOTA_HERMES_PYTHON to the installed Hermes Python')
-    import pw_strategy
-    import strategy_build as compiler
 
     from games.gota.tools.engine_identity import provision
     identity, _ = provision(identity)
     out.parent.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='.gota-build-', dir=out.parent))
+    os.environ['GOTA_ANALYSIS_DIR'] = str(scratch / 'analysis')
+    import pw_strategy
+    import strategy_build as compiler
+
     resolved_manifest = identity.pop('manifest')
     manifest = scratch / 'manifest.json'
     manifest.write_text(json.dumps(resolved_manifest, indent=2) + '\n')
@@ -73,6 +75,9 @@ def build(candidate, out, manifest=None, *, timeout=900, offline=False):
     with contextlib.redirect_stdout(sys.stderr):
         result = pw_strategy.run(args, report, engine_identity=identity)
     target = Path(result['build'])
+    analysis = scratch / 'analysis'
+    if analysis.exists():
+        analysis.rename(target / 'analysis')
     version = compiler.read(target / 'version.json')
     version['engine'] = identity
     version['compiler']['security_scanner_sha256'] = hashlib.sha256(scanner.read_bytes()).hexdigest()

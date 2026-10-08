@@ -710,8 +710,11 @@ TOOL = "pw_intent"
 CLI = "uv run python paintbot_pw_lab/tools/pw_intent.py"
 DEFAULT_RECORD_OUT = pw_cli.default_out(TOOL, "episodes")      # <lab>/analysis/pw_intent/episodes/
 DEFAULT_AUDIT_OUT = pw_cli.default_out(TOOL, "audit")          # <lab>/analysis/pw_intent/audit/<key>/
-SHOWN_RECORD_OUT = DEFAULT_RECORD_OUT.relative_to(pw_release.REPO)   # as --help prints it (repo-relative)
-SHOWN_AUDIT_OUT = DEFAULT_AUDIT_OUT.relative_to(pw_release.REPO)
+# Installed compiler and candidate worktree may have unrelated roots.
+SHOWN_RECORD_OUT = (DEFAULT_RECORD_OUT.relative_to(pw_release.REPO)
+                    if DEFAULT_RECORD_OUT.is_relative_to(pw_release.REPO) else DEFAULT_RECORD_OUT)
+SHOWN_AUDIT_OUT = (DEFAULT_AUDIT_OUT.relative_to(pw_release.REPO)
+                   if DEFAULT_AUDIT_OUT.is_relative_to(pw_release.REPO) else DEFAULT_AUDIT_OUT)
 
 
 def _roots(texts: list[str]) -> list[Path]:

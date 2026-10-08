@@ -73,7 +73,9 @@ the installed distribution may be a separate Git archive. Commit the candidate
 input closure (strategy, skills, packing, comms) first. Development installations
 also require clean tracked compiler inputs. Archive compiler inputs are hashed
 separately; the candidate commit does not establish their Git provenance.
-The output directory must not exist. Failed builds retain failed gate evidence
+Compiler analysis defaults to build-owned scratch and is retained under
+`BUILD_DIRECTORY/analysis` when produced; it does not write into the installed
+distribution. The output directory must not exist. Failed builds retain failed gate evidence
 and are refused by the shared upload reader.
 
 The host must install the locked Python dependencies, Nim 2.2.10 and the native
