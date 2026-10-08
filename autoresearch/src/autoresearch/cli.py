@@ -25,6 +25,7 @@ GROUP_MODULES = (
     "autoresearch.queue.cli",
     "autoresearch.runtime.promotion_cli",
     "autoresearch.softmax_tool.cli",
+    "autoresearch.games.cli",
 )
 
 
