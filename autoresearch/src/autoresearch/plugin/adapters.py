@@ -140,16 +140,21 @@ def on_session_end(
 
 
 def pre_llm_call(is_first_turn=False, **kwargs):
-    """The card briefing, injected into the first user turn of a Kanban card worker."""
+    """The card briefing, injected into the first user turn of a Kanban card worker, with
+    the run id (the journal ``iteration``). It also records the worker identity for the
+    worker's subprocesses, which Hermes strips of ``HERMES_KANBAN_TASK``/``_RUN_ID``
+    (``runctx`` module docstring)."""
     task = os.environ.get(runctx.ENV_CARD_ID)
     if not is_first_turn or not task:
         return None
     ctx = None
     try:
         ctx = _run_context()
+        runctx.record_worker_identity(ctx)
         text = (runctx.runtime_dir(ctx) / "briefings" / f"{task}.md").read_text(encoding="utf-8")
         marker = BRIEFING_MARKER.format(task_id=task)
-        return text if marker in text else f"{marker}\n{text}"
+        text = text if marker in text else f"{marker}\n{text}"
+        return f"{text.rstrip()}\n\n- Run: {ctx.run_id} (this card run; the journal `iteration`)\n"
     except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
         _log_error(ctx, "pre_llm_call", error)
     return None

@@ -111,6 +111,16 @@ def test_pre_llm_call_injects_the_briefing_on_the_first_turn(worker_env):
     assert adapters.pre_llm_call(is_first_turn=False, platform="cli") is None
 
 
+def test_pre_llm_call_records_the_worker_identity_and_names_the_run(worker_env, layout):
+    """Worker subprocesses lose HERMES_KANBAN_TASK/_RUN_ID (Hermes scrubs them), so the
+    first turn records them for ``runctx`` and tells the model the run id."""
+    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
+    text = adapters.pre_llm_call(is_first_turn=True)
+    assert "- Run: r_1" in text
+    record = json.loads((worker_env / "workers" / "Q-1.json").read_text())
+    assert record == {"task_id": "t_1", "run_id": "r_1", "worker": str(layout.worker)}
+
+
 def test_pre_llm_call_adds_a_missing_marker(worker_env):
     (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
     text = adapters.pre_llm_call(is_first_turn=True)

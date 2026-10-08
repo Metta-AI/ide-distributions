@@ -1,6 +1,6 @@
 import json
 
-from autoresearch.runctx import from_env, ledger_dir, runtime_dir
+from autoresearch.runctx import from_env, ledger_dir, record_worker_identity, runtime_dir
 
 
 def test_defaults_canonical_under_hermes_home(tmp_path):
@@ -47,3 +47,28 @@ def test_env_task_beats_serial_file(tmp_path):
     (runtime / "serial_current.json").write_text(json.dumps({"task_id": "t_9"}))
     ctx = from_env({"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_TASK": "t_1"})
     assert ctx.card_id == "t_1"
+
+
+def test_worker_identity_record_fills_task_and_run(tmp_path):
+    """Hermes scrubs HERMES_KANBAN_TASK and _RUN_ID from a worker's subprocesses (v0.21.5
+    ``scrub_kanban_env``); HERMES_KANBAN_WORKSPACE survives, and the plugin records the
+    identity for that worktree."""
+    worktree = tmp_path / "workspace" / ".worktrees" / "Q-1"
+    home_env = {"HERMES_HOME": str(tmp_path)}
+    record_worker_identity(from_env(home_env | {
+        "HERMES_KANBAN_WORKSPACE": str(worktree), "HERMES_KANBAN_TASK": "t_1",
+        "HERMES_KANBAN_RUN_ID": "7",
+    }))  # fmt: skip
+    ctx = from_env(home_env | {"HERMES_KANBAN_WORKSPACE": str(worktree)})
+    assert (ctx.card_id, ctx.run_id, ctx.worker) == ("t_1", "7", worktree)
+
+
+def test_worker_identity_record_for_another_worktree_is_ignored(tmp_path):
+    runtime = tmp_path / "workspace/.supervisor/runtime/workers"
+    runtime.mkdir(parents=True)
+    (runtime / "Q-1.json").write_text(
+        json.dumps({"task_id": "t_1", "run_id": "7", "worker": str(tmp_path / "elsewhere/Q-1")})
+    )
+    worktree = tmp_path / "workspace" / ".worktrees" / "Q-1"
+    ctx = from_env({"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_WORKSPACE": str(worktree)})
+    assert ctx.card_id is None and ctx.run_id is None

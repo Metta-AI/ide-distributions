@@ -44,9 +44,10 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
     "unit": "<one line: the unit of work>", "refs": ["ar://…"]}
    ```
 
-   - `iteration`: `$HERMES_KANBAN_RUN_ID` as an integer (Kanban run ids are integers per
-     board). In the serial fallback (`$HERMES_KANBAN_RUN_ID` is not set; run ids look like
-     `r-<ULID>`), use the number of runs of this card:
+   - `iteration`: the number on the `- Run:` line at the end of the briefing (Kanban run
+     ids are integers per board). Your shell does not have `$HERMES_KANBAN_RUN_ID` or
+     `$HERMES_KANBAN_TASK`: Hermes removes them from worker commands. In the serial fallback
+     (run ids look like `r-<ULID>`), use the number of runs of this card:
      `"$AUTORESEARCH_CLI" queue show <task id>` and count `data.runs`.
    - The doctrine version is `N` in the first line of `AGENTS.md`
      (`<!-- doctrine-version: N -->`).
