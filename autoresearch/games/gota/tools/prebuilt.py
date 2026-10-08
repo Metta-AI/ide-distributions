@@ -6,7 +6,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from games.gota.tools.native_build import digest
+from games.gota.tools.native_build import digest, fingerprint
 
 ENGINE_FIELDS = ('commit', 'coworld_version', 'source_url', 'manifest_sha256')
 
@@ -66,7 +66,15 @@ def validate_source(candidate, artifact, identity):
 
 
 def build(candidate, out, artifact, identity):
-    from games.gota.gates import GateContext, GateResult, g1_lint, g2_episode, g3_budget, g4_screen
+    from games.gota.gates import (
+        GateContext,
+        GateResult,
+        g1_lint,
+        g2_episode,
+        g3_budget,
+        g4_screen,
+        retain_episode_locators,
+    )
     from games.gota.tools.engine_identity import provision
     from games.gota.tools.native_build import TOOLS, validate
 
@@ -91,12 +99,16 @@ def build(candidate, out, artifact, identity):
     error = None
     for name, module in zip(('G1', 'G2', 'G3', 'G4'), (g1_lint, g2_episode, g3_budget, g4_screen)):
         try:
+            if fingerprint(json.loads(manifest.read_text())) != identity['manifest_sha256']:
+                raise ValueError('manifest changed after engine resolution')
             result = module.run(frozen, context)
             for measurement in context.measurements.values():
                 if measurement.get('native_build') != native['gate_probe']:
                     raise ValueError('gate used a different native build from verification provenance')
             if digest(frozen) != provenance['artifact_sha256']:
                 raise ValueError('frozen prebuilt artifact changed during gates')
+            if fingerprint(json.loads(manifest.read_text())) != identity['manifest_sha256']:
+                raise ValueError('manifest changed after engine resolution')
         except Exception as fault:  # noqa: BLE001 - retain arbitrary tool faults and stop.
             result = GateResult.errored(fault)
         gates[name] = {'outcome': result.outcome, 'passed': result.ok,
@@ -127,6 +139,7 @@ def build(candidate, out, artifact, identity):
         gates['verification'] = {'outcome': result.outcome, 'passed': False, 'summary': result.details}
         status, error = 'errored', result.details['error']
     driver = {str(path): digest(path) for path in (Path(__file__), Path(__file__).with_name('build.py'))}
+    retain_episode_locators(gates, scratch)
     version = {'build_id': out.name, 'backend': 'gota', 'status': status, 'gates': gates,
                'artifact': 'policy.bas', 'policy_sha256': digest(frozen),
                'source_commit': head, 'source_path': next(iter(hashes)), 'source_hashes': hashes,

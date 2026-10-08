@@ -76,7 +76,10 @@ also require clean tracked compiler inputs. Archive compiler inputs are hashed
 separately; the candidate commit does not establish their Git provenance.
 Compiler analysis defaults to build-owned scratch and is retained under
 `BUILD_DIRECTORY/analysis` when produced; it does not write into the installed
-distribution. The output directory must not exist. Gate results record `outcome` as `passed`,
+distribution. Retained G2 and legacy G5 `summary.episode_dir` locators inside the
+build are relative to `BUILD_DIRECTORY`, including attempt receipts. Executed
+command arguments and error tracebacks preserve their original paths.
+The output directory must not exist. Gate results record `outcome` as `passed`,
 `failed`, or `errored`, alongside the compatibility `passed` boolean. Failed
 policy checks can feed compiler repair rounds. A gate or harness tool fault stops
 the build immediately: `report.json`, `report.md`, `version.json` and the binding's
@@ -152,13 +155,17 @@ identity}`, name the artifact itself as the input, and record its exact hash and
 resolved engine identity. For v13-live, the generator below records the original
 hash, output hash, transform tool hash and resolved engine automatically. Build
 reproduces the transformation before gates and verifies the committed closure
-again after gates. The frozen sidecar, native receipts, manifest, reports and
+again after gates. The frozen manifest fingerprint must match the resolved engine
+before and after each gate; a mismatch stops the build as `errored`.
+The frozen sidecar, native receipts, manifest, reports and
 `version.json` stay in the build directory; shared upload preserves provenance
 under `version.build.compiler.prebuilt_provenance`. In prebuilt mode, the shared
 `strategy_sha256` field is the committed BASIC source hash (equal to
 `policy_sha256`), and `source_path` names that BASIC file. `compiler.mode` is
 `prebuilt`; these fields do not claim STRATEGY.md compilation or semantic proof.
 
+The prebuilt runtime baseline requires no game test fixtures. This does not
+establish fixture-free operation of the full compiler profile.
 The installed distribution includes the byte-identical original at
 `games/gota/baselines/submitted-v13.bas`, with its historical origin in the
 adjacent provenance file. Copy it into the worker candidate and commit that input

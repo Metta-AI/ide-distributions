@@ -12,6 +12,7 @@ from autoresearch.softmax_tool.upload import _read_build
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from games.gota.tools import build, engine_identity, make_v13_live
+from games.gota.tools.native_build import fingerprint
 
 
 def sha(path):
@@ -31,7 +32,7 @@ def candidate(tmp_path, monkeypatch):
     artifact = directory / 'baseline.bas'
     artifact.write_bytes((ROOT / 'tests/fixtures/gota/v13-live.bas').read_bytes())
     identity = {'commit': 'a' * 40, 'coworld_version': 'test', 'source_url': 'test',
-                'manifest_sha256': 'manifest', 'manifest': {'test': True}}
+                'manifest_sha256': fingerprint({'test': True}), 'manifest': {'test': True}}
     provenance = {'schema': 'gota-prebuilt/1', 'artifact_sha256': sha(artifact),
                   'input': {'path': 'baseline.bas', 'sha256': sha(artifact)},
                   'transform': {'name': 'identity'}, 'engine': {k: v for k, v in identity.items() if k != 'manifest'}}
@@ -81,6 +82,62 @@ def test_prebuilt_exact_bytes_shared_reader_and_no_compiler(candidate, tmp_path,
     assert version['native_builds']['gate_probe']['fingerprint'] == 'gate_probe'
     with pytest.raises(ValueError, match='immutable'):
         build.build(directory, out, offline=True, prebuilt=artifact)
+
+
+@pytest.mark.parametrize('boundary', ['before', 'G1', 'G2', 'G3', 'G4'])
+def test_prebuilt_manifest_fault_stops_gates_and_retains_error(candidate, tmp_path, monkeypatch, boundary):
+    from games.gota.gates import g1_lint, g2_episode, g3_budget, g4_screen
+    from games.gota.tools import prebuilt
+    directory, artifact = candidate
+    calls = fake_gates(monkeypatch)
+    if boundary == 'before':
+        original_dump = prebuilt.dump
+        def wrong_manifest(path, value):
+            original_dump(path, {'wrong': True} if path.name == 'coworld_manifest.json' else value)
+        monkeypatch.setattr(prebuilt, 'dump', wrong_manifest)
+    else:
+        module = dict(zip(('G1', 'G2', 'G3', 'G4'), (g1_lint, g2_episode, g3_budget, g4_screen)))[boundary]
+        original_run = module.run
+        def mutate(policy, context):
+            result = original_run(policy, context)
+            context.manifest.write_text(json.dumps({'wrong': True}))
+            return result
+        monkeypatch.setattr(module, 'run', mutate)
+    out = tmp_path / 'failed-manifest'
+    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    assert result['status'] == 'errored'
+    assert calls == ([] if boundary == 'before' else ['G1', 'G2', 'G3', 'G4'][:int(boundary[1])])
+    assert result['error']['type'] == 'ValueError'
+    assert 'manifest changed after engine resolution' in result['error']['message']
+    for receipt in ('report.json', 'version.json'):
+        assert json.loads((out / receipt).read_text())['status'] == 'errored'
+    assert json.loads((out / 'report.json').read_text())['error'] == result['error']
+    assert artifact.read_bytes() == (out / 'policy.bas').read_bytes()
+    with pytest.raises(Exception, match='gates did not pass'):
+        _read_build(out)
+
+
+def test_prebuilt_episode_locator_survives_output_move(candidate, tmp_path, monkeypatch):
+    from games.gota.gates import GateResult, g2_episode
+    directory, artifact = candidate
+    fake_gates(monkeypatch)
+    original_command = []
+    def episode(policy, context):
+        evidence = context.work_dir / 'episode'
+        evidence.mkdir()
+        (evidence / 'results.json').write_text('{}')
+        original_command.extend(['coworld', '--output-dir', str(evidence)])
+        return GateResult('passed', {'episode_dir': str(evidence), 'command': list(original_command)})
+    monkeypatch.setattr(g2_episode, 'run', episode)
+    out = tmp_path / 'unrelated-output/build'
+    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    surfaces = [result, json.loads((out / 'version.json').read_text()),
+                json.loads((out / 'report.json').read_text()), {'gates': json.loads((out / 'gates.json').read_text())}]
+    for surface in surfaces:
+        summary = surface['gates']['G2']['summary']
+        assert (out / summary['episode_dir'] / 'results.json').is_file()
+        assert summary['command'] == original_command
+    assert not Path(original_command[-1]).exists()
 
 
 @pytest.mark.parametrize('mutation,message', [('dirty', 'committed'), ('dirty_sidecar', 'committed'), ('untracked', 'committed'), ('provenance_hash', 'hash'),

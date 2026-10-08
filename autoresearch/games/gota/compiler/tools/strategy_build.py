@@ -537,11 +537,18 @@ def carry_guesses(order: dict, draft: dict) -> list[dict]:
 
 
 def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: dict | None = None) -> Path:
+    from games.gota.gates import retain_episode_locators
+
     assert_inputs(order)
     stage = build_path(order['build_id'], staged=True)
     target = BUILDS / order['build_id']
     if target.exists():
         raise pw_cli.UsageError(f'finalized build is immutable: {target}')
+    retain_episode_locators(gates, stage)
+    for path in stage.rglob('gates.json'):
+        retained = read(path)
+        retain_episode_locators(retained, stage)
+        dump(path, retained)
     draft = read(stage / 'report_draft.json') if (stage / 'report_draft.json').exists() else {'guesses': [], 'gaps': []}
     guesses = carry_guesses(order, draft)
     blocked = [g['id'] for g in guesses if g['severity'] == 'high' and g['state'] != 'closed'

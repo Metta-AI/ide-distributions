@@ -30,6 +30,16 @@ def exception_summary(error: BaseException) -> dict:
             'traceback': ''.join(traceback.format_exception(error, limit=-8))}
 
 
+def retain_episode_locators(gates: dict, build_dir: Path) -> None:
+    """Make retained episode navigation relative to the build; preserve executed commands."""
+    for name in ('G2', 'G5'):
+        summary = gates.get(name, {}).get('summary')
+        if isinstance(summary, dict) and summary.get('episode_dir'):
+            episode = Path(summary['episode_dir'])
+            if episode.is_relative_to(build_dir):
+                summary['episode_dir'] = str(episode.relative_to(build_dir))
+
+
 def gate_run(run):
     """Keep deliberate policy rejection distinct from unexpected tooling faults."""
     @wraps(run)
