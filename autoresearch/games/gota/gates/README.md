@@ -26,7 +26,10 @@ ran and passed. A G4 behavior regression is advisory and does not change its exi
 status; missing or failed measurements do. Use a fresh work directory for G2.
 No command uploads or submits a policy. The manifest and container image must
 already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
-`uv run`; it does not override the locked versions.
+`uv run`; it does not override the locked versions. `tools/lasthit_eval.py` uses
+the same `uv run --project PROJECT --locked --offline --python 3.12` invocation,
+with the project directory resolved from the script rather than the caller's
+working directory. Cache the locked dependencies before either command.
 
 ## Evidence and limits
 

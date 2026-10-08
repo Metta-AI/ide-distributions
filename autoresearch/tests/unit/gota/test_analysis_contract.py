@@ -74,12 +74,20 @@ def test_relative_manifest_is_absolute_in_command(tmp_path, monkeypatch):
         'manifest.json', '--mirror', '--episodes', '1', '--out', str(tmp_path / 'out')])
     commands = []
     def capture(command, **kwargs):
-        commands.append(command)
+        commands.append((command, kwargs))
         return type('Result', (), {'returncode': 0})()
     monkeypatch.setattr(lasthit_eval.subprocess, 'run', capture)
     monkeypatch.setattr(lasthit_eval, 'parse_episode', lambda *a: [])
     assert lasthit_eval.main() == 0
-    assert commands[0][6] == str(tmp_path / 'manifest.json')
+    command, kwargs = commands[0]
+    assert command[:10] == ['uv', 'run', '--project', str(ROOT), '--locked',
+        '--offline', '--python', '3.12', 'coworld', 'run-episode']
+    assert kwargs['cwd'] == ROOT
+    assert command[10] == str(tmp_path / 'manifest.json')
+    players = command[11:21]
+    assert players == [str(tmp_path / 'out/inputs/candidate.bas')] * 10
+    assert command[21:] == ['--variant', 'competition', '--output-dir',
+        str(tmp_path / 'out/mirror'), '--timeout-seconds', '900', '-n', '1']
 
 
 @pytest.mark.parametrize('outcome', ['unknown', None])

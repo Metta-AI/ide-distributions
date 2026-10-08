@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+PROJECT = Path(__file__).resolve().parents[3]
 
 
 @dataclass
@@ -281,14 +282,15 @@ def main() -> int:
         directory = out / ('mirror' if args.mirror else 'candidate-red' if candidate_red else 'candidate-blue')
         roster = candidate_seats(candidate_red, mirror=args.mirror, mixed=args.mixed)
         players = [snapshots['candidate' if seat in roster else 'reference'] for seat in range(10)]
-        command = ['uv', 'run', '--with', 'coworld==0.1.57', 'coworld', 'run-episode', str(args.manifest.resolve()),
+        command = ['uv', 'run', '--project', str(PROJECT), '--locked', '--offline', '--python', '3.12',
+                   'coworld', 'run-episode', str(args.manifest.resolve()),
                    *map(str, players), '--variant', 'competition',
                    '--output-dir', str(directory), '--timeout-seconds', '900', '-n', str(args.episodes)]
         print('Running: ' + shlex.join(command), flush=True)
         log_path = out / f'{directory.name}.runner.log'
         try:
             with log_path.open('w') as log:
-                process = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
+                process = subprocess.run(command, cwd=PROJECT, stdout=log, stderr=subprocess.STDOUT, check=False)
             if process.returncode:
                 failed = True
                 print(f'Runner failed (exit {process.returncode}); diagnostic: {log_path}')
