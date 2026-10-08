@@ -15,7 +15,7 @@ from autoresearch import cli
 DISTRIBUTION = Path(__file__).resolve().parents[2]
 README = (DISTRIBUTION / "README.md").read_text(encoding="utf-8")
 SHELL_FENCE = re.compile(r"^```(?:sh|bash)\n(.*?)^```", re.MULTILINE | re.DOTALL)
-BUILTINS = {"cd", "mkdir", "cp", "export", "set"}
+BUILTINS = {"cd", "mkdir", "cp", "export", "set", "."}
 OPTIONAL_TOOLS = {"nim"}  # skipped when absent from the machine
 CLI_VARIABLE = "$AUTORESEARCH_CLI"
 
@@ -27,11 +27,12 @@ def shell_commands() -> list[list[str]]:
         for line in joined.splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
-                words = shlex.split(line)
-                while words and re.fullmatch(r"[A-Z_]+=\S*", words[0]):
-                    words.pop(0)  # leading VAR=value assignments
-                if words:
-                    commands.append(words)
+                for segment in line.strip("()").split(";"):  # subshell and `a; b` lines
+                    words = shlex.split(segment)
+                    while words and re.fullmatch(r"[A-Z_]+=\S*", words[0]):
+                        words.pop(0)  # leading VAR=value assignments
+                    if words:
+                        commands.append(words)
     return commands
 
 
@@ -87,3 +88,10 @@ def test_operator_shell_setup_precedes_cli_examples():
     assert README.index(OPERATOR_SETUP) < README.index('"' + CLI_VARIABLE + '" ')
     assert 'export PROFILE="' in README
     assert README.index('export PROFILE="') < README.index(OPERATOR_SETUP)
+
+
+def test_bootstrap_commands_load_the_profile_env():
+    lines = [line for line in README.splitlines() if "scripts/queue_keeper.py" in line]
+    assert lines
+    for line in lines:
+        assert '. "$PROFILE/.env"' in line, line

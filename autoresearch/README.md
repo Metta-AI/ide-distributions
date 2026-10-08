@@ -138,10 +138,12 @@ hermes -p autoresearch cron run queue-keeper
 ```
 
 `cron run` only marks the job. A running gateway runs it on its next tick, or you can run
-`hermes -p autoresearch cron tick` once by hand. To run only bootstrap (no cards):
+`hermes -p autoresearch cron tick` once by hand. To run only bootstrap (no cards). The subshell loads the profile `.env`, because the runtime
+reads `AUTORESEARCH_WORKSPACE_REMOTE` and the other keys from the environment. `uv` must be
+on `PATH`, because the launcher runs `uv sync`:
 
 ```sh
-HERMES_HOME="$PROFILE" python3 "$PROFILE/scripts/queue_keeper.py" --bootstrap-only
+( set -a; . "$PROFILE/.env"; set +a; HERMES_HOME="$PROFILE" python3 "$PROFILE/scripts/queue_keeper.py" --bootstrap-only )
 ```
 
 The first `queue-keeper` run syncs the venv (`uv sync` from `uv.lock`), writes the CLI shim,
@@ -224,10 +226,10 @@ memory is not in that repository by itself: queue-keeper copies it to
 
 1. Install Hermes and the profile as above. Write the same `.env` (new credential if the
    old one expired).
-2. Run bootstrap once (this is the command that clones the workspace):
+2. Run bootstrap once (this is the command that clones the workspace; `uv` must be on `PATH`):
 
 ```sh
-HERMES_HOME="$PROFILE" python3 "$PROFILE/scripts/queue_keeper.py" --bootstrap-only
+( set -a; . "$PROFILE/.env"; set +a; HERMES_HOME="$PROFILE" python3 "$PROFILE/scripts/queue_keeper.py" --bootstrap-only )
 ```
 
    When the remote has a `main`, bootstrap clones it into `$PROFILE/workspace/`. It does
