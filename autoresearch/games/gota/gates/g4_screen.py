@@ -2,17 +2,15 @@
 import hashlib
 from pathlib import Path
 
-from . import GateContext, GateResult, PolicyFailure, gate_run
+from . import GateContext, GateResult, gate_run
+from .g2_episode import validate_results
 from .native import NATIVE_MODE, measure
 
 
 def metrics(row: dict, slots: range) -> dict:
+    validate_results(row)
     ticks = row['ticks']
-    if ticks <= 0:
-        raise PolicyFailure('Missing positive runtime duration')
     scores, xp = row['scores'], row['total_xp']
-    if len(scores) != 10 or len(xp) != 10:
-        raise PolicyFailure('Incomplete ten-seat screen results')
     return {'glory': sum(max(0, xp[i]) * 1440 // ticks if scores[i] == 1 else 0
                          for i in slots) / 5,
             'win_rate': sum(scores[i] for i in slots) / 5}
@@ -33,9 +31,9 @@ def run(artifact: Path, context: GateContext) -> GateResult:
             report = measure(artifact, context, seed,
                              None if identical else context.baseline,
                              False if identical else blue)
-            runtime = report.get('runtime', {})
-            if report.get('ok') is not True or not runtime.get('decisions'):
-                raise PolicyFailure(f'Seed {seed}: missing runtime or BASIC failure')
+            if report['outcome'] != 'passed':
+                return GateResult(report['outcome'], report)
+            runtime = report['runtime']
             candidate_slots = range(5, 10) if blue else range(5)
             baseline_slots = range(5) if blue else range(5, 10)
             a, b = metrics(runtime, candidate_slots), metrics(runtime, baseline_slots)

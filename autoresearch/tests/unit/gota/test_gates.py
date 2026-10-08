@@ -138,7 +138,7 @@ def test_telemetry_artifact_identity_mismatch(context, recorded_episode):
 
 
 def test_screen_rejects_incomplete_metrics():
-    with pytest.raises(ValueError, match='Incomplete'):
+    with pytest.raises(ValueError, match='ten finite'):
         gate('g4_screen').metrics({'ticks': 1, 'scores': [], 'total_xp': []}, range(5))
 
 

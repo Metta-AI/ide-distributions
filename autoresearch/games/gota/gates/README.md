@@ -47,9 +47,18 @@ working directory. Cache the locked dependencies before either command.
   acceptance uses that receipt, not file timestamps.
 - G1 compiles using the actual GotA host schema and limits at the resolved full
   engine pin. The native receipt binds engine/Bassy source and executable bytes.
+  The probe reports a known Bassy `BasicError` during compilation as `failed`.
+  Unexpected native exceptions report `errored` with their native type, message
+  and stack trace; release builds enable stack traces for the probe. Simulation
+  VM error flags remain explicit policy failures. The Python reader validates
+  outcome consistency, compile counters and complete runtime counters/results
+  before interpreting measurements as policy evidence.
 - G2 executes all ten seats through pinned coworld and reads back staged artifact
   hashes, every completed private log, BASIC errors, ten active scripts, decisions,
-  nonzero aggregate actions, and full results. Positive XP is compatibility
+  nonzero aggregate actions, and full results. Missing runner/completion markers,
+  truncated results and non-finite measurements are tool errors. Complete
+  measurements showing inactive seats, zero decisions or zero actions are policy
+  failures. Positive XP is compatibility
   evidence for v13-live, not a general G2 requirement for every possible policy.
 - G3 enforces legacy ceilings of 256 globals, 32 arrays, 4096 cells and 65536
   source bytes, or structured ceilings of 512 globals, 128 arrays, 262144 cells
@@ -57,7 +66,8 @@ working directory. Cache the locked dependencies before either command.
   (including main), and 20000 static instructions. Runtime ceilings are 80000
   instructions, 200000 work units, 1024 PRINT bytes and 128 PRINT events per
   decision. The 80% instruction/work thresholds apply to live 100000/250000
-  budgets, not historical 20000/50000 budgets. Missing runtime measurements fail.
+  budgets, not historical 20000/50000 budgets. Missing or malformed runtime
+  measurements error and stop verification; measured ceiling violations fail.
 - G4 runs native OpenDraft matches for seeds 1 through 10, candidate versus
   baseline on each side. It computes winning lifetime XP per simulated minute, floored for each hero before
   averaging (Glory) and win rate for the five candidate/baseline heroes. Regressions are

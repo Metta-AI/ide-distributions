@@ -157,7 +157,8 @@ def inputs(target: str, commit: str, *, tools=TOOLS) -> dict:
             'toolchain': toolchain(clone, source),
             'options': ['--hints:off', '--path:.', '-d:release', '-d:replayEvents',
                         f'-d:PolyworldCommit={commit}',
-                        '-d:BassyCommit=' + dependencies.get('bassy', {}).get('commit', '')]}
+                        '-d:BassyCommit=' + dependencies.get('bassy', {}).get('commit', '')]
+                       + (['--stackTrace:on'] if target == 'gate_probe' else [])}
 
 
 def receipt_path(binary: Path) -> Path:

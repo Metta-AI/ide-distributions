@@ -113,6 +113,12 @@ Pandas is now a locked project dependency; no pandas overlay is needed.
 
 ## Offline native tools
 
+Native probe receipts carry the same `passed`/`failed`/`errored` outcomes.
+Only known BASIC compile rejection and explicit VM failure/activity measurements
+are policy failures. Unexpected native exceptions retain their type, message and
+stack trace; incomplete or inconsistent receipts stop verification as tool errors.
+Missing counters never become resource violations or model repair requests.
+
 Build and receipt-validation helpers never fetch or install dependencies. The
 explicit setup command fetches pinned Git sources (see [gate setup](../../gates/README.md)).
 Establish the exact source/dependency caches first, retaining the real Polyworld config.nims and Nim
