@@ -25,7 +25,7 @@ Useful options: `--priority P0..P5`, `--expects-response` or `--no-expects-respo
 | `note` | A decision or status change that a human should know. Also the acknowledgement of an inbound message. | Set per message with `expects_response`. |
 | `question` | A choice where human judgement adds value. Give the options, your recommendation, and say whether work is parked until the answer comes. | Yes. An unanswered question stays owed. |
 | `suggestion` | Something a human can do, for example raise credits or look at a replay. Also each skill proposal and each doctrine proposal. | Set per message. A skill proposal stays open until a reply. |
-| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. | Set per message. |
+| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. For a tool fault (D-26), name the command and the error text. | Set per message. |
 | `highlight` | One event: a supported or falsified hypothesis, a newly verified claim, a promotion, or a surprising result. | Set per message. |
 
 For a skill proposal, add the ref `ar://skill-proposal/<name>`.

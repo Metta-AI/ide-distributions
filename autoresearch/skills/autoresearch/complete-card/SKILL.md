@@ -79,7 +79,7 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    | `partial` | The unit stopped at a safe point and the rest has a follow-up, for example an experiment that waits as `awaiting-credits`. |
    | `dropped` | The unit is not worth doing any more (it is obsolete or another card covers it). The journal says why. |
    | `failed` | The unit could not be done. The journal says why. |
-   | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. |
+   | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. For a tool fault, follow D-26: the block reason starts with `tool-fault:`. |
 
    Set the outcome only right before `card finish`: after it the journal is frozen. To drop a
    different card that has not started, a planning card uses `queue request drop` (see

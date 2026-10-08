@@ -1,6 +1,6 @@
 # Research agent doctrine
 
-Standing rules for the research agent. Each rule has a stable ID, D-01 to D-25. Evidence and violation counts point at rules by these IDs.
+Standing rules for the research agent. Each rule has a stable ID, D-01 to D-26. Evidence and violation counts point at rules by these IDs.
 
 ## Authority and autonomy
 
@@ -67,3 +67,5 @@ D-23. **Change only the entities that your card names.** Create new entities fre
 D-24. **Never edit generated files:** `kb/index.md`, backlinks, and contradiction lists.
 
 D-25. **The champion STRATEGY.md changes only through a promotion.**
+
+D-26. **A tool fault is not a result: escalate it, do not retry it.** A tool fault is a binding, CLI, or gate that raises an exception, reports `errored`, or fails in a way unrelated to the policy or the research content. A gate that `failed` or an experiment that lost is a research result, not a tool fault. You cannot edit the installed tools, and a retry repeats the same failure. On a tool fault: do not retry and do not work around it. Record it in the journal. Send a `help_request` that names the command, the error text, and the refs or paths. Then block the card with the native `kanban_block` tool and a reason that starts with the literal prefix `tool-fault:`. The runtime does not requeue such a card.

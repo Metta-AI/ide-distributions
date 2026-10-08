@@ -53,3 +53,4 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
   the artifact hash is the same). After a second failure, finish `partial`.
 - Exit 3 (`tool_missing`): the pinned platform tool is missing. Send a `help_request` and
   finish `blocked`.
+- A binding, CLI, or gate raises an exception, reports `errored`, or fails for a reason unrelated to the policy or research content (a tool fault): do not retry it. Follow D-26: journal it, send a `help_request`, and block the card with a reason that starts with `tool-fault:`.

@@ -62,3 +62,4 @@ Doctrine upheld: D-04, D-09.
   yet. Treat it like the case above.
 - `stats noise` exit 1 "no rows for league": step 5 kept no rows. Check the game version
   and the league id.
+- A binding, CLI, or gate raises an exception, reports `errored`, or fails for a reason unrelated to the policy or research content (a tool fault): do not retry it. Follow D-26: journal it, send a `help_request`, and block the card with a reason that starts with `tool-fault:`.

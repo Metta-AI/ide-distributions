@@ -60,3 +60,4 @@ Doctrine upheld: D-03, D-06, D-11.
   finish `partial` and say so in the journal.
 - Lost handles: `softmax xp recover <E-id>` lists every request tagged for the experiment,
   and `xp create` backfills any missing from the record.
+- A binding, CLI, or gate raises an exception, reports `errored`, or fails for a reason unrelated to the policy or research content (a tool fault): do not retry it. Follow D-26: journal it, send a `help_request`, and block the card with a reason that starts with `tool-fault:`.

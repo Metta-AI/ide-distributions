@@ -130,7 +130,7 @@ hermes -p autoresearch cron list
 |---|---|---|
 | `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning. The only writer of the canonical workspace. |
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
-| `health` | every 15 minutes | Checks blocked cards, free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
+| `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
 To start a `queue-keeper` run at the next scheduler tick instead of waiting for the
 schedule:

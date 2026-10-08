@@ -23,7 +23,7 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
 | `note` | A decision or status change worth a human knowing. Send these sparingly. Also every acknowledgement. |
 | `question` | A choice where human judgement adds value. Give the options and your recommendation, and say whether work is parked. |
 | `suggestion` | Something a human can do, for example look at a replay. Also each doctrine proposal. |
-| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. |
+| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. For a tool fault (D-26), name the command and the error text. |
 | `highlight` | One message per event: a supported or falsified hypothesis, a newly verified claim, a promotion, or a surprising result. |
 
 ## Procedure
