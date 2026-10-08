@@ -177,10 +177,10 @@ Implements the `00-overview.md` C9 table exactly: each key with its policy (alwa
 ### Task 6.0: Full research cycle on the fake game (marker `hermes`)
 **Preconditions:** Plan 01 Milestone 5 passed; Plan 03 Milestones 1–4 complete.
 **Files:** `tests/integration/test_fake_cycle.py`
-- [ ] Install with `AUTORESEARCH_GAME=fakegame`, `AUTORESEARCH_SOFTMAX=fake` (persistent FakeSoftmax with league episodes for calibration), a bare remote, and a real cheap model. Resume cron jobs. Let the agent run from an empty plan (no scripted card bodies; real doctrine and skills).
-- [ ] Assert within 90 min: calibration card writes a noise record; planning creates a Topic and cards; an investigation produces a hypothesis; an experiment freezes an evaluation design, builds, uploads, launches XP; xp-poll requests the review; review writes a Result and a decision; on `promote`, the promotion card submits and the promotion reaches `published`.
-- [ ] Inject `credits=0` mid-cycle once: the experiment goes `awaiting-credits` and resumes when credits return, with no duplicate XP in FakeSoftmax.
-- [ ] Record cost and wall time in `docs/plans/findings/fake-cycle.md`. Commit.
+- [x] Install with `AUTORESEARCH_GAME=fakegame`, `AUTORESEARCH_SOFTMAX=fake` (persistent FakeSoftmax with league episodes for calibration), a bare remote, and a real cheap model. Resume cron jobs. Let the agent run from an empty plan (no scripted card bodies; real doctrine and skills).
+- [x] Assert within 90 min: calibration card writes a noise record; planning creates a Topic and cards; an investigation produces a hypothesis; an experiment freezes an evaluation design, builds, uploads, launches XP; xp-poll requests the review; review writes a Result and a decision; on `promote`, the promotion card submits and the promotion reaches `published`.
+- [x] Inject `credits=0` mid-cycle once: the experiment goes `awaiting-credits` and resumes when credits return, with no duplicate XP in FakeSoftmax.
+- [x] Record cost and wall time in `docs/plans/findings/fake-cycle.md`. Commit.
 
 
 ### Task 6.1: Real cycle on local Hermes (manual gate with checklist)
