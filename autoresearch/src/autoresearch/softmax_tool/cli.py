@@ -18,11 +18,17 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating``) and ``lifecycle.next_launch_after`` is set
   by ``credit_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
-  the worker's environment, read before any request is created); ``lifecycle.credit_denials``
+  the worker's environment, read before any request is created; it is read in worker terminals
+  only, which see the whole profile ``.env``, so it is deliberately not on
+  ``terminal.env_passthrough``: a cron job would not get it); ``lifecycle.credit_denials``
   counts consecutive denials. Rerunning the same ``--batch``/``--attempt`` later creates only
-  the missing requests. A new attempt (one with no request yet in the batch) is refused while
-  the batch's latest attempt still lacks requests (``attempt_incomplete``: rerun that attempt)
-  or when it skips a number (``bad_attempt``), so a relaunch never starts a second full set.
+  the missing requests. A new attempt (one with no request yet in the batch) is a retry, and
+  the only reason to retry is a failed or cancelled request, so it is refused unless it is
+  the next number (``bad_attempt``), the batch's latest attempt has every request
+  (``attempt_incomplete``: rerun that attempt), and at least one of those requests is
+  ``failed`` (``attempt_not_needed``; read with ``xp_status``). So no relaunch, however many
+  run one after another, repeats a healthy attempt. Not covered: two relaunchers running at
+  the same moment (no lock across processes), and a ``--batches`` change between runs.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
@@ -181,7 +187,8 @@ def credit_backoff(denials: int, base: timedelta = BACKOFF_BASE) -> timedelta:
 
 
 def backoff_base(env) -> timedelta:
-    """The first backoff: ``BACKOFF_ENV`` minutes (a positive number) when set, else 30."""
+    """The first backoff: ``BACKOFF_ENV`` minutes (a positive finite number) when set, else 30.
+    Worker terminals only; not on ``terminal.env_passthrough`` (module docstring)."""
     value = (env.get(BACKOFF_ENV) or "").strip()
     if not value:
         return BACKOFF_BASE
@@ -189,7 +196,7 @@ def backoff_base(env) -> timedelta:
         minutes = float(value)
     except ValueError:
         minutes = 0.0
-    if not minutes > 0:
+    if not (math.isfinite(minutes) and minutes > 0):
         raise BadArguments(f"{BACKOFF_ENV} must be a positive number of minutes, got {value!r}")
     return timedelta(minutes=minutes)
 
@@ -328,9 +335,12 @@ def _record_xp(store, experiment: str, entries: list[dict]) -> dict:
     return meta
 
 
-def check_new_attempt(recovered: list[XpHandle], planned: list, batch: int, attempt: int) -> None:
-    """Refuse a new ``attempt`` of ``batch`` while its latest attempt is incomplete or when it
-    skips a number (module docstring). ``planned`` is ``xp_specs`` for the batch."""
+def check_new_attempt(
+    sm, recovered: list[XpHandle], planned: list, batch: int, attempt: int
+) -> None:
+    """Refuse a new ``attempt`` of ``batch`` unless it is the next number, the latest attempt
+    is complete, and one of its requests failed (module docstring). ``planned`` is
+    ``xp_specs`` for the batch; ``sm`` reads the latest attempt's statuses."""
     attempts = {handle.attempt for handle in recovered if handle.batch == batch}
     if not attempts or attempt in attempts:
         return
@@ -348,6 +358,13 @@ def check_new_attempt(recovered: list[XpHandle], planned: list, batch: int, atte
             f"batch {batch} attempt {latest} still lacks {len(missing)} request(s); rerun "
             f"xp create with --attempt {latest} to create only those (a new attempt would "
             f"repeat every request)",
+        )
+    latest_handles = [h for h in recovered if (h.batch, h.attempt) == (batch, latest)]
+    if not any(sm.xp_status(handle).state == "failed" for handle in latest_handles):
+        raise Refused(
+            "attempt_not_needed",
+            f"batch {batch} attempt {latest} has every request and none failed; a new attempt "
+            f"would repeat them all. Nothing to relaunch: wait for the review card",
         )
 
 
@@ -369,7 +386,7 @@ def _xp_create(ctx, sm, args) -> dict:
     # what is missing, and requests the platform has but the record lacks are backfilled first.
     recovered = sm.xp_recover(experiment)
     _record_xp(store, experiment, [_xp_entry(h, policies.get(h.arm)) for h in recovered])
-    check_new_attempt(recovered, planned, args.batch, args.attempt)
+    check_new_attempt(sm, recovered, planned, args.batch, args.attempt)
     existing = {
         (handle.seed, handle.arm): handle
         for handle in recovered

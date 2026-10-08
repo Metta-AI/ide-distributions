@@ -139,6 +139,23 @@ def test_assign_and_unassign(fake, queue):
     ]
 
 
+def test_get_exposes_the_block_reason_of_a_blocked_card(fake, queue):
+    runs = [
+        {"id": 1, "outcome": "reclaimed", "ended_at": 5, "summary": None},
+        {"id": 2, "outcome": "blocked", "ended_at": 9, "summary": "tool-fault: build crashed"},
+    ]
+    fake.reply("show", {"task": task_json("blocked"), "runs": runs})
+    assert queue.get("t_abc").block_reason == "tool-fault: build crashed"
+
+
+def test_block_reason_is_none_without_a_blocked_run_or_a_blocked_card(fake, queue):
+    fake.reply("show", {"task": task_json("blocked"), "runs": []})  # e.g. a circuit-breaker park
+    assert queue.get("t_abc").block_reason is None
+    run = {"id": 1, "outcome": "blocked", "ended_at": 9, "summary": "tool-fault: old"}
+    fake.reply("show", {"task": task_json("ready"), "runs": [run]})
+    assert queue.get("t_abc").block_reason is None
+
+
 def test_get_parses_task_and_runs(fake, queue):
     show = {
         "task": task_json("running", "prof"),
@@ -311,7 +328,7 @@ def fenced(fake, tmp_path, monkeypatch):
         "CREATE TABLE tasks (id TEXT, title TEXT, body TEXT, assignee TEXT, status TEXT,"
         " priority INTEGER);"
         "CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,"
-        " outcome TEXT, metadata TEXT);"
+        " outcome TEXT, metadata TEXT, summary TEXT);"
     )
     body = json.dumps(asdict(SPEC))
     db.executemany(
@@ -324,10 +341,10 @@ def fenced(fake, tmp_path, monkeypatch):
         ],
     )
     db.executemany(
-        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?)",
         [
-            (1, "t_run", 5, "completed", '{"outcome": "dropped"}'),
-            (2, "t_run", None, None, None),
+            (1, "t_run", 5, "completed", '{"outcome": "dropped"}', None),
+            (2, "t_run", None, None, None, None),
         ],
     )
     db.commit()
@@ -425,8 +442,8 @@ def test_delegate_child_reads_the_pinned_db(fenced, tmp_path, monkeypatch):
 
 def test_malformed_run_metadata_and_corrupt_db_are_tolerated(fenced, tmp_path):
     db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
-    db.execute("INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json')")
-    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]')")
+    db.execute("INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json', NULL)")
+    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]', NULL)")
     db.commit()
     db.close()
     assert [r.outcome for r in fenced.get("t_ready").runs] == ["completed", "completed"]

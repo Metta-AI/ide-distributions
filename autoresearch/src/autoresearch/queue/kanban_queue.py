@@ -34,7 +34,9 @@ _SELECT_TASKS = (
     "SELECT id, title, body, assignee, status, priority FROM tasks WHERE status != 'archived'"
 )
 _SELECT_TASK = "SELECT id, title, body, assignee, status, priority FROM tasks WHERE id = ?"
-_SELECT_RUNS = "SELECT id, ended_at, outcome, metadata FROM task_runs WHERE task_id = ? ORDER BY id"
+_SELECT_RUNS = (
+    "SELECT id, ended_at, outcome, metadata, summary FROM task_runs WHERE task_id = ? ORDER BY id"
+)
 
 
 class KanbanError(RuntimeError):
@@ -182,6 +184,16 @@ class KanbanQueue:
         outcome = (run.get("metadata") or {}).get("outcome") or run["outcome"]
         return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome)
 
+    @staticmethod
+    def _block_reason(status: str, runs: list[dict]) -> str | None:
+        """Hermes ends the blocking run with the block reason as its summary."""
+        if status != "blocked":
+            return None
+        for run in reversed(runs):
+            if run["outcome"] == "blocked":
+                return run.get("summary")
+        return None
+
     # -- Queue protocol --
 
     def ensure_board(self) -> None:
@@ -231,6 +243,7 @@ class KanbanQueue:
             state=_STATE_BY_STATUS[task["status"]],
             assignee=task["assignee"],
             runs=[self._run_info(run) for run in shown["runs"]],
+            block_reason=self._block_reason(task["status"], shown["runs"]),
         )
 
     def list(self, state: str | None = None) -> list[Card]:

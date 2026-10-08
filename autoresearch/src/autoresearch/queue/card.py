@@ -36,6 +36,7 @@ class Card:
     state: CardState
     assignee: str | None
     runs: list[RunInfo] = field(default_factory=list)
+    block_reason: str | None = None  # why a blocked card was blocked; None when unknown
 
 
 def kanban_priority(priority: Priority, order: int = 0) -> int:

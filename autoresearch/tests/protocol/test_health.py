@@ -36,10 +36,11 @@ def _help(host: Host, text: str) -> list[dict]:
     return [m for m in host.outbox() if m["kind"] == "help_request" and text in m["title"]]
 
 
-def _block(host: Host, task_id: str) -> None:
+def _block(host: Host, task_id: str, reason: str | None = None) -> None:
     path = host.queue.directory / "cards" / f"{task_id}.json"
     record = read_json(path)
     record["state"] = "blocked"
+    record["block_reason"] = reason
     write_json(path, record)
 
 
@@ -72,6 +73,29 @@ def test_blocked_card_is_requeued_once_then_repaired_with_one_help_request(host)
     assert _check(host, at(4)).blocked == []  # nothing more for this card
     assert len(_help(host, card.task_id)) == 1
     assert host.remote_head() == host.head() and host.clean()
+
+
+def test_tool_fault_block_is_not_requeued_or_repaired_and_asks_for_help_once(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "tool-fault: softmax build raised FileNotFoundError")
+
+    [action] = _check(host, at(2)).blocked
+    assert action.action == "tool-fault" and action.repair_request is None
+    assert host.queue.get(card.task_id).state == "blocked"  # stays for a human
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+    [help_request] = _help(host, card.task_id)
+    assert help_request["expects_response"] and help_request["priority"] == "P1"
+    assert "tool-fault: softmax build raised FileNotFoundError" in help_request["body"]
+
+    assert _check(host, at(3)).blocked == []  # idempotent
+    assert len(_help(host, card.task_id)) == 1
+    assert host.remote_head() == host.head() and host.clean()
+
+
+def test_other_block_reasons_are_requeued_as_before(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "circuit breaker open")
+    assert [a.action for a in _check(host, at(2)).blocked] == ["requeued"]
 
 
 def test_low_disk_raises_one_help_request_a_day(host):

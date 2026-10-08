@@ -48,6 +48,7 @@ class FileQueue:
             state=record["state"],
             assignee=record["assignee"],
             runs=[RunInfo(**run) for run in record["runs"]],
+            block_reason=record.get("block_reason"),
         )
 
     # -- Queue protocol --

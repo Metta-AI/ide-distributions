@@ -7,7 +7,8 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 ``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
 (creating a new XP request raises once N exist, like the platform's pending-request cap), and
-``crash_after=<label>`` (read by runtime code through :func:`fault`).
+``crash_after=<label>`` (read by runtime code through :func:`fault`). A request whose state
+entry has ``"failed": true`` (tests set it in the state file) reports status ``failed``.
 
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
 JSON with a ``player_id`` (a fake-only field), that is the player; otherwise the credential is
@@ -291,6 +292,8 @@ class FakeSoftmax:
             request = state["xp"][handle.request_id]
             request["polls"] += 1
             total = request["episodes"]
+            if request.get("failed"):  # set by tests in the state file: a failed request
+                return XpStatus("failed", 0, total)
             if request["polls"] >= state["polls_to_complete"]:
                 return XpStatus("completed", total, total)
             return XpStatus("running", 0, total)
