@@ -249,8 +249,17 @@ def _candidate_problems(
 ) -> tuple[list[str] | None, bytes | None]:
     """``(problems, data)`` of one untracked inbox file: ``([], data)`` to adopt it,
     ``(problems, None)`` to reject it, ``(None, None)`` to leave it for a later run."""
+    problems, data = _file_problems(canonical, path, name, writers, now)
+    # A runtime reply with no rejection record: a crash between the note and the record.
+    # The id stays rejected; keep the real problems when the file still shows them.
     if find_reply(canonical, name, FROM_RUNTIME) is not None:
-        return ["already answered by the runtime"], None  # a rejection's note, before its record
+        return problems or ["already answered by the runtime"], None
+    return problems, data
+
+
+def _file_problems(
+    canonical: Path, path: Path, name: str, writers: frozenset[int] | None, now: float
+) -> tuple[list[str] | None, bytes | None]:
     try:
         info = os.lstat(path)
     except FileNotFoundError:

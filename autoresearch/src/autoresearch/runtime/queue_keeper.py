@@ -198,14 +198,29 @@ def _read_state(ctx: RunContext, name: str, default):
         return default  # disposable: a damaged file starts over
 
 
-def _routing_step(ctx: RunContext, queue: Queue, env: Mapping[str, str], allow_no_remote: bool):
+INBOX_WRITERS_STEP = "inbox_writers"
+
+
+def _routing_step(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str], allow_no_remote: bool
+):
     """Route inbound (C11). Direct inbox writes are adopted only from the users in
-    ``AUTORESEARCH_INBOX_WRITERS`` when it is set (an unknown user fails the step, so nothing
-    is adopted); when it is unset, a run that took direct writes logs that they are
-    unauthenticated."""
-    writers = inbox_writers(env.get(INBOX_WRITERS_ENV))
-    actions = route_all(ctx, queue, allow_no_remote=allow_no_remote, inbox_writers=writers)
-    if writers is None and any(a.kind in ("adopted", "write_rejected") for a in actions):
+    ``AUTORESEARCH_INBOX_WRITERS`` when it is set. When it names an unknown user, adoption is
+    skipped (direct writes wait, untouched and unanswered, rather than being rejected for
+    good), the failure is recorded as the step ``inbox_writers`` so it escalates like any
+    failing step, and committed inbound messages are still routed. When it is unset, a run
+    that took direct writes logs that they are unauthenticated."""
+    adopt = True
+    try:
+        writers = inbox_writers(env.get(INBOX_WRITERS_ENV))
+    except ValueError as error:
+        adopt, writers = False, None
+        run.failures[INBOX_WRITERS_STEP] = f"ValueError: {error}"
+        _log(ctx, f"step {INBOX_WRITERS_STEP} failed: {error}; direct inbox writes are not adopted")
+    actions = route_all(
+        ctx, queue, allow_no_remote=allow_no_remote, inbox_writers=writers, adopt=adopt
+    )
+    if adopt and writers is None and any(a.kind in ("adopted", "write_rejected") for a in actions):
         _log(
             ctx,
             f"warning: direct inbox writes are unauthenticated: {INBOX_WRITERS_ENV} is unset, "
@@ -667,7 +682,7 @@ def _run_steps(
     _step(run, ctx, "kb", kb_step, canonical, now, game_version, pin)
     _step(run, ctx, "push", push_early, canonical)
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
-    _step(run, ctx, "routing", _routing_step, ctx, queue, env, allow_no_remote)
+    _step(run, ctx, "routing", _routing_step, run, ctx, queue, env, allow_no_remote)
     _step(run, ctx, "admission", admission_step, run, ctx, queue, game, game_version, profile, now)
     run.signals = (
         _step(

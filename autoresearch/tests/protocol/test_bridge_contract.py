@@ -16,6 +16,7 @@ import jsonschema
 import pytest
 from support.board import Board
 
+from autoresearch.comms.inbound import submit_inbound
 from autoresearch.comms.publisher import publish_hook, publish_runtime
 from autoresearch.comms.reader import read_since
 from autoresearch.comms.stage import stage
@@ -280,14 +281,64 @@ def test_a_file_that_stays_unparseable_is_rejected(board):
     assert ("write_rejected", TASK_ID) in _kinds(_route(board))
 
 
+def _keeper_routing(board: Board, env: dict) -> queue_keeper.KeeperRun:
+    run = queue_keeper.KeeperRun()
+    queue_keeper._routing_step(run, board.ctx(), board.queue, env, True)
+    return run
+
+
 def test_keeper_warns_when_direct_writes_are_unauthenticated(board):
     log = board.canonical / ".supervisor" / "runtime" / "keeper.log"
     bridge_write(board, bridge_task())
-    queue_keeper._routing_step(board.ctx(), board.queue, {}, True)
+    _keeper_routing(board, {})
     assert "unauthenticated" in log.read_text()
 
     log.unlink()
     bridge_write(board, bridge_stop())
-    env = {"AUTORESEARCH_INBOX_WRITERS": str(os.getuid())}
-    queue_keeper._routing_step(board.ctx(), board.queue, env, True)
+    _keeper_routing(board, {"AUTORESEARCH_INBOX_WRITERS": str(os.getuid())})
     assert not log.exists() or "unauthenticated" not in log.read_text()
+
+
+def test_an_unknown_inbox_writer_stops_adoption_only(board):
+    """Fail closed for direct writes, but committed inbound still routes, and the bridge's
+    file waits (no permanent rejection) until the variable is fixed."""
+    submit_inbound(board.canonical, "steer", {"text": "Look", "urgency": "now"}, "preston")
+    bridge_write(board, bridge_task())
+
+    run = _keeper_routing(board, {"AUTORESEARCH_INBOX_WRITERS": "no_such_user_zz"})
+
+    assert "inbox_writers" in run.failures
+    assert len(_requests(board)) == 1  # the committed steer got its card
+    assert _committed(board, f"comms/inbox/{TASK_ID}.json") is None
+    assert _runtime_notes(board, TASK_ID) == []
+    assert board.committed(board.ledger / "inbound-rejected" / f"{TASK_ID}.json") is None
+
+    run = _keeper_routing(board, {"AUTORESEARCH_INBOX_WRITERS": str(os.getuid())})
+    assert run.failures == {} and _committed(board, f"comms/inbox/{TASK_ID}.json") is not None
+
+
+def test_a_stray_staged_file_does_not_stop_adoption(board):
+    stray = board.canonical / "notes-stray.md"
+    stray.write_text("left staged by a crashed writer\n")
+    gitops.git(board.canonical, "add", "notes-stray.md")
+    bridge_write(board, bridge_task())
+
+    assert ("adopted", TASK_ID) in _kinds(_route(board))
+
+    assert len(_requests(board)) == 1
+    assert _committed(board, "notes-stray.md") is None  # it did not ride along
+    staged = gitops.git(board.canonical, "diff", "--cached", "--name-only")
+    assert staged == "notes-stray.md"  # and it is still staged, untouched
+
+
+def test_crash_recovery_keeps_the_real_problems(board):
+    bridge_write(board, bridge_task(mode="strategy"))
+    with canonical_lock(board.canonical):  # the note was published, then the run crashed
+        publish_runtime(
+            board.canonical, "note", "Inbound rejected", "B", [], allow_no_remote=True,
+            in_reply_to=TASK_ID,
+        )
+    _route(board)
+    rejection = board.committed(board.ledger / "inbound-rejected" / f"{TASK_ID}.json")
+    assert any("mode" in problem for problem in rejection["problems"])
+    assert len(_runtime_notes(board, TASK_ID)) == 1

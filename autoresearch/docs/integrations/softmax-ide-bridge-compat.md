@@ -113,6 +113,19 @@ What the deployment should do:
    example a group that owns `comms/inbox/` (mode `2770`, setgid so files keep the group) and
    includes both users. The bridge also needs search (`x`) permission on the directories above it
    (the profile and workspace are `0700` on the box today). Files the bridge writes must be
-   readable by `autoresearch` (umask `007` or `027`).
+   readable by `autoresearch`: use umask `027` (group read, no group write). A group-writable
+   file (umask `007`) would let any member of the group rewrite a pending bridge file in place
+   before queue-keeper adopts it, and the owner check would still pass.
 3. Set `AUTORESEARCH_INBOX_WRITERS=ide-bridge` in the profile `.env`. It is on
    `terminal.env_passthrough`, so queue-keeper sees it under the gateway.
+
+Getting the variable wrong:
+
+- **An unknown user name** stops adoption only: direct writes wait in `comms/inbox/`, untouched
+  and unanswered, committed inbound messages still route, and the step `inbox_writers` fails in
+  `keeper.log` and escalates like any failing queue-keeper step (a `keeper_step_failed` signal,
+  then a help request). Fixing the name adopts the waiting files on the next run.
+- **A valid but wrong user** (the bridge runs as someone else) rejects every bridge write, each
+  with a runtime note, and the rejections are final. The bridge closes those IDE tasks on the
+  note. Fixing the variable does not bring them back: the bridge must send them again with new
+  ids (new task keys). Check the variable before the bridge sends its first message.

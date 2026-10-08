@@ -670,17 +670,20 @@ def route_all(
     queue: Queue,
     allow_no_remote: bool = False,
     inbox_writers: frozenset[int] | None = None,
+    adopt: bool = True,
 ) -> list[Action]:
     """Receive, route and resolve every inbound message (C11); see the module docstring.
     Takes the canonical lock: the caller must not hold it. Idempotent; safe to rerun after
     a crash at any point. ``allow_no_remote`` is for runtime notes (tests, local runs);
-    ``inbox_writers`` restricts adoption to files those uids own (``comms.inbound``)."""
+    ``inbox_writers`` restricts adoption to files those uids own (``comms.inbound``);
+    ``adopt=False`` skips adoption (the writer list could not be resolved)."""
     canonical = ctx.canonical
     actions: list[Action] = []
     with canonical_lock(canonical):
-        adoption = adopt_direct_writes(canonical, inbox_writers)
-        actions += [Action("adopted", inbound_id) for inbound_id in adoption.adopted]
-        actions += _reject_direct_writes(canonical, adoption.rejected, allow_no_remote)
+        if adopt:
+            adoption = adopt_direct_writes(canonical, inbox_writers)
+            actions += [Action("adopted", inbound_id) for inbound_id in adoption.adopted]
+            actions += _reject_direct_writes(canonical, adoption.rejected, allow_no_remote)
         skipped: list[str] = []
         inbox = delivery.inbox(canonical, skipped)
         actions += [Action("unreadable", path) for path in skipped]
