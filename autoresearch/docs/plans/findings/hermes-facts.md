@@ -211,3 +211,11 @@ Observed by `tests/integration/test_install.py` (Hermes v0.21.5, throwaway `HERM
 - **Board DB root for a profile under `<root>/profiles/<name>`** is `<root>` (`hermes_constants.get_default_hermes_root`, `hermes_cli/kanban_db.py:399-413`): the launcher run with `HERMES_HOME=<root>/profiles/ar-it` created `<root>/kanban/boards/ar-it/kanban.db`.
 - **The launcher's `uv sync --frozen` also installs the `dev` group** (pytest, ruff) into `local/venv`, because uv syncs default groups. Fixed in the Task 1.3 fix round: the launcher now runs `uv sync --frozen --no-dev`.
 - The worker tests (`$AUTORESEARCH_CLI` in a worker shell; plugin `post_tool_call` writing `workspace/.supervisor/runtime/tool_events.jsonl`) were not run: they need `OPENROUTER_API_KEY` and the broker key is out of credit. Their setup (task create with `--model z-ai/glm-5.3-flash --provider openrouter --max-retries 1`, worktree workspace, `dispatch --dry-run` selects the task) was checked without a model call. `hermes kanban log <id>` exits 1 before a worker has spawned.
+
+## Task 5.1 observations (config migrations, 2026-10-07)
+
+Source: Hermes v0.21.5 (`v2026.9.24`, `f97608f`), read-only.
+
+- **Auto-update.** Hermes has no automatic update. It only runs a passive check (banner and CLI) that `updates.check: false` turns off (`hermes_cli/banner.py` `check_for_updates`; default in `hermes_cli/config_defaults.py`). `hermes profile update` and `hermes update` run only when an operator starts them. Bootstrap sets `updates.check: false` ("auto-update off").
+- **Curator and shipped skills.** There is no per-skill exclusion key. The curator touches only skills with a `created_by: agent` record (or `agent_created: true`) and, when `curator.prune_builtins` is true, bundled built-ins (`tools/skill_usage.py` `list_agent_created_skill_names`, `is_curation_eligible`). Skills shipped by a distribution have neither, so they are excluded by default; bootstrap pins `curator.prune_builtins: false`. Caveat: `hermes curator adopt <skill>` flips the opt-in flag, so an operator must not adopt a shipped skill.
+- **`skills.create_dir`** exists (`agent/skill_utils.py` `get_skill_create_dir`, used by `tools/skill_manager_tool.py`); new skills land there instead of `skills/`.

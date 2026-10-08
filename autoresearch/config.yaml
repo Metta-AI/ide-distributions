@@ -57,7 +57,16 @@ terminal:
     - AUTORESEARCH_GAME
     - AUTORESEARCH_SOFTMAX
     - AUTORESEARCH_CLI
+    - AUTORESEARCH_QUEUE
 
 plugins:
   enabled:
     - autoresearch
+
+# Hermes has no auto-update; this turns off its passive update check (C9).
+updates:
+  check: false
+
+# Shipped skills are never curator-managed; this pins built-in pruning off (C9).
+curator:
+  prune_builtins: false

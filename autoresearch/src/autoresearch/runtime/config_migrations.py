@@ -12,8 +12,13 @@ existing installs is applied here with ``hermes config set`` (verified to write 
 change, so a run with nothing to migrate starts no process. The shipped ``config.yaml`` must
 agree with these tables (a unit test checks it).
 
-Not covered yet (Plan 03 Task 5.1 hardens this module): "auto-update off" and "the curator
-excludes shipped skills" have no verified Hermes key in v0.21.5, so they are not set here.
+Hermes v0.21.5 has no auto-update: it only checks for updates passively, and ``updates.check:
+false`` turns that off ("auto-update off", C9). The curator only archives skills that have a
+``created_by: agent`` record or, with ``curator.prune_builtins``, bundled built-ins
+(``tools/skill_usage.py list_agent_created_skill_names``). Shipped skills have neither, and
+agent-created skills go to ``skills.create_dir`` (outside ``skills/``), so the curator already
+leaves shipped skills alone; ``curator.prune_builtins: false`` pins that. Hermes has no
+per-skill curator exclusion key (``docs/plans/findings/hermes-facts.md``, Task 5.1 observations).
 ``kanban.*`` rows govern only ``hermes -p <profile> kanban dispatch`` and profile tools; the
 gateway dispatcher reads the host root config, which preflight checks (A3).
 """
@@ -37,6 +42,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_GAME",
     "AUTORESEARCH_SOFTMAX",
     "AUTORESEARCH_CLI",
+    "AUTORESEARCH_QUEUE",  # the serial fallback selects the queue through it (A4)
 ]
 APPROVAL_DENY = [
     "coworld player use*",
@@ -66,6 +72,8 @@ def always(home: Path) -> dict[str, object]:
         "approvals.deny": APPROVAL_DENY,
         "terminal.env_passthrough": ENV_PASSTHROUGH,
         "skills.create_dir": str(Path(home) / SKILLS_STAGING_RELATIVE),
+        "updates.check": False,
+        "curator.prune_builtins": False,
     }
 
 
