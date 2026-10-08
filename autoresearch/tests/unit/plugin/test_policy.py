@@ -315,6 +315,19 @@ def test_kanban_complete_needs_card_finish_first(layout):
     assert tool_policy("kanban_complete", {"summary": "s"}, no_card, None)[0]
 
 
+@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link"])
+@pytest.mark.parametrize("card", [WORKING, PLANNING, FINISHED, None])
+def test_native_kanban_card_tools_are_blocked_in_every_session(layout, tool, card):
+    """A worker-made task skips admission, receipts and pause control (C3, C7). Cards come
+    only from requests that queue-keeper admits."""
+    args = {"title": "x", "assignee": "autoresearch", "parent_id": "t_1", "child_id": "t_2"}
+    ctx = layout.ctx(worker=card is not None)
+    allowed, reason = tool_policy(tool, args, ctx, card)
+    assert not allowed
+    assert reason.startswith("autoresearch policy: ")
+    assert '"$AUTORESEARCH_CLI" queue request create --title' in reason
+
+
 @pytest.mark.parametrize(
     ("card", "expected"),
     [(PLANNING, True), (WORKING, False), ({"mode": "experimentation"}, False), (None, True)],

@@ -11,6 +11,9 @@
   every model write after `card finish` (C3), and `memory` writes outside planning cards;
 - the native `kanban_complete` on a card before `card finish` ran (C3): a completed run with no
   handoff record leaves its work unmerged;
+- the native `kanban_create` and `kanban_link` in every agent session (C3, C7): a task a model
+  creates with an assignee is dispatched with no admission, no receipt and no pause control.
+  Cards come only from `queue request create` requests that queue-keeper admits;
 - forging inbound messages (C11: inbound carries the human's full authority): the trusted
   `comms inbound` command in any agent session, any write into the canonical workspace's
   `comms/inbox/` (every session, cards or not), and `python -c`/`execute_code` text that names
@@ -167,6 +170,13 @@ NOT_FINISHED = (
     'run "$AUTORESEARCH_CLI" card finish --outcome <o> first: it records the handoff; '
     "kanban_complete without it leaves this card's work unmerged."
 )
+CARD_REQUEST = (
+    "Kanban cards are created and linked only by the runtime (queue-keeper admits each card "
+    "request; C3, C7). To ask for a card, write a request: "
+    '"$AUTORESEARCH_CLI" queue request create --title "<title>" --mode <mode> '
+    '--why "<reason>" --ref <ar://ref>. It is admitted after this card\'s branch merges.'
+)
+KANBAN_CARD_TOOLS = {"kanban_create", "kanban_link"}
 FINISHED = "this card is finished (`card finish` ran); no further writes."
 SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
 INBOX_WRITE = (
@@ -214,6 +224,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
             return ALLOW
         if tool_name == "memory":
             return guard.memory()
+        if tool_name in KANBAN_CARD_TOOLS:
+            return _block(CARD_REQUEST)
         if tool_name == "kanban_complete" and card is not None and not guard.finished:
             return _block(NOT_FINISHED)
         if tool_name == "execute_code":
