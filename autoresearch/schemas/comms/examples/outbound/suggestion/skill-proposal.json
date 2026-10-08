@@ -1,0 +1,24 @@
+{
+  "schema": "ar-comms/0",
+  "id": "M-01K6Z3V8QX0000000000000004",
+  "created": "2026-10-08T21:04:00+00:00",
+  "from": "research-agent",
+  "iteration": 7,
+  "kind": "suggestion",
+  "title": "Skill proposal: replay-diff",
+  "body": "A skill that diffs two replays turn by turn. It found the tower timing bug twice.",
+  "refs": [
+    {
+      "uri": "ar://skill-proposal/replay-diff",
+      "rev": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "role": "subject"
+    }
+  ],
+  "priority": "P2",
+  "expects_response": false,
+  "supersedes": null,
+  "expires": null,
+  "thread": "skill-proposal/replay-diff",
+  "seq": 4,
+  "published_rev": "5f0c6d8e2a9b4c1d7e3f6a8b9c0d1e2f3a4b5c6d"
+}

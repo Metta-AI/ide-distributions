@@ -18,9 +18,10 @@ not found, unresolvable), 2 bad arguments or no workspace.
   ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
   data: ``{id, published, seq, published_rev, seen_by}`` plus, for a published message, the
   derived ``state`` (open | answered | withdrawn | expired) and ``late``.
-- ``inbound KIND (--json J | --file F) --author A``: an external agent submits a
-  ``reply``, ``steer``, ``task`` or ``seen`` (``comms.inbound``). Refused (exit 2) in a card
-  worker (``WORKER_ENV_MARKERS``); the plugin blocks it in every agent session too.
+- ``inbound KIND (--json J | --file F) --author A``: an external agent submits an inbound
+  message of one of the registry's inbound kinds (``comms.kinds``; ``comms.inbound``).
+  Refused (exit 2) in a card worker (``WORKER_ENV_MARKERS``); the plugin blocks it in every
+  agent session too.
 
 Every command except ``stage`` works on the canonical workspace (``--root`` overrides it).
 """
@@ -33,7 +34,7 @@ from pathlib import Path
 
 from autoresearch import runctx
 from autoresearch.cli import register_group
-from autoresearch.comms import delivery, reader
+from autoresearch.comms import delivery, kinds, reader
 from autoresearch.comms.envelope import PRIORITIES, MessageProblems
 from autoresearch.comms.inbound import (
     INBOUND_KINDS,
@@ -245,8 +246,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--rev", help="workspace commit (default: HEAD)")
     sub.add_argument("--game", help="game under games/ whose reference types to add")
 
-    sub = command("inbound", _inbound, "submit an inbound reply, steer, task or seen")
-    sub.add_argument("kind", choices=INBOUND_KINDS)
+    sub = command(
+        "inbound", _inbound, "submit an inbound message (" + ", ".join(INBOUND_KINDS) + ")"
+    )
+    kind_help = "; ".join(f"{name}: {kinds.get('inbound', name).summary}" for name in INBOUND_KINDS)
+    sub.add_argument("kind", choices=INBOUND_KINDS, help=kind_help)
     payload = sub.add_mutually_exclusive_group(required=True)
     payload.add_argument("--json", help="the message fields as a JSON object")
     payload.add_argument("--file", help="path to the message fields as a JSON object")

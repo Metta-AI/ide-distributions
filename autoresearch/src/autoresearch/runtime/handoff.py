@@ -138,7 +138,7 @@ def _json_at(repo: Path, sha: str, path: str):
 
 
 def _message_problems(path: str, message) -> list[str]:
-    """A staged message must pass ``schemas/message.json`` with a known kind, be ``from``
+    """A staged message must pass its kind's schema (``comms.kinds``), be ``from``
     ``research-agent``, use its id as its file name, and carry no outbox-only fields."""
     problems = [f"{path}: staged message: {problem}" for problem in message_problems(message)]
     if not isinstance(message, dict):

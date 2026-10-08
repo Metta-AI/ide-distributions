@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/comms/outbound/question.json",
+  "title": "Outbound question (ar-comms/0)",
+  "x-autoresearch": {
+    "direction": "outbound",
+    "summary": "A choice where human judgement adds value; a reply is expected."
+  },
+  "allOf": [{"$ref": "../envelope.outbound.json"}],
+  "properties": {"kind": {"const": "question"}}
+}

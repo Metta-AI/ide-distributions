@@ -1,9 +1,8 @@
-"""Doctrine files (Plan 03 Task 4.1): rule IDs, code references, communication kinds."""
+"""Doctrine files (Plan 03 Task 4.1): rule IDs and code references. The kinds that
+``communication.md`` lists are checked by ``tests/contract/comms/test_kind_registry.py``."""
 
 import re
 from pathlib import Path
-
-from autoresearch.comms.envelope import KINDS
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCTRINE = ROOT / "doctrine"
@@ -38,12 +37,6 @@ def test_every_rule_code_used_in_src_exists():
         used |= set(re.findall(r"\bD-\d{2}\b", path.read_text(encoding="utf-8")))
     assert used  # handoff.py uses D-23
     assert used <= set(rule_ids())
-
-
-def test_communication_lists_exactly_the_outbound_kinds():
-    text = (DOCTRINE / "communication.md").read_text(encoding="utf-8")
-    section = text.split("## The five outbound kinds")[1].split("\n## ")[0]
-    assert re.findall(r"^\| `(\w+)` \|", section, re.MULTILINE) == list(KINDS)
 
 
 def test_communication_does_not_redefine_rule_ids():

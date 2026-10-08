@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/comms/inbound/task.json",
+  "title": "Inbound task (ar-comms/0): a request for a card of its own. Its refs must also resolve at canonical HEAD when it is routed.",
+  "x-autoresearch": {
+    "direction": "inbound",
+    "summary": "A request for work: it becomes its own card request with these fields.",
+    "describe": ["Task: {title} (mode {mode}, priority {priority}). Why: {why}"]
+  },
+  "allOf": [{"$ref": "../envelope.inbound.json"}],
+  "required": ["title", "mode", "why", "refs", "priority"],
+  "properties": {
+    "kind": {"const": "task"},
+    "title": {"type": "string", "pattern": "\\S", "x-message": "required text"},
+    "mode": {
+      "enum": ["investigation", "scouting", "experimentation", "maintenance", "planning"],
+      "x-message": "must be one of investigation, scouting, experimentation, maintenance, planning"
+    },
+    "why": {"type": "string", "pattern": "\\S", "x-message": "required text"},
+    "refs": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^ar://", "x-message": "a list of ar:// strings is required"},
+      "x-message": "a list of ar:// strings is required"
+    },
+    "priority": {
+      "enum": ["P0", "P1", "P2", "P3", "P4", "P5"],
+      "x-message": "must be one of P0, P1, P2, P3, P4, P5"
+    }
+  }
+}

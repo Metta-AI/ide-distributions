@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/comms/outbound/note.json",
+  "title": "Outbound note (ar-comms/0)",
+  "x-autoresearch": {
+    "direction": "outbound",
+    "summary": "A decision or status change a human should know; with in_reply_to, the acknowledgement of an inbound message."
+  },
+  "allOf": [{"$ref": "../envelope.outbound.json"}],
+  "properties": {"kind": {"const": "note"}}
+}

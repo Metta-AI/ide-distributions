@@ -25,13 +25,10 @@ record's ``received_at``.
 stored; it is derived from the inbox and the outbox.
 
 Every kind carries ``author`` (the consumer name; it carries the full authority of the human
-it serves). Shapes (other fields are kept):
-
-- ``reply``: ``in_reply_to`` (M-id) and ``choice`` and/or ``text``.
-- ``steer``: ``text``, ``urgency`` (now | next | whenever), optional ``proposed_topic``
-  ``{title, objective, metrics, priority}``.
-- ``seen``: ``ids`` (published M-ids, at least one).
-- ``task``: ``title``, ``mode``, ``why``, ``refs`` (ar:// strings), ``priority`` (P0-P5).
+it serves). The kinds and their shapes are the registry's (``comms.kinds``; one JSON Schema per
+kind in ``schemas/comms/inbound/``); other fields are kept. ``inbound_problems`` adds the
+checks that need the workspace, named by a kind's schema and implemented here in ``CHECKS``
+(``published_ids``: a seen's ids must be published messages).
 """
 
 import datetime
@@ -44,21 +41,19 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoresearch.comms import delivery
-from autoresearch.comms.envelope import FROM_RUNTIME, PRIORITIES, SCHEMA_VERSION, now_iso
+from autoresearch.comms import delivery, kinds
+from autoresearch.comms.envelope import FROM_RUNTIME, SCHEMA_VERSION, now_iso
 from autoresearch.comms.publisher import RECEIPTS_DIR, commit_and_push, find_reply, push
-from autoresearch.comms.reader import check_consumer, read_since, seen_path
+from autoresearch.comms.reader import read_since, seen_path
 from autoresearch.ids import new_id
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
 from autoresearch.paths import Layout
 from autoresearch.runtime.ledger import canonical_lock
 
-INBOUND_KINDS = ("reply", "steer", "task", "seen")
-URGENCIES = ("now", "next", "whenever")
-MODES = ("investigation", "scouting", "experimentation", "maintenance", "planning")
-_MESSAGE_ID = re.compile(r"M-[0-9A-HJKMNP-TV-Z]{26}")
-# One safe path component; schemas/inbound.json "id" and message.json "in_reply_to" match it.
+INBOUND_KINDS = kinds.inbound_kinds()
+# One safe path component; the inbound envelope's "id", schemas/inbound.json "id" and the
+# outbound envelope's "in_reply_to" match it.
 INBOUND_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}")
 
 
@@ -72,85 +67,28 @@ class InboundProblems(ValueError):
         self.problems = problems
 
 
-def _text(payload: dict, name: str) -> bool:
-    return isinstance(payload.get(name), str) and bool(payload[name].strip())
+def _unpublished_ids(canonical: Path, message: dict) -> list[str]:
+    return [
+        f"ids: {message_id} is not a published message"
+        for message_id in message["ids"]
+        if gitops.show(canonical, "HEAD", f"{RECEIPTS_DIR}/{message_id}.json") is None
+    ]
 
 
-def _required_text(payload: dict, names: tuple[str, ...], where: str = "") -> list[str]:
-    return [f"{where}{name}: required text" for name in names if not _text(payload, name)]
+# The workspace checks a kind's schema names in ``x-autoresearch.checks``; each runs only on a
+# message that passed its schema.
+CHECKS = {"published_ids": _unpublished_ids}
 
 
-def _is_published(canonical: Path, message_id: str) -> bool:
-    return gitops.show(canonical, "HEAD", f"{RECEIPTS_DIR}/{message_id}.json") is not None
-
-
-def _reply_problems(payload: dict) -> list[str]:
-    problems = []
-    if not isinstance(payload.get("in_reply_to"), str) or not _MESSAGE_ID.fullmatch(
-        payload["in_reply_to"]
-    ):
-        problems.append("in_reply_to: a message id (M-...) is required")
-    if not (_text(payload, "text") or _text(payload, "choice")):
-        problems.append("choice or text: at least one is required")
-    return problems
-
-
-def _steer_problems(payload: dict) -> list[str]:
-    problems = _required_text(payload, ("text",))
-    if payload.get("urgency") not in URGENCIES:
-        problems.append(f"urgency: must be one of {', '.join(URGENCIES)}")
-    topic = payload.get("proposed_topic")
-    if topic is None:
+def inbound_problems(canonical: Path, message) -> list[str]:
+    """Problems of an inbound message: its kind's schema (``comms.kinds``), then the
+    workspace checks the kind names."""
+    problems = kinds.problems("inbound", message)
+    if problems:
         return problems
-    if not isinstance(topic, dict):
-        return [*problems, "proposed_topic: must be an object"]
-    problems += _required_text(topic, ("title", "objective"), "proposed_topic.")
-    if not isinstance(topic.get("metrics"), list):
-        problems.append("proposed_topic.metrics: must be a list")
-    if topic.get("priority") not in PRIORITIES:
-        problems.append(f"proposed_topic.priority: must be one of {', '.join(PRIORITIES)}")
+    for check in kinds.get("inbound", message["kind"]).checks:
+        problems += CHECKS[check](canonical, message)
     return problems
-
-
-def _task_problems(payload: dict) -> list[str]:
-    problems = _required_text(payload, ("title", "why"))
-    if payload.get("mode") not in MODES:
-        problems.append(f"mode: must be one of {', '.join(MODES)}")
-    refs = payload.get("refs")
-    if not isinstance(refs, list) or not all(
-        isinstance(ref, str) and ref.startswith("ar://") for ref in refs
-    ):
-        problems.append("refs: a list of ar:// strings is required")
-    if payload.get("priority") not in PRIORITIES:
-        problems.append(f"priority: must be one of {', '.join(PRIORITIES)}")
-    return problems
-
-
-def _seen_problems(canonical: Path, payload: dict) -> list[str]:
-    ids = payload.get("ids")
-    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
-        return ["ids: a non-empty list of message ids is required"]
-    return [f"ids: {i} is not a published message" for i in ids if not _is_published(canonical, i)]
-
-
-def inbound_problems(canonical: Path, kind: str, payload: dict, author) -> list[str]:
-    if kind not in INBOUND_KINDS:
-        return [f"kind: {kind!r} is not one of {', '.join(INBOUND_KINDS)}"]
-    problems = []
-    if not isinstance(author, str):
-        problems.append("author: required")
-    else:
-        try:
-            check_consumer(author)
-        except ValueError as error:
-            problems.append(f"author: {error}")
-    checks = {
-        "reply": _reply_problems,
-        "steer": _steer_problems,
-        "task": _task_problems,
-        "seen": lambda payload: _seen_problems(canonical, payload),
-    }
-    return problems + checks[kind](payload)
 
 
 def _record_seen(canonical: Path, consumer: str, ids: list[str]) -> Path:
@@ -176,7 +114,7 @@ def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> st
     }
     path = Layout(canonical).comms_inbox / f"{inbound_id}.json"
     with canonical_lock(canonical):
-        problems = inbound_problems(canonical, kind, payload, author)
+        problems = inbound_problems(canonical, record)
         if problems:
             raise InboundProblems(problems)
         write_json(path, record)
@@ -191,7 +129,6 @@ INBOX_WRITERS_ENV = "AUTORESEARCH_INBOX_WRITERS"
 # A direct write that is still not JSON after this long is rejected (a writer that renames
 # into place never leaves one; a partial file younger than this is retried next run).
 UNPARSEABLE_AFTER_S = 300
-_RESERVED_ID = re.compile(r"M-.*|[0-9]+")  # `comms get` reads these as outbox keys
 
 
 def inbox_writers(value: str | None) -> frozenset[int] | None:
@@ -223,8 +160,6 @@ class Adoption:
 
 
 def _direct_write_problems(canonical: Path, name: str, message) -> list[str]:
-    if _RESERVED_ID.fullmatch(name):
-        return ["id: must not look like an outbound message id (M-...) or a seq number"]
     if not isinstance(message, dict):
         return ["the file is not a JSON object"]
     if message.get("id") != name:
@@ -234,7 +169,7 @@ def _direct_write_problems(canonical: Path, name: str, message) -> list[str]:
         parse_time(received)
     except (TypeError, ValueError):
         return ["created: an ISO 8601 time is required"]
-    return inbound_problems(canonical, message.get("kind"), message, message.get("author"))
+    return inbound_problems(canonical, message)
 
 
 def _read_regular(path: Path) -> bytes:

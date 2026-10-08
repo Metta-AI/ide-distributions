@@ -7,7 +7,7 @@
   "required": ["id", "kind", "received_at", "state", "responsible", "acknowledged_by", "late", "history"],
   "properties": {
     "id": {"description": "The inbound id: an I-id from comms inbound, or the external agent's own id for a file it wrote directly (comms.inbound.INBOUND_ID).", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"},
-    "kind": {"enum": ["reply", "steer", "task", "seen"]},
+    "kind": {"description": "The inbound message's kind: one of the inbound kinds in comms/inbound/ (the registry; the message was validated against it).", "type": "string", "minLength": 1},
     "received_at": {"type": "string", "minLength": 1},
     "state": {"enum": ["received", "routed", "acknowledged"]},
     "responsible": {
