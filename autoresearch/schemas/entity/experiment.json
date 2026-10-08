@@ -1,14 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "autoresearch/entity/experiment.json",
-  "title": "Experiment: a pre-registered test of one hypothesis (System Design 3.1 #6). Design fields freeze once status leaves `designed`.",
+  "title": "Experiment: a pre-registered test of one hypothesis (System Design 3.1 #6). Design fields freeze once status leaves `designed`. `evaluation_design` is written by `stats design` while `designed` and is required in every later status.",
   "type": "object",
   "required": [
     "id",
     "hypothesis",
     "baseline",
     "change",
-    "evaluation_design",
     "environment",
     "status"
   ],

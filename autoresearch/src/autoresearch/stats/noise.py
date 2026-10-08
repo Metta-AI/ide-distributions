@@ -94,6 +94,12 @@ def write_noise(layout: Layout, record: dict) -> str:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         _atomic_write_text(layout.stats / "history" / f"{stamp}.yaml", path.read_text("utf-8"))
     _atomic_write_text(path, yaml.safe_dump(record, sort_keys=True))
+    return noise_revision(layout)
+
+
+def noise_revision(layout: Layout) -> str:
+    """The record revision: the git blob sha of ``stats/metric-noise.yaml`` as it is on disk."""
+    path = _noise_path(layout)
     return git(layout.stats, "hash-object", str(path))
 
 

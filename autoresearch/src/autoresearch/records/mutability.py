@@ -26,6 +26,7 @@ EXPERIMENT_DESIGN_FIELDS = (
     "baseline",
     "change",
     "evaluation_design",
+    "evaluation_design_request",
     "environment",
     "parents",
     "lever",
@@ -155,9 +156,17 @@ def _has_decisions_section(body: str) -> bool:
 
 
 def _experiment_content(meta: dict) -> list[str]:
+    problems = []
+    if meta.get("status") != "designed" and not meta.get("evaluation_design"):
+        problems.append(
+            f"experiment in status {meta.get('status')} needs a frozen evaluation_design "
+            "(stats design writes it while designed)"
+        )
     if meta.get("xp_requests") and not meta.get("candidate_binding"):
-        return ["experiment has xp_requests but no candidate_binding; bind the candidate first"]
-    return []
+        problems.append(
+            "experiment has xp_requests but no candidate_binding; bind the candidate first"
+        )
+    return problems
 
 
 def _claim_content(meta: dict) -> list[str]:

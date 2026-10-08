@@ -9,6 +9,15 @@ Files under the workspace root:
 - ``stats/rows/<league-id or E-id>.jsonl``: kept EpisodeRows, one JSON object per line.
   ``stats ingest`` creates or replaces the file.
 - ``stats/metric-noise.yaml``: the noise record (``stats noise``).
+- ``stats design <E> --request-file F [--planned-pairs N]`` freezes the experiment's
+  ``evaluation_design`` (``stats.freeze.freeze_design``) from the request, the game contract
+  (``--game`` or ``AUTORESEARCH_GAME``) and the noise record for the league's current game
+  version (``Softmax.game_version``, so it needs a profile context). It stores the request as
+  ``evaluation_design_request``. The experiment must be ``designed`` and its
+  ``environment.game_version`` must be the current version. A refusal is exit 1 with
+  ``error.reason``: ``needs_calibration`` (no noise record for the current version),
+  ``not_designed``, ``version_mismatch`` or ``bad_request`` (the request does not freeze).
+  ``--planned-pairs`` (the pairs ``delta`` is computed for) defaults to the request's seed count.
 - ``stats/outcomes/<E-id>.json``: the last ``stats evaluate`` outcome, with the champion and
   candidate it was evaluated against, ``rows_sha256`` (of the rows file) and ``design_sha256``
   (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
@@ -39,9 +48,16 @@ from autoresearch.records.store import RecordStore
 from autoresearch.runtime.promotion import current_champion, has_published
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
-from autoresearch.stats.design import EvaluationDesign
+from autoresearch.stats.design import DesignError, EvaluationDesign
+from autoresearch.stats.freeze import freeze_design
 from autoresearch.stats.ingest import EpisodeRow, ingest, ingest_rows, pair
-from autoresearch.stats.noise import compute_noise, write_noise
+from autoresearch.stats.noise import (
+    NoiseError,
+    compute_noise,
+    load_noise,
+    noise_revision,
+    write_noise,
+)
 
 # games/ lives at the autoresearch project root, next to schemas/.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -108,6 +124,30 @@ def _design_sha256(design: EvaluationDesign) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+class Refusal(ValueError):
+    """A business refusal with a stable ``reason`` code (exit 1)."""
+
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def _with_refusals(handler):
+    def run(args, store: RecordStore) -> int:
+        try:
+            return handler(args, store)
+        except Refusal as error:
+            print(
+                json.dumps(
+                    {"ok": False, "error": {"reason": error.reason, "message": str(error)}},
+                    sort_keys=True,
+                )
+            )
+            return 1
+
+    return run
+
+
 # --- handlers ---
 
 
@@ -148,6 +188,81 @@ def _noise(args, store: RecordStore) -> int:
     record = compute_noise(rows, metrics, args.game_version, args.evidence)
     revision = write_noise(store.layout, record)
     return _ok({"noise_rev": revision, "path": str(store.layout.stats / "metric-noise.yaml")})
+
+
+def _current_game_version(league_id: str) -> str:
+    try:
+        ctx = runctx.from_env()
+    except KeyError as error:
+        raise BadArguments(
+            f"{error.args[0]} is not set: the current game version needs a profile context"
+        ) from None
+    try:
+        return softmax_from_env(os.environ, ctx.canonical).game_version(league_id)
+    except (RuntimeError, OSError) as error:
+        raise ValueError(f"cannot read the current game version from Softmax: {error}") from None
+
+
+def _design(args, store: RecordStore) -> int:
+    experiment = _check_id(args.experiment)
+    request = _json_object_file(args.request_file)
+    game_name = args.game or os.environ.get(GAME_ENV)
+    if not game_name:
+        raise BadArguments(f"pass --game or set {GAME_ENV}")
+    try:
+        game = load_game(_REPO_ROOT, game_name)
+    except GameError as error:
+        raise BadArguments(str(error)) from None
+    meta, _ = store.load(experiment)
+    if meta.get("status") != "designed":
+        raise Refusal(
+            "not_designed",
+            f"{experiment} is {meta.get('status')}; the design freezes only while designed",
+        )
+    version = _current_game_version(game.league_id)
+    declared = (meta.get("environment") or {}).get("game_version")
+    if declared != version:
+        raise Refusal(
+            "version_mismatch",
+            f"{experiment} environment.game_version is {declared!r} but the current game "
+            f"version of {game.league_id} is {version!r}",
+        )
+    try:
+        noise = load_noise(store.layout, version)
+    except NoiseError as error:
+        raise Refusal("needs_calibration", str(error)) from None
+    planned = args.planned_pairs or len(request.get("seeds") or [])
+    if planned < 1:
+        raise BadArguments("--planned-pairs must be positive (or give the request seeds)")
+    try:
+        design = freeze_design(
+            {"evaluation_design_request": request},
+            game,
+            noise,
+            planned,
+            noise_revision(store.layout),
+        )
+    except (DesignError, NoiseError, TypeError) as error:
+        raise Refusal("bad_request", f"the request does not freeze: {error}") from None
+    store.update(
+        experiment,
+        {"evaluation_design_request": request, "evaluation_design": design.to_dict()},
+    )
+    return _ok(
+        {"experiment": experiment, "evaluation_design": design.to_dict(), "planned_pairs": planned}
+    )
+
+
+def _json_object_file(path: str) -> dict:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as error:
+        raise BadArguments(f"cannot read {path}: {error.strerror or error}") from None
+    except json.JSONDecodeError as error:
+        raise BadArguments(f"{path} is not valid JSON: {error}") from None
+    if not isinstance(value, dict):
+        raise BadArguments(f"{path} must hold a JSON object")
+    return value
 
 
 def _confirmed_champion() -> tuple[str | None, bool]:
@@ -250,6 +365,22 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--game-version", required=True)
     sub.add_argument("--metrics", required=True, help="comma-separated metric names")
     sub.add_argument("--evidence", nargs="*", default=[], metavar="REF")
+
+    sub = command(
+        "design",
+        _with_refusals(_design),
+        "freeze an experiment's evaluation_design (designed only)",
+    )
+    sub.add_argument("experiment")
+    sub.add_argument(
+        "--request-file",
+        required=True,
+        help="JSON evaluation_design_request (see stats.freeze.freeze_design)",
+    )
+    sub.add_argument(
+        "--planned-pairs", type=int, help="pairs delta is computed for (default: seeds)"
+    )
+    sub.add_argument("--game", help=f"game name under games/ (default ${GAME_ENV})")
 
     sub = command("evaluate", _evaluate, "apply the decision rule; writes stats/outcomes/<E>.json")
     sub.add_argument("experiment")
