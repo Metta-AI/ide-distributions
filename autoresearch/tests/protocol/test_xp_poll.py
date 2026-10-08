@@ -137,6 +137,14 @@ def test_completed_evaluation_writes_evidence_and_requests_one_review(host):
         assert row.seed == handle.seed
         assert row.policy_version == (CANDIDATE_PV if handle.arm == "candidate" else BASELINE_PV)
         assert set(row.metrics) == {"score", "errors"} and row.status == "completed"
+        # The fake results cover every roster seat (ours and opponents'); the row is the
+        # mean over our design seats only (C3 seat contract).
+        results = read_json(
+            host.canonical / "evidence" / "xp" / experiment / handle.request_id / "results.json"
+        )
+        assert {e["seat"] for e in results["episodes"]} > set(DESIGN.seats)
+        ours = [e for e in results["episodes"] if e["seat"] in DESIGN.seats]
+        assert row.metrics["score"] == sum(e["score"] for e in ours) / len(ours)
     kept, report = ingest(rows, DESIGN)
     assert report.kept == len(rows)
     assert len(pair(kept, DESIGN, CANDIDATE_PV)) == len(DESIGN.seeds)

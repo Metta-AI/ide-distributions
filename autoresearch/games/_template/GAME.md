@@ -29,12 +29,16 @@ silent fallback. Core code never names a game.
 - `name`: the game directory name.
 - `bindings`: command-line strings for `build`, `local_check`, `upload`, `evaluate` and
   `replay_inspect`. Relative paths resolve from the repo root. All five are required.
-  xp-poll runs `<evaluate> --results <results.json> --json` on each completed XP request and
-  reads `{"ok": true, "data": {"episodes": [{"episode", "metrics": {<outcome metric>: number},
-  "status"?: "completed"|"failed", "seed"?, "seat"?}]}}` (one entry per episode in that file).
-  `softmax league-episodes` runs the same command on a league episode's raw results; there
-  each entry is one seat's metrics and must carry `seat` (the participant position) when
-  the episode has more than one seat.
+  `<evaluate> --results <results.json> --json` prints `{"ok": true, "data": {"episodes":
+  [{"episode", "seat", "metrics": {<outcome metric>: number}, "status"?:
+  "completed"|"failed", "seed"?}]}}`: **one entry per seat** of each episode in that file,
+  opponents included, each naming its `seat` (the participant position). The binding does
+  not know which seats are ours; its callers decide:
+  - xp-poll (XP requests) keeps the entries whose `seat` is in the design's `seats`, requires
+    all of them (a missing or failed own seat records the episode as failed, with a reason),
+    and **reduces our seats by the arithmetic mean** of each metric: one row per episode.
+  - `softmax league-episodes` (league episodes, for noise) **keeps one row per seat**. It
+    accepts an entry without `seat` only when the episode has a single seat.
 - `reference_types`: extra reference types (`ar://<type>/<id>`), each mapped to a resolver
   command run from the repo root as `<command> <id>`, with `AUTORESEARCH_WORKSPACE` and
   `AUTORESEARCH_REV` set. Exit 0 with the content on stdout, or non-zero if not found. A type

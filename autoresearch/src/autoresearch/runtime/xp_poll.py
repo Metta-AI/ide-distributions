@@ -12,14 +12,26 @@ game's ``evaluate`` binding reads each ``results.json`` (``<evaluate> --results 
 --json``, see ``games/_template/GAME.md``), and, under the canonical lock, one commit adds:
 
 - ``evidence/xp/<E>/<request id>/results.json`` (the platform file) and ``rows.jsonl``: one
-  ``EpisodeRow`` per episode (``episode_id`` ``<request id>:<episode>``; ``seed`` from the
-  file's top-level ``seed``, else the episode's, else the request's; ``policy_version`` from the
-  request's arm: the candidate binding's platform id or the design's baseline; ``seats`` and
-  ``opponents`` from the frozen design; ``game_version`` from the file, else the league's
-  current version; ``metrics`` from the binding);
+  ``EpisodeRow`` per episode (``episode_id`` ``<request id>:<episode>``, or
+  ``<request id>:<file dir>:<episode>`` when the request has several results files; ``seed``
+  from the file's top-level ``seed``, else our lowest seat's entry, else the request's;
+  ``policy_version`` from the request's arm: the candidate binding's platform id or the
+  design's baseline; ``seats`` and ``opponents`` from the frozen design; ``game_version`` from
+  the file, else the league's current version; ``metrics`` as below);
 - ``evidence/index/<EV-id>.json``: kind ``xp-result``, ``source_ids.xreq`` = the request id
   (so ``ar://xreq/<id>`` resolves), the file's sha256, paths, batch, attempt, seed and arm;
 - ``evidence/xp/<E>/<request id>/meta.json``: ``{evidence, request_id}``, the "done" marker.
+
+Seat contract (controller ruling, C3). The binding returns one entry per (episode, seat),
+each with ``episode`` and ``seat``; the results of a multi-seat game cover every seat,
+opponents included. xp-poll keeps only the entries whose ``seat`` is in ``design.seats``
+(our policy fills exactly those slots, ``softmax_tool.cli._roster``) and reduces each metric
+by the arithmetic mean over our seats, so an episode is ONE observation of the arm, never
+one per seat and never an opponent's. Every one of our seats must be present: a missing or
+failed own seat (or own seats with different metric names) records the episode as
+``status: failed`` with a ``reason``, which ``stats ingest`` counts and drops. An entry
+without ``episode`` or ``seat`` is a binding bug and fails the experiment's poll (logged,
+retried next run). League rows (``softmax_tool.league``) stay one row per seat.
 
 A request whose ``meta.json`` is committed is never fetched again; files a crash left
 uncommitted are rewritten (an uncommitted index entry for the request is replaced, not
@@ -88,7 +100,6 @@ GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 
 
-
 @dataclass
 class XpPollRun:
     skipped: bool = False  # another run held the run lock
@@ -147,30 +158,93 @@ def _uncommitted_index_entries(canonical: Path, request_id: str) -> list[Path]:
     return found
 
 
-def _rows(
+def _episode_row(
+    episode_id: str,
+    entries: list[dict],
     results: dict,
-    episodes: list[dict],
     handle: XpHandle,
     design: EvaluationDesign,
     policy: str,
     game_version: str,
-) -> list[EpisodeRow]:
-    rows = []
-    for index, episode in enumerate(episodes):
-        seed = results.get("seed", episode.get("seed", handle.seed))
-        rows.append(
-            EpisodeRow(
-                episode_id=f"{handle.request_id}:{episode.get('episode', index)}",
-                game_version=str(results.get("game_version") or game_version).strip(),
-                policy_version=policy,
-                seed=int(seed),
-                seats=tuple(design.seats),
-                opponents=tuple(design.opponents),
-                metrics={name: float(value) for name, value in episode["metrics"].items()},
-                status="failed" if episode.get("status") == "failed" else "completed",
-            )
+) -> EpisodeRow:
+    """One episode's row: our seats (``design.seats``) reduced by the arithmetic mean.
+
+    ``entries`` are the binding's entries for this episode, one per seat. Opponent seats are
+    dropped. A missing or failed own seat, or own seats that disagree on the metric names,
+    make the row ``failed`` with a ``reason`` (``ingest`` then drops it and counts it)."""
+    ours: dict[int, dict] = {}
+    for entry in entries:
+        seat = entry["seat"]
+        if seat in design.seats:
+            if seat in ours:
+                raise ValueError(f"{episode_id}: the evaluate binding gave seat {seat} twice")
+            ours[seat] = entry
+    first = ours[min(ours)] if ours else {}
+    seed = results.get("seed", first.get("seed", handle.seed))
+    reason = None
+    missing = [seat for seat in design.seats if seat not in ours]
+    failed = [seat for seat in design.seats if ours.get(seat, {}).get("status") == "failed"]
+    names = {frozenset(entry["metrics"]) for entry in ours.values()}
+    if not design.seats:
+        reason = "the evaluation design names no seats of ours"
+    elif missing:
+        reason = (
+            f"evaluate gave no entry for our seat(s) {missing} (design seats {list(design.seats)})"
         )
-    return rows
+    elif failed:
+        reason = f"our seat(s) {failed} failed"
+    elif len(names) != 1:
+        reason = "our seats report different metric names"
+    metrics = {}
+    if reason is None:
+        metrics = {
+            name: sum(float(ours[seat]["metrics"][name]) for seat in design.seats)
+            / len(design.seats)
+            for name in sorted(next(iter(names)))
+        }
+    return EpisodeRow(
+        episode_id=episode_id,
+        game_version=game_version,
+        policy_version=policy,
+        seed=int(seed),
+        seats=tuple(design.seats),
+        opponents=tuple(design.opponents),
+        metrics=metrics,
+        status="completed" if reason is None else "failed",
+        reason=reason,
+    )
+
+
+def _rows(
+    results: dict,
+    entries: list[dict],
+    handle: XpHandle,
+    design: EvaluationDesign,
+    policy: str,
+    game_version: str,
+    file_label: str | None = None,
+) -> list[EpisodeRow]:
+    """One row per episode of one results file (the XP seat contract, module docstring).
+
+    ``entries`` is the evaluate binding's output: one entry per (episode, seat), each with
+    ``episode`` and ``seat``. ``file_label`` keeps episode ids unique when a request has
+    several results files."""
+    by_episode: dict[object, list[dict]] = {}
+    for index, entry in enumerate(entries):
+        if "episode" not in entry or "seat" not in entry:
+            raise ValueError(
+                f"XP {handle.request_id}: evaluate entry {index} lacks 'episode' or 'seat' "
+                f"(GAME.md: one entry per seat, each naming its seat)"
+            )
+        by_episode.setdefault(entry["episode"], []).append(entry)
+    prefix = handle.request_id if file_label is None else f"{handle.request_id}:{file_label}"
+    version = str(results.get("game_version") or game_version).strip()
+    return [
+        _episode_row(
+            f"{prefix}:{episode}", episode_entries, results, handle, design, policy, version
+        )
+        for episode, episode_entries in by_episode.items()
+    ]
 
 
 @dataclass
@@ -219,13 +293,9 @@ def _fetch(
     for path in results_paths:
         results = json.loads(path.read_text(encoding="utf-8"))
         game_version = str(results.get("game_version") or league_version()).strip()
-        rows += _rows(results, evaluate(path), handle, design, policy, game_version)
-        files.append(
-            (
-                path.name if len(results_paths) == 1 else f"{path.parent.name}-{path.name}",
-                path.read_bytes(),
-            )
-        )
+        label = None if len(results_paths) == 1 else path.parent.name
+        rows += _rows(results, evaluate(path), handle, design, policy, game_version, label)
+        files.append((path.name if label is None else f"{label}-{path.name}", path.read_bytes()))
     return _Fetched(handle, files, rows, policy, game_version)
 
 

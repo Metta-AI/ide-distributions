@@ -16,6 +16,7 @@ class EpisodeRow:
     opponents: tuple[str, ...]
     metrics: dict[str, float]
     status: Literal["completed", "failed"]
+    reason: str | None = None  # why a failed row failed, when the producer knows
 
 
 @dataclass

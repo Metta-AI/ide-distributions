@@ -4,10 +4,11 @@
 ``policy`` is an artifact path (policy.json from fake_build) or any id string. Each policy
 gets a fixed mean shift in score (-2..+2) so a statistical test can tell policies apart.
 
-``--results <results.json>`` is the evaluate binding's hosted-XP mode (xp-poll): it reads one
-XP request's ``results.json`` (the fake platform's format: ``{seed?, episodes: [{episode,
-score, errors, seed?, seat?}]}``) and prints each episode's outcome metrics. A league
-episode's results (``softmax league-episodes``) have one entry per seat, with ``seat``.
+``--results <results.json>`` is the evaluate binding's hosted mode: it reads one XP
+request's ``results.json`` (xp-poll) or a league episode's raw results (``softmax
+league-episodes``), both in the fake platform's format ``{seed?, episodes: [{episode, seat,
+score, errors, seed?}]}``, and prints one entry per (episode, seat) with its ``seat``, as the
+GAME.md evaluate contract requires.
 """
 
 import argparse
@@ -63,17 +64,17 @@ def results_metrics(path: str) -> dict:
     results = json.loads(Path(path).read_text())
     episodes = []
     for episode in results.get("episodes") or []:
-        missing = [name for name in METRICS if name not in episode]
+        missing = [name for name in ("episode", "seat", *METRICS) if name not in episode]
         if missing:
             raise ValueError(f"{path}: episode {episode.get('episode')} lacks {missing}")
         entry = {
-            "episode": episode.get("episode"),
+            "episode": episode["episode"],
+            "seat": episode["seat"],
             "status": "failed" if episode.get("failed") else "completed",
             "metrics": {name: episode[name] for name in METRICS},
         }
-        for key in ("seed", "seat"):
-            if key in episode:
-                entry[key] = episode[key]
+        if "seed" in episode:
+            entry["seed"] = episode["seed"]
         episodes.append(entry)
     return {"episodes": episodes}
 

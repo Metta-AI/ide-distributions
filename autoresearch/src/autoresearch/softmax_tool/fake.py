@@ -114,6 +114,14 @@ def _league_episode(league_id: str, index: int, game_version: str) -> dict:
     }
 
 
+def _roster_slots(spec: dict) -> list[int]:
+    """The roster's fixed seat slots in order, or ``[0]`` (one seat) without a roster."""
+    slots = sorted(
+        entry["slot"] for entry in spec.get("roster") or [] if entry.get("slot", -1) >= 0
+    )
+    return slots or [0]
+
+
 def _roster_policy(spec: dict) -> str | None:
     """Our policy: the first fixed ``policy_ref`` in the roster (our seats come first)."""
     for entry in spec.get("roster") or []:
@@ -237,6 +245,7 @@ class FakeSoftmax:
                     "arm": arm,
                     "game_seed": (spec.get("game_config_overrides") or {}).get("seed"),
                     "policy": _roster_policy(spec),
+                    "slots": _roster_slots(spec),
                 }
                 state["credits"] = max(0, state["credits"] - 1)
             return XpHandle(request_id, experiment, batch, attempt, seed, arm)
@@ -260,16 +269,18 @@ class FakeSoftmax:
         )
         game_seed = request.get("game_seed")
         source = handle.request_id if game_seed is None else f"{game_seed}|{request['policy']}"
-        episodes = []
+        episodes = []  # one entry per (episode, seat), like a multi-seat game's results
         for index in range(request["episodes"]):
-            episode = {
-                "episode": index,
-                "score": int(_short_hash(source, index, "score"), 16) % 100,
-                "errors": int(_short_hash(source, index, "errors"), 16) % 5,
-            }
-            if game_seed is not None:
-                episode["seed"] = game_seed
-            episodes.append(episode)
+            for slot in request.get("slots") or [0]:
+                episode = {
+                    "episode": index,
+                    "seat": slot,
+                    "score": int(_short_hash(source, index, slot, "score"), 16) % 100,
+                    "errors": int(_short_hash(source, index, slot, "errors"), 16) % 5,
+                }
+                if game_seed is not None:
+                    episode["seed"] = game_seed
+                episodes.append(episode)
         results = {"request_id": handle.request_id, "episodes": episodes}
         if game_seed is not None:
             results["seed"] = game_seed

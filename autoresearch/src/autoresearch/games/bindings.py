@@ -2,9 +2,10 @@
 
 ``binding_evaluate(game)`` is the ``evaluate`` binding in hosted-results mode:
 ``<evaluate> --results <results.json> --json``, run from the repo root. It returns the
-binding's ``data.episodes``: ``[{episode, metrics, status?, seed?, seat?}]`` (contract in
-``games/_template/GAME.md``). xp-poll uses it on XP results; ``softmax league-episodes`` on
-league episode results.
+binding's ``data.episodes``: one entry per (episode, seat), ``[{episode, seat, metrics,
+status?, seed?}]`` (contract in ``games/_template/GAME.md``). xp-poll uses it on XP results and
+reduces our seats by the mean; ``softmax league-episodes`` on league episode results, one row
+per seat.
 """
 
 import json
@@ -17,7 +18,7 @@ from autoresearch.games.loader import Game, binding_argv
 EVALUATE_TIMEOUT_S = 300
 REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project root
 
-# (results.json path) -> the binding's episodes [{episode, metrics, status?, seed?, seat?}]
+# (results.json path) -> the binding's entries [{episode, seat, metrics, status?, seed?}]
 Evaluate = Callable[[Path], list[dict]]
 
 
