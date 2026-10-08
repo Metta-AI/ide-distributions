@@ -5,7 +5,9 @@ Every core skill under ``skills/autoresearch/`` must:
 - have valid Hermes front matter (``name`` equal to its directory, a ``description`` that
   begins "Use when" and fits Hermes's 60-character skill-index budget,
   ``agent/skill_utils.py:763`` at v0.21.5) and a body;
-- name only CLI commands and flags that exist (checked against each parser's ``--help``);
+- name only CLI commands and flags that exist: every ``"$AUTORESEARCH_CLI" ...`` call, and
+  every inline-code span that starts with a CLI group name (such as ``stats design``), resolves
+  to a leaf parser, and every ``--flag`` is one of that parser's option strings;
 - call the CLI as ``"$AUTORESEARCH_CLI"``, never as bare ``autoresearch``;
 - never name a game;
 - cite only doctrine IDs that exist.
@@ -52,9 +54,14 @@ PLAN_EXTRAS = {"kb-maintenance", "calibrate-noise"}
 NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*")  # Hermes skill_manager_tool.VALID_NAME_RE
 DESCRIPTION_LIMIT = 60  # Hermes SKILL_PROMPT_DESC_LIMIT: longer descriptions are truncated
 # A CLI call: the quoted variable, then words up to the end of the line, an inline-code
-# backtick, or a shell operator. Backslash-newline continues a line.
-CLI_CALL = re.compile(r'"\$AUTORESEARCH_CLI"((?:\\\n|[^`\n|;&>)])*)')
-GROUPS = ("records", "stats", "kb", "card", "comms", "queue", "promotion", "softmax")
+# backtick, or a shell operator. Backslash-newline continues a line. ``>`` ends a call only
+# after a space (a redirect), so placeholders such as ``<E-id>`` stay inside the call.
+CLI_CALL = re.compile(r'"\$AUTORESEARCH_CLI"((?:\\\n|[^`\n|;&>)]|(?<! )>)*)')
+# A single-backtick inline-code span (not a fence); it may wrap across lines.
+INLINE_CODE = re.compile(r"(?<!`)`(?!`)([^`]+?)`(?!`)")
+GROUPS = ("records", "stats", "kb", "card", "comms", "queue", "promotion", "softmax", "game")
+# An inline-code span naming a command without the variable: a group, then a subcommand.
+PREFIXLESS = re.compile(rf"^(?:{'|'.join(GROUPS)}) [a-z]")
 BARE_CALL = re.compile(rf"(?<![\w/$.-])(?:python3? -m )?autoresearch (?:{'|'.join(GROUPS)})\b")
 
 
@@ -92,8 +99,25 @@ def resolve(words: list[str]) -> tuple[list[str], argparse.ArgumentParser, list[
     return path, parser, words
 
 
+def _unwrap_inline_code(text: str) -> str:
+    """Join inline-code spans that wrap across lines, so a wrapped call reads as one line."""
+    return INLINE_CODE.sub(lambda m: "`" + " ".join(m.group(1).split("\n")) + "`", text)
+
+
 def cli_calls(text: str) -> list[str]:
-    return [match.group(1).replace("\\\n", " ") for match in CLI_CALL.finditer(text)]
+    """Every CLI call: ``"$AUTORESEARCH_CLI" ...`` ones, then inline-code spans that start
+    with a group name (such as ``stats design <E-id>``), as the words after the program."""
+    text = _unwrap_inline_code(text)
+    calls = [match.group(1).replace("\\\n", " ") for match in CLI_CALL.finditer(text)]
+    for match in INLINE_CODE.finditer(text):
+        span = match.group(1).strip()
+        if PREFIXLESS.match(span):
+            calls.append(span)
+    return calls
+
+
+def option_strings(parser: argparse.ArgumentParser) -> set[str]:
+    return set(parser._option_string_actions)
 
 
 @pytest.fixture(params=skill_files(), ids=skill_ids())
@@ -126,32 +150,39 @@ def test_cli_commands_and_flags_exist(skill):
         if not words:  # the variable named in prose, not a call
             continue
         path, leaf, rest = resolve(list(words))
-        if len(path) > 1:  # the command appears in its parent's --help
-            parent = build_parser()
-            for word in path[:-1]:
-                parent = subcommands(parent)[word]
-            assert path[-1] in parent.format_help(), f"{call!r}: {path[-1]} not in --help"
-        leaf_help = leaf.format_help()
+        options = option_strings(leaf)
         for word in rest:
             if word.startswith("--"):
                 flag = word.split("=", 1)[0]
-                assert re.search(rf"(?<![\w-]){re.escape(flag)}(?![\w-])", leaf_help), (
-                    f"{skill.parent.name}: {' '.join(path)} has no flag {flag}\n{leaf_help}"
+                assert flag in options, (
+                    f"{skill.parent.name}: {' '.join(path)} has no flag {flag} "
+                    f"(has {sorted(options)})"
                 )
 
 
 def test_cli_calls_parse_on_the_test_helpers():
     calls = cli_calls(
         'Run `"$AUTORESEARCH_CLI" card finish --outcome done` and\n'
-        '"$AUTORESEARCH_CLI" queue request drop Q-1 \\\n  --reason "x" | jq .'
+        '"$AUTORESEARCH_CLI" queue request drop Q-1 \\\n  --reason "x" | jq .\n'
+        '`"$AUTORESEARCH_CLI" queue request drop <Q-id> --reason "y"` > out.json\n'
+        '`"$AUTORESEARCH_CLI" queue request create --title "t"\n   --mode maintenance`\n'
+        "Then `stats design <E-id> --request-file F` and see `queue`."
     )
     assert [call.split()[:3] for call in calls] == [
         ["card", "finish", "--outcome"],
         ["queue", "request", "drop"],
+        ["queue", "request", "drop"],
+        ["queue", "request", "create"],
+        ["stats", "design", "<E-id>"],
     ]
     assert "--reason" in calls[1]
+    assert "--reason" in calls[2] and "out.json" not in calls[2]  # past the placeholder
+    assert "--mode" in calls[3]  # a call wrapped inside one inline-code span
+    assert "--request-file" in calls[4]
     with pytest.raises(AssertionError):
         resolve(["queue", "nosuch"])
+    _, leaf, _ = resolve(["queue", "request", "drop", "Q-1"])
+    assert "--reason" in option_strings(leaf) and "--outcome" not in option_strings(leaf)
     assert BARE_CALL.search("run autoresearch records new")
     assert not BARE_CALL.search('"$AUTORESEARCH_CLI" records new')
 
