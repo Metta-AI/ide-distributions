@@ -51,7 +51,8 @@ platform scores (zero for loss/draw/timeout); `win_rate` is team outcome.
 `xp_per_1k_ticks` and `team_xp_lead` describe the subject, not ten independent
 observations. Repeated teammates share an episode and must be aggregated.
 
-Use leaderboard `current_champion`; null means blocked. A copied v13 STRATEGY is
+Use leaderboard `current_champion`; when no baseline policy version exists, use
+the exact prebuilt bootstrap below in this same card. A copied v13 STRATEGY is
 not proof of that identity. Freeze full game version, baseline policy version,
 subject seats, fixed opponent refs, unique paired seeds, metrics/directions,
 effect thresholds, anti-gaming guardrails and noise revision before results.
@@ -72,6 +73,47 @@ name the roster, not disguise teammate copies as additional N. Diagnose by
 red/blue seat, draft class and opponent composition before pooling.
 
 Continue through core `build-upload` and `xp-request` only within authorized work:
-committed semantic STRATEGY -> PW compiler -> G1–G5 receipts. No BASIC fallback;
+committed semantic STRATEGY -> PW compiler -> G1–G5 receipts; an existing exact
+BASIC baseline uses the explicit prebuilt path below;
 local gate success proves mechanism, not hosted strength. Failed/partial evidence
 cannot support a promotion. This design skill does not itself authorize spending.
+
+
+## Missing baseline: exact prebuilt path in the same card
+
+Read the bootstrap and sidecar contract in `games/gota/GAME.md`. Copy
+`$AR_HOME/games/gota/baselines/submitted-v13.bas` into the card's candidate
+folder and commit that original input. Use absolute candidate paths:
+
+```sh
+"$AR_PYTHON" "$AR_HOME/games/gota/tools/make_v13_live.py" <ABS_CANDIDATE>/submitted-v13.bas <ABS_CANDIDATE>/v13-live.bas
+```
+
+Commit both generated `v13-live.bas` and `v13-live.provenance.json`, then build:
+
+```sh
+"$AR_PYTHON" "$AR_HOME/games/gota/tools/build.py" <ABS_CANDIDATE> --out <ABS_FRESH_BUILD> --prebuilt <ABS_CANDIDATE>/v13-live.bas --json
+```
+
+This resolves the current engine, verifies committed input and transform hashes,
+freezes exact bytes and runs G1–G4 without Hermes, model calls or scanner setup.
+G4 is a baseline mirror screen. G5 is not executed: its advisory receipt says
+`not applicable: prebuilt`, with `passed: false`. Read the retained local gate
+reports; use the separate G1–G4 local_check command in GAME.md if required.
+
+**The shared first-install upload handoff is pending:** upload requires a built
+experiment and a frozen design naming an existing baseline. Preserve this local
+build in the same card; journal the missing bootstrap contract and send a
+`help_request` with the build directory. Do not fabricate that baseline/design,
+start another card, or use a direct coworld upload. Once the shared owner supplies
+the record contract, continue through the shared guarded upload and record its
+local version id and experiment `candidate_binding.platform_policy_version_id`.
+For an already valid built experiment, the existing upload command is:
+
+```sh
+"$AUTORESEARCH_CLI" softmax upload <E-id> --build-dir <ABS_FRESH_BUILD>
+"$AUTORESEARCH_CLI" records show <E-id>
+```
+
+An `errored` build is a tool fault: send a `help_request` with its error and build
+directory, journal the fault, and do not retry or change the strategy to repair it.

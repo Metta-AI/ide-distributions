@@ -94,7 +94,7 @@ Only explicit `failed` G1–G3 policy gate results and expected structural assem
 `BuildError` diagnostics can request another generation. Unexpected gate,
 generation, import or harness exceptions stop immediately with build status
 `errored`. Reports retain their type, message and traceback summary; they never
-enter the model's `repair_errors`. Later gates are omitted when not run. The
+enter the model's `repair_errors`. Later gates are omitted when not run.
 G4/G5 failures are advisory warnings and never trigger model repair.
 Provider requests/retries and tokens are not a hard spend cap. The 3600-second
 operational allowance is informed by the primary lab's observed 3–25 minute

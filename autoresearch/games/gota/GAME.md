@@ -26,7 +26,8 @@ layers: [P,K,S,SK,C,G,ST,A]
 GotA has ten fixed hero seats: red seats 0–4 and blue seats 5–9.
 Read [mechanics](docs/mechanics.md), [policy surface](docs/policy-surface.md),
 [game guide](docs/game-guide.md), and [replay format](docs/replay-format.md).
-The PW semantic compiler is the only candidate build path. COM is not supported.
+Semantic candidates use the PW compiler. Exact committed BASIC artifacts use
+the prebuilt path below. COM is not supported.
 
 ## Commands
 
@@ -128,6 +129,78 @@ The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 `"$AUTORESEARCH_CLI" softmax upload E --build-dir BUILD_DIRECTORY`. Set the variable
 to the installed shared CLI executable. That shared tool performs the C6 identity
 check immediately before mutation; this wrapper has no alternate upload route.
+
+## Exact prebuilt baseline and first-install bootstrap
+
+`build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json --prebuilt FILE.bas`
+freezes the exact committed artifact bytes and runs the existing G1–G4 gates.
+It skips Hermes, model generation and scanner setup entirely. Native preparation,
+manifest resolution and the host contract check still apply. G4 compares the
+artifact against its own immutable bytes as a baseline mirror; this checks the
+screen machinery, not strength against an incumbent. G5 compiler goal traces are
+not applicable: its receipt has `applicable: false`, `passed: false`,
+`advisory: true`, and summary `not applicable: prebuilt`. It has no executed
+`outcome`. Failed G1–G3 refuse upload; any tool error stops the build with retained
+evidence and refuses upload. No prebuilt build attempts model repair.
+
+The artifact, adjacent `FILE.provenance.json`, and declared original input must
+be inside the candidate directory and committed unchanged. The sidecar schema is
+`gota-prebuilt/1`: `artifact_sha256`, `input: {path, sha256}`, `transform`, and
+`engine: {commit, coworld_version, source_url, manifest_sha256}`. Input paths are
+relative to the sidecar. For handwritten artifacts, use `transform: {name:
+identity}`, name the artifact itself as the input, and record its exact hash and
+resolved engine identity. For v13-live, the generator below records the original
+hash, output hash, transform tool hash and resolved engine automatically. Build
+reproduces the transformation before gates and verifies the committed closure
+again after gates. The frozen sidecar, native receipts, manifest, reports and
+`version.json` stay in the build directory; shared upload preserves provenance
+under `version.build.compiler.prebuilt_provenance`. In prebuilt mode, the shared
+`strategy_sha256` field is the committed BASIC source hash (equal to
+`policy_sha256`), and `source_path` names that BASIC file. `compiler.mode` is
+`prebuilt`; these fields do not claim STRATEGY.md compilation or semantic proof.
+
+The installed distribution includes the byte-identical original at
+`games/gota/baselines/submitted-v13.bas`, with its historical origin in the
+adjacent provenance file. Copy it into the worker candidate and commit that input
+first. Generate v13-live in one command; this resolves the current engine and
+makes only the authorized identifier/division token changes, with no model call:
+
+```sh
+mkdir -p /workspace/strategy/candidates/E
+cp games/gota/baselines/submitted-v13.bas /workspace/strategy/candidates/E/submitted-v13.bas
+git -C /workspace add strategy/candidates/E/submitted-v13.bas
+git -C /workspace commit -m "Record exact submitted v13 bootstrap input"
+uv run --locked python games/gota/tools/make_v13_live.py /workspace/strategy/candidates/E/submitted-v13.bas /workspace/strategy/candidates/E/v13-live.bas
+git -C /workspace add strategy/candidates/E/v13-live.bas strategy/candidates/E/v13-live.provenance.json
+git -C /workspace commit -m "Record mechanical v13-live bootstrap candidate"
+uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/E --out /workspace/versions/E-prebuilt --prebuilt /workspace/strategy/candidates/E/v13-live.bas --json
+```
+
+Use the installed profile's Python in workers (see the GotA eval-design skill).
+For an explicit historical build, append `--offline --manifest PATH` to both
+generator and build. Existing outputs are immutable; use a fresh output path.
+
+The build already records G1–G4 local checks. For a separate `local_check`, run
+only these applicable gates against the frozen artifact and manifest; G5 compiler
+coverage does not apply to this artifact:
+
+```sh
+uv run --locked python -m games.gota.gates /workspace/versions/E-prebuilt/policy.bas --baseline /workspace/versions/E-prebuilt/policy.bas --manifest /workspace/versions/E-prebuilt/coworld_manifest.json --work-dir /workspace/checks/E-prebuilt --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen
+```
+
+**Shared first-install upload handoff is pending.** The current shared upload
+requires an experiment with status `built` and a previously frozen evaluation
+design that names an existing baseline policy version. An install with no
+baseline cannot yet satisfy that contract. Preserve the successful local build
+in the same card, journal the missing baseline/design contract and send a
+`help_request`; do not fabricate a baseline or evaluation design. The shared
+owner must supply the bootstrap record transition before first upload can proceed.
+
+For an already valid built experiment, the supported next step is unchanged:
+`"$AUTORESEARCH_CLI" softmax upload E --build-dir /workspace/versions/E-prebuilt`.
+It performs C6 and returns the local version record id; record that id and its
+`candidate_binding.platform_policy_version_id` from `records show E` in the card
+journal. This local prebuilt path has not uploaded or established a platform baseline.
 
 ## Qualification scope
 

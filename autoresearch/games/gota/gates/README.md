@@ -33,6 +33,12 @@ startup fails. Exit 0 means selected blocking gates passed; exit 1 means a
 policy failed a blocking gate; exit 3 means a tool or harness errored. Gates omitted
 after an error were not run. G4/G5 policy failures are advisory and do not change the exit
 status; tool errors always do. Use a fresh work directory for G2.
+The explicit `build --prebuilt FILE.bas` binding runs G1–G4 with this contract.
+Its G5 receipt is not an executed GateResult: it records `applicable: false`,
+`passed: false`, `advisory: true`, and `not applicable: prebuilt`, without an
+`outcome`. The artifact is its own G4 baseline mirror. See [bootstrap](../GAME.md#exact-prebuilt-baseline-and-first-install-bootstrap)
+for committed-input provenance and the shared upload handoff.
+
 No command uploads or submits a policy. The manifest and container image must
 already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
 `uv run`; it does not override the locked versions. `tools/lasthit_eval.py` uses

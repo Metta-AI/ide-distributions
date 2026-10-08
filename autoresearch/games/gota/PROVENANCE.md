@@ -194,7 +194,8 @@ actual engine tests observe `PRINT "X", 12`: four events/five bytes,
 Run from `autoresearch/`:
 
 ```sh
-uv run --locked --python 3.12 python games/gota/tools/make_v13_live.py tests/fixtures/gota/submitted-v13.bas tests/fixtures/gota/v13-live.bas
+# Generate into a fresh committed-input candidate; see GAME.md bootstrap steps.
+uv run --locked --python 3.12 python games/gota/tools/make_v13_live.py /workspace/strategy/candidates/E/submitted-v13.bas /workspace/strategy/candidates/E/v13-live.bas --offline --manifest /path/to/2026.10.7.2-manifest.json
 uv run --locked --python 3.12 pytest tests/unit/gota -q
 uv run --locked --python 3.12 ruff check games/gota/gates games/gota/tools tests/unit/gota
 uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13-live.bas --baseline tests/fixtures/gota/v13-live.bas --manifest /path/to/coworld_manifest.json --work-dir /tmp/gota-gates-new
@@ -317,3 +318,21 @@ Update 2026-10-08: online builds and gates no longer target a fixed release. The
 resolve the live engine and prepare its exact commits; only `--offline` selects the
 historical 2026.10.7.2 pin. See [the live-engine finding](../../docs/plans/findings/gota-live-engine.md)
 and "Build and upload" in [GAME.md](GAME.md).
+
+
+## Exact prebuilt bootstrap (VERDICT-F item 2)
+
+`baselines/submitted-v13.bas` and its adjacent provenance Markdown are exact
+copies of the immutable test fixture and its sidecar; the artifact remains
+54,718 bytes with SHA-256
+`d0fd3a8210bbf754e699cfd7022ea18d7d416d8d8f9861eb0f1f10ff40b978a1`.
+This runtime copy ships under `games/` because installed profiles omit tests.
+No header or behavioral change is inserted into either BASIC artifact.
+
+The mechanical generator now requires a committed input and a fresh output,
+resolves an explicit live or offline engine and writes a reproducible
+`gota-prebuilt/1` JSON sidecar. The prebuilt build validates original/output/tool
+hashes and exact transformation bytes before running existing G1–G4 gates.
+Handwritten artifacts use the same sidecar with an identity transform. G5 goal
+traces are explicitly not applicable and are never labeled passed. See
+[GAME.md](GAME.md) for the command and pending shared first-install upload contract.

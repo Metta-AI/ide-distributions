@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a committed candidate using the installed qualified GotA compiler."""
+"""Build a committed semantic candidate or gate an exact prebuilt BASIC artifact."""
 import argparse
 import contextlib
 import hashlib
@@ -20,15 +20,18 @@ def validate_manifest(path, *, offline=False):
     return resolve(path, offline=offline)
 
 
-def build(candidate, out, manifest=None, *, timeout=900, offline=False):
+def build(candidate, out, manifest=None, *, timeout=900, offline=False, prebuilt=None):
     """Output is new and immutable; failure retains evidence without an upload envelope."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(TOOLS))
     identity = validate_manifest(manifest, offline=offline)
-    source = candidate / 'STRATEGY.md'
-    repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     if out.exists():
         raise ValueError(f'output already exists (immutable): {out}')
+    if prebuilt is not None:
+        from games.gota.tools import prebuilt as existing
+        return existing.build(candidate, out, prebuilt, identity)
+    source = candidate / 'STRATEGY.md'
+    repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     os.environ['GOTA_CANDIDATE_REPO'] = repo
     import pw_cli
     python = os.environ.get('GOTA_HERMES_PYTHON')
@@ -101,13 +104,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--prebuilt', type=Path, help='committed BASIC artifact with adjacent .provenance.json; no model compiler')
     parser.add_argument('--manifest', type=Path, default=None)
     parser.add_argument('--offline', action='store_true', help='explicit historical pinned engine; no live lookup')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     try:
         manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
-        result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, offline=args.offline)
+        options = {'offline': args.offline}
+        if args.prebuilt is not None:
+            options['prebuilt'] = args.prebuilt.resolve()
+        result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, **options)
     except (Exception, SystemExit) as error:
         if isinstance(error, SystemExit) and isinstance(error.code, int):
             raise

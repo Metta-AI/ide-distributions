@@ -221,8 +221,8 @@ GAME_CALL = re.compile(r'"\$AR_PYTHON" "\$AR_HOME/games/gota/tools/([^"/]+)"([^`
 
 
 def check_game_call(script: str, arguments: str) -> None:
-    # Only advertised read-only instruments may run, and only their --help path.
-    assert script in {"replay_stats.py", "evaluate.py", "compare.py"}, script
+    # Only advertised instruments may run, and only their read-only --help path.
+    assert script in {"replay_stats.py", "evaluate.py", "compare.py", "make_v13_live.py", "build.py"}, script
     path = ROOT / "games" / "gota" / "tools" / script
     assert path.is_file(), path
     result = subprocess.run(
