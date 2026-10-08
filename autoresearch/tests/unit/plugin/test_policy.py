@@ -94,6 +94,31 @@ BLOCKED_COMMANDS = [
     "cd {canon} && echo hi > x",
     "git -C {canon} commit -am sneaky",
     'cat > {canon}/x <<EOF\nhello\nEOF',
+    # fix round 1: quoted substitutions, piped / stdin shells, wrapper forms
+    'echo "$(coworld submit x)"',
+    'x="$(coworld player use bob)"',
+    'echo "`softmax login`"',
+    "$(which coworld) submit pv_1",
+    "`which coworld` submit pv_1",
+    "cat <<EOF | sh\ncoworld submit x\nEOF",
+    "echo coworld submit x | sh",
+    "bash -s <<EOF\ncoworld upload-policy p\nEOF",
+    "sh <<'EOF'\nsoftmax login\nEOF",
+    "uvx coworld@latest submit pv_1",
+    "uv tool run coworld==1.0 submit pv_1",
+    "uv --directory x run coworld submit pv_1",
+    "coworld --server http://x --token abc --env prod submit pv_1",
+    "coworld player --name bob use",
+    "python -m coworld.cli submit pv_1",
+    "pipx run coworld submit pv_1",
+    "busybox sh -c 'coworld submit'",
+    "time -p coworld submit pv_1",
+    "watch -n 5 coworld submit pv_1",
+    "strace -f coworld submit pv_1",
+    "ssh -p 22 host coworld submit pv_1",
+    "c=coworld; $c submit pv_1",
+    "pushd ~/.softmax && echo x > token",
+    "echo hi > /tmp/x",
 ]
 
 
@@ -134,6 +159,14 @@ ALLOWED_COMMANDS = [
     'cat > notes/x.md <<EOF\nnever run coworld submit or softmax login\nEOF',
     'echo "unterminated',
     "uv run pytest -q",
+    "echo hi > .scratch/x",
+    "bash script.sh",
+    "cat <<EOF | grep coworld\ncoworld submit is documented here\nEOF",
+    'echo \'$(coworld submit x)\'',
+    "ssh host uptime",
+    "watch -n 5 git status",
+    "pushd notes && echo hi > x.md",
+    "uv run --directory . pytest",
 ]
 
 
@@ -176,7 +209,9 @@ FILE_TOOL_CASES = [
     ("search_files", {"pattern": "x", "path": "{canon}"}, True),
     ("web_search", {"query": "coworld submit"}, True),
     ("kanban_complete", {"summary": "done"}, True),
-    ("skill_manage", {"operations": [{"action": "create", "name": "x", "content": "y"}]}, False),
+    ("skill_manage", {"operations": [{"action": "create", "name": "x", "content": "y"}]}, True),
+    ("write_file", {"path": ".scratch/notes.txt", "content": "x"}, True),
+    ("write_file", {"path": "a\x00b", "content": "x"}, True),
 ]
 
 
@@ -204,8 +239,21 @@ def test_finished_card_blocks_every_model_write(layout):
     assert not _terminal(layout, "rm notes/x.md", card=FINISHED)[0]
 
 
+def test_outside_worktree_message_points_at_scratch(layout):
+    allowed, reason = tool_policy("write_file", {"path": "/tmp/x", "content": "x"},
+                                  layout.ctx(), WORKING)
+    assert not allowed and f"use {layout.worker}/.scratch/ for scratch files" in reason
+
+
+def test_nul_byte_paths_never_raise(layout):
+    assert not tool_policy("write_file", {"path": "a\x00b"}, layout.ctx(), FINISHED)[0]
+    assert tool_policy("terminal", {"command": "/bin/x\x00y run"}, layout.ctx(), WORKING)[0]
+
+
 def test_finished_card_still_allows_reads_trusted_cli_and_completion(layout):
     ctx = layout.ctx()
+    skill = {"operations": [{"action": "create", "name": "x", "content": "y"}]}
+    assert tool_policy("skill_manage", skill, ctx, FINISHED)[0]
     assert tool_policy("read_file", {"path": "notes/x.md"}, ctx, FINISHED)[0]
     assert tool_policy("kanban_complete", {"summary": "s"}, ctx, FINISHED)[0]
     assert _terminal(layout, '"$AUTORESEARCH_CLI" card status', card=FINISHED)[0]

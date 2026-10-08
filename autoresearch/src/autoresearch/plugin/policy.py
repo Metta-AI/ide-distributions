@@ -6,18 +6,22 @@
 - raw platform mutations: `coworld submit|upload-policy|xp-request create` (C6: only the trusted
   softmax tool behind `"$AUTORESEARCH_CLI"` may mutate the platform);
 - force pushes, ref deletions and pushes to `main`/`master` from model commands;
-- model writes outside the worker worktree (C2), every model write after `card finish`
-  (C3), and `memory` writes outside planning cards.
+- model writes outside the worker worktree (C2; scratch files go to `<worktree>/.scratch/`),
+  every model write after `card finish` (C3), and `memory` writes outside planning cards.
 
-Tool names and argument keys are Hermes v0.21.5's (`tools/terminal_tool.py`
+Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
+(`tools/terminal_tool.py`
 `terminal{command, workdir}`, `tools/file_tools.py` `write_file{path}` and
 `patch{path | mode="patch", patch}`, `tools/memory_tool.py` `memory`,
-`tools/skill_manager_tool.py` `skill_manage`, `tools/code_execution_tool.py`
-`execute_code{code}`). Any other tool is allowed.
+`tools/code_execution_tool.py` `execute_code{code}`). Any other tool is allowed, including
+`skill_manage` (it writes to `skills.create_dir`, the staging area queue-keeper sweeps, C9).
 
 Shell commands are tokenized with `shlex` and every simple command is inspected, including
-ones behind `&&`, `;`, `|`, subshells, `$(...)`, backticks, `bash -c`, `eval`, `xargs`,
-`find -exec`, env prefixes and launcher wrappers (`uv run`, `python -m`, `sudo`, ...).
+ones behind `&&`, `;`, `|`, subshells, `$(...)` and backticks (also inside double quotes),
+`bash -c`, `eval`, `xargs`, `find -exec`, `watch`, env prefixes and launcher wrappers
+(`uv run`, `uvx`, `python -m`, `sudo`, `strace`, ...). A shell reading its script from stdin
+(`... | sh`, `sh <<EOF`, `bash -s`) has its here-document bodies walked, and when piped the
+raw text is checked for blocked phrases. `ssh host <cmd>` is checked for blocked phrases.
 This is a best-effort parser, not a shell: it guards against a model reaching for a
 blocked command, not against an adversary. The approvals.deny globs in config.yaml are
 the coarse second layer.
@@ -26,7 +30,6 @@ Allowed calls return `(True, "")`, or `(True, "unparsed ...")` when a shell comm
 not be tokenized and was allowed anyway; the adapter logs that note.
 """
 
-import itertools
 import os
 import re
 import shlex
@@ -44,6 +47,7 @@ TRUSTED_CLI_WORDS = {"$AUTORESEARCH_CLI", "${AUTORESEARCH_CLI}"}
 DEVICE_TARGETS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"}
 PROTECTED_REFS = {"main", "master", "refs/heads/main", "refs/heads/master"}
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+COMMAND_STARTERS = ";&|(\n{"
 MAX_NESTING = 5
 
 # Text that, found anywhere in a command we could not parse (or in code), means a raw
@@ -56,8 +60,8 @@ BLOCKED_TEXT = re.compile(
 
 # Words skipped at the start of a simple command (shell keywords and no-option prefixes).
 PREFIX_WORDS = {
-    "!", "{", "}", "then", "do", "else", "elif", "if", "while", "until", "time", "exec",
-    "command", "builtin", "nohup", "setsid", "doas",
+    "!", "{", "}", "then", "do", "else", "elif", "if", "while", "until", "exec",
+    "command", "builtin", "nohup", "setsid", "doas", "busybox",
 }
 # Wrappers: name -> options that take a value. The wrapped command follows the options.
 OPTION_WRAPPERS = {
@@ -66,8 +70,20 @@ OPTION_WRAPPERS = {
     "stdbuf": {"-i", "-o", "-e"},
     "xargs": {"-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a"},
     "env": {"-u", "-C", "-S"},
+    "time": {"-o", "-f", "--output", "--format"},
+    "strace": {"-o", "-e", "-p", "-s", "-u", "-E", "-P", "-a", "-b", "-I", "-O", "-S", "-X"},
+    "ltrace": {"-o", "-e", "-p", "-s", "-u", "-E", "-a", "-n"},
     "uvx": {"--from", "--with", "--python", "-p", "--index", "--index-url"},
-    "pipx": {"--spec", "--python"},
+}
+RUN_WRAPPER_VALUE_OPTIONS = {"--spec", "--python", "-e", "--env"}
+WATCH_VALUE_OPTIONS = {"-n", "--interval", "-d", "--differences"}
+SSH_VALUE_OPTIONS = {
+    "-p", "-i", "-l", "-o", "-F", "-J", "-L", "-R", "-D", "-E", "-b", "-c", "-e", "-m", "-O",
+    "-Q", "-S", "-W", "-w", "-B",
+}
+UV_GLOBAL_VALUE_OPTIONS = {
+    "--directory", "--project", "--config-file", "--cache-dir", "--python", "-p", "--color",
+    "--python-preference", "--index-url",
 }
 UV_RUN_VALUE_OPTIONS = {
     "--with", "--with-requirements", "--python", "-p", "--project", "--directory", "--package",
@@ -87,9 +103,19 @@ SECRET_WORD = re.compile(
 )
 SIGNATURE_WORDS = 5
 SIGNATURE_MAX = 120
-V4A_PATH = re.compile(r"^\*\*\*\s*(?:Update|Add|Delete|Move) File:\s*(.+?)\s*$", re.MULTILINE)
+# Hermes tools/patch_parser.py _OP_MARKERS (matched at line start).
+V4A_PATH = re.compile(
+    r"^\*\*\*\s*(?:Update|Add|Delete|Move)\s+File:\s*(.+?)\s*$", re.MULTILINE
+)
 HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
-ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(?!=)")
+VERSION_SUFFIX = re.compile(r"[@=<>!~\[].*$")
+RAW_MUTATION = (
+    "this command contains a raw platform mutation or player switch; "
+    'use the "$AUTORESEARCH_CLI" softmax commands.'
+)
+FINISHED = "this card is finished (`card finish` ran); no further writes."
+SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
 
 
 class _Blocked(Exception):
@@ -118,8 +144,6 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
             return ALLOW
         if tool_name == "memory":
             return guard.memory()
-        if tool_name == "skill_manage":
-            return guard.skill_manage()
         if tool_name == "execute_code":
             code = args.get("code")
             if isinstance(code, str) and BLOCKED_TEXT.search(code):
@@ -130,6 +154,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
             return ALLOW
     except _Blocked as blocked:
         return _block(str(blocked))
+    except (ValueError, OSError) as error:  # e.g. a NUL byte in an executable path
+        return True, f"unparsed call allowed ({error})"
     return ALLOW
 
 
@@ -167,14 +193,6 @@ class _Guard:
             return _block("this card is finished (`card finish` ran); no further writes.")
         return ALLOW
 
-    def skill_manage(self) -> tuple[bool, str]:
-        if self.finished or self.worker is not None:
-            return _block(
-                "skill_manage edits the profile's live skills, outside your worktree; "
-                "stage skill changes as files in your worktree instead."
-            )
-        return ALLOW
-
     # --- write targets ---
 
     def check_write(self, target: str, cwd: Path) -> str | None:
@@ -182,22 +200,27 @@ class _Guard:
         expanded = _expand(target, self.home)
         if expanded in DEVICE_TARGETS or expanded.startswith("/dev/fd/"):
             return None
-        if "$" in expanded:
+        resolved = None
+        if "$" not in expanded and "\x00" not in expanded:
+            try:
+                resolved = _real(cwd / expanded)
+            except (ValueError, OSError):
+                resolved = None
+        if resolved is None:
             if ".softmax" in expanded:
-                raise _Blocked("writes under ~/.softmax switch the player identity.")
+                raise _Blocked(SOFTMAX_WRITE)
             if self.finished:
-                raise _Blocked("this card is finished (`card finish` ran); no further writes.")
+                raise _Blocked(FINISHED)
             return f"unresolved write target {target!r}"
-        resolved = _real(cwd / expanded)
         if _within(resolved, self.softmax_dir):
-            raise _Blocked("writes under ~/.softmax switch the player identity.")
+            raise _Blocked(SOFTMAX_WRITE)
         if self.finished:
-            raise _Blocked("this card is finished (`card finish` ran); no further writes.")
+            raise _Blocked(FINISHED)
         if self.worker is not None and not _within(resolved, self.worker):
             raise _Blocked(
                 f"model writes must stay inside your worktree {self.ctx.worker}; "
-                f"{target!r} resolves to {resolved}. Canonical bookkeeping goes through "
-                '"$AUTORESEARCH_CLI".'
+                f"{target!r} resolves to {resolved}; use {self.ctx.worker}/.scratch/ for "
+                'scratch files. Canonical bookkeeping goes through "$AUTORESEARCH_CLI".'
             )
         return None
 
@@ -215,43 +238,62 @@ class _Guard:
         if depth > MAX_NESTING:
             self._unparsed(command, "nested too deeply", notes)
             return
+        text, bodies = _split_heredocs(command)
+        for start, end, body in _substitutions(text):
+            self._walk_shell(body, cwd, depth + 1, notes)
+            # `$(which coworld) submit`: the substitution's output is the command word.
+            if text[:start].rstrip()[-1:] in ("", *COMMAND_STARTERS):
+                words = body.split()
+                head = words[-1].strip("'\"") if words else ""
+                if BLOCKED_TEXT.search(f"{head} {text[end:]}"):
+                    raise _Blocked(RAW_MUTATION)
         try:
-            tokens = _tokenize(_strip_heredoc_bodies(command).replace("`", " ( "))
+            tokens = _tokenize(text.replace("`", " ( "))
         except ValueError as error:
             self._unparsed(command, str(error), notes)
             return
-        for words, targets in _simple_commands(tokens):
-            if words and words[0] == "cd":
+        line = _Line(raw=command, bodies=bodies)
+        for words, targets, piped in _simple_commands(tokens):
+            if words and words[0] in ("cd", "pushd"):
                 cwd = self._cd(words, cwd)
                 continue
-            for target in targets + self._inspect(words, cwd, depth, notes):
+            if words and all(ASSIGNMENT.match(word) for word in words):
+                for word in words:
+                    name, value = word.split("=", 1)
+                    line.variables[name] = value
+                continue
+            line.piped = piped
+            for target in targets + self._inspect(words, cwd, depth, notes, line):
                 note = self.check_write(target, cwd)
                 if note:
                     notes.append(note)
 
     def _unparsed(self, command: str, why: str, notes: list[str]) -> None:
         if BLOCKED_TEXT.search(command):
-            raise _Blocked(
-                "this command contains a raw platform mutation or player switch; "
-                'use the "$AUTORESEARCH_CLI" softmax commands.'
-            )
+            raise _Blocked(RAW_MUTATION)
         notes.append(f"unparsed shell allowed ({why})")
 
     def _cd(self, words: list[str], cwd: Path) -> Path:
-        if len(words) < 2:
-            return self.home
-        target = _expand(words[1], self.home)
+        operands = [word for word in words[1:] if not word.startswith("-")]
+        if not operands:
+            return self.home if words[0] == "cd" else cwd
+        target = _expand(operands[0], self.home)
         return cwd if "$" in target or target == "-" else cwd / target
 
-    def _inspect(self, words: list[str], cwd: Path, depth: int, notes: list[str]) -> list[str]:
+    def _inspect(
+        self, words: list[str], cwd: Path, depth: int, notes: list[str], line: "_Line",
+    ) -> list[str]:
         """Check one simple command; return the write targets it names."""
-        core = self._unwrap(words, cwd, depth, notes)
+        core = self._unwrap(words, cwd, depth, notes, line)
         if not core:
             return []
         first = core[0]
         if first in self.trusted or (os.path.isabs(first) and _real(Path(first)) in self.trusted):
             return []
-        name = os.path.basename(first)
+        if first.startswith("$"):  # `c=coworld; $c submit`
+            first = _expand_variables(first, line.variables)
+        # `coworld@latest`, `coworld==1.0` (uvx / uv tool run package specs)
+        name = VERSION_SUFFIX.sub("", os.path.basename(first))
         operands = [word for word in core[1:] if not word.startswith("-")]
         if name == "coworld":
             self._check_coworld(operands)
@@ -260,12 +302,14 @@ class _Guard:
         elif name == "git":
             return self._check_git(core[1:], cwd)
         elif name == "find":
-            return self._find_exec(core, cwd, depth, notes)
+            return self._find_exec(core, cwd, depth, notes, line)
         return _writer_targets(name, core[1:])
 
-    def _unwrap(self, words: list[str], cwd: Path, depth: int, notes: list[str]) -> list[str]:
-        """Strip env assignments and wrappers. Nested scripts (`bash -c`, `eval`) are walked
-        here and yield an empty core."""
+    def _unwrap(
+        self, words: list[str], cwd: Path, depth: int, notes: list[str], line: "_Line",
+    ) -> list[str]:
+        """Strip env assignments and wrappers. Nested scripts (`bash -c`, `eval`, `watch`,
+        stdin shells) are walked here and yield an empty core."""
         index = 0
         while index < len(words):
             word = words[index]
@@ -282,34 +326,51 @@ class _Guard:
                         self._walk_shell(" ".join(words[split + 1:]), cwd, depth + 1, notes)
                     return []
                 index = _skip_options(words, index + 1, OPTION_WRAPPERS[name])
-            elif name == "uv" and words[index + 1:index + 2] == ["run"]:
-                index = _skip_options(words, index + 2, UV_RUN_VALUE_OPTIONS)
-            elif name == "uv" and words[index + 1:index + 3] == ["tool", "run"]:
-                index = _skip_options(words, index + 3, OPTION_WRAPPERS["uvx"])
+            elif name == "uv":
+                verb = _skip_options(words, index + 1, UV_GLOBAL_VALUE_OPTIONS)
+                if words[verb:verb + 1] == ["run"]:
+                    index = _skip_options(words, verb + 1, UV_RUN_VALUE_OPTIONS)
+                elif words[verb:verb + 2] == ["tool", "run"]:
+                    index = _skip_options(words, verb + 2, OPTION_WRAPPERS["uvx"])
+                else:
+                    return words[index:]
             elif name in {"poetry", "pdm", "hatch", "pipx"} and words[index + 1:index + 2] == [
                 "run"
             ]:
-                index = _skip_options(words, index + 2, OPTION_WRAPPERS["pipx"])
+                index = _skip_options(words, index + 2, RUN_WRAPPER_VALUE_OPTIONS)
+            elif name == "watch":
+                start = _skip_options(words, index + 1, WATCH_VALUE_OPTIONS)
+                self._walk_shell(" ".join(words[start:]), cwd, depth + 1, notes)
+                return []
+            elif name == "ssh":
+                host = _skip_options(words, index + 1, SSH_VALUE_OPTIONS)
+                if BLOCKED_TEXT.search(" ".join(words[host + 1:])):
+                    raise _Blocked(RAW_MUTATION)
+                return []
             elif re.fullmatch(r"python[0-9.]*", name):
                 rest = words[index + 1:]
                 if "-m" in rest:
                     module_at = index + 1 + rest.index("-m") + 1
-                    return words[module_at:]
+                    if module_at >= len(words):
+                        return []
+                    # `python -m coworld.cli submit` runs the coworld package.
+                    return [words[module_at].split(".")[0], *words[module_at + 1:]]
                 if "-c" in rest:
                     code_at = index + 1 + rest.index("-c") + 1
                     code = words[code_at] if code_at < len(words) else ""
                     if BLOCKED_TEXT.search(code):
-                        raise _Blocked(
-                            "code that runs a raw platform mutation or player switch is blocked; "
-                            'use the "$AUTORESEARCH_CLI" softmax commands.'
-                        )
+                        raise _Blocked(RAW_MUTATION)
                 return words[index:]
             elif name in SHELLS:
-                script_at = _shell_script_index(words, index + 1)
-                if script_at is None:
-                    return words[index:]
-                if script_at < len(words):
+                mode, script_at = _shell_mode(words, index + 1)
+                if mode == "c" and script_at < len(words):
                     self._walk_shell(words[script_at], cwd, depth + 1, notes)
+                elif mode == "stdin":
+                    # The script arrives on stdin: here-document bodies, or a pipe.
+                    for body in line.bodies:
+                        self._walk_shell(body, cwd, depth + 1, notes)
+                    if line.piped and BLOCKED_TEXT.search(line.raw):
+                        raise _Blocked(RAW_MUTATION)
                 return []
             elif name == "eval":
                 self._walk_shell(" ".join(words[index + 1:]), cwd, depth + 1, notes)
@@ -319,13 +380,19 @@ class _Guard:
         return []
 
     def _check_coworld(self, operands: list[str]) -> None:
-        head = operands[:3]
-        if "submit" in head or "upload-policy" in head or _adjacent(head, "xp-request", "create"):
+        # Every operand is scanned: global options with values (`--server x`, `--env prod`)
+        # can push the subcommand anywhere. This can over-block an option value that happens
+        # to be "submit"; that is the safe direction.
+        if (
+            "submit" in operands
+            or "upload-policy" in operands
+            or _in_order(operands, "xp-request", "create")
+        ):
             raise _Blocked(
                 "raw `coworld submit/upload-policy/xp-request create` is blocked; use the "
                 '"$AUTORESEARCH_CLI" softmax commands, which check the player identity first.'
             )
-        if _adjacent(head, "player", "use"):
+        if _in_order(operands, "player", "use"):
             raise _Blocked("`coworld player use` switches the player identity.")
 
     def _check_git(self, args: list[str], cwd: Path) -> list[str]:
@@ -350,13 +417,25 @@ class _Guard:
             return [str(directory)]
         return []
 
-    def _find_exec(self, core: list[str], cwd: Path, depth: int, notes: list[str]) -> list[str]:
+    def _find_exec(
+        self, core: list[str], cwd: Path, depth: int, notes: list[str], line: "_Line",
+    ) -> list[str]:
         for flag in ("-exec", "-execdir", "-ok", "-okdir"):
             if flag in core:
                 start = core.index(flag) + 1
                 inner = [w for w in core[start:] if w not in {";", "+", "{}"}]
-                return self._inspect(inner, cwd, depth, notes)
+                return self._inspect(inner, cwd, depth, notes, line)
         return []
+
+
+class _Line:
+    """Per command line state for the shell walk."""
+
+    def __init__(self, raw: str, bodies: list[str]):
+        self.raw = raw
+        self.bodies = bodies
+        self.piped = False  # the current simple command reads from a pipe
+        self.variables: dict[str, str] = {}
 
 
 def _check_push(rest: list[str]) -> None:
@@ -434,18 +513,29 @@ def _skip_options(words: list[str], index: int, value_options: set[str]) -> int:
     return index
 
 
-def _shell_script_index(words: list[str], index: int) -> int | None:
-    """Index of the `-c` script for `bash -c 'x'` / `bash -lc 'x'`; None for `bash script.sh`."""
+def _shell_mode(words: list[str], index: int) -> tuple[str, int]:
+    """`("c", script_index)` for `bash -c 'x'` / `-lc`; `("stdin", 0)` for `sh`, `bash -s`,
+    `sh < f`; `("file", 0)` for `bash script.sh`."""
+    stdin_flag = False
     while index < len(words) and words[index].startswith("-"):
         flag = words[index]
         if not flag.startswith("--") and "c" in flag:
-            return index + 1
+            return "c", index + 1
+        stdin_flag = stdin_flag or (not flag.startswith("--") and "s" in flag)
         index += 1
-    return None
+    if stdin_flag or index >= len(words):
+        return "stdin", 0
+    return "file", 0
 
 
-def _adjacent(words: list[str], first: str, second: str) -> bool:
-    return any(a == first and b == second for a, b in itertools.pairwise(words))
+def _in_order(words: list[str], first: str, second: str) -> bool:
+    return first in words and second in words[words.index(first) + 1:]
+
+
+def _expand_variables(word: str, variables: dict[str, str]) -> str:
+    for name, value in variables.items():
+        word = word.replace("${" + name + "}", value).replace("$" + name, value)
+    return os.path.expandvars(word)
 
 
 # --- tokenizing ---
@@ -464,9 +554,11 @@ def _is_operator(token: str) -> bool:
 
 
 def _simple_commands(tokens: list[str]):
-    """Yield `(words, redirect_write_targets)` for each simple command."""
+    """Yield `(words, redirect_write_targets, piped)` for each simple command; `piped` is
+    True when the command reads from a `|`."""
     words: list[str] = []
     targets: list[str] = []
+    piped = False
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -484,27 +576,88 @@ def _simple_commands(tokens: list[str]):
                     targets.append(following)
             index += 2 if following is not None and not _is_operator(following) else 1
             continue
-        yield words, targets
+        yield words, targets, piped
+        piped = token in {"|", "|&"}
         words, targets = [], []
         index += 1
-    yield words, targets
+    yield words, targets, piped
 
 
-def _strip_heredoc_bodies(command: str) -> str:
-    """Drop here-document bodies: they are data, not commands."""
+def _split_heredocs(command: str) -> tuple[str, list[str]]:
+    """`(command without here-document bodies, the bodies)`. Bodies are data unless a shell
+    reads its script from stdin; the walk decides."""
     kept: list[str] = []
+    bodies: list[str] = []
     pending: list[tuple[str, bool]] = []
+    body: list[str] = []
     for line in command.split("\n"):
         if pending:
             delimiter, strip_tabs = pending[0]
             if (line.lstrip("\t") if strip_tabs else line).strip() == delimiter:
                 pending.pop(0)
+                bodies.append("\n".join(body))
+                body = []
+            else:
+                body.append(line)
             continue
         kept.append(line)
         for match in HEREDOC.finditer(line):
             if line[match.start():match.start() + 3] != "<<<":
                 pending.append((match.group(3), match.group(1) == "-"))
-    return "\n".join(kept)
+    if body:
+        bodies.append("\n".join(body))
+    return "\n".join(kept), bodies
+
+
+def _substitutions(text: str) -> list[tuple[int, int, str]]:
+    """`(start, end, body)` of each top-level `$(...)` and backtick substitution that the
+    shell would run: outside single quotes, inside double quotes or bare."""
+    found = []
+    single = double = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and not single:
+            index += 2
+            continue
+        if char == "'" and not double:
+            single = not single
+        elif char == '"' and not single:
+            double = not double
+        elif not single and text.startswith("$(", index):
+            end = _closing_paren(text, index + 2)
+            found.append((index, end, text[index + 2:end - 1]))
+            index = end
+            continue
+        elif not single and char == "`":
+            close = text.find("`", index + 1)
+            end = len(text) if close < 0 else close + 1
+            found.append((index, end, text[index + 1:close if close >= 0 else len(text)]))
+            index = end
+            continue
+        index += 1
+    return found
+
+
+def _closing_paren(text: str, index: int) -> int:
+    """Index just past the `)` closing a `$(` whose body starts at `index`."""
+    depth = 1
+    quote = ""
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return len(text) + 1
 
 
 # --- paths ---
@@ -544,7 +697,7 @@ def command_signature(tool_name: str, args: dict) -> str:
     if tool_name == "terminal" and isinstance(args.get("command"), str):
         command = args["command"]
         try:
-            first = next(_simple_commands(_tokenize(_strip_heredoc_bodies(command))))[0]
+            first = next(_simple_commands(_tokenize(_split_heredocs(command)[0])))[0]
         except (ValueError, StopIteration):
             first = command.split()
         words = []
