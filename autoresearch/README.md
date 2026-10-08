@@ -272,3 +272,9 @@ automatic update; `updates.check` is set to false so it does not even check.
 - **Credits.** A Player credential cannot read credits (HTTP 403). Preflight only warns,
   and experiments that wait for credits are retried with backoff (A10).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
+
+## Integrations
+
+| Document | Covers |
+|---|---|
+| [`docs/integrations/softmax-ide-bridge.md`](docs/integrations/softmax-ide-bridge.md) | The Softmax IDE bridge as the external agent on `comms/`: the inbox files it writes, the outbox fields it reads, how it treats acknowledgements, and what is not exercised yet |
