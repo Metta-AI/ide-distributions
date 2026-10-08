@@ -14,8 +14,12 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    (``memory_snapshot``). Staged messages the publisher skipped
    (invalid envelope) are reported once each by a runtime note (marker
    ``ledger/skipped-staged/<M-id>.json``).
-6. KB: lint ``analyze`` + ``apply``, compaction (claims pending re-verification are kept), and
-   the generated views; one commit.
+6. KB: stale marking against the current game version (``kb.staleness.mark_stale``: live
+   claims whose ``last_checked_version`` is older become ``stale``; a no-op unless the game
+   version changed), lint ``analyze`` + ``apply``, compaction (claims pending re-verification
+   are kept), and the generated views; one commit. The KB maintenance commands are
+   runtime-only: cards run read-only ``kb lint``/``kb hubs`` and edit only claims their refs
+   name (D-23).
 7. Push ``main`` and ``refs/heads/card/*`` to ``origin`` (card finish does not push), so
    merged work leaves the host early. The run ends with the same push (step 13).
 8. Sweep staged skills into ``skills-proposed/`` (``proposals.sweep_skills``).
@@ -71,7 +75,7 @@ from autoresearch.kb.apply import apply as kb_apply
 from autoresearch.kb.compaction import compact
 from autoresearch.kb.index import write_generated
 from autoresearch.kb.lint import analyze
-from autoresearch.kb.staleness import pending_reverification
+from autoresearch.kb.staleness import mark_stale, pending_reverification
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
@@ -279,10 +283,13 @@ def report_skipped(canonical: Path, results: list[PublishResult], allow_no_remot
             commit(canonical, [marker], f"publish: skipped staged {message_id} reported")
 
 
-def kb_step(canonical: Path, now: datetime.datetime) -> None:
-    """Lint apply, compaction and generated views (System Design §3.5); one commit."""
+def kb_step(canonical: Path, now: datetime.datetime, game_version: str | None = None) -> None:
+    """Stale marking (when the game version is known), lint apply, compaction and generated
+    views (System Design §3.5); one commit."""
     layout = Layout(canonical)
     with canonical_lock(canonical):
+        if game_version:
+            mark_stale(layout, game_version, now)
         kb_apply(layout, analyze(layout), now)
         compact(layout, now, pending_reverify=pending_reverification(layout))
         write_generated(layout)
@@ -596,7 +603,7 @@ def _run_steps(
     )
     _step(run, ctx, "memory_snapshot", snapshot_memory, ctx)
     _step(run, ctx, "skipped_staged", report_skipped, canonical, run.published, allow_no_remote)
-    _step(run, ctx, "kb", kb_step, canonical, now)
+    _step(run, ctx, "kb", kb_step, canonical, now, game_version)
     _step(run, ctx, "push", push_early, canonical)
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
     _step(run, ctx, "routing", route_all, ctx, queue, allow_no_remote=allow_no_remote)

@@ -482,3 +482,47 @@ def test_main_builds_the_run_from_the_environment(host, monkeypatch, capsys):
     summary = json.loads(capsys.readouterr().out)
     assert summary["exit_code"] == 0 and summary["failures"] == {}
     assert (host.canonical / ".git").exists() and host.remote_head() == host.head()
+
+
+# --- KB staleness on a game-version change (runtime-only KB maintenance) ---
+
+
+def _claim(host: Host, checked: str) -> str:
+    claim = host.store.create(
+        "claim",
+        {
+            "kind": "mechanism",
+            "status": "belief",
+            "confidence": 0.7,
+            "evidence": [],
+            "revise_if": "A replay shows otherwise.",
+            "relations": [],
+            "topics": [],
+            "valid_from_version": checked,
+            "last_checked_version": checked,
+        },
+        "Damage is 10.",
+    )
+    gitops.commit_all(host.canonical, f"claim {claim}")
+    return claim
+
+
+def _set_game_version(host: Host, version: str) -> None:
+    path = host.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(path) if path.exists() else host.sm._initial_state()
+    write_json(path, {**state, "game_version": version})
+
+
+def test_kb_step_marks_claims_stale_when_the_game_version_changes(host):
+    host.tick(at(0))
+    current = _claim(host, GAME_VERSION)
+    host.tick(at(1))
+    assert host.store.load(current)[0]["status"] == "belief"  # same version: untouched
+
+    _set_game_version(host, "fake-2")
+    result = host.tick(at(2))
+
+    assert "kb" not in result.failures
+    meta, _ = host.store.load(current)
+    assert meta["status"] == "stale" and "fake-2" in meta["status_reason"]
+    assert gitops.git(host.canonical, "status", "--porcelain", "kb") == ""  # committed

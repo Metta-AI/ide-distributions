@@ -152,3 +152,20 @@ def test_compact_skips_claim_with_pending_reverification(tmp_path):
     code, out = run_kb(tmp_path, "compact")
     assert code == 0
     assert out["data"] == {"archived": [unguarded]}
+
+
+def test_mutating_kb_commands_are_marked_runtime_only():
+    import argparse
+
+    from autoresearch.cli import build_parser
+    from autoresearch.kb.cli import RUNTIME_ONLY
+
+    parser = build_parser()
+    group = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    kb = group.choices["kb"]
+    commands = next(a for a in kb._actions if isinstance(a, argparse._SubParsersAction))
+    helps = {action.dest: action.help for action in commands._choices_actions}
+    for name in ("apply", "index", "stale", "renew", "compact"):
+        assert helps[name].startswith(RUNTIME_ONLY), name
+    for name in ("lint", "hubs"):
+        assert RUNTIME_ONLY not in helps[name]

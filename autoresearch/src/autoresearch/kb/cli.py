@@ -13,6 +13,12 @@ Same envelope, exit codes and root resolution as ``autoresearch records`` (see
 - ``kb compact``: archive the longest-stale claims when too many are stale. Claims with a
   re-verification request in ``cards/requests`` are never archived.
 - ``kb hubs [--request]``: hub health flags; ``--request`` also writes maintenance requests.
+
+``apply``, ``index``, ``stale``, ``renew`` and ``compact`` are operator/runtime commands: they
+change many claims at once, so a card running them would fail the D-23 ref check at card
+finish. queue-keeper's KB step runs stale marking, apply, compaction and the generated views
+on canonical every run; ``renew`` is an operator command. Cards use ``kb lint`` and ``kb hubs`` and edit only the claims their
+refs name.
 """
 
 import argparse
@@ -101,28 +107,39 @@ def _hubs(args, store: RecordStore) -> int:
 # --- parser ---
 
 
+RUNTIME_ONLY = "[operator/runtime only, not for cards] "
+
+
 def setup(parser: argparse.ArgumentParser) -> None:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", help="workspace root (default: worker worktree or canonical)")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
     def command(name: str, handler, help_text: str) -> argparse.ArgumentParser:
-        sub = commands.add_parser(name, parents=[common], help=help_text)
+        sub = commands.add_parser(name, parents=[common], help=help_text, description=help_text)
         sub.set_defaults(func=_run(handler))
         return sub
 
     command("lint", _lint, "report knowledge-base findings (writes nothing)")
-    command("apply", _apply, "lint, then apply the fixes the linter may make")
-    sub = command("index", _index, "regenerate kb/index.md and kb/_generated/*")
+    command("apply", _apply, RUNTIME_ONLY + "lint, then apply the fixes the linter may make")
+    sub = command("index", _index, RUNTIME_ONLY + "regenerate kb/index.md and kb/_generated/*")
     sub.add_argument("--token-budget", type=int, default=6000)
-    sub = command("stale", _stale, "mark claims checked against an older game version stale")
+    sub = command(
+        "stale", _stale, RUNTIME_ONLY + "mark claims checked against an older game version stale"
+    )
     sub.add_argument("--version", required=True, help="current game version")
-    sub = command("renew", _renew, "renew claims whose cited game code did not change")
+    sub = command(
+        "renew", _renew, RUNTIME_ONLY + "renew claims whose cited game code did not change"
+    )
     sub.add_argument("--game-repo", required=True, help="path to the game git repository")
     sub.add_argument("--old", required=True, help="previous game commit")
     sub.add_argument("--new", required=True, help="current game commit")
     sub.add_argument("--version", required=True, help="current game version")
-    command("compact", _compact, "archive the longest-stale claims when too many are stale")
+    command(
+        "compact",
+        _compact,
+        RUNTIME_ONLY + "archive the longest-stale claims when too many are stale",
+    )
     sub = command("hubs", _hubs, "hub health flags")
     sub.add_argument("--size-limit-tokens", type=int, default=2000)
     sub.add_argument("--request", action="store_true", help="write maintenance card requests")
