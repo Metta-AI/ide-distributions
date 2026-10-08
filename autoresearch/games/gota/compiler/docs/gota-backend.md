@@ -100,8 +100,9 @@ compiler context/host/runtime/config, all compiler and gate Python, GotA Python
 and Nim helpers, both build scripts and engine.env. Finalization hashes immutable
 artifacts. G1–G5 use the shared gate modules, with fresh evidence per repair round.
 `--manifest` supplies the downloaded live manifest to G2; null config does not
-skip the gate. G2's Coworld overlay is locked to `coworld==0.1.57` and
-`softmax-cli==0.26.38` and resolves offline. Images and overlay must already exist.
+skip the gate. G2 and `tools/lasthit_eval.py` use the project lockfile through
+`uv run --project PROJECT --locked --offline --python 3.12`; they do not override
+the locked Coworld or softmax-cli versions. Dependencies and images must already exist.
 Pandas is now a locked project dependency; no pandas overlay is needed.
 
 ## Offline native tools

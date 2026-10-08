@@ -67,7 +67,7 @@ def test_goal_audit_reports_all_levels_without_invented_predicates(tmp_path):
     assert audit(mapping, tmp_path)['seats'][0]['issues']
 
 
-def test_native_death_edge_resets_selection_once_without_resetting_policy_state(tmp_path):
+def test_native_death_edge_resets_selection_once_without_resetting_policy_state(prepare_native_tools, tmp_path):
     import json
     import subprocess
 

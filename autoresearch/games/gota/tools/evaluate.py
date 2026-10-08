@@ -14,7 +14,7 @@ def metrics(data: dict, seat: int) -> dict:
     ticks = data.get('ticks')
     if isinstance(ticks, bool) or not isinstance(ticks, int) or ticks <= 0:
         raise ValueError('ticks must be a positive integer')
-    # Native Polyworld 5287c437 sim.nim:3853-3859 outcome values.
+    # Polyworld 801749e5 examples/gods_of_the_arena/sim.nim:3860-3867; Team enum:51.
     outcome = data.get('outcome')
     if outcome not in ('RedTeam', 'BlueTeam', 'draw', 'time_limit'):
         raise ValueError('outcome must be RedTeam, BlueTeam, draw, or time_limit')

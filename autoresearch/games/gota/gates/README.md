@@ -26,7 +26,10 @@ ran and passed. A G4 behavior regression is advisory and does not change its exi
 status; missing or failed measurements do. Use a fresh work directory for G2.
 No command uploads or submits a policy. The manifest and container image must
 already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
-`uv run`; it does not override the locked versions.
+`uv run`; it does not override the locked versions. `tools/lasthit_eval.py` uses
+the same `uv run --project PROJECT --locked --offline --python 3.12` invocation,
+with the project directory resolved from the script rather than the caller's
+working directory. Cache the locked dependencies before either command.
 
 ## Evidence and limits
 
@@ -95,10 +98,20 @@ failed gates. Receipts include effective absolute compiler/configuration paths;
 after moving an install, rebuild to produce valid receipts at the new location.
 No parent repository Git metadata is required, so a `git archive` install works.
 
-The GotA pytest session explicitly prepares current and recorded engine pins and
-builds the current probe and match runner. A cold session therefore needs network
-access or local mirrors and the same native tools. Replay tests build their
-historical helpers offline after setup.
+GotA tests explicitly request `prepare_native_sources` when they inspect pinned
+engine sources or build replay helpers, and `prepare_native_tools` when they
+execute the current probe or match runner. These session fixtures prepare current
+and recorded engine pins; the latter also builds the current helpers with Nim
+2.2.10. A cold native test run needs network access or local mirrors. Replay tests
+build historical helpers offline after source preparation. Pure Python tests,
+including seed, evaluate-binding and mocked compiler tests, need neither Nim nor
+source preparation. The real-agent process guard remains autouse for every GotA
+test. For example, from `autoresearch/`, this needs only the locked Python environment:
+
+```sh
+uv run --locked --offline pytest tests/unit/gota/test_seed.py tests/unit/gota/test_evaluate_binding.py tests/unit/gota/test_native_build.py -q
+```
+
 Unit tests use short real native simulations and recorded telemetry fixtures.
 The fixture envelope assembled by a test is a parser test, not a new episode.
 Full manifest and ten-seed execution evidence is recorded separately in provenance.

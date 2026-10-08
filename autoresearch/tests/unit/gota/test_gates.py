@@ -21,20 +21,20 @@ def gate(name):
     return importlib.import_module(f'games.gota.gates.{name}')
 
 
-def test_real_compile_baseline_and_invalid_syntax(context, tmp_path):
+def test_real_compile_baseline_and_invalid_syntax(prepare_native_tools, context, tmp_path):
     assert gate('g1_lint').run(BASELINE, context).ok
     invalid = tmp_path / 'invalid.bas'
     invalid.write_text('IF THEN\n')
     assert not gate('g1_lint').run(invalid, context).ok
 
 
-def test_original_is_expected_live_compile_rejection(context):
+def test_original_is_expected_live_compile_rejection(prepare_native_tools, context):
     result = gate('g1_lint').run(BASELINE.with_name('submitted-v13.bas'), context)
     assert not result.ok
     assert "'is'" in str(result.details)
 
 
-def test_measured_budget_baseline_and_33rd_array(context, tmp_path):
+def test_measured_budget_baseline_and_33rd_array(prepare_native_tools, context, tmp_path):
     result = gate('g3_budget').run(BASELINE, context)
     assert result.ok
     assert result.details['native_mode'] == {
@@ -44,14 +44,14 @@ def test_measured_budget_baseline_and_33rd_array(context, tmp_path):
     assert not gate('g3_budget').run(invalid, context).ok
 
 
-def test_dynamic_loop_rejected(context, tmp_path):
+def test_dynamic_loop_rejected(prepare_native_tools, context, tmp_path):
     invalid = tmp_path / 'loop.bas'
     invalid.write_text('i = 0\nWHILE i < 30000\ni = i + 1\nWEND\n')
     result = gate('g3_budget').run(invalid, context)
     assert not result.ok
 
 
-def test_print_accounting_real_engine(context, tmp_path):
+def test_print_accounting_real_engine(prepare_native_tools, context, tmp_path):
     policy = tmp_path / 'print.bas'
     policy.write_text('PRINT "X", 12\n')
     result = gate('g3_budget').run(policy, context)
@@ -60,7 +60,7 @@ def test_print_accounting_real_engine(context, tmp_path):
     assert result.details['runtime'][0]['print_bytes'] == 5
 
 
-def test_print_limit_rejected(context, tmp_path):
+def test_print_limit_rejected(prepare_native_tools, context, tmp_path):
     invalid = tmp_path / 'print.bas'
     invalid.write_text('i = 0\nWHILE i < 130\nPRINT "X";\ni = i + 1\nWEND\n')
     assert not gate('g3_budget').run(invalid, context).ok
@@ -121,7 +121,7 @@ def test_screen_requires_all_ten_seeds(context):
     'a=' + '+'.join(['a'] * 21000) + '\n',
     'PRINT "' + 'x' * 1025 + '"\n',
 ], ids=['globals', 'cells', 'source', 'routines', 'static', 'print-bytes'])
-def test_hard_budget_violations(context, tmp_path, source):
+def test_hard_budget_violations(prepare_native_tools, context, tmp_path, source):
     artifact = tmp_path / 'violation.bas'
     artifact.write_text(source)
     assert not gate('g3_budget').run(artifact, context).ok
@@ -146,7 +146,7 @@ def test_screen_rejects_incomplete_metrics():
     ('PRINT', 1, 1),
     ('PRINT "X", 12', 4, 5),
 ])
-def test_print_forms_use_actual_callback_counts(context, tmp_path, statement, events, size):
+def test_print_forms_use_actual_callback_counts(prepare_native_tools, context, tmp_path, statement, events, size):
     artifact = tmp_path / 'print-form.bas'
     artifact.write_text(statement + '\n')
     result = gate('g3_budget').run(artifact, context)
@@ -155,7 +155,7 @@ def test_print_forms_use_actual_callback_counts(context, tmp_path, statement, ev
     assert result.details['runtime'][0]['print_bytes'] == size
 
 
-def test_screen_invalid_artifact_rejected(context, tmp_path):
+def test_screen_invalid_artifact_rejected(prepare_native_tools, context, tmp_path):
     context.seeds = tuple(range(1, 11))
     context.max_ticks = 31200
     invalid = tmp_path / 'screen.bas'
@@ -163,7 +163,7 @@ def test_screen_invalid_artifact_rejected(context, tmp_path):
     assert not gate('g4_screen').run(invalid, context).ok
 
 
-def test_unexecuted_seats_never_pass_budget(context):
+def test_unexecuted_seats_never_pass_budget(prepare_native_tools, context):
     context.max_ticks = 1
     assert not gate('g3_budget').run(BASELINE, context).ok
 

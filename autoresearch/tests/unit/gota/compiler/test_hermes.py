@@ -320,7 +320,8 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     monkeypatch.setattr(sb.subprocess, 'run', processes)
     monkeypatch.setattr(gota_gates, 'verify', lambda *a, **k: {
         f'G{i}': {'passed': True, 'summary': 'fake gates only'} for i in range(1, 6)})
-    import pw_strategy  # Establish the canonical module for restoration after this isolated archive test.
+    # Establish the canonical module for restoration after this isolated archive test.
+    importlib.import_module("pw_strategy")
     monkeypatch.delitem(sys.modules, 'pw_strategy')
     monkeypatch.setattr(sys, 'path', list(sys.path))
     spec = importlib.util.spec_from_file_location('archive_build_binding', distribution / 'games/gota/tools/build.py')

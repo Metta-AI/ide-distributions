@@ -17,7 +17,7 @@ def test_python_tool_help(name):
 
 
 @pytest.fixture(scope='module')
-def expander():
+def expander(prepare_native_sources):
     import shutil
 
     if shutil.which('nim') is None:
