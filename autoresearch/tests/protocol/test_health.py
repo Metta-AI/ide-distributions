@@ -33,7 +33,12 @@ def _check(host: Host, now: datetime.datetime, free: int = 100 * GB) -> health.H
 
 
 def _help(host: Host, text: str) -> list[dict]:
-    return [m for m in host.outbox() if m["kind"] == "help_request" and text in m["title"]]
+    """Help requests whose title contains ``text`` or whose ``about`` names it."""
+    return [
+        m
+        for m in host.outbox()
+        if m["kind"] == "help_request" and (text in m["title"] or text in m.get("about", {}).values())
+    ]
 
 
 def _block(host: Host, task_id: str, reason: str | None = None, run: str = "r-1") -> None:

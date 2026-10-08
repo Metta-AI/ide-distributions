@@ -16,7 +16,7 @@ Per blocked card, tracked by the committed marker
 A card the worker blocked with a reason starting ``tool-fault:`` (doctrine D-26: a broken
 binding, CLI or gate) skips all of that. A requeue or repair would redo the same broken
 step, so the card is never requeued and gets no repair request. It gets one runtime
-``help_request`` quoting the reason and naming the block's run, and the marker becomes
+``help_request`` quoting the reason (the block's run is in its ``about``), and the marker becomes
 ``{state: tool-fault, block_run_id}``; the card stays blocked for a human. The marker is
 keyed on the run, so a later tool-fault block (another run) is reported again. The agent also
 sends its own help_request, which reaches canonical with its handoff (``card finish`` runs
@@ -35,7 +35,8 @@ a second time; it never skips straight to a repair.
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import outbox_has_key, publish_message
 from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
@@ -63,6 +64,11 @@ def blocked_marker_path(canonical: Path, task_id: str) -> Path:
     return ledger_of(canonical) / "health" / "blocked" / f"{task_id}.json"
 
 
+def _refs(card: Card) -> list[dict]:
+    """The card's own refs: what its work is about."""
+    return [{"uri": uri} for uri in card.spec.refs]
+
+
 def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction:
     queue.requeue(card.task_id, "requeued once after a block (health)")
     marker = blocked_marker_path(canonical, card.task_id)
@@ -83,7 +89,6 @@ def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction:
 def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) -> BlockedAction:
     task_id = card.task_id
     covered = promotion.covers_task(canonical, task_id)
-    title = f"Card {task_id} is blocked again after a requeue"
     with canonical_lock(canonical):
         request_id = None
         if not covered:
@@ -104,23 +109,13 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
             )
             commit_runtime_request(canonical, repair_blocked_marker(task_id), spec)
             request_id = marked_request(canonical, repair_blocked_marker(task_id)).stem
-        if not outbox_has_title(canonical, title, exact=True):
-            follow_up = (
-                f"Repair request {request_id} redoes its work."
-                if request_id
-                else "Its promotion's recovery card is the follow-up."
-            )
-            body = (
-                f"Hermes blocked card {task_id} ({card.spec.title}) twice, once after the "
-                f"runtime requeued it. {follow_up} Please check the Hermes logs for the cause "
-                f"(credentials, circuit breaker) and fix it."
-            )
-            publish_runtime(
+        message = runtime_messages.card_blocked_twice(
+            card.spec.title, task_id, card.spec.request_id, request_id, _refs(card)
+        )
+        if not outbox_has_key(canonical, message.key):
+            publish_message(
                 canonical,
-                "help_request",
-                title,
-                body,
-                [],
+                message,
                 allow_no_remote,
                 priority=REPAIR_PRIORITY,
                 expects_response=True,
@@ -133,21 +128,14 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
 
 def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool) -> BlockedAction:
     task_id = card.task_id
-    title = f"Card {task_id} is blocked by a tool fault (run {card.block_run_id})"
+    message = runtime_messages.card_tool_fault(
+        card.spec.title, reason, task_id, card.spec.request_id, str(card.block_run_id), _refs(card)
+    )
     with canonical_lock(canonical):
-        if not outbox_has_title(canonical, title, exact=True):
-            body = (
-                f"The agent blocked card {task_id} ({card.spec.title}) with: {reason!r}. A tool "
-                f"(binding, CLI or gate) failed in a way a retry will not fix, so the runtime "
-                f"did not requeue it and made no repair request. Fix the tool, then unblock "
-                f"the card."
-            )
-            publish_runtime(
+        if not outbox_has_key(canonical, message.key):
+            publish_message(
                 canonical,
-                "help_request",
-                title,
-                body,
-                [],
+                message,
                 allow_no_remote,
                 priority=REPAIR_PRIORITY,
                 expects_response=True,

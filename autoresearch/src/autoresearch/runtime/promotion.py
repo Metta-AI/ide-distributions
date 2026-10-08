@@ -66,7 +66,8 @@ from pathlib import Path
 import jsonschema
 from ulid import ULID
 
-from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import outbox_has_key, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -85,6 +86,7 @@ from autoresearch.runtime.ledger import (
     now_iso,
 )
 from autoresearch.softmax_tool.protocol import Softmax
+from autoresearch.softmax_tool.versions import current_baseline
 
 CHAMPION_PATH = "strategy/STRATEGY.md"
 PROMOTION_FILE_REL = ".supervisor/ledger/promotion.json"
@@ -338,6 +340,10 @@ def champion_status(ctx: RunContext, sm: Softmax, league_id: str) -> tuple[str |
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     if not published:
         if on_board is None:
+            # A14: before any league entry, the bootstrap baseline is the comparison champion.
+            baseline = current_baseline(RecordStore(Layout(ctx.canonical)))
+            if baseline is not None and baseline.platform_policy_version_id is not None:
+                return baseline.platform_policy_version_id, ""
             return None, f"no champion known: nothing promoted and no {league_id} leaderboard entry"
         return on_board, ""
     latest = published[-1].platform_policy_version_id
@@ -354,7 +360,9 @@ def champion_status(ctx: RunContext, sm: Softmax, league_id: str) -> tuple[str |
 def current_champion(ctx: RunContext, sm: Softmax, league_id: str) -> str | None:
     """The champion's platform policy version id: the latest ``published`` promotion,
     confirmed against the Softmax leaderboard for our player. Before any promotion is
-    published the leaderboard champion is taken as is (amendment A9). None when no champion
+    published the leaderboard champion is taken as is (amendment A9), and with no leaderboard
+    entry either, the current baseline version uploaded by ``softmax upload-baseline``
+    (amendment A14: it is the comparison champion, never a promotion). None when no champion
     is known, or when the ledger and the leaderboard disagree (logged; callers must refuse
     to submit)."""
     return champion_status(ctx, sm, league_id)[0]
@@ -782,23 +790,21 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
     lock. Published before the flag is committed, so a crash in between can at worst repeat
     it; the outbox is checked first to make that rare."""
     canonical = ctx.canonical
-    key = f"promote-recover-help:{promotion.id}"
-    title = f"Promotion {promotion.id} needs an operator ({key})"
-    if not outbox_has_title(canonical, key):
-        body = (
-            f"Promotion {promotion.id} submitted {promotion.platform_policy_version_id} "
-            f"(submission {promotion.submission_id}) for {promotion.experiment}, but "
-            f"{len(promotion.recovery_requests)} recovery cards "
-            f"({', '.join(promotion.recovery_requests)}) ended without recording the champion. "
-            f"No further recovery card is created and no new promotion can start until an "
-            f"operator records the champion {CHAMPION_PATH} from {promotion.candidate_ref} at "
-            f"{promotion.candidate_sha} or aborts the promotion."
-        )
-        refs = [{"uri": f"ar://experiment/{promotion.experiment}"}]
-        publish_runtime(canonical, "help_request", title, body, refs, allow_no_remote=True)
+    message = runtime_messages.promotion_stuck(
+        promotion_id=promotion.id,
+        recovery_requests=list(promotion.recovery_requests),
+        champion_path=CHAMPION_PATH,
+        submission_id=promotion.submission_id,
+        policy_version_id=promotion.platform_policy_version_id,
+        candidate_ref=promotion.candidate_ref,
+        candidate_sha=promotion.candidate_sha,
+        refs=[{"uri": f"ar://experiment/{promotion.experiment}"}],
+    )
+    if not outbox_has_key(canonical, message.key):
+        publish_message(canonical, message, allow_no_remote=True)
     updated = replace(promotion, help_requested=True, updated_at=now_iso())
     _save(canonical, updated, f"promotion {promotion.id}: help requested")
-    return Action("help_requested", promotion.id, title)
+    return Action("help_requested", promotion.id, message.title)
 
 
 def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:

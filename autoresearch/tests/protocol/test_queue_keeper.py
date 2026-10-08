@@ -32,7 +32,12 @@ def host(tmp_path) -> Host:
 
 
 def _help_requests(host: Host, text: str = "") -> list[dict]:
-    return [m for m in host.outbox() if m["kind"] == "help_request" and text in m["title"]]
+    """Help requests whose title contains ``text`` or whose ``about`` names it."""
+    return [
+        m
+        for m in host.outbox()
+        if m["kind"] == "help_request" and (text in m["title"] or text in m.get("about", {}).values())
+    ]
 
 
 def _subsequence(patterns: list[str], subjects: list[str]) -> bool:
@@ -472,7 +477,7 @@ def test_skipped_staged_messages_are_reported_once(host):
     results = [PublishResult(skipped={"M-01K00000000000000000000000": ["kind: bad"]})]
     report_skipped(host.canonical, results, allow_no_remote=False)
     report_skipped(host.canonical, results, allow_no_remote=False)
-    notes = [m for m in host.outbox() if "was not published" in m["title"]]
+    notes = [m for m in host.outbox() if m["title"].startswith("Not published")]
     assert len(notes) == 1 and "kind: bad" in notes[0]["body"]
     assert host.clean()
 
@@ -512,13 +517,13 @@ def test_tool_fault_sequence_publishes_the_agents_help_request_and_keeps_the_car
     assert host.queue.get(worker.task_id).state == "blocked"
     [agent_help] = _help_requests(host, "softmax build E-1 failed")  # merged via the handoff
     assert "FileNotFoundError" in agent_help["body"]
-    [runtime_help] = _help_requests(host, "blocked by a tool fault")
-    assert worker.task_id in runtime_help["title"]
+    [runtime_help] = _help_requests(host, "Blocked by a tool fault")
+    assert runtime_help["about"]["card"] == worker.task_id
     assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
 
     assert host.tick(at(3)).blocked == []  # nothing more
     assert len(_help_requests(host, "softmax build E-1 failed")) == 1
-    assert len(_help_requests(host, "blocked by a tool fault")) == 1
+    assert len(_help_requests(host, "Blocked by a tool fault")) == 1
     assert host.clean()
 
 

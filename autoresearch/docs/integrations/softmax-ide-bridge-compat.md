@@ -61,23 +61,31 @@ that contract:
   On the box today 4 of 9 outbox messages have it. The bridge's `Outbound` model must default it to
   `None`.
 - Task acknowledgement: when the task's card is published, the runtime publishes a `note`
-  (`from: runtime`, title `Task <id> done`) with `in_reply_to` set to the bridge's task id. The
-  bridge's "a note in reply to a task id closes the IDE task" holds.
+  (`from: runtime`) with `in_reply_to` set to the bridge's task id. The bridge's "a note in reply
+  to a task id closes the IDE task" holds. Its title is the outcome and the task's own title
+  (`Done: Profile macromackie's opening`); its body is the card's completion summary (see
+  "Outbox messages are not written for humans" below). The card, request, merge commit and
+  outcome are in the additive `about` field, never in the title or body
+  (`schemas/comms/examples/outbound/note/ack-of-ide-bridge-task.json`).
 - Files are never rewritten or moved, so the bridge's retry ("finds the file and writes nothing")
   stays correct.
 
 ## Notes for the bridge
 
 1. **A note in reply to a task id is not always "done".** The runtime also answers a task with a
-   note when it cannot become a card: `Task <id> rejected` (bad refs, admission rejected it) or
-   `Inbound <id> rejected` (the file is invalid: wrong `mode`, missing field, `id` not equal to the
-   file name, no `created`). Both are acknowledgements under §7 ("applied, declined with a reason, or
-   noted"). The IDE should show the note as the outcome rather than assume success.
-2. **"Done" covers every card outcome.** `Task <id> done` is published when the card's work is
-   published, whatever the card's outcome. The body names it (`outcome 'done'`, `'blocked'`, ...).
+   note when it cannot become a card: `Not started: <task title>` (bad refs, admission rejected
+   it; the body says why and what to send instead) or `Not delivered: the message is not valid`
+   (the file is invalid: wrong `mode`, missing field, `id` not equal to the file name, no
+   `created`; the body lists the problems). Both are acknowledgements under §7 ("applied, declined
+   with a reason, or noted"). The IDE should show the note as the outcome rather than assume
+   success. To tell them apart without parsing the title, read `about.outcome`: `rejected` for
+   these two, the card's outcome for an acknowledgement.
+2. **The acknowledgement covers every card outcome.** It is published when the card's work is
+   published, whatever the card's outcome. The title starts with the outcome: `Done:`,
+   `Partly done:`, `Dropped:`, `Failed:` or `Blocked:`; `about.outcome` has the raw value.
 3. **A stop is a request, not a cancel.** The stop `steer` gives the agent a P0 card, and the agent
    decides what to do (for example drop the task's card if it is still pending). If the task's card is
-   already running or finished, its `Task <id> done` note can still arrive after the stop. The bridge
+   already running or finished, its acknowledgement can still arrive after the stop. The bridge
    should not reopen or re-complete an IDE task it has cancelled.
 4. **A rejected id is final.** An invalid direct write stays in `comms/inbox/` uncommitted and is
    never delivered, and its id is recorded in `.supervisor/ledger/inbound-rejected/`. Rewriting the
@@ -143,9 +151,9 @@ Outbox messages are written for a Preston-role agent that can read the whole wor
 message and record ids, `ar://` references and assumed context on purpose. The bridge says every
 outbox message in the IDE chat as `<title>\n\n<body>`, and it uses the acknowledging note as the IDE
 task's outcome text, so a coach sees the agent-facing text verbatim. Two real messages from a
-live run show the problem:
+live run showed the problem:
 
-- A task acknowledgement, which becomes the IDE task's outcome:
+- A task acknowledgement, which became the IDE task's outcome:
   `Task I-01M4EJ7ABV097KEMKSBV76N9T9 done` / `Card t_6c0a018c (request
   Q-01M4EJ9RQMHVH6XK3N4T760MNB) created for inbound task I-01M4EJ7ABV097KEMKSBV76N9T9, finished
   with outcome 'done' and was published at f5e50b4909eb…`.
@@ -159,10 +167,14 @@ What changes on each side:
   they need to do anything". Say the result in chat. The agent can resolve the `ar://` references
   with the profile CLI (`"$AUTORESEARCH_CLI" comms resolve <uri>`). Keep the raw message available
   as a detail. Use the same plain text for the task outcome when closing an IDE task.
-- **The distribution:** runtime acknowledgements (the first example) are being rewritten to say
-  in plain words what the card did, with ids moved out of the text and into `refs`. That makes them
-  useful to Preston, but they remain agent-facing. The translation step is still the place where
-  text becomes fit for a human.
+- **The distribution (done):** every runtime-generated message now says in plain words what
+  happened and what, if anything, the reader must do (`src/autoresearch/comms/runtime_messages.py`).
+  The first example now reads `Done: <task title>`, and its body is the card's own completion
+  summary: the `summary` it gave `kanban_complete`, else the opening paragraph of its journal,
+  then what follows from the outcome and the titles of the messages the card sent. Ids and commits
+  moved into `refs` and the additive `about` field. These messages are still agent-facing, and the
+  card's summary is the agent's own words (it may name records or `ar://` references), so the
+  translation step is still the place where text becomes fit for a human.
 
 Our own test console (`autoresearch-shim/`) does the same: its feed shows the chat agent's
 plain-language version of each message by default, and the raw message behind "Details".

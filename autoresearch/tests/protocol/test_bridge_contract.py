@@ -150,6 +150,10 @@ def test_bridge_task_becomes_a_card_and_its_note_closes_the_ide_task(board):
     ]
     [(name, ack)] = acks
     assert ack["kind"] == "note" and ack["title"] and ack["body"]
+    # Plain words: the bridge shows these as the IDE task's outcome (runtime_messages).
+    assert ack["title"] == "Done: Profile macromackie's opening"
+    assert ack["body"] == "Did things."  # the card's journal summary
+    assert TASK_ID not in ack["title"] + ack["body"] and ack["about"]["outcome"] == "done"
     assert int(name.split("-", 1)[0]) == ack["seq"]  # the bridge skips by the name's seq
     assert name == f"{ack['seq']:08d}-{ack['id']}.json"
     assert _delivery(board, TASK_ID)["acknowledged_by"] == ack["id"]
@@ -213,6 +217,8 @@ def test_a_symlink_is_rejected_and_other_writes_still_route(board, tmp_path):
     assert _committed(board, f"comms/inbox/{STOP_ID}.json") is None
     [note] = _runtime_notes(board, STOP_ID)
     assert "regular file" in note["body"]
+    assert note["title"] == "Not delivered: the message is not valid"
+    assert note["about"]["outcome"] == "rejected"  # how the bridge tells it from a card outcome
     assert len(_requests(board)) == 1 and _route(board) == []
 
 

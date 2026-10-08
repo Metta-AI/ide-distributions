@@ -33,7 +33,11 @@ Readers see only committed outbox files (``reader``), never a half-done publicat
 Acknowledgement (C11). ``publish_hook`` then moves the inbound the publishing card is
 responsible for (``comms.delivery`` records) to ``acknowledged``: a ``reply``/``steer`` by
 the card's published ``note`` with ``in_reply_to``, a ``task`` by a runtime note published
-here (found again in the outbox on a rerun, so it is published once).
+here (found again in the outbox on a rerun, so it is published once). That note quotes the
+card's completion summary (``runtime_messages.task_acknowledgement``).
+
+Runtime messages. Runtime code publishes only ``runtime_messages.RuntimeMessage``s, through
+``publish_message``; ``publish_runtime`` is the free-text primitive under it.
 
 Locking. Every function here must run under ``canonical.lock`` held by the caller, and never
 takes it: ``process_handoffs`` calls ``publish_hook`` while it holds the (non-reentrant) lock.
@@ -44,7 +48,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoresearch.comms import delivery, kinds
+import frontmatter
+
+from autoresearch.comms import delivery, kinds, runtime_messages
 from autoresearch.comms.envelope import (
     FROM_AGENT,
     FROM_RUNTIME,
@@ -55,10 +61,18 @@ from autoresearch.comms.envelope import (
     now_iso,
     ref_dict,
 )
+from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
+from autoresearch.plugin.adapters import KANBAN_EVENTS_FILE
+from autoresearch.records.registry import entity_of_id
 
 OUTBOX_DIR = "comms/outbox"
+INBOX_DIR = "comms/inbox"
+# Written by the plugin's kanban_task_completed hook (runctx.runtime_dir).
+KANBAN_EVENTS = f".supervisor/runtime/{KANBAN_EVENTS_FILE}"
+SUMMARY_LIMIT = 600  # characters of a card's summary quoted in its task acknowledgement
+REFERENCED_RECORDS = 10  # journal and created records a task acknowledgement refers to
 STAGED_DIR = "comms/staged"
 RECEIPTS_DIR = ".supervisor/ledger/published"
 REMOTE = "origin"
@@ -107,14 +121,13 @@ def _outbox_files(canonical: Path) -> dict[str, tuple[int, Path]]:
     return found
 
 
-def outbox_has_title(canonical: Path, text: str, *, exact: bool = False) -> bool:
-    """True if a published message's title contains ``text`` (equals it, with ``exact``).
-    Runtime jobs use it to avoid publishing the same help_request or note twice when a crash
-    lands between publishing and committing their own dedupe marker."""
+def outbox_has_key(canonical: Path, key: str) -> bool:
+    """True if a published message has ``runtime_key`` == ``key``. Runtime jobs use it to
+    publish a help_request or note once, also when a crash lands between publishing and
+    committing their own dedupe marker (``runtime_messages``)."""
     for _seq, path in _outbox_files(Path(canonical)).values():
         message = read_json(path)
-        title = str(message.get("title", "")) if isinstance(message, dict) else ""
-        if (title == text) if exact else (text in title):
+        if isinstance(message, dict) and message.get("runtime_key") == key:
             return True
     return False
 
@@ -364,6 +377,24 @@ def publish_runtime(
     return PublishResult(seqs=[seq], pushed=push(canonical, allow_no_remote))
 
 
+def publish_message(
+    canonical: Path, message: RuntimeMessage, allow_no_remote: bool = False, **fields
+) -> PublishResult:
+    """Publish one runtime message built by ``runtime_messages`` (the only way runtime code
+    publishes): its refs, plus its ``about`` and ``runtime_key`` fields. ``fields`` adds
+    envelope fields such as ``priority``, ``expects_response`` or ``in_reply_to``."""
+    return publish_runtime(
+        canonical,
+        message.kind,
+        message.title,
+        message.body,
+        message.refs,
+        allow_no_remote,
+        **message.fields(),
+        **fields,
+    )
+
+
 # --- inbound acknowledgement (C11) ---
 
 
@@ -399,30 +430,117 @@ def _is_responsible(record: dict, handoff: dict) -> bool:
     )
 
 
+def _kanban_summary(canonical: Path, card: str, run_id: str) -> str | None:
+    """The ``summary`` the card gave ``kanban_complete``, as the plugin's
+    ``kanban_task_completed`` hook recorded it. That file is disposable runtime state and the
+    serial fallback has none, so a missing file or event is normal."""
+    try:
+        lines = (canonical / KANBAN_EVENTS).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if (
+            isinstance(event, dict)
+            and event.get("event") == "kanban_task_completed"
+            and event.get("task_id") == card
+            and str(event.get("run_id")) == str(run_id)
+        ):
+            summary = event.get("summary")
+            return _clip(summary) if isinstance(summary, str) else None
+    return None
+
+
+def _clip(text: str) -> str | None:
+    line = " ".join(text.split())
+    if len(line) > SUMMARY_LIMIT:
+        line = line[:SUMMARY_LIMIT].rsplit(" ", 1)[0] + "…"
+    return line or None
+
+
+def _journal(canonical: Path, handoff: dict) -> tuple[str | None, str | None]:
+    """(journal id, its opening paragraph) of the card's journal at its merge. The journal's
+    first paragraph is "what you did, what you found, and what is open" (complete-card)."""
+    path = handoff.get("journal")
+    content = gitops.show(canonical, handoff["merge_sha"], path) if path else None
+    if content is None:
+        return None, None
+    doc = frontmatter.loads(content.decode("utf-8", errors="replace"))
+    lead = re.split(r"^#{1,6} ", doc.content, maxsplit=1, flags=re.MULTILINE)[0]
+    paragraph = next((part for part in re.split(r"\n\s*\n", lead) if part.strip()), "")
+    journal_id = doc.metadata.get("id")
+    return (str(journal_id) if journal_id else None), _clip(paragraph)
+
+
+def _sent_titles(canonical: Path, card: str) -> list[str]:
+    """Titles of the messages this card published, in outbox order."""
+    titles = []
+    for _seq, path in sorted(_outbox_files(canonical).values()):
+        message = read_json(path)
+        if not isinstance(message, dict) or message.get("card") != card:
+            continue
+        if message.get("from") == FROM_AGENT and isinstance(message.get("title"), str):
+            titles.append(message["title"])
+    return titles
+
+
+def _ack_refs(handoff: dict, journal_id: str | None) -> list[dict]:
+    """The handoff record (read at the publishing HEAD), then the journal and the records the
+    card created, read at its merge."""
+    refs = [{"uri": f"ar://handoff/{handoff['card']}/{handoff['run_id']}", "role": "subject"}]
+    record_ids = [journal_id] if journal_id else []
+    record_ids += [rid for rid in handoff["report"]["created"] if rid not in record_ids]
+    for record_id in record_ids[:REFERENCED_RECORDS]:
+        try:
+            entity = entity_of_id(record_id).name
+        except ValueError:
+            continue
+        refs.append(
+            {"uri": f"ar://{entity}/{record_id}", "rev": handoff["merge_sha"], "role": "evidence"}
+        )
+    return refs
+
+
+def _task_title(canonical: Path, inbound_id: str) -> str | None:
+    content = gitops.show(canonical, "HEAD", f"{INBOX_DIR}/{inbound_id}.json")
+    message = json.loads(content) if content is not None else None
+    title = message.get("title") if isinstance(message, dict) else None
+    return title if isinstance(title, str) else None
+
+
 def _task_acknowledgement(
     canonical: Path, inbound_id: str, handoff: dict, backlog: bool, allow_no_remote: bool
 ) -> str:
     """The runtime note acknowledging an inbound ``task`` (published once: a rerun after a
-    crash finds the note already in the outbox)."""
+    crash finds the note already in the outbox). Its title is the task as the sender phrased
+    it plus the outcome; its body is the card's own completion summary (its Kanban summary,
+    else the opening of its journal), then what follows from the outcome and the titles of
+    the messages the card sent. Ids and commits go into ``refs`` and ``about``."""
     found = find_reply(canonical, inbound_id, FROM_RUNTIME)
     if found is not None:
         return found
-    if backlog:
-        how = f"took inbound task {inbound_id} from the planning backlog"
-    else:
-        how = f"created for inbound task {inbound_id},"
-    body = (
-        f"Card {handoff['card']} (request {handoff['request_id']}) {how} finished with "
-        f"outcome {handoff.get('outcome')!r} and was published at {handoff['merge_sha']}."
+    journal_id, journal_summary = _journal(canonical, handoff)
+    outcome = str(handoff.get("outcome"))
+    message = runtime_messages.task_acknowledgement(
+        task_title=_task_title(canonical, inbound_id),
+        outcome=outcome,
+        summary=_kanban_summary(canonical, handoff["card"], handoff["run_id"]) or journal_summary,
+        sent_titles=_sent_titles(canonical, handoff["card"]),
+        backlog=backlog,
+        has_journal=journal_id is not None,
+        refs=_ack_refs(handoff, journal_id),
+        about={
+            "card": handoff["card"],
+            "request": handoff["request_id"],
+            "merge_commit": handoff["merge_sha"],
+            "outcome": outcome,
+        },
     )
-    result = publish_runtime(
-        canonical,
-        "note",
-        f"Task {inbound_id} done",
-        body,
-        [],
-        allow_no_remote=allow_no_remote,
-        in_reply_to=inbound_id,
+    result = publish_message(
+        canonical, message, allow_no_remote=allow_no_remote, in_reply_to=inbound_id
     )
     return message_id_of_seq(canonical, result.seq)
 
@@ -441,18 +559,20 @@ def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = 
         if record["state"] != "routed" or not _is_responsible(record, handoff):
             continue
         ack = kinds.get("inbound", record["kind"]).ack
-        if ack == "none":
-            continue
-        if ack == "runtime":
+        if ack == "card":
+            # Only the responsible card's own note counts: a card that showed the message
+            # read-only and answered it anyway does not acknowledge it.
+            message_id = find_reply(canonical, inbound_id, FROM_AGENT, card=handoff["card"])
+        elif ack == "runtime":
             backlog = record["responsible"]["backlog"]
             message_id = _task_acknowledgement(
                 canonical, inbound_id, handoff, backlog, allow_no_remote
             )
             _checkpoint("ack_published")
+        elif ack == "none":
+            continue
         else:
-            # Only the responsible card's own note counts: a card that showed the message
-            # read-only and answered it anyway does not acknowledge it.
-            message_id = find_reply(canonical, inbound_id, FROM_AGENT, card=handoff["card"])
+            raise ValueError(f"inbound kind {record['kind']!r} has unknown ack {ack!r}")
         if message_id is None:
             continue
         acknowledged = delivery.moved(record, "acknowledged", acknowledged_by=message_id)

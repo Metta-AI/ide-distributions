@@ -41,6 +41,8 @@
     "in_reply_to": {"description": "Id of the message (M-id) or inbound message (an I-id, or an external agent's own id such as <player id>:task:<key>) this answers. An acknowledgement is a note with in_reply_to.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(?!\\n)$"},
     "supersedes": {"description": "Id of an earlier message this one replaces (that message becomes withdrawn).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
     "expires": {"description": "ISO 8601 time after which an unanswered message is expired; null for never.", "type": ["string", "null"], "minLength": 1},
+    "about": {"description": "Runtime messages only: name -> id of what the message is about (for example card, request, merge_commit, outcome). Ids and commits go here or in refs, never in title or body (autoresearch.comms.runtime_messages).", "type": "object", "additionalProperties": {"type": "string"}},
+    "runtime_key": {"description": "Runtime messages only: a stable key the runtime uses to publish a message once (for example health:disk:2026-10-08). Readers may ignore it.", "type": "string", "minLength": 1},
     "card": {"description": "Outbox only: the task id of the card whose handoff published it (set by the publisher, never by the worker); a reply's thread is routed by it.", "type": "string", "minLength": 1},
     "seq": {"description": "Outbox only: the gap-free sequence number.", "type": "integer", "minimum": 1},
     "published_rev": {"description": "Outbox only: canonical commit the message was published at (for a staged message, the merge commit that brought it in).", "type": "string", "pattern": "^[0-9a-f]{40}(?!\\n)$"}

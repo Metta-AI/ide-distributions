@@ -22,7 +22,7 @@ fires and ends when it stops). The committed marker
 ``signals.json`` is lost (host rebuilt), a still-firing signal continues its latest
 escalated episode from that marker instead of escalating again. A signal that clears and
 returns is a new episode and can escalate again. A crash between publication and the marker
-commit is caught by looking for the key and episode in the outbox titles first. Identity mismatch is not escalated: it is a hard stop
+commit is caught by looking for the key and episode in the outbox (``runtime_key``) first. Identity mismatch is not escalated: it is a hard stop
 that preflight already answers with a pause and a help request (C6).
 
 Signals and their data sources:
@@ -78,7 +78,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import outbox_has_key, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -414,7 +415,7 @@ def _stale_card(inputs: _Inputs) -> list[_Raw]:
         at = admitted.get(card.task_id)
         if at is not None and inputs.now - at > limit:
             days = (inputs.now - at).days
-            detail = f"card {card.task_id} ({card.spec.title}) has been pending {days} days"
+            detail = f"the card “{card.spec.title}” has been pending {days} days"
             found.append(_Raw(STALE_CARD, card.task_id, detail))
     return found
 
@@ -520,19 +521,14 @@ def _escalate(ctx: RunContext, signal: Signal, first_iteration: int, allow_no_re
     (once per episode). Takes the canonical lock."""
     canonical = ctx.canonical
     marker = escalation_marker_path(canonical, signal.key, signal.first_seen)
-    # The stable part of the title (key and episode), for the outbox check.
-    prefix = f"Signal {signal.key} (since {signal.first_seen}) persists"
-    title = f"{prefix} after {signal.count - 1} iterations"
+    message = runtime_messages.signal_persists(
+        signal.code, signal.entity, signal.detail, signal.first_seen, signal.count - 1
+    )
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not outbox_has_title(canonical, prefix):
-            body = (
-                f"The self-monitoring signal {signal.key} first fired at {signal.first_seen} and "
-                f"still fires {signal.count - 1} iterations later, after the agent's response. "
-                f"Detail: {signal.detail}. Please look at the research state and steer."
-            )
-            publish_runtime(canonical, "help_request", title, body, [], allow_no_remote)
+        if not outbox_has_key(canonical, message.key):  # its key names the episode
+            publish_message(canonical, message, allow_no_remote)
         record = {
             "key": signal.key,
             "first_seen": signal.first_seen,

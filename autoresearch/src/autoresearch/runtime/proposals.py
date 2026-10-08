@@ -5,8 +5,8 @@ Skill sweep. Hermes writes agent-created skills to ``$HERMES_HOME/local/skills-s
 (bootstrap sets ``skills.create_dir``; outside every workspace). ``sweep_skills`` copies each
 skill directory (one with a ``SKILL.md``) that is new or changed into canonical
 ``skills-proposed/<name>/`` (replacing what was there), commits it, and publishes one runtime
-``suggestion`` with ref ``ar://skill-proposal/<name>``. The suggestion's title carries the
-skill's content hash, so a crash between the commit and the publication is finished by the
+``suggestion`` with ref ``ar://skill-proposal/<name>``. The suggestion's ``runtime_key``
+carries the skill's content hash, so a crash between the commit and the publication is finished by the
 next run, and an unchanged skill is never suggested twice. A changed skill's new suggestion
 ``supersedes`` the previous open one.
 
@@ -23,9 +23,9 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from autoresearch.comms import delivery
+from autoresearch.comms import delivery, runtime_messages
 from autoresearch.comms.inbound import derived_status, parse_time
-from autoresearch.comms.publisher import publish_runtime
+from autoresearch.comms.publisher import publish_message
 from autoresearch.comms.reader import read_since
 from autoresearch.io import gitops
 from autoresearch.runctx import RunContext
@@ -63,15 +63,9 @@ def _outbox(canonical: Path) -> list[dict]:
     return read_since(canonical, "proposals", after=0, include_unknown=True)
 
 
-def _suggestion_title(name: str, tree_hash: str) -> str:
-    return f"Skill proposal: {name} ({tree_hash})"
-
-
 def _previous_suggestion(outbox: list[dict], name: str) -> str | None:
-    prefix = f"Skill proposal: {name} ("
-    found = [
-        m["id"] for m in outbox if m.get("kind") == "suggestion" and m["title"].startswith(prefix)
-    ]
+    prefix = runtime_messages.skill_proposal_key_prefix(name)
+    found = [m["id"] for m in outbox if str(m.get("runtime_key", "")).startswith(prefix)]
     return found[-1] if found else None
 
 
@@ -92,21 +86,15 @@ def sweep_skills(ctx: RunContext, allow_no_remote: bool = False) -> list[str]:
                     shutil.rmtree(target)
                 shutil.copytree(skill, target)
                 commit(canonical, [target], f"skills-proposed: {skill.name}")
-            title = _suggestion_title(skill.name, _tree_hash(staged))
-            outbox = _outbox(canonical)
-            if any(message["title"] == title for message in outbox):
-                continue
-            body = (
-                f"The agent wrote or changed the skill {skill.name}. It is in "
-                f"{SKILLS_PROPOSED}/{skill.name}/ and is not adopted. Reply adopt, reject, or "
-                f"revise."
+            message = runtime_messages.skill_proposal(
+                skill.name, _tree_hash(staged), SKILLS_PROPOSED, gitops.head(canonical)
             )
-            publish_runtime(
+            outbox = _outbox(canonical)
+            if any(m.get("runtime_key") == message.key for m in outbox):
+                continue
+            publish_message(
                 canonical,
-                "suggestion",
-                title,
-                body,
-                [{"uri": f"ar://skill-proposal/{skill.name}", "rev": gitops.head(canonical)}],
+                message,
                 allow_no_remote,
                 expects_response=True,
                 supersedes=_previous_suggestion(outbox, skill.name),
@@ -172,12 +160,9 @@ def reraise(ctx: RunContext, now: datetime.datetime, allow_no_remote: bool = Fal
             )
             if now - latest < RERAISE_EVERY:
                 continue
-            publish_runtime(
+            publish_message(
                 canonical,
-                "suggestion",
-                f"Still open: {message['title']}",
-                f"No reply yet to {message['id']} (sent {message['created']}). {message['body']}",
-                [ref | {"rev": gitops.head(canonical)} for ref in message["refs"]],
+                runtime_messages.proposal_still_open(message, gitops.head(canonical)),
                 allow_no_remote,
                 expects_response=True,
                 thread=message.get("thread") or message["id"],

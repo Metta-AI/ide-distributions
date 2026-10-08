@@ -63,7 +63,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoresearch.comms import delivery, kinds
+from autoresearch.comms import delivery, kinds, runtime_messages
 from autoresearch.comms.envelope import FROM_RUNTIME
 from autoresearch.comms.inbound import (
     adopt_direct_writes,
@@ -75,11 +75,12 @@ from autoresearch.comms.publisher import (
     commit_and_push,
     find_reply,
     message_id_of_seq,
-    publish_runtime,
+    publish_message,
 )
 from autoresearch.comms.reader import get as get_published
 from autoresearch.comms.reader import read_since
 from autoresearch.comms.resolver import ResolveError, resolve
+from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.kb.requests import bracketed, has_marker
@@ -124,6 +125,12 @@ def _checkpoint(step: str) -> None:
 
 
 # --- reading ---
+
+
+def _text_field(message: dict, name: str) -> str | None:
+    """A text field of an inbound message, which may not have passed validation."""
+    value = message.get(name)
+    return value if isinstance(value, str) else None
 
 
 def _one_line(text: str, limit: int) -> str:
@@ -301,28 +308,26 @@ def _route_to_backlog(canonical: Path, record: dict, message: dict, note: str) -
 
 
 def _answer_with_note(
-    canonical: Path, record: dict, title: str, body: str, allow_no_remote: bool
+    canonical: Path, record: dict, note: RuntimeMessage, allow_no_remote: bool
 ) -> list[Action]:
     """Publish (once) a runtime note answering the inbound, and acknowledge it with that."""
     message_id = find_reply(canonical, record["id"], FROM_RUNTIME)
     if message_id is None:
-        result = publish_runtime(
-            canonical,
-            "note",
-            title,
-            body,
-            [],
-            allow_no_remote=allow_no_remote,
-            in_reply_to=record["id"],
+        result = publish_message(
+            canonical, note, allow_no_remote=allow_no_remote, in_reply_to=record["id"]
         )
         message_id = message_id_of_seq(canonical, result.seq)
     _checkpoint("note_published")
     answered = delivery.moved(
-        record, "acknowledged", note=title, responsible=dict(NO_ONE), acknowledged_by=message_id
+        record,
+        "acknowledged",
+        note=note.title,
+        responsible=dict(NO_ONE),
+        acknowledged_by=message_id,
     )
     path = delivery.write_record(canonical, answered)
     commit_and_push(canonical, [path], f"inbound {record['id']}: answered by {message_id}")
-    return [Action("rejected", record["id"], body)]
+    return [Action("rejected", record["id"], note.body)]
 
 
 # --- routing rules ---
@@ -354,7 +359,9 @@ def _task_problems(canonical: Path, message: dict) -> list[str]:
         try:
             resolve(canonical, uri)
         except ResolveError as error:
-            problems.append(f"refs: {uri} does not resolve at canonical HEAD: {error}")
+            problems.append(
+                f"refs: {uri} does not point to anything in the workspace ({error})"
+            )
     return problems
 
 
@@ -466,11 +473,8 @@ def _route_task(
     canonical, inbound_id = ctx.canonical, record["id"]
     problems = _task_problems(canonical, message)
     if problems:
-        body = f"Inbound task {inbound_id} was not turned into a card:\n\n" + "\n".join(
-            f"- {problem}" for problem in problems
-        )
-        title = f"Task {inbound_id} rejected"
-        return _answer_with_note(canonical, record, title, body, allow_no_remote)
+        note = runtime_messages.task_not_started(_text_field(message, "title"), problems)
+        return _answer_with_note(canonical, record, note, allow_no_remote)
     if message["mode"] == "planning" and planning_owned(canonical, queue):
         return _route_to_backlog(canonical, record, message, "planning is owned")
     return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
@@ -530,22 +534,13 @@ def _reject_direct_writes(
     actions, paths = [], []
     for inbound_id, problems in sorted(rejected.items()):
         message_id = find_reply(canonical, inbound_id, FROM_RUNTIME)
-        body = (
-            f"The inbound message {inbound_id} in comms/inbox/ is not valid and was not "
-            "delivered: " + "; ".join(problems) + ". Write a corrected message with a new id."
-        )
         if message_id is None:
-            result = publish_runtime(
-                canonical,
-                "note",
-                f"Inbound {inbound_id} rejected",
-                body,
-                [],
-                allow_no_remote=allow_no_remote,
-                in_reply_to=inbound_id,
+            note = runtime_messages.inbox_write_rejected(problems)
+            result = publish_message(
+                canonical, note, allow_no_remote=allow_no_remote, in_reply_to=inbound_id
             )
             message_id = message_id_of_seq(canonical, result.seq)
-            actions.append(Action("write_rejected", inbound_id, body))
+            actions.append(Action("write_rejected", inbound_id, note.body))
         paths.append(delivery.write_rejection(canonical, inbound_id, problems, message_id))
     if paths:
         commit_and_push(canonical, paths, f"inbound: {len(paths)} direct writes rejected")
@@ -597,9 +592,8 @@ def _closed(
     canonical = ctx.canonical
     reason = receipt.get("reason", "")
     if record["kind"] == "task" and receipt["state"] == "rejected" and PLANNING_OWNED not in reason:
-        title = f"Task {record['id']} rejected"
-        body = f"Admission rejected the card for inbound task {record['id']}: {reason}"
-        return [], _answer_with_note(canonical, record, title, body, allow_no_remote)
+        note = runtime_messages.task_not_admitted(_text_field(message, "title"), reason)
+        return [], _answer_with_note(canonical, record, note, allow_no_remote)
     note = f"request {receipt['request_id']} {receipt['state']} without acknowledging it"
     return _backlog_record(canonical, record, message, note), [
         Action("returned", record["id"], note, request_id=receipt["request_id"])

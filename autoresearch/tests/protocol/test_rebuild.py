@@ -361,7 +361,11 @@ def test_uncommitted_handoff_debris_does_not_block_readmission(host, tmp_path):
 def _help_requests(host: Host, text: str) -> list[dict]:
     outbox = host.canonical / "comms" / "outbox"
     messages = [read_json(path) for path in sorted(outbox.glob("*.json"))]
-    return [m for m in messages if m.get("kind") == "help_request" and text in m["title"]]
+    return [
+        m
+        for m in messages
+        if m.get("kind") == "help_request" and (text in m["title"] or text in m.get("about", {}).values())
+    ]
 
 
 def test_admitted_request_without_a_committed_spec_is_closed_with_one_help_request(host, tmp_path):

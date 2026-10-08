@@ -612,7 +612,7 @@ def test_recovery_attempts_are_capped_then_one_help_request(board):
         for path in sorted((board.canonical / "comms" / "outbox").glob("*.json"))
     ]
     helps = [m for m in outbox if m.get("kind") == "help_request"]
-    assert len(helps) == 1 and board.promotion().id in helps[0]["title"]
+    assert len(helps) == 1 and helps[0]["about"]["promotion"] == board.promotion().id
     assert helps[0]["refs"][0]["uri"] == f"ar://experiment/{a.experiment}"
     assert reconcile(board.ctx(), board.queue, board.sm) == []  # no more cards, no more help
     assert board.promotion().stage == "submitted"

@@ -68,12 +68,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
+from autoresearch.comms import runtime_messages
 from autoresearch.comms.inbound import INBOX_WRITERS_ENV, inbox_writers
 from autoresearch.comms.publisher import (
+    STAGED_DIR,
     PublishResult,
-    outbox_has_title,
+    outbox_has_key,
     publish_hook,
-    publish_runtime,
+    publish_message,
 )
 from autoresearch.games.loader import Game, load_game
 from autoresearch.io import gitops
@@ -246,10 +248,6 @@ def _step(run: KeeperRun, ctx: RunContext, name: str, fn: Callable, *args, **kwa
 # --- pause ---
 
 
-def _pause_title(canonical: Path) -> str:
-    return f"Agent paused at {read_json(pause_path(ledger_of(canonical)))['paused_at']}"
-
-
 def pause_for_preflight(
     ctx: RunContext, queue: Queue, result: PreflightResult, allow_no_remote: bool
 ) -> None:
@@ -258,35 +256,20 @@ def pause_for_preflight(
     reasons = "; ".join(result.reasons)
     pause(queue, ledger_of(canonical), f"preflight failed: {reasons}")
     with canonical_lock(canonical):
-        title = _pause_title(canonical)
-        if outbox_has_title(canonical, title, exact=True):
+        paused_at = read_json(pause_path(ledger_of(canonical)))["paused_at"]
+        message = runtime_messages.agent_paused(reasons, paused_at)
+        if outbox_has_key(canonical, message.key):
             return
-        body = (
-            f"queue-keeper preflight failed, so the agent is paused: no new cards start and "
-            f"pending cards are unassigned. Reasons: {reasons}. Running cards stop at the next "
-            f"identity check. Fix the cause; the agent resumes by itself on the first run "
-            f"whose preflight passes."
-        )
-        publish_runtime(
-            canonical,
-            "help_request",
-            title,
-            body,
-            [],
-            allow_no_remote,
-            priority="P0",
-            expects_response=True,
+        publish_message(
+            canonical, message, allow_no_remote, priority="P0", expects_response=True
         )
 
 
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
     canonical = ctx.canonical
-    with canonical_lock(canonical):
-        title = _pause_title(canonical)
     resumed = resume(queue, ledger_of(canonical))
     with canonical_lock(canonical):
-        body = f"Preflight passes again; {len(resumed)} card(s) were reassigned."
-        publish_runtime(canonical, "note", f"Agent resumed ({title})", body, [], allow_no_remote)
+        publish_message(canonical, runtime_messages.agent_resumed(len(resumed)), allow_no_remote)
     return resumed
 
 
@@ -304,6 +287,17 @@ def abort_stale_merge(canonical: Path) -> bool:
         return True
 
 
+def _staged_title(canonical: Path, message_id: str) -> str | None:
+    """The title of a staged message the publisher skipped, if it has a readable one."""
+    content = gitops.show(canonical, "HEAD", f"{STAGED_DIR}/{message_id}.json")
+    try:
+        message = json.loads(content) if content is not None else None
+    except ValueError:
+        return None
+    title = message.get("title") if isinstance(message, dict) else None
+    return title if isinstance(title, str) and title.strip() else None
+
+
 def report_skipped(canonical: Path, results: list[PublishResult], allow_no_remote: bool) -> None:
     """One runtime note per staged message the publisher skipped (invalid envelope)."""
     skipped: dict[str, list[str]] = {}
@@ -316,14 +310,11 @@ def report_skipped(canonical: Path, results: list[PublishResult], allow_no_remot
             marker = ledger_of(canonical) / "skipped-staged" / f"{message_id}.json"
             if committed_json(canonical, marker) is not None:
                 continue
-            title = f"Staged message {message_id} was not published"
-            if not outbox_has_title(canonical, title, exact=True):
-                body = (
-                    f"The staged message comms/staged/{message_id}.json does not satisfy the "
-                    f"message envelope, so it stays unpublished:\n\n"
-                    + "\n".join(f"- {problem}" for problem in problems)
-                )
-                publish_runtime(canonical, "note", title, body, [], allow_no_remote)
+            message = runtime_messages.staged_not_published(
+                message_id, _staged_title(canonical, message_id), problems
+            )
+            if not outbox_has_key(canonical, message.key):
+                publish_message(canonical, message, allow_no_remote)
             write_json(marker, {"id": message_id, "problems": problems})
             commit(canonical, [marker], f"publish: skipped staged {message_id} reported")
 
@@ -402,19 +393,8 @@ def push_step(ctx: RunContext, allow_no_remote: bool) -> bool | None:
         _log(ctx, "push: main reached origin but a card branch was rejected")
     if failures >= PUSH_FAILURE_LIMIT and not help_sent:
         with canonical_lock(canonical):
-            body = (
-                f"queue-keeper could not push canonical main to {REMOTE} {failures} runs in a "
-                f"row (remote main {remote_head}, local HEAD {head}). Unpushed work is lost if "
-                f"this host is lost. Check the remote URL, credentials and network."
-            )
-            publish_runtime(
-                canonical,
-                "help_request",
-                f"Push to {REMOTE} failing ({failures} runs)",
-                body,
-                [],
-                allow_no_remote=True,
-            )
+            message = runtime_messages.push_failing(REMOTE, failures, head, remote_head)
+            publish_message(canonical, message, allow_no_remote=True)
         help_sent = True
     write_json(
         runtime_dir(ctx) / PUSH_STATE_FILE,
@@ -432,25 +412,14 @@ def push_step(ctx: RunContext, allow_no_remote: bool) -> bool | None:
 
 def _publish_step_help(ctx: RunContext, step: str, entry: dict, allow_no_remote: bool) -> None:
     canonical = ctx.canonical
-    title = f"queue-keeper step {step} failing since {entry['since']}"
+    message = runtime_messages.step_failing(
+        step, entry["runs"], entry["since"], entry["error"], f".supervisor/runtime/{LOG_FILE}"
+    )
     with canonical_lock(canonical):
-        if outbox_has_title(canonical, title, exact=True):
+        if outbox_has_key(canonical, message.key):
             return
-        body = (
-            f"The queue-keeper step {step} has failed in {entry['runs']} consecutive runs "
-            f"since {entry['since']}. Last error: {entry['error']}. The other steps go on, but "
-            f"whatever this step does is not happening. Details are in "
-            f".supervisor/runtime/{LOG_FILE}."
-        )
-        publish_runtime(
-            canonical,
-            "help_request",
-            title,
-            body,
-            [],
-            allow_no_remote,
-            priority="P1",
-            expects_response=True,
+        publish_message(
+            canonical, message, allow_no_remote, priority="P1", expects_response=True
         )
 
 
