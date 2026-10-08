@@ -85,6 +85,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
 | `AUTORESEARCH_QUEUE` | no | `file` selects the serial fallback queue (see below). |
+| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them

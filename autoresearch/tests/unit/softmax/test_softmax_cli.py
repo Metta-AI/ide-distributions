@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -225,6 +226,20 @@ def test_design_pairing_is_seed_only_with_selector_opponents():
 def test_credit_backoff_doubles_and_caps():
     minutes = [softmax_cli.credit_backoff(n).total_seconds() / 60 for n in range(1, 8)]
     assert minutes == [30, 60, 120, 240, 480, 480, 480]
+
+
+def test_credit_backoff_base_comes_from_the_environment(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker, **{FAULTS_ENV: "credits=0", softmax_cli.BACKOFF_ENV: "2"})
+    before = datetime.now(UTC)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["credit_denied"] is True
+    after = datetime.fromisoformat(data["data"]["next_launch_after"])
+    assert timedelta(minutes=1) < after - before < timedelta(minutes=3)
+    bad = base_env(board, worker, **{softmax_cli.BACKOFF_ENV: "soon"})
+    code, data = softmax(bad, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 2 and data["error"]["reason"] == "bad_arguments"
+    assert worker.store.load(experiment)[0]["xp_requests"] == []  # refused before any create
 
 
 def test_xp_create_records_request_and_starts_evaluating(board, launch):

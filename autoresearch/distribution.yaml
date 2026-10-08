@@ -32,6 +32,10 @@ env_requires:
   - name: AUTORESEARCH_WORKSPACE
     required: false
     description: Path of the canonical workspace. Default is $HERMES_HOME/workspace.
+  - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
+    required: false
+    default: "30"
+    description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
   - name: AUTORESEARCH_SOFTMAX
     required: false
     description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.

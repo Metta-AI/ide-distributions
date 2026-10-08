@@ -17,8 +17,10 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   batch with exit 0 and ``credit_denied: true``: requests already created stay (and are
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating``) and ``lifecycle.next_launch_after`` is set
-  by ``credit_backoff`` (A10); ``lifecycle.credit_denials`` counts consecutive denials. Rerunning
-  the same ``--batch``/``--attempt`` later creates only the missing requests.
+  by ``credit_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
+  the worker's environment, read before any request is created); ``lifecycle.credit_denials``
+  counts consecutive denials. Rerunning the same ``--batch``/``--attempt`` later creates only
+  the missing requests.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
@@ -84,6 +86,7 @@ GAME_ENV = "AUTORESEARCH_GAME"
 PLAYER_ENV = "AUTORESEARCH_PLAYER_ID"
 IDENTITY_ENV = ("SOFTMAX_PLAYER_CREDENTIAL", PLAYER_ENV)
 BACKOFF_BASE = timedelta(minutes=30)
+BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
 BACKOFF_CAP = timedelta(hours=8)
 
 
@@ -165,10 +168,24 @@ def _league_id() -> str:
 # --- XP mapping (pure) ---
 
 
-def credit_backoff(denials: int) -> timedelta:
+def credit_backoff(denials: int, base: timedelta = BACKOFF_BASE) -> timedelta:
     """Wait before relaunching after the ``denials``-th consecutive credit denial (A10):
-    30 min, doubling, capped at 8 h."""
-    return min(BACKOFF_BASE * 2 ** (denials - 1), BACKOFF_CAP)
+    ``base`` (30 min), doubling, capped at 8 h."""
+    return min(base * 2 ** (denials - 1), BACKOFF_CAP)
+
+
+def backoff_base(env) -> timedelta:
+    """The first backoff: ``BACKOFF_ENV`` minutes (a positive number) when set, else 30."""
+    value = (env.get(BACKOFF_ENV) or "").strip()
+    if not value:
+        return BACKOFF_BASE
+    try:
+        minutes = float(value)
+    except ValueError:
+        minutes = 0.0
+    if not minutes > 0:
+        raise BadArguments(f"{BACKOFF_ENV} must be a positive number of minutes, got {value!r}")
+    return timedelta(minutes=minutes)
 
 
 def _opponent(entry: str) -> dict:
@@ -259,10 +276,10 @@ def _credits(ctx, sm, args) -> dict:
         return {"available": False, "reason": str(error)}
 
 
-def _credit_denied(store, experiment: str, meta: dict, reason: str) -> dict:
+def _credit_denied(store, experiment: str, meta: dict, reason: str, base: timedelta) -> dict:
     lifecycle = dict(meta.get("lifecycle") or {})
     denials = int(lifecycle.get("credit_denials", 0)) + 1
-    after = datetime.now(UTC) + credit_backoff(denials)
+    after = datetime.now(UTC) + credit_backoff(denials, base)
     next_launch_after = after.isoformat(timespec="seconds")
     patch: dict = {
         "lifecycle": {
@@ -306,6 +323,7 @@ def _record_xp(store, experiment: str, entries: list[dict]) -> dict:
 
 
 def _xp_create(ctx, sm, args) -> dict:
+    base = backoff_base(os.environ)
     store = worker_store(ctx)
     experiment = args.experiment
     meta, _ = store.load(experiment)
@@ -359,7 +377,7 @@ def _xp_create(ctx, sm, args) -> dict:
     }
     meta, _ = store.load(experiment)
     if denial is not None:
-        return {**report, **_credit_denied(store, experiment, meta, denial.reason)}
+        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base)}
 
     patch: dict = {}
     if meta["status"] in ("uploaded", "awaiting-credits"):
