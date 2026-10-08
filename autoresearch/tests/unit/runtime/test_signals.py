@@ -199,6 +199,7 @@ def _tool_event(
     signature="terminal: $AUTORESEARCH_CLI softmax league-episodes",
     exit_code=None,
     task="t_1",
+    **fields,
 ):
     path = board.canonical / ".supervisor" / "runtime" / "tool_events.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,6 +208,7 @@ def _tool_event(
         "ts": moment.timestamp(), "task": task, "run": run, "tool": "terminal",
         "status": "error", "error_type": error_type, "cmd_signature": signature,
         "exit_code": exit_code,
+        **fields,
     }
     with path.open("a") as handle:
         handle.write(json.dumps(event) + "\n")
@@ -243,6 +245,47 @@ def test_grep_without_match_is_not_an_error(board):
     assert _compute(board) == []
     for run in ("1", "2", "3"):
         _tool_event(board, 4, run=run, signature="terminal: grep -l opponent", exit_code=2)
+    assert "repeated_tool_error" in _codes(_compute(board))
+
+
+def test_the_error_signature_is_part_of_the_key(board):
+    """System Design §8: the same command AND error signature. A timeout and a platform
+    refusal of one command are different problems."""
+    for run, signature in (("1", "exit 124 timeout"), ("2", "exit 1 reason platform")):
+        _tool_event(board, 5, run=run, error_type="tool_error", error_signature=signature)
+    _tool_event(board, 4, run="3", error_type="tool_error", error_signature="exit 124 timeout")
+    assert _compute(board) == []
+    _tool_event(board, 3, run="4", error_type="tool_error", error_signature="exit 124 timeout")
+    [signal] = _compute(board)
+    assert signal.entity == (
+        "terminal: $AUTORESEARCH_CLI softmax league-episodes [exit 124 timeout]"
+    )
+
+
+def test_validation_feedback_from_our_cli_is_not_an_error(board):
+    """`records validate` exits 1 with problems in nearly every card: the card fixes them."""
+    for run in ("1", "2", "3"):
+        _tool_event(
+            board, 5, run=run, error_type="tool_error", exit_code=1,
+            signature="terminal: $AUTORESEARCH_CLI records validate --all",
+            exit_program="$AUTORESEARCH_CLI", error_signature="exit 1 problems",
+        )
+    assert _compute(board) == []
+
+
+def test_exit_1_is_judged_by_the_program_that_exited(board):
+    """The exit code belongs to the last command of the line, not the first one."""
+    for run in ("1", "2", "3"):  # `cli queue list | grep x` found nothing: an answer
+        _tool_event(
+            board, 5, run=run, exit_code=1, signature="terminal: $AUTORESEARCH_CLI queue list",
+            exit_program="grep", error_signature="exit 1",
+        )
+    assert _compute(board) == []
+    for run in ("1", "2", "3"):  # `grep -q x f; ls missing`: ls failed
+        _tool_event(
+            board, 4, run=run, exit_code=1, signature="terminal: grep -q x f",
+            exit_program="ls", error_signature="exit 1",
+        )
     assert "repeated_tool_error" in _codes(_compute(board))
 
 

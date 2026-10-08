@@ -250,4 +250,4 @@ Source evidence (Hermes v2026.9.24 / v0.21.5):
 ## post_tool_call result and errors (2026-10-08)
 
 - `model_tools.py:_emit_post_tool_call_hook` passes `result` (for `terminal`, the JSON string `{"output", "exit_code", "error"}`) along with `status`, `error_type` and `error_message`.
-- `agent/display.py:_detect_tool_failure` marks every non-zero terminal exit as `status: error`, `error_type: tool_error` (a `grep` with no match included). The plugin records `exit_code` from `result` so the repeated-tool-error signal can tell those apart.
+- `agent/display.py:_detect_tool_failure` marks every non-zero terminal exit as `status: error`, `error_type: tool_error` (a `grep` with no match included). The plugin records `exit_code` from `result`, `exit_program` (the last command of the line, whose status the shell returns) and a secret-free `error_signature` (`exit <code>` plus `timeout` or the autoresearch CLI envelope's `reason`/`problems`; for other tools the masked first line of `error_message`), so the repeated-tool-error signal can key on the command and error signature (System Design §8) and tell a `grep` with no match or validation feedback from a failure.

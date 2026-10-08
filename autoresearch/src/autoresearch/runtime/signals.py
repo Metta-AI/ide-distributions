@@ -34,11 +34,15 @@ Signals and their data sources:
   the signal fires and the agent answers it (explain, or change course).
 - ``plateau``: M experiments reviewed since the last published promotion, or D days since
   it (since the canonical root commit when nothing was ever promoted).
-- ``repeated_tool_error``: the same command signature and error type failed in 3 card runs
-  (iterations) within ``tool_error_window``, from ``runtime/tool_events.jsonl`` (the plugin's
-  post_tool_call log; ``cmd_signature`` skips setup such as ``cd ... &&``). Retries inside
-  one run count once: Hermes's own loop guard answers those. Exit 1 of a program whose 1
-  means "no match" or "false" (``grep``, ``test``, ``diff``, ...) is not an error.
+- ``repeated_tool_error``: the same command and error signature (System Design §8) failed in
+  3 card runs (iterations) within ``tool_error_window``, from ``runtime/tool_events.jsonl``
+  (the plugin's post_tool_call log). The command is ``cmd_signature`` (setup such as
+  ``cd ... &&`` skipped); the error signature is ``error_signature`` (terminal: ``exit <code>``
+  plus ``timeout`` or the autoresearch CLI's ``reason``; other tools: the masked first line of
+  the error), else the error type. Retries inside one run count once: Hermes's own loop guard
+  answers those. Not errors: exit 1 of the program the exit code came from (the last command
+  of the line) when its 1 means "no match" or "false" (``grep``, ``test``, ``diff``, ...),
+  and an autoresearch CLI envelope with ``problems`` (validation feedback the card fixes).
 - ``long_iterations``: the last 3 journals (by ``started``) each ran over 45 minutes.
 - ``stale_plan``: ``plan.md`` unchanged for 6 iterations while no experiment was reviewed
   and no promotion published.
@@ -300,17 +304,21 @@ def _tool_events(inputs: _Inputs) -> list[dict]:
 
 
 def _tool_error(event: dict) -> str | None:
-    """The error type of a tool event, or None when it is not a failure."""
+    """The error signature of a failed tool event, or None when it is not a failure."""
     error = event.get("error_type") or (
         None if event.get("status") in OK_TOOL_STATUSES else event.get("status")
     )
     if not error:
         return None
-    signature = str(event.get("cmd_signature") or "")
-    program = signature.removeprefix("terminal: ").split(" ", 1)[0]
+    signature = event.get("error_signature")
+    if isinstance(signature, str) and signature.endswith(" problems"):
+        return None  # validation feedback: the card reads the problems and fixes them
+    program = event.get("exit_program")
+    if "exit_program" not in event:  # events written before exit_program was recorded
+        program = str(event.get("cmd_signature") or "").removeprefix("terminal: ").split(" ")[0]
     if event.get("exit_code") == 1 and program in EXIT_1_ANSWERS:
         return None
-    return error
+    return signature or error
 
 
 def _repeated_tool_error(inputs: _Inputs) -> list[_Raw]:
@@ -321,8 +329,8 @@ def _repeated_tool_error(inputs: _Inputs) -> list[_Raw]:
             continue
         error = _tool_error(event)
         if error:
-            signature = event.get("cmd_signature") or event.get("tool")
-            key = f"{signature} [{error}]"
+            command = event.get("cmd_signature") or event.get("tool")
+            key = f"{command} [{error}]"
             runs.setdefault(key, set()).add((event.get("task"), event.get("run")))
     return [
         _Raw(REPEATED_TOOL_ERROR, key, f"{key} failed in {len(found)} card runs recently")

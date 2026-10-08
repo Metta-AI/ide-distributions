@@ -913,17 +913,36 @@ def _signature_command(commands: list[list[str]]) -> list[str]:
     return commands[0] if commands else []
 
 
+def _shell_commands(command: str) -> list[list[str]]:
+    try:
+        return [words for words, *_ in _simple_commands(_tokenize(_split_heredocs(command)[0]))]
+    except ValueError:
+        return [command.split()]
+
+
+def exit_program(command: str) -> str | None:
+    """The program whose status a shell command line exits with: the last simple command (of
+    the last pipeline or list), without env assignments or prefixes such as ``time``. The
+    repeated-tool-error signal judges an exit code by it (``grep`` exit 1 is "no match")."""
+    for words in reversed(_shell_commands(command)):
+        program = next(
+            (
+                w for w in words
+                if not ASSIGNMENT.match(w) and w not in PREFIX_WORDS
+                and w not in SIGNATURE_PREFIX_WORDS
+            ),
+            None,
+        )
+        if program is not None:
+            return program if program in TRUSTED_CLI_WORDS else os.path.basename(program)
+    return None
+
+
 def command_signature(tool_name: str, args: dict) -> str:
     """Short, secret-free form of a call for the repeated-tool-error signal."""
     args = args if isinstance(args, dict) else {}
     if tool_name == "terminal" and isinstance(args.get("command"), str):
-        command = args["command"]
-        try:
-            tokens = _tokenize(_split_heredocs(command)[0])
-            commands = [words for words, *_ in _simple_commands(tokens)]
-        except ValueError:
-            commands = [command.split()]
-        first = _signature_command(commands)
+        first = _signature_command(_shell_commands(args["command"]))
         words = []
         for word in first:
             if not words and (ASSIGNMENT.match(word) or word in SIGNATURE_PREFIX_WORDS):

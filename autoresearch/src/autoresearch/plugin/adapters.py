@@ -10,6 +10,7 @@ allows the call (returns None) and is appended to `runtime/plugin_errors.jsonl`.
 
 import json
 import os
+import re
 import time
 import traceback
 from pathlib import Path
@@ -107,16 +108,59 @@ def pre_tool_call(tool_name=None, args=None, task_id=None, **kwargs):
     return None
 
 
+_WORD = re.compile(r"[a-z][a-z_-]{0,29}")
+_VOLATILE = re.compile(r"[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*|\d+")
+ERROR_SIGNATURE_MAX = 60
+
+
+def _json_object(value) -> dict | None:
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def _exit_code(result) -> int | None:
     """The ``exit_code`` of a terminal result (a JSON object string), else None. Hermes marks
     every non-zero exit as a tool error; the signal needs the code to tell a grep that
     matched nothing from a real failure."""
-    try:
-        value = json.loads(result) if isinstance(result, str) else result
-    except ValueError:
-        return None
-    code = value.get("exit_code") if isinstance(value, dict) else None
+    code = (_json_object(result) or {}).get("exit_code")
     return code if isinstance(code, int) and not isinstance(code, bool) else None
+
+
+def _terminal_error_signature(result, code: int | None) -> str | None:
+    """``exit <code>``, plus ``timeout`` for a timed-out command, or for an autoresearch CLI
+    failure envelope on the last output line its ``reason`` word (``reason platform``) or
+    ``problems`` (validation feedback: an answer, not a failure). Built only from the exit
+    code and fixed words, so it is safe in a signal key that reaches the outbox."""
+    if code is None or code == 0:
+        return None
+    output = str((_json_object(result) or {}).get("output") or "")
+    if code == 124 or "timed out" in output[-300:]:
+        return f"exit {code} timeout"
+    lines = [line for line in output.strip().splitlines() if line.strip()]
+    error = (_json_object(lines[-1]) or {}).get("error") if lines else None
+    if isinstance(error, dict):
+        reason = error.get("reason")
+        if isinstance(reason, str) and _WORD.fullmatch(reason):
+            return f"exit {code} reason {reason}"
+        if error.get("problems"):
+            return f"exit {code} problems"
+    return f"exit {code}"
+
+
+def _message_signature(message) -> str | None:
+    """First line of a tool's error message with numbers and ids masked, cut before any
+    secret-looking word."""
+    if not isinstance(message, str) or not message.strip():
+        return None
+    words = []
+    for word in message.strip().splitlines()[0].split():
+        if policy.SECRET_WORD.search(word):
+            break
+        words.append(_VOLATILE.sub("#", word))
+    return " ".join(words)[:ERROR_SIGNATURE_MAX] or None
 
 
 def post_tool_call(
@@ -126,11 +170,26 @@ def post_tool_call(
     ctx = None
     try:
         ctx = _run_context()
+        args = args if isinstance(args, dict) else {}
+        command = args.get("command") if tool_name == "terminal" else None
+        if isinstance(command, str):
+            code = _exit_code(result)
+            outcome = {
+                "exit_code": code,
+                "exit_program": policy.exit_program(command),
+                "error_signature": _terminal_error_signature(result, code),
+            }
+        else:
+            outcome = {
+                "exit_code": None,
+                "exit_program": None,
+                "error_signature": _message_signature(error_message) if error_type else None,
+            }
         _append(ctx, TOOL_EVENTS_FILE, {
             "ts": time.time(), "task": ctx.card_id, "run": ctx.run_id, "tool": tool_name,
             "status": status, "error_type": error_type, "duration_ms": duration_ms,
-            "cmd_signature": policy.command_signature(tool_name or "", args or {}),
-            "exit_code": _exit_code(result) if tool_name == "terminal" else None,
+            "cmd_signature": policy.command_signature(tool_name or "", args),
+            **outcome,
         })
     except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
         _log_error(ctx, "post_tool_call", error)

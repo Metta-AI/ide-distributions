@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from autoresearch.plugin.policy import command_signature, tool_policy
+from autoresearch.plugin.policy import command_signature, exit_program, tool_policy
 
 WORKING = {"mode": "investigation", "finished": False}
 FINISHED = {"mode": "investigation", "finished": True}
@@ -431,3 +431,17 @@ def test_file_tools_and_code_cannot_write_the_inbox(layout):
     # Reading the inbox and the other comms commands stay allowed.
     assert _terminal(layout, "cat {canon}/comms/inbox/x.json")[0]
     assert _terminal(layout, '"$AUTORESEARCH_CLI" comms get x:task:1')[0]
+
+
+@pytest.mark.parametrize(
+    ("command", "program"),
+    [
+        ('"$AUTORESEARCH_CLI" queue list | grep x', "grep"),
+        ("grep -q x f; ls missing", "ls"),
+        ('cd "$W" && FOO=1 time "$AUTORESEARCH_CLI" stats noise', "$AUTORESEARCH_CLI"),
+        ("/usr/bin/diff a b", "diff"),
+        ("", None),
+    ],
+)
+def test_exit_program_is_the_last_command(command, program):
+    assert exit_program(command) == program
