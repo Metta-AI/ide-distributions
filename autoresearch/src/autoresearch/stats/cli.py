@@ -198,7 +198,7 @@ def _current_game_version(league_id: str) -> str:
             f"{error.args[0]} is not set: the current game version needs a profile context"
         ) from None
     try:
-        return softmax_from_env(os.environ, ctx.canonical).game_version(league_id)
+        return str(softmax_from_env(os.environ, ctx.canonical).game_version(league_id)).strip()
     except (RuntimeError, OSError) as error:
         raise ValueError(f"cannot read the current game version from Softmax: {error}") from None
 
@@ -221,7 +221,7 @@ def _design(args, store: RecordStore) -> int:
         )
     version = _current_game_version(game.league_id)
     declared = (meta.get("environment") or {}).get("game_version")
-    if declared != version:
+    if declared is None or str(declared).strip() != version:
         raise Refusal(
             "version_mismatch",
             f"{experiment} environment.game_version is {declared!r} but the current game "

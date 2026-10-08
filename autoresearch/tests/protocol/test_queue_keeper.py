@@ -526,3 +526,15 @@ def test_kb_step_marks_claims_stale_when_the_game_version_changes(host):
     meta, _ = host.store.load(current)
     assert meta["status"] == "stale" and "fake-2" in meta["status_reason"]
     assert gitops.git(host.canonical, "status", "--porcelain", "kb") == ""  # committed
+    logs = sorted((host.canonical / "kb" / "log").glob("*.md"))
+    host.tick(at(3))
+    assert sorted((host.canonical / "kb" / "log").glob("*.md")) == logs  # marked once
+
+
+def test_whitespace_only_version_difference_marks_nothing(host):
+    host.tick(at(0))
+    claim = _claim(host, GAME_VERSION)
+    _set_game_version(host, f" {GAME_VERSION}\n")
+    result = host.tick(at(1))
+    assert "kb" not in result.failures
+    assert host.store.load(claim)[0]["status"] == "belief"

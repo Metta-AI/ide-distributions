@@ -109,13 +109,14 @@ def load_noise(layout: Layout, game_version: str) -> dict:
         raise NoiseError(f"no noise record at {path}; calibrate noise first")
     try:
         record = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if isinstance(record, dict) and isinstance(record.get("game_version"), int | float):
-            # A hand-written `game_version: 65` is a YAML number; versions are strings.
-            record["game_version"] = str(record["game_version"])
+        if isinstance(record, dict) and isinstance(record.get("game_version"), int | float | str):
+            # A hand-written `game_version: 65` is a YAML number; versions are strings,
+            # compared without surrounding whitespace.
+            record["game_version"] = str(record["game_version"]).strip()
         jsonschema.validate(record, json.loads(_SCHEMA_PATH.read_text(encoding="utf-8")))
     except (yaml.YAMLError, jsonschema.ValidationError) as error:
         raise NoiseError(f"malformed noise record {path}: {error}") from error
-    if record.get("game_version") != game_version:
+    if record.get("game_version") != str(game_version).strip():
         raise NoiseError(
             f"noise record is for game version {record.get('game_version')!r}, "
             f"not {game_version!r}; recalibrate"

@@ -87,8 +87,8 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    `card finish` commits your worktree, validates the change, and writes the handoff.
    - Exit 0: `data` is the handoff record. Go to step 6.
    - Exit 1: `error.problems` lists what is wrong. Nothing was recorded. Fix each problem
-     (a missing Decisions section, a missing acknowledgement, a change to an entity that the
-     card does not name) and run `card finish` again with the same outcome. The journal's
+     (a missing acknowledgement, a change to an entity that the card does not name, an
+     invalid record) and run `card finish` again with the same outcome. The journal's
      outcome is already set, so its body cannot change any more: put new information in the
      records or requests you fix, not in the journal.
    - Exit 2: no card worker context. Stop and report it in your final message.

@@ -77,8 +77,9 @@ def test_episode_rows_map_seats_and_opponents(tmp_path):
         ]
 
     episode = _episode([_seat(0, "a:v1"), _seat(1, "b:v1"), _seat(2, None)])
+    episode["results"]["game_version"] = " v9\n"  # versions compare stripped
     rows = episode_rows(episode, evaluate, tmp_path, "current")
-    assert seen == [{"game_version": "v9"}]
+    assert seen == [{"game_version": " v9\n"}]
     assert [(r.policy_version, r.seats, r.opponents) for r in rows] == [
         ("a:v1", (0,), ("b:v1", "human")),
         ("b:v1", (1,), ("a:v1", "human")),

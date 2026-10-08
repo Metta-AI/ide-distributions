@@ -288,8 +288,8 @@ def kb_step(canonical: Path, now: datetime.datetime, game_version: str | None = 
     views (System Design §3.5); one commit."""
     layout = Layout(canonical)
     with canonical_lock(canonical):
-        if game_version:
-            mark_stale(layout, game_version, now)
+        if game_version and str(game_version).strip():
+            mark_stale(layout, str(game_version).strip(), now)
         kb_apply(layout, analyze(layout), now)
         compact(layout, now, pending_reverify=pending_reverification(layout))
         write_generated(layout)

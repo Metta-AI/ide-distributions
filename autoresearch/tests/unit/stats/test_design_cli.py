@@ -155,3 +155,11 @@ def test_outside_a_profile_is_bad_arguments(ws, tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("HERMES_HOME")
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 2 and "profile" in env["error"]["message"]
+
+
+def test_versions_compare_without_surrounding_whitespace(ws, tmp_path, capsys):
+    store, exp = new_experiment(ws, version=f" {VERSION} ")
+    write_noise(store.layout, noise_record(version=f"{VERSION}\n"))
+    code, env = design(capsys, ws, tmp_path, exp)
+    assert code == 0, env
+    assert env["data"]["evaluation_design"]["game_version"] == VERSION

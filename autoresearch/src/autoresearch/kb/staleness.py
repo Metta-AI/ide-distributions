@@ -59,8 +59,11 @@ class RenewalReport:
 
 
 def version_older(version: str, current: str) -> bool:
-    """True if ``version`` is older than ``current``. Versions compare by their digit runs as
-    integers ("9" < "10", "1.9" < "1.10"); without digits, any difference counts as older."""
+    """True if ``version`` is older than ``current``. Game versions are dotted numbers (Coworld
+    versions such as ``2026.10.7.2``); they compare by their digit runs as integers ("9" <
+    "10", "1.9" < "1.10"), ignoring surrounding whitespace; without digits, any difference
+    counts as older."""
+    version, current = str(version).strip(), str(current).strip()
     old_parts, new_parts = _numbers(version), _numbers(current)
     if old_parts and new_parts:
         return old_parts < new_parts
@@ -83,6 +86,7 @@ def stale_since(meta: dict) -> datetime.datetime | None:
 def mark_stale(layout: Layout, current_version: str, now: datetime.datetime) -> list[str]:
     """Mark live claims checked against an older game version as stale; return their ids."""
     store = RecordStore(layout)
+    current_version = str(current_version).strip()
     at = now.isoformat()
     marked = []
     for claim in load_records(layout, "claim"):
