@@ -27,6 +27,12 @@ document must stay consistent with it.
 The review record for the System Design (two rounds of comments with replies) is in
 [`docs/designs/reviews/`](docs/designs/reviews/).
 
+## Integrations
+
+| Document | Covers |
+|---|---|
+| [`docs/integrations/softmax-ide-bridge.md`](docs/integrations/softmax-ide-bridge.md) | The Softmax IDE bridge as the external agent on `comms/`: the inbox files it writes, the outbox fields it reads, how it treats acknowledgements, and what is not exercised yet |
+
 ## Tracking
 
 Asana: "GotA auto-research agent on Hermes: autonomous research loop + comms
