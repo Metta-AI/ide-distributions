@@ -12,7 +12,7 @@ import pytest
 from support.promotion_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, SubmitBoard
 
 from autoresearch.cli import main
-from autoresearch.io.docs import read_json
+from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.select import FILE_QUEUE_RELATIVE
 from autoresearch.records.store import RecordStore
@@ -350,8 +350,44 @@ def test_xp_create_refuses_a_new_attempt_while_the_last_is_incomplete(board, lau
     assert code == 0 and [(r["seed"], r["arm"]) for r in data["data"]["created"]] == [
         (2, "baseline")
     ]
+    # A second relauncher after the first completed the attempt: nothing failed, so refused.
     code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
-    assert code == 0 and len(data["data"]["created"]) == 4  # a complete attempt may be retried
+    assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 4
+
+
+def data_first_request(worker, experiment) -> str:
+    return worker.store.load(experiment)[0]["xp_requests"][0]["request_id"]
+
+
+def _fail_fake_request(board, request_id: str) -> None:
+    path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(path)
+    state["xp"][request_id]["failed"] = True
+    write_json(path, state)
+
+
+def test_xp_create_new_attempt_only_after_a_failed_request(board, launch):
+    worker, experiment = launch  # seeds (1, 2): four requests per attempt
+    env = base_env(board, worker)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and len(data["data"]["created"]) == 4
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
+    failed = data_first_request(worker, experiment)
+    _fail_fake_request(board, failed)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(data["data"]["created"]) == 4, (failed, data)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
+    assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
+
+
+def test_credit_backoff_rejects_infinite_minutes(board, launch):
+    worker, experiment = launch
+    for value in ("inf", "1e400", "nan"):
+        env = base_env(board, worker, **{softmax_cli.BACKOFF_ENV: value})
+        code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+        assert code == 2 and data["error"]["reason"] == "bad_arguments", (value, data)
 
 
 def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launch):
