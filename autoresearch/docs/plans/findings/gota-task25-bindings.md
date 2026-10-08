@@ -52,6 +52,13 @@ guess identity in the game adapter.
 
 ## Latest live state and validation scope
 
+**Update 2026-10-08 (later commits):** two statements below are superseded. The
+adapter no longer rejects a manifest outside the `801749e5` pin: online builds and gates
+follow the live engine ([gota-live-engine.md](gota-live-engine.md)); only `--offline`
+selects the historical pin. And xp-poll now keeps only the design's seats and reduces
+them by the arithmetic mean, one row per episode (`9787d75`,
+`src/autoresearch/runtime/xp_poll.py`, contract in `games/_template/GAME.md`).
+
 NOTES-5 reports live 2026.10.8.1 / Polyworld 02eda3d3. Dynamic resolution and
 qualification for that release are a separate follow-on. The adapter intentionally
 rejects a manifest outside the M1-qualified 801749e5 pin. This does not establish
