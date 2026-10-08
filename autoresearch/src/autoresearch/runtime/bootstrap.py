@@ -3,7 +3,7 @@
 Local setup only, idempotent, and it never creates cards (admission does, after preflight):
 
 1. The venv is the launcher's job (``autoresearch.launch``), already done when this runs.
-2. Config migrations (C9): ``config_migrations.apply(runner, home)``.
+2. Config migrations (C9): ``config_migrations.apply(runner, home, env)``.
 3. The CLI shim ``$HERMES_HOME/bin/autoresearch`` (only that file; ``bin/`` also holds
    Hermes's ``tirith`` and is never cleaned, A6), and in the profile ``.env``
    ``AUTORESEARCH_CLI`` (the shim's absolute path) and ``HERMES_WRITE_SAFE_ROOT`` (canonical).
@@ -283,7 +283,7 @@ def bootstrap(
     result = BootstrapResult()
     home = ctx.hermes_home
     try:
-        for argv in config_migrations.apply(runner, home):
+        for argv in config_migrations.apply(runner, home, env):
             result.actions.append("hermes " + " ".join(argv))
         _write_shim(home, result)
         env_values = {

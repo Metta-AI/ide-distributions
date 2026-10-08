@@ -13,6 +13,7 @@ EXPECTED_PASSTHROUGH = [
     "AUTORESEARCH_SOFTMAX",
     "AUTORESEARCH_CLI",
     "AUTORESEARCH_QUEUE",
+    "OPENROUTER_MODEL",
 ]
 
 
@@ -42,7 +43,7 @@ def config_of(home):
     return yaml.safe_load((home / "config.yaml").read_text())
 
 
-def test_env_passthrough_is_the_exact_c9_list_with_queue():
+def test_env_passthrough_is_the_exact_c9_list_with_queue_and_model():
     assert cm.ENV_PASSTHROUGH == EXPECTED_PASSTHROUGH
 
 
@@ -125,3 +126,17 @@ def test_second_apply_runs_nothing(tmp_path):
     runner = Recorder()
     assert cm.apply(runner, tmp_path) == []
     assert runner.calls == []
+
+
+def test_openrouter_model_env_overrides_the_model(tmp_path):
+    """C9: ``OPENROUTER_MODEL`` in the profile .env sets ``model.default`` (workers read the
+    model only from config.yaml); without it the shipped or installer-set model stays."""
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"model": {"default": "a/b"}}))
+    runner = Recorder()
+    cm.apply(runner, tmp_path, {"OPENROUTER_MODEL": "z-ai/glm-5.3-flash"})
+    assert ["config", "set", "model.default", "z-ai/glm-5.3-flash"] in runner.calls
+    assert config_of(tmp_path)["model"]["default"] == "z-ai/glm-5.3-flash"
+    assert cm.pending(tmp_path, {"OPENROUTER_MODEL": "z-ai/glm-5.3-flash"}) == []
+
+    cm.apply(Recorder(), tmp_path, {})
+    assert config_of(tmp_path)["model"]["default"] == "z-ai/glm-5.3-flash"

@@ -58,6 +58,7 @@ terminal:
     - AUTORESEARCH_SOFTMAX
     - AUTORESEARCH_CLI
     - AUTORESEARCH_QUEUE
+    - OPENROUTER_MODEL
 
 plugins:
   enabled:

@@ -7,6 +7,10 @@ existing installs is applied here with ``hermes config set`` (verified to write 
 - ``ALWAYS``: set whenever the profile value differs.
 - ``MISSING_ONLY``: set only when the key is absent (the installer may tune it).
 - ``UNSET``: removed with ``hermes config unset`` when present.
+- ``ENV_OVERRIDES``: set from an environment variable when it is set and differs (the
+  installer's ``OPENROUTER_MODEL`` in the profile ``.env`` becomes ``model.default``: Hermes
+  workers read the model only from ``config.yaml``). Unset leaves the value alone. The names
+  are on ``terminal.env_passthrough``, so a cron run under the gateway receives them (A4).
 
 ``apply`` reads the profile ``config.yaml`` first and runs Hermes only for keys that need a
 change, so a run with nothing to migrate starts no process. The shipped ``config.yaml`` must
@@ -26,7 +30,7 @@ gateway dispatcher reads the host root config, which preflight checks (A3).
 import json
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import yaml
@@ -43,6 +47,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_SOFTMAX",
     "AUTORESEARCH_CLI",
     "AUTORESEARCH_QUEUE",  # the serial fallback selects the queue through it (A4)
+    "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
 ]
 APPROVAL_DENY = [
     "coworld player use*",
@@ -84,6 +89,7 @@ MISSING_ONLY: dict[str, object] = {
     "agent.run_budget_seconds": 2700,
 }
 UNSET = ("kanban.default_assignee",)
+ENV_OVERRIDES = {"model.default": "OPENROUTER_MODEL"}
 
 _ABSENT = object()
 
@@ -120,8 +126,9 @@ def read_config(home: Path) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def pending(home: Path) -> list[list[str]]:
-    """The ``hermes`` argv lists that would bring the profile config in line with C9."""
+def pending(home: Path, env: Mapping[str, str] | None = None) -> list[list[str]]:
+    """The ``hermes`` argv lists that would bring the profile config in line with C9;
+    ``env`` supplies the ``ENV_OVERRIDES`` values."""
     config = read_config(home)
     commands = []
     for key, value in always(home).items():
@@ -133,12 +140,16 @@ def pending(home: Path) -> list[list[str]]:
     for key in UNSET:
         if _lookup(config, key) not in (_ABSENT, None, ""):
             commands.append(["config", "unset", key])
+    for key, name in ENV_OVERRIDES.items():
+        value = (env or {}).get(name, "").strip()
+        if value and _lookup(config, key) != value:
+            commands.append(["config", "set", key, value])
     return commands
 
 
-def apply(runner: Runner, home: Path) -> list[list[str]]:
+def apply(runner: Runner, home: Path, env: Mapping[str, str] | None = None) -> list[list[str]]:
     """Apply the C9 migrations to the profile at ``home``; return the commands run."""
-    commands = pending(home)
+    commands = pending(home, env)
     for argv in commands:
         runner(argv, Path(home))
     return commands
