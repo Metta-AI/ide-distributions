@@ -2,6 +2,7 @@
 bootstrapped canonical with a bare ``origin``, a FileQueue board, FakeSoftmax and the
 fakegame, with scripted card workers (``tests/support/keeper_host.py``)."""
 
+import dataclasses
 import datetime
 import re
 
@@ -487,14 +488,14 @@ def test_main_builds_the_run_from_the_environment(host, monkeypatch, capsys):
 # --- KB staleness on a game-version change (runtime-only KB maintenance) ---
 
 
-def _claim(host: Host, checked: str) -> str:
+def _claim(host: Host, checked: str, evidence: list | None = None) -> str:
     claim = host.store.create(
         "claim",
         {
             "kind": "mechanism",
             "status": "belief",
             "confidence": 0.7,
-            "evidence": [],
+            "evidence": evidence or [],
             "revise_if": "A replay shows otherwise.",
             "relations": [],
             "topics": [],
@@ -538,3 +539,84 @@ def test_whitespace_only_version_difference_marks_nothing(host):
     result = host.tick(at(1))
     assert "kb" not in result.failures
     assert host.store.load(claim)[0]["status"] == "belief"
+
+
+# --- code-citation renewal when the game source pin changes ---
+
+
+def _source_repo(tmp_path):
+    """A local game source repo with two commits; line 8 of engine.nim changes."""
+    repo = tmp_path / "game-src"
+    repo.mkdir()
+    gitops.git(repo, "init", "-q", "-b", "main")
+    gitops.git(repo, "config", "user.email", "t@example.com")
+    gitops.git(repo, "config", "user.name", "t")
+    lines = [f"line {n}" for n in range(1, 11)]
+    (repo / "engine.nim").write_text("\n".join(lines) + "\n")
+    old = gitops.commit_all(repo, "v1")
+    lines[7] = "line 8 changed"
+    (repo / "engine.nim").write_text("\n".join(lines) + "\n")
+    new = gitops.commit_all(repo, "v2")
+    return repo, old, new
+
+
+def _cites(path_range: str, sha: str) -> list[dict]:
+    return [{"ref": f"{path_range}@{sha}", "tier": "S", "direct": True, "stance": "supports"}]
+
+
+def test_game_source_pin_change_renews_code_citations(host, tmp_path):
+    repo, old, new = _source_repo(tmp_path)
+    host.game = dataclasses.replace(
+        host.game, source={"repo": str(repo), "pin": "coworld_manifest"}
+    )
+    host.tick(at(0))
+    unchanged = _claim(host, GAME_VERSION, _cites("engine.nim:1-3", old))
+    changed = _claim(host, GAME_VERSION, _cites("engine.nim:8", old))
+    _set_fake(host, game_source_pin=old)
+    host.tick(at(1))  # the first pin is only recorded
+    ledger = host.canonical / ".supervisor" / "ledger" / "game_source.json"
+    assert read_json(ledger)["pin"] == old
+    assert host.store.load(unchanged)[0]["last_checked_version"] == GAME_VERSION
+
+    _set_fake(host, game_source_pin=new, game_version="fake-2")
+    result = host.tick(at(2))
+
+    assert "game_source" not in result.failures and "kb" not in result.failures
+    renewed, _ = host.store.load(unchanged)
+    assert renewed["status"] == "belief" and renewed["last_checked_version"] == "fake-2"
+    stale, _ = host.store.load(changed)
+    assert stale["status"] == "stale"
+    reverify = [
+        r for r in host.requests() if f"ar://claim/{changed}" in r.get("spec", {}).get("refs", [])
+    ]
+    assert len(reverify) == 1 and f"reverify {old}..{new}" in reverify[0]["spec"]["why"]
+    assert read_json(ledger)["pin"] == new
+    assert gitops.git(host.canonical, "status", "--porcelain") == ""  # all committed
+    checkout = host.home / "local" / "game-source" / "fakegame"
+    assert (checkout / ".git").exists()
+
+
+def test_without_a_source_field_the_pin_is_ignored(host, tmp_path):
+    _set_fake(host, game_source_pin="0" * 40)
+    host.tick(at(0))
+    assert not (host.canonical / ".supervisor" / "ledger" / "game_source.json").exists()
+
+
+def test_unreachable_source_keeps_the_old_pin_and_retries(host, tmp_path):
+    host.game = dataclasses.replace(
+        host.game, source={"repo": str(tmp_path / "missing"), "pin": "coworld_manifest"}
+    )
+    host.tick(at(0))
+    _set_fake(host, game_source_pin="a" * 40)
+    host.tick(at(1))
+    _set_fake(host, game_source_pin="b" * 40)
+    result = host.tick(at(2))
+    assert "game_source" in result.failures and "kb" not in result.failures
+    ledger = host.canonical / ".supervisor" / "ledger" / "game_source.json"
+    assert read_json(ledger)["pin"] == "a" * 40
+
+
+def _set_fake(host: Host, **values) -> None:
+    path = host.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(path) if path.exists() else host.sm._initial_state()
+    write_json(path, {**state, **values})

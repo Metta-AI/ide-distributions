@@ -126,6 +126,7 @@ class FakeSoftmax:
         return {
             "credits": DEFAULT_CREDITS,
             "game_version": "fake-1",
+            "game_source_pin": None,
             "polls_to_complete": 1,
             "xp": {},
             "uploads": {},
@@ -169,6 +170,11 @@ class FakeSoftmax:
 
     def game_version(self, league_id: str) -> str:
         return self._operate("game_version", lambda state: state["game_version"], persist=False)
+
+    def game_source_pin(self, league_id: str) -> str | None:
+        return self._operate(
+            "game_source_pin", lambda state: state.get("game_source_pin"), persist=False
+        )
 
     # --- XP requests ----------------------------------------------------
 

@@ -14,9 +14,12 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    (``memory_snapshot``). Staged messages the publisher skipped
    (invalid envelope) are reported once each by a runtime note (marker
    ``ledger/skipped-staged/<M-id>.json``).
-6. KB: stale marking against the current game version (``kb.staleness.mark_stale``: live
-   claims whose ``last_checked_version`` is older become ``stale``; a no-op unless the game
-   version changed), lint ``analyze`` + ``apply``, compaction (claims pending re-verification
+6. KB: when the game contract has ``source`` and the game source pin changed
+   (``runtime.game_source``: fetched outside the lock), code-citation renewal
+   (``kb.staleness.renew_code_citations``) and the new pin in
+   ``.supervisor/ledger/game_source.json``; then stale marking against the current game
+   version (``kb.staleness.mark_stale``: live claims whose ``last_checked_version`` is older
+   become ``stale``; a no-op unless the game version changed), lint ``analyze`` + ``apply``, compaction (claims pending re-verification
    are kept), and the generated views; one commit. The KB maintenance commands are
    runtime-only: cards run read-only ``kb lint``/``kb hubs`` and edit only claims their refs
    name (D-23).
@@ -75,7 +78,7 @@ from autoresearch.kb.apply import apply as kb_apply
 from autoresearch.kb.compaction import compact
 from autoresearch.kb.index import write_generated
 from autoresearch.kb.lint import analyze
-from autoresearch.kb.staleness import mark_stale, pending_reverification
+from autoresearch.kb.staleness import mark_stale, pending_reverification, renew_code_citations
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
@@ -94,6 +97,7 @@ from autoresearch.runtime.admission import (
 from autoresearch.runtime.blocked import handle_blocked
 from autoresearch.runtime.bootstrap import REPO_ROOT, BootstrapResult, bootstrap
 from autoresearch.runtime.briefing import BriefingInputs
+from autoresearch.runtime.game_source import PinUpdate, pin_update, record_pin
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of
 from autoresearch.runtime.memory_snapshot import snapshot_memory
 from autoresearch.runtime.merge import find_orphan_done, process_handoffs
@@ -283,17 +287,33 @@ def report_skipped(canonical: Path, results: list[PublishResult], allow_no_remot
             commit(canonical, [marker], f"publish: skipped staged {message_id} reported")
 
 
-def kb_step(canonical: Path, now: datetime.datetime, game_version: str | None = None) -> None:
-    """Stale marking (when the game version is known), lint apply, compaction and generated
-    views (System Design §3.5); one commit."""
+def kb_step(
+    canonical: Path,
+    now: datetime.datetime,
+    game_version: str | None = None,
+    pin: PinUpdate | None = None,
+) -> None:
+    """Code-citation renewal (when the game source pin changed), stale marking (when the game
+    version is known), lint apply, compaction and generated views (System Design §3.5); one
+    commit, which also records a new game source pin."""
     layout = Layout(canonical)
+    version = str(game_version).strip() if game_version else ""
     with canonical_lock(canonical):
-        if game_version and str(game_version).strip():
-            mark_stale(layout, str(game_version).strip(), now)
+        extra: list[Path] = []
+        if pin is not None and (pin.old is None or version):
+            if pin.old is not None and pin.checkout is not None:
+                before = set(layout.card_requests.glob("*.json"))
+                renew_code_citations(
+                    layout, pin.checkout, pin.old, pin.new, current_version=version, now=now
+                )
+                extra += sorted(set(layout.card_requests.glob("*.json")) - before)
+            extra.append(record_pin(canonical, pin, now))
+        if version:
+            mark_stale(layout, version, now)
         kb_apply(layout, analyze(layout), now)
         compact(layout, now, pending_reverify=pending_reverification(layout))
         write_generated(layout)
-        commit(canonical, [layout.kb], "kb: lint fixes, compaction, generated views")
+        commit(canonical, [layout.kb, *extra], "kb: lint fixes, compaction, generated views")
 
 
 def _remote_main(canonical: Path) -> str | None:
@@ -603,7 +623,8 @@ def _run_steps(
     )
     _step(run, ctx, "memory_snapshot", snapshot_memory, ctx)
     _step(run, ctx, "skipped_staged", report_skipped, canonical, run.published, allow_no_remote)
-    _step(run, ctx, "kb", kb_step, canonical, now, game_version)
+    pin = _step(run, ctx, "game_source", pin_update, ctx, sm, game)
+    _step(run, ctx, "kb", kb_step, canonical, now, game_version, pin)
     _step(run, ctx, "push", push_early, canonical)
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
     _step(run, ctx, "routing", route_all, ctx, queue, allow_no_remote=allow_no_remote)

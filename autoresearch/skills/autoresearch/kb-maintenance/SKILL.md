@@ -15,9 +15,10 @@ Doctrine upheld: D-07, D-14, D-15, D-16, D-22, D-23, D-24.
 - Reads: claims, hubs, the linter report, `plan.md`, the journal.
 - Writes: the claims and hubs this card's refs name, card requests, and the journal.
 - Never runs: `kb apply`, `kb stale`, `kb renew`, `kb compact`, `kb index`. They change many
-  claims at once, so card finish would reject them (D-23). queue-keeper runs stale marking
-  (on a game-version change), lint fixes, compaction and the generated views on canonical
-  every run.
+  claims at once, so card finish would reject them (D-23). queue-keeper runs them on
+  canonical every run: code-citation renewal when the game source commit changes (games
+  whose contract has `source`), stale marking on a game-version change, lint fixes,
+  compaction and the generated views.
 - Never writes: `kb/index.md`, backlinks, and other files under `kb/_generated/` (D-24).
 
 ## Procedure
@@ -54,4 +55,5 @@ Doctrine upheld: D-07, D-14, D-15, D-16, D-22, D-23, D-24.
 - A change to an entity that the card does not name fails card finish (D-23). Undo it and
   request a maintenance card that names it instead.
 - The linter reports a stale claim that a game update should have renewed from unchanged
-  source: say so in the journal; code-citation renewal is an operator command.
+  source: the game contract may have no `source`, or the platform declares no source commit.
+  Re-verify the claims this card names by hand and say so in the journal.

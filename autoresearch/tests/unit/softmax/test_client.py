@@ -216,3 +216,18 @@ def test_bad_credential_is_identity_error_before_any_mutating_call(
         with pytest.raises(IdentityError):
             action()
     assert not saw_mutation(runner)
+
+
+def test_game_source_pin_reads_the_manifest_source_url(env, runner, tmp_path):
+    runner.on("coworld", "leagues", response=completed(recorded("leagues_get.json")))
+    runner.on(
+        "coworld", "show", response=completed(synthetic("coworld_show_with_manifest.json"))
+    )
+    pin = make(env, runner, tmp_path).game_source_pin(LEAGUE_ID)
+    assert pin == "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_game_source_pin_is_none_without_a_pinned_source_url(env, runner, tmp_path):
+    runner.on("coworld", "leagues", response=completed(recorded("leagues_get.json")))
+    runner.on("coworld", "show", response=completed(recorded("coworld_show.json")))
+    assert make(env, runner, tmp_path).game_source_pin(LEAGUE_ID) is None

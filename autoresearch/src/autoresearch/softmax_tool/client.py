@@ -31,6 +31,7 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
 """
 
 import json
+import re
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -42,6 +43,7 @@ from autoresearch.softmax_tool.platform_cli import PlatformCli, Runner, SoftmaxC
 from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
 
 UPLOAD_TIMEOUT_S = 600
+_FULL_SHA = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
 ROUND_PAGE_LIMIT = 200  # coworld rounds --limit max
 EPISODE_PAGE_LIMIT = 100  # coworld episodes --limit max
 
@@ -82,13 +84,26 @@ class SoftmaxClient:
         # (verified 2026-10-07), and neither CLI exposes it. Callers treat this as unknown.
         raise CreditsUnavailable("credit balance is not readable with a Player credential")
 
-    def game_version(self, league_id: str) -> str:
+    def _league_coworld(self, league_id: str) -> dict:
         league = self._cli.run_json("coworld", ["leagues", league_id])
         game = league["game"]
         coworld_id = game.get("canonical_coworld_id") or game.get("coworld_id")
         if not coworld_id:
             raise SoftmaxCliError(f"league {league_id} names no Coworld")
-        return self._cli.run_json("coworld", ["show", coworld_id])["version"]
+        return self._cli.run_json("coworld", ["show", coworld_id])
+
+    def game_version(self, league_id: str) -> str:
+        return self._league_coworld(league_id)["version"]
+
+    def game_source_pin(self, league_id: str) -> str | None:
+        """The full commit sha in ``manifest.game.runnable.source_url`` of the league's
+        Coworld (``coworld show --json`` includes the manifest; coworld 0.1.57
+        ``CoworldUploadResponse``). ``source_url`` is optional and may name a branch or a
+        bare repository, so None when it carries no 40-hex sha."""
+        manifest = self._league_coworld(league_id).get("manifest") or {}
+        runnable = (manifest.get("game") or {}).get("runnable") or {}
+        match = _FULL_SHA.search(str(runnable.get("source_url") or ""))
+        return match.group(0).lower() if match else None
 
     # --- XP requests ----------------------------------------------------
 

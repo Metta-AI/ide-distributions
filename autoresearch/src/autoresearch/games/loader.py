@@ -11,6 +11,9 @@ from autoresearch.io.docs import read_doc
 BINDING_NAMES = ("build", "local_check", "upload", "evaluate", "replay_inspect")
 COMPILERS = ("pw", "basic", "none")
 DIRECTIONS = ("up", "down")
+# How queue-keeper reads the game source commit the current game version runs.
+# ``coworld_manifest``: ``Softmax.game_source_pin`` (the commit in the Coworld manifest).
+PIN_SOURCES = ("coworld_manifest",)
 
 
 class GameError(Exception):
@@ -38,6 +41,10 @@ class Game:
     - noise_source: where metric noise is measured (for example ``league_episodes``).
     - layers: STRATEGY.md layers that apply to this game.
     - compiler: ``pw``, ``basic`` or ``none``.
+    - source: optional ``{repo, pin}``: the game source repository (git URL or local path) and
+      how to read the commit the current game version runs (one of ``PIN_SOURCES``). With it,
+      queue-keeper renews code citations when the commit changes; without it, claims only go
+      stale on a version change.
     """
 
     name: str
@@ -51,6 +58,7 @@ class Game:
     layers: list[str]
     compiler: Literal["pw", "basic", "none"]
     guide: str
+    source: dict[str, str] | None = None
 
 
 def _is_text(value) -> bool:
@@ -112,7 +120,23 @@ def _check_fields(meta: dict) -> list[str]:
         problems.append("layers: must be a list of names")
     if meta.get("compiler") not in COMPILERS:
         problems.append("compiler: must be one of pw, basic, none")
+    _check_source(meta, problems)
     return problems
+
+
+def _check_source(meta: dict, problems: list[str]) -> None:
+    source = meta.get("source")
+    if source is None:
+        return
+    if not isinstance(source, dict):
+        problems.append("source: must be a map with repo and pin")
+        return
+    if not _is_text(source.get("repo")):
+        problems.append("source.repo: missing or empty")
+    if source.get("pin") not in PIN_SOURCES:
+        problems.append(f"source.pin: must be one of {', '.join(PIN_SOURCES)}")
+    for extra in sorted(set(source) - {"repo", "pin"}):
+        problems.append(f"source.{extra}: unknown field")
 
 
 def load_game(repo_root: Path, name: str) -> Game:
@@ -135,6 +159,7 @@ def load_game(repo_root: Path, name: str) -> Game:
         layers=list(meta["layers"]),
         compiler=meta["compiler"],
         guide=body,
+        source=dict(meta["source"]) if meta.get("source") is not None else None,
     )
 
 

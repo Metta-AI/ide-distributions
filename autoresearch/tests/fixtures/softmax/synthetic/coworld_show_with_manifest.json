@@ -1,0 +1,25 @@
+{
+  "id": "cow_162aa34f-f447-4c5d-8db3-480ec83e98f4",
+  "name": "Gods of the Arena",
+  "version": "2026.10.6.1",
+  "visibility": "public",
+  "manifest_hash": "sha256:3680c5728297fdb899fc76d8cb4e019135f0d35da86359c0d8be99f12def0227",
+  "size_bytes": 45618,
+  "canonical": true,
+  "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Gods%20of%20the%20Arena.md",
+  "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Gods%20of%20the%20Arena/pages.md",
+  "documentation_url": "https://softmax.com/docs/coworld/build-a-player/choose-a-coworld",
+  "certification_status_url": "https://softmax.com/api/observatory/v2/coworlds/cow_162aa34f-f447-4c5d-8db3-480ec83e98f4/certification",
+  "certification_transcript_url": "https://softmax.com/api/observatory/v2/coworlds/cow_162aa34f-f447-4c5d-8db3-480ec83e98f4/certification/transcript",
+  "manifest": {
+    "game": {
+      "name": "example",
+      "version": "2026.10.6.1",
+      "runnable": {
+        "type": "game",
+        "image": "ghcr.io/example/game:2026.10.6.1",
+        "source_url": "https://github.com/example/game/tree/0123456789abcdef0123456789abcdef01234567/engine"
+      }
+    }
+  }
+}

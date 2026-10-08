@@ -16,6 +16,9 @@ league_id: example-league
 noise_source: league_episodes
 layers: [example_layer]
 compiler: none
+source:
+  repo: https://github.com/example/example-game.git
+  pin: coworld_manifest
 ---
 # Game guide (template)
 
@@ -43,5 +46,12 @@ silent fallback. Core code never names a game.
 - `noise_source`: where metric noise is measured, for example `league_episodes`.
 - `layers`: the STRATEGY.md layers that apply to this game.
 - `compiler`: `pw`, `basic` or `none`.
+- `source` (optional): `{repo, pin}`. `repo` is the game source repository (a git URL or a
+  local path) that claims cite as `<path>:<a>-<b>@<sha>`. `pin` says how to read the commit
+  the current game version runs; the only value is `coworld_manifest`: the commit in the
+  `source_url` of the game runnable in the Coworld manifest. When the pin changes,
+  queue-keeper fetches `repo` into `$HERMES_HOME/local/game-source/<game>/` and renews
+  claims whose cited lines did not change (and requests re-verification for the others).
+  Without `source`, claims only go stale on a game-version change.
 
 Describe the game here: its rules, primitives, limits, and host data for the STRATEGY.md layers.

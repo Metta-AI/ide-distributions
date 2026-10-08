@@ -170,3 +170,23 @@ def test_bad_input_gives_error_envelope(tmp_path):
         )
         assert result.returncode == 1, tool
         assert json.loads(result.stdout)["ok"] is False
+
+
+def _game_with(tmp_path, extra: str):
+    root = tmp_path / "repo"
+    shutil.copytree(Path(__file__).resolve().parents[3] / "games" / "fakegame", root / "games" / "g")
+    path = root / "games" / "g" / "GAME.md"
+    text = path.read_text().replace("name: fakegame", "name: g", 1)
+    path.write_text(text.replace("compiler: none\n", f"compiler: none\n{extra}", 1))
+    return lambda: load_game(root, "g")
+
+
+def test_source_is_optional_and_validated(tmp_path):
+    assert load_game(Path(__file__).resolve().parents[3], "fakegame").source is None
+    game = _game_with(tmp_path, "source: {repo: /srv/game.git, pin: coworld_manifest}\n")()
+    assert game.source == {"repo": "/srv/game.git", "pin": "coworld_manifest"}
+    bad = _game_with(tmp_path / "b", "source: {repo: '', pin: latest, extra: 1}\n")
+    with pytest.raises(GameError) as error:
+        bad()
+    message = str(error.value)
+    assert "source.repo" in message and "source.pin" in message and "source.extra" in message
