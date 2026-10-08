@@ -518,23 +518,35 @@ def test_submit_identity_fault_is_exit_1(board):
     assert not ledger.exists() or read_json(ledger)["stage"] != "intent"
 
 
-def test_submit_reads_the_identity_from_the_profile_env_at_call_time(board):
-    """A running worker's environment is fixed when Hermes spawns it, but the profile
-    ``.env`` may change while it runs (the operator sets another player id; preflight then
-    pauses). The softmax tool reads the identity names from the profile ``.env`` at each
-    call (C6, C7), so the running worker's submit is refused too."""
+def test_submit_refused_when_the_profile_identity_changed_since_spawn(board):
+    """A worker's environment is fixed when Hermes spawns it, but the profile ``.env`` may
+    change while it runs (the operator sets another player id; preflight then pauses). The
+    tool keeps using the spawn-time identity and refuses while the ``.env`` disagrees (C6,
+    C7); it never takes identity from the ``.env``, which a worker could write."""
     experiment, _ = board.reviewed_experiment()
     worker = board.promoter(experiment)
     credential = json.dumps({"token": "t", "expires_at": "2099-01-01T00:00:00Z",
                              "player_id": PLAYER})  # fmt: skip
     home = board.tmp_path / "home"
     home.mkdir()
-    (home / ".env").write_text("AUTORESEARCH_PLAYER_ID=ply_wrong\nOTHER=1\n")
     env = base_env(board, worker, SOFTMAX_PLAYER_CREDENTIAL=credential)  # spawn-time env
+    (home / ".env").write_text(f"AUTORESEARCH_PLAYER_ID={PLAYER}\nOTHER=1\n")
+    code, data = softmax(env, "whoami")
+    assert code == 0, data  # the .env agrees: no refusal
+
+    (home / ".env").write_text("AUTORESEARCH_PLAYER_ID=ply_wrong\nOTHER=1\n")
     code, data = softmax(env, "submit", experiment)
     assert code == 1 and data["error"]["reason"] == "identity", data
-    assert "ply_wrong" in data["error"]["message"]
+    assert "AUTORESEARCH_PLAYER_ID" in data["error"]["message"]
+    assert "t" not in data["error"]["message"].split()  # no value is printed
     assert load(board.canonical) is None  # refused before the promotion lock
+
+    # A worker that rewrites the .env to another credential gains nothing: refused too.
+    forged = json.dumps({"token": "x", "expires_at": "2099-01-01T00:00:00Z",
+                         "player_id": "ply_other"})  # fmt: skip
+    (home / ".env").write_text(f"SOFTMAX_PLAYER_CREDENTIAL='{forged}'\n")
+    code, data = softmax(env, "submit", experiment)
+    assert code == 1 and data["error"]["reason"] == "identity", data
 
 
 def test_leaderboard(board):

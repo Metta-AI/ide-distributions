@@ -35,17 +35,12 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
-Identity is read at call time (C6, C7). Hermes fixes a worker's environment when it spawns
-the worker, but the profile ``.env`` can change while the worker runs (for example the operator
-sets another player id, and the next preflight pauses the agent). So each command first takes
-``IDENTITY_ENV`` (the credential and the expected player id) from ``$HERMES_HOME/.env`` when the
-file sets them; a running worker's mutating calls then use the same identity the next
-preflight checks.
-
-Prints one JSON envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false, "error": {"reason",
-"message", "details"?}}``. Exit codes: 0 done (including a credit denial), 1 refused or failed
-(``identity``, a guard's reason, ``platform``, ...), 2 bad arguments or no profile context,
-3 the pinned softmax/coworld executable is missing.
+Identity is the spawn-time one (C6, C7). Each command uses the credential and expected player
+id in its own environment (what Hermes gave the worker when it started) for ``whoami`` and the
+mutating call. The profile ``.env`` is read only to refuse: when it sets ``IDENTITY_ENV`` names
+to other values (the operator changed the player since this worker started, and the next
+preflight pauses the agent), every command fails with ``identity``. The ``.env`` is never a
+source of identity, because a worker could write it.
 """
 
 import argparse
@@ -103,12 +98,20 @@ def _fail(reason: str, message: str, code: int, details: dict | None = None) -> 
     return code
 
 
-def refresh_identity_env(hermes_home: Path) -> None:
-    """Set ``IDENTITY_ENV`` in this process from the profile ``.env`` (module docstring)."""
-    for name in IDENTITY_ENV:
-        value = env_file_value(Path(hermes_home) / ".env", name)
-        if value is not None:
-            os.environ[name] = value
+def check_identity_unchanged(hermes_home: Path) -> None:
+    """Raise IdentityError when the profile ``.env`` sets an ``IDENTITY_ENV`` name to a value
+    other than this process's (module docstring). Values are never printed."""
+    changed = [
+        name
+        for name in IDENTITY_ENV
+        if (value := env_file_value(Path(hermes_home) / ".env", name)) is not None
+        and value != os.environ.get(name)
+    ]
+    if changed:
+        raise IdentityError(
+            f"profile identity changed since this worker started ({', '.join(changed)}); "
+            "no Softmax action until a new worker starts with the new identity"
+        )
 
 
 def _run(handler):
@@ -117,8 +120,8 @@ def _run(handler):
             ctx = runctx.from_env()
         except KeyError as error:
             return _fail("bad_arguments", f"{error.args[0]} is not set", EXIT_BAD_ARGS)
-        refresh_identity_env(ctx.hermes_home)
         try:
+            check_identity_unchanged(ctx.hermes_home)
             sm = softmax_from_env(os.environ, ctx.canonical)
             data = handler(ctx, sm, args)
         except (BadArguments, GameError) as error:

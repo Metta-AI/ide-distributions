@@ -534,7 +534,7 @@ def test_protocol_slice(install):
             if isinstance(e, dict) and e.get("ok") is False
         ]  # fmt: skip
         assert [e["error"]["reason"] for e in refusals] == ["identity"], refusals
-        assert WRONG_PLAYER in refusals[0]["error"]["message"]
+        assert "identity changed since this worker started" in refusals[0]["error"]["message"]
         [d_handoff] = handoffs_of(canonical, task["D"])
         assert d_handoff["outcome"] == "blocked", d_handoff
         assert [x["policy_version_id"] for x in s.fake().submissions(PLAYER)] == [BASELINE_PV, PV_A]
