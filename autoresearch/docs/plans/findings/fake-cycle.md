@@ -60,7 +60,7 @@ other agents' calls on the same key.
 |---|---|---|---|---|---|
 | 1 | **PASSED** | 29.2 min | 8 | 656k / 42k / 5.9M | $0.48 |
 | 2 | Failed one assertion: 6 duplicate XP requests (bug 2). Every stage reached, promotion `published`. | 29.2 min | 8 | 560k / 36k / 5.0M | $0.40 |
-| 3 | **PASSED** (on `ad5e8a9`+`4569558`; before review fix `9cce176`) | 31.2 min | 7 | 415k / 35k / 5.1M | $0.39 |
+| 3 | **PASSED** (on `ad5e8a9`+`4569558`; before review fix `c2443d6`/`9cce176`) | 31.2 min | 7 | 415k / 35k / 5.1M | $0.39 |
 
 OpenRouter key usage for the whole task: **$2.89** by `GET /api/v1/key` (usage 2.908 before
 run 1, 5.797 after run 3). Budget was $15. The key's `usage` lags by minutes, so a per-run delta can read 0.
@@ -80,7 +80,7 @@ run 1, 5.797 after run 3). Budget was $15. The key's `usage` lags by minutes, so
    attempt rule (`lifecycle.launch_attempts` is never incremented, so the attempt was a free
    model choice). `xp create` now refuses a new attempt while the batch's latest attempt
    lacks requests (`attempt_incomplete`, naming the attempt to rerun) and an attempt that
-   skips a number (`bad_attempt`). Review fix round 1 (`9cce176`) closed the rest of the
+   skips a number (`bad_attempt`). Review fix round 1 (code in `c2443d6`, tests in `9cce176`) closed the rest of the
    hole: a complete attempt could still be repeated (the runtime relaunch completes attempt
    1, then a self-requested card runs `--attempt 2`). A new attempt now also needs a failed
    or cancelled request in the latest attempt (`attempt_not_needed` otherwise), so relaunches
