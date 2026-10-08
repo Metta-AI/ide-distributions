@@ -1,5 +1,6 @@
 """Tool policy matrix. Placeholders: {canon} {worker} {sibling} {cli} {home}."""
 
+import json
 import os
 
 import pytest
@@ -363,3 +364,24 @@ def test_absolute_cli_path_is_trusted_through_a_symlink(layout, tmp_path):
     link.symlink_to(layout.cli)
     assert _terminal(layout, f"{link} card show")[0]
     assert os.path.realpath(link) == os.path.realpath(layout.cli)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "open('{home}/.env', 'a').write('AUTORESEARCH_PLAYER_ID=x')",
+        "import os; open(os.environ['HERMES_HOME'] + '/.env', 'w')",
+        "open(os.path.expanduser('~/.softmax/credentials.yaml'), 'w')",
+    ],
+)
+def test_interpreter_text_naming_identity_files_is_blocked(layout, code):
+    code = code.replace("{home}", str(layout.hermes_home))
+    allowed, reason = tool_policy("execute_code", {"code": code}, layout.ctx(), WORKING)
+    assert not allowed and ".env" in reason
+    command = f"python3 -c {json.dumps(code)}"
+    assert not _terminal(layout, command)[0]
+
+
+def test_interpreter_text_about_other_env_files_is_allowed(layout):
+    code = "print(open('notes/.env.example').read())"
+    assert tool_policy("execute_code", {"code": code}, layout.ctx(), WORKING)[0]

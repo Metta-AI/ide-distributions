@@ -2,7 +2,8 @@
 
 `tool_policy` decides one call. It blocks:
 
-- player switching: `coworld player use`, `softmax login|logout`, any write under `~/.softmax`;
+- player switching: `coworld player use`, `softmax login|logout`, any write under `~/.softmax`,
+  and `python -c`/`execute_code` text that names the profile `.env` or `.softmax`;
 - raw platform mutations: `coworld submit|upload-policy|xp-request create` (C6: only the trusted
   softmax tool behind `"$AUTORESEARCH_CLI"` may mutate the platform);
 - force pushes, ref deletions and pushes to `main`/`master` from model commands;
@@ -38,7 +39,12 @@ blocked command, not an adversary. Known unhandled forms:
   variables set in an earlier tool call or exported from a sourced file;
 - aliases, shell functions defined earlier, renamed or copied binaries;
 - Python (or any language) code that calls coworld through a library or a constructed
-  string, beyond the literal-phrase check on `python -c` and `execute_code`.
+  string, beyond the literal-phrase check on `python -c` and `execute_code`;
+- interpreter writes in general: a `python -c`, `execute_code`, `node -e`, `perl -e`, ... body
+  can write any file the user can. Only a literal check stops `python -c` and `execute_code`
+  text that names the identity files (the profile `.env` with `HERMES_HOME` or its path, or
+  `.softmax`); a constructed path passes. The softmax tool therefore never takes identity
+  from the `.env` (it only refuses when the `.env` differs from its spawn-time identity).
 The other layers are the approvals.deny globs in config.yaml (coarse, matched by Hermes
 before execution) and the softmax tool's `whoami` identity check immediately before every
 platform mutation (C6), which a raw `coworld` call cannot pass through.
@@ -138,6 +144,10 @@ RAW_MUTATION = (
     "this command contains a raw platform mutation or player switch; "
     'use the "$AUTORESEARCH_CLI" softmax commands.'
 )
+IDENTITY_FILES = (
+    "code that names the profile .env or ~/.softmax is blocked: they hold the agent's "
+    "identity (C6)."
+)
 NOT_FINISHED = (
     'run "$AUTORESEARCH_CLI" card finish --outcome <o> first: it records the handoff; '
     "kanban_complete without it leaves this card's work unmerged."
@@ -181,6 +191,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
                     "code that runs a raw platform mutation or player switch is blocked; "
                     'use the "$AUTORESEARCH_CLI" softmax commands.'
                 )
+            if isinstance(code, str) and guard.names_identity_files(code):
+                return _block(IDENTITY_FILES)
             return ALLOW
     except _Blocked as blocked:
         return _block(str(blocked))
@@ -211,6 +223,16 @@ class _Guard:
         self.home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
         self.softmax_dir = _real(self.home / ".softmax")
         self.trusted = _trusted_cli_words(ctx)
+
+    def names_identity_files(self, text: str) -> bool:
+        """Literal check (module docstring): ``text`` names ``.softmax``, or ``.env`` together
+        with ``HERMES_HOME`` or the profile home's path."""
+        if ".softmax" in text:
+            return True
+        if ".env" not in text:
+            return False
+        homes = {str(self.ctx.hermes_home), str(_real(self.ctx.hermes_home)), "HERMES_HOME"}
+        return any(home in text for home in homes)
 
     # --- non-shell tools ---
 
@@ -414,6 +436,8 @@ class _Guard:
                     code = words[code_at] if code_at < len(words) else ""
                     if BLOCKED_TEXT.search(code):
                         raise _Blocked(RAW_MUTATION)
+                    if self.names_identity_files(code):
+                        raise _Blocked(IDENTITY_FILES)
                 return words[index:]
             elif name in SHELLS:
                 mode, script_at = _shell_mode(words, index + 1)
