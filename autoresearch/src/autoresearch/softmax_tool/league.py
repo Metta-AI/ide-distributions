@@ -9,22 +9,21 @@ which may be left out only when the episode has a single seat. Each entry become
 - ``policy_version``: the seat's policy label; ``seats``: ``(seat,)``; ``opponents``: the other
   seats' policy labels in position order (a human seat appears as ``human``);
 - ``seed``: the entry's, else the episode's; ``game_version``: the episode's, else the
-  results', else ``fallback_version`` (the league's current version);
+  results', else ``fallback_version`` (the league's current version), stripped of
+  surrounding whitespace (versions are dotted numbers);
 - ``status``: ``failed`` when the binding says so, else ``completed``.
 
 Entries for a human seat are skipped. These rows feed ``stats ingest --league``.
 """
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
+from autoresearch.games.bindings import Evaluate
 from autoresearch.stats.ingest import EpisodeRow
 
 HUMAN = "human"
 
-# (results.json path) -> the binding's entries [{episode, metrics, status?, seed?, seat?}]
-Evaluate = Callable[[Path], list[dict]]
 
 
 def episode_rows(
@@ -39,7 +38,7 @@ def episode_rows(
         episode.get("game_version")
         or (episode["results"] or {}).get("game_version")
         or fallback_version
-    )
+    ).strip()
     rows = []
     for index, entry in enumerate(evaluate(results_path)):
         position = entry.get("seat")

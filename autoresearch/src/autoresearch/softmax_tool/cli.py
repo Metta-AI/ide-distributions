@@ -53,12 +53,12 @@ from pathlib import Path
 
 from autoresearch import runctx
 from autoresearch.cli import register_group
+from autoresearch.games.bindings import binding_evaluate
 from autoresearch.games.loader import GameError, load_game
 from autoresearch.io.docs import write_text
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.promotion import PromotionError, champion_status
-from autoresearch.runtime.xp_poll import binding_evaluate
 from autoresearch.softmax_tool.client import CreditsUnavailable
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
@@ -427,7 +427,7 @@ def _leaderboard(ctx, sm, args) -> dict:
 
 def _game_version(ctx, sm, args) -> dict:
     league_id = _league_id()
-    return {"league_id": league_id, "game_version": sm.game_version(league_id)}
+    return {"league_id": league_id, "game_version": str(sm.game_version(league_id)).strip()}
 
 
 def _standings(ctx, sm, args) -> dict:
@@ -440,7 +440,7 @@ def _league_episodes(ctx, sm, args) -> dict:
         raise BadArguments("--limit must be positive")
     game = _game()
     league_id = args.league or game.league_id
-    current = sm.game_version(league_id)
+    current = str(sm.game_version(league_id)).strip()
     evaluate = binding_evaluate(game, _REPO_ROOT)
     episodes = sm.league_episodes(league_id, args.limit)
     rows = []

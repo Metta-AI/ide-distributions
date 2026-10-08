@@ -50,7 +50,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 import traceback
 from collections.abc import Callable, Mapping
@@ -58,7 +57,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
-from autoresearch.games.loader import Game, binding_argv, load_game
+from autoresearch.games.bindings import Evaluate, binding_evaluate
+from autoresearch.games.loader import Game, load_game
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_text
 from autoresearch.io.locks import LockTimeout, file_lock
@@ -83,13 +83,10 @@ EVIDENCE_XP_DIR = "evidence/xp"
 TERMINAL = ("completed", "failed")
 WATCHED = ("evaluating", "awaiting-credits")
 CARD_PRIORITY = "P1"
-EVALUATE_TIMEOUT_S = 300
 REMOTE = "origin"
 GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 
-# (results.json path) -> the binding's episodes [{episode, metrics, status?, seed?}]
-Evaluate = Callable[[Path], list[dict]]
 
 
 @dataclass
@@ -108,31 +105,6 @@ def _log(ctx: RunContext, message: str) -> None:
     stamp = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"{stamp} {message}\n")
-
-
-def binding_evaluate(game: Game, repo_root: Path = REPO_ROOT) -> Evaluate:
-    """The game's ``evaluate`` binding in hosted-XP mode (module docstring)."""
-
-    def evaluate(results: Path) -> list[dict]:
-        argv = [*binding_argv(game.bindings["evaluate"]), "--results", str(results), "--json"]
-        completed = subprocess.run(
-            argv,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=EVALUATE_TIMEOUT_S,
-            check=False,
-        )
-        try:
-            payload = json.loads(completed.stdout)
-        except ValueError:
-            payload = None
-        if completed.returncode != 0 or not isinstance(payload, dict) or not payload.get("ok"):
-            detail = (payload or {}).get("error") or completed.stderr.strip()[-500:]
-            raise RuntimeError(f"{game.name} evaluate binding failed on {results}: {detail}")
-        return payload["data"]["episodes"]
-
-    return evaluate
 
 
 def _parse_time(value) -> datetime.datetime | None:
