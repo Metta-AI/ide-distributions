@@ -278,3 +278,23 @@ def test_fakegame_build_output_uploads(ws, tmp_path):
     version = ws.store.load(ws.run())[0]
     expected = hashlib.sha256(b"# Candidate\n").hexdigest()
     assert version["strategy_sha256"] == expected
+
+@pytest.mark.parametrize('name', ['G4', 'G5'])
+def test_advisory_error_rejected_even_with_passed_build_status(tmp_path, name):
+    ws = Workspace(tmp_path)
+    ws.write_build(status='passed', gates={name: {'outcome': 'errored', 'passed': False,
+                                                'advisory': True}})
+    with pytest.raises(Refused, match='build gates did not pass'):
+        ws.run()
+    assert ws.uploads() == {}
+
+
+@pytest.mark.parametrize('name', ['G4', 'G5'])
+def test_advisory_failure_upload_reader_accepts(tmp_path, name):
+    from autoresearch.softmax_tool.upload import _read_build
+    ws = Workspace(tmp_path)
+    ws.write_build(status='passed', gates={name: {'outcome': 'failed', 'passed': False,
+                                                'advisory': True}})
+    metadata, artifact = _read_build(ws.build)
+    assert metadata['status'] == 'passed'
+    assert artifact == ws.build / 'policy.bas'

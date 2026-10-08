@@ -256,3 +256,51 @@ def test_compact_telemetry_broken_map_is_not_policy_failure(tmp_path, monkeypatc
     result = compiler_logs(GateContext(tmp_path, episode_dir=tmp_path, compiler_map=mapping))
     assert result.outcome == 'errored'
     assert result.details['error']['type'] == 'KeyError'
+
+@pytest.mark.parametrize('failed_gate', ['G4', 'G5'])
+def test_advisory_policy_failure_passes_without_repair(staged, monkeypatch, failed_gate):
+    _order, _stage, source = staged
+    generations, calls = [], []
+    monkeypatch.setattr(builds, 'generate', lambda order, *, errors, **kw: generations.append(errors))
+    for name, module in zip(('G1', 'G2', 'G3', 'G4', 'G5'),
+                            (gota_gates.g1_lint, gota_gates.g2_episode, gota_gates.g3_budget,
+                             gota_gates.g4_screen, gota_gates.g5_telemetry)):
+        def run(*a, name=name):
+            calls.append(name)
+            return GateResult('failed' if name == failed_gate else 'passed', {})
+        monkeypatch.setattr(module, 'run', run)
+    result = pw_strategy.run(compile_args(source), pw_cli.Report('test', json_mode=True))
+    assert result['status'] == 'passed'
+    assert generations == [[]]
+    assert calls == ['G1', 'G2', 'G3', 'G4', 'G5']
+    assert result['gates'][failed_gate]['advisory'] is True
+    assert result['warnings'] == [{'gate': failed_gate, 'summary': {}}]
+    assert failed_gate in (Path(result['build']) / 'report.md').read_text()
+
+@pytest.mark.parametrize('failed_gate', ['G1', 'G2', 'G3'])
+def test_blocking_policy_failure_remains_failed(staged, monkeypatch, failed_gate):
+    _order, _stage, source = staged
+    monkeypatch.setattr(builds, 'generate', lambda *a, **kw: None)
+    monkeypatch.setattr(gota_gates, 'verify', lambda *a, **kw:
+                        {f'G{i}': {'outcome': 'failed' if f'G{i}' == failed_gate else 'passed',
+                                  'passed': f'G{i}' != failed_gate, 'summary': {}}
+                         for i in range(1, 6)})
+    result = pw_strategy.run(compile_args(source), pw_cli.Report('test', json_mode=True))
+    assert result['status'] == 'failed'
+
+
+def test_local_check_advisory_failures_exit_zero(tmp_path, monkeypatch):
+    from games.gota.gates import __main__ as check
+    from games.gota.tools import engine_identity
+    monkeypatch.setattr(sys, 'argv', ['check', str(tmp_path / 'policy.bas'),
+                                     '--work-dir', str(tmp_path / 'check')])
+    monkeypatch.setattr(engine_identity, 'resolve', lambda *a, **kw:
+                        {'commit': 'a' * 40, 'manifest': {}})
+    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
+    monkeypatch.setattr(check.importlib, 'import_module', lambda name:
+                        SimpleNamespace(run=lambda *a: GateResult(
+                            'failed' if name.endswith(('g4_screen', 'g5_telemetry')) else 'passed', {})))
+    assert check.main() == 0
+    receipt = json.loads((tmp_path / 'check/gates.json').read_text())
+    assert receipt['g5_telemetry']['advisory'] is True
+    assert receipt['g5_telemetry']['outcome'] == 'failed'

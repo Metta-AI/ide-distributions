@@ -33,7 +33,8 @@ def main() -> int:
                 result = importlib.import_module(f'{__package__}.{name}').run(args.artifact, context)
             except Exception as error:  # noqa: BLE001 - persist arbitrary tool faults; never repair them.
                 result = GateResult.errored(error)
-            results[name] = {'outcome': result.outcome, 'ok': result.ok, 'details': result.details}
+            results[name] = {'outcome': result.outcome, 'ok': result.ok, 'details': result.details,
+                             'advisory': name in ('g4_screen', 'g5_telemetry')}
             print(json.dumps({'gate': name, **results[name]}), flush=True)
             if result.outcome == 'errored':
                 break
@@ -44,7 +45,7 @@ def main() -> int:
     (args.work_dir / 'gates.json').write_text(json.dumps(results, indent=2) + '\n')
     if any(result['outcome'] == 'errored' for result in results.values()):
         return 3
-    return 0 if all(result['ok'] for result in results.values()) else 1
+    return 0 if all(result['ok'] or result.get('advisory') for result in results.values()) else 1
 
 
 if __name__ == '__main__':

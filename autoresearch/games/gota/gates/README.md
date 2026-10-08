@@ -29,10 +29,10 @@ uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13
 
 `--gate NAME` selects a gate and can repeat. Each result is printed as JSON;
 `WORK_DIR/gates.json` holds the final report, including an errored harness if
-startup fails. Exit 0 means every selected gate ran and passed; exit 1 means a
-policy failed verification; exit 3 means a tool or harness errored. Gates omitted
-after an error were not run. A G4 behavior regression is advisory and does not change its exit
-status; missing or failed measurements do. Use a fresh work directory for G2.
+startup fails. Exit 0 means selected blocking gates passed; exit 1 means a
+policy failed a blocking gate; exit 3 means a tool or harness errored. Gates omitted
+after an error were not run. G4/G5 policy failures are advisory and do not change the exit
+status; tool errors always do. Use a fresh work directory for G2.
 No command uploads or submits a policy. The manifest and container image must
 already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
 `uv run`; it does not override the locked versions. `tools/lasthit_eval.py` uses
@@ -163,3 +163,10 @@ historical pin without a network lookup. An online failure never falls back.
 Programmatic GateContext callers may set `engine_commit` explicitly. Its omitted
 value retains the historical test/audit pin; that default is not live resolution.
 Historical equivalence and goal audits retain their immutable M1 engine semantics.
+
+Only G1–G3 policy failures block a build and may enter compiler repair rounds.
+G4 and G5 still run and carry `advisory: true` in build receipts. Their `failed`
+outcomes appear in `report.json` warnings and the Markdown report, while a build
+with passing G1–G3 remains passed. An `errored` outcome from any gate stops the
+build immediately and makes it errored, including advisory gates. Local check
+returns 0 for advisory failures, 1 for blocking failures, and 3 for tool errors.

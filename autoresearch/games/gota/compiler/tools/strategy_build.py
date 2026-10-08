@@ -553,10 +553,13 @@ def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: 
         status = 'errored'
         error = tool_error or gate_errors[0]
     else:
-        status = 'passed' if not error and len(gates) == 5 and all(g['passed'] for g in gates.values()) else 'failed'
+        status = 'passed' if not error and len(gates) == 5 and all(gates.get(name, {}).get('passed') is True for name in ('G1', 'G2', 'G3')) else 'failed'
+    warnings = [{'gate': name, 'summary': gate.get('summary', {})}
+                for name, gate in gates.items()
+                if name in ('G4', 'G5') and gate.get('outcome') == 'failed']
     budget = read(stage / 'budget.json') if (stage / 'budget.json').exists() else {}
     report = {'build_id': order['build_id'], 'status': status, 'units': order['units'],
-              'guesses': guesses, 'gaps': draft['gaps'], 'gates': gates, 'budget': budget, 'error': error}
+              'guesses': guesses, 'gaps': draft['gaps'], 'gates': gates, 'budget': budget, 'error': error, 'warnings': warnings}
     dump(stage / 'report.json', report)
     lines = [f'# Build {order["build_id"]}', '', f'Status: **{status}**. Intent: {order["intent"]}.', '',
              '| Gate | Outcome | Evidence |', '| --- | --- | --- |']
@@ -565,6 +568,8 @@ def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: 
         lines[3:3] = ["G5 event coverage: **not exercised**: " + ", ".join(unexercised) +
                       ". Their semantic checks remain unproven.", ""]
     lines.extend(f'| {name} | {gate.get("outcome", "passed" if gate["passed"] else "failed")} | {gate.get("summary", "")} |' for name, gate in gates.items())
+    if warnings:
+        lines += ['', '## Warnings', '', *(f"- {warning['gate']}: {warning['summary']}" for warning in warnings)]
     lines += ['', '## Units', '', *(f'- `{key}`: {state}' for key, state in order['units'].items()),
               '', '## Guesses', '']
     lines.extend(f'- **{g["id"]}** ({g["severity"]}, {g["state"]}): {g["decision"]} — {g["why"]}\n'

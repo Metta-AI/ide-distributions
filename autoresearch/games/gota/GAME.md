@@ -138,3 +138,10 @@ checked locally. All ten seats ran with no VM errors. This does not extend the
 prior paid M1 semantic qualification, which remains bound to its immutable
 2026.10.7.2 / `801749e509e888b423ba44ee2188946c22e3ba85` receipts. The historical
 oracle and audit keep those identities; a new engine needs its own qualification.
+
+Only G1–G3 policy failures block a build and may enter compiler repair rounds.
+G4 and G5 still run and carry `advisory: true` in build receipts. Their `failed`
+outcomes appear in `report.json` warnings and the Markdown report, while a build
+with passing G1–G3 remains passed. An `errored` outcome from any gate stops the
+build immediately and makes it errored, including advisory gates. Local check
+returns 0 for advisory failures, 1 for blocking failures, and 3 for tool errors.

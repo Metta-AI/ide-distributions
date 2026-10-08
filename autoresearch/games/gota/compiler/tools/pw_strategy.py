@@ -97,13 +97,8 @@ def run(args, report, *, engine_identity=None):
                 if any(gate['outcome'] == 'errored' for gate in gates.values()):
                     break
                 errors = [{'gate': name, **gate} for name, gate in gates.items()
-                          if gate['outcome'] == 'failed']
+                          if name in ('G1', 'G2', 'G3') and gate['outcome'] == 'failed']
                 if not errors:
-                    break
-                # A bad screen is never sent to an LLM as a gameplay-improvement request.
-                if gates.get('G4', {}).get('outcome') == 'failed' and gates['G2']['passed']:
-                    break
-                if not any(gates.get(name, {}).get('outcome') == 'failed' for name in ('G2', 'G3', 'G5')):
                     break
             except BuildError as error:
                 failure = str(error)
