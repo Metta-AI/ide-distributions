@@ -50,10 +50,16 @@ Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
 Experiment lock. ``xp create``, ``upload`` and ``submit`` hold a per-experiment lock for the
 whole command: ``fcntl.flock`` on ``.supervisor/runtime/locks/xp-<E>.lock`` in the canonical
-workspace, shared by every worker on the host. A second command for the same experiment waits
-up to ``LOCK_WAIT_S`` (60 s), then refuses with ``busy`` and does nothing. The kernel releases
-the lock when the process exits, so a crashed worker never leaves it held. The experiment
-argument must be an ``E-`` id (``bad_arguments`` otherwise), because it names the lock file.
+workspace, shared by every worker on the host. The holder writes ``{task_id, run_id, pid,
+command, started_at}`` into the file while it holds the lock and empties it before release. A
+second command for the same experiment waits up to ``LOCK_WAIT_S`` (60 s; below Hermes'
+180 s foreground terminal timeout), then refuses with ``busy`` and does nothing; ``details``
+carries ``holder`` and ``own_run`` (the holder is this card's own run, for example an earlier
+call still running in the background: wait for it, do not give up the card). The kernel
+releases the lock when the process exits, so a crashed worker never leaves it held. Do not
+delete ``runtime/locks/`` while workers run: a new file would let a second holder in. The
+experiment argument must be an ``E-`` id (``bad_arguments`` otherwise), because it names the
+lock file.
 
 Identity is the spawn-time one (C6, C7). Each command uses the credential and expected player
 id in its own environment (what Hermes gave the worker when it started) for ``whoami`` and the
@@ -180,8 +186,10 @@ def _run(handler):
 
 
 @contextmanager
-def experiment_lock(ctx, experiment: str) -> Iterator[None]:
-    """Hold the experiment's cross-process lock (module docstring), or refuse ``busy``."""
+def experiment_lock(ctx, experiment: str, command: str) -> Iterator[None]:
+    """Hold the experiment's cross-process lock for ``command`` (module docstring), or refuse
+    ``busy`` naming the holder. Not re-entrant: a command holding it must not call another
+    locked command in the same process (it would wait, then refuse ``busy``)."""
     try:
         prefix, _ = parse_id(experiment)
     except ValueError:
@@ -191,16 +199,61 @@ def experiment_lock(ctx, experiment: str) -> Iterator[None]:
     path = runctx.runtime_dir(ctx) / "locks" / f"xp-{experiment}.lock"
     with ExitStack() as held:
         try:  # only the acquisition: a LockTimeout from the command itself is not "busy"
-            held.enter_context(file_lock(path, timeout_s=LOCK_WAIT_S))
+            handle = held.enter_context(file_lock(path, timeout_s=LOCK_WAIT_S))
         except LockTimeout:
-            raise Refused(
-                "busy",
-                f"another process is running xp create, upload or submit for {experiment} "
-                f"(waited {LOCK_WAIT_S:g} s). See who: "
-                '"$AUTORESEARCH_CLI" queue list --state claimed. Do not duplicate a peer\'s '
-                "work; rerun later only if it is still needed",
-            ) from None
-        yield
+            raise _busy(ctx, experiment, _read_holder(path)) from None
+        record = {
+            "task_id": ctx.card_id,
+            "run_id": ctx.run_id,
+            "pid": os.getpid(),
+            "command": command,
+            "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        handle.truncate(0)  # the lock is on the open handle, so rewriting the file is safe
+        handle.write(json.dumps(record, sort_keys=True))
+        handle.flush()
+        try:
+            yield
+        finally:
+            handle.truncate(0)  # before the unlock: a stale holder is never reported
+
+
+def _read_holder(path: Path) -> dict | None:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # empty: the holder has not written itself yet
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _busy(ctx, experiment: str, holder: dict | None) -> Refused:
+    own_run = bool(
+        holder and ctx.card_id and holder.get("task_id") == ctx.card_id
+        and str(holder.get("run_id")) == str(ctx.run_id)
+    )
+    if holder is None:
+        who = "another process (holder not recorded yet)"
+    else:
+        who = (
+            f"card {holder.get('task_id')} run {holder.get('run_id')} "
+            f"(pid {holder.get('pid')}, {holder.get('command')} since {holder.get('started_at')})"
+        )
+    if own_run:
+        advice = (
+            "This is your own earlier command, still running (for example a terminal call that "
+            "went to the background). Wait for it to finish and use its result; do not rerun "
+            "it and do not finish the card partial"
+        )
+    else:
+        advice = (
+            'See the running cards: "$AUTORESEARCH_CLI" queue list --state claimed. Do not '
+            "duplicate that card's work; rerun later only if it is still needed"
+        )
+    return Refused(
+        "busy",
+        f"{experiment} is locked by {who}; waited {LOCK_WAIT_S:g} s. {advice}",
+        {"holder": holder, "own_run": own_run},
+    )
 
 
 def _game():
@@ -407,7 +460,7 @@ def check_new_attempt(
 
 def _xp_create(ctx, sm, args) -> dict:
     base = backoff_base(os.environ)
-    with experiment_lock(ctx, args.experiment):
+    with experiment_lock(ctx, args.experiment, "xp create"):
         return _xp_create_locked(ctx, sm, args, base)
 
 
@@ -527,7 +580,7 @@ def _xp_artifacts(ctx, sm, args) -> dict:
 
 def _upload(ctx, sm, args) -> dict:
     player = os.environ.get(PLAYER_ENV) or None
-    with experiment_lock(ctx, args.experiment):
+    with experiment_lock(ctx, args.experiment, "upload"):
         version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player)
     binding = worker_store(ctx).load(args.experiment)[0]["candidate_binding"]
     return {
@@ -541,7 +594,7 @@ def _submit(ctx, sm, args) -> dict:
     queue = queue_from_env(os.environ, ctx)
     player = os.environ.get(PLAYER_ENV, "")
     league_id = _league_id()
-    with experiment_lock(ctx, args.experiment):
+    with experiment_lock(ctx, args.experiment, "submit"):
         return submit(
             ctx, queue, sm, args.experiment, league_id, player, candidate=args.candidate_path
         )

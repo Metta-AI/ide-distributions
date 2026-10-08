@@ -283,15 +283,28 @@ disposable.
 ### Step 1 as implemented
 
 - **Policy** (`plugin/policy.py`): `kanban_create` and `kanban_link` are refused in every
-  agent session, card or not. The refusal names the card-request path:
+  agent session, card or not. So is the shell route: `hermes kanban <action>` (also behind
+  `env -u`, `bash -c`, `python -m hermes_cli…`, `python -c`/`execute_code` text) for every
+  action that writes the board. The list is Hermes' own delegate-fence list
+  (`hermes_cli/kanban.py` `_DELEGATED_CHILD_DENIED_ACTIONS`, and the `boards` actions in
+  `_DELEGATED_CHILD_DENIED_BOARD_ACTIONS`); our skills use none of them. Reads (`show`, `list`,
+  `boards list`) pass. `config.yaml` `approvals.deny` adds coarse `hermes kanban create*` and
+  `link*` globs. Hermes' delegate fence (`HERMES_DELEGATED_CHILD_CONTEXT` on every worker
+  subprocess) is a second layer in card workers only: it is cooperative (`env -u` removes it)
+  and absent in non-card sessions. Every refusal names the card-request path:
   `"$AUTORESEARCH_CLI" queue request create --title … --mode … --why … --ref …`. The
   `complete-card` skill no longer mentions `created_cards`; no other skill or doctrine named
   the tools.
 - **"Other cards running now"** (`plugin/peers.py`, called from `adapters.pre_llm_call`). It
   is appended after the briefing and its `- Run:` line on the first turn. One line per other
   claimed card: task id, current run, mode, priority, title, refs, and the age of the run's
-  last heartbeat ("no heartbeat yet" before the first). It is framed as information, not
-  instructions, and says how to re-check. Differences from item 1 above:
+  last heartbeat ("no heartbeat yet" before the first). Text from other cards is untrusted
+  (titles and refs are free strings a worker wrote), so the list is one fenced block under a
+  lead-in that calls it data from other cards, not instructions; titles lose whitespace runs
+  and markdown control characters (`"`, backticks, `#`, `*`, `<>`, `[]`, `|`, `\`); only refs
+  that match `ar://<type>/<id>[#frag]` and are at most 100 characters are kept, at most 5,
+  with "(+N not shown)"; an unknown mode or priority shows as `?`. It says how to re-check.
+  Differences from item 1 above:
   - It reads only the board DB (read-only sqlite, through
     `KanbanQueue(board_db_only=True)`), not `runtime/cards/*.json`: the card body's
     `CardSpec` already holds the title, mode, refs and priority.
@@ -310,11 +323,16 @@ disposable.
   `_TASK_DICT_FIELDS`, `_SHOW_RUN_FIELDS`); on the read-only DB path it is
   `task_runs.last_heartbeat_at`. Hermes writes both in one transaction
   (`kanban_db_dispatch.heartbeat_worker`). FileQueue sets `current_run_id` and has no
-  heartbeats.
+  heartbeats. `KanbanQueue.list` skips a card deleted between the list and its `show`.
 - **Experiment lock** (`softmax_tool/cli.py` `experiment_lock`): `xp create`, `upload` and
   `submit` hold `fcntl.flock` on `.supervisor/runtime/locks/xp-<E>.lock` (canonical
   workspace, through `io.locks.file_lock`) for the whole command. A second process waits up
-  to 60 s (`LOCK_WAIT_S`), then refuses with reason `busy` and does nothing. The experiment
+  to 60 s (`LOCK_WAIT_S`, below Hermes' 180 s foreground terminal timeout), then refuses with
+  reason `busy` and does nothing. The holder writes `{task_id, run_id, pid, command,
+  started_at}` into the lock file and empties it before release; `busy` carries it in
+  `details.holder`, with `details.own_run` when the holder is the caller's own card run (an
+  earlier call still running in the background). The skills say: own run, wait for that
+  command; another card, finish `partial`. The experiment
   argument must be an `E-` id, because it names the lock file. The lock is per experiment
   and shared by the three commands, so an upload and a launch of one experiment also run one
   after the other.
