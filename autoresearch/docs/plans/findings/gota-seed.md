@@ -45,8 +45,9 @@ uv run --locked --python 3.12 pytest tests/unit/gota/test_seed.py -q
 uv run --locked --python 3.12 ruff check tests/unit/gota/test_seed.py
 ```
 
-The GotA autouse fixture provisions native tools, so Nim 2.2.10 is required even
-for seed tests. This host selects the installed version with
+Seed tests are pure Python and do not require Nim or native source preparation.
+Tests that execute native helpers explicitly request their preparation fixtures
+and require Nim 2.2.10. This host selects the installed version with
 `PATH=/Users/jamesboggs/.nimby/nim-2.2.10/bin:$PATH`; no guard is disabled.
 
 ## One-off existing-workspace maintenance task text

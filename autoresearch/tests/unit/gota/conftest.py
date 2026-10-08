@@ -74,8 +74,8 @@ def prevent_real_agents(tmp_path_factory):
     _state['active'] = False
 
 
-@pytest.fixture(scope='session', autouse=True)
-def prepare_native_tools(prevent_real_agents):
+@pytest.fixture(scope='session')
+def prepare_native_sources(prevent_real_agents):
     """Test shim: explicitly provision pinned sources before offline native tests."""
     root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(root))
@@ -84,5 +84,13 @@ def prepare_native_tools(prevent_real_agents):
 
     native_build.prepare(POLYWORLD_COMMIT)
     native_build.prepare('5287c437fe5e4ae7a1fc56df3fa40f6821a7d5fd')
+
+
+@pytest.fixture(scope='session')
+def prepare_native_tools(prepare_native_sources):
+    """Build verified helpers only for tests that execute native tools."""
+    from games.gota.gates.limits import POLYWORLD_COMMIT
+    from games.gota.tools import native_build
+
     native_build.build('gate_probe', POLYWORLD_COMMIT)
     native_build.build('gota_match', POLYWORLD_COMMIT)

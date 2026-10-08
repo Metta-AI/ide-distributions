@@ -26,7 +26,7 @@ Design documents (open the HTML files in a browser):
 | `git` | any recent | the canonical workspace and its remote |
 | `uv` | any recent | the profile venv, and installing Hermes |
 | Hermes Agent | v0.21.5 (tag `v2026.9.24`) | runs the cron jobs, the workers and Kanban |
-| Nim | 2.2.10 | building the GotA native tools, gates and replay tools (needed only for GotA) |
+| Nim | 2.2.10 | building GotA native tools and running native gate/replay tests; pure Python tests need no Nim |
 
 Install Hermes by one of two ways (amendment A1). A plain `uv tool install git+...` fails,
 because Hermes `setup.py` refuses wheel builds.

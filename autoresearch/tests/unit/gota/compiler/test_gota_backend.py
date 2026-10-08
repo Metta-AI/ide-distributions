@@ -13,6 +13,20 @@ import strategy_format as sf
 from test_strategy_basic import RUNTIME, TRIVIAL, TRIVIAL_UNITS
 
 
+@pytest.fixture
+def mocked_native_verification(tmp_path, monkeypatch):
+    """Keep gate orchestration tests independent of native builds and receipts."""
+    import gota_gates
+    import gota_host
+
+    from games.gota.tools import native_build
+
+    probe = tmp_path / "mock-probe"
+    monkeypatch.setattr(gota_gates, "cached_probe", lambda *args: probe)
+    monkeypatch.setattr(gota_host, "cached_probe", lambda *args: probe)
+    monkeypatch.setattr(native_build, "validate", lambda *args, **kwargs: {})
+
+
 def strategy(tmp_path):
     path = tmp_path / "STRATEGY.md"
     path.write_text(TRIVIAL.replace(",10,11,12,13,14,15", ""))
@@ -27,7 +41,7 @@ def test_ten_seats_and_live_host_ids(tmp_path):
     assert "selfId = 0 " not in tables
 
 
-def test_real_generated_artifact_compiles(tmp_path):
+def test_real_generated_artifact_compiles(prepare_native_tools, tmp_path):
     import gota_host as host
 
     from games.gota.gates import GateContext, g1_lint, g3_budget
@@ -144,7 +158,7 @@ def test_source_budget_is_actual_generated_bytes(tmp_path):
         sb.assemble(value, units, RUNTIME, "abcdef12-1", "a" * 40)
 
 
-def test_shared_gate_order_and_advisory_screen(tmp_path, monkeypatch):
+def test_shared_gate_order_and_advisory_screen(mocked_native_verification, tmp_path, monkeypatch):
     import gota_gates
     import strategy_build as builds
 
@@ -215,7 +229,7 @@ def test_source_inventory_includes_backend_and_shared_gate_closure(tmp_path):
         assert any(p.name == suffix for p in paths), suffix
 
 
-def test_backend_host_schema_matches_cached_live_sources():
+def test_backend_host_schema_matches_cached_live_sources(prepare_native_sources):
     import re
 
     import gota_host as host
@@ -246,7 +260,7 @@ def test_backend_host_schema_matches_cached_live_sources():
     assert host.KEYWORDS == set(re.findall(r'"(\w+)"', reserved))
 
 
-def test_actual_packed_v13_storage_compiles(tmp_path):
+def test_actual_packed_v13_storage_compiles(prepare_native_tools, tmp_path):
     import gota_host as host
     import legacy_packing as packing
 
@@ -435,7 +449,7 @@ END SUB
 @pytest.mark.parametrize('supplied_context', [False, True])
 @pytest.mark.parametrize('first_failure', ['G2', 'G3'])
 def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
-    tmp_path, monkeypatch, supplied_context, first_failure,
+    mocked_native_verification, tmp_path, monkeypatch, supplied_context, first_failure,
 ):
     import subprocess
 
@@ -495,8 +509,6 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
         telemetry.append((context.episode_dir, result))
         return result
 
-    from games.gota.tools import native_build
-    monkeypatch.setattr(native_build, 'validate', lambda *args, **kwargs: {})
     monkeypatch.setattr(gota_gates.g2_episode.subprocess, 'run', episode_runner)
     monkeypatch.setattr(gota_gates.g3_budget, 'run', budget)
     monkeypatch.setattr(gota_gates.g5_telemetry, 'run', g5)
