@@ -350,3 +350,18 @@ def test_softmax_failure_while_confirming_the_champion_is_exit_1(
     monkeypatch.setattr(stats_cli, "current_champion", broken)
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
     assert code == 1 and "cannot confirm the champion" in env["error"]["message"]
+
+
+def test_relative_root_is_resolved_at_cli_entry(tmp_path, monkeypatch, capsys):
+    """On the box, ``stats noise --root <relative>`` wrote the file, then crashed in
+    noise_revision (the git path was doubled). The CLI makes ``--root`` absolute first."""
+    rows_file = write_rows(tmp_path / "rows.jsonl", league_rows())
+    monkeypatch.chdir(tmp_path)
+    ingest = ["--league", "L1", "--game-version", "65"]
+    assert main(["stats", "ingest", "--rows", str(rows_file), *ingest, "--game", "fakegame",
+                 "--root", "ws"]) == 0
+    capsys.readouterr()
+    code = main(["stats", "noise", *ingest, "--metrics", "score", "--root", "ws"])
+    env = json.loads(capsys.readouterr().out)
+    assert code == 0, env
+    assert len(env["data"]["noise_rev"]) == 40
