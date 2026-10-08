@@ -36,19 +36,24 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
 
    `"$AUTORESEARCH_CLI" records new journal --meta-file .scratch/journal.json --body-file .scratch/journal.md`
 
-   with `.scratch/journal.json` like:
+   with `.scratch/journal.json` like (no `outcome` yet; step 5 sets it):
 
    ```json
-   {"iteration": <$HERMES_KANBAN_RUN_ID as an integer, or 0 if it is not set>, "mode": "<card mode>",
+   {"iteration": <run number, see below>, "mode": "<card mode>",
     "card": "<the task id on the briefing's Task line>", "doctrine_version": "<N from the AGENTS.md header>",
-    "unit": "<one line: the unit of work>", "outcome": "<done|partial|failed>",
-    "refs": ["ar://…"]}
+    "unit": "<one line: the unit of work>", "refs": ["ar://…"]}
    ```
 
-   The doctrine version is `N` in the first line of `AGENTS.md`
-   (`<!-- doctrine-version: N -->`). For outcome `blocked`, leave `outcome` out of the
-   journal. If `card finish` failed and you run it again in the same run, change the
-   journal with `"$AUTORESEARCH_CLI" records update <J-id> --body-file .scratch/journal.md`.
+   - `iteration`: `$HERMES_KANBAN_RUN_ID` as an integer (Kanban run ids are integers per
+     board). In the serial fallback (`$HERMES_KANBAN_RUN_ID` is not set; run ids look like
+     `r-<ULID>`), use the number of runs of this card:
+     `"$AUTORESEARCH_CLI" queue show <task id>` and count `data.runs`.
+   - The doctrine version is `N` in the first line of `AGENTS.md`
+     (`<!-- doctrine-version: N -->`).
+
+   Create the journal without `outcome`: a journal cannot change once its outcome is set.
+   Until step 5 you may change it freely, for example after a failed `card finish`:
+   `"$AUTORESEARCH_CLI" records update <J-id> --body-file .scratch/journal.md`
    Do not make a second journal.
 2. Acknowledge each `reply` and `steer` that this card is responsible for (D-02). See the
    `communicate` skill:
@@ -62,24 +67,30 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
 4. Validate the records:
    `"$AUTORESEARCH_CLI" records validate --all`
    Fix each problem it lists. Never edit generated files such as `kb/index.md` (D-24).
-5. Finish the card with one outcome:
-   `"$AUTORESEARCH_CLI" card finish --outcome <done|partial|failed|blocked>`
+5. Choose one outcome, set it on the journal, then finish the card with the same value
+   (`card finish` refuses a journal outcome that differs from `--outcome`):
+   `"$AUTORESEARCH_CLI" records update <J-id> --patch '{"outcome": "<o>"}'`
+   `"$AUTORESEARCH_CLI" card finish --outcome <o>`
 
    | Outcome | When |
    | --- | --- |
    | `done` | The unit of work is complete. |
    | `partial` | The unit stopped at a safe point and the rest has a follow-up, for example an experiment that waits as `awaiting-credits`. |
+   | `dropped` | The unit is not worth doing any more (it is obsolete or another card covers it). The journal says why. |
    | `failed` | The unit could not be done. The journal says why. |
    | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. |
 
-   To drop a card, a planning card uses `queue request drop` (see `groom-queue`). There is
-   no `dropped` outcome for `card finish`.
+   Set the outcome only right before `card finish`: after it the journal is frozen. To drop a
+   different card that has not started, a planning card uses `queue request drop` (see
+   `groom-queue`).
 
    `card finish` commits your worktree, validates the change, and writes the handoff.
    - Exit 0: `data` is the handoff record. Go to step 6.
    - Exit 1: `error.problems` lists what is wrong. Nothing was recorded. Fix each problem
      (a missing Decisions section, a missing acknowledgement, a change to an entity that the
-     card does not name) and run `card finish` again.
+     card does not name) and run `card finish` again with the same outcome. The journal's
+     outcome is already set, so its body cannot change any more: put new information in the
+     records or requests you fix, not in the journal.
    - Exit 2: no card worker context. Stop and report it in your final message.
 6. Call the native `kanban_complete` tool. Give a `summary` of one to three sentences, and
    give the `data` object of the `card finish` envelope as `metadata`. List the card ids you
@@ -91,8 +102,10 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
 
 ## Failure handling
 
-- If `card finish` keeps failing on the same problem, finish with `--outcome failed` and
-  give the problem in the journal. Outcome `failed` records the handoff even when the
-  content is not valid, and the runtime opens a repair card.
+- If `card finish` keeps failing on the same problem, finish with `--outcome failed`.
+  Outcome `failed` records the handoff even when the content is not valid, and the runtime
+  opens a repair card. The journal's outcome then differs from `failed`; that difference is
+  listed in the handoff's problems with the others, which tells the repair card what
+  happened.
 - Do not skip `kanban_complete` after a successful `card finish`. The runtime processes a
   handoff only when the run is terminal.

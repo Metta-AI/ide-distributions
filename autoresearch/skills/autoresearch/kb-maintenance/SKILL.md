@@ -13,45 +13,45 @@ Doctrine upheld: D-07, D-14, D-15, D-16, D-22, D-23, D-24.
 ## Reads and writes
 
 - Reads: claims, hubs, the linter report, `plan.md`, the journal.
-- Writes: claims (grades, stale marks, renewals, archive moves), hubs, `kb/log/`,
-  `kb/archive/`, card requests, and the journal.
-- Never writes: `kb/index.md`, backlinks, and other files under `kb/_generated/` (D-24). The
-  runtime regenerates them after each merge. Do not run `kb index` in a card.
+- Writes: the claims and hubs this card's refs name, card requests, and the journal.
+- Never runs: `kb apply`, `kb stale`, `kb renew`, `kb compact`, `kb index`. They change many
+  claims at once, so card finish would reject them (D-23). queue-keeper runs stale marking
+  (on a game-version change), lint fixes, compaction and the generated views on canonical
+  every run.
+- Never writes: `kb/index.md`, backlinks, and other files under `kb/_generated/` (D-24).
 
 ## Procedure
 
 1. Run the linter. It writes nothing:
    `"$AUTORESEARCH_CLI" kb lint`
    Read each finding: stale claims, code citations to renew, contradictions, orphans, hub
-   sentences without claims, and grade changes.
-2. Apply the fixes the linter may make (grades and demotions):
-   `"$AUTORESEARCH_CLI" kb apply`
-3. When the game version changed, mark the claims checked against older versions stale. The
-   current game version is the `game_version` of `stats/metric-noise.yaml`:
-   `"$AUTORESEARCH_CLI" kb stale --version <game version>`
-4. When `GAME.md` names the game source repository and you know the old and new game
-   commits, renew code citations whose cited lines did not change. For changed lines it
-   requests re-verification cards:
-   `"$AUTORESEARCH_CLI" kb renew --game-repo <path> --old <sha> --new <sha> --version <game version>`
-5. Work through the re-verification items and unresolved contradictions that this card
-   names. Close a contradicted claim with `superseded_by` or `valid_to_version`; never
-   delete it (D-15):
+   sentences without claims, and grade changes. Grades, demotions, stale marks and
+   compaction are the runtime's; do not repeat them by hand.
+2. Work through the re-verification items and unresolved contradictions on the claims this
+   card's refs name. Check each claim against current evidence and the current game version
+   (`"$AUTORESEARCH_CLI" softmax game-version`). Renew a claim that still holds by adding
+   the evidence and setting `last_checked_version`:
+   `"$AUTORESEARCH_CLI" records link <C-id> evidence '{"ref": "<ar://evidence/EV-id>", "tier": "<S-E>", "direct": true, "stance": "supports"}'`
+   `"$AUTORESEARCH_CLI" records update <C-id> --patch '{"last_checked_version": "<game version>"}'`
+   Close a contradicted claim with `superseded_by` or `valid_to_version`; never delete it
+   (D-15):
    `"$AUTORESEARCH_CLI" records status <C-id> superseded --reason "<why>" --ref <ar://ref>`
    `"$AUTORESEARCH_CLI" records update <C-id> --patch '{"superseded_by": "<C-id>"}'`
-   Every hub sentence must cite claims (D-16). Prose describes the present (D-14).
-6. Compact when stale claims are too many (at 10% of claims it archives the longest-stale
-   down to 2.5%; it never archives a claim with a pending re-verification request):
-   `"$AUTORESEARCH_CLI" kb compact`
-7. Check hub health and request split or merge cards for flagged hubs:
+3. Fix the hub sentences the card's refs name. Every hub sentence must cite claims (D-16).
+   Prose describes the present (D-14).
+4. For every finding on a claim or hub this card does not name, request a maintenance card
+   whose refs name it (D-22, D-23), grouping related claims in one card:
+   `"$AUTORESEARCH_CLI" queue request create --title "Re-verify <subject>" --mode maintenance --why "<lint finding>" --ref ar://claim/<C-id>`
+5. Check hub health and request split or merge cards for flagged hubs:
    `"$AUTORESEARCH_CLI" kb hubs --request`
-8. Record stale open threads in the journal Decisions section, and request a planning card
+6. Record stale open threads in the journal Decisions section, and request a planning card
    to archive them:
    `"$AUTORESEARCH_CLI" queue request create --title "Archive stale open threads" --mode planning --why "<threads>" --ref ar://plan`
-9. Validate (`"$AUTORESEARCH_CLI" records validate --all`) and finish with `complete-card`.
+7. Validate (`"$AUTORESEARCH_CLI" records validate --all`) and finish with `complete-card`.
 
 ## Failure handling
 
-- `kb renew` exit 1 (for example, the game repo cannot be read): skip renewal, note it in
-  the journal, and go on.
-- A change to an entity that the card does not name fails card finish (D-23). Request a
-  maintenance card that names it instead.
+- A change to an entity that the card does not name fails card finish (D-23). Undo it and
+  request a maintenance card that names it instead.
+- The linter reports a stale claim that a game update should have renewed from unchanged
+  source: say so in the journal; code-citation renewal is an operator command.

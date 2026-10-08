@@ -32,7 +32,12 @@ Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23.
   `AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"` is the profile directory. A
   binding is a command line in the `bindings` map of its front matter. Run a binding from
   `"$AR_HOME"`, because its relative paths start there. The body of `GAME.md` says how to
-  call each binding.
+  call each binding. `"$AUTORESEARCH_CLI" game show` prints the contract's front matter as
+  JSON (bindings, outcome metrics, performance guardrails, episode floor, league, layers)
+  and the file's path.
+- The current game version (the one noise records, designs and claims are checked against)
+  comes from `"$AUTORESEARCH_CLI" softmax game-version`. Do not read it from a card title or
+  an old record.
 
 ## Procedure
 

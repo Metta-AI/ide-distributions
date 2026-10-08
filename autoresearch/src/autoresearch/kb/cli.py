@@ -17,8 +17,8 @@ Same envelope, exit codes and root resolution as ``autoresearch records`` (see
 ``apply``, ``index``, ``stale``, ``renew`` and ``compact`` are operator/runtime commands: they
 change many claims at once, so a card running them would fail the D-23 ref check at card
 finish. queue-keeper's KB step runs stale marking, apply, compaction and the generated views
-on canonical every run; ``renew`` is an operator command. Cards use ``kb lint`` and ``kb hubs`` and edit only the claims their
-refs name.
+on canonical every run; ``renew`` is an operator command. Cards use ``kb lint`` and
+``kb hubs`` and edit only the claims their refs name.
 """
 
 import argparse

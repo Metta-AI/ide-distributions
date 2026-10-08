@@ -38,10 +38,11 @@ Doctrine upheld: D-01, D-06, D-09, D-14, D-15, D-17, D-20, D-22, D-23.
    experiment:
    `"$AUTORESEARCH_CLI" records update <E-id> --patch '{"decision": {"outcome": "<o>", "reason": "<why>", "decided_at": "<ISO time>", "refs": ["ar://result/<R-id>"]}}'`
    `"$AUTORESEARCH_CLI" records status <E-id> reviewed`
-7. Update the hypothesis, claims, hubs, and component status. A review card names only the
-   experiment and its version, so it may change only those (D-23). When the card refs name
-   the hypothesis, do these here; otherwise request one investigation card whose refs name
-   the hypothesis, the claims, and the hubs to change, and give it the decision:
+7. Update the hypothesis, claims, hubs, and component status. The review card's refs name
+   the experiment, its version, its hypothesis, and that hypothesis's Topics, so change
+   the hypothesis and the Topics here; no follow-up card is needed for them. Claims and hubs
+   change only when the refs name them (D-23); for others, request one maintenance card
+   whose refs name them, and give it the decision:
    - `promote` → the hypothesis becomes `supported`; `refute` → `falsified`; `hold` and
      `invalid` do not move it:
      `"$AUTORESEARCH_CLI" records status <H-id> supported --reason "<decision>" --ref ar://result/<R-id>`

@@ -58,8 +58,10 @@ Doctrine upheld: D-04, D-05, D-07, D-14, D-16, D-23.
    linter computes the grade; do not set `evidence_grade` yourself.
    To add evidence to an existing claim (the card must name it, D-23):
    `"$AUTORESEARCH_CLI" records link <C-id> evidence '{"ref": "ar://evidence/<EV-id>", "tier": "C", "direct": true, "stance": "supports"}'`
-6. Update the hub sentences that rest on the claims. Every hub sentence cites a claim (D-16),
-   and prose describes the present (D-14).
+6. Update the hub sentences that rest on the claims, but only in hubs the card's refs name
+   (D-23); for any other hub, request a card that names it:
+   `"$AUTORESEARCH_CLI" queue request create --title "Update hub <HUB-id>" --mode maintenance --why "<claims that changed>" --ref ar://hub/<HUB-id>`
+   Every hub sentence cites a claim (D-16), and prose describes the present (D-14).
 7. If the replay cannot show the cause, do not change strategy. Request an instrumentation
    card: a STRATEGY change of kind instrumentation that adds telemetry and no behaviour
    change. It makes a version with no experiment:
@@ -74,4 +76,5 @@ Doctrine upheld: D-04, D-05, D-07, D-14, D-16, D-23.
 - The replay does not decode, or the hash does not match: the gate fails. Record the gap in
   the journal and request instrumentation or a tool fix. Never edit strategy from a low score
   alone.
-- No command fetches league episodes or replays outside our XP requests. Use XP evidence.
+- No command fetches replays outside our XP requests (`softmax league-episodes` returns
+  league results as metric rows, not replays). Use XP evidence for replays.

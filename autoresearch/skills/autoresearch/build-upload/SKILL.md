@@ -9,7 +9,7 @@ This skill implements the build, local check, and upload steps of System Design 
 adapts optimizer-seed `build-upload`. The build is game-specific, so it runs the game's
 `build` binding.
 
-Doctrine upheld: D-03, D-04, D-08, D-25.
+Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 
 ## Reads and writes
 
@@ -20,6 +20,13 @@ Doctrine upheld: D-03, D-04, D-08, D-25.
 
 ## Procedure
 
+0. If the experiment has no `evaluation_design` yet (an earlier card stopped on
+   `needs_calibration`), freeze it first from the request it stored. Write
+   `data.meta.evaluation_design_request` of `"$AUTORESEARCH_CLI" records show <E-id>` to
+   `.scratch/design-request.json`, then:
+   `"$AUTORESEARCH_CLI" stats design <E-id> --request-file .scratch/design-request.json`
+   On exit 1, follow the `experiment` skill's failure handling for `stats design`. The
+   experiment cannot leave `designed` without a frozen design.
 1. Check that the candidate differs from the champion only in the components the experiment
    names (D-08): `git diff --no-index strategy/STRATEGY.md strategy/candidates/<E-id>/STRATEGY.md`.
 2. Build through the game's `build` binding. Read `GAME.md` (see `queue` for its path and
