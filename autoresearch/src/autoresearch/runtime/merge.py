@@ -268,6 +268,7 @@ def _validate(canonical: Path, path: Path, record: dict) -> dict:
         card_spec(record),
         list(record["responsible_inbound"]),
         record["card"],
+        outcome=record.get("outcome"),
     )
     record = record | {"report": report.to_dict()}
     if report.ok:

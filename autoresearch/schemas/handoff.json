@@ -16,7 +16,7 @@
     "refs": {"type": "array", "items": {"type": "string"}},
     "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "result_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "outcome": {"enum": ["done", "partial", "failed", "blocked"]},
+    "outcome": {"enum": ["done", "partial", "dropped", "failed", "blocked"]},
     "journal": {"type": ["string", "null"]},
     "responsible_inbound": {"type": "array", "items": {"type": "string"}},
     "report": {

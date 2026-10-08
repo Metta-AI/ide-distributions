@@ -235,6 +235,21 @@ def _classify_records(
     return own_journals
 
 
+def _journal_outcome_problems(
+    repo: Path, sha: str, path: str, outcome: str | None
+) -> list[str]:
+    if outcome is None:
+        return []
+    doc = _doc_at(repo, sha, path, "journal")
+    journal_outcome = doc[0].get("outcome") if doc else None
+    if journal_outcome is not None and journal_outcome != outcome:
+        return [
+            f"{path}: journal outcome {journal_outcome!r} differs from the card finish "
+            f"outcome {outcome!r}"
+        ]
+    return []
+
+
 def validate_at(
     repo: Path,
     base_sha: str,
@@ -242,6 +257,7 @@ def validate_at(
     spec: CardSpec,
     responsible_inbound: list[str],
     task_id: str,
+    outcome: str | None = None,
 ) -> HandoffReport:
     """Judge the change ``base_sha..result_sha`` of card ``task_id`` from git objects only.
 
@@ -252,7 +268,8 @@ def validate_at(
     ``validate_changes`` so an archive move is one change of an existing entity; no generated,
     ledger, outbox or inbox file changed; only staged messages and card requests are deleted;
     staged messages and card requests are valid; each responsible ``reply``/``steer`` inbound
-    is answered by a staged ``note`` with ``in_reply_to``."""
+    is answered by a staged ``note`` with ``in_reply_to``. When ``outcome`` (the card finish
+    outcome) is given and the journal sets ``outcome``, the two must be equal."""
     report = HandoffReport(ok=False)
     record_changes: list[Change] = []
     replied_to: set[str] = set()
@@ -280,6 +297,7 @@ def validate_at(
     own_journals = [path for path in own_journals if path not in earlier]
     if len(own_journals) == 1:
         report.journal = own_journals[0]
+        report.problems += _journal_outcome_problems(repo, result_sha, report.journal, outcome)
     else:
         report.problems.append(
             f"the card must add exactly one new journal with card {task_id}; "

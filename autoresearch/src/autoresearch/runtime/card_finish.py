@@ -40,7 +40,8 @@ from autoresearch.runtime.ledger import (
     now_iso,
 )
 
-OUTCOMES = ("done", "partial", "failed", "blocked")
+# System Design §5.8 (done|partial|dropped|failed) plus the runtime's ``blocked``.
+OUTCOMES = ("done", "partial", "dropped", "failed", "blocked")
 # Receipt states from which a handoff may be recorded: a first run, or a retry after an
 # earlier run's handoff.
 HANDOFF_FROM_STATES = ("admitted", "handed_off")
@@ -144,7 +145,9 @@ def finish(ctx: RunContext, outcome: str) -> FinishResult:
     )
     base_sha = gitops.merge_base(ctx.canonical, result_sha, "HEAD")
     responsible = list(meta.get("responsible_inbound", []))
-    report = validate_at(ctx.canonical, base_sha, result_sha, spec, responsible, task_id)
+    report = validate_at(
+        ctx.canonical, base_sha, result_sha, spec, responsible, task_id, outcome=outcome
+    )
     if not report.ok and outcome != "failed":
         return FinishResult(ok=False, problems=report.problems, report=report)
 

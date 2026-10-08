@@ -511,3 +511,25 @@ def test_archive_move_that_edits_the_record_is_a_problem(card):
     result = finish(card.ctx(), "done")
     assert not result.ok
     assert any("must not change its body" in problem for problem in result.problems)
+
+
+# --- outcomes (§5.8 plus blocked) and the journal outcome ---
+
+
+@pytest.mark.parametrize("outcome", ["done", "partial", "dropped", "failed", "blocked"])
+def test_every_outcome_is_accepted_and_matches_the_journal(card, monkeypatch, outcome):
+    journal_id = card.write_journal()
+    card.worker_store.update(journal_id, {"outcome": outcome})
+    assert _finish_cli(card, monkeypatch, outcome=outcome) == 0
+    record = read_json(card.handoff_path("run-1"))
+    jsonschema.validate(record, load_schema("handoff.json"))
+    assert record["outcome"] == outcome and record["report"]["ok"] is True
+
+
+def test_journal_outcome_must_equal_the_finish_outcome(card):
+    journal_id = card.write_journal()
+    card.worker_store.update(journal_id, {"outcome": "done"})
+    result = finish(card.ctx(), "partial")
+    assert not result.ok
+    assert any("differs from the card finish outcome" in p for p in result.problems)
+    assert not card.handoff_path("run-1").exists()

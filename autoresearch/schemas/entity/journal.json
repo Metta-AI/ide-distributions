@@ -48,7 +48,8 @@
         "done",
         "partial",
         "dropped",
-        "failed"
+        "failed",
+        "blocked"
       ]
     },
     "doctrine_version": {
