@@ -99,16 +99,22 @@ G4/G5 failures are advisory warnings and never trigger model repair.
 The standalone compiler accepts optional `--agent-budget SECONDS` to share one
 cumulative generation allowance across all rounds. Each generation receives the
 smaller of `--agent-timeout` and the remaining allowance. Generation time is measured
-with a monotonic clock, separately from assembly and gates. Budget exhaustion is an
-`errored` tool outcome and stops before subsequent generation, assembly or gates.
+with a monotonic clock, separately from assembly and gates. Completed generation
+proceeds to assembly and gates even at the budget. If repair is needed and no budget
+remains, the next generation is blocked with an `errored` outcome. Final-round
+structural policy errors remain `failed`; timeout errors retain their original
+duration and exact stream filename and never trigger another repair.
 Without `--agent-budget`, only the per-round timeout applies; the standalone default
 per-round timeout remains 900 seconds.
 Provider requests/retries and tokens are not a hard spend cap. The 3600-second
 example allowance is informed by the primary lab's observed 3–25 minute
 28-unit generations and 2–4 minute gates; this two-unit source has no promised
 latency. It is not the autoresearch build binding's default or a card budget.
-For that binding's `--agent-timeout` flag, optional `GOTA_AGENT_TIMEOUT_S` host
-setting, precedence and gate budget constraints, see
+The autoresearch binding defaults to 1200 seconds per round and 1800 seconds overall.
+Both are configurable with its `--agent-timeout` / `GOTA_AGENT_TIMEOUT_S` and
+`--agent-budget` / `GOTA_AGENT_BUDGET_S`; flags override environment values and empty
+environment values use defaults. For validation, JSON error reporting and the soft
+card budget's gate timing constraints, see
 [Build and upload](../../GAME.md#build-and-upload). Local fake fixtures do not
 predict model reliability or cost.
 

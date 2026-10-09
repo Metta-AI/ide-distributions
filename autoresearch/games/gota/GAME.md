@@ -133,40 +133,50 @@ never becomes `repair_errors`. Startup faults retain an error report under the
 requested output directory; they may have no artifact or provenance. Failed and
 errored builds are refused by the shared upload reader.
 
-Set the compiler agent's timeout with `--agent-timeout SECONDS`, or set the optional
-`GOTA_AGENT_TIMEOUT_S` in the command environment or the worker profile's `.env`.
-The flag overrides the environment; with neither set, the timeout is 1800 seconds.
-The value must be a positive integer number of seconds. Invalid settings stop before
-manifest lookup or model execution. This limit applies separately to each generation
-round, with up to three rounds per build. All rounds also share a fixed 1800-second
-generation budget: each subprocess gets the smaller of the requested per-round limit
-and the remaining generation allowance. The compiler measures generation with a
-monotonic clock; assembly and gate time do not consume this allowance. Increasing
-the flag or environment value to 3600 does not increase the cumulative allowance.
-Native preparation and gates have their own timing and are outside this budget.
+Set the compiler agent's per-round timeout with `--agent-timeout SECONDS` or the
+optional `GOTA_AGENT_TIMEOUT_S`, and its cumulative generation budget with
+`--agent-budget SECONDS` or `GOTA_AGENT_BUDGET_S`. Environment settings belong in the
+command environment or the worker profile's `.env`. Each flag overrides its matching
+environment setting; an absent or empty environment value uses the default:
+1200 seconds per round and 1800 seconds across all rounds. Both values must be
+positive integer numbers of seconds. Invalid numeric settings stop before manifest
+lookup or model execution; with `--json`, malformed flag values also return an
+`errored` JSON report and retain startup error reports under the requested output.
+
+Each subprocess gets the smaller of the per-round timeout and the remaining overall
+allowance, with up to three rounds per build. The compiler measures generation with
+a monotonic clock; assembly and gate time do not consume this allowance. To increase
+the allowance on a slower host, raise the overall budget as well as the per-round
+timeout. Native preparation and gates are outside the generation budget.
 An agent timeout stops the build as `errored`, retains `agent.log` and the partial
 `hermes-stream-*.jsonl` under the output directory, and reports the configured duration
-and evidence filenames. Exhausting the generation budget also stops as `errored`
-before any later generation, assembly or gate work. Neither condition requests a
-policy repair round. Prebuilt builds ignore this setting because they run no compiler
-agent.
+and the exact stream filename, including when the timeout consumes the remaining
+budget. A completed generation proceeds to assembly and gates even if its elapsed
+time reaches the budget. If those checks request a repair but no generation allowance
+remains, the build stops as `errored` before another generation. A final-round
+structural policy error remains `failed`. Tool timeouts never request a repair, even
+when some budget remains. Prebuilt builds ignore both settings because they run no
+compiler agent.
 
-Keep generation, gates and worker overhead within the card's configured run budget
-(currently 5400 seconds). The documented G3/G4 workload alone takes about 3300 seconds
-on the test box. The 1800-second generation allowance plus that gate estimate totals
-5100 seconds, leaving about 300 seconds for other work. This is planning headroom,
-not an enforced total build deadline: setup overhead, host speed and repeated gate
-work during repairs can increase the total.
+The card's configured 5400-second run budget is soft: Hermes injects a wrap-up notice
+at 80%, or 4320 seconds, rather than enforcing a build deadline. The documented G3/G4
+workload takes about 3300 seconds on the test box. The default 1800-second cumulative
+generation allowance plus that estimate totals 5100 seconds, leaving about 300 seconds
+for other work but exceeding the wrap-up threshold. A repair after a G3 failure repeats
+the roughly 55-minute gate workload; two gate runs alone take about 6600 seconds and
+can exceed the card budget whatever generation timeout is chosen. Setup overhead,
+host speed, and separate local checks can increase the total further.
 
 The timeout choice is informed by timings measured on the EC2 test box, 2026-10-09.
-Passed builds had stream-file creation-to-last-write intervals of 691 and 185 seconds
+Passed builds had intervals between stream creation and last write of 691 and 185 seconds
 for one two-round build, and 210 and 533 seconds for two one-round builds. These are
 lower bounds on generation wall time, not exact process runtimes. A 777-second stream
 interval belonged to a build that timed out after 900 seconds; another timed-out
 stream stopped writing after 20 seconds. The 1377-second interval belonged to an
 errored build whose report said the compiler exited 1. Neither is evidence of a
-successful slow round. The 1800-second allowance provides headroom over the observed
-successful intervals while reserving estimated gate time. A separate idle timeout
+successful slow round. The 1200-second per-round default provides headroom over the
+observed successful intervals, and the 1800-second total allows more than one shorter
+round. A separate idle timeout
 is deferred: these timestamps do not establish a safe maximum quiet interval, and
 reliable idle detection would require supervising the process and its output.
 

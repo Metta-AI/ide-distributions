@@ -167,7 +167,7 @@ def test_generation_budget_shortens_repairs_and_excludes_gates(staged, monkeypat
 
 
 @pytest.mark.parametrize('durations', [[1800], [1000, 800]])
-def test_generation_budget_exhaustion_stops_before_gates(staged, monkeypatch, durations):
+def test_generation_budget_exhaustion_stops_before_next_round(staged, monkeypatch, durations):
     _order, _stage, source = staged
     now, timeouts, gates = [0.0], [], []
     elapsed = iter(durations)
@@ -184,7 +184,7 @@ def test_generation_budget_exhaustion_stops_before_gates(staged, monkeypatch, du
     args.agent_timeout, args.agent_budget = 3600, 1800
     result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
     assert timeouts == ([1800] if len(durations) == 1 else [1800, 800])
-    assert len(gates) == len(durations) - 1
+    assert len(gates) == len(durations)
     assert result['status'] == 'errored'
     assert 'generation budget of 1800s exhausted' in result['error']['message']
     target = Path(result['build'])
@@ -215,10 +215,36 @@ def test_structural_generation_error_cannot_repair_after_budget_exhaustion(
     args.agent_timeout, args.agent_budget = 3600, 1800
     result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
     assert timeouts == ([1800] if len(durations) == 1 else [1800, 1200, 600])
-    assert result['status'] == 'errored'
-    assert result['error']['type'] == 'RuntimeError'
-    assert 'generation budget of 1800s exhausted' in result['error']['message']
+    if len(durations) == 1:
+        assert result['status'] == 'errored'
+        assert result['error']['type'] == 'RuntimeError'
+        assert 'generation budget of 1800s exhausted' in result['error']['message']
+    else:
+        assert result['status'] == 'failed'
+        assert 'unit missing' in result['error']
     assert result['gates'] == {}
+
+
+@pytest.mark.parametrize('elapsed', [1800, 1801])
+def test_completed_generation_at_budget_proceeds_to_gates(staged, monkeypatch, elapsed):
+    _order, _stage, source = staged
+    now, timeouts, gates = [0.0], [], []
+    monkeypatch.setattr(pw_strategy.time, 'monotonic', lambda: now[0])
+    def generate(order, *, errors, timeout):
+        timeouts.append(timeout)
+        now[0] += elapsed
+    monkeypatch.setattr(builds, 'generate', generate)
+    def verify(*a, **kw):
+        gates.append(True)
+        return {f'G{i}': {'outcome': 'passed', 'passed': True, 'summary': {}}
+                for i in range(1, 6)}
+    monkeypatch.setattr(gota_gates, 'verify', verify)
+    args = compile_args(source)
+    args.agent_timeout, args.agent_budget = 1800, 1800
+    result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+    assert timeouts == [1800]
+    assert gates == [True]
+    assert result['status'] == 'passed'
 
 
 @pytest.mark.parametrize('budget', [0, -1])

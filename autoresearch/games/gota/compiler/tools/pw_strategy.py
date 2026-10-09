@@ -110,8 +110,6 @@ def run(args, report, *, engine_identity=None):
                 finally:
                     if args.agent_budget is not None:
                         generation_elapsed += time.monotonic() - generation_started
-                        if generation_elapsed >= args.agent_budget:
-                            raise RuntimeError(budget_message) from None
                 builds.assemble_build(order['build_id'])
                 from gota_gates import verify
                 gates = verify(order['build_id'], manifest=args.manifest)
