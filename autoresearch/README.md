@@ -341,7 +341,8 @@ own commit fails (a journal that cannot be written fails every canonical commit,
 help request cannot be published either and is only logged and retried; the uncommitted
 `pause.json` holds the pause until the journal is fixed). A runtime writer
 builds each commit before it moves `main` and first records an intent naming that exact
-commit, so a crash between moving `main` and the journal entry is recognized, not reported;
+commit, so a crash between moving `main` and the journal entry is recognized, not reported,
+and the next queue-keeper run writes the missing entry and sets the index for that commit;
 an intent vouches for no other commit (one made on the same parent with the same subject is
 reported). The first run of this check on an existing workspace, and a newly
 seeded or cloned one, trusts the current `HEAD` once and commits

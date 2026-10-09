@@ -362,6 +362,8 @@ def check_provenance(
     ``accept-commits`` anchor gets one note, so an accept (even a forged one) is visible."""
     canonical = ctx.canonical
     with canonical_lock(canonical):
+        for sha in provenance.recover(canonical):
+            _log(ctx, f"provenance: recorded and settled {sha}, left unfinished by a crash")
         violation = run.provenance_violation = provenance.check(canonical)
         invalid = provenance.invalid_lines(canonical)
         for anchor in provenance.operator_anchors(canonical):

@@ -585,3 +585,46 @@ def test_a_bootstrap_commit_that_needs_an_unreadable_journal_still_pauses(host, 
     assert run.bootstrap.ok and "JournalError" in run.bootstrap.provenance_error
     assert "provenance" in run.failures and run.paused and run.spend_run is not None
     assert [card.assignee for card in host.queue.list("pending")] == [None]
+
+
+def _staged(host: Host) -> str:
+    return gitops.git(host.canonical, "diff", "--cached", "--name-only")
+
+
+def test_a_recording_failure_after_landing_still_settles_the_index(host, monkeypatch):
+    """Codex review of PR #24 round 2, M2: once HEAD moved, the index follows even when the
+    commit entry cannot be written, and unrelated staged changes are kept."""
+    (host.canonical / "stray.txt").write_text("staged by someone else\n")
+    gitops.git(host.canonical, "add", "stray.txt")
+
+    def fails(*_args, **_kwargs):
+        raise PermissionError("journal")
+
+    monkeypatch.setattr(provenance, "record", fails)
+    with pytest.raises(PermissionError):
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "landed\n")
+        )
+    assert _staged(host) == "stray.txt"  # plan.md is not staged as a revert
+
+
+def test_a_commit_a_crash_left_unsettled_is_recovered_on_the_next_run(host, monkeypatch):
+    """M2: a kill after HEAD moved, before the commit entry and before the index was set,
+    is finished by the next queue-keeper run: commit entry written, index settled."""
+    def crash(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(provenance, "record", crash)
+    monkeypatch.setattr(gitops, "settle", crash)
+    with pytest.raises(KeyboardInterrupt):
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "landed\n")
+        )
+    monkeypatch.undo()
+    landed = host.head()
+    assert _staged(host) == "plan.md"  # the index still holds the old plan.md
+
+    assert host.tick(at(1)).provenance_violation is None
+    assert _staged(host) == ""
+    entries, _ = provenance._entries(host.canonical)
+    assert any(e["kind"] == provenance.COMMIT and e["sha"] == landed for e in entries)

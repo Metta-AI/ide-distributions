@@ -16,7 +16,8 @@ Entry kinds:
 
 - ``intent``: written after the runtime built a commit object and before it moves ``main``
   to it: ``intent`` (a random id), ``sha`` (that exact commit), ``parent`` (HEAD then, or
-  null), ``step`` (the commit subject).
+  null), ``step`` (the commit subject), ``paths`` and ``merge`` (what settling the index
+  after the move needs; ``recover``).
 - ``commit``: one runtime commit: ``sha``, ``parent`` (its first parent, or null for a root
   commit), ``step`` (the commit subject, which names the runtime step), ``intent``, ``pid``,
   ``at``.
@@ -57,7 +58,9 @@ A runtime writer records its commit before it releases the canonical lock, and `
 runs under that lock, so a check never sees a runtime commit without its entry. A crash
 between moving ``main`` and the ``commit`` entry leaves the ``intent`` open: a commit whose
 sha an open intent names is the runtime's own (``check``). Only that exact sha: a commit
-someone else makes on the same parent with the same subject is still reported."""
+someone else makes on the same parent with the same subject is still reported. The next
+queue-keeper run finishes such a commit before it checks (``recover``: the ``commit`` entry,
+and the index entries of its paths set to HEAD)."""
 
 import datetime
 import hashlib
@@ -303,7 +306,8 @@ def commit_recorded(
         _append(
             canonical,
             {"kind": INTENT, "intent": intent, "sha": prepared.sha, "parent": prepared.parent,
-             "step": _subject(message), "at": _now()},
+             "step": _subject(message), "paths": list(prepared.paths), "merge": prepared.merge,
+             "at": _now()},
         )  # fmt: skip
     except BaseException:
         gitops.discard(canonical, prepared)  # leave no merge in progress behind
@@ -313,9 +317,46 @@ def commit_recorded(
     except gitops.GitError:
         _append(canonical, {"kind": VOID, "intent": intent, "at": _now()})
         raise
-    record(canonical, prepared.sha, message, intent)
-    gitops.settle(canonical, prepared)
+    try:
+        record(canonical, prepared.sha, message, intent)
+    finally:  # HEAD moved: the index must follow even when recording failed (``recover``)
+        gitops.settle(canonical, prepared)
     return prepared.sha
+
+
+def _merging(canonical: Path) -> bool:
+    try:
+        gitops.git(canonical, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    except gitops.GitError:
+        return False
+    return True
+
+
+def recover(canonical: Path) -> list[str]:
+    """Finish runtime commits a crash left between moving ``main`` and their ``commit``
+    entry: an open intent whose commit is in HEAD's history gets its ``commit`` entry, and
+    the index entries of its paths are set to HEAD (an unsettled commit leaves them staged
+    as a revert; other entries are left alone) or its merge is ended. Call under the
+    canonical lock, before ``check`` (queue-keeper does, every run). Returns the commits
+    recovered. An intent whose commit never landed stays open: it vouches for that exact
+    commit only."""
+    entries, _ = _entries(canonical)
+    closed = {entry.get("intent") for entry in entries if entry["kind"] in (COMMIT, VOID)}
+    head = gitops.head(canonical)
+    recovered = []
+    for entry in entries:
+        if entry["kind"] != INTENT or entry["intent"] in closed or "sha" not in entry:
+            continue
+        if not _is_ancestor(canonical, entry["sha"], head):
+            continue
+        record(canonical, entry["sha"], entry["step"], entry["intent"])
+        if entry.get("merge"):
+            if _merging(canonical):
+                gitops.git(canonical, "merge", "--quit")
+        elif entry.get("paths"):
+            gitops.git(canonical, "reset", "-q", "HEAD", "--", *entry["paths"])
+        recovered.append(entry["sha"])
+    return recovered
 
 
 def _anchor(canonical: Path, sha: str, reason: str) -> dict:
