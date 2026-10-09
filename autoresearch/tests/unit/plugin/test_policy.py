@@ -315,6 +315,80 @@ def test_kanban_complete_needs_card_finish_first(layout):
     assert tool_policy("kanban_complete", {"summary": "s"}, no_card, None)[0]
 
 
+@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link"])
+@pytest.mark.parametrize("card", [WORKING, PLANNING, FINISHED, None])
+def test_native_kanban_card_tools_are_blocked_in_every_session(layout, tool, card):
+    """A worker-made task skips admission, receipts and pause control (C3, C7). Cards come
+    only from requests that queue-keeper admits."""
+    args = {"title": "x", "assignee": "autoresearch", "parent_id": "t_1", "child_id": "t_2"}
+    ctx = layout.ctx(worker=card is not None)
+    allowed, reason = tool_policy(tool, args, ctx, card)
+    assert not allowed
+    assert reason.startswith("autoresearch policy: ")
+    assert '"$AUTORESEARCH_CLI" queue request create --title' in reason
+
+
+KANBAN_WRITE_COMMANDS = [
+    'hermes kanban create "x" --assignee autoresearch',
+    "hermes kanban --board autoresearch link t_1 t_2",
+    "hermes -p autoresearch kanban assign t_1 autoresearch",
+    "env -u HERMES_DELEGATED_CHILD_CONTEXT hermes kanban create x --assignee autoresearch",
+    "HERMES_DELEGATED_CHILD_CONTEXT= hermes kanban create x",
+    "bash -c 'hermes kanban create x'",
+    "cd /tmp && /usr/local/bin/hermes kanban swarm --goal g",
+    "uv run hermes kanban decompose t_1",
+    "python3 -m hermes_cli.main kanban create x",
+    "hermes kanban boards rm autoresearch",
+    "hermes kanban comment t_1 'note'",
+    "hermes kanban unlink t_1 t_2",
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'create', 'x'])\"""",
+    "echo $(hermes kanban create x)",
+    # an allowlist of reads: writes Hermes' fence list misses, and future actions, are refused
+    "hermes kanban set-model t_1 some/model",
+    "hermes kanban some-future-action t_1",
+    "hermes kanban --board create set-model t_1 m",
+    "hermes kanban boards export -o /tmp/x.tar.gz",
+    "hermes kanban boards some-future-action",
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'set-model', 'x'])\"""",
+]
+KANBAN_READ_COMMANDS = [
+    "hermes kanban show t_1 --json",
+    "hermes kanban list --status blocked",
+    "hermes kanban ls",
+    "hermes kanban --board autoresearch runs t_1 --json",
+    "hermes -p autoresearch kanban --board=autoresearch context t_1",
+    "hermes kanban diag --json",
+    "hermes kanban tail t_1",
+    "hermes kanban boards list",
+    "hermes kanban boards current",
+    "hermes kanban",
+    'git commit -m "do not hermes kanban create"',
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'show', 't_1'])\"""",
+]
+
+
+@pytest.mark.parametrize("command", KANBAN_WRITE_COMMANDS)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_hermes_kanban_writes_from_a_shell_are_blocked(layout, command, card):
+    """The shell route to the same board writes (Hermes' delegate fence is the second layer
+    in card workers; it can be unset with ``env -u``, and non-card sessions have none)."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed, command
+    assert '"$AUTORESEARCH_CLI" queue request create --title' in reason
+
+
+@pytest.mark.parametrize("command", KANBAN_READ_COMMANDS)
+def test_hermes_kanban_reads_are_allowed(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert allowed, (command, reason)
+
+
+def test_execute_code_running_hermes_kanban_create_is_blocked(layout):
+    code = "import subprocess\nsubprocess.run(['hermes', 'kanban', 'create', 'x'])"
+    allowed, reason = tool_policy("execute_code", {"code": code}, layout.ctx(), WORKING)
+    assert not allowed and "queue request create" in reason
+
+
 @pytest.mark.parametrize(
     ("card", "expected"),
     [(PLANNING, True), (WORKING, False), ({"mode": "experimentation"}, False), (None, True)],

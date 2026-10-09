@@ -47,6 +47,10 @@ approvals:
     - "git push -f*"
     - "git push*--force*"
     - "git push* -f*"
+    - "hermes kanban create*"
+    - "hermes kanban link*"
+    - "hermes kanban --board * create*"
+    - "hermes kanban --board * link*"
 
 terminal:
   env_passthrough:

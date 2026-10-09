@@ -125,6 +125,11 @@ def _is_denied(command: str) -> bool:
         ("git push -f origin main", True),
         ("git push origin --force", True),
         ("git push origin main", False),
+        ("hermes kanban create x --assignee autoresearch", True),
+        ("hermes kanban --board autoresearch link t_1 t_2", True),
+        ("cd /tmp && hermes kanban create x", True),
+        ("hermes kanban show t_1 --json", False),
+        ('git commit -m "no hermes kanban create here"', False),
     ],
 )
 def test_deny_globs_are_anchored(command, blocked):

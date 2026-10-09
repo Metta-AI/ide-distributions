@@ -84,8 +84,12 @@ run 1, 5.797 after run 3). Budget was $15. The key's `usage` lags by minutes, so
    hole: a complete attempt could still be repeated (the runtime relaunch completes attempt
    1, then a self-requested card runs `--attempt 2`). A new attempt now also needs a failed
    or cancelled request in the latest attempt (`attempt_not_needed` otherwise), so relaunches
-   that run one after another never repeat a healthy attempt. Not covered: two relaunchers
-   at the same moment (no cross-process lock), and a `--batches` change between launches.
+   that run one after another never repeat a healthy attempt. Not covered then: two
+   relaunchers at the same moment (no cross-process lock), and a `--batches` change between
+   launches. The first is now closed: `xp create`, `upload` and `submit` hold a
+   per-experiment file lock (`.supervisor/runtime/locks/xp-<E>.lock`), so a second process
+   waits, then refuses `busy` (worker-to-worker-comms step 1; two-process tests in
+   `tests/unit/softmax/test_softmax_cli.py`). A `--batches` change is still not covered.
    Run 3 ran with the first guard but predates the second, and no self-requested relaunch
    happened in it, so neither guard was exercised: its "no duplicate XP" result rests on the
    agent's behaviour in that run, not on the guards. The guards are proven by unit

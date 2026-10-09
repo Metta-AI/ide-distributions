@@ -10,7 +10,7 @@ decision rule, handle a credit refusal, record the handles, and set `evaluating`
 optimizer-seed `run-eval` and the co-gas custody rules. Use it in a design card after
 `build-upload`, and in a "Launch E-…" card.
 
-Doctrine upheld: D-03, D-06, D-11.
+Doctrine upheld: D-03, D-06, D-11, D-21.
 
 ## Reads and writes
 
@@ -25,6 +25,9 @@ Doctrine upheld: D-03, D-06, D-11.
    `lifecycle.launch_attempts` yourself.
 2. Recover first. Requests that already exist must not be created again:
    `"$AUTORESEARCH_CLI" softmax xp recover <E-id>`
+   Check the running peers too (D-21): `"$AUTORESEARCH_CLI" queue list --state claimed`. If
+   another card names this experiment, do not launch it as well: record that in the journal
+   and finish `partial`. `last_heartbeat_at` is in epoch seconds.
 3. Optionally read credits. A Player credential normally cannot read them
    (`available: false`); that is not an error:
    `"$AUTORESEARCH_CLI" softmax credits`
@@ -54,6 +57,14 @@ Doctrine upheld: D-03, D-06, D-11.
 - Reason `attempt_incomplete`: an earlier attempt of the batch still lacks requests (for
   example after a credit denial). Rerun `xp create` with the attempt the message names. It
   creates only the missing requests. A new attempt would repeat every request.
+- Reason `busy`: a process is running `xp create`, `upload` or `submit` for this experiment
+  now; `error.details.holder` names its card, run, pid and command. If `details.own_run` is
+  `true`, it is your own earlier command (for example one that went to the background): wait
+  for it to finish and use its result; do not rerun it and do not finish `partial`. To wait,
+  call the native `process_manage` tool with action `wait` (or `poll`) and that command's
+  `session_id`, then read the result with `"$AUTORESEARCH_CLI" softmax xp recover <E-id>`.
+  Otherwise another card holds it: do not loop, record it in the journal, and finish
+  `partial`.
 - Reason `bad_attempt`: the attempt skips a number. Use the attempt the message names.
 - Reason `attempt_not_needed`: the latest attempt is complete and nothing failed. Do not
   relaunch; the runtime makes the review card.

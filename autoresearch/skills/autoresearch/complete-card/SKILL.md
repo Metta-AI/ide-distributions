@@ -93,13 +93,14 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
      outcome is already set, so its body cannot change any more: put new information in the
      records or requests you fix, not in the journal.
    - Exit 2: no card worker context. Stop and report it in your final message.
-6. Call the native `kanban_complete` tool. Give a `summary` of one to three plain sentences
-   for the coach, and give the `data` object of the `card finish` envelope as `metadata`. When
-   the card came from an inbound `task`, the runtime quotes this summary as the task's outcome,
-   and the coach reads it as written. So say what you found or produced, findings first, in
-   plain words. Put no ids, `ar://` refs or commits in it: they are in `metadata`. List the card
-   ids you made with `kanban_create`, if any, in `created_cards` (normally none: request cards
-   with `queue request create`). The `summary` is required: a call without it fails with
+6. Call the native `kanban_complete` tool, unless this card ends on a tool fault: then
+   `kanban_block` replaces it (see "Tool fault" below). Give a `summary` of one to three plain
+   sentences for the coach, and give the `data` object of the `card finish` envelope as
+   `metadata`. When the card came from an inbound `task`, the runtime quotes this summary as the
+   task's outcome, and the coach reads it as written. So say what you found or produced,
+   findings first, in plain words. Put no ids, `ar://` refs or commits in it: they are in
+   `metadata`. Do not set `created_cards`: you request cards with `queue request create`, and
+   the plugin blocks the native `kanban_create` and `kanban_link`. The `summary` is required: a call without it fails with
    "provide at least one of: summary (preferred), result". Do not set `board`; the tool
    uses this card's board. For example:
    `{"summary": "andre opens with a two-tower push. I wrote a hypothesis that waiting for kill range beats it, and asked for an experiment to test it.", "metadata": {<data>}}`
@@ -129,5 +130,6 @@ tooling. It is not a research result. Do not retry it. In this order:
   opens a repair card. The journal's outcome then differs from `failed`; that difference is
   listed in the handoff's problems with the others, which tells the repair card what
   happened.
-- Do not skip `kanban_complete` after a successful `card finish`. The runtime processes a
-  handoff only when the run is terminal.
+- Do not skip `kanban_complete` after a successful `card finish`, except after a tool
+  fault, where `kanban_block` ends the run instead. The runtime processes a handoff only
+  when the run is terminal.
