@@ -43,6 +43,7 @@ def ws(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(root))
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", "ply_fake")  # FakeSoftmax's default player
     for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
         monkeypatch.delenv(name, raising=False)
     root.mkdir()
@@ -232,4 +233,13 @@ def test_an_open_champion_conflict_is_refused(ws, tmp_path, capsys):
     pause_file.write_text(json.dumps({"reason": "champion conflict: the league shows X"}))
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 1 and env["error"]["reason"] == "champion_conflict"
+    assert "evaluation_design" not in store.load(exp)[0]
+
+
+def test_a_wrong_credential_is_refused_before_the_champion_is_read(ws, tmp_path, capsys, monkeypatch):
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
+    monkeypatch.setenv("AUTORESEARCH_FAKE_FAULTS", "player=ply_other")
+    code, env = design(capsys, ws, tmp_path, exp)
+    assert code == 1 and env["error"]["reason"] == "identity"
     assert "evaluation_design" not in store.load(exp)[0]

@@ -125,6 +125,8 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
     version. Go to step 3: make the first champion in this card (bootstrap), request the
     experiment again, and finish.
   - `champion_conflict`: record it and finish `blocked` (the runtime told the user).
+  - `identity` (D-03): the credential is not our Player. Send a `help_request` and finish
+    `blocked`.
 - The hypothesis is not in the card refs: do not change it. Request a card that names it.
 - If you cannot finish the build in this card, request a "Build <E-id>" card as in the
   `needs_calibration` case and finish `partial`. The runtime makes a build card by itself

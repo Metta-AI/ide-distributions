@@ -56,10 +56,12 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
 - Reason `no_binding`: the experiment is not uploaded. Run `build-upload` first.
 - Reason `baseline_not_champion`: the design's baseline is no longer the current champion
   (another policy was promoted since the design froze), so this experiment can never
-  promote and nothing was launched. Do not edit the design (D-09). Record it in the journal,
-  request a new experiment for the same hypothesis against the current champion
-  (`"$AUTORESEARCH_CLI" queue request create --title "Experiment for <H-id>" --mode experimentation --why "champion changed; redesign against it" --ref ar://hypothesis/<H-id>`),
-  and finish `done`.
+  promote and nothing was launched. Do not edit the design (D-09). Record it in the journal.
+  Unless a pending or claimed card already designs this hypothesis (`queue list --state
+  pending`, `--state claimed`: a later launch card of the same experiment may get here
+  again), request a new experiment for it against the current champion
+  (`"$AUTORESEARCH_CLI" queue request create --title "Experiment for <H-id>" --mode experimentation --why "champion changed; redesign against it" --ref ar://hypothesis/<H-id>`).
+  Finish `done`.
 - Reason `champion_unknown` or `champion_conflict`: the league shows no champion, or the
   league and the loop disagree (A9). Nothing was launched. Record it and finish `blocked`
   (for a conflict the runtime already told the user; for no champion send a

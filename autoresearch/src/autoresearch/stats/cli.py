@@ -17,7 +17,8 @@ Files under the workspace root:
   ``baseline_version`` must be the current champion (``check_baseline``: the policy the
   league shows competing for our player, A9, because a promotion requires champion ==
   baseline), and its ``environment.game_version`` must be the current version. A refusal is
-  exit 1 with ``error.reason``: ``not_designed``; ``champion_conflict`` (the league and the
+  exit 1 with ``error.reason``: ``not_designed``; ``identity`` (the credential is not the
+  expected Player, checked first because the champion read is per player); ``champion_conflict`` (the league and the
   loop disagree, or the agent is paused for it: ``promotion.open_conflict``);
   ``champion_unknown`` (the league shows no champion: run the starter-policy bootstrap first,
   A14); ``baseline_not_champion`` (any other policy, such as a leftover uploaded version);
@@ -58,6 +59,7 @@ from autoresearch.paths import Layout
 from autoresearch.records.cli import BadArguments, _check_id, _ok, _run
 from autoresearch.records.store import RecordStore
 from autoresearch.runtime.promotion import baseline_problem, current_champion
+from autoresearch.softmax_tool.identity import identity_problems
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
 from autoresearch.stats.design import DesignError, EvaluationDesign
@@ -76,6 +78,7 @@ from autoresearch.stats.opponents import DEFAULT_EPISODES, league_snapshot, samp
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAMPION_UNKNOWN = "champion unknown: pass --champion"
 GAME_ENV = "AUTORESEARCH_GAME"
+PLAYER_ENV = "AUTORESEARCH_PLAYER_ID"
 # A league id becomes a file name under stats/rows/, so no path separators or leading dots.
 _LEAGUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -279,6 +282,13 @@ def check_baseline(baseline: str | None, league_id: str) -> None:
         ) from None
     sm = softmax_from_env(os.environ, ctx.canonical)
     try:
+        # Identity first: the champion read is per player, so another player's credential
+        # would show that player's champion (C6).
+        problems = identity_problems(
+            sm.whoami(), os.environ.get(PLAYER_ENV, ""), datetime.now(UTC)
+        )
+        if problems:
+            raise Refusal("identity", "; ".join(problems))
         problem = baseline_problem(ctx, sm, league_id, baseline)
     except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
         raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
