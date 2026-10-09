@@ -147,6 +147,7 @@ Source of truth: `distribution.yaml` (`env_requires`). Details and examples: REA
 | `AUTORESEARCH_WORKSPACE` | no | Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but the serial job that runs its cards is not built (see 2.6). |
 | `AUTORESEARCH_SOFTMAX` | no | Tests only (`fake`). Never set in production. |
+| `AUTORESEARCH_CARD_MODELS` | no | Model per card mode. Default: `planning`, `scouting` and `maintenance` on `z-ai/glm-5.3`, the other modes on `model.default` (README). |
 
 Bootstrap writes `AUTORESEARCH_CLI` and `HERMES_WRITE_SAFE_ROOT`. Do not set them by hand.
 
@@ -256,6 +257,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Softmax tool against the live platform, as a Player | `findings/player-xp-probe.md` (create, get, list, episodes, download as Games Bond: PASS) and `findings/softmax-client.md` (read-only probes: PASS; league episodes readable by a Player) |
 | Skills and doctrine consistency | `tests/unit/test_skills.py`, `tests/unit/test_doctrine.py` (pytest) |
 | Models glm-5.3, glm-5.3-flash tool calling in Hermes | `hermes-facts.md` item 11 |
+| Per-mode card model (`AUTORESEARCH_CARD_MODELS`): `kanban create --model --provider` sets the task's `model_override`/`provider_override` | `tests/unit/queue/test_kanban_queue.py` (pytest); real Hermes v0.21.5 in a throwaway home, 2026-10-08 (create, then `show --json`: `model_override: z-ai/glm-5.3`, `provider_override: openrouter`). **UNVERIFIED:** a dispatched worker actually running on glm-5.3 (no paid run). |
 
 ### 3.2 Needs the hosted or live run
 

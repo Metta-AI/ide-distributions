@@ -67,6 +67,7 @@ terminal:
     - AUTORESEARCH_QUEUE
     - OPENROUTER_MODEL
     - AUTORESEARCH_INBOX_WRITERS
+    - AUTORESEARCH_CARD_MODELS
 
 plugins:
   enabled:

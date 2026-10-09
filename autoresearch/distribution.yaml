@@ -39,6 +39,13 @@ env_requires:
       external agent such as the Softmax IDE bridge, run as its own user). When set, only
       inbox files they own are adopted. When unset, any valid file is adopted and
       queue-keeper logs that direct writes are unauthenticated.
+  - name: AUTORESEARCH_CARD_MODELS
+    required: false
+    default: planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3
+    description: >-
+      Model per card mode, as mode=model pairs. queue-keeper creates each card with that
+      model (Hermes per-task model override); modes not listed, or set to "default", use
+      model.default. "none" puts every mode on model.default.
   - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
     required: false
     default: "30"

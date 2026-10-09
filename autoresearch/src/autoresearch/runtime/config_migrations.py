@@ -49,6 +49,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_QUEUE",  # the serial fallback selects the queue through it (A4)
     "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
     "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
+    "AUTORESEARCH_CARD_MODELS",  # queue-keeper creates cards with the per-mode model
 ]
 APPROVAL_DENY = [
     "coworld player use*",

@@ -539,3 +539,43 @@ def test_list_skips_a_card_removed_between_list_and_show(fake, queue):
     fake.reply("show", code=1, stderr="kanban: database is locked")
     with pytest.raises(KanbanError, match="locked"):
         queue.list()
+
+
+def test_create_pins_the_model_of_the_card_mode(fake, tmp_path):
+    """Mechanical modes run on a cheaper model: Hermes ``kanban create --model --provider``
+    sets the task's model override, which the dispatcher passes to the worker as ``-m``."""
+    queue = KanbanQueue("board1", "prof", models={"planning": "z-ai/glm-5.3"})
+    fake.reply("create", {"id": "t_abc", "status": "ready", "assignee": None})
+    planning = CardSpec("Q-2", "Plan", "planning", "because", [], "tester", "P2")
+    queue.create_unassigned(planning, "card/Q-2", tmp_path / "wt")
+    queue.create_unassigned(SPEC, "card/Q-1", tmp_path / "wt")  # investigation: not in the map
+    pinned, default = fake.argvs()
+    assert pinned[pinned.index("--model") + 1] == "z-ai/glm-5.3"
+    assert pinned[pinned.index("--provider") + 1] == "openrouter"
+    assert "--model" not in default and "--provider" not in default
+
+
+def test_card_models_default_and_override():
+    from autoresearch.queue.select import DEFAULT_CARD_MODELS, card_models
+
+    assert card_models({}) == DEFAULT_CARD_MODELS == {
+        "planning": "z-ai/glm-5.3",
+        "scouting": "z-ai/glm-5.3",
+        "maintenance": "z-ai/glm-5.3",
+    }
+    assert card_models({"AUTORESEARCH_CARD_MODELS": "planning=a/b, scouting=default"}) == {
+        "planning": "a/b"
+    }
+    assert card_models({"AUTORESEARCH_CARD_MODELS": "none"}) == {}
+    for bad in ("planing=a/b", "planning", "planning="):
+        with pytest.raises(ValueError):
+            card_models({"AUTORESEARCH_CARD_MODELS": bad})
+
+
+def test_queue_from_env_gives_the_kanban_queue_the_model_map(tmp_path):
+    from autoresearch.queue.select import queue_from_env
+    from autoresearch.runctx import RunContext
+
+    ctx = RunContext(tmp_path / "autoresearch", tmp_path / "ws", None, None, None)
+    queue = queue_from_env({"AUTORESEARCH_CARD_MODELS": "planning=x/y"}, ctx)
+    assert queue.models == {"planning": "x/y"}
