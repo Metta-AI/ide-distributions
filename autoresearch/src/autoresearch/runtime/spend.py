@@ -415,10 +415,17 @@ def enforce_cards(
 ) -> None:
     """Stop the pending and claimed cards over a cap, foreign cards included
     (``Queue.foreign_cards``: no admission, but they still spend). Only cards Hermes can block
-    are tried (``running``/``ready``); one card that fails does not stop the others."""
+    are tried (``running``/``ready``); one card that fails does not stop the others, and a
+    board that cannot list its foreign cards (``result.failures["foreign"]``) still has its
+    admitted cards capped."""
     canonical = ctx.canonical
     sessions = card_sessions(ctx)
-    for card in [*queue.list(), *queue.foreign_cards()]:
+    cards = queue.list()
+    try:
+        cards = [*cards, *queue.foreign_cards()]
+    except Exception as error:  # noqa: BLE001 - the admitted cards are capped anyway
+        result.failures["foreign"] = f"{type(error).__name__}: {error}"
+    for card in cards:
         if card.state not in ("pending", "claimed"):
             continue
         if card.board_status not in (None, *STOPPABLE_STATUSES):

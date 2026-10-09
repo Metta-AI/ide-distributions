@@ -17,6 +17,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
 from autoresearch.runtime import promotion, proposals, queue_keeper, xp_poll
+from autoresearch.runtime.foreign import report_foreign_cards
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
@@ -660,6 +661,40 @@ def test_spend_caps_stop_a_foreign_card(host):
 
     assert [task_id for task_id, _ in run.spend_run.stopped] == [running.task_id]
     assert host.queue.queue.get(running.task_id).state == "blocked"
+
+
+class _BrokenForeignCards(ForeignBoard):
+    """Hermes cannot show one task, so ``foreign_cards`` raises."""
+
+    def foreign_cards(self):
+        raise RuntimeError("database is locked")
+
+
+def test_spend_caps_still_stop_admitted_cards_when_foreign_cards_fail(host):
+    host.tick(at(0))
+    host.runtime_request(spec=_spec("Admitted"))
+    host.tick(at(1))
+    card = host.claim(mode="investigation")
+    host.queue.requeue(card.task_id, "a second run")
+    host.queue.claim_next(f"worker-{card.task_id}")  # 2 runs, still running
+    host.queue = _BrokenForeignCards(host.queue)
+    host.env["AUTORESEARCH_MAX_CARD_RUNS"] = "1"
+
+    run = host.tick(at(2))
+
+    assert [task_id for task_id, _ in run.spend_run.stopped] == [card.task_id]
+    assert "database is locked" in run.spend_run.failures["foreign"]
+
+
+def test_the_foreign_step_does_nothing_before_the_board_exists(host):
+    class MissingBoard:
+        def board_exists(self):
+            return False
+
+        def foreign_cards(self):
+            raise AssertionError("the board is missing: nothing to list")
+
+    assert report_foreign_cards(host.ctx, MissingBoard(), allow_no_remote=True) == []
 
 
 def test_blocked_card_is_requeued_once_then_repaired(host):

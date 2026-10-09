@@ -542,3 +542,55 @@ def test_receipt_left_admitted_is_reconciled_to_handed_off(board):
     receipt = a.receipt()
     assert receipt["handed_off"] == {"task_id": a.task_id, "run_id": a.run_id}
     assert _states(receipt) == ["admitted", "handed_off", "published"]
+
+
+class _AdvanceFails:
+    """``merge._advance`` raises for one card's handoff (``stage`` first stages a change, as a
+    merge killed halfway would leave canonical)."""
+
+    def __init__(self, monkeypatch, canonical, broken: str, stage: bool):
+        self.original = merge._advance
+        self.canonical, self.broken, self.stage = canonical, broken, stage
+        self.calls = 0
+        monkeypatch.setattr(merge, "_advance", self)
+
+    def __call__(self, ctx, path, store, publish, summary):
+        self.calls += 1
+        if self.broken in str(path):
+            if self.stage:
+                (self.canonical / "half-done.txt").write_text("x", encoding="utf-8")
+                gitops.git(self.canonical, "add", "half-done.txt")
+            raise RuntimeError("advance broke")
+        return self.original(ctx, path, store, publish, summary)
+
+
+def test_an_advance_error_on_a_clean_canonical_does_not_stop_the_other_handoffs(
+    board, monkeypatch
+):
+    a, b = board.admit(), board.admit()
+    for card in (a, b):
+        card.start()
+        card.write_journal()
+        card.finish()
+    _AdvanceFails(monkeypatch, board.canonical, a.task_id, stage=False)
+
+    with pytest.raises(RuntimeError, match=f"{a.task_id}.*advance broke"):
+        board.process()
+
+    assert b.handoff()["state"] == "published"
+    assert a.handoff()["state"] == "committed"
+
+
+def test_an_advance_error_that_leaves_canonical_dirty_stops_the_step(board, monkeypatch):
+    a, b = board.admit(), board.admit()
+    for card in (a, b):
+        card.start()
+        card.write_journal()
+        card.finish()
+    advance = _AdvanceFails(monkeypatch, board.canonical, "", stage=True)  # every handoff
+
+    with pytest.raises(RuntimeError, match="advance broke"):
+        board.process()
+
+    assert advance.calls == 1
+    assert {a.handoff()["state"], b.handoff()["state"]} == {"committed"}

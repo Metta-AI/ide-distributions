@@ -91,7 +91,10 @@ def report_foreign_cards(ctx: RunContext, queue: Queue, allow_no_remote: bool) -
     """Record each foreign task on the board once (module docstring); return the task ids
     recorded by this call. An admitted card whose body cannot be read, or a card whose
     recording fails, does not stop the others: they are raised together at the end, so the
-    step is logged as failed and retried next run. The caller must not hold the lock."""
+    step is logged as failed and retried next run. Before the board exists (the rebuild step
+    creates it) there is nothing to report. The caller must not hold the lock."""
+    if not queue.board_exists():
+        return []
     canonical = ctx.canonical
     admitted = None
     recorded, failures = [], []

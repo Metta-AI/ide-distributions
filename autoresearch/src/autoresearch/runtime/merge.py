@@ -455,6 +455,19 @@ def _ready(
     return _terminal_run(queue, canonical, record)
 
 
+def _left_unchanged(canonical: Path, head_before: str) -> bool:
+    """Canonical is as it was before a failed ``_advance``: HEAD has not moved, no merge is in
+    progress and nothing is uncommitted (a half-done merge or publication shows as one of
+    these)."""
+    if gitops.head(canonical) != head_before:
+        return False
+    try:
+        gitops.git(canonical, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+        return False
+    except gitops.GitError:
+        return gitops.git(canonical, "status", "--porcelain") == ""
+
+
 def process_handoffs(
     ctx: RunContext,
     queue: Queue,
@@ -480,8 +493,9 @@ def process_handoffs(
     foreign card fails) leaves that handoff for the next run, and once every handoff was
     tried the errors are raised together, so the step is logged as failed. The outcomes of
     such a run are lost to the caller (only its log counts); the handoffs are committed. An
-    error while advancing a handoff (``_advance``: validate, merge, publish) still stops the
-    step at once: it can leave canonical mid-transaction (a merge or a partial publication),
+    error while advancing a handoff (``_advance``: validate, merge, publish) is treated the
+    same way only if canonical is left unchanged (``_left_unchanged``); otherwise it stops the
+    step at once, because canonical may be mid-transaction (a merge or a partial publication)
     and the next run repairs that first (module docstring, crash safety)."""
     canonical = ctx.canonical
     publish = publish or _no_publish
@@ -497,8 +511,15 @@ def process_handoffs(
             continue
         if not ready:
             continue
-        with canonical_lock(canonical):
-            record = _advance(ctx, path, store, publish, summary)
+        head_before = gitops.head(canonical)
+        try:
+            with canonical_lock(canonical):
+                record = _advance(ctx, path, store, publish, summary)
+        except Exception as error:
+            if not _left_unchanged(canonical, head_before):
+                raise
+            failures.append(f"{_label(record)}: {type(error).__name__}: {error}")
+            continue
         outcomes.append(
             HandoffOutcome(
                 task_id=record["card"],
