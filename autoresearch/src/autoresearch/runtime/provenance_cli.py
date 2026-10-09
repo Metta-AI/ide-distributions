@@ -1,12 +1,14 @@
 """``autoresearch runtime ...``: operator commands for canonical commit provenance
 (``runtime.provenance``, C1).
 
-- ``runtime check-commits``: read-only. What queue-keeper's provenance check finds now
-  (``null`` when the history is clean): each commit the runtime did not make, with its id,
+- ``runtime check-commits``: read-only. ``{"violation": ..., "invalid_journal_lines": n}``:
+  what queue-keeper's provenance check finds now (``violation`` null when the history is
+  clean): each commit the runtime did not make, with its id,
   author, time and files, and the commit to give ``accept-commits``. It does not move the
   checked point and does not pause.
-- ``runtime accept-commits <sha>``: operator only (refused in a card context, and blocked for
-  agents by the plugin policy and the approvals deny list). Trust ``<sha>`` (HEAD or a commit
+- ``runtime accept-commits <sha>``: operator only. Refused in a card context and in any agent
+  session (``runctx.ENV_AGENT_SESSION``, set by the plugin), and blocked for agents by the
+  plugin policy and the approvals deny list. Trust ``<sha>`` (HEAD or a commit
   in HEAD's history) and everything before it; queue-keeper's next run then checks only the
   commits after it and resumes the agent.
 
@@ -53,17 +55,26 @@ def _run(handler):
     return run
 
 
-def _check_commits(ctx, args) -> dict | None:
+def _check_commits(ctx, args) -> dict:
     with canonical_lock(ctx.canonical):
         violation = provenance.check(ctx.canonical, advance=False)
-    return None if violation is None else violation.to_dict()
+        invalid = provenance.invalid_lines(ctx.canonical)
+    return {
+        "violation": None if violation is None else violation.to_dict(),
+        "invalid_journal_lines": invalid,
+    }
 
 
 def _accept_commits(ctx, args) -> dict:
-    if ctx.card_id or ctx.worker or os.environ.get(runctx.ENV_WORKER):
+    if (
+        ctx.card_id
+        or ctx.worker
+        or os.environ.get(runctx.ENV_WORKER)
+        or os.environ.get(runctx.ENV_AGENT_SESSION)
+    ):
         raise provenance.ProvenanceError(
-            "accept-commits is for a human operator, not a card: a commit the runtime did not "
-            "make pauses the agent until a person checks it (D-27)"
+            "accept-commits is for a human operator, not an agent session or a card: a commit "
+            "the runtime did not make pauses the agent until a person checks it (D-27)"
         )
     with canonical_lock(ctx.canonical):
         return provenance.accept(ctx.canonical, args.sha)

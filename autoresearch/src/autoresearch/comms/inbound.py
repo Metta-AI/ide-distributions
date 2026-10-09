@@ -251,7 +251,9 @@ def adopt_direct_writes(
             for author, ids in sorted(seen_ids.items())
         ]
         subject = f"inbound: adopted {len(blobs)} direct writes"
-        provenance.record(canonical, gitops.commit_blobs(canonical, blobs, paths, subject), subject)
+        provenance.commit_recorded(
+            canonical, subject, lambda: gitops.commit_blobs(canonical, blobs, paths, subject)
+        )
         push(canonical, allow_no_remote=True)
     return result
 

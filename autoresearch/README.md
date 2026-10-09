@@ -314,14 +314,17 @@ git -C "$PROFILE/workspace" show --stat <commit>
 
 `check-commits` lists the commits the runtime did not make (id, author, time, files) and the
 commit to accept; it changes nothing. Keep the commits, or undo them in the workspace (a
-revert is one more commit to accept), then run `accept-commits` with the commit
-`check-commits` names: it trusts that commit and everything before it, and the next
-queue-keeper run resumes the agent. Agents cannot run `accept-commits` (plugin policy,
-approvals deny list, and the command refuses in a card context). A runtime crash between a
-commit and its journal entry also shows up here; its subject names the runtime step. The
-first run of this check on an existing workspace, and a newly seeded or cloned one, trusts
-the current `HEAD` once and commits `.supervisor/ledger/provenance.json`; after that a lost
-journal is reported, not trusted again.
+revert is one more commit to accept; do not reset, which is reported as a rewrite), then run
+`accept-commits` with the commit `check-commits` names: it trusts that commit and everything
+before it, and the next queue-keeper run resumes the agent. Agents cannot run
+`accept-commits` (plugin policy, approvals deny list, and the command refuses in a card or
+any agent session). A check that cannot run (an unreadable journal, a git error) also
+pauses the agent; a step that keeps failing gets its usual help request. A runtime writer
+records an intent before each commit, so a crash between a commit and its journal entry is
+recognized, not reported. The first run of this check on an existing workspace, and a newly
+seeded or cloned one, trusts the current `HEAD` once and commits
+`.supervisor/ledger/provenance.json`; once that marker has been in history, a lost journal
+is reported, not trusted again.
 
 ## Restore on a new host
 
@@ -344,7 +347,9 @@ memory is not in that repository by itself: queue-keeper copies it to
 
    When the remote has a `main`, bootstrap clones it into `$PROFILE/workspace/`. It does
    not seed a new history. The commit provenance journal is local to the host, so the new
-   host trusts the cloned history once (Operate, above).
+   host trusts the cloned history once (Operate, above): whatever is on the remote's `main`
+   is trusted, so check the remote's recent history before a restore if the old host may
+   have been tampered with.
 3. Copy the memory snapshot back:
 
 ```sh
@@ -391,12 +396,18 @@ automatic update; `updates.check` is set to false so it does not even check.
   <<EOF`, `execute_code`), but a constructed path, a script file run by name or another
   interpreter gets past it, and `canonical.lock` is advisory. The commit provenance check
   (Operate, above) detects a commit on canonical `main` that the runtime did not make, after
-  the fact. It is detection, not prevention, and it can be defeated on purpose: a process of
-  the same user can read the journal key and write valid entries, or delete the journal and
-  the ledger marker together to reset the trust (`card finish` runs in the worker and writes
-  the journal, so the key cannot be hidden from workers). Doctrine D-27 forbids working
-  around any refusal. The real fix is to run card workers as a separate OS user without
-  write access to canonical (Rohit's sandbox).
+  the fact. It is detection, not prevention, and it can be defeated on purpose. The OS
+  cannot hide the journal key from workers (same user, and `card finish` in the worker writes
+  the journal); the plugin refuses model tool calls that name the journal, its key or the
+  provenance module, and `runtime accept-commits` refuses in any agent session, but both are
+  policy, so a process that gets the key anyway can write valid entries. Deleting the journal
+  is reported, not trusted again, once the ledger marker has been in history; only a history
+  rewrite that also removes the marker resets the trust, and that is itself loud. The check
+  sees commits, not files: a file a worker writes into a directory that a runtime commit
+  picks up whole (`comms/outbox`, the receipts directory, `comms/inbox` by design) arrives
+  in a recorded commit. Doctrine D-27 forbids working around any refusal. The real fix is to
+  run card workers as a separate OS user without write access to canonical (Rohit's
+  sandbox).
 - **Spend caps see only this profile's sessions.** GotA compiler child runs (their own
   `HERMES_HOME`) and spend outside the profile are not counted. A card's cost needs the
   plugin's `session_start` event for each run, so sessions from before this feature count

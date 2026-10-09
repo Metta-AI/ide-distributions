@@ -637,7 +637,8 @@ def commit_provenance(violation: dict, day: str) -> RuntimeMessage:
         "unassigned, and finished cards are not merged until a person looks. To inspect, run "
         '`"$AUTORESEARCH_CLI" runtime check-commits` in an operator shell: it lists each '
         "commit with its id and files (the ids are also in this message's details, `about`). "
-        "Keep the commits or undo them in the workspace. When the history is as it should be, "
+        "Keep the commits, or undo them with git revert in the workspace (do not reset: the "
+        "revert is one more commit to accept). When the history is as it should be, "
         'run `"$AUTORESEARCH_CLI" runtime accept-commits <commit>` with the commit '
         "`check-commits` names to accept (the agent cannot run it). The agent resumes by itself "
         "on the next run."

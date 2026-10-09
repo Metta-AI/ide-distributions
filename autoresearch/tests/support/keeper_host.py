@@ -191,16 +191,17 @@ class Host:
         request_id = write_request(Layout(self.canonical), op, **fields)
         path = f"cards/requests/{request_id}.json"
         message = f"test request {request_id}"
-        provenance.record(self.canonical, gitops.commit_paths(self.canonical, [path], message),
-                          message)  # fmt: skip
+        provenance.commit_recorded(
+            self.canonical, message, lambda: gitops.commit_paths(self.canonical, [path], message)
+        )
         return request_id
 
     def runtime_commit(self, message: str) -> str:
         """Commit everything in canonical as a runtime writer would: recorded in the
         provenance journal, so queue-keeper's provenance check accepts it."""
-        sha = gitops.commit_all(self.canonical, message)
-        provenance.record(self.canonical, sha, message)
-        return sha
+        return provenance.commit_recorded(
+            self.canonical, message, lambda: gitops.commit_all(self.canonical, message)
+        )
 
     # --- workers ---
 

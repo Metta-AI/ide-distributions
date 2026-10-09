@@ -10,6 +10,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    journal): pause (C7), one runtime ``help_request`` per violation, the spend step, and
    stop. Nothing is merged, published or admitted until an operator runs
    ``runtime accept-commits``; the run after that resumes the agent like any other pause.
+   A check that raises fails closed the same way (pause, spend, stop; the step failure
+   escalates after 5 runs like any other).
 2. ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
    them (``preflight.host_requirement_problems``: the profile ``.env`` over this job's
    environment): missing ones are logged and get one runtime ``help_request`` per distinct
@@ -360,6 +362,9 @@ def check_provenance(
     canonical = ctx.canonical
     with canonical_lock(canonical):
         violation = run.provenance_violation = provenance.check(canonical)
+        invalid = provenance.invalid_lines(canonical)
+    if invalid:
+        _log(ctx, f"provenance: {invalid} journal line(s) do not verify and are ignored")
     if violation is None:
         return
     _log(ctx, f"provenance violation: {json.dumps(violation.to_dict(), sort_keys=True)}")
@@ -819,7 +824,13 @@ def _run_steps(
 ) -> None:
     canonical = ctx.canonical
     _step(run, ctx, "provenance", check_provenance, run, ctx, queue, now, allow_no_remote)
-    if run.provenance_violation is not None:
+    if "provenance" in run.failures:
+        # Fail closed: a check that cannot run is treated like a violation (no merge, publish
+        # or admission, and no resume). The step failure escalates like any failing step.
+        error = run.failures["provenance"]
+        reason = f"{provenance.PAUSE_REASON}: the check could not run: {error}"
+        _step(run, ctx, "provenance_pause", pause, queue, ledger_of(canonical), reason)
+    if run.provenance_violation is not None or "provenance" in run.failures:
         run.paused = True
         # Running cards keep running while paused: the caps still apply to them.
         _spend_steps(run, ctx, queue, env, now, allow_no_remote)

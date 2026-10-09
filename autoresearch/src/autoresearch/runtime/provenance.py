@@ -1,16 +1,20 @@
 """Canonical commit provenance: find commits on canonical ``main`` that the runtime did not
 make (Overview C1: queue-keeper and the trusted runtime commands are the only writers).
 
-Every runtime writer of the canonical workspace records each commit it makes with ``record``
-in a journal outside the work tree, in ``<canonical>/.git/autoresearch/``:
+Every runtime writer of the canonical workspace makes each commit through ``commit_recorded``,
+which records it in a journal outside the work tree, in ``<canonical>/.git/autoresearch/``:
 ``provenance.jsonl`` (append-only, one JSON object per line) and ``provenance.key`` (a random
 key, mode 0600). Each entry carries ``mac``, an HMAC-SHA256 of its other fields under that
 key. An entry whose MAC does not verify is ignored: it vouches for nothing.
 
 Entry kinds:
 
+- ``intent``: written just before a runtime commit: ``intent`` (a random id), ``parent``
+  (HEAD then, or null), ``step`` (the commit subject).
 - ``commit``: one runtime commit: ``sha``, ``parent`` (its first parent, or null for a root
-  commit), ``step`` (the commit subject, which names the runtime step), ``pid``, ``at``.
+  commit), ``step`` (the commit subject, which names the runtime step), ``intent``, ``pid``,
+  ``at``.
+- ``void``: the intent made no commit (nothing to commit, or a merge that conflicted).
 - ``anchor``: trust ``sha`` and all of its history. Bootstrap writes one when it initializes
   the journal (``initialize``: a new or restored workspace, or the first run of this check on
   an existing one), and the operator command ``runtime accept-commits`` writes one.
@@ -25,21 +29,25 @@ needs a ``commit`` entry with the same first parent. Otherwise it returns a ``Vi
 - ``rewritten``: the last checked commit, or a runtime commit recorded after it, is no longer
   in HEAD's history (a reset, rebase, amend or forced move of ``main``);
 - ``journal_lost``: no valid anchor, but the workspace says the journal was initialized
-  (``.supervisor/ledger/provenance.json``, committed by ``initialize``): the journal or its
-  key was deleted or replaced.
+  (``.supervisor/ledger/provenance.json`` is, or ever was, in HEAD's history): the journal or
+  its key was deleted or replaced.
+
+A line that is not valid JSON, not UTF-8, or whose MAC does not verify vouches for nothing;
+``invalid_lines`` counts them (queue-keeper logs the count, ``runtime check-commits`` shows it).
 
 What this is not. Every process of the profile runs as one OS user, and card workers write
-the journal legitimately (``card finish`` commits the handoff on canonical). A process that
-reads the key can write valid entries, and one that deletes both the journal and the ledger
-marker resets the trust. So the journal makes a commit made outside the runtime visible
-unless its author also forges the journal on purpose; it is not a security boundary. The
-boundary is a separate OS user for card workers, without write access to canonical (README,
-"Known gaps").
+the journal legitimately (``card finish`` commits the handoff on canonical), so the OS cannot
+hide the key from them. The plugin refuses model tool calls that name the journal directory,
+its files or this module (best effort, ``plugin/policy.py``), but a process that gets the key
+anyway can write valid entries. So the journal makes a commit made outside the runtime
+visible unless its author also forges the journal on purpose; it is not a security boundary.
+The boundary is a separate OS user for card workers, without write access to canonical
+(README, "Known gaps").
 
 A runtime writer records its commit before it releases the canonical lock, and ``check``
 runs under that lock, so a check never sees a runtime commit without its entry. A crash
-between a commit and its entry leaves an unrecorded runtime commit: it is reported like any
-other, and the operator accepts it after reading its subject.
+between a commit and its ``commit`` entry leaves the ``intent`` open: an unrecorded commit
+whose first parent and subject match an open intent is the runtime's own (``check``).
 """
 
 import datetime
@@ -48,6 +56,7 @@ import hmac
 import json
 import os
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -58,6 +67,7 @@ JOURNAL_FILE = "provenance.jsonl"
 KEY_FILE = "provenance.key"
 MARKER_RELATIVE = ".supervisor/ledger/provenance.json"
 COMMIT, ANCHOR, VERIFIED = "commit", "anchor", "verified"
+INTENT, VOID = "intent", "void"
 UNKNOWN_COMMITS, REWRITTEN, JOURNAL_LOST = "unknown_commits", "rewritten", "journal_lost"
 PAUSE_REASON = "commit provenance"  # the pause reason prefix (pause.json ``reason``)
 
@@ -180,13 +190,13 @@ def _entries(canonical: Path) -> tuple[list[dict], int]:
         return [], 0
     key = _key(canonical, create=False)
     valid, invalid = [], 0
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_bytes().splitlines():
         if not line.strip():
             continue
-        try:
-            entry = json.loads(line)
+        try:  # decoding is inside: one bad byte must not stop the check (it fails closed)
+            entry = json.loads(line.decode("utf-8"))
             ok = key is not None and hmac.compare_digest(str(entry.get("mac")), _mac(key, entry))
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, TypeError):
             ok = False
         if ok:
             valid.append(entry)
@@ -202,20 +212,55 @@ def _first_parent(canonical: Path, sha: str) -> str | None:
         return None  # a root commit
 
 
-def record(canonical: Path, sha: str, step: str) -> None:
+def invalid_lines(canonical: Path) -> int:
+    """Journal lines that vouch for nothing (module docstring)."""
+    return _entries(canonical)[1]
+
+
+def _subject(message: str) -> str:
+    return message.splitlines()[0] if message else ""
+
+
+def record(canonical: Path, sha: str, step: str, intent: str | None = None) -> None:
     """Record a commit the runtime just made on canonical. Call it before releasing the
-    canonical lock (module docstring)."""
+    canonical lock (module docstring). Runtime code commits through ``commit_recorded``."""
     _append(
         canonical,
         {
             "kind": COMMIT,
             "sha": sha,
             "parent": _first_parent(canonical, sha),
-            "step": step.splitlines()[0] if step else "",
+            "step": _subject(step),
+            "intent": intent,
             "pid": os.getpid(),
             "at": _now(),
         },
     )
+
+
+def commit_recorded(
+    canonical: Path, message: str, make_commit: Callable[[], str | None]
+) -> str | None:
+    """Make one runtime commit on canonical with ``make_commit`` (which returns the new
+    commit, or None when it made none) and record it: an ``intent`` entry first, then a
+    ``commit`` entry (or ``void``), so a crash in between is still recognized. Call under the
+    canonical lock."""
+    intent = secrets.token_hex(8)
+    try:
+        parent = gitops.head(canonical)
+    except gitops.GitError:
+        parent = None  # an empty repository: the first commit has no parent
+    _append(
+        canonical,
+        {"kind": INTENT, "intent": intent, "parent": parent, "step": _subject(message),
+         "at": _now()},
+    )  # fmt: skip
+    sha = make_commit()
+    if sha is None:
+        _append(canonical, {"kind": VOID, "intent": intent, "at": _now()})
+    else:
+        record(canonical, sha, message, intent)
+    return sha
 
 
 def _anchor(canonical: Path, sha: str, reason: str) -> None:
@@ -243,8 +288,9 @@ def initialize(canonical: Path, fresh: bool) -> str | None:
     if _base(entries) is not None:
         return None
     has_marker = gitops.show(canonical, "HEAD", MARKER_RELATIVE) is not None
-    if has_marker and not fresh:
-        return None  # check reports journal_lost
+    ever_marked = bool(gitops.git(canonical, "log", "-1", "--format=%H", "--", MARKER_RELATIVE))
+    if ever_marked and not fresh:
+        return None  # check reports journal_lost, also when the marker was deleted since
     head = gitops.head(canonical)
     _anchor(canonical, head, "bootstrap" if fresh else "bootstrap: existing workspace")
     if not has_marker:
@@ -256,9 +302,9 @@ def initialize(canonical: Path, fresh: bool) -> str | None:
             encoding="utf-8",
         )
         subject = "provenance: journal initialized"
-        sha = gitops.commit_paths(canonical, [MARKER_RELATIVE], subject)
-        if sha is not None:
-            record(canonical, sha, subject)
+        commit_recorded(
+            canonical, subject, lambda: gitops.commit_paths(canonical, [MARKER_RELATIVE], subject)
+        )
     return f"provenance journal initialized: trusted HEAD {head}"
 
 
@@ -300,14 +346,25 @@ def check(canonical: Path, advance: bool = True) -> Violation | None:
     # An anchor older than the last verified commit (an operator accepted an old commit)
     # restarts the walk there; commits anchored or verified before still count.
     trusted = {entry["sha"] for entry in entries if entry["kind"] in (ANCHOR, VERIFIED)}
+    closed = {entry.get("intent") for entry in entries if entry["kind"] in (COMMIT, VOID)}
+    open_intents = {
+        (entry["parent"], entry["step"])
+        for entry in entries
+        if entry["kind"] == INTENT and entry["intent"] not in closed
+    }
+
+    def is_runtime(sha: str) -> bool:
+        if sha in trusted:
+            return True
+        parent = _first_parent(canonical, sha)
+        if sha in recorded:
+            return recorded[sha]["parent"] == parent
+        # A runtime writer crashed between its commit and its commit entry.
+        subject = gitops.git(canonical, "show", "-s", "--format=%s", sha)
+        return (parent, subject) in open_intents
 
     def unrecorded(shas: list[str]) -> list[CommitInfo]:
-        return [
-            describe(canonical, sha)
-            for sha in shas
-            if sha not in trusted
-            and (sha not in recorded or recorded[sha]["parent"] != _first_parent(canonical, sha))
-        ]
+        return [describe(canonical, sha) for sha in shas if not is_runtime(sha)]
 
     if not _is_ancestor(canonical, base, head):
         try:

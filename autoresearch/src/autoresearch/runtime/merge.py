@@ -333,14 +333,19 @@ def _merge(canonical: Path, path: Path, record: dict, store: RecordStore) -> dic
             canonical, path, record, "reconcile", why, overlap=overlap, conflicts=[]
         )
     message = f"merge card/{record['request_id']} ({_label(record)})"
-    merged, conflicts = gitops.merge_no_ff(canonical, record["result_sha"], message)
-    if not merged:
+    conflicts: list[str] = []
+
+    def merge_commit() -> str | None:
+        merged, found = gitops.merge_no_ff(canonical, record["result_sha"], message)
+        conflicts.extend(found)
+        return gitops.head(canonical) if merged else None
+
+    merge_sha = provenance.commit_recorded(canonical, message, merge_commit)
+    if merge_sha is None:
         why = _reconcile_why(record, head, [], conflicts)
         return _request_follow_up(
             canonical, path, record, "reconcile", why, overlap=[], conflicts=conflicts
         )
-    merge_sha = gitops.head(canonical)
-    provenance.record(canonical, merge_sha, message)
     return _mark_merged(canonical, path, record, merge_sha)
 
 

@@ -54,9 +54,15 @@ def _forge(host: Host) -> str:
     return host.head()
 
 
-def _cli(monkeypatch, capsys, host: Host, *argv: str, card: bool = False) -> tuple[int, dict]:
+def _cli(
+    monkeypatch, capsys, host: Host, *argv: str, card: bool = False, agent: bool = False
+) -> tuple[int, dict]:
     monkeypatch.setenv("HERMES_HOME", str(host.home))
     monkeypatch.delenv("AUTORESEARCH_WORKSPACE", raising=False)
+    if agent:
+        monkeypatch.setenv("AUTORESEARCH_AGENT_SESSION", "1")
+    else:
+        monkeypatch.delenv("AUTORESEARCH_AGENT_SESSION", raising=False)
     if card:
         monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(host.canonical / ".worktrees" / "x"))
     else:
@@ -107,7 +113,8 @@ def test_runtime_commits_pass_through_a_full_card_cycle(host):
     assert not (host.ledger / "pause.json").exists()
     entries, invalid = provenance._entries(host.canonical)
     assert invalid == 0
-    assert entries[-1] == {**entries[-1], "kind": provenance.VERIFIED, "sha": host.head()}
+    checked = entries[provenance._base(entries)]
+    assert checked["kind"] == provenance.VERIFIED and checked["sha"] == host.head()
 
 
 def _checked(host: Host) -> str:
@@ -141,7 +148,8 @@ def test_accept_commits_clears_the_pause(host, monkeypatch, capsys):
     assert host.tick(at(1)).paused
 
     code, envelope = _cli(monkeypatch, capsys, host, "check-commits")
-    assert code == 0 and envelope["data"]["accept_sha"] == forged
+    assert code == 0 and envelope["data"]["violation"]["accept_sha"] == forged
+    assert envelope["data"]["invalid_journal_lines"] == 0
     assert host.tick(at(2)).paused  # check-commits changes nothing
 
     code, envelope = _cli(monkeypatch, capsys, host, "accept-commits", forged[:12])
@@ -153,13 +161,17 @@ def test_accept_commits_clears_the_pause(host, monkeypatch, capsys):
     [resumed] = [m for m in host.outbox() if m["title"] == "Agent resumed"]
     assert "a person accepted" in resumed["body"]
     code, envelope = _cli(monkeypatch, capsys, host, "check-commits")
-    assert code == 0 and envelope["data"] is None
+    assert code == 0 and envelope["data"]["violation"] is None
 
 
 def test_accept_commits_is_refused_in_a_card_and_for_foreign_commits(host, monkeypatch, capsys):
     forged = _forge(host)
     code, envelope = _cli(monkeypatch, capsys, host, "accept-commits", forged, card=True)
     assert code == 1 and "human operator" in envelope["error"]["message"]
+    # Any agent session (a planner or chat session too): the plugin's marker, however the
+    # command word was assembled.
+    code, envelope = _cli(monkeypatch, capsys, host, "accept-commits", forged, agent=True)
+    assert code == 1 and "agent session" in envelope["error"]["message"]
     assert host.tick(at(1)).paused
 
     other = host.tmp_path / "other"
@@ -193,30 +205,123 @@ def test_an_entry_forged_without_the_key_does_not_count(host):
     assert host.tick(at(1)).provenance_violation.commits[0].sha == forged
 
 
-def test_bootstrap_trusts_an_existing_workspace_once(host):
-    """The first run with this check on a workspace without a journal (an upgrade) trusts
-    HEAD once and commits the marker; a journal lost after that is not trusted again."""
-    marker = host.canonical / provenance.MARKER_RELATIVE
-    gitops.git(host.canonical, "rm", "-q", str(marker))
-    gitops.git(host.canonical, "commit", "-q", "-m", "an install from before the check")
-    journal = provenance.journal_dir(host.canonical)
-    for path in journal.iterdir():
+def test_bootstrap_trusts_a_workspace_from_before_the_check_once(tmp_path):
+    """The first run with this check on a workspace that never had a journal (an upgrade)
+    trusts HEAD once and commits the marker; a journal lost after that is not trusted again."""
+    repo = tmp_path / "canonical"
+    gitops.git(tmp_path, "init", "-q", "-b", "main", str(repo))
+    gitops.git(repo, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-q",
+               "--allow-empty", "-m", "an install from before the check")  # fmt: skip
+    gitops.git(repo, "config", "user.name", "x")
+    gitops.git(repo, "config", "user.email", "x@x")
+
+    action = provenance.initialize(repo, fresh=False)
+    assert action and "trusted HEAD" in action
+    assert gitops.show(repo, "HEAD", provenance.MARKER_RELATIVE) is not None
+    assert provenance.check(repo) is None
+
+    for path in provenance.journal_dir(repo).iterdir():
+        path.unlink()
+    assert provenance.initialize(repo, fresh=False) is None
+    assert provenance.check(repo).kind == provenance.JOURNAL_LOST
+
+
+def test_deleting_the_journal_and_the_marker_is_still_reported(host):
+    """Removing the marker in a later commit does not make a lost journal trusted again: the
+    marker was once in history (I-6)."""
+    gitops.git(host.canonical, "rm", "-q", provenance.MARKER_RELATIVE)
+    gitops.git(host.canonical, "commit", "-q", "-m", "drop the marker")
+    for path in provenance.journal_dir(host.canonical).iterdir():
         path.unlink()
 
     run = host.tick(at(1))
-    assert run.provenance_violation is None
-    assert any("provenance journal initialized" in a for a in run.bootstrap.actions)
-    assert json.loads(marker.read_text())["trusted_head"]
+    assert run.provenance_violation.kind == provenance.JOURNAL_LOST
+    assert not any("provenance journal initialized" in a for a in run.bootstrap.actions)
+
+
+def test_a_crash_between_commit_and_record_is_recognized(host):
+    """M-1: the intent entry written before the commit lets the check recognize a runtime
+    commit whose commit entry was never written (a kill in between)."""
+    marker = host.canonical / "plan.md"
+
+    def commit_then_crash() -> str:
+        marker.write_text("crash\n")
+        gitops.commit_all(host.canonical, "a runtime step")
+        raise KeyboardInterrupt  # the process dies before the commit entry
+
+    with pytest.raises(KeyboardInterrupt):
+        provenance.commit_recorded(host.canonical, "a runtime step", commit_then_crash)
+    assert host.tick(at(1)).provenance_violation is None
+
+    # The same subject on another parent (or with no intent at all) is not the runtime's.
+    marker.write_text("forged\n")
+    gitops.commit_all(host.canonical, "a runtime step")
+    assert host.tick(at(2)).provenance_violation.kind == provenance.UNKNOWN_COMMITS
+
+
+def test_an_unreadable_journal_line_fails_closed(host):
+    """I-1: a byte that is not UTF-8 is an invalid line, not a crash of the check."""
+    forged = _forge(host)
+    with provenance.journal_path(host.canonical).open("ab") as handle:
+        handle.write(b"\xff\xfe not json\n")
+    run = host.tick(at(1))
+    assert run.provenance_violation.commits[0].sha == forged
+    assert provenance.invalid_lines(host.canonical) == 1
+
+
+def test_a_check_that_cannot_run_pauses_and_never_resumes(host, monkeypatch):
+    """I-1: a provenance step that raises fails closed: pause, nothing merged or admitted, and
+    a provenance pause is not lifted by that run."""
+    def broken(*_args, **_kwargs):
+        raise PermissionError("journal unreadable")
+
+    monkeypatch.setattr(provenance, "check", broken)
+    run = host.tick(at(1))
+    assert "provenance" in run.failures and run.paused and run.preflight is None
+    assert run.admitted == [] and run.resumed is None
+    pause = json.loads((host.ledger / "pause.json").read_text())
+    assert pause["reason"].startswith(provenance.PAUSE_REASON)
+    assert host.tick(at(2)).paused
+
+    monkeypatch.undo()
+    resumed = host.tick(at(3))
+    assert not resumed.paused and not (host.ledger / "pause.json").exists()
+
+
+GIT_WRITES = {"commit", "commit-tree", "update-ref", "merge", "reset", "rebase",
+              "cherry-pick", "revert", "am", "pull"}  # fmt: skip
+
+
+def _commits(call: ast.Call) -> bool:
+    """A call that can move a branch: ``gitops.commit_*`` / ``merge_no_ff``, or
+    ``gitops.git(repo, "<write subcommand>", ...)``."""
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+            and func.value.id == "gitops"):  # fmt: skip
+        return False
+    if func.attr in {"commit_all", "commit_paths", "commit_blobs", "merge_no_ff"}:
+        return True
+    first = call.args[1] if func.attr == "git" and len(call.args) > 1 else None
+    return isinstance(first, ast.Constant) and first.value in GIT_WRITES
+
+
+def _records(call: ast.Call) -> bool:
+    func = call.func
+    if isinstance(func, ast.Name):  # inside provenance.py itself
+        return func.id == "commit_recorded"
+    return (isinstance(func, ast.Attribute) and func.attr == "commit_recorded"
+            and isinstance(func.value, ast.Name) and func.value.id == "provenance")  # fmt: skip
 
 
 def test_every_canonical_commit_records_its_provenance():
-    """A new canonical commit site that forgets ``provenance.record`` would pause the agent
-    on its first commit. Every function that commits (``gitops.commit_*``, ``merge_no_ff``)
-    either records it or commits only in a card worktree."""
-    committers = {"commit_all", "commit_paths", "commit_blobs", "merge_no_ff"}
+    """A new canonical commit site that forgets ``provenance.commit_recorded`` would pause
+    the agent on its first commit. Every function that can move a branch either commits
+    through ``commit_recorded`` or works only on a card worktree (listed, and checked to
+    exist). ``merge --abort`` in ``abort_stale_merge`` moves nothing."""
     worktree_only = {
         ("runtime/card_finish.py", "finish"),
         ("softmax_tool/submit.py", "bootstrap_champion"),
+        ("runtime/queue_keeper.py", "abort_stale_merge"),
     }
     found, missing = set(), []
     for path in SRC.rglob("*.py"):
@@ -224,18 +329,23 @@ def test_every_canonical_commit_records_its_provenance():
         if relative == "io/gitops.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for function in ast.walk(tree):
-            if not isinstance(function, ast.FunctionDef):
+        functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        # A nested function handed to commit_recorded by its enclosing function is covered.
+        covered = {
+            id(inner)
+            for outer in functions
+            if any(_records(c) for c in ast.walk(outer) if isinstance(c, ast.Call))
+            for inner in ast.walk(outer)
+            if isinstance(inner, ast.FunctionDef) and inner is not outer
+        }
+        for function in functions:
+            if id(function) in covered:
                 continue
-            calls = {
-                getattr(node.func, "attr", getattr(node.func, "id", None))
-                for node in ast.walk(function)
-                if isinstance(node, ast.Call)
-            }
-            if not calls & committers:
+            calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+            if not any(_commits(call) for call in calls):
                 continue
             found.add((relative, function.name))
-            if (relative, function.name) not in worktree_only and "record" not in calls:
+            if (relative, function.name) not in worktree_only and not any(map(_records, calls)):
                 missing.append((relative, function.name))
     assert missing == []
     assert worktree_only <= found  # keep the exemptions honest

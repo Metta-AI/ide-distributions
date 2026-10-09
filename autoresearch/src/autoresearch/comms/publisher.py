@@ -219,10 +219,9 @@ def _commit_pending(canonical: Path, message: str) -> str | None:
     paths += staged_removed
     if not paths:
         return None
-    sha = gitops.commit_paths(canonical, sorted(set(paths)), message)
-    if sha is not None:
-        provenance.record(canonical, sha, message)
-    return sha
+    return provenance.commit_recorded(
+        canonical, message, lambda: gitops.commit_paths(canonical, sorted(set(paths)), message)
+    )
 
 
 def push(canonical: Path, allow_no_remote: bool = False) -> bool:
@@ -241,9 +240,9 @@ def commit_and_push(canonical: Path, paths: list[Path], message: str) -> bool:
     and queue-keeper pushes ``main`` every run. Returns whether the push happened. Call under
     the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
-    sha = gitops.commit_paths(canonical, relative, message)
-    if sha is not None:
-        provenance.record(canonical, sha, message)
+    provenance.commit_recorded(
+        canonical, message, lambda: gitops.commit_paths(canonical, relative, message)
+    )
     return push(canonical, allow_no_remote=True)
 
 

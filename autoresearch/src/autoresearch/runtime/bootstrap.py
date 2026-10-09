@@ -192,9 +192,9 @@ def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult)
     with canonical_lock(canonical):
         write_text(path, _agents_md(repo_root))
         subject = f"bootstrap: doctrine version {wanted}"
-        sha = gitops.commit_paths(canonical, ["AGENTS.md"], subject)
-        if sha is not None:
-            provenance.record(canonical, sha, subject)
+        provenance.commit_recorded(
+            canonical, subject, lambda: gitops.commit_paths(canonical, ["AGENTS.md"], subject)
+        )
     result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
 
 
@@ -212,7 +212,7 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     (ledger_of(canonical) / ".gitkeep").touch()
     gitops.git(canonical, "remote", "add", REMOTE, remote)
     subject = f"bootstrap: seed workspace from games/{game}/seed"
-    provenance.record(canonical, gitops.commit_all(canonical, subject), subject)
+    provenance.commit_recorded(canonical, subject, lambda: gitops.commit_all(canonical, subject))
     result.actions.append(f"seeded canonical from games/{game}/seed")
     if not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
         result.warnings.append(f"initial push to {remote} failed; queue-keeper retries it")
@@ -226,9 +226,9 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
         with canonical_lock(canonical):
             write_text(path, "\n".join([*lines, *missing]) + "\n")
             subject = "bootstrap: .gitignore runtime dirs"
-            sha = gitops.commit_paths(canonical, [".gitignore"], subject)
-            if sha is not None:
-                provenance.record(canonical, sha, subject)
+            provenance.commit_recorded(
+                canonical, subject, lambda: gitops.commit_paths(canonical, [".gitignore"], subject)
+            )
         result.actions.append(f"added {missing} to .gitignore")
     remotes = gitops.git(canonical, "remote").split()
     if REMOTE not in remotes:
