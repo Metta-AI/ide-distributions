@@ -6,6 +6,9 @@ existing installs is applied here with ``hermes config set`` (verified to write 
 
 - ``ALWAYS``: set whenever the profile value differs.
 - ``MISSING_ONLY``: set only when the key is absent (the installer may tune it).
+- ``UPGRADE_DEFAULTS``: key -> (old default, new default). A value equal to the old default
+  (an earlier release shipped it, or Hermes' own default) is raised to the new one; any other
+  value is the installer's and is kept.
 - ``UNSET``: removed with ``hermes config unset`` when present.
 - ``ENV_OVERRIDES``: set from an environment variable when it is set and differs (the
   installer's ``OPENROUTER_MODEL`` in the profile ``.env`` becomes ``model.default``: Hermes
@@ -97,11 +100,17 @@ MISSING_ONLY: dict[str, object] = {
     "kanban.max_in_progress": 2,
     "tool_loop_guardrails.hard_stop_enabled": True,
     "agent.max_turns": 150,
-    "agent.run_budget_seconds": 2700,
+    # 90 min: Hermes tells the agent to wrap up at 80% of it (agent/conversation_loop.py
+    # _maybe_inject_run_budget_wrapup); a GotA build card waits about 55 min on its gates.
+    "agent.run_budget_seconds": 5400,
     # Hermes clamps a process_manage wait to terminal.timeout (tools/process_registry.py
     # ProcessRegistry.wait) and uses it as the default foreground timeout. 1800 lets one wait
     # cover a long build or local check; the default 180 forced a model call every 3 minutes.
     "terminal.timeout": 1800,
+}
+UPGRADE_DEFAULTS: dict[str, tuple[object, object]] = {
+    "agent.run_budget_seconds": (2700, 5400),  # shipped until 2026-10-08
+    "terminal.timeout": (180, 1800),  # the Hermes default
 }
 UNSET = ("kanban.default_assignee",)
 ENV_OVERRIDES = {"model.default": "OPENROUTER_MODEL"}
@@ -152,6 +161,9 @@ def pending(home: Path, env: Mapping[str, str] | None = None) -> list[list[str]]
     for key, value in MISSING_ONLY.items():
         if _lookup(config, key) is _ABSENT:
             commands.append(["config", "set", key, _cli_value(value)])
+    for key, (old, new) in UPGRADE_DEFAULTS.items():
+        if _lookup(config, key) == old:
+            commands.append(["config", "set", key, _cli_value(new)])
     for key in UNSET:
         if _lookup(config, key) not in (_ABSENT, None, ""):
             commands.append(["config", "unset", key])

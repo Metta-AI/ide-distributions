@@ -30,7 +30,7 @@ tool_loop_guardrails:
 
 agent:
   max_turns: 150
-  run_budget_seconds: 2700
+  run_budget_seconds: 5400
 
 approvals:
   mode: "off"

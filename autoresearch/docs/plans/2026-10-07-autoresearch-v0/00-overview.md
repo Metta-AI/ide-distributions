@@ -89,7 +89,7 @@ Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, 
 | `kanban.max_in_progress` (2) | missing only (installer may tune) | config.yaml + bootstrap |
 | `kanban.auto_decompose false`, `review_dispatch false`, `auto_subscribe_on_create false`; `default_assignee` unset | always | config.yaml + bootstrap |
 | `memory.memory_enabled true`, `user_profile_enabled false`, `write_approval false`; `auxiliary.background_review.enabled false` | always | config.yaml + bootstrap |
-| `tool_loop_guardrails.hard_stop_enabled true`; `agent.max_turns 150`; `agent.run_budget_seconds 2700` (soft) | missing only | config.yaml + bootstrap |
+| `tool_loop_guardrails.hard_stop_enabled true`; `agent.max_turns 150`; `agent.run_budget_seconds 5400` (soft; 2700 until 2026-10-08, upgraded when still at 2700) | missing only | config.yaml + bootstrap |
 | `approvals.mode off`; `approvals.deny` globs | always | config.yaml + bootstrap |
 | `skills.create_dir` = `$HERMES_HOME/local/skills-staging` (outside every workspace; `queue-keeper` sweeps new/changed skills into canonical `skills-proposed/` and publishes a suggestion) ; curator excludes shipped skills | always | bootstrap |
 | `HERMES_WRITE_SAFE_ROOT` = canonical (covers `.worktrees/`) | always | profile `.env` via bootstrap |

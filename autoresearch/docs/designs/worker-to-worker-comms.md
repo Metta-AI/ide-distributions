@@ -126,7 +126,7 @@ directly.
 | Status for a later card | "E-12 batch 1 failed on seed 7; retry it" | Next card | Already handled: journal, handoff, briefing. A Kanban comment on the follow-up card also works. |
 
 Seconds-level latency never matters for this research loop. XP takes minutes to hours. Cards run
-for up to 45 minutes (`agent.run_budget_seconds: 2700`). "On the recipient's next tool call" is
+for up to 90 minutes (`agent.run_budget_seconds: 5400`; 2700 when this was written). "On the recipient's next tool call" is
 fast enough everywhere.
 
 ## Options
