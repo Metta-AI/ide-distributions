@@ -25,7 +25,7 @@ Design documents (open the HTML files in a browser):
 |---|---|---|
 | `git` | any recent | the canonical workspace and its remote |
 | `uv` | any recent | the profile venv, and installing Hermes |
-| Hermes Agent | v0.21.5 (tag `v2026.9.24`) | runs the cron jobs, the workers and Kanban |
+| Hermes Agent | v0.21.5 (tag `v2026.9.24`) locally; v0.21.6 on the EC2 image | runs the cron jobs, the workers and Kanban. Both are supported ([image check](docs/plans/findings/hermes-image-compat.md)). |
 | Nim | 2.2.10 | building GotA native tools and running native gate/replay tests; pure Python tests need no Nim |
 
 Install Hermes by one of two ways (amendment A1). A plain `uv tool install git+...` fails,
@@ -143,15 +143,20 @@ hermes -p autoresearch cron list
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
 | `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
-To start a `queue-keeper` run at the next scheduler tick instead of waiting for the
-schedule:
+To start a `queue-keeper` run now instead of waiting for the schedule:
 
 ```sh
 hermes -p autoresearch cron run queue-keeper
 ```
 
-`cron run` only marks the job. A running gateway runs it on its next tick, or you can run
-`hermes -p autoresearch cron tick` once by hand. To run only bootstrap (no cards). The subshell loads the profile `.env`, because the runtime
+`cron run` claims the job and runs it in the foreground, then prints `Ran now: succeeded.` or
+`Ran now: failed.` This is the same in Hermes v0.21.5 and v0.21.6 (checked in source:
+`tools/cronjob_tools.py`, `_action_run`). It does not wait for the gateway. If the scheduler
+already holds the job it prints "Already being fired by the scheduler" and does not run it
+again; if the CLI inherits a gateway session it may instead report that the job runs in the
+background. `hermes -p autoresearch cron tick` runs every due job once, by hand.
+
+To run only bootstrap (no cards), use a subshell. It loads the profile `.env`, because the runtime
 reads `AUTORESEARCH_WORKSPACE_REMOTE` and the other keys from the environment. `uv` must be
 on `PATH`, because the launcher runs `uv sync`:
 

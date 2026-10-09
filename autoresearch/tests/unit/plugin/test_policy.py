@@ -315,7 +315,7 @@ def test_kanban_complete_needs_card_finish_first(layout):
     assert tool_policy("kanban_complete", {"summary": "s"}, no_card, None)[0]
 
 
-@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link"])
+@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link", "kanban_schedule"])
 @pytest.mark.parametrize("card", [WORKING, PLANNING, FINISHED, None])
 def test_native_kanban_card_tools_are_blocked_in_every_session(layout, tool, card):
     """A worker-made task skips admission, receipts and pause control (C3, C7). Cards come

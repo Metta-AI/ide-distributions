@@ -282,7 +282,7 @@ disposable.
 
 ### Step 1 as implemented
 
-- **Policy** (`plugin/policy.py`): `kanban_create` and `kanban_link` are refused in every
+- **Policy** (`plugin/policy.py`): `kanban_create`, `kanban_link` and `kanban_schedule` (Hermes v0.21.6+) are refused in every
   agent session, card or not. So is the shell route: `hermes kanban <action>` (also behind
   `env -u`, `bash -c`, `python -m hermes_cli…`, `python -c`/`execute_code` text) for every
   action except an allowlist of reads (`list`/`ls`, `show`, `tail`, `watch`, `stats`, `log`,
