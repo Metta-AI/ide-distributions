@@ -316,9 +316,11 @@ git -C "$PROFILE/workspace" show --stat <commit>
 commit to accept; it changes nothing. Keep the commits, or undo them in the workspace (a
 revert is one more commit to accept; do not reset, which is reported as a rewrite), then run
 `accept-commits` with the commit `check-commits` names: it trusts that commit and everything
-before it, and the next queue-keeper run resumes the agent. Agents cannot run
-`accept-commits` (plugin policy, approvals deny list, and the command refuses in a card or
-any agent session). A check that cannot run (an unreadable journal, a git error) also
+before it, and the next queue-keeper run resumes the agent. `accept-commits` is refused
+for agents (best effort: plugin policy, approvals deny list, and the command refuses in a
+card or any agent session; see Known gaps), and every accept is announced: queue-keeper
+publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is
+visible. A check that cannot run (an unreadable journal, a git error) also
 pauses the agent; a step that keeps failing gets its usual help request. A runtime writer
 records an intent before each commit, so a crash between a commit and its journal entry is
 recognized, not reported. The first run of this check on an existing workspace, and a newly
@@ -372,6 +374,13 @@ and keeps `.env`, `config.yaml`, memories, the workspace, and `local/`. The next
 `hermes config set` and re-seeds `AGENTS.md` when `doctrine/VERSION` changed. Hermes has no
 automatic update; `updates.check` is set to false so it does not even check.
 
+After an install or update, check once that agent terminals carry the plugin's agent-session
+marker (`runtime accept-commits` refuses agents by it; this rests on reading the Hermes
+source and is not yet observed live). In an agent session of the profile (a chat with
+`hermes -p autoresearch chat`, or a card worker), have the agent run
+`"$AUTORESEARCH_CLI" runtime session`. It must print `"agent_session": true`. The same
+command in an operator shell prints `false`.
+
 ## Known gaps
 
 - **GotA is bound but not yet proven end to end.** `games/gota` has real `build`,
@@ -400,7 +409,9 @@ automatic update; `updates.check` is set to false so it does not even check.
   cannot hide the journal key from workers (same user, and `card finish` in the worker writes
   the journal); the plugin refuses model tool calls that name the journal, its key or the
   provenance module, and `runtime accept-commits` refuses in any agent session, but both are
-  policy, so a process that gets the key anyway can write valid entries. Deleting the journal
+  policy, so a process that gets the key anyway can write valid entries, and a deliberate
+  agent can assemble the command and clear its environment. Each accept is announced by a
+  runtime note, so a forged one is visible but not prevented. Deleting the journal
   is reported, not trusted again, once the ledger marker has been in history; only a history
   rewrite that also removes the marker resets the trust, and that is itself loud. The check
   sees commits, not files: a file a worker writes into a directory that a runtime commit

@@ -160,8 +160,22 @@ def test_accept_commits_clears_the_pause(host, monkeypatch, capsys):
     assert not (host.ledger / "pause.json").exists()
     [resumed] = [m for m in host.outbox() if m["title"] == "Agent resumed"]
     assert "a person accepted" in resumed["body"]
+    # The accept itself is announced once, so a forged accept is never silent (review R2-M2).
+    [accepted] = [m for m in host.outbox() if m["title"] == "Workspace commits accepted"]
+    assert accepted["kind"] == "note" and accepted["about"]["accepted_commit"] == forged
+    assert "If you did not run accept-commits" in accepted["body"]
+    host.tick(at(4))
+    assert len([m for m in host.outbox() if m["title"] == "Workspace commits accepted"]) == 1
     code, envelope = _cli(monkeypatch, capsys, host, "check-commits")
     assert code == 0 and envelope["data"]["violation"] is None
+
+
+def test_runtime_session_reports_the_agent_session_marker(host, monkeypatch, capsys):
+    """Review R2-M5: the deploy check that agent terminals carry the plugin's marker."""
+    code, envelope = _cli(monkeypatch, capsys, host, "session", agent=True)
+    assert code == 0 and envelope["data"] == {"agent_session": True, "card": None}
+    code, envelope = _cli(monkeypatch, capsys, host, "session")
+    assert code == 0 and envelope["data"]["agent_session"] is False
 
 
 def test_accept_commits_is_refused_in_a_card_and_for_foreign_commits(host, monkeypatch, capsys):

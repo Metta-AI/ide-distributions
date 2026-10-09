@@ -200,6 +200,14 @@ FIXTURES = {
         {"count": 0, "champion": True},
         {"count": 1, "provenance": True},
     ],
+    "commits_accepted": [
+        {
+            "sha": SHA,
+            "accepted_at": "2026-10-09T01:00:00+00:00",
+            "author": "Autoresearch shim <shim@localhost>",
+            "subject": f"admit {REQUEST} (manual admission repair)",
+        }
+    ],
     "commit_provenance": [
         {
             "violation": {

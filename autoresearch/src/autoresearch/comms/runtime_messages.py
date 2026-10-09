@@ -657,6 +657,25 @@ def commit_provenance(violation: dict, day: str) -> RuntimeMessage:
     )
 
 
+def commits_accepted(sha: str, accepted_at: str, author: str, subject: str) -> RuntimeMessage:
+    """Someone ran ``runtime accept-commits`` (or wrote its journal entry): the runtime now
+    trusts that commit and its history. One per accept, so an accept is never silent."""
+    body = (
+        f"At {accepted_at} the workspace history was accepted up to a commit by {author} "
+        f"(“{_line(plain_ids(subject), 80)}”): the runtime now trusts it and everything before "
+        "it, and the agent resumes if that was the only reason for its pause. The commit is in "
+        "this message's details (`about`). If you did not run accept-commits, someone else "
+        "did: check the workspace history and the journal."
+    )
+    return RuntimeMessage(
+        "note",
+        "Workspace commits accepted",
+        body,
+        about=_about(accepted_commit=sha),
+        key=f"provenance-accepted:{sha}:{accepted_at}",
+    )
+
+
 def staged_not_published(
     message_id: str, staged_title: str | None, problems: list[str]
 ) -> RuntimeMessage:

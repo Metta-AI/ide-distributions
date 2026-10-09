@@ -358,11 +358,21 @@ def check_provenance(
     run: KeeperRun, ctx: RunContext, queue: Queue, now: datetime.datetime, allow_no_remote: bool
 ) -> None:
     """C1: check that every new commit on canonical is one the runtime made
-    (``provenance.check``); on a violation pause and publish one help_request for it."""
+    (``provenance.check``); on a violation pause and publish one help_request for it. Each
+    ``accept-commits`` anchor gets one note, so an accept (even a forged one) is visible."""
     canonical = ctx.canonical
     with canonical_lock(canonical):
         violation = run.provenance_violation = provenance.check(canonical)
         invalid = provenance.invalid_lines(canonical)
+        for anchor in provenance.operator_anchors(canonical):
+            try:
+                info = provenance.describe(canonical, anchor["sha"])
+                author, subject = info.author, info.subject
+            except gitops.GitError:  # the accepted commit is gone from the repository
+                author, subject = "an unknown author", "a commit no longer in the workspace"
+            note = runtime_messages.commits_accepted(anchor["sha"], anchor["at"], author, subject)
+            if not already_published(canonical, note):
+                publish_message(canonical, note, allow_no_remote)
     if invalid:
         _log(ctx, f"provenance: {invalid} journal line(s) do not verify and are ignored")
     if violation is None:

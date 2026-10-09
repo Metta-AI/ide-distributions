@@ -6,6 +6,10 @@
   clean): each commit the runtime did not make, with its id,
   author, time and files, and the commit to give ``accept-commits``. It does not move the
   checked point and does not pause.
+- ``runtime session``: read-only. ``{"agent_session": bool, "card": task id or null}``:
+  whether this process carries the plugin's agent-session marker. Run from an agent's
+  terminal after a deploy, it must say ``true``: ``accept-commits`` relies on it (README,
+  "Update").
 - ``runtime accept-commits <sha>``: operator only. Refused in a card context and in any agent
   session (``runctx.ENV_AGENT_SESSION``, set by the plugin), and blocked for agents by the
   plugin policy and the approvals deny list. Trust ``<sha>`` (HEAD or a commit
@@ -65,6 +69,13 @@ def _check_commits(ctx, args) -> dict:
     }
 
 
+def _session(ctx, args) -> dict:
+    return {
+        "agent_session": bool(os.environ.get(runctx.ENV_AGENT_SESSION)),
+        "card": ctx.card_id,
+    }
+
+
 def _accept_commits(ctx, args) -> dict:
     if (
         ctx.card_id
@@ -86,6 +97,10 @@ def _setup(parser: argparse.ArgumentParser) -> None:
         "check-commits", help="list commits on canonical the runtime did not make"
     )
     sub.set_defaults(func=_run(_check_commits))
+    sub = commands.add_parser(
+        "session", help="whether this process runs in an agent session (the plugin's marker)"
+    )
+    sub.set_defaults(func=_run(_session))
     sub = commands.add_parser(
         "accept-commits", help="operator: trust a canonical commit and its history"
     )

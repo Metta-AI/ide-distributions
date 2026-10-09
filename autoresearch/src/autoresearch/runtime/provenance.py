@@ -69,6 +69,7 @@ MARKER_RELATIVE = ".supervisor/ledger/provenance.json"
 COMMIT, ANCHOR, VERIFIED = "commit", "anchor", "verified"
 INTENT, VOID = "intent", "void"
 UNKNOWN_COMMITS, REWRITTEN, JOURNAL_LOST = "unknown_commits", "rewritten", "journal_lost"
+ACCEPTED_REASON = "accepted by an operator"  # the ``reason`` of an accept-commits anchor
 PAUSE_REASON = "commit provenance"  # the pause reason prefix (pause.json ``reason``)
 
 
@@ -267,6 +268,16 @@ def _anchor(canonical: Path, sha: str, reason: str) -> None:
     _append(canonical, {"kind": ANCHOR, "sha": sha, "reason": reason, "at": _now()})
 
 
+def operator_anchors(canonical: Path) -> list[dict]:
+    """Valid ``accept-commits`` anchors (``sha``, ``at``), oldest first. queue-keeper announces
+    each once, so an accept is never silent, also one forged with the key."""
+    return [
+        entry
+        for entry in _entries(canonical)[0]
+        if entry["kind"] == ANCHOR and entry.get("reason") == ACCEPTED_REASON
+    ]
+
+
 def _base(entries: list[dict]) -> int | None:
     """The index of the last anchor or verified entry."""
     for index in range(len(entries) - 1, -1, -1):
@@ -402,5 +413,5 @@ def accept(canonical: Path, sha: str) -> dict:
     head = gitops.head(canonical)
     if not _is_ancestor(canonical, full, head):
         raise ProvenanceError(f"{full} is not in the history of canonical HEAD {head}")
-    _anchor(canonical, full, "accepted by an operator")
+    _anchor(canonical, full, ACCEPTED_REASON)
     return {"accepted": full, "head": head}
