@@ -64,7 +64,7 @@ env_requires:
       queue-keeper stops it. 0 turns it off.
   - name: AUTORESEARCH_DAILY_BUDGET_USD
     required: false
-    default: "25"
+    default: "100"
     description: >-
       Estimated model spend per UTC day of all sessions of this profile. At the budget
       queue-keeper pauses dispatch with a help_request; it resumes the next UTC day. 0 turns
