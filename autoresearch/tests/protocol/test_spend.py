@@ -115,10 +115,10 @@ def test_health_holds_a_blocked_card_at_the_run_cap_instead_of_requeueing(host):
     host.queue.block(task_id, host.queue.get(task_id).runs[-1].run_id, "circuit breaker open")
     host.now = at(2)
     result = health.run(host.ctx, host.queue, host.sm, at(2), env=host.env)
-    assert [(a.task_id, a.action) for a in result.blocked] == [(task_id, "run-cap")]
+    assert [(a.task_id, a.action) for a in result.blocked] == [(task_id, "spend-cap")]
     assert host.queue.get(task_id).state == "blocked"
     [help_request] = _cap_help(host)
-    assert "kept the blocked card blocked" in help_request["body"]
+    assert "kept the blocked card" in help_request["body"]
     assert health.run(host.ctx, host.queue, host.sm, at(3), env=host.env).blocked == []
     host.tick(at(4))
     assert host.queue.get(task_id).state == "blocked" and len(_cap_help(host)) == 1
@@ -165,3 +165,91 @@ def test_a_preflight_pause_is_not_resumed_while_over_budget(host):
     add_session(host.home, "today", 30.0, started_at=at(1).timestamp())
     result = host.tick(at(3))
     assert result.resumed is None and read_json(path)["reason"] == "preflight failed: x"
+
+
+def test_a_blocked_card_over_its_cost_cap_is_held_not_requeued(host):
+    task_id = _runs(host, 2, end_claimed=True)
+    record_session_start(host.canonical, task_id, "r-1", "s1")
+    add_session(host.home, "s1", 5.0)
+    host.queue.block(task_id, host.queue.get(task_id).runs[-1].run_id, "circuit breaker open")
+    result = host.tick(at(2))
+    assert [(a.task_id, a.action) for a in result.blocked] == [(task_id, "spend-cap")]
+    assert host.queue.get(task_id).state == "blocked"
+    [help_request] = _cap_help(host)
+    assert "$5.00" in help_request["body"]
+
+
+def test_a_card_blocked_again_after_its_requeue_at_the_run_cap_is_held_not_repaired(host):
+    task_id = _runs(host, 3, end_claimed=True)
+    host.queue.block(task_id, host.queue.get(task_id).runs[-1].run_id, "circuit breaker open")
+    host.tick(at(2))  # requeued once (marker: requeued)
+    assert host.queue.get(task_id).state == "pending"
+    run = host.queue.claim_next(PROFILE).runs[-1].run_id  # run 4
+    host.queue.block(task_id, run, "circuit breaker open")
+    result = host.tick(at(3))
+    assert [(a.task_id, a.action) for a in result.blocked] == [(task_id, "spend-cap")]
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+
+
+def test_caps_still_apply_while_preflight_fails(host):
+    task_id = _runs(host, 1, end_claimed=True)
+    record_session_start(host.canonical, task_id, "r-1", "s1")
+    add_session(host.home, "s1", 4.5)
+    host.set_faults("player=ply_someone_else")
+    result = host.tick(at(2))
+    assert result.paused and host.queue.get(task_id).state == "blocked"
+    assert len(_cap_help(host)) == 1
+
+
+def test_a_stop_that_fails_is_reported_once_and_not_retried(host, monkeypatch):
+    task_id = _runs(host, 5, end_claimed=True)
+    calls = []
+
+    def broken(task, reason):
+        calls.append(task)
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(host.queue, "stop", broken)
+    first = host.tick(at(2))
+    assert first.failures[f"spend {task_id}"].startswith("RuntimeError")
+    host.tick(at(3))
+    assert calls == [task_id]
+    [help_request] = [m for m in host.outbox() if m["title"].startswith("Card not stopped")]
+    assert "block it by hand" in help_request["body"]
+
+
+def test_a_stop_hermes_sends_to_triage_says_so(host, monkeypatch):
+    _runs(host, 5, end_claimed=True)
+    real = host.queue.stop
+    monkeypatch.setattr(host.queue, "stop", lambda task, why: real(task, why) and "triage")
+    host.tick(at(2))
+    [help_request] = _cap_help(host)
+    assert "triage" in help_request["body"] and "unblock the card" not in help_request["body"]
+
+
+def test_cards_hermes_cannot_block_are_skipped(host, monkeypatch):
+    """triage, todo, scheduled, review: not dispatched, and `kanban block` refuses them."""
+    task_id = _runs(host, 4, end_claimed=False)
+    real_list = host.queue.list
+
+    def listed(state=None):
+        cards = real_list(state)
+        for card in cards:
+            card.board_status = "triage"
+        return cards
+
+    monkeypatch.setattr(host.queue, "list", listed)
+    result = host.tick(at(2))
+    assert result.spend_run.stopped == [] and "spend " + task_id not in result.failures
+    assert host.queue.get(task_id).state == "pending"
+
+
+def test_a_budget_reached_today_holds_the_pause_when_state_db_is_unreadable(host):
+    path = host.ledger / "pause.json"
+    host.tick(at(2))
+    write_json(path, {"reason": "preflight failed: x", "paused_at": "t", "tasks": {}})
+    add_session(host.home, "today", 30.0, started_at=at(1).timestamp())
+    host.tick(at(3))  # over budget: hold recorded; preflight reason kept
+    (host.home / "state.db").write_bytes(b"not a database")
+    result = host.tick(at(4))
+    assert "spend_db" in result.failures and result.resumed is None and is_paused(host.ledger)

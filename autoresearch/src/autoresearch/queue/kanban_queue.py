@@ -58,6 +58,8 @@ _BOARD_DB_ARGV = ["board-db"]
 # Provider of every per-mode model: the profile's model.provider (config.yaml). Pinned with
 # the model so the worker resolves it on the intended backend (Hermes kanban_parser --provider).
 MODEL_PROVIDER = "openrouter"
+# Hermes statuses ``kanban block`` accepts (``kanban_db.block_task``).
+STOPPABLE_STATUSES = ("running", "ready")
 
 
 class KanbanQueue:
@@ -298,6 +300,7 @@ class KanbanQueue:
             block_run_id=str(blocking["id"]) if blocking else None,
             current_run_id=current_run_id,
             last_heartbeat_at=last_heartbeat_at,
+            board_status=task["status"],
         )
 
     def list(self, state: str | None = None) -> list[Card]:
@@ -344,13 +347,37 @@ class KanbanQueue:
         else:
             raise ValueError(f"cannot requeue a {state} card")
 
-    def stop(self, task_id: str, reason: str) -> None:
-        """``kanban block``: a ``running`` or ``ready`` task becomes ``blocked`` and its run
-        ends with the reason as summary (``kanban_db.block_task``; a never-claimed task gets a
-        zero-length blocked run). The worker of a running task is not signalled here: the
-        dispatcher's ``reap_terminal_workers`` ends a worker that outlived its run, 120 s after
-        the run ended, on its next tick. Raises KanbanError for another status."""
-        self._kanban("block", task_id, reason)
+    def stop(self, task_id: str, reason: str) -> str:
+        """``kanban block --kind <kind>``: a ``running`` or ``ready`` task becomes ``blocked``
+        and its run ends with the reason as summary (``kanban_db.block_task``; a never-claimed
+        task gets a zero-length blocked run). Returns the Hermes status the task landed in.
+
+        The kind is ``capability`` (a human-bucket kind no worker path uses), or
+        ``needs_input`` when the task's latest block event already was ``capability``: Hermes counts
+        same-kind block -> unblock -> block cycles and sends the second one to ``triage``
+        (``_route_block``, ``BLOCK_RECURRENCE_LIMIT`` 2), which has no command back to
+        ``ready``. The runtime never unblocks a spend-cap stop itself, so a repeat here is a
+        human's deliberate unblock, not the automatic loop the breaker exists for.
+
+        The worker of a running task is not signalled here: the dispatcher's
+        ``reap_terminal_workers`` ends a worker that outlived its run, 120 s after the run
+        ended, on its next tick. ValueError for another status."""
+        shown = self._show_task(task_id)
+        task = shown["task"]
+        if task["status"] not in STOPPABLE_STATUSES:
+            raise ValueError(f"cannot stop a {task['status']} task")
+        kind = "needs_input" if self._last_block_kind(shown) == "capability" else "capability"
+        self._kanban("block", task_id, reason, "--kind", kind)
+        return self._show_task(task_id)["task"]["status"]
+
+    @staticmethod
+    def _last_block_kind(shown: dict) -> str | None:
+        """The kind of the task's latest block. The show JSON has no ``block_kind`` field, so
+        it is read from the latest ``blocked``/``block_loop_detected`` event's payload."""
+        for event in reversed(shown.get("events") or []):
+            if event.get("kind") in ("blocked", "block_loop_detected"):
+                return (event.get("payload") or {}).get("kind")
+        return None
 
     def _require_pending(self, task_id: str, action: str) -> Card:
         card = self.get(task_id)

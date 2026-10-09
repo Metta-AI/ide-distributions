@@ -126,7 +126,7 @@ class FileQueue:
             record["state"] = "pending"
             self._save_record(record)
 
-    def stop(self, task_id: str, reason: str) -> None:
+    def stop(self, task_id: str, reason: str) -> str:
         with file_lock(self._lock_path):
             record = self._load_record(task_id)
             if record["state"] not in ("pending", "claimed"):
@@ -138,6 +138,7 @@ class FileQueue:
             run.update(terminal=True, outcome="blocked", summary=reason)
             record.update(state="blocked", block_reason=reason, block_run_id=run["run_id"])
             self._save_record(record)
+        return "blocked"
 
     # -- board (C12: "board missing" is a missing queue directory) --
 

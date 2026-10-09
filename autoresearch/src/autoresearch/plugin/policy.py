@@ -21,8 +21,9 @@
   layer in card workers; it is cooperative (``env -u`` removes it) and absent in non-card
   sessions, so the policy does not rely on it;
 - waiting with the model in a foreground `terminal` call: `sleep` of 30 seconds or more, and
-  a `while`/`until`/`for` loop that runs `sleep` and checks a process (`pgrep`, `pidof`,
-  `ps`, `kill -0`). Each such check costs one more model call on the whole conversation
+  a `while`/`until`/`for` loop that sleeps 5 seconds or more at a time and checks a process
+  or a file (`pgrep`, `pidof`, `ps`, `kill -0`, `test`, `[`). Shorter sleeps (`kill $p; while
+  kill -0 $p; do sleep 0.2; done`) end in moments and pass. Each such check costs one more model call on the whole conversation
   (the box spend report of 2026-10-08: 15+ polling loops in one $5 build run). The refusal
   names the pattern: start the work with `background: true`, then one `process_manage`
   `wait`. The same command with `background: true` is allowed: it costs no model calls;
@@ -217,7 +218,8 @@ POLL_WAIT = (
 )
 SLEEP_LIMIT_SECONDS = 30
 LOOP_WORDS = {"while", "until", "for"}
-PROCESS_PROBES = {"pgrep", "pidof", "ps", "kill -0"}
+LOOP_SLEEP_SECONDS = 5  # a loop sleeping less than this per round finishes soon
+WAIT_PROBES = {"pgrep", "pidof", "ps", "kill -0", "test", "[", "[["}
 SLEEP_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 SLEEP_OPERAND = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)")
 KANBAN_CARD_TOOLS = {"kanban_create", "kanban_link"}
@@ -395,7 +397,7 @@ class _Guard:
         return (True, "; ".join(notes)) if notes else ALLOW
 
     def _walk_shell(self, command: str, cwd: Path, depth: int, notes: list[str]) -> set[str]:
-        """Check one command line; return the programs it runs (``PROCESS_PROBES`` names
+        """Check one command line; return the programs it runs (``WAIT_PROBES`` names
         included), substitutions too, for the waiting rule."""
         if depth > MAX_NESTING:
             self._unparsed(command, "nested too deeply", notes)
@@ -449,8 +451,8 @@ class _Guard:
         if (
             self.foreground
             and looped
-            and "sleep" in line.programs
-            and line.programs & PROCESS_PROBES
+            and line.loop_sleep >= LOOP_SLEEP_SECONDS
+            and line.programs & WAIT_PROBES
         ):
             raise _Blocked(POLL_WAIT)
         return line.programs
@@ -490,9 +492,16 @@ class _Guard:
         # `coworld@latest`, `coworld==1.0` (uvx / uv tool run package specs)
         name = VERSION_SUFFIX.sub("", os.path.basename(first))
         operands = [word for word in core[1:] if not word.startswith("-")]
-        line.programs.add("kill -0" if name == "kill" and "-0" in core[1:] else name)
-        if self.foreground and name == "sleep" and _sleep_seconds(operands) >= SLEEP_LIMIT_SECONDS:
-            raise _Blocked(POLL_WAIT)
+        # `[`/`[[` before VERSION_SUFFIX (which strips a leading `[`)
+        line.programs.add(
+            first if first in ("[", "[[")
+            else "kill -0" if name == "kill" and "-0" in core[1:] else name
+        )
+        if name == "sleep":
+            seconds = _sleep_seconds(operands)
+            line.loop_sleep = max(line.loop_sleep, seconds)
+            if self.foreground and seconds >= SLEEP_LIMIT_SECONDS:
+                raise _Blocked(POLL_WAIT)
         if line.via_xargs and name in {"coworld", "softmax"}:
             raise _Blocked(
                 f"running {name} through xargs is blocked: its subcommand would come from input."
@@ -698,6 +707,7 @@ class _Line:
         self.process_bodies: list[str] = []  # bodies of `<(...)` / `>(...)` on the line
         self.variables: dict[str, str] = {}
         self.programs: set[str] = set()  # programs run on the line, for the waiting rule
+        self.loop_sleep = 0.0  # the longest single sleep on the line, for the waiting rule
 
 
 def _sleep_seconds(operands: list[str]) -> float:

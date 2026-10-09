@@ -567,9 +567,16 @@ def test_card_models_default_and_override():
         "planning": "a/b"
     }
     assert card_models({"AUTORESEARCH_CARD_MODELS": "none"}) == {}
-    for bad in ("planing=a/b", "planning", "planning="):
-        with pytest.raises(ValueError):
-            card_models({"AUTORESEARCH_CARD_MODELS": bad})
+
+
+def test_bad_card_model_entries_are_skipped_never_raised():
+    """A typo must not stop queue-keeper, health or submit (they all build the queue)."""
+    from autoresearch.queue.select import card_models, parse_card_models
+
+    models, problems = parse_card_models("planing=a/b, scouting, maintenance=c/d")
+    assert models == {"maintenance": "c/d"}
+    assert len(problems) == 2 and "planing" in problems[0] and "scouting" in problems[1]
+    assert card_models({"AUTORESEARCH_CARD_MODELS": "planning="}) == {}
 
 
 def test_queue_from_env_gives_the_kanban_queue_the_model_map(tmp_path):
@@ -581,6 +588,32 @@ def test_queue_from_env_gives_the_kanban_queue_the_model_map(tmp_path):
     assert queue.models == {"planning": "x/y"}
 
 
-def test_stop_blocks_the_task_with_the_reason(fake, queue):
-    queue.stop("t_abc", "spend-cap: card used $4.10 of $4.00")
-    assert fake.argvs() == [[*BOARD, "block", "t_abc", "spend-cap: card used $4.10 of $4.00"]]
+def _shown(status, events=()):
+    return {"task": task_json(status=status), "runs": [], "events": list(events)}
+
+
+def test_stop_blocks_the_task_with_a_typed_kind_and_reports_where_it_landed(fake, queue):
+    fake.reply("show", _shown("running"))
+    fake.reply("block", "Blocked t_abc")
+    assert queue.stop("t_abc", "spend-cap: card used $4.10 of $4.00") == "running"  # fake show
+    block = [argv for argv in fake.argvs() if "block" in argv]
+    assert block == [[*BOARD, "block", "t_abc", "spend-cap: card used $4.10 of $4.00",
+                      "--kind", "capability"]]
+
+
+def test_a_repeat_stop_alternates_the_kind_so_hermes_keeps_it_blocked(fake, queue):
+    """Same-kind block -> unblock -> block goes to triage in Hermes (BLOCK_RECURRENCE_LIMIT)."""
+    fake.reply("show", _shown("ready", [
+        {"kind": "blocked", "payload": {"kind": "capability"}}, {"kind": "unblocked"},
+    ]))
+    queue.stop("t_abc", "spend-cap: x")
+    [block] = [argv for argv in fake.argvs() if "block" in argv]
+    assert block[-2:] == ["--kind", "needs_input"]
+
+
+@pytest.mark.parametrize("status", ["triage", "todo", "review", "blocked", "scheduled"])
+def test_stop_refuses_statuses_hermes_cannot_block(fake, queue, status):
+    fake.reply("show", _shown(status))
+    with pytest.raises(ValueError):
+        queue.stop("t_abc", "spend-cap: x")
+    assert not [argv for argv in fake.argvs() if "block" in argv]

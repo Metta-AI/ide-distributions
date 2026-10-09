@@ -7,11 +7,16 @@ blocked-card step:
 - **Per card** (pending or claimed): a card that would start run ``max_runs + 1`` (pending
   with ``max_runs`` counted runs) or has started it (claimed), or whose sessions cost an
   estimated ``max_card_usd`` or more, is stopped: ``queue.stop`` blocks it with a reason
-  starting ``spend-cap:`` (Hermes ``kanban block``; the dispatcher ends a running worker
-  within about two minutes), and one runtime ``help_request`` goes out. A ``spend-cap:``
-  block is never requeued or repaired (``blocked.handle_blocked`` skips it). A card blocked
-  for another reason once it has ``max_runs`` counted runs is held the same way
-  (``hold_blocked``, called from ``handle_blocked``) instead of being requeued.
+  starting ``spend-cap:`` (Hermes ``kanban block`` with a typed kind, so the unblock-loop
+  breaker keeps it in ``blocked``; the dispatcher ends a running worker within about two
+  minutes), and one runtime ``help_request`` goes out, worded for where the card landed.
+  Only cards Hermes can block (``running``, ``ready``) are tried. A stop that fails is
+  recorded like a stop (one help_request asking a human to block it), so it is not retried
+  every minute. A ``spend-cap:`` block is never requeued or repaired
+  (``blocked.handle_blocked`` skips it). A card blocked for another reason once it has
+  reached either cap is held the same way (``hold_blocked``, called from
+  ``handle_blocked``) instead of being requeued. queue-keeper also runs the caps while
+  preflight fails: running cards keep running during a pause.
 - **Allowance after a stop.** Each stop is recorded in the committed marker
   ``.supervisor/ledger/health/spend/<task-id>.json`` with the card's runs and cost at that
   point. Caps count from the latest stop, so a human who unblocks a stopped card gives it
@@ -19,8 +24,10 @@ blocked-card step:
 - **Daily budget**: when the estimated spend of all sessions that started this UTC day
   reaches ``daily_usd``, queue-keeper pauses dispatch (``pause.pause``, reason starting
   ``daily budget:``) and sends one ``help_request`` per day. It does not resume while over
-  budget (``may_resume``); on the next UTC day the spend is under budget again and the usual
-  resume runs. Running cards are not stopped by the budget; their own caps hold.
+  budget (``may_resume``; when the spend cannot be read it keeps a budget pause, or any pause
+  on a day the budget was reached, ``runtime/budget_hold.json``); on the next UTC day the
+  spend is under budget again and the usual resume runs. Running cards are not stopped by
+  the budget; their own caps hold.
 
 Counted runs are the card's runs except those that did no work (``NO_WORK_OUTCOMES``).
 
@@ -50,6 +57,7 @@ from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card
+from autoresearch.queue.kanban_queue import STOPPABLE_STATUSES
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.pause import is_paused, pause, pause_path
@@ -70,6 +78,8 @@ BUDGET_PAUSE_PREFIX = "daily budget:"
 NO_WORK_OUTCOMES = frozenset({"spawn_failed", "rate_limited"})
 EVENTS_FILE = "kanban_events.jsonl"  # written by the plugin (plugin.adapters)
 UNPRICED_FILE = "spend_unpriced.json"
+BUDGET_HOLD_FILE = "budget_hold.json"  # the UTC day the daily budget was last reached
+DB_FAILURE = "spend_db"  # SpendRun.failures key when state.db cannot be read
 STATE_DB = "state.db"
 HELP_PRIORITY = "P1"
 _TOKEN_COLUMNS = {
@@ -256,8 +266,8 @@ def _base(record: dict | None) -> tuple[int, float]:
 
 
 def is_held(canonical: Path, card: Card) -> bool:
-    """True for a blocked card the caps own: stopped (``spend-cap:`` reason) or held at the
-    run cap for this block (``hold_blocked``)."""
+    """True for a blocked card the caps own: stopped (``spend-cap:`` reason) or held at a
+    cap for this block (``hold_blocked``)."""
     if (card.block_reason or "").startswith(SPEND_CAP_PREFIX):
         return True
     record = _record(canonical, card.task_id)
@@ -265,9 +275,28 @@ def is_held(canonical: Path, card: Card) -> bool:
     return bool(card.block_run_id and last and last.get("block_run_id") == card.block_run_id)
 
 
-def run_cap_reached(canonical: Path, card: Card, config: SpendConfig) -> bool:
-    runs, _ = _base(_record(canonical, card.task_id))
-    return bool(config.max_runs) and counted_runs(card) - runs >= config.max_runs
+def _over_cap(card: Card, used_runs: int, used_usd: float, config: SpendConfig) -> str | None:
+    """Why ``card`` is over a cap, or None. A pending or blocked card may not start another
+    run once it has ``max_runs``; a claimed card is over once it started run
+    ``max_runs + 1``."""
+    if config.max_runs:
+        if card.state == "claimed" and used_runs > config.max_runs:
+            return f"it started run {used_runs}, and the cap is {config.max_runs} runs per card"
+        if card.state != "claimed" and used_runs >= config.max_runs:
+            return f"it already had {used_runs} runs, and the cap is {config.max_runs} runs per card"
+    if config.max_card_usd and used_usd >= config.max_card_usd:
+        return (
+            f"its runs used an estimated ${used_usd:.2f} of model spend, and the cap is "
+            f"${config.max_card_usd:.2f} per card"
+        )
+    return None
+
+
+def cap_reached(ctx: RunContext, card: Card, config: SpendConfig) -> str | None:
+    """Why a (blocked) card is at its run or cost cap, counted from its latest stop."""
+    runs, usd = _base(_record(ctx.canonical, card.task_id))
+    cost = card_cost(ctx, card.task_id, config.prices).usd
+    return _over_cap(card, counted_runs(card) - runs, cost - usd, config)
 
 
 def _report(
@@ -278,9 +307,11 @@ def _report(
     cost: float,
     config: SpendConfig,
     allow_no_remote: bool,
-    block_run_id: str | None,
+    outcome: str,
+    block_run_id: str | None = None,
 ) -> None:
-    """Record the stop in the marker and publish its help_request (call without the lock)."""
+    """Commit the stop to the marker, then publish its help_request (call without the
+    lock). The marker comes first so a crash never reuses a published stop number."""
     canonical = ctx.canonical
     path = marker_path(canonical, card.task_id)
     with canonical_lock(canonical):
@@ -293,11 +324,14 @@ def _report(
             {
                 "at": now_iso(),
                 "why": why,
+                "outcome": outcome,
                 "runs": runs,
                 "cost_usd": round(cost, 4),
                 "block_run_id": block_run_id,
             }
         )
+        write_json(path, record)
+        commit(canonical, [path], f"spend: card {card.task_id} at its cap ({outcome})")
         message = runtime_messages.card_over_cap(
             card.spec.title,
             why,
@@ -306,38 +340,23 @@ def _report(
             card.spec.request_id,
             len(record["stops"]),
             [{"uri": uri} for uri in card.spec.refs],
-            running=block_run_id is None,
+            outcome,
         )
         if not already_published(canonical, message):
             publish_message(
                 canonical, message, allow_no_remote, priority=HELP_PRIORITY, expects_response=True
             )
-        write_json(path, record)
-        commit(canonical, [path], f"spend: card {card.task_id} stopped at its cap")
 
 
 def hold_blocked(
-    ctx: RunContext, card: Card, config: SpendConfig, allow_no_remote: bool
+    ctx: RunContext, card: Card, why: str, config: SpendConfig, allow_no_remote: bool
 ) -> None:
-    """A blocked card at the run cap stays blocked: no requeue, no repair (module docstring)."""
-    runs = counted_runs(card)
+    """A blocked card at a cap stays blocked: no requeue, no repair (module docstring)."""
     cost = card_cost(ctx, card.task_id, config.prices).usd
-    why = f"it was blocked after {runs} runs, and the cap is {config.max_runs} runs per card"
-    _report(ctx, card, why, runs, cost, config, allow_no_remote, card.block_run_id)
-
-
-def _over_cap(card: Card, used_runs: int, used_usd: float, config: SpendConfig) -> str | None:
-    if config.max_runs:
-        if card.state == "pending" and used_runs >= config.max_runs:
-            return f"it already had {used_runs} runs, and the cap is {config.max_runs} runs per card"
-        if card.state == "claimed" and used_runs > config.max_runs:
-            return f"it started run {used_runs}, and the cap is {config.max_runs} runs per card"
-    if config.max_card_usd and used_usd >= config.max_card_usd:
-        return (
-            f"its runs used an estimated ${used_usd:.2f} of model spend, and the cap is "
-            f"${config.max_card_usd:.2f} per card"
-        )
-    return None
+    _report(
+        ctx, card, why, counted_runs(card), cost, config, allow_no_remote, runtime_messages.HELD,
+        card.block_run_id,
+    )
 
 
 @dataclass
@@ -347,20 +366,96 @@ class SpendRun:
     over_budget: bool = False
     paused: bool = False  # this run paused for the budget
     unpriced: list[str] = field(default_factory=list)
-    failures: dict[str, str] = field(default_factory=dict)  # task id -> error
+    failures: dict[str, str] = field(default_factory=dict)  # task id or "spend_db" -> error
 
 
 def _stop(
     ctx: RunContext, queue: Queue, card: Card, why: str, cost: float, config: SpendConfig,
     allow_no_remote: bool,
-) -> None:
+) -> str | None:
     """Block first, then record: a crash between them loses the help_request but never lets
-    the card run on (a recorded stop with the card still running would reset its allowance)."""
-    queue.stop(card.task_id, f"{SPEND_CAP_PREFIX} {why}")
+    the card run on (a recorded stop with the card still running would reset its allowance).
+    A stop that fails is recorded too, with one help_request, so it is not retried every
+    minute; it returns the error."""
     # Stopping a pending card adds a zero-length blocked run (Hermes, FileQueue): count it in
     # the base so an unblocked card starts from a full allowance.
     runs = counted_runs(card) + (1 if card.state == "pending" else 0)
-    _report(ctx, card, why, runs, cost, config, allow_no_remote, None)
+    try:
+        landed = queue.stop(card.task_id, f"{SPEND_CAP_PREFIX} {why}")
+    except Exception as error:  # noqa: BLE001 - recorded and reported once
+        problem = f"{type(error).__name__}: {error}"
+        _report(
+            ctx, card, f"{why} (the stop failed: {problem})", counted_runs(card), cost, config,
+            allow_no_remote, runtime_messages.NOT_STOPPED,
+        )
+        return problem
+    outcome = runtime_messages.STOPPED if landed == "blocked" else runtime_messages.TRIAGED
+    _report(ctx, card, why, runs, cost, config, allow_no_remote, outcome)
+    return None
+
+
+def enforce_cards(
+    ctx: RunContext, queue: Queue, config: SpendConfig, allow_no_remote: bool,
+    result: SpendRun,
+) -> None:
+    """Stop the pending and claimed cards over a cap. Only cards Hermes can block are
+    tried (``running``/``ready``); one card that fails does not stop the others."""
+    canonical = ctx.canonical
+    sessions = card_sessions(ctx)
+    for card in queue.list():
+        if card.state not in ("pending", "claimed"):
+            continue
+        if card.board_status not in (None, *STOPPABLE_STATUSES):
+            continue  # triage, todo, scheduled, review: not dispatched, cannot be blocked
+        try:
+            cost = sessions_cost(ctx.hermes_home, sessions.get(card.task_id, set()), config.prices)
+        except sqlite3.Error as error:
+            result.failures[DB_FAILURE] = f"{type(error).__name__}: {error}"
+            continue
+        result.unpriced += cost.unpriced
+        runs, usd = _base(_record(canonical, card.task_id))
+        why = _over_cap(card, counted_runs(card) - runs, cost.usd - usd, config)
+        if why is None:
+            continue
+        problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        if problem is None:
+            result.stopped.append((card.task_id, why))
+        else:
+            result.failures[card.task_id] = problem
+
+
+def enforce_budget(
+    ctx: RunContext, queue: Queue, config: SpendConfig, now: datetime.datetime,
+    allow_no_remote: bool, result: SpendRun,
+) -> None:
+    """Pause when today's spend reaches the daily budget, with one help_request a day."""
+    canonical = ctx.canonical
+    try:
+        today = day_cost(ctx.hermes_home, now, config.prices)
+    except sqlite3.Error as error:
+        result.failures[DB_FAILURE] = f"{type(error).__name__}: {error}"
+        return
+    result.day_usd = today.usd
+    result.unpriced += today.unpriced
+    result.over_budget = bool(config.daily_usd) and today.usd >= config.daily_usd
+    if not result.over_budget:
+        return
+    day = f"{now.astimezone(datetime.UTC):%Y-%m-%d}"
+    write_json(runtime_dir(ctx) / BUDGET_HOLD_FILE, {"day": day})
+    ledger = ledger_of(canonical)
+    result.paused = not is_paused(ledger)
+    pause(
+        queue,
+        ledger,
+        f"{BUDGET_PAUSE_PREFIX} estimated spend ${today.usd:.2f} of ${config.daily_usd:.2f} "
+        f"on {day}",
+    )
+    message = runtime_messages.daily_budget_reached(today.usd, config.daily_usd, day)
+    with canonical_lock(canonical):
+        if not already_published(canonical, message):
+            publish_message(
+                canonical, message, allow_no_remote, priority="P0", expects_response=True
+            )
 
 
 def enforce(
@@ -370,58 +465,31 @@ def enforce(
     now: datetime.datetime,
     allow_no_remote: bool = False,
 ) -> SpendRun:
-    """Stop pending and claimed cards over a cap; pause when today's spend reaches the daily
-    budget (module docstring). One card that cannot be stopped does not stop the others."""
+    """Stop cards over a cap, then check the daily budget (module docstring)."""
     result = SpendRun()
-    canonical = ctx.canonical
-    sessions = card_sessions(ctx)
-    for card in queue.list():
-        if card.state not in ("pending", "claimed"):
-            continue
-        cost = sessions_cost(ctx.hermes_home, sessions.get(card.task_id, set()), config.prices)
-        result.unpriced += cost.unpriced
-        runs, usd = _base(_record(canonical, card.task_id))
-        why = _over_cap(card, counted_runs(card) - runs, cost.usd - usd, config)
-        if why is None:
-            continue
-        try:
-            _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
-        except Exception as error:  # noqa: BLE001 - reported; the other cards still go
-            result.failures[card.task_id] = f"{type(error).__name__}: {error}"
-            continue
-        result.stopped.append((card.task_id, why))
-    today = day_cost(ctx.hermes_home, now, config.prices)
-    result.day_usd = today.usd
-    result.unpriced += today.unpriced
-    result.over_budget = bool(config.daily_usd) and today.usd >= config.daily_usd
-    if result.over_budget:
-        ledger = ledger_of(canonical)
-        result.paused = not is_paused(ledger)
-        day = f"{now.astimezone(datetime.UTC):%Y-%m-%d}"
-        pause(
-            queue,
-            ledger,
-            f"{BUDGET_PAUSE_PREFIX} estimated spend ${today.usd:.2f} of ${config.daily_usd:.2f} "
-            f"on {day}",
-        )
-        message = runtime_messages.daily_budget_reached(today.usd, config.daily_usd, day)
-        with canonical_lock(canonical):
-            if not already_published(canonical, message):
-                publish_message(
-                    canonical, message, allow_no_remote, priority="P0", expects_response=True
-                )
+    enforce_cards(ctx, queue, config, allow_no_remote, result)
+    enforce_budget(ctx, queue, config, now, allow_no_remote, result)
     result.unpriced = sorted(set(result.unpriced))
     return result
 
 
-def may_resume(canonical: Path, spend: SpendRun | None) -> bool:
-    """Whether queue-keeper may lift the pause this run: never while over the daily budget,
-    and not a budget pause when this run could not read the spend."""
-    if spend is not None:
+def may_resume(ctx: RunContext, spend: SpendRun | None, now: datetime.datetime) -> bool:
+    """Whether queue-keeper may lift the pause this run: never while over the daily budget.
+    When this run could not read the spend (the step failed, or ``state.db`` could not be
+    read), not if the pause is a budget pause or the budget was reached today
+    (``runtime/budget_hold.json``; ``pause.json`` keeps only its first reason)."""
+    if spend is not None and DB_FAILURE not in spend.failures:
         return not spend.over_budget
-    path = pause_path(ledger_of(canonical))
+    path = pause_path(ledger_of(ctx.canonical))
     reason = read_json(path).get("reason", "") if path.exists() else ""
-    return not reason.startswith(BUDGET_PAUSE_PREFIX)
+    if reason.startswith(BUDGET_PAUSE_PREFIX):
+        return False
+    hold = runtime_dir(ctx) / BUDGET_HOLD_FILE
+    try:
+        held_day = read_json(hold).get("day") if hold.exists() else None
+    except ValueError:
+        held_day = None  # disposable
+    return held_day != f"{now.astimezone(datetime.UTC):%Y-%m-%d}"
 
 
 def new_unpriced(ctx: RunContext, sessions: list[str]) -> list[str]:

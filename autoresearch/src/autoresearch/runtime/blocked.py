@@ -25,10 +25,10 @@ human unblocks the card and a later non-tool-fault block follows, the marker is 
 the card follows the ordinary requeue-then-repair path.
 
 Spend caps (``runtime.spend``) come first. A card stopped at a cap (reason starting
-``spend-cap:``, or held at the run cap) is skipped: never requeued, never repaired. With a
-``spend_config``, a card that would be requeued or repaired but already has the cap's number
-of runs is held instead (``spend.hold_blocked``: one runtime ``help_request``; the card stays
-blocked for a human).
+``spend-cap:``, or held at a cap) is skipped: never requeued, never repaired. With a
+``spend_config``, a card that would be requeued or repaired but has reached its run cap or
+its estimated-cost cap is held instead (``spend.hold_blocked``: one runtime
+``help_request``; the card stays blocked for a human).
 
 Hermes limit: a second ``kanban_block`` with the same kind after an unblock (D-26 uses
 ``needs_input``) is routed to ``triage``, which the Queue reports as ``pending``, so this
@@ -54,7 +54,7 @@ from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marke
 
 REQUEUED = "requeued"
 REPAIRED = "repaired"
-RUN_CAP = "run-cap"
+SPEND_CAP = "spend-cap"
 TOOL_FAULT = "tool-fault"
 TOOL_FAULT_PREFIX = "tool-fault:"
 REPAIR_PRIORITY = "P1"
@@ -63,7 +63,7 @@ REPAIR_PRIORITY = "P1"
 @dataclass
 class BlockedAction:
     task_id: str
-    action: str  # requeued | repaired | tool-fault | run-cap
+    action: str  # requeued | repaired | tool-fault | spend-cap
     repair_request: str | None = None
 
 
@@ -189,10 +189,10 @@ def handle_blocked(
         elif (
             spend_config is not None
             and (record is None or record["state"] in (TOOL_FAULT, REQUEUED))
-            and spend.run_cap_reached(canonical, card, spend_config)
+            and (why := spend.cap_reached(ctx, card, spend_config))
         ):
-            spend.hold_blocked(ctx, card, spend_config, allow_no_remote)
-            actions.append(BlockedAction(card.task_id, RUN_CAP))
+            spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
+            actions.append(BlockedAction(card.task_id, SPEND_CAP))
         elif record is None or record["state"] == TOOL_FAULT:
             actions.append(_requeue(canonical, queue, card))
         elif record["state"] == REQUEUED:

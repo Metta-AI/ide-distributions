@@ -549,6 +549,8 @@ POLL_WAITS = [
     "while ps -p 4242 >/dev/null; do sleep 10; done",
     "bash -c 'while pgrep -f gates; do sleep 10; done'",
     'while [ -n "$(pgrep -f gates)" ]; do sleep 10; done',
+    "while [ ! -f .scratch/build/E/report.json ]; do sleep 20; done",
+    "until test -s out.log; do sleep 10; done",
 ]
 NOT_POLL_WAITS = [
     "sleep 5",
@@ -558,6 +560,8 @@ NOT_POLL_WAITS = [
     "pgrep -f gates",
     "while read -r line; do echo $line; done < notes/a",
     "for f in notes/*; do wc -l $f; done",
+    "kill $P; while kill -0 $P 2>/dev/null; do sleep 0.2; done",  # kill, then wait moments
+    "timeout 30 bash -c 'until ! pgrep x; do sleep 1; done'",
 ]
 
 

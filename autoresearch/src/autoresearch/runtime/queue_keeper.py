@@ -93,7 +93,7 @@ from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import read_requests
-from autoresearch.queue.select import queue_from_env
+from autoresearch.queue.select import ENV_CARD_MODELS, parse_card_models, queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime import config_migrations, promotion, proposals, spend
@@ -571,9 +571,13 @@ def _spend_step(
     result = spend.enforce(ctx, queue, config, now, allow_no_remote)
     for task_id, why in result.stopped:
         _log(ctx, f"spend: stopped card {task_id}: {why}")
-    for task_id, error in result.failures.items():
-        run.failures[f"spend {task_id}"] = error
-        _log(ctx, f"spend: could not stop card {task_id}: {error}")
+    for key, error in result.failures.items():
+        if key == spend.DB_FAILURE:
+            run.failures[key] = error
+            _log(ctx, f"spend: cannot read state.db: {error}")
+        else:
+            run.failures[f"spend {key}"] = error
+            _log(ctx, f"spend: could not stop card {key}: {error}")
     if result.paused:
         _log(ctx, f"spend: paused, today's estimated spend is ${result.day_usd:.2f}")
     new = spend.new_unpriced(ctx, result.unpriced)
@@ -584,6 +588,41 @@ def _spend_step(
             f"priced from token counts with {spend.ENV_FALLBACK_PRICES}",
         )
     return result
+
+
+def _spend_steps(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str],
+    now: datetime.datetime, allow_no_remote: bool,
+) -> spend.SpendConfig | None:
+    """The spend step (``spend.enforce``); returns its config for the blocked step, or None
+    when the config is invalid (the step failure is recorded)."""
+    config = _step(run, ctx, "spend", spend.SpendConfig.from_env, env)
+    if config is not None:
+        run.spend_run = _step(
+            run, ctx, "spend", _spend_step, run, ctx, queue, config, now, allow_no_remote
+        )
+    return config
+
+
+def _card_models_check(
+    run: KeeperRun, ctx: RunContext, env: Mapping[str, str], allow_no_remote: bool
+) -> None:
+    """Report entries of ``AUTORESEARCH_CARD_MODELS`` that were skipped (the queue uses the
+    default model for them): a log line every run, the step failure ``card_models`` (so it
+    escalates and shows as a signal), and one help_request per distinct value."""
+    raw = env.get(ENV_CARD_MODELS) or ""
+    _models, problems = parse_card_models(raw)
+    if not problems:
+        return
+    text = "; ".join(problems)
+    run.failures["card_models"] = text
+    _log(ctx, f"{ENV_CARD_MODELS}: {text}; those modes use the default model")
+    if not (ctx.canonical / ".git").exists():
+        return
+    message = runtime_messages.card_models_invalid(raw, problems)
+    with canonical_lock(ctx.canonical):
+        if not already_published(ctx.canonical, message):
+            publish_message(ctx.canonical, message, allow_no_remote, expects_response=True)
 
 
 def _rebuild_step(ctx, queue, sm, game_version, now, allow_no_remote) -> list[CardSpec]:
@@ -645,10 +684,14 @@ def _run_steps(
         run.preflight = PreflightResult(ok=False, reasons=[reason])
     for warning in run.preflight.warnings:
         _log(ctx, f"preflight warning: {warning}")
+    _card_models_check(run, ctx, env, allow_no_remote)
     if not run.preflight.ok:
         run.paused = True
         _log(ctx, f"preflight failed: {run.preflight.reasons}")
         _step(run, ctx, "pause", pause_for_preflight, ctx, queue, run.preflight, allow_no_remote)
+        # Running cards keep running while paused (low credit, expired credential): the caps
+        # still apply to them.
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
         return
 
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
@@ -697,17 +740,13 @@ def _run_steps(
     )
     run.planning = _step(run, ctx, "planning", _planning_step, ctx, queue, now, run.signals)
     run.orphans = _step(run, ctx, "orphans", find_orphan_done, queue, ledger_of(canonical)) or []
-    spend_config = _step(run, ctx, "spend", spend.SpendConfig.from_env, env)
-    if spend_config is not None:
-        run.spend_run = _step(
-            run, ctx, "spend", _spend_step, run, ctx, queue, spend_config, now, allow_no_remote
-        )
+    spend_config = _spend_steps(run, ctx, queue, env, now, allow_no_remote)
     run.blocked = (
         _step(run, ctx, "blocked", handle_blocked, ctx, queue, allow_no_remote, spend_config)
         or []
     )
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
-    if is_paused(ledger_of(canonical)) and spend.may_resume(canonical, run.spend_run):
+    if is_paused(ledger_of(canonical)) and spend.may_resume(ctx, run.spend_run, now):
         run.resumed = _step(run, ctx, "resume", resume_after_preflight, ctx, queue, allow_no_remote)
     run.pushed = _step(run, ctx, "push_final", push_step, ctx, allow_no_remote)
 
