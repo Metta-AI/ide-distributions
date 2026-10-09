@@ -25,9 +25,11 @@ platform (`AUTORESEARCH_SOFTMAX=fake`), never on a real league.
 
 ## Seats and opponents
 
-Two seats per episode. Our policy plays seat 0. The league opponent is the house policy
-`fake-house:v1` in seat 1. An evaluation design uses `"seats": [0]` and
-`"opponents": ["fake-house:v1"]` (pairing `seed_and_opponents`).
+Two seats per episode, no teams. Our policy plays seat 0 and one opponent plays seat 1, so an
+evaluation design uses `"seats": [0]` and `"opponent_count": 1`: `stats design` samples each
+seed's opponent from the fake league (the house policy `fake-house:v1` and the
+`fake-alpha`/`fake-beta`/`fake-gamma` policies of its episodes; pairing `seed_and_opponents`).
+The fake platform's results do not depend on the opponent.
 
 ## Mechanics
 

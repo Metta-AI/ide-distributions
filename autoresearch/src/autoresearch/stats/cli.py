@@ -18,6 +18,12 @@ Files under the workspace root:
   ``error.reason``: ``needs_calibration`` (no noise record for the current version),
   ``not_designed``, ``version_mismatch`` or ``bad_request`` (the request does not freeze).
   ``--planned-pairs`` (the pairs ``delta`` is computed for) defaults to the request's seed count.
+  Opponents (A12): a request with ``opponent_count: N`` (and optionally ``opponent_episodes``,
+  default 100) is sampled here: the league snapshot from that many recent league episodes and
+  the standings (``stats.opponents.league_snapshot``, our player from ``whoami``, our policy
+  the request's ``baseline_version``), one line-up of N per seed salted with the experiment
+  id, both frozen into the design. A refusal to sample (no opponents in the snapshot) is
+  ``bad_request``. A fixed ``opponents`` set needs ``opponent_rationale``.
 - ``stats/outcomes/<E-id>.json``: the last ``stats evaluate`` outcome, with the champion and
   candidate it was evaluated against, ``rows_sha256`` (of the rows file) and ``design_sha256``
   (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
@@ -35,6 +41,7 @@ import json
 import os
 import re
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 from autoresearch import runctx
@@ -57,6 +64,7 @@ from autoresearch.stats.noise import (
     noise_revision,
     write_noise,
 )
+from autoresearch.stats.opponents import DEFAULT_EPISODES, league_snapshot, sample_lineups
 
 # games/ lives at the autoresearch project root, next to schemas/.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -234,8 +242,9 @@ def _design(args, store: RecordStore) -> int:
     if planned < 1:
         raise BadArguments("--planned-pairs must be positive (or give the request seeds)")
     try:
+        sampled = _with_sampled_opponents(request, experiment, game.league_id)
         design = freeze_design(
-            {"evaluation_design_request": request},
+            {"evaluation_design_request": sampled},
             game,
             noise,
             planned,
@@ -250,6 +259,32 @@ def _design(args, store: RecordStore) -> int:
     return _ok(
         {"experiment": experiment, "evaluation_design": design.to_dict(), "planned_pairs": planned}
     )
+
+
+def _with_sampled_opponents(request: dict, experiment: str, league_id: str) -> dict:
+    """The request plus ``lineups`` and ``league_snapshot`` when it asks for
+    ``opponent_count`` sampled opponents (module docstring, A12); else the request as is."""
+    if "opponent_count" not in request:
+        return request
+    count = request["opponent_count"]
+    episodes = request.get("opponent_episodes", DEFAULT_EPISODES)
+    if not isinstance(count, int) or not isinstance(episodes, int) or episodes < 1:
+        raise DesignError("opponent_count and opponent_episodes must be positive integers")
+    ctx = runctx.from_env()
+    sm = softmax_from_env(os.environ, ctx.canonical)
+    try:
+        snapshot = league_snapshot(
+            sm.league_episodes(league_id, episodes),
+            sm.standings(league_id),
+            league_id,
+            sm.whoami().player_id,
+            request.get("baseline_version"),
+            datetime.now(UTC).isoformat(timespec="seconds"),
+        )
+    except (RuntimeError, OSError) as error:
+        raise ValueError(f"cannot read the league to sample opponents: {error}") from None
+    lineups = sample_lineups(snapshot, request.get("seeds") or [], count, experiment)
+    return {**request, "lineups": lineups, "league_snapshot": snapshot}
 
 
 def _json_object_file(path: str) -> dict:

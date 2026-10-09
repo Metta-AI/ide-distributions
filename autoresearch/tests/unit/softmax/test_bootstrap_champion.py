@@ -180,7 +180,7 @@ def test_fresh_install_bootstraps_the_champion_then_an_experiment_designs_agains
     request = {
         "baseline_version": champion,
         "seats": [0],
-        "opponents": ["fake-house:v1"],
+        "opponent_count": 1,  # fakegame: two seats, one opponent (A12)
         "seeds": list(range(1, 21)),
         "primary_metrics": [{"name": "errors", "direction": "down", "min_effect": 2.0}],
         "guardrails": [],

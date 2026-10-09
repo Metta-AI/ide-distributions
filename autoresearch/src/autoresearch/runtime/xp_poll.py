@@ -16,7 +16,8 @@ game's ``evaluate`` binding reads each ``results.json`` (``<evaluate> --results 
   ``<request id>:<file dir>:<episode>`` when the request has several results files; ``seed``
   from the file's top-level ``seed``, else our lowest seat's entry, else the request's;
   ``policy_version`` from the request's arm: the candidate binding's platform id or the
-  design's baseline; ``seats`` and ``opponents`` from the frozen design; ``game_version`` from
+  design's baseline; ``seats`` and ``opponents`` from the frozen design (``opponents``: the
+  request seed's sampled line-up, A12, or the fixed set); ``game_version`` from
   the file, else the league's current version; ``metrics`` as below);
 - ``evidence/index/<EV-id>.json``: kind ``xp-result``, ``source_ids.xreq`` = the request id
   (so ``ar://xreq/<id>`` resolves), the file's sha256, paths, batch, attempt, seed and arm;
@@ -212,7 +213,7 @@ def _episode_row(
         policy_version=policy,
         seed=int(seed),
         seats=tuple(design.seats),
-        opponents=tuple(design.opponents),
+        opponents=design.opponents_for(handle.seed if handle.seed is not None else int(seed)),
         metrics=metrics,
         status="completed" if reason is None else "failed",
         reason=reason,

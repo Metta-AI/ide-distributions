@@ -317,13 +317,14 @@ def _opponent(entry: str) -> dict:
     return {"slot": -1, "player": player}
 
 
-def _roster(design: EvaluationDesign, policy: str) -> list[dict]:
-    """Our policy in each ``design.seats`` slot, then ``design.opponents`` in order in the
-    remaining slots (ascending, skipping our seats). Fixed slots keep a pair's seating
+def _roster(design: EvaluationDesign, policy: str, seed: int) -> list[dict]:
+    """Our policy in each ``design.seats`` slot, then the seed's opponents
+    (``design.opponents_for(seed)``: its sampled line-up, or the fixed set, A12) in order in
+    the remaining slots (ascending, skipping our seats). Fixed slots keep a pair's seating
     identical; with ``slot: -1`` the platform would rotate open seats per episode."""
     roster = [{"slot": seat, "player": {"policy_ref": policy}} for seat in design.seats]
     free_slots = (slot for slot in itertools.count() if slot not in design.seats)
-    for entry, slot in zip(design.opponents, free_slots, strict=False):
+    for entry, slot in zip(design.opponents_for(seed), free_slots, strict=False):
         roster.append({**_opponent(entry), "slot": slot})
     return roster
 
@@ -342,9 +343,11 @@ def xp_specs(
       play the same board. The tag ``ar:<E>:b<batch>:a<attempt>:s<seed>:<arm>`` is unique.
     - The candidate arm plays the binding's platform id, the baseline arm
       ``design.baseline_version``, each in every ``design.seats`` slot.
-    - Opponents fill the other slots in order as fixed seats: a policy ref is identical across
-      the pair; ``"random"`` is sampled per request by the platform, so pairing is then
-      seed-only (``EvaluationDesign.pairing``). The roster must fill the game's seat count.
+    - Opponents fill the other slots in order as fixed seats: the seed's line-up sampled from
+      the league at design time (``design.lineups``, A12), or the design's fixed
+      ``opponents``. A policy ref is identical across the pair; ``"random"`` is sampled per
+      request by the platform, so pairing is then seed-only (``EvaluationDesign.pairing``).
+      The roster must fill the game's seat count.
     """
     if batches < 1 or not 1 <= batch <= batches:
         raise BadArguments(f"--batch must be between 1 and --batches ({batches}), got {batch}")
@@ -369,7 +372,7 @@ def xp_specs(
                 "league_id": league_id,
                 "num_episodes": 1,
                 "game_config_overrides": {"seed": seed},
-                "roster": _roster(parsed, policies[arm]),
+                "roster": _roster(parsed, policies[arm], seed),
             },
         )
         for seed in seeds

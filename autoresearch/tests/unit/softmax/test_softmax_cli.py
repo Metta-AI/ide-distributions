@@ -199,6 +199,34 @@ def test_xp_specs_one_seeded_request_per_seed_and_arm():
     assert baseline["game_config_overrides"] == {"seed": 11}
 
 
+def test_xp_specs_sampled_lineups_are_per_seed_and_shared_by_the_pair():
+    """A12: a design with league-sampled line-ups seats each seed's line-up for both arms."""
+    from support.promotion_board import design_dict
+
+    lineups = {"11": ["a:v1", "b:v2"], "12": ["c:v3", "a:v1"]}
+    snapshot = {"league_id": LEAGUE, "taken_at": "t", "basis": "league_episodes", "entries": []}
+    design = {
+        **design_dict(),
+        "seeds": [11, 12],
+        "n_min": 2,
+        "opponents": [],
+        "lineups": lineups,
+        "league_snapshot": snapshot,
+    }
+    specs = softmax_cli.xp_specs(design, {"platform_policy_version_id": PV_A}, LEAGUE, 1, 1)
+    opponents = {
+        (seed, arm): [entry["player"]["policy_ref"] for entry in spec["roster"][2:]]
+        for seed, arm, spec in specs
+    }
+    assert opponents == {
+        (11, "candidate"): ["a:v1", "b:v2"],
+        (11, "baseline"): ["a:v1", "b:v2"],
+        (12, "candidate"): ["c:v3", "a:v1"],
+        (12, "baseline"): ["c:v3", "a:v1"],
+    }
+    assert [entry["slot"] for entry in specs[0][2]["roster"]] == [0, 1, 2, 3]
+
+
 def test_xp_specs_opponent_slots_skip_our_seats():
     from support.promotion_board import design_dict
 

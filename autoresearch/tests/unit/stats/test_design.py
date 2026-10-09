@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from jsonschema import ValidationError, validate
 
@@ -107,3 +109,48 @@ def test_fewer_seeds_than_n_min_is_rejected():
     with pytest.raises(DesignError, match="seeds"):
         replace(DESIGN, seeds=(), n_min=1).validate()
     replace(DESIGN, seeds=(1, 2, 3, 4), n_min=4).validate()
+
+
+# --- A12: league-sampled line-ups ---
+
+SNAPSHOT = {"league_id": "l", "taken_at": "t", "basis": "league_episodes", "entries": []}
+
+
+def sampled(**changes) -> EvaluationDesign:
+    lineups = {str(seed): ("pv-a", f"pv-{seed}") for seed in DESIGN.seeds}
+    fields = {"opponents": (), "lineups": lineups, "league_snapshot": SNAPSHOT, **changes}
+    return dataclasses.replace(DESIGN, **fields)
+
+
+def test_sampled_lineups_round_trip_and_give_each_seed_its_own():
+    design = sampled()
+    data = design.to_dict()
+    assert data["lineups"]["3"] == ["pv-a", "pv-3"] and data["league_snapshot"] == SNAPSHOT
+    assert EvaluationDesign.from_dict(data) == design
+    assert design.opponents_for(3) == ("pv-a", "pv-3") and design.pairing == "seed_and_opponents"
+    assert DESIGN.opponents_for(3) == ("pv-opp",)
+
+
+def test_older_designs_keep_their_shape():
+    """Unset A12 fields stay out of the dict, so a design frozen earlier hashes the same."""
+    assert not {"lineups", "league_snapshot", "opponent_rationale"} & set(DESIGN.to_dict())
+
+
+@pytest.mark.parametrize(
+    "changes, problem",
+    [
+        ({"opponents": ("pv-opp",)}, "exclusive"),
+        ({"lineups": {"1": ("pv-a",)}}, "one line-up per seed"),
+        ({"league_snapshot": None}, "league_snapshot"),
+    ],
+)
+def test_inconsistent_lineups_are_rejected(changes, problem):
+    with pytest.raises(DesignError, match=problem):
+        sampled(**changes).validate()
+
+
+def test_unequal_lineups_are_rejected():
+    lineups = {str(seed): ("pv-a",) for seed in DESIGN.seeds}
+    lineups["1"] = ("pv-a", "pv-b")
+    with pytest.raises(DesignError, match="same number"):
+        sampled(lineups=lineups).validate()

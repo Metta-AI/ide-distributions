@@ -58,6 +58,12 @@ silent fallback. Core code never names a game.
   claims whose cited lines did not change (and requests re-verification for the others).
   Without `source`, claims only go stale on a game-version change.
 
+The body must have a `## Seats and opponents` section: how many seats an episode has, which
+slots our policy fills (`seats` in a design), any team rules (which slots play together), and
+so how many opponents a line-up needs (`opponent_count`). Evaluation designs sample their
+opponents from the league per seed (amendment A12, `stats design`); core never knows a seat
+count, so this section is where the agent reads it.
+
 The body must have a `## Starter policy` section: how to build the game's starter policy
 with the `build` binding (arguments, input, output directory) so `softmax bootstrap-champion`
 can submit it, unevaluated, as the first champion when the league shows no policy competing
