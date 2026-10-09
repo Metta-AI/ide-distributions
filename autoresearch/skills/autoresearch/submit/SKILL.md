@@ -135,6 +135,8 @@ names the promotion id, the candidate commit, and the holder's branch. Never sub
 6. Finish with `complete-card`, outcome `done`. Its merge moves the promotion to `recorded`
    and then `published`.
 
-If `adopt` or `stage-champion` exits 1 (refused), record the message in the journal, send a
-`help_request` that names the promotion id and refs the experiment (or, for a bootstrap
-promotion, the version), and finish `blocked`.
+If `adopt` or `stage-champion` exits 1 (refused), record the message in the journal and run
+`"$AUTORESEARCH_CLI" promotion status`. If the stage is `rejected`, the league declined the
+policy after your card started and the runtime already told the user: finish `blocked` and do
+not send your own `help_request`. Otherwise send a `help_request` that names the promotion id
+and refs the experiment (or, for a bootstrap promotion, the version), and finish `blocked`.

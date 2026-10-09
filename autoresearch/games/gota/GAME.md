@@ -50,6 +50,21 @@ why those policies answer the question.
 Run bindings from the `autoresearch/` distribution root with the project environment.
 Append the arguments below to the exact front-matter command.
 
+Treat `build` and `local_check` as long commands: their G3/G4 workload takes
+approximately 55 minutes, measured on the autoresearch EC2 test box
+(m7i.xlarge), 2026-10-08. This is not a separate timing for each gate or for
+model generation. Host speed, policy, cache reuse and compiler repair rounds
+can change the total. See
+[gate durations](gates/README.md#durations-and-waiting) for the scope.
+Follow the shared `queue` skill's **Long commands** procedure: start each build
+or full local check with the terminal tool's `background: true`, keep its
+`session_id`, then call `process_manage` with `action: "wait"`, that `session_id`
+and `timeout: 1800`. Repeat `wait` only on `status: "timeout"`; do nothing else
+between waits. Do not poll, read logs repeatedly, or use sleep/probing loops.
+Other episode runs, Nim replay-expander builds, `gota_local.py`,
+`gota_episodes.py` and replay inspection use this same pattern unless known to
+fit a foreground terminal `timeout` of at most 600 seconds.
+
 - `local_check ARTIFACT --baseline BASELINE --work-dir OUTPUT`
   runs the existing shared G1–G5 gates. See [gate reference](gates/README.md).
 - `evaluate RESULTS_JSON --seat N` prints one JSON metric object for one subject
@@ -63,6 +78,16 @@ Append the arguments below to the exact front-matter command.
   absolute. Ticks form a nonempty half-open interval `[START, END)`. The resolver
   prints the absolute replay path and integer boundaries; it does not parse,
   truncate, or validate the replay's duration. Remote URLs are unsupported.
+
+After the process exits, read the exit code and command JSON, then the retained
+evidence before continuing. A build writes `NEW_BUILD_DIRECTORY/report.json`,
+`report.md`, `version.json` (including `gates`, `engine` and `native_builds`)
+and, when available, `policy.bas` and `coworld_manifest.json`. A local check
+writes `OUTPUT/gates.json`, `engine_identity.json`, `coworld_manifest.json` and
+hashed native measurement JSON files containing `native_build` receipts.
+Follow G2's `summary.episode_dir` to the episode results and logs; build locators
+are relative to the build directory. Read failed/errored receipts too; a process
+exit alone is not evidence of passing gates.
 
 ## Metrics
 
@@ -205,8 +230,31 @@ git -C "$CARD_WORKTREE" commit -m "Record exact submitted v13 bootstrap input"
 (cd "$AR_HOME" && "$AR_PYTHON" games/gota/tools/make_v13_live.py "$CANDIDATE/submitted-v13.bas" "$CANDIDATE/v13-live.bas")
 git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/v13-live.bas strategy/candidates/bootstrap/v13-live.provenance.json
 git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidate"
+```
+
+Run the build below in its own terminal call with `background: true`. The G3/G4
+workload is approximately 55 minutes, measured on the autoresearch EC2 test box
+(m7i.xlarge), 2026-10-08; the separate full `local_check` repeats that workload
+in a fresh context, so budget for both commands. This is not a measured total for every
+host or a separate 55-minute timing for each gate. Keep the build `session_id`
+and call `process_manage` with `action: "wait"`, that `session_id`,
+`timeout: 1800`; repeat only if `status: "timeout"`, with no polling or sleep
+loops. Each long-command block below sets its own paths for a fresh shell;
+start it from the card's worktree.
+
+```sh
+AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
+AR_PYTHON="$AR_HOME/local/venv/bin/python"
+CANDIDATE="$PWD/strategy/candidates/bootstrap"
+BUILD="$PWD/.scratch/build/champion"
 (cd "$AR_HOME" && "$AR_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
 ```
+
+After exit, read the command JSON, `$BUILD/report.json`, `$BUILD/report.md`,
+`$BUILD/version.json` and `$BUILD/gates.json`. Check the recorded gate outcomes,
+engine/native receipts, frozen `$BUILD/policy.bas`,
+`$BUILD/prebuilt.provenance.json` and `$BUILD/coworld_manifest.json` before
+starting the separate local check. Preserve error reports if the build stops.
 
 Generation resolves the current engine and makes only the authorized
 identifier/division token changes, with no model call. For an explicit historical
@@ -216,11 +264,24 @@ outputs are immutable; use fresh output paths.
 The build records G1–G4 local checks. Before bootstrap, run the separate
 `local_check` on the frozen artifact and manifest, selecting only applicable
 gates; G5 compiler coverage does not apply. For a historical local_check,
-append `--offline` as well:
+append `--offline` as well.
+
+Start this command in another terminal call with `background: true`, keep its
+new `session_id`, and use `process_manage` action `wait`, `timeout: 1800` as
+above, repeating only on `status: "timeout"`:
 
 ```sh
+AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
+AR_PYTHON="$AR_HOME/local/venv/bin/python"
+BUILD="$PWD/.scratch/build/champion"
+CHECK="$PWD/.scratch/check/champion"
 (cd "$AR_HOME" && "$AR_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
 ```
+
+After exit, read `$CHECK/gates.json`, `$CHECK/engine_identity.json`,
+`$CHECK/coworld_manifest.json`, the hashed native measurement JSON receipts and
+the G2 episode results/logs named by `summary.episode_dir`. Check blocking
+outcomes and any tool errors before the bootstrap handoff.
 
 After successful build and local_check, follow the core `submit` skill's
 "Bootstrap card" procedure. Check that no champion or promotion in flight exists,

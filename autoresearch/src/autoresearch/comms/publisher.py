@@ -384,8 +384,9 @@ def publish_message(
     canonical: Path, message: RuntimeMessage, allow_no_remote: bool = False, **fields
 ) -> PublishResult:
     """Publish one runtime message built by ``runtime_messages`` (the only way runtime code
-    publishes): its refs, plus its ``about`` and ``runtime_key`` fields. ``fields`` adds
-    envelope fields such as ``priority``, ``expects_response`` or ``in_reply_to``."""
+    publishes): its refs, plus its ``about``, ``runtime_key`` and kind-derived fields.
+    ``fields`` adds or overrides envelope fields such as ``priority``, ``expects_response`` or
+    ``in_reply_to``."""
     return publish_runtime(
         canonical,
         message.kind,
@@ -393,8 +394,7 @@ def publish_message(
         message.body,
         message.refs,
         allow_no_remote,
-        **message.fields(),
-        **fields,
+        **{**message.fields(), **fields},
     )
 
 

@@ -309,7 +309,7 @@ def check_champion(
         rejected = promotion.rejection_message(check.basis, game.league_id, check.submission.detail)
         with canonical_lock(canonical):
             if not already_published(canonical, rejected):
-                publish_message(canonical, rejected, allow_no_remote, priority="P1")
+                publish_message(canonical, rejected, allow_no_remote)
     if conflict is not None:
         _log(ctx, f"champion conflict: {conflict.detail}")
         pause(queue, ledger_of(canonical), f"{CHAMPION_PAUSE}: {conflict.detail}")
