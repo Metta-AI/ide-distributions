@@ -4,7 +4,8 @@ State lives in ``<canonical>/.supervisor/runtime/fake_softmax.json``; every oper
 read-modify-write under a file lock, so separate processes share one fake platform.
 
 Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value``):
-``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
+``credits=N``, ``identity=user``, ``identity=rejected`` (``whoami`` raises
+``CredentialRejected``, as for a revoked token), ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
 (creating a new XP request raises once N exist, like the platform's pending-request cap), and
 ``crash_after=<label>`` (read by runtime code through :func:`fault`). A request whose state
@@ -13,7 +14,9 @@ entry has ``"failed": true`` (tests set it in the state file) reports status ``f
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
 JSON with a ``player_id`` (a fake-only field), that is the player; otherwise the credential is
 taken to belong to ``AUTORESEARCH_PLAYER_ID``. So a wrong ``AUTORESEARCH_PLAYER_ID`` with a
-credential that names its player fails the C6 check, as on the real platform.
+credential that names its player fails the C6 check, as on the real platform. A credential
+starting ``cga_`` (an agent token) has no expiry, as on the real platform, and ignores
+``expires_in``.
 
 Like the real client, the mutating calls (``upload``, a new ``xp_create``, ``submit``) re-check
 ``whoami`` first and raise ``IdentityError`` unless it is the expected unexpired Player (C6), so
@@ -49,7 +52,11 @@ from pathlib import Path
 
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.io.locks import file_lock
-from autoresearch.softmax_tool.identity import IdentityError, identity_problems
+from autoresearch.softmax_tool.identity import (
+    CredentialRejected,
+    IdentityError,
+    identity_problems,
+)
 from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
 from autoresearch.softmax_tool.xp import handle_order
 
@@ -178,6 +185,7 @@ class FakeSoftmax:
         self._lock_path = runtime_dir / "fake_softmax.lock"
         self._player_id = env.get("AUTORESEARCH_PLAYER_ID") or DEFAULT_PLAYER_ID
         self._credential_player = credential_player(env) or self._player_id
+        self._agent_token = (env.get(CREDENTIAL_ENV) or "").startswith("cga_")
         self._faults = parse_faults(env)
         self._clock = clock
 
@@ -210,11 +218,13 @@ class FakeSoftmax:
     # --- identity and account -------------------------------------------
 
     def whoami(self) -> Identity:
+        if self._faults.get("identity") == "rejected":
+            raise CredentialRejected("Softmax did not accept the player credential (fake)")
         lifetime = timedelta(seconds=float(self._faults.get("expires_in", 24 * 3600)))
         identity = Identity(
             subject_type="user" if self._faults.get("identity") == "user" else "player",
             player_id=self._faults.get("player", self._credential_player),
-            expires_at=self._clock() + lifetime,
+            expires_at=None if self._agent_token else self._clock() + lifetime,
         )
         return self._operate("whoami", lambda _state: identity, persist=False)
 

@@ -1,0 +1,4 @@
+Error: Request failed: GET /whoami returned HTTP 401.
+Failed to authenticate
+Next: run `uv run softmax status`; if the token is missing or expired, run `uv run softmax login`.
+Docs: https://softmax.com/docs/guides/authentication

@@ -50,6 +50,42 @@ def _subsequence(patterns: list[str], subjects: list[str]) -> bool:
 # --- identity failure on the first tick (C6, C7) ---
 
 
+def test_whoami_blips_skip_runs_then_pause_once_per_streak(tmp_path):
+    """I1: a whoami failure that is not a rejection skips the run (no pause, no help request,
+    no admission); the third in a row pauses with one help request for the whole streak; a
+    good whoami resumes."""
+    host = Host(tmp_path)
+    host.tick(at(0))  # bootstrap + a planning request
+    host.set_faults("fail_after=whoami")
+    for minute in (1, 2):
+        blip = host.tick(at(minute))
+        assert blip.preflight.skipped and not blip.paused and blip.failures == {}
+        assert not (host.ledger / "pause.json").exists()
+        assert host.queue.list() == []  # nothing admitted while whoami is unavailable
+    assert _help_requests(host) == []
+
+    third = host.tick(at(3))
+    assert third.paused and (host.ledger / "pause.json").exists()
+    [help_request] = _help_requests(host, "Agent paused")
+    assert "3 times in a row" in help_request["body"]
+    assert help_request["runtime_key"].startswith("whoami-unavailable:")
+    for minute in (4, 5):
+        assert host.tick(at(minute)).paused
+    assert len(_help_requests(host, "Agent paused")) == 1  # one per streak
+
+    host.set_faults("")
+    assert not host.tick(at(6)).paused
+    assert not (host.ledger / "pause.json").exists()
+
+
+def test_rejected_credential_pauses_on_the_first_tick(tmp_path):
+    host = Host(tmp_path, faults="identity=rejected")
+    first = host.tick(at(0))
+    assert first.paused and not first.preflight.skipped
+    [help_request] = _help_requests(host, "Agent paused")
+    assert "did not accept" in help_request["body"]
+
+
 def test_identity_failure_on_the_first_tick_pauses_and_asks_for_help(tmp_path):
     host = Host(tmp_path, faults="player=ply_someone_else")
 

@@ -49,6 +49,7 @@ ENV_PASSTHROUGH = [
     "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
     "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
     "AUTORESEARCH_CHAMPION_GRACE_MINUTES",  # queue-keeper's champion check (A9)
+    "COGAMES_API_URL",  # the Softmax API server; the hosting runtime writes it to the .env
 ]
 APPROVAL_DENY = [
     "coworld player use*",

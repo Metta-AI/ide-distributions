@@ -10,6 +10,7 @@ from autoresearch.comms.publisher import publish_runtime
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runtime import health
 from autoresearch.runtime.ledger import canonical_lock
+from autoresearch.softmax_tool.protocol import Identity
 
 T0 = datetime.datetime.now(datetime.UTC)
 GB = 1024**3
@@ -170,14 +171,32 @@ def test_credential_expiring_soon_or_expired(host):
     assert len(_help(host, "credential")) == 2
 
 
-def test_whoami_failure_is_reported(host):
+def test_rejected_credential_is_reported(host):
+    host.set_faults("identity=rejected")
+    result = _check(host, at(2))
+    assert any("did not accept" in problem for problem in result.problems)
+    assert len(_help(host, "whoami")) == 1
+
+
+def test_unreachable_whoami_is_left_to_preflight(host):
+    """A network error or 5xx is no verdict on the credential: queue-keeper's preflight counts
+    those and asks for help after 3 in a row; health does not add a daily help request."""
     host.set_faults("fail_after=whoami")
     result = _check(host, at(2))
-    assert any("whoami" in problem for problem in result.problems)
-    assert len(_help(host, "whoami")) == 1
+    assert result.problems == [] and _help(host, "whoami") == []
 
 
 def test_no_workspace_yet_is_not_an_error(tmp_path):
     host = Host(tmp_path)
     result = health.run(host.ctx, host.queue, host.sm, at(0), env=host.env)
     assert result.skipped and result.problems == []
+
+
+def test_a_non_expiring_credential_has_no_expiry_problem():
+    """A ``cga_`` agent token has no expiry (``expires_at`` None): never expiring or expired."""
+
+    class AgentToken:
+        def whoami(self):
+            return Identity("player", "ply_a", None)
+
+    assert health.credential_problem(AgentToken(), at(2)) is None

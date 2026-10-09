@@ -1,16 +1,28 @@
 """Run the pinned ``softmax``/``coworld`` CLIs as the profile's Player, isolated from the host user.
 
-Credential handling (C6, A4):
+Credential handling (C6, A4). ``SOFTMAX_PLAYER_CREDENTIAL`` holds one of two Player credentials:
 
-- ``SOFTMAX_PLAYER_CREDENTIAL`` is a JSON object ``{"token": "ply_...", "expires_at": "<ISO 8601>"}``,
-  the same shape as one entry of ``player_sessions[<server>].cache`` in the file that
-  ``coworld player use <ply_id>`` writes. The server's ``/whoami`` does not report token expiry, so
-  the credential must carry it for preflight's expiry checks. A bare token is rejected.
+- A ``cga_...`` agent token, given bare. The Softmax hosting runtime provisions one per hosted
+  player (metta ``packages/observatory-hosted-worker``). The platform resolves it to the
+  player's PLAYER principal; it has no expiry and stops working when the agent is revoked or
+  the player disabled. It is written as the server's token (``tokens[<server>]``), the same
+  shape the hosting runtime writes to its own ``~/.softmax/credentials.yaml``.
+- A Player session: JSON ``{"token": "ply_...", "expires_at": "<ISO 8601>"}``, the same shape
+  as one entry of ``player_sessions[<server>].cache`` in the file that ``coworld player use
+  <ply_id>`` writes. It lasts about 24 hours, and the server's ``/whoami`` does not report the
+  expiry, so the credential must carry it for preflight's expiry checks. It is written as the
+  active player session, with ``tokens`` empty: with no user token in the file, an expired
+  session makes the CLI report "Not authenticated" instead of silently acting as a user.
+
+Any other shape (a bare ``ply_`` token, JSON without ``expires_at``) is rejected.
+
 - Before every CLI call the credential is written to
   ``$HERMES_HOME/local/softmax/home/.softmax/credentials.yaml`` (mode 0600) in softmax-cli 0.26.38's
-  format (``softmax/auth.py``): ``tokens`` (user tokens per server) is left empty and the Player
-  token is the active player session. With no user token in the file, an expired player session
-  makes the CLI report "Not authenticated" instead of silently acting as a user.
+  format (``softmax/auth.py``), keyed by the server.
+- Server: ``COGAMES_API_URL`` (what the hosting runtime writes to the profile ``.env``, and
+  what softmax-cli itself reads), else ``https://softmax.com/api``; a trailing ``/`` is
+  dropped, as the CLIs do. Every call ends with ``--server <server>``, because coworld 0.1.58
+  ignores ``COGAMES_API_URL`` and both CLIs look the token up by that server.
 - The CLIs run with ``HOME`` pointing at that directory, ``cwd`` inside it, and an environment
   built from scratch, so the host user's ``~/.softmax/credentials.yaml`` is never read or changed
   and the credential env var is not passed on. ``COWORLD_AGENT_GUIDANCE=0`` stops ``upload-policy``
@@ -21,13 +33,15 @@ Credential handling (C6, A4):
 ``api_get_json`` is the one read that does not go through a CLI: the XP credit balance
 (``GET /observatory/usage/me/credits``, readable with a Player credential since metta #27052,
 2026-10-08) has no command in coworld 0.1.58 (``coworld credits`` is merged in metta but not
-released). It sends the same Player token as a bearer header, with a User-Agent (Cloudflare
-answers 403 "error code: 1010" to urllib's default one). Replace it with ``coworld credits
+released). It sends the same credential token as a bearer header to the configured server
+(``self.server``, as the CLIs get with ``--server``), with a User-Agent (Cloudflare answers 403
+"error code: 1010" to urllib's default one), and never follows a redirect (urllib would copy
+the ``Authorization`` header to the redirect target). Replace it with ``coworld credits
 --json`` once a coworld release ships that command.
 """
-
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -41,8 +55,11 @@ import yaml
 
 from autoresearch.io.docs import write_text
 
-SERVER = "https://softmax.com/api"
+DEFAULT_SERVER = "https://softmax.com/api"
+SERVER_ENV = "COGAMES_API_URL"
 CREDENTIAL_ENV = "SOFTMAX_PLAYER_CREDENTIAL"
+# A registered agent's token: "cga_" + urlsafe base64 (metta observatory_core credential_tokens).
+AGENT_TOKEN = re.compile(r"cga_[A-Za-z0-9_\-=]+")
 SESSION_KEY = "autoresearch"  # the active-session key in the file; whoami reports the real player
 DEFAULT_TIMEOUT_S = 120
 PAGE_LIMIT = 200
@@ -54,9 +71,19 @@ Runner = Callable[..., subprocess.CompletedProcess]
 HttpGet = Callable[[str, dict[str, str]], str]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Turn every redirect into an HTTPError, so the bearer token never follows one."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def urllib_get(url: str, headers: dict[str, str]) -> str:
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_S) as response:
+    with _OPENER.open(request, timeout=HTTP_TIMEOUT_S) as response:
         return response.read().decode("utf-8")
 
 
@@ -82,13 +109,25 @@ class CredentialError(IdentityError):
 @dataclass(frozen=True)
 class PlayerCredential:
     token: str = field(repr=False)
-    expires_at: datetime
+    expires_at: datetime | None  # None: a cga_ agent token, which does not expire
+
+
+def server_from_env(env: Mapping[str, str]) -> str:
+    return (env.get(SERVER_ENV) or DEFAULT_SERVER).rstrip("/")
 
 
 def parse_credential(value: str | None) -> PlayerCredential:
-    expected = f'{CREDENTIAL_ENV} must be JSON {{"token": "ply_...", "expires_at": "<ISO 8601>"}}'
+    expected = (
+        f"{CREDENTIAL_ENV} must be a cga_ agent token, or JSON "
+        '{"token": "ply_...", "expires_at": "<ISO 8601>"}'
+    )
     if not value:
         raise CredentialError(f"{CREDENTIAL_ENV} is not set; {expected}")
+    value = value.strip()
+    if value.startswith("cga_"):
+        if not AGENT_TOKEN.fullmatch(value):
+            raise CredentialError(f"{CREDENTIAL_ENV} is not a well-formed cga_ agent token")
+        return PlayerCredential(token=value, expires_at=None)
     try:
         data = json.loads(value)
     except json.JSONDecodeError:
@@ -120,6 +159,7 @@ class PlatformCli:
         self._run = run
         self._http_get = http_get or urllib_get
         self._bin_dir = bin_dir or Path(sys.executable).parent
+        self.server = server_from_env(env)
         self.home = Path(env["HERMES_HOME"]) / "local" / "softmax" / "home"
 
     @property
@@ -129,11 +169,12 @@ class PlatformCli:
     def install_credential(self) -> PlayerCredential:
         """Parse the credential and (re)write the profile-local credentials file from it."""
         credential = parse_credential(self._credential_value)
-        session = {"token": credential.token, "expires_at": credential.expires_at.isoformat()}
-        data = {
-            "tokens": {},
-            "player_sessions": {SERVER: {"active": SESSION_KEY, "cache": {SESSION_KEY: session}}},
-        }
+        if credential.expires_at is None:
+            data = {"tokens": {self.server: credential.token}, "player_sessions": {}}
+        else:
+            session = {"token": credential.token, "expires_at": credential.expires_at.isoformat()}
+            sessions = {"active": SESSION_KEY, "cache": {SESSION_KEY: session}}
+            data = {"tokens": {}, "player_sessions": {self.server: sessions}}
         for directory in (self.home, self.credentials_path.parent):
             directory.mkdir(parents=True, exist_ok=True)
             directory.chmod(0o700)
@@ -160,12 +201,13 @@ class PlatformCli:
         ok_codes: Sequence[int] = (0,),
         timeout: float = DEFAULT_TIMEOUT_S,
     ) -> subprocess.CompletedProcess:
-        """Run ``<venv>/bin/<tool> <args>`` as the Player; raise unless the exit code is in ok_codes."""
+        """Run ``<venv>/bin/<tool> <args> --server <server>`` as the Player; raise unless the
+        exit code is in ok_codes. A call that runs past ``timeout`` is a ``SoftmaxCliError``."""
         self.install_credential()
         executable = self._bin_dir / tool
         try:
             result = self._run(
-                [str(executable), *args],
+                [str(executable), *args, "--server", self.server],
                 input=input,
                 capture_output=True,
                 text=True,
@@ -175,6 +217,10 @@ class PlatformCli:
             )
         except FileNotFoundError:
             raise ToolMissing(f"{executable} is not installed (reinstall the profile venv)") from None
+        except subprocess.TimeoutExpired:
+            # argv never holds the token (it is only in the credentials file).
+            command = " ".join([tool, *args[:3]])
+            raise SoftmaxCliError(f"{command} timed out after {timeout:g} s") from None
         if result.returncode not in ok_codes:
             raise SoftmaxCliError(describe_failure(tool, args, result))
         return result
@@ -189,12 +235,12 @@ class PlatformCli:
             ) from None
 
     def api_get_json(self, path: str):
-        """``GET <SERVER><path>`` as the Player (module docstring); the parsed JSON body.
+        """``GET <self.server><path>`` as the Player (module docstring); the parsed JSON body.
         Errors never include the token."""
         credential = parse_credential(self._credential_value)
         headers = {"Authorization": f"Bearer {credential.token}", "User-Agent": USER_AGENT}
         try:
-            body = self._http_get(f"{SERVER}{path}", headers)
+            body = self._http_get(f"{self.server}{path}", headers)
         except urllib.error.HTTPError as error:
             raise SoftmaxCliError(f"GET {path} answered HTTP {error.code}") from None
         except (urllib.error.URLError, OSError) as error:

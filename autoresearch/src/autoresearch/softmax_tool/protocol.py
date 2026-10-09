@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 class Identity:
     subject_type: str  # "player" or "user"; only "player" credentials are allowed (C6)
     player_id: str
-    expires_at: datetime
+    expires_at: datetime | None  # None: the credential does not expire (a cga_ agent token)
 
 
 @dataclass(frozen=True)

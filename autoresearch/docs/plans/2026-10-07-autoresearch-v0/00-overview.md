@@ -93,7 +93,7 @@ Python 3.12 (Hermes requires ≥3.11,<3.15); uv (required on the host); pytest, 
 | `approvals.mode off`; `approvals.deny` globs | always | config.yaml + bootstrap |
 | `skills.create_dir` = `$HERMES_HOME/local/skills-staging` (outside every workspace; `queue-keeper` sweeps new/changed skills into canonical `skills-proposed/` and publishes a suggestion) ; curator excludes shipped skills | always | bootstrap |
 | `HERMES_WRITE_SAFE_ROOT` = canonical (covers `.worktrees/`) | always | profile `.env` via bootstrap |
-| `terminal.env_passthrough` = `SOFTMAX_PLAYER_CREDENTIAL, AUTORESEARCH_PLAYER_ID, AUTORESEARCH_WORKSPACE, AUTORESEARCH_WORKSPACE_REMOTE, AUTORESEARCH_GAME, AUTORESEARCH_SOFTMAX, AUTORESEARCH_CLI` (exact names; no wildcards: `tools/env_passthrough.py:111-133`) | always | config.yaml + bootstrap |
+| `terminal.env_passthrough` = `SOFTMAX_PLAYER_CREDENTIAL, AUTORESEARCH_PLAYER_ID, AUTORESEARCH_WORKSPACE, AUTORESEARCH_WORKSPACE_REMOTE, AUTORESEARCH_GAME, AUTORESEARCH_SOFTMAX, AUTORESEARCH_CLI, AUTORESEARCH_QUEUE, OPENROUTER_MODEL, AUTORESEARCH_INBOX_WRITERS, COGAMES_API_URL` (current list: `runtime/config_migrations.py` `ENV_PASSTHROUGH`; exact names; no wildcards: `tools/env_passthrough.py:111-133`) | always | config.yaml + bootstrap |
 | Auto-update off | always | bootstrap |
 | `OPENROUTER_MODEL` (default `moonshotai/kimi-k3`) and fallback chain (`z-ai/glm-5.3`) | distribution default; installer may override | config.yaml model + `fallback_providers`; `.env` override |
 | League id (GotA: `league_3c60897b-25cf-4b37-9d1a-8554c1198f28`), outcome and performance metrics, `min_episodes_floor` (40/side) | game contract; installer override | `games/<game>/GAME.md`; env override |

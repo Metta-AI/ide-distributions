@@ -96,6 +96,13 @@ def test_whoami(board):
     assert env["data"]["problems"] == []
 
 
+def test_whoami_agent_token_has_no_expiry(board):
+    env = base_env(board, SOFTMAX_PLAYER_CREDENTIAL="cga_fake_agent_token")
+    code, payload = softmax(env, "whoami")
+    assert code == 0 and payload["data"]["expires_at"] is None
+    assert payload["data"]["problems"] == []
+
+
 def test_whoami_reports_identity_problems(board):
     code, env = softmax(base_env(board, **{FAULTS_ENV: "identity=user"}), "whoami")
     assert code == 1 and env["error"]["reason"] == "identity"
