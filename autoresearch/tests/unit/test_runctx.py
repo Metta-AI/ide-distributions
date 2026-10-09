@@ -33,23 +33,8 @@ def test_dirs(tmp_path):
     assert ledger_dir(ctx) == tmp_path / "workspace/.supervisor/ledger"
 
 
-def test_serial_fallback_reads_file(tmp_path):
-    runtime = tmp_path / "workspace/.supervisor/runtime"
-    runtime.mkdir(parents=True)
-    (runtime / "serial_current.json").write_text(
-        json.dumps({"task_id": "t_9", "run_id": "3", "worker": str(tmp_path / "wt9")})
-    )
-    ctx = from_env({"HERMES_HOME": str(tmp_path)})
-    assert ctx.card_id == "t_9" and ctx.run_id == "3"
-    assert ctx.worker == tmp_path / "wt9"
 
 
-def test_env_task_beats_serial_file(tmp_path):
-    runtime = tmp_path / "workspace/.supervisor/runtime"
-    runtime.mkdir(parents=True)
-    (runtime / "serial_current.json").write_text(json.dumps({"task_id": "t_9"}))
-    ctx = from_env({"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_TASK": "t_1"})
-    assert ctx.card_id == "t_1"
 
 
 def test_worker_identity_record_fills_task_and_run(tmp_path):
@@ -95,15 +80,3 @@ def test_a_retry_whose_record_write_fails_never_inherits_the_old_run(tmp_path, m
     ctx = from_env(home_env)
     assert ctx.card_id is None and ctx.run_id is None  # commands fail clearly, not as run 7
 
-
-def test_serial_current_naming_this_worktree_wins_over_a_worker_record(tmp_path):
-    worktree = tmp_path / "workspace" / ".worktrees" / "Q-1"
-    home_env = {"HERMES_HOME": str(tmp_path), "HERMES_KANBAN_WORKSPACE": str(worktree)}
-    record_worker_identity(
-        from_env(home_env | {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "7"})
-    )
-    runtime = tmp_path / "workspace/.supervisor/runtime"
-    (runtime / "serial_current.json").write_text(
-        json.dumps({"task_id": "K-2", "run_id": "r-2", "worker": str(worktree)})
-    )
-    assert (from_env(home_env).card_id, from_env(home_env).run_id) == ("K-2", "r-2")

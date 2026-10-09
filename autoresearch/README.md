@@ -84,7 +84,6 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_GAME` | no | Directory name under `games/`. Default `gota`. |
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
-| `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but no shipped job runs its cards (see below). |
 | `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
 | `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
 
@@ -160,10 +159,10 @@ Later runs skip each step that is already done.
 ## Kanban go/no-go switch
 
 The queue is Hermes Kanban. The Kanban go/no-go passed (GO, 2026-10-08,
-[protocol-slice.md](docs/plans/findings/protocol-slice.md)), so v0 has no other queue.
-`AUTORESEARCH_QUEUE=file` selects a file queue that keeps its cards in the canonical runtime
-directory, but the serial job that would run those cards (Plan 01 Task 5.2) is not built.
-Do not set it on a host: cards would be admitted and never run.
+[protocol-slice.md](docs/plans/findings/protocol-slice.md)), so v0 has no other queue. The
+serial fallback was never built and its queue option was removed (amendment A13).
+`FileQueue` remains only as the tests' stand-in for Kanban (`AUTORESEARCH_QUEUE=file` is a
+test hook, like `AUTORESEARCH_SOFTMAX=fake`; never set it on a host).
 
 ## Operate
 
@@ -284,10 +283,6 @@ automatic update; `updates.check` is set to false so it does not even check.
 
 ## Known gaps
 
-- **Serial fallback is not shipped.** `AUTORESEARCH_QUEUE=file` selects the queue backend,
-  but the `research-serial` cron job and its pre-run script (Plan 01 Task 5.2) are not
-  built: the Kanban go/no-go passed (GO, `docs/plans/findings/protocol-slice.md`), so Kanban
-  is the v0 queue.
 - **GotA is bound but not yet proven end to end.** `games/gota` has real `build`,
   `local_check`, `evaluate` and `upload` bindings (Plan 02 Task 2.5). The build follows the
   live engine. The compiler passed M1 on 2026.10.7.2 only; a newer engine has no semantic

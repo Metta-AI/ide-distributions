@@ -26,9 +26,6 @@ env_requires:
     required: false
     default: gota
     description: Game to research. A directory name under games/.
-  - name: AUTORESEARCH_QUEUE
-    required: false
-    description: Set to "file" to use the serial fallback queue instead of Hermes Kanban.
   - name: AUTORESEARCH_WORKSPACE
     required: false
     description: Path of the canonical workspace. Default is $HERMES_HOME/workspace.

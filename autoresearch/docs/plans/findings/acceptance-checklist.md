@@ -145,7 +145,6 @@ Source of truth: `distribution.yaml` (`env_requires`). Details and examples: REA
 | `OPENROUTER_MODEL` | no | Default `moonshotai/kimi-k3`; fallback `z-ai/glm-5.3`. |
 | `AUTORESEARCH_GAME` | no | Default `gota`. GotA builds also need `GOTA_HERMES_PYTHON`, `GOTA_TIRITH_BIN` and the native helpers ([games/gota/GAME.md](../../../games/gota/GAME.md), "Build and upload"). |
 | `AUTORESEARCH_WORKSPACE` | no | Default `$PROFILE/workspace`. |
-| `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but the serial job that runs its cards is not built (see 2.6). |
 | `AUTORESEARCH_SOFTMAX` | no | Tests only (`fake`). Never set in production. |
 
 Bootstrap writes `AUTORESEARCH_CLI` and `HERMES_WRITE_SAFE_ROOT`. Do not set them by hand.

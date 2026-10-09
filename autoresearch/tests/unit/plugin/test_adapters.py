@@ -178,12 +178,6 @@ def test_an_unreadable_board_leaves_the_peers_section_out_and_logs(worker_env, l
     assert errors[0]["hook"] == "pre_llm_call" and "does not exist" in errors[0]["error"]
 
 
-def test_the_serial_fallback_gets_no_peers_section(worker_env, monkeypatch):
-    monkeypatch.setenv("AUTORESEARCH_QUEUE", "file")
-    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
-    text = adapters.pre_llm_call(is_first_turn=True)
-    assert "Other cards running now" not in text
-    assert not (worker_env / "plugin_errors.jsonl").exists()
 
 
 def test_unreadable_briefing_never_raises(worker_env):

@@ -8,8 +8,6 @@ this section is computed from the board at the first turn instead.
 The board is read straight from the board DB, read-only (``KanbanQueue(board_db_only=True)``):
 inside a worker every ``hermes kanban`` read fails on the delegate fence. With no other card
 running, the section is one line that says so, so the worker knows the board was checked.
-The serial fallback (``AUTORESEARCH_QUEUE=file``) runs one card at a time and gets no
-section.
 
 Everything taken from another card is untrusted: titles and refs are free strings a worker
 wrote with ``queue request create``, and the board can hold tasks from other writers. So the
