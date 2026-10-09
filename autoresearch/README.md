@@ -137,15 +137,20 @@ hermes -p autoresearch cron list
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
 | `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
-To start a `queue-keeper` run at the next scheduler tick instead of waiting for the
-schedule:
+To start a `queue-keeper` run now instead of waiting for the schedule:
 
 ```sh
 hermes -p autoresearch cron run queue-keeper
 ```
 
-`cron run` only marks the job. A running gateway runs it on its next tick, or you can run
-`hermes -p autoresearch cron tick` once by hand. To run only bootstrap (no cards). The subshell loads the profile `.env`, because the runtime
+`cron run` claims the job and runs it in the foreground, then prints `Ran now: succeeded.` or
+`Ran now: failed.` This is the same in Hermes v0.21.5 and v0.21.6 (checked in source:
+`tools/cronjob_tools.py`, `_action_run`). It does not wait for the gateway. If the scheduler
+already holds the job it prints "Already being fired by the scheduler" and does not run it
+again; if the CLI inherits a gateway session it may instead report that the job runs in the
+background. `hermes -p autoresearch cron tick` runs every due job once, by hand.
+
+To run only bootstrap (no cards), use a subshell. It loads the profile `.env`, because the runtime
 reads `AUTORESEARCH_WORKSPACE_REMOTE` and the other keys from the environment. `uv` must be
 on `PATH`, because the launcher runs `uv sync`:
 
