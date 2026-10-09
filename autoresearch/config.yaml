@@ -77,6 +77,15 @@ terminal:
     - AUTORESEARCH_FALLBACK_PRICES
     - AUTORESEARCH_RELAUNCH_MIN_CREDITS
 
+# Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
+# process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin; the
+# run budget (5400) still bounds a whole card. concurrent_batch is set too: sequential_call
+# falls back to it, and a wait can arrive in a parallel batch.
+timeouts:
+  tools:
+    sequential_call: 1900
+    concurrent_batch: 1900
+
 plugins:
   enabled:
     - autoresearch

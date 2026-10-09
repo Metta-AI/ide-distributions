@@ -115,10 +115,20 @@ MISSING_ONLY: dict[str, object] = {
     # ProcessRegistry.wait) and uses it as the default foreground timeout. 1800 lets one wait
     # cover a long build or local check; the default 180 forced a model call every 3 minutes.
     "terminal.timeout": 1800,
+    # Hermes ends any single tool call after 420 s (agent/tool_executor.py
+    # _resolve_sequential_tool_timeout / _resolve_concurrent_tool_timeout, via
+    # agent/deadline.py resolve_timeout), so a process_manage wait of terminal.timeout would be
+    # cut at 420 s. 1900 is that wait (1800) plus margin; the run budget (5400) still bounds a
+    # card. sequential_call falls back to concurrent_batch, but both are set so neither path
+    # drifts back to 420. The section is not in Hermes' DEFAULT_CONFIG, so it is absent by default.
+    "timeouts.tools.sequential_call": 1900,
+    "timeouts.tools.concurrent_batch": 1900,
 }
 UPGRADE_DEFAULTS: dict[str, tuple[object, object]] = {
     "agent.run_budget_seconds": (2700, 5400),  # shipped until 2026-10-08
     "terminal.timeout": (180, 1800),  # the Hermes default
+    "timeouts.tools.sequential_call": (420, 1900),  # the Hermes default
+    "timeouts.tools.concurrent_batch": (420, 1900),  # the Hermes default
 }
 UNSET = ("kanban.default_assignee",)
 ENV_OVERRIDES = {"model.default": "OPENROUTER_MODEL"}

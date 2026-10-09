@@ -75,6 +75,8 @@ def test_empty_profile_gets_every_row(tmp_path):
     assert config["tool_loop_guardrails"]["hard_stop_enabled"] is True
     assert config["agent"] == {"max_turns": 150, "run_budget_seconds": 5400}
     assert config["terminal"]["timeout"] == 1800  # the longest process_manage wait
+    # One tool call may run longer than that wait, or Hermes cuts the wait at 420 s.
+    assert config["timeouts"]["tools"] == {"sequential_call": 1900, "concurrent_batch": 1900}
     assert config["approvals"]["mode"] == "off"
     assert config["approvals"]["deny"] == cm.APPROVAL_DENY
     assert config["terminal"]["env_passthrough"] == EXPECTED_PASSTHROUGH
@@ -91,6 +93,7 @@ def test_missing_only_rows_keep_tuned_values(tmp_path):
         "tool_loop_guardrails": {"hard_stop_enabled": False},
         "agent": {"max_turns": 40, "run_budget_seconds": 600},
         "terminal": {"timeout": 600},
+        "timeouts": {"tools": {"sequential_call": 2400, "concurrent_batch": 0}},
     }
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(tuned))
     cm.apply(Recorder(), tmp_path)
@@ -99,6 +102,7 @@ def test_missing_only_rows_keep_tuned_values(tmp_path):
     assert config["tool_loop_guardrails"]["hard_stop_enabled"] is False
     assert config["agent"] == {"max_turns": 40, "run_budget_seconds": 600}
     assert config["terminal"]["timeout"] == 600
+    assert config["timeouts"]["tools"] == {"sequential_call": 2400, "concurrent_batch": 0}
 
 
 def test_always_rows_overwrite_drifted_values(tmp_path):
@@ -154,10 +158,15 @@ def test_openrouter_model_env_overrides_the_model(tmp_path):
 
 
 def test_earlier_shipped_defaults_are_upgraded_but_tuned_values_kept(tmp_path):
-    old = {"agent": {"max_turns": 150, "run_budget_seconds": 2700}, "terminal": {"timeout": 180}}
+    old = {
+        "agent": {"max_turns": 150, "run_budget_seconds": 2700},
+        "terminal": {"timeout": 180},
+        "timeouts": {"tools": {"sequential_call": 420, "concurrent_batch": 420}},
+    }
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(old))
     cm.apply(Recorder(), tmp_path)
     config = config_of(tmp_path)
     assert config["agent"]["run_budget_seconds"] == 5400
     assert config["terminal"]["timeout"] == 1800
+    assert config["timeouts"]["tools"] == {"sequential_call": 1900, "concurrent_batch": 1900}
     assert cm.pending(tmp_path) == []
