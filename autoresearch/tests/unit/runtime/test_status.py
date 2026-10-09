@@ -10,9 +10,10 @@ from autoresearch import cli
 from autoresearch.comms import runtime_messages
 from autoresearch.comms.publisher import publish_message
 from autoresearch.io.docs import write_json
-from autoresearch.runtime import status
+from autoresearch.runtime import promotion, status
 from autoresearch.runtime.ledger import commit
 from autoresearch.runtime.pause import pause
+from autoresearch.runtime.promotion import ChampionConflict, LeagueCheck
 from runtime.workspace import make_spec
 
 NOW = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.UTC)
@@ -27,9 +28,9 @@ def http_get(url, headers):
     return KEY_RESPONSE
 
 
-def build(ctx, queue, env=ENV, get=http_get, champion=lambda: None):
+def build(ctx, queue, env=ENV, get=http_get, league_check=lambda now, grace: LeagueCheck(None, None, None, None)):
     ctx.hermes_home.mkdir(exist_ok=True)
-    return status.build(ctx, env, get, queue, champion, NOW)
+    return status.build(ctx, env, get, queue, league_check, NOW)
 
 
 def all_values(node):
@@ -66,7 +67,7 @@ def test_a_full_snapshot(ctx, canonical, queue):
     )
     env = ENV | {"AUTORESEARCH_AUTONOMY": "on-request"}
 
-    result = build(ctx, queue, env, champion=lambda: "pv_1")
+    result = build(ctx, queue, env, league_check=lambda now, grace: LeagueCheck("pv_1", None, None, None))
     data = result["data"]
 
     assert data["distribution"] == {
@@ -109,7 +110,7 @@ def test_unreadable_sources_become_warnings(ctx, queue):
     def broken_get(url, headers):
         raise OSError("network down")
 
-    def broken_champion():
+    def broken_champion(now, grace):
         raise RuntimeError("league unreachable")
 
     result = build(ctx, queue, ENV, broken_get, broken_champion)
@@ -151,3 +152,40 @@ def test_cli_prints_the_envelope(ctx, canonical, queue, monkeypatch, capsys):
     printed = json.loads(capsys.readouterr().out)
     assert printed["ok"] is True and set(printed) == {"ok", "data", "warnings"}
     assert printed["data"]["champion"] == {"policy": None, "conflict": False}
+
+
+def test_a_conflict_in_the_league_check_is_reported(ctx, queue):
+    conflict = ChampionConflict("pv_1", "pv_2", "hand-made")
+    data = build(ctx, queue, league_check=lambda now, grace: LeagueCheck("pv_2", None, None, conflict))
+    assert data["data"]["champion"] == {"policy": "pv_2", "conflict": True}
+
+
+def test_the_grace_comes_from_the_environment(ctx, queue):
+    seen = []
+
+    def check(now, grace):
+        seen.append(grace)
+        return LeagueCheck(None, None, None, None)
+
+    build(ctx, queue, ENV | {"AUTORESEARCH_CHAMPION_GRACE_MINUTES": "5"}, league_check=check)
+    result = build(ctx, queue, ENV | {"AUTORESEARCH_CHAMPION_GRACE_MINUTES": "bad"}, league_check=check)
+    assert seen == [datetime.timedelta(minutes=5), promotion.DEFAULT_CHAMPION_GRACE]
+    assert any("AUTORESEARCH_CHAMPION_GRACE_MINUTES" in warning for warning in result["warnings"])
+
+
+def test_a_malformed_distribution_yaml_degrades_to_a_warning(ctx, queue):
+    ctx.hermes_home.mkdir()
+    (ctx.hermes_home / "distribution.yaml").write_bytes(b"\xff\xfe not text: [")
+    result = build(ctx, queue)
+    assert result["data"]["distribution"]["version"]
+    assert any("distribution.yaml" in warning for warning in result["warnings"])
+
+
+def test_a_raising_queue_gives_no_running_cards_and_a_warning(ctx, queue):
+    class BrokenQueue:
+        def list(self, state=None):
+            raise RuntimeError("board unreachable")
+
+    result = build(ctx, BrokenQueue())
+    assert result["data"]["running_cards"] == []
+    assert any("running cards unavailable" in warning for warning in result["warnings"])

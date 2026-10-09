@@ -281,7 +281,7 @@ def openrouter_problems(
     try:
         remaining = data.get("limit_remaining")
         remaining = None if remaining is None else float(remaining)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         return [], [*warnings, f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
     if remaining is not None and remaining < floor:
         reason = f"OpenRouter key has ${remaining:.2f} left, below ${floor:g}: top it up (A5)"

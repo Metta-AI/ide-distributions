@@ -33,7 +33,7 @@ from autoresearch.runtime import autonomy, spend
 from autoresearch.runtime.ledger import ledger_of
 from autoresearch.runtime.pause import is_paused, pause_path
 from autoresearch.runtime.preflight import HttpGet, credit_floor, fetch_key_data
-from autoresearch.runtime.promotion import champion_conflict
+from autoresearch.runtime.promotion import DEFAULT_CHAMPION_GRACE, LeagueCheck, champion_grace
 
 COACH_HOLD_FILE = "coach-hold.json"
 DISTRIBUTION_FILE = "distribution.yaml"
@@ -43,8 +43,9 @@ KEEPER_LOG = "keeper.log"
 QUESTION_KINDS = frozenset({"question", "help_request"})
 LOG_TAIL_BYTES = 4096
 
-# Returns the policy version the league shows as our champion (None: none); may raise.
-ChampionLookup = Callable[[], str | None]
+# ``promotion.league_check`` for this agent's league, as of ``now`` with the given grace
+# (read only, ``record=False``); may raise.
+LeagueCheckFn = Callable[[datetime.datetime, datetime.timedelta], LeagueCheck]
 
 
 def build(
@@ -52,7 +53,7 @@ def build(
     env: Mapping[str, str],
     http_get: HttpGet,
     queue: Queue,
-    champion_lookup: ChampionLookup,
+    league_check: LeagueCheckFn,
     now: datetime.datetime | None = None,
 ) -> dict:
     """The ``data`` and ``warnings`` of the status envelope: ``{"data": {...}, "warnings": [...]}``."""
@@ -75,7 +76,7 @@ def build(
         "openrouter_floor_usd": floor,
         "running_cards": _running_cards(queue, warnings),
         "open_questions": _open_questions(ctx.canonical, now, warnings),
-        "champion": _champion(ctx.canonical, champion_lookup, now, warnings),
+        "champion": champion_section(league_check, env, now, warnings),
         "last_keeper_run": _last_keeper_run(ctx),
     }
     return {"data": data, "warnings": [*floor_warnings, *warnings]}
@@ -86,7 +87,7 @@ def _distribution(profile: Path, warnings: list[str]) -> dict:
     try:
         manifest = yaml.safe_load((profile / DISTRIBUTION_FILE).read_text(encoding="utf-8"))
         version = str(manifest["version"])
-    except (OSError, yaml.YAMLError, TypeError, KeyError) as error:
+    except (OSError, ValueError, yaml.YAMLError, TypeError, KeyError) as error:
         warnings.append(f"{DISTRIBUTION_FILE} version unreadable ({type(error).__name__})")
     return {
         "version": version,
@@ -170,34 +171,42 @@ def _open_questions(canonical: Path, now: datetime.datetime, warnings: list[str]
     """Published question and help_request messages with no reply, not superseded and not
     expired (the rules of ``comms.inbound.derived_status``, applied in one pass)."""
     try:
-        published = reader.read_since(canonical, "status", after=0)
+        published = reader.read_since(canonical, "status", after=0, include_unknown=True)
         answered = {
             message.get("in_reply_to")
             for message in delivery.inbox(canonical).values()
             if message.get("kind") == "reply"
         }
+        superseded = {message.get("supersedes") for message in published}
+        return sum(
+            1
+            for message in published
+            if message.get("kind") in QUESTION_KINDS
+            and message["id"] not in answered
+            and message["id"] not in superseded
+            and not (message.get("expires") and parse_time(message["expires"]) <= now)
+        )
     except Exception as error:  # noqa: BLE001
         warnings.append(f"open questions unavailable: {type(error).__name__}: {error}")
         return 0
-    superseded = {message.get("supersedes") for message in published}
-    return sum(
-        1
-        for message in published
-        if message.get("kind") in QUESTION_KINDS
-        and message["id"] not in answered
-        and message["id"] not in superseded
-        and not (message.get("expires") and parse_time(message["expires"]) <= now)
-    )
 
 
-def _champion(canonical: Path, lookup: ChampionLookup, now, warnings: list[str]) -> dict:
+def champion_section(
+    league_check: LeagueCheckFn, env: Mapping[str, str], now: datetime.datetime, warnings: list[str]
+) -> dict:
+    """The league's champion and whether it conflicts, decided as queue-keeper decides it
+    (``promotion.league_check``, grace from the environment)."""
     try:
-        policy = lookup()
-        conflict = champion_conflict(canonical, policy, now) is not None
+        grace = champion_grace(env)
+    except ValueError as error:  # a read-only command: warn and use the default
+        warnings.append(f"{error}; using {DEFAULT_CHAMPION_GRACE}")
+        grace = DEFAULT_CHAMPION_GRACE
+    try:
+        check = league_check(now, grace)
     except Exception as error:  # noqa: BLE001 - Softmax unreachable, no game, no credential
         warnings.append(f"champion unavailable: {type(error).__name__}: {error}")
         return {"policy": None, "conflict": False}
-    return {"policy": policy, "conflict": conflict}
+    return {"policy": check.shown, "conflict": check.conflict is not None}
 
 
 def _last_keeper_run(ctx: RunContext) -> str | None:

@@ -6,6 +6,7 @@ accepted for clarity.
 """
 
 import argparse
+import datetime
 import json
 import os
 
@@ -16,18 +17,19 @@ from autoresearch.queue.select import queue_from_env
 from autoresearch.runtime import status
 from autoresearch.runtime.bootstrap import REPO_ROOT
 from autoresearch.runtime.preflight import _urllib_get
+from autoresearch.runtime.promotion import league_check
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 
 EXIT_OK, EXIT_BAD_ARGS = 0, 2
 
 
-def _champion_lookup(ctx: runctx.RunContext) -> status.ChampionLookup:
-    def lookup() -> str | None:
+def _league_check_fn(ctx: runctx.RunContext) -> status.LeagueCheckFn:
+    def check(now: datetime.datetime, grace: datetime.timedelta):
         game = load_game(REPO_ROOT, os.environ.get("AUTORESEARCH_GAME") or "gota")
         sm = softmax_from_env(os.environ, ctx.canonical)
-        return sm.leaderboard_champion(sm.whoami().player_id, game.league_id)
+        return league_check(ctx, sm, game.league_id, now, grace)
 
-    return lookup
+    return check
 
 
 def _status(args: argparse.Namespace) -> int:
@@ -37,7 +39,7 @@ def _status(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "error": {"message": f"{error.args[0]} is not set"}}))
         return EXIT_BAD_ARGS
     queue = queue_from_env(os.environ, ctx)
-    result = status.build(ctx, os.environ, _urllib_get, queue, _champion_lookup(ctx))
+    result = status.build(ctx, os.environ, _urllib_get, queue, _league_check_fn(ctx))
     print(json.dumps({"ok": True, **result}, sort_keys=True))
     return EXIT_OK
 
