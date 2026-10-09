@@ -567,6 +567,20 @@ CANONICAL_CODE_WRITES = [
     "python3 -c \"import os; open(os.environ['AUTORESEARCH_WORKSPACE'] + '/plan.md', 'w')\"",
     "python -c \"import fcntl; fcntl.flock(open('x/canonical.lock'), 2)\"",
     "python3 -c \"open('.supervisor/ledger/pause.json', 'w').write('{{}}')\"",
+    # canonical as the destination (codex review of PR #24, F4: judged by destination)
+    "python3 -c \"import shutil; shutil.copyfile('notes/plan.md', '{canon}/plan.md')\"",
+    (
+        "python3 -c \"from pathlib import Path; "
+        "Path('{canon}/plan.md').write_text(Path('notes/plan.md').read_text())\""
+    ),
+    (
+        "python3 - <<'EOF'\nimport subprocess\n"
+        "subprocess.run('git commit -am x', shell=True, cwd='{canon}')\nEOF"
+    ),
+    (
+        "python3 - <<'EOF'\nimport subprocess\n"
+        "subprocess.run(['git', '-C', '{canon}', 'branch', '-f', 'main', 'HEAD~1'])\nEOF"
+    ),
 ]
 
 
@@ -599,6 +613,16 @@ def test_execute_code_that_writes_canonical_is_refused(layout):
             "import subprocess\nout = subprocess.run(['git', '-C', '{canon}', 'show', "
             "'HEAD:plan.md'], capture_output=True).stdout\n"
             "open('{worker}/notes/plan.md', 'wb').write(out)"
+        ),
+        # canonical only as the source (codex review of PR #24, F4)
+        "import shutil\nshutil.copyfile('{canon}/plan.md', '{worker}/notes/plan.md')",
+        (
+            "from pathlib import Path\n"
+            "Path('notes/plan.md').write_text(Path('{canon}/plan.md').read_text())"
+        ),
+        (
+            "import subprocess\nout = subprocess.run(['git', '-C', '{canon}', 'show', "
+            "'HEAD:plan.md'], capture_output=True).stdout\nresults = {{'branch': 'candidate'}}"
         ),
     ],
 )
