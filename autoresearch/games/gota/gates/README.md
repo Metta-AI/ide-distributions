@@ -1,6 +1,13 @@
 # Shared local GotA gates
 
 Every gate exports `run(artifact: Path, context: GateContext) -> GateResult`.
+`GateResult.outcome` is `passed`, `failed`, or `errored`; its computed `ok` is true
+only for `passed`. A deliberate policy rejection (compile diagnostics, resource
+violations, VM failures or malformed policy telemetry) is `failed`. Unexpected
+exceptions, missing tools/files, subprocess failures and broken harness invariants
+are `errored`, retaining exception type, message and a traceback summary under
+`details.error`. Raw exceptions from a gate or its import are caught at the
+runner boundary too. An errored result immediately stops later gates.
 Import the context and result from `games.gota.gates` with `autoresearch/` on
 Python's import path. Both legacy baseline and structured compiler policies are
 accepted; the marker selects the native host's corresponding limits.
@@ -21,12 +28,23 @@ uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13
 ```
 
 `--gate NAME` selects a gate and can repeat. Each result is printed as JSON;
-`WORK_DIR/gates.json` holds the final report. Exit 0 means every selected gate
-ran and passed. A G4 behavior regression is advisory and does not change its exit
-status; missing or failed measurements do. Use a fresh work directory for G2.
+`WORK_DIR/gates.json` holds the final report, including an errored harness if
+startup fails. Exit 0 means selected blocking gates passed; exit 1 means a
+policy failed a blocking gate; exit 3 means a tool or harness errored. Gates omitted
+after an error were not run. G4/G5 policy failures are advisory and do not change the exit
+status; tool errors always do. Use a fresh work directory for G2.
+The explicit `build --prebuilt FILE.bas` binding runs G1–G4 with this contract.
+Its G5 receipt is not an executed GateResult: it records `applicable: false`,
+`passed: false`, `advisory: true`, and `not applicable: prebuilt`, without an
+`outcome`. The artifact is its own G4 baseline mirror. See [bootstrap](../GAME.md#exact-prebuilt-baseline-and-first-install-bootstrap)
+for committed-input provenance and the shared upload handoff.
+
 No command uploads or submits a policy. The manifest and container image must
 already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
-`uv run`; it does not override the locked versions.
+`uv run`; it does not override the locked versions. `tools/lasthit_eval.py` uses
+the same `uv run --project PROJECT --locked --offline --python 3.12` invocation,
+with the project directory resolved from the script rather than the caller's
+working directory. Cache the locked dependencies before either command.
 
 ## Evidence and limits
 
@@ -35,9 +53,18 @@ already be available for the intended live release. G2 uses the project lockfile
   acceptance uses that receipt, not file timestamps.
 - G1 compiles using the actual GotA host schema and limits at the resolved full
   engine pin. The native receipt binds engine/Bassy source and executable bytes.
+  The probe reports a known Bassy `BasicError` during compilation as `failed`.
+  Unexpected native exceptions report `errored` with their native type, message
+  and stack trace; release builds enable stack traces for the probe. Simulation
+  VM error flags remain explicit policy failures. The Python reader validates
+  outcome consistency, compile counters and complete runtime counters/results
+  before interpreting measurements as policy evidence.
 - G2 executes all ten seats through pinned coworld and reads back staged artifact
   hashes, every completed private log, BASIC errors, ten active scripts, decisions,
-  nonzero aggregate actions, and full results. Positive XP is compatibility
+  nonzero aggregate actions, and full results. Missing runner/completion markers,
+  truncated results and non-finite measurements are tool errors. Complete
+  measurements showing inactive seats, zero decisions or zero actions are policy
+  failures. Positive XP is compatibility
   evidence for v13-live, not a general G2 requirement for every possible policy.
 - G3 enforces legacy ceilings of 256 globals, 32 arrays, 4096 cells and 65536
   source bytes, or structured ceilings of 512 globals, 128 arrays, 262144 cells
@@ -45,7 +72,8 @@ already be available for the intended live release. G2 uses the project lockfile
   (including main), and 20000 static instructions. Runtime ceilings are 80000
   instructions, 200000 work units, 1024 PRINT bytes and 128 PRINT events per
   decision. The 80% instruction/work thresholds apply to live 100000/250000
-  budgets, not historical 20000/50000 budgets. Missing runtime measurements fail.
+  budgets, not historical 20000/50000 budgets. Missing or malformed runtime
+  measurements error and stop verification; measured ceiling violations fail.
 - G4 runs native OpenDraft matches for seeds 1 through 10, candidate versus
   baseline on each side. It computes winning lifetime XP per simulated minute, floored for each hero before
   averaging (Glory) and win rate for the five candidate/baseline heroes. Regressions are
@@ -90,15 +118,26 @@ sh games/gota/tools/build_gota_match.sh
 Set `GOTA_ENGINE_SOURCE` to a local Git mirror and `GOTA_DEPENDENCY_ROOT` to a
 directory of dependency Git mirrors named by the lockfile for offline setup.
 Neither variable changes required pins. Build and receipt validation never fetch.
-Builders cache ignored binaries; compiler/runtime errors and missing tools produce
-failed gates. Receipts include effective absolute compiler/configuration paths;
+Builders cache ignored binaries. Measured policy compile/runtime failures produce
+failed gates; missing tools, build/receipt failures and unexpected exceptions
+produce errored gates. Receipts include effective absolute compiler/configuration paths;
 after moving an install, rebuild to produce valid receipts at the new location.
 No parent repository Git metadata is required, so a `git archive` install works.
 
-The GotA pytest session explicitly prepares current and recorded engine pins and
-builds the current probe and match runner. A cold session therefore needs network
-access or local mirrors and the same native tools. Replay tests build their
-historical helpers offline after setup.
+GotA tests explicitly request `prepare_native_sources` when they inspect pinned
+engine sources or build replay helpers, and `prepare_native_tools` when they
+execute the current probe or match runner. These session fixtures prepare current
+and recorded engine pins; the latter also builds the current helpers with Nim
+2.2.10. A cold native test run needs network access or local mirrors. Replay tests
+build historical helpers offline after source preparation. Pure Python tests,
+including seed, evaluate-binding and mocked compiler tests, need neither Nim nor
+source preparation. The real-agent process guard remains autouse for every GotA
+test. For example, from `autoresearch/`, this needs only the locked Python environment:
+
+```sh
+uv run --locked --offline pytest tests/unit/gota/test_seed.py tests/unit/gota/test_evaluate_binding.py tests/unit/gota/test_native_build.py -q
+```
+
 Unit tests use short real native simulations and recorded telemetry fixtures.
 The fixture envelope assembled by a test is a parser test, not a new episode.
 Full manifest and ten-seed execution evidence is recorded separately in provenance.
@@ -130,3 +169,10 @@ historical pin without a network lookup. An online failure never falls back.
 Programmatic GateContext callers may set `engine_commit` explicitly. Its omitted
 value retains the historical test/audit pin; that default is not live resolution.
 Historical equivalence and goal audits retain their immutable M1 engine semantics.
+
+Only G1–G3 policy failures block a build and may enter compiler repair rounds.
+G4 and G5 still run and carry `advisory: true` in build receipts. Their `failed`
+outcomes appear in `report.json` warnings and the Markdown report, while a build
+with passing G1–G3 remains passed. An `errored` outcome from any gate stops the
+build immediately and makes it errored, including advisory gates. Local check
+returns 0 for advisory failures, 1 for blocking failures, and 3 for tool errors.

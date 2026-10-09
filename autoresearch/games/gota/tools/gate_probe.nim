@@ -6,18 +6,23 @@ const
   PolyworldCommit {.strdefine.} = ""
   BassyCommit {.strdefine.} = ""
 
-let source = readFile(paramStr(2))
 let output = paramStr(3)
 var report = %*{"ok": false}
+var compiling = true
+proc toolError(error: ref CatchableError): JsonNode =
+  %*{"ok": false, "outcome": "errored", "error": {
+    "type": $error.name, "message": error.msg, "traceback": getStackTrace(error)}}
 try:
+  let source = readFile(paramStr(2))
   let structured = usesStructures(source)
   let compiledSource = if structured: StructureSource & "\n" & source else: source
   let limits = if structured: structureLimits(neuralLimits()) else: neuralLimits()
   let program = compile(compiledSource, initHeroHost(0), limits)
+  compiling = false
   var cells = 0
   for i in 0 ..< program.arrays:
     cells += int(program.arrayExtent(int32(i))[1])
-  report = %*{"ok": true, "globals": program.globals,
+  report = %*{"ok": true, "outcome": "passed", "globals": program.globals,
     "arrays": program.arrays, "array_cells": cells,
     "routines": program.routines, "static_instructions": program.instructions,
     "source_bytes": source.len, "mode": (if structured: "structured" else: "legacy")}
@@ -75,8 +80,15 @@ try:
       "total_xp": xp, "scores": scores, "seed": seed,
       "candidate_blue": candidateBlue}
     report["ok"] = %(errors.len == 0 and decisions > 0)
+    report["outcome"] = %(if report["ok"].getBool(): "passed" else: "failed")
+except BasicError as error:
+  if compiling:
+    report = %*{"ok": false, "outcome": "failed", "error": {
+      "type": $error.name, "message": error.msg}}
+  else:
+    report = toolError(error)
 except CatchableError as error:
-  report = %*{"ok": false, "error": error.msg}
+  report = toolError(error)
 report["engine"] = %PolyworldCommit
 report["bassy"] = %BassyCommit
 writeFile(output, $report)

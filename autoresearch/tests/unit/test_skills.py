@@ -1,4 +1,4 @@
-"""Core skill conformance (Plan 03 Task 4.3).
+"""Core and GotA skill conformance (Plan 03 Task 4.3, Plan 02 Task 1.5).
 
 Every core skill under ``skills/autoresearch/`` must:
 
@@ -12,11 +12,15 @@ Every core skill under ``skills/autoresearch/`` must:
 - never name a game;
 - cite only doctrine IDs that exist.
 
-The set of skills is System Design §6.1 plus the two maintenance skills the plan adds.
+The core set is System Design §6.1 plus two maintenance skills. GotA bindings share
+metadata, doctrine and CLI checks; only core skills must avoid game names. Game
+instruments are checked through whitelisted --help paths without executing actions.
 """
 
 import argparse
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import frontmatter
@@ -66,7 +70,7 @@ BARE_CALL = re.compile(rf"(?<![\w/$.-])(?:python3? -m )?autoresearch (?:{'|'.joi
 
 
 def skill_files() -> list[Path]:
-    return sorted(SKILLS.glob("*/SKILL.md"))
+    return sorted(SKILLS.glob("*/SKILL.md")) + sorted((ROOT / "skills" / "gota").glob("*/SKILL.md"))
 
 
 def skill_ids() -> list[str]:
@@ -126,7 +130,14 @@ def skill(request) -> Path:
 
 
 def test_every_core_skill_has_a_file():
-    assert set(skill_ids()) == SECTION_6_1 | PLAN_EXTRAS
+    assert {p.parent.name for p in SKILLS.glob("*/SKILL.md")} == SECTION_6_1 | PLAN_EXTRAS
+    assert {p.parent.name for p in (ROOT / "skills" / "gota").glob("*/SKILL.md")} == {
+        "replay-inspection",
+        "eval-design",
+        "diagnosis",
+        "ab",
+        "survey",
+    }
 
 
 def test_front_matter_is_valid(skill):
@@ -193,6 +204,8 @@ def test_no_bare_autoresearch_call(skill):
 
 
 def test_core_skills_never_name_a_game(skill):
+    if skill.parent.parent != SKILLS:
+        return
     assert not re.search(
         r"gota|gods of the arena", skill.read_text(encoding="utf-8"), re.IGNORECASE
     )
@@ -202,3 +215,43 @@ def test_cited_doctrine_ids_exist(skill):
     cited = set(re.findall(r"\bD-\d{2}\b", skill.read_text(encoding="utf-8")))
     assert cited, f"{skill.parent.name} cites no doctrine rule"
     assert cited <= rule_ids(), cited - rule_ids()
+
+
+GAME_CALL = re.compile(r'"\$AR_PYTHON" "\$AR_HOME/games/gota/tools/([^"/]+)"([^`\n]*)')
+
+
+def check_game_call(script: str, arguments: str) -> None:
+    # Only advertised instruments may run, and only their read-only --help path.
+    assert script in {"replay_stats.py", "evaluate.py", "compare.py", "make_v13_live.py", "build.py"}, script
+    path = ROOT / "games" / "gota" / "tools" / script
+    assert path.is_file(), path
+    result = subprocess.run(
+        [sys.executable, str(path), "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    supported = set(re.findall(r"--[a-z][a-z0-9-]*", result.stdout))
+    for flag in re.findall(r"--[a-z][a-z0-9-]*", arguments):
+        assert flag in supported, f"{script}: unknown flag {flag}"
+
+
+def test_game_tool_commands_and_flags_exist(skill):
+    if skill.parent.parent == SKILLS:
+        return
+    calls = GAME_CALL.findall(skill.read_text(encoding="utf-8"))
+    assert calls, f"{skill}: no GotA instrument command"
+    for script, arguments in calls:
+        check_game_call(script, arguments)
+
+
+def test_game_command_regressions_fail_closed():
+    with pytest.raises(AssertionError):
+        check_game_call("missing.py", "--json")
+    with pytest.raises(AssertionError, match="unknown flag"):
+        check_game_call("evaluate.py", "--invented-option")
+    with pytest.raises(AssertionError):
+        resolve(["softmax", "missing-command"])

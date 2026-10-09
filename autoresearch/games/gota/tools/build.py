@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a committed candidate using the installed qualified GotA compiler."""
+"""Build a committed semantic candidate or gate an exact prebuilt BASIC artifact."""
 import argparse
 import contextlib
 import hashlib
@@ -20,27 +20,32 @@ def validate_manifest(path, *, offline=False):
     return resolve(path, offline=offline)
 
 
-def build(candidate, out, manifest=None, *, timeout=900, offline=False):
+def build(candidate, out, manifest=None, *, timeout=900, offline=False, prebuilt=None):
     """Output is new and immutable; failure retains evidence without an upload envelope."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(TOOLS))
     identity = validate_manifest(manifest, offline=offline)
-    source = candidate / 'STRATEGY.md'
-    repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     if out.exists():
         raise ValueError(f'output already exists (immutable): {out}')
+    if prebuilt is not None:
+        from games.gota.tools import prebuilt as existing
+        return existing.build(candidate, out, prebuilt, identity)
+    source = candidate / 'STRATEGY.md'
+    repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     os.environ['GOTA_CANDIDATE_REPO'] = repo
     import pw_cli
     python = os.environ.get('GOTA_HERMES_PYTHON')
     if not python:
         raise pw_cli.EnvironmentMissing('Hermes Python is not configured', 'set GOTA_HERMES_PYTHON to the installed Hermes Python')
-    import pw_strategy
-    import strategy_build as compiler
 
     from games.gota.tools.engine_identity import provision
     identity, _ = provision(identity)
     out.parent.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='.gota-build-', dir=out.parent))
+    os.environ['GOTA_ANALYSIS_DIR'] = str(scratch / 'analysis')
+    import pw_strategy
+    import strategy_build as compiler
+
     resolved_manifest = identity.pop('manifest')
     manifest = scratch / 'manifest.json'
     manifest.write_text(json.dumps(resolved_manifest, indent=2) + '\n')
@@ -73,6 +78,9 @@ def build(candidate, out, manifest=None, *, timeout=900, offline=False):
     with contextlib.redirect_stdout(sys.stderr):
         result = pw_strategy.run(args, report, engine_identity=identity)
     target = Path(result['build'])
+    analysis = scratch / 'analysis'
+    if analysis.exists():
+        analysis.rename(target / 'analysis')
     version = compiler.read(target / 'version.json')
     version['engine'] = identity
     version['compiler']['security_scanner_sha256'] = hashlib.sha256(scanner.read_bytes()).hexdigest()
@@ -88,6 +96,7 @@ def build(candidate, out, manifest=None, *, timeout=900, offline=False):
     target.rename(out)
     shutil.rmtree(scratch)
     return {'ok': version['status'] == 'passed', 'build_id': version['build_id'],
+            'status': version['status'], 'error': result.get('error'), 'build': str(out),
             'gates': version['gates'], 'artifact': str(out / 'policy.bas')}
 
 
@@ -95,26 +104,37 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--prebuilt', type=Path, help='committed BASIC artifact with adjacent .provenance.json; no model compiler')
     parser.add_argument('--manifest', type=Path, default=None)
     parser.add_argument('--offline', action='store_true', help='explicit historical pinned engine; no live lookup')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     try:
         manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
-        result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, offline=args.offline)
-    except SystemExit as error:
-        if isinstance(error.code, int):
+        options = {'offline': args.offline}
+        if args.prebuilt is not None:
+            options['prebuilt'] = args.prebuilt.resolve()
+        result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, **options)
+    except (Exception, SystemExit) as error:
+        if isinstance(error, SystemExit) and isinstance(error.code, int):
             raise
-        print(json.dumps({'ok': False, 'error': str(error)}))
-        return getattr(error, 'exit_code', 2)
-    except (OSError, subprocess.SubprocessError) as error:
-        print(json.dumps({'ok': False, 'error': str(error)}))
-        return 3
-    except (ValueError, KeyError, RuntimeError) as error:
-        print(json.dumps({'ok': False, 'error': str(error)}))
-        return 2
+        from games.gota.gates import exception_summary
+        result = {'ok': False, 'status': 'errored', 'build': str(args.out.resolve()),
+                  'error': exception_summary(error), 'gates': {}}
+        # Never overwrite an existing immutable build, even if the caller reused --out.
+        if not args.out.exists():
+            args.out.mkdir(parents=True)
+            for name in ('report.json', 'version.json'):
+                (args.out / name).write_text(json.dumps(result, indent=2) + '\n')
+            (args.out / 'report.md').write_text(
+                '# Build error\n\nStatus: **errored**.\n\n```json\n' +
+                json.dumps(result['error'], indent=2) + '\n```\n')
+        print(json.dumps(result))
+        if isinstance(error, (ValueError, KeyError, RuntimeError)):
+            return 2
+        return getattr(error, 'exit_code', 3)
     print(json.dumps(result))
-    return 0 if result['ok'] else 1
+    return 0 if result['ok'] else 3 if result.get('status') == 'errored' else 1
 
 
 if __name__ == '__main__':

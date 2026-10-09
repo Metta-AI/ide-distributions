@@ -5,12 +5,67 @@ import subprocess
 from pathlib import Path
 
 from . import GateContext
-from .limits import POLYWORLD_COMMIT
+from .limits import LEGACY, POLYWORLD_COMMIT, PRINT, SOFT
 
 # Explicitly selected by gate_probe at the current engine pin.
 NATIVE_MODE = {'drafting': True, 'draft_mode': 'OpenDraft', 'replay_mode': False}
 
 TOOLS = Path(__file__).resolve().parents[1] / 'tools'
+
+
+def validate_measurement(result: dict, *, simulated: bool) -> None:
+    """Validate probe evidence before interpreting any counter as policy behavior."""
+    if not isinstance(result, dict) or type(result.get('ok')) is not bool:
+        raise ValueError('native receipt requires an object and boolean ok')
+    outcome = result.get('outcome')
+    if outcome not in ('passed', 'failed', 'errored') or result['ok'] != (outcome == 'passed'):
+        raise ValueError('native receipt outcome/ok missing or inconsistent')
+    if outcome == 'errored':
+        error = result.get('error')
+        if (not isinstance(error, dict) or
+                any(not isinstance(error.get(name), str) or not error[name]
+                    for name in ('type', 'message', 'traceback'))):
+            raise ValueError('native tool error requires type, message and traceback')
+        return
+    if 'error' in result:
+        error = result['error']
+        if (outcome != 'failed' or not isinstance(error, dict) or
+                error.get('type') != 'BasicError' or not isinstance(error.get('message'), str) or
+                not error['message']):
+            raise ValueError('unrecognized native policy rejection receipt')
+        return
+    if result.get('mode') not in ('legacy', 'structured'):
+        raise ValueError('native compile receipt requires the policy mode')
+    for name in LEGACY:
+        if type(result.get(name)) is not int or result[name] < 0:
+            raise ValueError(f'native compile receipt requires nonnegative integer {name}')
+    if not simulated:
+        if outcome != 'passed':
+            raise ValueError('native failed compilation requires explicit BASIC rejection')
+        return
+    runtime = result.get('runtime')
+    if not isinstance(runtime, dict):
+        raise TypeError('native simulation receipt requires runtime evidence')
+    for name in (*SOFT, *PRINT, 'decisions', 'ticks', 'seed'):
+        if type(runtime.get(name)) is not int or runtime[name] < 0:
+            raise ValueError(f'native runtime receipt requires nonnegative integer {name}')
+    for name in ('seat_decisions', 'scores', 'total_xp'):
+        values = runtime.get(name)
+        if (not isinstance(values, list) or len(values) != 10 or
+                any(type(value) is not int or value < 0 for value in values)):
+            raise ValueError(f'native runtime receipt requires ten nonnegative integers: {name}')
+    if (sum(runtime['seat_decisions']) != runtime['decisions'] or
+            any(score not in (0, 1) for score in runtime['scores']) or
+            type(runtime.get('candidate_blue')) is not bool):
+        raise ValueError('native runtime receipt has inconsistent seat counts, scores or side')
+    errors = runtime.get('errors')
+    if not isinstance(errors, list) or any(
+            not isinstance(error, dict) or type(error.get('slot')) is not int or
+            not 0 <= error['slot'] < 10 or not isinstance(error.get('error'), str) or not error['error']
+            for error in errors):
+        raise ValueError('native runtime receipt requires explicit VM error records')
+    if result['ok'] != (not errors and runtime['decisions'] > 0):
+        raise ValueError('native runtime outcome disagrees with measured activity or VM errors')
 
 
 def measure(artifact: Path, context: GateContext, seed: int | None = None,
@@ -41,6 +96,7 @@ def measure(artifact: Path, context: GateContext, seed: int | None = None,
                     'blue' if blue else 'red']
     subprocess.run(command, capture_output=True, text=True, check=True, timeout=context.timeout)
     result = json.loads(report.read_text())
+    validate_measurement(result, simulated=seed is not None)
     after = validate(binary, 'gate_probe', commit)
     if identity != after or result.get('engine') != commit or result.get('bassy') != identity['inputs']['dependencies']['bassy']['commit']:
         raise ValueError('native gate identity mismatch')

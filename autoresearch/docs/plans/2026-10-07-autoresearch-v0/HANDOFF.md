@@ -2,6 +2,8 @@
 
 Paste everything below the line into a new Claude Code session started in `~/coding/ide-mvp`.
 
+> **Status 2026-10-08:** historical. This prompt started the v0 implementation; it is kept as written. Where it differs, `00-overview.md` (amendments A1-A13 and the outcomes under "Dates and decisions") is current: Hermes installs from a clone of tag `v2026.9.24` (A1; the `uv tool install git+...` command below fails), the Kanban slice passed so the serial fallback was not built, and the compiler passed M1.
+
 ---
 
 You are implementing **autoresearch v0**: an autonomous research agent for the Softmax game Gods of the Arena (GotA), packaged as a Hermes Agent profile distribution. The design is finished and approved; the implementation plan is written and was reviewed with Codex over six rounds to a GO verdict. Your job is to **execute the plan**, not to redesign it.

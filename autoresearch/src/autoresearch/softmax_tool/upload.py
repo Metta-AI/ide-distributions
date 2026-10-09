@@ -37,6 +37,7 @@ build both follow it):
 
 - ``artifact`` (required): path of the policy file or directory, relative to the build dir.
 - ``gates`` (required, non-empty): ``{<gate>: {"passed": bool, "advisory": bool?, ...}}``.
+  An errored outcome always rejects upload, including advisory gates.
   The build passed when every non-advisory gate has ``passed: true`` and ``status`` (if
   present) is ``"passed"``.
 - ``strategy_sha256``, or ``source_hashes[source_path]``: the STRATEGY the build compiled.
@@ -115,8 +116,9 @@ def _gate_failures(build: dict) -> list[str]:
     failures = [
         name
         for name, result in sorted(gates.items())
-        if not (isinstance(result, dict) and result.get("advisory"))
-        and not (isinstance(result, dict) and result.get("passed") is True)
+        if not isinstance(result, dict)
+        or result.get("outcome") == "errored"
+        or (not result.get("advisory") and result.get("passed") is not True)
     ]
     if build.get("status", "passed") != "passed":
         failures.append(f"status {build['status']!r}")

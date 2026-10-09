@@ -536,30 +536,47 @@ def carry_guesses(order: dict, draft: dict) -> list[dict]:
     return list(guesses.values())
 
 
-def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
+def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: dict | None = None) -> Path:
+    from games.gota.gates import retain_episode_locators
+
     assert_inputs(order)
     stage = build_path(order['build_id'], staged=True)
     target = BUILDS / order['build_id']
     if target.exists():
         raise pw_cli.UsageError(f'finalized build is immutable: {target}')
+    retain_episode_locators(gates, stage)
+    for path in stage.rglob('gates.json'):
+        retained = read(path)
+        retain_episode_locators(retained, stage)
+        dump(path, retained)
     draft = read(stage / 'report_draft.json') if (stage / 'report_draft.json').exists() else {'guesses': [], 'gaps': []}
     guesses = carry_guesses(order, draft)
     blocked = [g['id'] for g in guesses if g['severity'] == 'high' and g['state'] != 'closed'
                and str(order['components'].get(g['component'], {}).get('fields', {}).get('Status', '')).startswith(('tested', 'proven'))]
     if blocked:
         error = 'Status: tested is blocked by unresolved high-severity guesses: ' + ', '.join(blocked)
-    status = 'passed' if not error and len(gates) == 5 and all(g['passed'] for g in gates.values()) else 'failed'
+    gate_errors = [g['summary']['error'] for g in gates.values() if g.get('outcome') == 'errored']
+    if tool_error or gate_errors:
+        status = 'errored'
+        error = tool_error or gate_errors[0]
+    else:
+        status = 'passed' if not error and len(gates) == 5 and all(gates.get(name, {}).get('passed') is True for name in ('G1', 'G2', 'G3')) else 'failed'
+    warnings = [{'gate': name, 'summary': gate.get('summary', {})}
+                for name, gate in gates.items()
+                if name in ('G4', 'G5') and gate.get('outcome') == 'failed']
     budget = read(stage / 'budget.json') if (stage / 'budget.json').exists() else {}
     report = {'build_id': order['build_id'], 'status': status, 'units': order['units'],
-              'guesses': guesses, 'gaps': draft['gaps'], 'gates': gates, 'budget': budget, 'error': error}
+              'guesses': guesses, 'gaps': draft['gaps'], 'gates': gates, 'budget': budget, 'error': error, 'warnings': warnings}
     dump(stage / 'report.json', report)
     lines = [f'# Build {order["build_id"]}', '', f'Status: **{status}**. Intent: {order["intent"]}.', '',
-             '| Gate | Pass | Evidence |', '| --- | --- | --- |']
+             '| Gate | Outcome | Evidence |', '| --- | --- | --- |']
     unexercised = gates.get("G5", {}).get("coverage", {}).get("unexercised_message_types", [])
     if unexercised:
         lines[3:3] = ["G5 event coverage: **not exercised**: " + ", ".join(unexercised) +
                       ". Their semantic checks remain unproven.", ""]
-    lines.extend(f'| {name} | {gate["passed"]} | {gate.get("summary", "")} |' for name, gate in gates.items())
+    lines.extend(f'| {name} | {gate.get("outcome", "passed" if gate["passed"] else "failed")} | {gate.get("summary", "")} |' for name, gate in gates.items())
+    if warnings:
+        lines += ['', '## Warnings', '', *(f"- {warning['gate']}: {warning['summary']}" for warning in warnings)]
     lines += ['', '## Units', '', *(f'- `{key}`: {state}' for key, state in order['units'].items()),
               '', '## Guesses', '']
     lines.extend(f'- **{g["id"]}** ({g["severity"]}, {g["state"]}): {g["decision"]} — {g["why"]}\n'
@@ -569,7 +586,7 @@ def finalize(order: dict, gates: dict, *, error: str | None = None) -> Path:
     lines += ['', '## Gaps', '', '```json', json.dumps(draft['gaps'], indent=2), '```']
     lines += ['', '## Budget', '', '```json', json.dumps(budget, indent=2), '```']
     if error:
-        lines += ['', '## Failure', '', error]
+        lines += ['', '## Failure', '', '```json', json.dumps(error, indent=2), '```']
     (stage / 'report.md').write_text('\n'.join(lines) + '\n')
     version = {k: order[k] for k in ('build_id', 'source_commit', 'source_path', 'source_hashes',
                                     'previous_build', 'compiler', 'engine', 'created', 'intent')}

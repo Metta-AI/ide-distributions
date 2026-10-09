@@ -8,8 +8,8 @@ import pytest
 TOOLS = Path(__file__).resolve().parents[4] / "games/gota/compiler/tools"
 sys.path.insert(0, str(TOOLS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import strategy_format as sf  # noqa: E402
-from test_strategy_basic import TRIVIAL, RICH, write_strategy  # noqa: E402
+import strategy_format as sf
+from test_strategy_basic import RICH, TRIVIAL, write_strategy
 
 
 def lint_codes(text: str, tmp_path: Path) -> set[str]:

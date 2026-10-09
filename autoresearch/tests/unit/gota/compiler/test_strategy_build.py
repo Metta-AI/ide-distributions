@@ -1,9 +1,8 @@
 # Vendored from personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84: paintbot_pw_lab/tools/tests/test_strategy_build.py
 """Source provenance and build publication are deterministic trust boundaries."""
 import json
-from pathlib import Path
-import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest

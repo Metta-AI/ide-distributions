@@ -26,7 +26,7 @@ Design documents (open the HTML files in a browser):
 | `git` | any recent | the canonical workspace and its remote |
 | `uv` | any recent | the profile venv, and installing Hermes |
 | Hermes Agent | v0.21.5 (tag `v2026.9.24`) | runs the cron jobs, the workers and Kanban |
-| Nim | 2.2.10 | building the GotA replay tools (needed only for GotA) |
+| Nim | 2.2.10 | building GotA native tools and running native gate/replay tests; pure Python tests need no Nim |
 
 Install Hermes by one of two ways (amendment A1). A plain `uv tool install git+...` fails,
 because Hermes `setup.py` refuses wheel builds.
@@ -84,13 +84,18 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_GAME` | no | Directory name under `games/`. Default `gota`. |
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
-| `AUTORESEARCH_QUEUE` | no | `file` selects the serial fallback queue (see below). |
+| `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but no shipped job runs its cards (see below). |
 | `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
 | `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them
 by hand.
+
+The GotA `build` binding also needs `GOTA_HERMES_PYTHON` (the Python of the installed
+Hermes) and `GOTA_TIRITH_BIN` (an officially installed tirith scanner), plus the GotA native
+helpers prepared once on the host. Details: [games/gota/GAME.md](games/gota/GAME.md),
+"Build and upload".
 
 ## Host configuration
 
@@ -154,17 +159,11 @@ Later runs skip each step that is already done.
 
 ## Kanban go/no-go switch
 
-The default queue is Hermes Kanban. If Kanban does not work on a host, `AUTORESEARCH_QUEUE=file`
-selects a serial queue that keeps its cards in the canonical runtime directory and runs one
-card at a time:
-
-```dotenv
-AUTORESEARCH_QUEUE=file
-```
-
-Put it in the profile `.env`. It is on the passthrough list, so cron jobs receive it. Change
-it only with the jobs paused. The serial fallback job itself is not shipped yet (see Known
-gaps).
+The queue is Hermes Kanban. The Kanban go/no-go passed (GO, 2026-10-08,
+[protocol-slice.md](docs/plans/findings/protocol-slice.md)), so v0 has no other queue.
+`AUTORESEARCH_QUEUE=file` selects a file queue that keeps its cards in the canonical runtime
+directory, but the serial job that would run those cards (Plan 01 Task 5.2) is not built.
+Do not set it on a host: cards would be admitted and never run.
 
 ## Operate
 
@@ -288,9 +287,11 @@ automatic update; `updates.check` is set to false so it does not even check.
   but the `research-serial` cron job and its pre-run script (Plan 01 Task 5.2) are not
   built: the Kanban go/no-go passed (GO, `docs/plans/findings/protocol-slice.md`), so Kanban
   is the v0 queue.
-- **GotA build and upload bindings are in progress.** `games/gota` is merged (Plan 02), but
-  its real build and upload bindings are Plan 02 Task 2.5 (in progress). Nim is needed for
-  its replay tools.
+- **GotA is bound but not yet proven end to end.** `games/gota` has real `build`,
+  `local_check`, `evaluate` and `upload` bindings (Plan 02 Task 2.5). The build follows the
+  live engine. The compiler passed M1 on 2026.10.7.2 only; a newer engine has no semantic
+  qualification yet, and no real research cycle has run on GotA
+  ([acceptance-checklist.md](docs/plans/findings/acceptance-checklist.md), section 3.2).
 - **Curator.** Hermes has no key to exclude single skills from the curator. Shipped skills
   are safe because the curator only manages skills with an agent-created record, and
   `curator.prune_builtins` is set to false. Do not run `hermes curator adopt` on a shipped
@@ -298,3 +299,9 @@ automatic update; `updates.check` is set to false so it does not even check.
 - **Credits.** A Player credential cannot read credits (HTTP 403). Preflight only warns,
   and experiments that wait for credits are retried with backoff (A10).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
+
+## Integrations
+
+| Document | Covers |
+|---|---|
+| [`docs/integrations/softmax-ide-bridge.md`](docs/integrations/softmax-ide-bridge.md) | The Softmax IDE bridge as the external agent on `comms/`: the inbox files it writes, the outbox fields it reads, how it treats acknowledgements, and what is not exercised yet |

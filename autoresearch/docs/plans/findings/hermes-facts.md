@@ -2,6 +2,8 @@
 
 **Result: 9 PASS, 1 FAIL (item 5: config location), 1 PARTIAL (item 11: kimi-k3 UNVERIFIED), plus Step 1 FAIL-with-workaround and one C1 command FAIL.** 2026-10-07, run by Claude for James.
 
+**Update 2026-10-08:** item 11 is now PASS (kimi-k3 re-run with a funded key), so the result is 10 PASS, 1 FAIL. Item 6 was corrected (Kanban task and run ids do not reach worker terminals).
+
 ## Setup
 - Hermes: `hermes --version` → `Hermes Agent v0.21.5 (2026.9.24)`, install method `git`, Python 3.12.11. Source: clone of tag `v2026.9.24` at commit `f97608f` in `~/coding/tools/hermes-agent-v2026.9.24` (not edited). All citations below are `file:line` at `f97608f`. The overview cites `hermes-agent@9ab4a4f`; line numbers moved (for example `_owned_entries` is now `hermes_cli/profile_distribution.py:354`, not 343).
 - Every command ran with `HERMES_HOME=/tmp/hh`. `~/.hermes` and `~/.softmax` were not touched.

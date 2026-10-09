@@ -320,5 +320,5 @@ def require_policy(episodes, policy: str | None, flag: str = "--policy") -> None
 
 
 def default_out(tool: str, *parts: str) -> Path:
-    """<lab>/analysis/<tool>/<parts...>: the documented default output location."""
-    return ANALYSIS.joinpath(tool, *parts)
+    """Use build-owned analysis when configured; standalone tools default to the lab."""
+    return Path(os.environ.get("GOTA_ANALYSIS_DIR", ANALYSIS)).joinpath(tool, *parts)

@@ -318,9 +318,22 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
             return types.SimpleNamespace(stdout=str(home / 'bin/tirith'), returncode=0)
         return guarded(command, **kwargs)  # generation fixture rejects real backend/processes
     monkeypatch.setattr(sb.subprocess, 'run', processes)
-    monkeypatch.setattr(gota_gates, 'verify', lambda *a, **k: {
-        f'G{i}': {'passed': True, 'summary': 'fake gates only'} for i in range(1, 6)})
-    import pw_strategy  # Establish the canonical module for restoration after this isolated archive test.
+    commands = []
+    def verify_fake(build_id, **kwargs):
+        stage = sb.build_path(build_id, staged=True)
+        episode = stage / 'verify/attempt-fake/episode'
+        episode.mkdir(parents=True)
+        (episode / 'results.json').write_text('{}')
+        commands[:] = ['coworld', '--output-dir', str(episode)]
+        gates = {f'G{i}': {'outcome': 'passed', 'passed': True, 'summary': {}} for i in range(1, 6)}
+        for name in ('G2', 'G5'):
+            gates[name]['summary'] = {'episode_dir': str(episode), 'command': list(commands)}
+        sb.dump(stage / 'gates.json', gates)
+        sb.dump(episode.parent / 'gates.json', gates)
+        return gates
+    monkeypatch.setattr(gota_gates, 'verify', verify_fake)
+    # Establish the canonical module for restoration after this isolated archive test.
+    importlib.import_module("pw_strategy")
     monkeypatch.delitem(sys.modules, 'pw_strategy')
     monkeypatch.setattr(sys, 'path', list(sys.path))
     spec = importlib.util.spec_from_file_location('archive_build_binding', distribution / 'games/gota/tools/build.py')
@@ -344,3 +357,13 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     assert version['driver']['installed_commit'] is None
     assert str(lab / 'tools/strategy_build.py') in version['compiler']['installed_source_hashes']
     assert not (archive.parent / '.git').exists()
+    surfaces = [result, version, sb.read(out / 'report.json'),
+                {'gates': sb.read(out / 'gates.json')},
+                {'gates': sb.read(out / 'verify/attempt-fake/gates.json')}]
+    for surface in surfaces:
+        for name in ('G2', 'G5'):
+            summary = surface['gates'][name]['summary']
+            assert (out / summary['episode_dir'] / 'results.json').is_file()
+            assert summary['command'] == commands
+    assert not Path(commands[-1]).exists()
+    sb.checked_build(out)  # All retained receipt bytes match artifact_hashes after both moves.
