@@ -343,6 +343,17 @@ seeded or cloned one, trusts the current `HEAD` once and commits
 `.supervisor/ledger/provenance.json`; once that marker has been in history, a lost journal
 is reported, not trusted again.
 
+What this check is, and is not. It catches accidental and naive writes to canonical (a worker
+committing by hand, as on 2026-10-09). It does not stop a deliberate one: card workers run as
+the same OS user as the runtime, so a process that imports the runtime and calls its own commit
+function (`ledger.commit`), or reads `provenance.key`, produces commits signed like the
+runtime's, with no accept and no announcement. The plugin refuses model tool calls that do this
+openly, but that is policy, not a boundary. Truncating the journal (cutting off its newest
+entries) is also not detectable from inside the workspace. Real prevention needs card workers
+under a different user than the owner of canonical, or coach requests by API (D9 options (c)
+or (d) in `docs/plans/2026-10-09-softmax-integration/plan.md`); for the first hosted deploy
+James accepted D9 option (a), detection only.
+
 ## Restore on a new host
 
 Privacy note: the memory snapshot is committed to the workspace and pushed to
