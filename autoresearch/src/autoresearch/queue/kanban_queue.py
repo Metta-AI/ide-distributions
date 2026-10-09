@@ -50,6 +50,18 @@ class KanbanError(RuntimeError):
         self.stderr = stderr
 
 
+class ForeignCardError(KanbanError):
+    """A board task whose body is not an autoresearch card spec: the runtime did not create it
+    (admission writes the spec into every card it creates), so it has no request behind it.
+    Something added it to the board directly, such as a model's ``kanban_create``."""
+
+    def __init__(self, argv: list[str], task_id: str, title: str | None, board: str):
+        super().__init__(argv, f"task {task_id} has no autoresearch card body")
+        self.task_id = task_id
+        self.title = title
+        self.board = board
+
+
 # Substring of Hermes' fence error (kanban_db.py:147, raised from write_txn at
 # kanban_db_connect.py:~1201 and from the CLI guard at kanban.py:153).
 _DELEGATE_FENCE_MESSAGE = "cannot mutate Kanban"
@@ -287,7 +299,9 @@ class KanbanQueue:
         try:
             spec = self._parse_spec(task)
         except ValueError as error:
-            raise KanbanError(["kanban", "show", task_id], str(error)) from error
+            raise ForeignCardError(
+                ["kanban", "show", task_id], task_id, task.get("title"), self.board
+            ) from error
         blocking = self._blocking_run(task["status"], shown["runs"])
         current_run_id, last_heartbeat_at = self._liveness(shown)
         return Card(

@@ -22,6 +22,10 @@ is pure, a merge is skipped when canonical already contains the result (no secon
 no revalidation), a follow-up request left uncommitted is found and reused, and ``publish`` is
 called again. ``publish`` must therefore be idempotent.
 
+Foreign cards. A handoff whose card has no card body on the board (the runtime did not
+create it, ``runtime.foreign``) bypassed admission and is never merged, in any board epoch: the
+card gets one marker and one runtime help_request, and the other handoffs go on.
+
 All canonical mutations run under ``canonical.lock``, which is not re-entrant: callers must
 not hold it, and ``publish`` is called while it is held and must not take it.
 
@@ -46,12 +50,14 @@ from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
+from autoresearch.queue.kanban_queue import ForeignCardError, KanbanError
 from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.registry import parse_record_path
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion
 from autoresearch.runtime.admission import board_epoch, receipt_path
+from autoresearch.runtime.foreign import is_foreign, record_foreign
 from autoresearch.runtime.handoff import (
     HANDOFFS_DIR,
     card_spec,
@@ -423,20 +429,38 @@ def _advance(
 
 
 def process_handoffs(
-    ctx: RunContext, queue: Queue, store: RecordStore, publish: Publish | None = None
+    ctx: RunContext,
+    queue: Queue,
+    store: RecordStore,
+    publish: Publish | None = None,
+    allow_no_remote: bool = False,
 ) -> list[HandoffOutcome]:
     """Advance every committed/validated/merged handoff whose run is terminal (C3).
 
     ``store`` is canonical's record store (its layout maps paths to entity ids). ``publish``
     defaults to a no-op; see the module docstring for its contract. The caller must not hold
-    the canonical lock. Returns one outcome per handoff processed."""
+    the canonical lock. Returns one outcome per handoff processed.
+
+    One card never stops the others. A handoff of a foreign card (one the runtime did not
+    create, ``runtime.foreign``) is never merged: the card is recorded once (marker and
+    help_request; ``allow_no_remote`` is for that message) and skipped from then on. A card
+    the board fails to show is skipped this run; once the other handoffs are done, the
+    failures are raised together so the step is logged as failed."""
     canonical = ctx.canonical
     publish = publish or _no_publish
     outcomes = []
+    unreadable: list[str] = []
     for path, record in _committed_handoffs(canonical):
-        if record["state"] not in PROCESS_STATES:
+        if record["state"] not in PROCESS_STATES or is_foreign(canonical, record["card"]):
             continue
-        terminal, summary = _terminal_run(queue, canonical, record)
+        try:
+            terminal, summary = _terminal_run(queue, canonical, record)
+        except ForeignCardError as error:
+            record_foreign(canonical, error.task_id, error.title, error.board, allow_no_remote)
+            continue
+        except KanbanError as error:
+            unreadable.append(f"{record['card']}: {error}")
+            continue
         if not terminal:
             continue
         with canonical_lock(canonical):
@@ -450,6 +474,8 @@ def process_handoffs(
                 follow_up_request=record.get("follow_up_request"),
             )
         )
+    if unreadable:
+        raise RuntimeError("could not read card(s) from the board: " + "; ".join(unreadable))
     return outcomes
 
 

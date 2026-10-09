@@ -11,7 +11,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 import yaml
-from support.board import Board, Worker, new_hypothesis
+from support.board import Board, ForeignBoard, Worker, new_hypothesis
 from support.keeper_host import PLENTY, no_hermes
 from support.promotion_board import design_dict
 
@@ -187,6 +187,22 @@ def test_no_rebuild_without_open_requests(host, tmp_path):
     host.process()
     queue = _lose_board(host, tmp_path)
     queue.ensure_board()
+    assert needs_rebuild(host.ctx(), queue) is False
+
+
+def test_a_recorded_foreign_card_does_not_trigger_a_rebuild(host):
+    """A foreign card's forged receipt and unmerged handoff look like an open request whose
+    task is not on the board (``KanbanQueue.list`` skips foreign tasks). Once the card is
+    recorded as foreign, that is no reason to rebuild (which would adopt its handoff)."""
+    foreign = host.admit()
+    foreign.start()
+    foreign.write_journal()
+    foreign.finish()
+    queue = ForeignBoard(host.queue, foreign.task_id)
+    assert needs_rebuild(host.ctx(), queue) is True  # before the handoffs step records it
+
+    host.process(queue=queue)
+
     assert needs_rebuild(host.ctx(), queue) is False
 
 

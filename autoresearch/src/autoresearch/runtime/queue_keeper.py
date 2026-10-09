@@ -20,7 +20,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
 5. ``process_handoffs`` with publication (C3, C5), then the MEMORY.md snapshot
-   (``memory_snapshot``). Staged messages the publisher skipped
+   (``memory_snapshot``). A card the runtime did not create is never merged: one marker and
+   one runtime ``help_request`` (``runtime.foreign``), and the other handoffs go on. Staged messages the publisher skipped
    (invalid envelope) are reported once each by a runtime note (marker
    ``ledger/skipped-staged/<M-id>.json``).
 6. KB: when the game contract has ``source`` and the game source pin changed
@@ -780,7 +781,18 @@ def _run_steps(
 
     store = RecordStore(Layout(canonical))
     run.handoffs = (
-        _step(run, ctx, "handoffs", process_handoffs, ctx, queue, store, publish=publish) or []
+        _step(
+            run,
+            ctx,
+            "handoffs",
+            process_handoffs,
+            ctx,
+            queue,
+            store,
+            publish=publish,
+            allow_no_remote=allow_no_remote,
+        )
+        or []
     )
     _step(run, ctx, "memory_snapshot", snapshot_memory, ctx)
     _step(run, ctx, "skipped_staged", report_skipped, canonical, run.published, allow_no_remote)

@@ -9,6 +9,7 @@ import types
 
 import pytest
 import yaml
+from support.board import ForeignBoard
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
 from autoresearch.comms.publisher import PublishResult, publish_runtime
@@ -609,6 +610,36 @@ def test_skipped_staged_messages_are_reported_once(host):
     report_skipped(host.canonical, results, allow_no_remote=False)
     notes = [m for m in host.outbox() if m["title"].startswith("Not published")]
     assert len(notes) == 1 and "kind: bad" in notes[0]["body"]
+    assert host.clean()
+
+
+def test_a_foreign_card_does_not_stop_the_other_handoffs(host):
+    """A card the runtime did not create (no card body; its worker forged a receipt and left a
+    handoff, as on the box on 2026-10-09) is skipped and reported once; the other handoff
+    merges in the same run and the handoffs step does not fail."""
+    host.tick(at(0))
+    host.runtime_request(spec=_spec("Hand-made"))
+    host.runtime_request(spec=_spec("Admitted"))
+    host.tick(at(1))
+    foreign = host.claim(mode="investigation")
+    normal = host.claim(mode="investigation")
+    foreign_record = foreign.finish()
+    normal_record = normal.finish()
+    host.queue = ForeignBoard(host.queue, foreign.task_id, title="Hand-made")
+
+    run = host.tick(at(2))
+
+    assert "handoffs" not in run.failures
+    assert [(o.task_id, o.state) for o in run.handoffs] == [(normal.task_id, "published")]
+    assert gitops.contains(host.canonical, normal_record["result_sha"])
+    assert not gitops.contains(host.canonical, foreign_record["result_sha"])
+    assert host.committed(host.ledger / "foreign" / f"{foreign.task_id}.json") is not None
+    [help_request] = _help_requests(host, foreign.task_id)
+    assert help_request["title"] == "Card not created by the runtime: Hand-made"
+
+    again = host.tick(at(3))
+    assert "handoffs" not in again.failures and again.handoffs == []
+    assert len(_help_requests(host, foreign.task_id)) == 1
     assert host.clean()
 
 

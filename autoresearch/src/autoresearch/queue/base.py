@@ -16,7 +16,9 @@ class Queue(Protocol):
     def assign(self, task_id: str, assignee: str | None) -> None:
         """Assign the card; ``None`` unassigns it."""
 
-    def get(self, task_id: str) -> Card: ...
+    def get(self, task_id: str) -> Card:
+        """The card. Unknown task: FileQueue raises KeyError, Kanban a ``KanbanError``. A Kanban
+        task the runtime did not create (no card body) raises ``ForeignCardError``."""
 
     def list(self, state: str | None = None) -> list[Card]: ...
 

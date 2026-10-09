@@ -11,6 +11,7 @@ from autoresearch.io.docs import write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.file_queue import FileQueue
+from autoresearch.queue.kanban_queue import ForeignCardError
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
 from autoresearch.runtime.card_finish import finish
@@ -184,7 +185,9 @@ class Board:
         return self.admit(refs=spec["refs"], mode=spec["mode"], request_id=request_id)
 
     def process(self, publish=None, queue=None):
-        return process_handoffs(self.ctx(), queue or self.queue, self.store, publish=publish)
+        return process_handoffs(
+            self.ctx(), queue or self.queue, self.store, publish=publish, allow_no_remote=True
+        )
 
     def merge_commits(self) -> list[str]:
         return gitops.git(self.canonical, "rev-list", "--merges", "HEAD").split()
@@ -195,3 +198,29 @@ class Board:
 
 def new_hypothesis(worker: Worker) -> str:
     return worker.store.create("hypothesis", dict(HYPOTHESIS), "New.\n")
+
+
+class ForeignBoard:
+    """A queue that reads like the Kanban board when ``foreign`` (task ids) have no card body:
+    ``get`` raises ``ForeignCardError`` and ``list`` skips them (``KanbanQueue``). Everything
+    else goes to the wrapped queue. Such a card was created outside admission, as by a model's
+    ``kanban_create``; a worker that then forged its receipt can still leave a handoff."""
+
+    BOARD = "autoresearch"
+
+    def __init__(self, queue, *foreign: str, title: str = "Hand-made card"):
+        self.queue = queue
+        self.foreign = set(foreign)
+        self.title = title
+
+    def get(self, task_id):
+        if task_id in self.foreign:
+            argv = ["hermes", "kanban", "--board", self.BOARD, "show", task_id]
+            raise ForeignCardError(argv, task_id, self.title, self.BOARD)
+        return self.queue.get(task_id)
+
+    def list(self, state=None):
+        return [card for card in self.queue.list(state) if card.task_id not in self.foreign]
+
+    def __getattr__(self, name):
+        return getattr(self.queue, name)

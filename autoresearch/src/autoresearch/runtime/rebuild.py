@@ -12,7 +12,9 @@ Detection (``needs_rebuild``). Rebuild when:
   re-admit (no committed handoff, not covered by a promotion, spec committed), or a receipt
   with a committed handoff that normal processing will still act on. Requests a promotion
   covers (A11) do not count: their only follow-up is the promotion's recovery card, so a dead
-  promotion holder never triggers rebuild after rebuild. An ``admitted`` receipt rebuild must
+  promotion holder never triggers rebuild after rebuild. Nor do receipts naming a card recorded
+  as foreign (``runtime.foreign``: a receipt its worker forged; the board lists no foreign
+  task, so it would look lost, and a rebuild would adopt its handoff). An ``admitted`` receipt rebuild must
   re-admit but cannot (its spec is not committed) also counts: rebuild settles it for good
   (below), so it triggers at most one rebuild.
 
@@ -81,6 +83,7 @@ from autoresearch.runtime.admission import (
     readmit,
     receipt_path,
 )
+from autoresearch.runtime.foreign import is_foreign
 from autoresearch.runtime.handoff import handoff_path
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.markers import (
@@ -218,6 +221,8 @@ def _classify(canonical: Path, receipt: dict) -> str:
     """What rebuild does with ``receipt`` (one of the constants above)."""
     if receipt["state"] not in OPEN_RECEIPT_STATES:
         return SETTLED
+    if any(is_foreign(canonical, task["task_id"]) for task in receipt.get("tasks", [])):
+        return SETTLED  # a forged receipt of a card the runtime did not create
     handoffs = _committed_handoffs(canonical, receipt)
     if receipt["state"] == "handed_off" or handoffs:
         return HANDOFF if any(h["state"] in PROCESS_STATES for h in handoffs) else SETTLED

@@ -3,10 +3,11 @@ worktrees and end with ``card finish`` (helpers in ``tests/support/board.py``)."
 
 import jsonschema
 import pytest
-from support.board import HYPOTHESIS_BODY, Board, new_hypothesis
+from support.board import HYPOTHESIS_BODY, Board, ForeignBoard, new_hypothesis
 
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
+from autoresearch.queue.kanban_queue import KanbanError
 from autoresearch.queue.requests import load_schema
 from autoresearch.runtime import merge
 from autoresearch.runtime.merge import find_orphan_done
@@ -341,6 +342,90 @@ def test_orphan_scan_ignores_dropped_cards_and_cards_with_handoffs(board):
     a.finish()
 
     assert find_orphan_done(board.queue, board.ledger) == []
+
+
+# --- foreign cards (created outside admission) ---
+
+
+def _help_requests(board: Board) -> list[dict]:
+    outbox = board.canonical / "comms" / "outbox"
+    messages = [read_json(path) for path in sorted(outbox.glob("*.json"))]
+    return [message for message in messages if message["kind"] == "help_request"]
+
+
+def _foreign_finished_first(board: Board):
+    """A foreign card (its receipt forged, as on the box) and a normal card, both finished;
+    the foreign handoff is the older one, so it is reached first."""
+    foreign, normal = board.admit(), board.admit()
+    foreign.start()
+    normal.start()
+    new_hypothesis(foreign)
+    foreign.write_journal()
+    foreign_record = foreign.finish()
+    normal.write_journal()
+    normal.finish()
+    return foreign, normal, foreign_record
+
+
+def test_foreign_card_is_skipped_and_reported_once_while_other_handoffs_merge(board):
+    foreign, normal, foreign_record = _foreign_finished_first(board)
+    queue = ForeignBoard(board.queue, foreign.task_id, title="Design a damage-first tune")
+
+    [outcome] = board.process(queue=queue)
+
+    assert (outcome.task_id, outcome.state) == (normal.task_id, "published")
+    assert foreign.handoff()["state"] == "committed"  # bypassed admission: never merged
+    assert not gitops.contains(board.canonical, foreign_record["result_sha"])
+    marker = board.committed(board.ledger / "foreign" / f"{foreign.task_id}.json")
+    assert marker["task_id"] == foreign.task_id
+    assert marker["title"] == "Design a damage-first tune"
+    [help_request] = _help_requests(board)
+    assert help_request["about"]["card"] == foreign.task_id
+    assert "Design a damage-first tune" in help_request["title"]
+    assert "archive" in help_request["body"]
+    _assert_clean(board)
+
+    head = gitops.head(board.canonical)
+    assert board.process(queue=queue) == []  # second run: nothing new, no second message
+    assert gitops.head(board.canonical) == head
+    assert len(_help_requests(board)) == 1
+
+
+def test_marked_foreign_card_is_not_merged_after_a_board_rebuild(board):
+    foreign, _normal, foreign_record = _foreign_finished_first(board)
+    board.process(queue=ForeignBoard(board.queue, foreign.task_id))
+    write_json(board.ledger / "board.json", {"epoch": "e2"})  # the board was rebuilt
+    gitops.commit_all(board.canonical, "new board epoch")
+
+    assert board.process(queue=_NoLookupQueue()) == []
+
+    assert foreign.handoff()["state"] == "committed"
+    assert not gitops.contains(board.canonical, foreign_record["result_sha"])
+
+
+class _FailingShowQueue:
+    """Hermes cannot show one task (any other KanbanError)."""
+
+    def __init__(self, queue, broken: str):
+        self.queue, self.broken = queue, broken
+
+    def get(self, task_id):
+        if task_id == self.broken:
+            raise KanbanError(["hermes", "kanban", "show", task_id], "database is locked")
+        return self.queue.get(task_id)
+
+
+def test_a_card_the_board_cannot_show_does_not_stop_the_other_handoffs(board):
+    broken, normal, _ = _foreign_finished_first(board)
+    queue = _FailingShowQueue(board.queue, broken.task_id)
+
+    with pytest.raises(RuntimeError, match=broken.task_id):
+        board.process(queue=queue)
+
+    assert normal.handoff()["state"] == "published"
+    assert broken.handoff()["state"] == "committed"  # retried next run
+    [outcome] = board.process()
+    assert (outcome.task_id, outcome.state) == (broken.task_id, "published")
 
 
 # --- board epochs and receipts ---
