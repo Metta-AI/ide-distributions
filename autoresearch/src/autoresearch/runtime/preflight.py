@@ -31,7 +31,10 @@ be read or parsed fails too: pause safety depends on it. Any other home layout s
 check with a warning.
 
 OpenRouter (A5). ``GET https://openrouter.ai/api/v1/key`` with the key; ``limit_remaining``
-below ``OPENROUTER_MIN_CREDIT_USD`` fails (Hermes would retry 402s forever). A cron script
+below the credit floor fails (Hermes would retry 402s forever). The floor is
+``AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD``, default ``OPENROUTER_MIN_CREDIT_USD`` ($10); a
+hosted workspace whose key starts near $10 sets a lower one. A value that is not a finite
+non-negative number falls back to the default with a warning. A cron script
 under the gateway never receives provider keys (hermes-facts item 7), so the key comes from
 the environment or else the profile ``.env``. No key, or ``AUTORESEARCH_SKIP_OPENROUTER_CHECK=1``
 (fake-Softmax test runs), skips the check with a warning; a failed request or a response
@@ -40,6 +43,7 @@ The key never appears in a reason or warning.
 """
 
 import json
+import math
 import re
 import shutil
 import urllib.request
@@ -60,7 +64,8 @@ MIN_FREE_BYTES = 1024**3
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
 SKIP_OPENROUTER_ENV = "AUTORESEARCH_SKIP_OPENROUTER_CHECK"
-OPENROUTER_MIN_CREDIT_USD = 10.0
+MIN_CREDIT_ENV = "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD"
+OPENROUTER_MIN_CREDIT_USD = 10.0  # default floor (A5); hosted workspaces set a lower one
 HTTP_TIMEOUT_S = 15
 STALE_QUEUE_ENV = "AUTORESEARCH_QUEUE"  # removed installer setting (A13), still a test hook
 WHOAMI_FAILURE_LIMIT = 3
@@ -225,30 +230,48 @@ def host_requirement_problems(
     return problems
 
 
+def credit_floor(env: Mapping[str, str]) -> tuple[float, list[str]]:
+    """The OpenRouter credit floor below which preflight pauses, and a warning when the
+    setting is unusable (then the default applies)."""
+    raw = env.get(MIN_CREDIT_ENV)
+    if not raw:
+        return OPENROUTER_MIN_CREDIT_USD, []
+    try:
+        value = float(raw)
+    except ValueError:
+        value = -1.0
+    # NaN would never pause (every comparison is false); infinity would always pause.
+    if not math.isfinite(value) or value < 0:
+        warning = (
+            f"{MIN_CREDIT_ENV}={raw!r} is not a non-negative number; "
+            f"using ${OPENROUTER_MIN_CREDIT_USD:g}"
+        )
+        return OPENROUTER_MIN_CREDIT_USD, [warning]
+    return value, []
+
+
 def openrouter_problems(
     env: Mapping[str, str], hermes_home: Path | None, http_get: HttpGet
 ) -> tuple[list[str], list[str]]:
     """(reasons, warnings) from the OpenRouter key's remaining credit (A5)."""
+    floor, warnings = credit_floor(env)
     if env.get(SKIP_OPENROUTER_ENV) == "1":
-        return [], [f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
+        return [], [*warnings, f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
     key = env.get(OPENROUTER_KEY_ENV)
     if not key and hermes_home is not None:
         key = env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
     if not key:
-        return [], [f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
+        return [], [*warnings, f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
     try:
         payload = json.loads(http_get(OPENROUTER_KEY_URL, {"Authorization": f"Bearer {key}"}))
         remaining = (payload.get("data") or {}).get("limit_remaining")
         remaining = None if remaining is None else float(remaining)
     except Exception as error:  # noqa: BLE001 - a lookup failure must not pause the agent
-        return [], [f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
-    if remaining is not None and remaining < OPENROUTER_MIN_CREDIT_USD:
-        reason = (
-            f"OpenRouter key has ${remaining:.2f} left, below "
-            f"${OPENROUTER_MIN_CREDIT_USD:.0f}: top it up (A5)"
-        )
-        return [reason], []
-    return [], []
+        return [], [*warnings, f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
+    if remaining is not None and remaining < floor:
+        reason = f"OpenRouter key has ${remaining:.2f} left, below ${floor:g}: top it up (A5)"
+        return [reason], warnings
+    return [], warnings
 
 
 def _count_whoami_failure(path: Path, now: datetime) -> tuple[int, str]:
