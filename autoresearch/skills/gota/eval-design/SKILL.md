@@ -51,10 +51,13 @@ platform scores (zero for loss/draw/timeout); `win_rate` is team outcome.
 `xp_per_1k_ticks` and `team_xp_lead` describe the subject, not ten independent
 observations. Repeated teammates share an episode and must be aggregated.
 
-Use leaderboard `current_champion`; when no baseline policy version exists, use
-the exact prebuilt bootstrap below in this same card. A copied v13 STRATEGY is
-not proof of that identity. Freeze full game version, baseline policy version,
-subject seats, fixed opponent refs, unique paired seeds, metrics/directions,
+Use leaderboard `current_champion`. If it is null, read `note`: "champion unknown"
+requires the core `experiment` help-request path; "no champion known" requires
+the exact prebuilt bootstrap below in this same card. Finish that bootstrap card
+before designing an experiment in a follow-up card (core `experiment` step 3).
+A copied v13 STRATEGY is not proof of policy identity. Freeze full game version,
+baseline policy version, subject seats, fixed opponent refs, unique paired seeds,
+metrics/directions,
 effect thresholds, anti-gaming guardrails and noise revision before results.
 Require N >= max(40, calibrated n_min) independent pairs. Calibration must match
 the current game version; absent calibration blocks experimentation.
@@ -98,38 +101,36 @@ journal. Leave the build path blocked pending a tooling fix; do not treat its
 error as policy evidence or a strategy repair task.
 
 
-## Missing baseline: exact prebuilt path in the same card
+## Missing champion: exact prebuilt bootstrap in the same card
 
-Read the bootstrap and sidecar contract in `games/gota/GAME.md`. Copy
-`$AR_HOME/games/gota/baselines/submitted-v13.bas` into the card's candidate
-folder and commit that original input. Use absolute candidate paths:
-
-```sh
-"$AR_PYTHON" "$AR_HOME/games/gota/tools/make_v13_live.py" <ABS_CANDIDATE>/submitted-v13.bas <ABS_CANDIDATE>/v13-live.bas
-```
-
-Commit both generated `v13-live.bas` and `v13-live.provenance.json`, then build:
-
-```sh
-"$AR_PYTHON" "$AR_HOME/games/gota/tools/build.py" <ABS_CANDIDATE> --out <ABS_FRESH_BUILD> --prebuilt <ABS_CANDIDATE>/v13-live.bas --json
-```
+Read `## Baseline build` and the sidecar contract in `games/gota/GAME.md`.
+Follow its installed-profile commands from this card's worktree: copy
+`$AR_HOME/games/gota/baselines/submitted-v13.bas` to
+`strategy/candidates/bootstrap/submitted-v13.bas` and commit the original input
+in this worktree. Generate v13-live, commit both `v13-live.bas` and
+`v13-live.provenance.json` here, then build into this worktree's
+`.scratch/build/champion`. Use absolute candidate/output paths and run the game
+bindings from `"$AR_HOME"` with `"$AR_PYTHON"` as GAME.md shows.
 
 This resolves the current engine, verifies committed input and transform hashes,
 freezes exact bytes and runs G1–G4 without Hermes, model calls or scanner setup.
 G4 is a baseline mirror screen. G5 is not executed: its advisory receipt says
-`not applicable: prebuilt`, with `passed: false`. Read the retained local gate
-reports; use the separate G1–G4 local_check command in GAME.md if required.
+`not applicable: prebuilt`, with `passed: false`. Read the retained reports and
+run the separate G1–G4 `local_check` command in GAME.md before bootstrap.
+An errored build follows **Build tool faults** above.
 
-**The shared first-install upload handoff is pending:** upload requires a built
-experiment and a frozen design naming an existing baseline. Preserve this local
-build in the same card; journal the missing bootstrap contract and send a
-`help_request` with the build directory. Do not fabricate that baseline/design,
-start another card, or use a direct coworld upload. Once the shared owner supplies
-the record contract, continue through the shared guarded upload and record its
-local version id and experiment `candidate_binding.platform_policy_version_id`.
-For an already valid built experiment, the existing upload command is:
+Follow the core `submit` skill's "Bootstrap card" checks, then:
 
 ```sh
-"$AUTORESEARCH_CLI" softmax upload <E-id> --build-dir <ABS_FRESH_BUILD>
-"$AUTORESEARCH_CLI" records show <E-id>
+"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir .scratch/build/champion
 ```
+
+This uploads and submits the first champion through the normal promotion path,
+without an experiment, frozen design or evaluation outcome. The first league
+submission is v13-live, unevaluated. Bootstrap never uses `softmax upload`.
+Record `data.version_id`, `data.platform_policy_version_id`, `data.promotion_id`
+and `data.submission_id` in the journal's Decisions and send the core `submit`
+highlight. Request the follow-up experiment as core `experiment` step 3 says,
+then finish through `complete-card`, outcome `done`; this card's merge publishes
+the promotion. The follow-up designs against that champion. Use the core `submit`
+refusal/recovery instructions if bootstrap does not succeed.

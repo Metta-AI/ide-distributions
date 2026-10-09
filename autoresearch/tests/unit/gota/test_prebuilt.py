@@ -211,20 +211,34 @@ def test_generator_records_reproducible_committed_input_and_engine(tmp_path, mon
     assert provenance['engine'] == {k: v for k, v in identity.items() if k != 'manifest'}
 
 
-def test_real_prebuilt_gates_with_recorded_episode_and_mock_screen(tmp_path, monkeypatch, prepare_native_tools):
-    """G1/G3 execute verified Nim; G2 inspects recorded evidence; G4 measures fake rows."""
+def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(tmp_path, monkeypatch, prepare_native_tools):
+    """Real native prebuilt -> fake shared CLI -> card merge publishes first champion."""
     import shutil
     from dataclasses import replace
 
+    from support.promotion_board import PLAYER, SubmitBoard
+    from unit.softmax.test_softmax_cli import base_env, softmax
+
+    from autoresearch.io import gitops
+    from autoresearch.queue.select import FILE_QUEUE_RELATIVE
+    from autoresearch.runtime.promotion import CHAMPION_PATH, champion_status, load
+    from autoresearch.softmax_tool.upload import policy_name
     from games.gota.gates import g2_episode, g3_budget, g4_screen
     from games.gota.gates.limits import POLYWORLD_COMMIT
     from games.gota.tools import native_build
 
-    directory = tmp_path / 'candidate'
-    directory.mkdir()
-    subprocess.run(['git', 'init', str(directory)], check=True, capture_output=True)
+    queue_dir = tmp_path / 'canonical/.supervisor/runtime' / FILE_QUEUE_RELATIVE
+    board = SubmitBoard(tmp_path, queue_dir=queue_dir, seed_champion=False)
+    (board.canonical / CHAMPION_PATH).write_text((ROOT / 'games/gota/seed/strategy/STRATEGY.md').read_text())
+    with (board.canonical / '.gitignore').open('a') as ignore:
+        ignore.write('.scratch/\n')
+    gitops.commit_all(board.canonical, 'seed shipped GotA strategy')
+    worker = board.admit(mode='maintenance')
+    worker.start()
+    directory = worker.worktree / 'strategy/candidates/bootstrap'
+    directory.mkdir(parents=True)
     source = directory / 'submitted-v13.bas'
-    source.write_bytes((ROOT / 'tests/fixtures/gota/submitted-v13.bas').read_bytes())
+    source.write_bytes((ROOT / 'games/gota/baselines/submitted-v13.bas').read_bytes())
     commit(directory)
     manifest = tmp_path / 'manifest.json'
     manifest.write_text(json.dumps({'game': {'runnable': {'source_url':
@@ -233,8 +247,14 @@ def test_real_prebuilt_gates_with_recorded_episode_and_mock_screen(tmp_path, mon
     monkeypatch.setattr(sys, 'argv', ['make_v13_live', str(source), str(artifact), '--offline', '--manifest', str(manifest)])
     make_v13_live.main()
     commit(directory)
+    input_commit = gitops.head(worker.worktree)
     real_run = subprocess.run
     def recorded_process(argv, **kwargs):
+        if argv[:5] == [sys.executable, '-m', 'autoresearch', 'softmax', 'bootstrap-champion']:
+            assert kwargs['env']['AUTORESEARCH_SOFTMAX'] == 'fake'
+            assert kwargs['env']['AUTORESEARCH_GAME'] == 'gota'
+            assert argv[5:] == ['--build-dir', str(out)]
+            return real_run(argv, **kwargs)
         if argv[0] != 'uv':
             assert Path(argv[0]).name in ('git', 'nim', f'gota_match-{POLYWORLD_COMMIT[:8]}', f'gate_probe-{POLYWORLD_COMMIT[:8]}'), argv
             return real_run(argv, **kwargs)
@@ -264,7 +284,7 @@ def test_real_prebuilt_gates_with_recorded_episode_and_mock_screen(tmp_path, mon
     # Even Python model imports are forbidden on this path.
     for name in ('pw_strategy', 'pw_cli', 'strategy_build'):
         monkeypatch.setitem(sys.modules, name, None)
-    out = tmp_path / 'native-build'
+    out = worker.worktree / '.scratch/build/champion'
     result = build.build(directory, out, manifest, offline=True, prebuilt=artifact)
     assert result['ok'], result
     version, frozen = _read_build(out)
@@ -277,6 +297,57 @@ def test_real_prebuilt_gates_with_recorded_episode_and_mock_screen(tmp_path, mon
     assert g2_episode.inspect_episode(frozen, out / 'verify/episode')['scripts_active'] == 10
     assert native_build.validate(native_build.TOOLS / f'bin/gate_probe-{POLYWORLD_COMMIT[:8]}',
                                  'gate_probe', POLYWORLD_COMMIT) == version['native_builds']['gate_probe']
+
+    # A14 has no experiment, frozen design, evaluation outcome or decision.
+    env = base_env(board, worker, AUTORESEARCH_GAME='gota')
+    assert worker.store.find('experiment') == []
+    assert load(board.canonical) is None
+    code, response = softmax(env, 'bootstrap-champion', '--build-dir', str(out))
+    assert code == 0, response
+    data = response['data']
+    assert data['version_id'].startswith('V-')
+    assert data['platform_policy_version_id'].startswith('pv_')
+    assert data['version_id'] != data['platform_policy_version_id']
+    meta = worker.store.load(data['version_id'])[0]
+    assert meta['experiment'] is None and meta['player_id'] == PLAYER
+    assert meta['policy_name'] == policy_name('bootstrap', sha(artifact))
+    assert meta['artifact_sha256'] == meta['strategy_sha256'] == sha(artifact)
+    assert meta['source_commit'] == input_commit
+    assert meta['build']['source_path'] == str(artifact.relative_to(worker.worktree))
+    assert meta['build']['source_hashes'] == version['source_hashes']
+    assert meta['build']['source_hashes'][str(source.relative_to(worker.worktree))] == sha(source)
+    assert meta['build']['compiler']['mode'] == 'prebuilt'
+    assert meta['build']['compiler']['prebuilt_provenance'] == version['prebuilt']
+    assert meta['build']['engine'] == version['engine']
+    assert meta['gates'] == version['gates']
+    [uploaded] = worker.store.find('version_event', version=data['version_id'], kind='uploaded')
+    assert worker.store.load(uploaded)[0]['data']['policy_version_id'] == data['platform_policy_version_id']
+    [submitted] = worker.store.find('version_event', version=data['version_id'], kind='submitted')
+    assert worker.store.load(submitted)[0]['data']['promotion_id'] == data['promotion_id']
+    league = 'league_3c60897b-25cf-4b37-9d1a-8554c1198f28'
+    current = load(board.canonical)
+    assert current.kind == 'bootstrap' and current.experiment is None
+    assert current.stage == 'submitted' and current.version == data['version_id']
+    [submission] = board.sm.submissions(PLAYER)
+    assert submission['league_id'] == league
+    assert submission['policy_version_id'] == data['platform_policy_version_id']
+    fake_state = json.loads((board.canonical / '.supervisor/runtime/fake_softmax.json').read_text())
+    assert list(fake_state['uploads']) == [data['platform_policy_version_id']]
+    assert fake_state['xp'] == {} and worker.store.find('experiment') == []
+
+    code, refused = softmax(env, 'bootstrap-champion', '--build-dir', str(out))
+    assert code == 1 and refused['error']['reason'] == 'promotion_in_flight'
+    worker.write_journal()
+    worker.finish()
+    [handled] = board.process()
+    assert handled.state == 'published' and load(board.canonical).stage == 'published'
+    assert champion_status(board.ctx(), board.sm, league) == (data['platform_policy_version_id'], '')
+    assert (board.canonical / CHAMPION_PATH).read_bytes() == (ROOT / 'games/gota/seed/strategy/STRATEGY.md').read_bytes()
+    assert board.store.load(data['version_id'])[0] == meta
+    assert len(board.sm.submissions(PLAYER)) == 1
+    assert not gitops.git(board.canonical, 'ls-files', '.scratch')
+    code, refused = softmax(env, 'bootstrap-champion', '--build-dir', str(out))
+    assert code == 1 and refused['error']['reason'] == 'champion_exists'
 
 
 def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monkeypatch):
@@ -399,3 +470,28 @@ def test_cli_prebuilt_validation_fault_retains_nonuploadable_report(candidate, t
     assert (out / 'report.json').is_file() and (out / 'report.md').is_file()
     with pytest.raises(Exception, match='names no artifact'):
         _read_build(out)
+
+
+def test_baseline_build_contract_matches_shared_bootstrap_champion():
+    game = (ROOT / 'games/gota/GAME.md').read_text()
+    assert '\n## Baseline build\n' in game
+    section = game.split('\n## Baseline build\n', 1)[1].split('\n## ', 1)[0]
+    commands = ('make_v13_live.py', 'tools/build.py', '-m games.gota.gates',
+                'softmax bootstrap-champion')
+    positions = [section.index(command) for command in commands]
+    assert positions == sorted(positions)
+    assert 'strategy/candidates/bootstrap' in section
+    assert '.scratch/build/champion' in section
+    assert 'git -C "$CARD_WORKTREE"' in section
+    assert '"$AR_PYTHON"' in section and 'cd "$AR_HOME"' in section
+    assert 'data.platform_policy_version_id' in section
+    assert 'unevaluated' in section and 'merge publishes' in section
+    assert '/workspace/versions/' not in section
+    skill = (ROOT / 'skills/gota/eval-design/SKILL.md').read_text()
+    assert 'softmax bootstrap-champion' in skill
+    assert 'strategy/candidates/bootstrap' in skill and '.scratch/build/champion' in skill
+    assert 'complete-card' in skill and 'merge publishes' in skill
+    for path in (ROOT / 'skills/gota').glob('*/SKILL.md'):
+        assert 'upload-baseline' not in path.read_text()
+        assert 'handoff is pending' not in path.read_text()
+    assert 'handoff is pending' not in game
