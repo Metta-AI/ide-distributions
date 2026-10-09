@@ -48,7 +48,10 @@
   `autor...` later on the line), canonical's `.git` directory itself (`find`, `grep -r`,
   `search_files` there), `provenance.key`, `provenance.jsonl`, the module
   (`runtime.provenance`, `ledger.provenance`, `runtime import ... provenance`) or
-  ``AUTORESEARCH_AGENT_SESSION`` (``PROVENANCE_TEXT``, ``_Guard.names_canonical_git``). A
+  ``AUTORESEARCH_AGENT_SESSION`` (``PROVENANCE_TEXT``, ``_Guard.names_canonical_git``).
+  Content is not access (``_access_texts``): what a file tool writes, message text
+  (``INERT_KEYS``) and the quoted `--title`/`--body` of a trusted `comms` command may name
+  the key, so a refusal can be recorded and reported (D-27). A
   module name built from pieces (`import_module('...prov' + 'enance')`) and canonical writes
   split across lines pass. The OS cannot hide the key from
   workers (same user, and `card finish` writes the journal); this refusal is policy;
@@ -403,11 +406,11 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
     """Decide one tool call: `(allowed, reason)`. `card` is `runtime/cards/<task>.json` or None."""
     args = args if isinstance(args, dict) else {}
     guard = _Guard(ctx, card)
-    texts = _strings(args)
-    if any(PROVENANCE_TEXT.search(text) or guard.names_canonical_git(text) for text in texts):
+    access = _access_texts(tool_name, args)
+    if any(PROVENANCE_TEXT.search(text) or guard.names_canonical_git(text) for text in access):
         return _block(PROVENANCE_FILES)
     if tool_name in ("terminal", "execute_code") and any(
-        ACCEPT_COMMITS_TEXT.search(text) for text in texts
+        ACCEPT_COMMITS_TEXT.search(text) for text in access
     ):
         return _block(ACCEPT_COMMITS)
     try:
@@ -447,6 +450,33 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
     except (ValueError, OSError) as error:  # e.g. a NUL byte in an executable path
         return True, f"unparsed call allowed ({error})"
     return ALLOW
+
+
+# Arguments that are content, not access: what a file tool writes, and message text. A
+# refusal must be recordable (D-27: journal entry, help_request) even when it names the key.
+INERT_KEYS = {"content", "body", "message", "text", "title", "summary", "old_string",
+              "new_string"}  # fmt: skip
+# The text options of the trusted CLI's ``comms`` commands, quoted so the shell runs nothing
+# inside them (single quotes, or double quotes without ``$``/backticks).
+INERT_CLI_TEXT = re.compile(r"""--(?:title|body)(?:=|\s+)(?:'[^']*'|"[^"$`\\]*")""")
+
+
+def _access_texts(tool_name: str, args: dict) -> list[str]:
+    """The argument text that can reach a file or run something, for the provenance-journal
+    refusal: file write tools' paths only; a terminal command without the quoted
+    ``--title``/``--body`` of a trusted ``comms`` command; every other string except
+    ``INERT_KEYS`` values."""
+    if tool_name in FILE_WRITE_TOOLS:
+        return _file_tool_targets(args)
+    texts = _strings({key: value for key, value in args.items() if key not in INERT_KEYS})
+    if tool_name == "terminal":
+        texts = [
+            INERT_CLI_TEXT.sub("--text ''", text)
+            if "AUTORESEARCH_CLI" in text and " comms " in text
+            else text
+            for text in texts
+        ]
+    return texts
 
 
 def _file_tool_targets(args: dict) -> list[str]:

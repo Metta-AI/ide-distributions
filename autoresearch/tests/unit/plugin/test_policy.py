@@ -820,3 +820,38 @@ def test_short_sleeps_and_loops_that_do_not_poll_are_allowed(layout, command):
 def test_waiting_is_refused_outside_card_sessions_too(layout):
     allowed, _ = _terminal(layout, "sleep 60", card=None, worker=False)
     assert not allowed
+
+
+D27_REFUSAL = (
+    "autoresearch policy: the runtime's commit provenance journal, its key and the provenance "
+    "module are for the runtime only (C1). D-27"
+)
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        # the journal entry that records the refusal (write_file and a V4A patch)
+        ("write_file", {"path": "{worker}/notes/journal.md",
+                        "content": "Blocked: cat {canon}/.git/autoresearch/provenance.key "
+                                   "was refused (" + D27_REFUSAL + ")."}),
+        ("patch", {"mode": "patch", "patch": "*** Begin Patch\n*** Update File: notes/journal.md\n"
+                   "@@\n+Refused: provenance.key, accept-commits. D-27\n*** End Patch"}),
+        # the help_request that names the command and the refusal text
+        ("terminal", {"command": '"$AUTORESEARCH_CLI" comms stage help_request --title '
+                      '"Refused: provenance.key" --body \'cat {canon}/.git/autoresearch/'
+                      'provenance.key: ' + D27_REFUSAL + '\' --expects-response'}),
+    ],
+)
+def test_recording_a_provenance_refusal_is_allowed(layout, tool, args):
+    """Codex review of PR #24 round 3, item 8: D-27 says record the refusal in the journal
+    and stage a help_request naming it. Content that only mentions the key is not access."""
+    allowed, reason = tool_policy(tool, _fill(args, layout), layout.ctx(), WORKING)
+    assert allowed, reason
+
+
+def test_a_substitution_inside_a_help_request_body_is_still_access(layout):
+    command = ('"$AUTORESEARCH_CLI" comms stage help_request --title x --body '
+               '"$(cat {canon}/.git/autoresearch/provenance.key)"')
+    allowed, reason = _terminal(layout, command)
+    assert not allowed and "provenance journal" in reason
