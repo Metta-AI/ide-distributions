@@ -9,6 +9,11 @@
    receipt to ``handed_off{task_id, run_id}``. That commit is the durable handoff.
 5. Set ``finished=true`` in ``runtime/cards/<task>.json`` so the plugin blocks model writes.
 
+Before step 1 the committed receipt is checked (``FinishUsageError`` otherwise): it must take
+a handoff of this task, and its request must have a committed create request
+(``admission.admitted_spec``). A receipt without one was not written by the runtime (a
+worker forged one on the box on 2026-10-09), so its card's work is never handed off.
+
 Idempotent per run: if the record for (task, run) is committed at canonical HEAD, it is
 returned as is and step 5 is redone. A record written but not committed (crash before the
 commit) is rewritten with its receipt and committed. A new run id of the same task writes a second record.
@@ -24,7 +29,7 @@ from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import load_schema
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime.admission import receipt_path
+from autoresearch.runtime.admission import admitted_spec, receipt_path
 from autoresearch.runtime.handoff import (
     HandoffReport,
     card_spec,
@@ -108,6 +113,13 @@ def _committed_receipt(canonical: Path, request_id: str, task_id: str) -> tuple[
         )
     if task_id not in [task["task_id"] for task in receipt.get("tasks", [])]:
         raise FinishUsageError(f"task {task_id} is not a task of request {request_id}")
+    if admitted_spec(canonical, request_id) is None:
+        raise FinishUsageError(
+            f"request {request_id} has no committed create request (cards/requests/"
+            f"{request_id}.json): the runtime did not admit this card, so its work cannot be "
+            "handed off. Do not write ledger files yourself; ask for the work with "
+            "`queue request create` in a card that was admitted."
+        )
     return path, receipt
 
 

@@ -323,19 +323,28 @@ def card_tool_fault(
     )
 
 
-def foreign_card(card_title: str | None, task_id: str, board: str) -> RuntimeMessage:
-    """A board card the runtime did not create (no card body, so no request behind it); the
-    runtime skips it for good (``runtime.foreign``)."""
+def foreign_card(
+    card_title: str | None, task_id: str, board: str, forged_handoff: bool = False
+) -> RuntimeMessage:
+    """A board card the runtime did not create (no request behind it); the runtime skips it
+    for good (``runtime.foreign``). ``forged_handoff``: its worker also wrote a receipt and a
+    handoff into the canonical workspace itself."""
     title = plain_ids(card_title) if card_title and card_title.strip() else None
     named = f"the card “{_line(title, 80)}”" if title else "a card with no title"
+    forged = (
+        " Its worker also wrote runtime records (a request receipt and a handoff) into the "
+        "canonical workspace itself, which only the runtime may do: please tell the operator."
+        if forged_handoff
+        else ""
+    )
     body = (
         f"The board has {named}, but the runtime did not create it: it has no request behind "
         "it, so it skipped admission. Something added it to the board directly, for example an "
-        "agent creating a card itself. The runtime leaves it alone: it does not merge any of "
-        "its work or track it. To remove it, archive it with "
-        f"`hermes kanban --board {board} archive <card>`, where <card> is the card named in "
-        "this message's about field. If its work should still be done, send it as a new task, "
-        "so the agent does it through a request the runtime admits."
+        "agent creating a card itself. The runtime leaves it alone: none of its work is merged "
+        f"(what it finished stays on its card branch, unused), and it is not tracked.{forged} "
+        f"To remove it, archive it with `hermes kanban --board {board} archive <card>`, where "
+        "<card> is the card named in this message's about field. If its work should still be "
+        "done, send it as a new task, so the agent does it through a request the runtime admits."
     )
     return RuntimeMessage(
         "help_request",

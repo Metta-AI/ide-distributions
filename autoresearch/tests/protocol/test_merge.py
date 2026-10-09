@@ -243,13 +243,14 @@ def test_crash_after_writing_follow_up_before_commit_reuses_the_request(board, m
         patch.setattr(merge, "commit", crash_on_repair)
         with pytest.raises(RuntimeError):
             board.process()
-    written = sorted((board.canonical / "cards" / "requests").glob("Q-*.json"))
+    requests = board.canonical / "cards" / "requests"
+    written = [p for p in sorted(requests.glob("Q-*.json")) if p.stem != a.request_id]
     assert len(written) == 1
 
     [outcome] = board.process()
 
     assert outcome.state == "repair"
-    assert sorted((board.canonical / "cards" / "requests").glob("Q-*.json")) == written
+    assert [p for p in sorted(requests.glob("Q-*.json")) if p.stem != a.request_id] == written
     assert outcome.follow_up_request == written[0].stem
     _assert_clean(board)
 
@@ -353,18 +354,38 @@ def _help_requests(board: Board) -> list[dict]:
     return [message for message in messages if message["kind"] == "help_request"]
 
 
-def _foreign_finished_first(board: Board):
-    """A foreign card (its receipt forged, as on the box) and a normal card, both finished;
-    the foreign handoff is the older one, so it is reached first."""
-    foreign, normal = board.admit(), board.admit()
+def _foreign_finished_first(board: Board, epoch: str | None = None):
+    """A foreign card and a normal card, both finished; the foreign handoff is the older one,
+    so it is reached first. The foreign card is the box's shape: no committed create request,
+    a receipt its worker wrote (naming board epoch ``epoch`` if given) and a handoff written
+    past ``card finish``'s refusal."""
+    foreign = board.admit(committed_request=False)
+    normal = board.admit()
+    if epoch is not None:
+        path = board.receipt_path(foreign.request_id)
+        receipt = read_json(path)
+        receipt["tasks"][0]["board_epoch"] = epoch
+        write_json(path, receipt)
+        gitops.commit_all(board.canonical, "forged receipt epoch")
     foreign.start()
     normal.start()
     new_hypothesis(foreign)
     foreign.write_journal()
-    foreign_record = foreign.finish()
+    foreign_record = foreign.finish(forged=True)
     normal.write_journal()
     normal.finish()
     return foreign, normal, foreign_record
+
+
+def _assert_foreign_unmerged(board: Board, foreign, record: dict, title: str = "T") -> None:
+    assert foreign.handoff()["state"] == "committed"
+    assert not gitops.contains(board.canonical, record["result_sha"])
+    marker = board.committed(board.ledger / "foreign" / f"{foreign.task_id}.json")
+    assert marker["task_id"] == foreign.task_id and marker["title"] == title
+    [help_request] = _help_requests(board)
+    assert help_request["about"]["card"] == foreign.task_id
+    assert title in help_request["title"]
+    assert "operator" in help_request["body"]  # its worker wrote runtime records itself
 
 
 def test_foreign_card_is_skipped_and_reported_once_while_other_handoffs_merge(board):
@@ -374,15 +395,8 @@ def test_foreign_card_is_skipped_and_reported_once_while_other_handoffs_merge(bo
     [outcome] = board.process(queue=queue)
 
     assert (outcome.task_id, outcome.state) == (normal.task_id, "published")
-    assert foreign.handoff()["state"] == "committed"  # bypassed admission: never merged
-    assert not gitops.contains(board.canonical, foreign_record["result_sha"])
-    marker = board.committed(board.ledger / "foreign" / f"{foreign.task_id}.json")
-    assert marker["task_id"] == foreign.task_id
-    assert marker["title"] == "Design a damage-first tune"
-    [help_request] = _help_requests(board)
-    assert help_request["about"]["card"] == foreign.task_id
-    assert "Design a damage-first tune" in help_request["title"]
-    assert "archive" in help_request["body"]
+    _assert_foreign_unmerged(board, foreign, foreign_record, "Design a damage-first tune")
+    assert "archive" in _help_requests(board)[0]["body"]
     _assert_clean(board)
 
     head = gitops.head(board.canonical)
@@ -391,16 +405,54 @@ def test_foreign_card_is_skipped_and_reported_once_while_other_handoffs_merge(bo
     assert len(_help_requests(board)) == 1
 
 
-def test_marked_foreign_card_is_not_merged_after_a_board_rebuild(board):
+def test_provenance_not_the_board_decides_foreign(board):
+    """Even when the board shows a readable card body, a handoff with no committed request
+    is foreign."""
+    foreign, normal, foreign_record = _foreign_finished_first(board)
+
+    [outcome] = board.process()
+
+    assert outcome.task_id == normal.task_id
+    _assert_foreign_unmerged(board, foreign, foreign_record)
+
+
+def test_foreign_handoff_is_not_merged_after_a_board_rebuild_before_any_handoffs_step(board):
     foreign, _normal, foreign_record = _foreign_finished_first(board)
-    board.process(queue=ForeignBoard(board.queue, foreign.task_id))
-    write_json(board.ledger / "board.json", {"epoch": "e2"})  # the board was rebuilt
+    write_json(board.ledger / "board.json", {"epoch": "e2"})  # rebuilt before it was seen
     gitops.commit_all(board.canonical, "new board epoch")
 
-    assert board.process(queue=_NoLookupQueue()) == []
+    board.process(queue=ForeignBoard(board.queue, foreign.task_id))
 
-    assert foreign.handoff()["state"] == "committed"
-    assert not gitops.contains(board.canonical, foreign_record["result_sha"])
+    _assert_foreign_unmerged(board, foreign, foreign_record, "Hand-made card")
+
+
+def test_a_forged_receipt_naming_an_earlier_epoch_is_still_foreign(board):
+    """The forger controls the receipt's board epoch; an earlier epoch skips the board lookup."""
+    foreign, _normal, foreign_record = _foreign_finished_first(board, epoch="e0")
+
+    board.process(queue=ForeignBoard(board.queue, foreign.task_id))
+
+    _assert_foreign_unmerged(board, foreign, foreign_record, "Hand-made card")
+
+
+def test_an_unreadable_body_on_an_admitted_card_is_retried_not_foreign(board):
+    a, b = board.admit(), board.admit()
+    a.start()
+    b.start()
+    a.write_journal()
+    a.finish()
+    b.write_journal()
+    b.finish()
+
+    with pytest.raises(RuntimeError, match=a.task_id):
+        board.process(queue=ForeignBoard(board.queue, a.task_id))
+
+    assert b.handoff()["state"] == "published"
+    assert a.handoff()["state"] == "committed"
+    assert board.committed(board.ledger / "foreign" / f"{a.task_id}.json") is None
+    assert _help_requests(board) == []
+    [outcome] = board.process()  # the body reads again: it merges
+    assert (outcome.task_id, outcome.state) == (a.task_id, "published")
 
 
 class _FailingShowQueue:
@@ -416,7 +468,11 @@ class _FailingShowQueue:
 
 
 def test_a_card_the_board_cannot_show_does_not_stop_the_other_handoffs(board):
-    broken, normal, _ = _foreign_finished_first(board)
+    broken, normal = board.admit(), board.admit()
+    for worker in (broken, normal):
+        worker.start()
+        worker.write_journal()
+        worker.finish()
     queue = _FailingShowQueue(board.queue, broken.task_id)
 
     with pytest.raises(RuntimeError, match=broken.task_id):

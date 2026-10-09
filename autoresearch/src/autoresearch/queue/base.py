@@ -20,6 +20,10 @@ class Queue(Protocol):
         """The card. Unknown task: FileQueue raises KeyError, Kanban a ``KanbanError``. A Kanban
         task the runtime did not create (no card body) raises ``ForeignCardError``."""
 
+    def foreign_cards(self) -> list[Card]:
+        """Board tasks the runtime did not create (no card body), which ``list`` skips; their
+        spec is a stand-in with only the title real. Always empty for FileQueue."""
+
     def list(self, state: str | None = None) -> list[Card]: ...
 
     def reprioritize(self, task_id: str, priority: Priority, order: int = 0) -> None:

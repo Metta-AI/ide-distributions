@@ -613,34 +613,53 @@ def test_skipped_staged_messages_are_reported_once(host):
     assert host.clean()
 
 
-def test_a_foreign_card_does_not_stop_the_other_handoffs(host):
-    """A card the runtime did not create (no card body; its worker forged a receipt and left a
-    handoff, as on the box on 2026-10-09) is skipped and reported once; the other handoff
-    merges in the same run and the handoffs step does not fail."""
+def test_foreign_cards_are_reported_once_and_never_merged_while_others_merge(host):
+    """Two cards the runtime did not create: one that just runs, and one whose worker forged
+    a receipt and wrote a handoff past card finish (the box, 2026-10-09). Each gets one marker
+    and one help_request; the forged work is not merged; the admitted card's handoff merges
+    in the same run and no step fails."""
     host.tick(at(0))
-    host.runtime_request(spec=_spec("Hand-made"))
     host.runtime_request(spec=_spec("Admitted"))
     host.tick(at(1))
-    foreign = host.claim(mode="investigation")
+    forged = host.foreign_card("Hand-made design", forged_receipt=True)
+    running = host.foreign_card("Hand-made run")
     normal = host.claim(mode="investigation")
-    foreign_record = foreign.finish()
+    forged_record = forged.finish(forged=True)
     normal_record = normal.finish()
-    host.queue = ForeignBoard(host.queue, foreign.task_id, title="Hand-made")
+    host.queue = ForeignBoard(host.queue, forged.task_id, running.task_id, title="Hand-made")
 
     run = host.tick(at(2))
 
-    assert "handoffs" not in run.failures
+    assert {"foreign", "handoffs"}.isdisjoint(run.failures)
+    assert sorted(run.foreign) == sorted([forged.task_id, running.task_id])
     assert [(o.task_id, o.state) for o in run.handoffs] == [(normal.task_id, "published")]
     assert gitops.contains(host.canonical, normal_record["result_sha"])
-    assert not gitops.contains(host.canonical, foreign_record["result_sha"])
-    assert host.committed(host.ledger / "foreign" / f"{foreign.task_id}.json") is not None
-    [help_request] = _help_requests(host, foreign.task_id)
-    assert help_request["title"] == "Card not created by the runtime: Hand-made"
+    assert not gitops.contains(host.canonical, forged_record["result_sha"])
+    for card in (forged, running):
+        assert host.committed(host.ledger / "foreign" / f"{card.task_id}.json") is not None
+        [help_request] = _help_requests(host, card.task_id)
+        assert help_request["title"] == "Card not created by the runtime: Hand-made"
+        assert ("operator" in help_request["body"]) == (card is forged)
 
     again = host.tick(at(3))
-    assert "handoffs" not in again.failures and again.handoffs == []
-    assert len(_help_requests(host, foreign.task_id)) == 1
+    assert {"foreign", "handoffs"}.isdisjoint(again.failures)
+    assert again.foreign == [] and again.handoffs == []
+    assert len(_help_requests(host, "Card not created by the runtime")) == 2
     assert host.clean()
+
+
+def test_spend_caps_stop_a_foreign_card(host):
+    host.tick(at(0))
+    running = host.foreign_card("Hand-made run")
+    host.queue.requeue(running.task_id, "a second run")
+    host.queue.claim_next(f"worker-{running.task_id}")  # 2 runs, still running
+    host.queue = ForeignBoard(host.queue, running.task_id, title="Hand-made")
+    host.env["AUTORESEARCH_MAX_CARD_RUNS"] = "1"
+
+    run = host.tick(at(1))
+
+    assert [task_id for task_id, _ in run.spend_run.stopped] == [running.task_id]
+    assert host.queue.queue.get(running.task_id).state == "blocked"
 
 
 def test_blocked_card_is_requeued_once_then_repaired(host):

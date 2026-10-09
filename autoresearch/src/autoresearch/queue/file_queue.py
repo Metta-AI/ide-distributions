@@ -93,6 +93,10 @@ class FileQueue:
     def get(self, task_id: str) -> Card:
         return self._to_card(self._load_record(task_id))
 
+    def foreign_cards(self) -> list[Card]:
+        """Every card here came from ``create_unassigned``: none is foreign."""
+        return []
+
     def list(self, state: str | None = None) -> list[Card]:
         records = [read_json(path) for path in self._cards_dir.glob("K-*.json")]
         records.sort(key=lambda record: record["seq"])

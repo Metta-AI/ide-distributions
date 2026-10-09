@@ -225,7 +225,8 @@ def handle_blocked(
 
     One card never stops the others: a card whose handling fails (the board refuses the
     unblock, say) is left for the next run, and once every card was tried the failures are
-    raised together, so the caller logs the step as failed."""
+    raised together, so the caller logs the step as failed (the actions of that run are then
+    lost to the caller; their markers are committed)."""
     actions, failures = [], []
     for card in queue.list("blocked"):
         try:

@@ -13,8 +13,9 @@ Detection (``needs_rebuild``). Rebuild when:
   with a committed handoff that normal processing will still act on. Requests a promotion
   covers (A11) do not count: their only follow-up is the promotion's recovery card, so a dead
   promotion holder never triggers rebuild after rebuild. Nor do receipts naming a card recorded
-  as foreign (``runtime.foreign``: a receipt its worker forged; the board lists no foreign
-  task, so it would look lost, and a rebuild would adopt its handoff). An ``admitted`` receipt rebuild must
+  as foreign, or a handed-off receipt whose request was never committed (``runtime.foreign``:
+  a receipt its worker forged; the board lists no foreign task, so it would look lost). Such a
+  receipt is settled: no recovery action, and its handoff is never adopted. An ``admitted`` receipt rebuild must
   re-admit but cannot (its spec is not committed) also counts: rebuild settles it for good
   (below), so it triggers at most one rebuild.
 
@@ -79,6 +80,7 @@ from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion
 from autoresearch.runtime.admission import (
     DEFAULT_BOARD_EPOCH,
+    admitted_spec,
     has_current_noise,
     readmit,
     receipt_path,
@@ -198,11 +200,6 @@ def _committed_handoffs(canonical: Path, receipt: dict) -> list[dict]:
     return records
 
 
-def _committed_spec(canonical: Path, request_id: str) -> dict | None:
-    request = committed_json(canonical, Layout(canonical).card_requests / f"{request_id}.json")
-    return (request or {}).get("spec") or None
-
-
 def _covered_by_promotion(canonical: Path, receipt: dict) -> bool:
     """A11: the request belongs to a promotion that reached submission, and is not the latest
     recovery request of the in-flight promotion (that one IS the recovery: rebuild re-admits
@@ -223,12 +220,15 @@ def _classify(canonical: Path, receipt: dict) -> str:
         return SETTLED
     if any(is_foreign(canonical, task["task_id"]) for task in receipt.get("tasks", [])):
         return SETTLED  # a forged receipt of a card the runtime did not create
+    spec = admitted_spec(canonical, receipt["request_id"])
     handoffs = _committed_handoffs(canonical, receipt)
     if receipt["state"] == "handed_off" or handoffs:
+        if spec is None:
+            return SETTLED  # forged: never adopted; the handoffs step reports it as foreign
         return HANDOFF if any(h["state"] in PROCESS_STATES for h in handoffs) else SETTLED
     if _covered_by_promotion(canonical, receipt):
         return SETTLED
-    if _committed_spec(canonical, receipt["request_id"]) is None:
+    if spec is None:
         return NO_SPEC
     return READMIT
 
@@ -299,7 +299,7 @@ def _recover_requests(
         if kind == NO_SPEC:
             _unrecoverable(ctx, receipt, allow_no_remote)
         elif kind == READMIT:
-            spec = CardSpec(**_committed_spec(canonical, receipt["request_id"]))
+            spec = CardSpec(**admitted_spec(canonical, receipt["request_id"]))
             readmit(ctx, queue, spec)
             readmitted.append(spec)
     return readmitted

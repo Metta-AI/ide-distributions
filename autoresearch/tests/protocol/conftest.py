@@ -86,6 +86,19 @@ class CardWorkspace:
             "history": [{"state": "admitted", "at": "2026-10-07T00:00:00+00:00"}],
         }
         write_json(self.receipt_path, receipt)
+        spec = {
+            "request_id": self.request_id,
+            "title": "T",
+            "mode": "investigation",
+            "why": "W",
+            "refs": self.refs,
+            "created_by": "planner",
+            "priority": "P2",
+        }
+        write_json(
+            self.canonical / "cards" / "requests" / f"{self.request_id}.json",
+            {"id": self.request_id, "op": "create", "spec": spec},
+        )
         gitops.commit_all(self.canonical, f"admit {self.request_id}")
         write_json(
             self.card_file,

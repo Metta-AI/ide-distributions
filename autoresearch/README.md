@@ -140,7 +140,7 @@ hermes -p autoresearch cron list
 
 | Job | Runs | Does |
 |---|---|---|
-| `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. A card on the board that the runtime did not create (no card body, for example one a model added with `kanban_create`) is never merged: it gets one help request that says how to archive it, and the marker `.supervisor/ledger/foreign/<task>.json`. One card that fails (foreign, unreadable, or a blocked card the board will not requeue) does not stop the other cards in the same step. |
+| `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. A card the runtime did not create is never merged, in any board epoch: a board task with no card body (for example one a model added with `kanban_create`), or a handoff whose request has no committed `cards/requests/<Q-id>.json` (a receipt its worker wrote). It gets one help request that says how to archive it, and the marker `.supervisor/ledger/foreign/<task>.json`; the spend caps still apply to it while it runs. Its card branch is still pushed to `origin` with the others (`refs/heads/card/*`), unmerged. One card that fails (unreadable on the board, or a blocked card the board will not requeue) does not stop the other cards in the same step; the step is still logged as failed. A Hermes status the runtime does not know reads as claimed. |
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
 | `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
@@ -361,6 +361,11 @@ automatic update; `updates.check` is set to false so it does not even check.
   `main` (`admit Q-... (manual admission repair ...)`), so `card finish` took the handoff of a
   card that skipped admission. queue-keeper now refuses to merge such a card's work (above),
   but the single-writer rule (C1) is enforced only by the workers' cooperation, not by the OS.
+  `card finish` now refuses a receipt whose request was never committed, and foreign cards are
+  decided from the ledger, but a worker that can write canonical can forge those files too.
+- **A malformed ledger file stops a step.** Routing, handoff processing and rebuild parse every
+  committed receipt and handoff; one file that is not valid JSON (only a direct write as above
+  can produce one) fails that step every run until a human fixes or removes it.
 - **A board rebuild (C12) gives re-admitted cards new task ids,** so their run and cost
   counts start again from zero.
 - `runtime/kanban_events.jsonl` is read in full on each queue-keeper run, and the daily sum

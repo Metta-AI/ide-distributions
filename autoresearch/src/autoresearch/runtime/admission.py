@@ -43,7 +43,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json, write_text
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
-from autoresearch.queue.requests import load_schema
+from autoresearch.queue.requests import REQUESTS_DIR, load_schema
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
 from autoresearch.runtime.handoff import handoff_path
@@ -74,6 +74,17 @@ class AdmissionResult:
 
 def receipt_path(ledger: Path, request_id: str) -> Path:
     return ledger / "requests" / f"{request_id}.json"
+
+
+def admitted_spec(canonical: Path, request_id: str) -> dict | None:
+    """The spec of ``request_id``'s committed create request (``cards/requests/<Q-id>.json``),
+    or None. Provenance: admission (and ``readmit``) only ever acts on a committed create
+    request, so a receipt whose request has none was not written by the runtime. It is the
+    ledger's answer to "did admission create this card?", independent of the board."""
+    request = committed_json(canonical, canonical / REQUESTS_DIR / f"{request_id}.json")
+    if not isinstance(request, dict) or request.get("op") != "create":
+        return None
+    return request.get("spec") or None
 
 
 def _unresolved_refs(canonical: Path, spec: CardSpec) -> list[str]:
