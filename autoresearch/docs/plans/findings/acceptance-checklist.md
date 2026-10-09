@@ -147,7 +147,7 @@ Source of truth: `distribution.yaml` (`env_requires`). Details and examples: REA
 | `AUTORESEARCH_WORKSPACE` | no | Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | Tests only (`fake`). Never set in production. |
 | `COGAMES_API_URL` | no | Softmax API server. Default `https://softmax.com/api`. Passed as `--server` to every `softmax`/`coworld` call. Softmax hosting writes it. |
-| `AUTORESEARCH_MAX_CARD_RUNS`, `AUTORESEARCH_MAX_CARD_USD`, `AUTORESEARCH_DAILY_BUDGET_USD`, `AUTORESEARCH_FALLBACK_PRICES` | no | Spend caps: 4 runs and an estimated $4 per card, $25 per UTC day (README). Set the daily budget to what the OpenRouter key may spend. |
+| `AUTORESEARCH_MAX_CARD_RUNS`, `AUTORESEARCH_MAX_CARD_USD`, `AUTORESEARCH_DAILY_BUDGET_USD`, `AUTORESEARCH_FALLBACK_PRICES` | no | Spend caps: 4 runs and an estimated $4 per card, $100 per UTC day (README). Set the daily budget to what the OpenRouter key may spend. |
 | `AUTORESEARCH_CARD_MODELS` | no | Model per card mode. Default: `planning`, `scouting` and `maintenance` on `z-ai/glm-5.3`, the other modes on `model.default` (README). |
 
 Bootstrap writes `AUTORESEARCH_CLI` and `HERMES_WRITE_SAFE_ROOT`. Do not set them by hand.
