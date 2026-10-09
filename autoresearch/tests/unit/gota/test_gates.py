@@ -1,5 +1,8 @@
 """Shared gates use current engine compilation and measured decisions."""
 import importlib
+import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -174,3 +177,183 @@ def test_glory_floors_each_winning_hero_before_mean():
            'total_xp': [1, 3, 100, 100, 100, 0, 0, 0, 0, 0]}
     result = gate('g4_screen').metrics(row, range(5))
     assert result == {'glory': 0.2, 'win_rate': 0.4}
+
+
+# Native G2 (default runner): one ten-seat episode on the pinned match binary, no Docker.
+FIXTURES = ROOT / 'tests/fixtures/gota'
+NATIVE_CONFIG = {'players': [{'name': f'Baseline {slot}'} for slot in range(10)],
+                 'seed': 2026, 'max_ticks': 600, 'spawn_interval_ticks': 480,
+                 'map_preset': {'map_size': 116}, 'draft_mode': 'open'}
+
+
+def write_manifest(path, config):
+    path.write_text(json.dumps({'variants': [{'id': 'competition', 'game_config': config}]}))
+    return path
+
+
+@pytest.fixture
+def no_docker(monkeypatch, tmp_path):
+    """PATH holds only git and nim (no docker, no uv); coworld/docker processes are refused."""
+    tools = tmp_path / 'path-without-docker'
+    tools.mkdir()
+    for name in ('git', 'nim'):
+        if shutil.which(name):
+            (tools / name).symlink_to(shutil.which(name))
+    monkeypatch.setenv('PATH', str(tools))
+    monkeypatch.delenv('GOTA_G2_RUNNER', raising=False)
+    real_run = subprocess.run
+    spawned = []
+
+    def guarded(command, *args, **kwargs):
+        spawned.append(command)
+        if any(part in ('docker', 'coworld', 'run-episode', 'uv') for part in map(str, command)):
+            raise AssertionError(f'native G2 spawned {command}')
+        return real_run(command, *args, **kwargs)
+    monkeypatch.setattr(subprocess, 'run', guarded)
+    assert shutil.which('docker') is None
+    return spawned
+
+
+@pytest.fixture
+def fake_native(monkeypatch, tmp_path, no_docker):
+    """Fake the native match binary: writes seat logs and result.json like gota_match."""
+    local = gate('g2_episode').gota_local
+    monkeypatch.setattr(local, 'binary_identity', lambda commit: {'fingerprint': 'fake-gota-match'})
+    monkeypatch.setattr(local, 'binary', lambda commit: tmp_path / 'gota_match-fake')
+    runner = {'failures': {}, 'config': NATIVE_CONFIG, 'actions': 5000, 'calls': [], 'commits': []}
+
+    def invoke(command, job_path, *, commit):
+        job = json.loads(Path(job_path).read_text())
+        runner['calls'].append((command, job))
+        runner['commits'].append(commit)
+        out = Path(job['out'])
+        telemetry = (FIXTURES / 'v13-live-telemetry.log').read_text()
+        heroes = []
+        for slot in range(10):
+            error = runner['failures'].get(slot, '')
+            (out / f'seat-{slot}.log').write_text(
+                telemetry + (f'\nBASIC error: {error}\n' if error else ''))
+            heroes.append({'slot': slot, 'team': slot // 5, 'xp': 100 + slot,
+                           'decisions': 620, 'vm_failed': bool(error), 'vm_error': error,
+                           'vm_routine': None, 'vm_pc': None,
+                           'policy_source_sha1': 'same-source'})
+        config = {**runner['config'], 'seed': job['seed'], 'max_ticks': job['ticks'],
+                  'draft_mode': job['draft']}
+        result = {'outcome': 'time_limit', 'ticks': job['ticks'] + 2400, 'heroes': heroes,
+                  'config': config, 'engine': commit, 'actions': runner['actions']}
+        (out / 'result.json').write_text(json.dumps(result))
+        return result
+    monkeypatch.setattr(local, '_invoke', invoke)
+    return runner
+
+
+@pytest.fixture
+def native_context(context, tmp_path):
+    context.manifest = write_manifest(tmp_path / 'manifest.json', NATIVE_CONFIG)
+    return context
+
+
+def test_native_episode_passes_without_docker(fake_native, no_docker, native_context):
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'passed', result.details
+    assert result.details['runner'] == 'native'
+    assert result.details['native_build'] == {'fingerprint': 'fake-gota-match'}
+    assert result.details['scripts_active'] == 10
+    assert result.details['decisions'] == 6200
+    assert result.details['actions'] == 5000
+    assert result.details['results']['ticks'] == 3000
+    assert no_docker == []  # the fake runner spawns nothing
+    [(command, job)] = fake_native['calls']
+    assert command == 'match'
+    assert job['seats'] == [str(BASELINE.resolve())] * 10
+    assert (job['seed'], job['ticks'], job['draft'], job['replay']) == (2026, 600, 'open', True)
+    # G5 reads the same native episode's ten seat logs.
+    assert native_context.episode_dir == native_context.work_dir / 'episode'
+    assert gate('g5_telemetry').run(BASELINE, native_context).ok
+
+
+def test_native_episode_vm_error_fails(fake_native, native_context):
+    fake_native['failures'][3] = 'array index out of range'
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'failed'
+    assert 'seat 3' in result.details['error']
+    assert 'array index out of range' in result.details['error']
+
+
+def test_native_episode_zero_actions_fails(fake_native, native_context):
+    fake_native['actions'] = 0
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'failed'
+    assert 'zero recorded actions' in result.details['error']
+
+
+def test_native_episode_missing_binary_errors(monkeypatch, no_docker, native_context, tmp_path):
+    monkeypatch.setattr(gate('g2_episode').gota_local, 'TOOLS', tmp_path / 'no-tools')
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'errored'
+    assert not any('coworld' in map(str, command) for command in no_docker)
+
+
+def test_native_episode_uses_resolved_engine_binary(fake_native, native_context):
+    """The context's resolved engine selects the match binary; engine.env is only the default."""
+    native_context.engine_commit = 'e' * 40
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'passed', result.details
+    assert result.details['engine'] == 'e' * 40
+    assert fake_native['commits'] == ['e' * 40]
+
+
+def test_native_episode_engine_defaults_to_engine_env(fake_native, native_context):
+    pin = gate('g2_episode').gota_local.gota_cli.engine()['POLYWORLD_COMMIT']
+    assert gate('g2_episode').run(BASELINE, native_context).details['engine'] == pin
+    assert fake_native['commits'] == [pin]
+
+
+def test_native_episode_rejects_manifest_config_it_cannot_reproduce(fake_native, native_context):
+    write_manifest(native_context.manifest, {**NATIVE_CONFIG, 'spawn_interval_ticks': 240})
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'errored'
+    assert 'game_config' in result.details['error']['message']
+
+
+def test_docker_runner_is_opt_in(monkeypatch, native_context):
+    monkeypatch.setenv('GOTA_G2_RUNNER', 'docker')
+    commands = []
+
+    def episode(command, **kwargs):
+        commands.append(command)
+        raise subprocess.CalledProcessError(1, command)
+    monkeypatch.setattr(gate('g2_episode').subprocess, 'run', episode)
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'errored'
+    assert commands[0][8:10] == ['coworld', 'run-episode']
+
+
+def test_unknown_runner_errors(monkeypatch, native_context):
+    monkeypatch.setenv('GOTA_G2_RUNNER', 'podman')
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'errored'
+    assert 'GOTA_G2_RUNNER' in result.details['error']['message']
+
+
+def test_native_episode_real_engine(prepare_native_tools, no_docker, context, tmp_path):
+    """A short real ten-seat native episode at the engine.env pin, read back by G2 and G5."""
+    from games.gota.gates.limits import POLYWORLD_COMMIT
+    from games.gota.tools import native_build
+
+    template = native_build.source_cache(POLYWORLD_COMMIT, native_build.TOOLS) / \
+        'coworld/gota/coworld_manifest_template.json'
+    manifest = json.loads(template.read_text())
+    for variant in manifest['variants']:
+        variant['game_config']['max_ticks'] = 600
+    context.manifest = tmp_path / 'manifest.json'
+    context.manifest.write_text(json.dumps(manifest))
+    result = gate('g2_episode').run(BASELINE, context)
+    assert result.outcome == 'passed', result.details
+    assert result.details['runner'] == 'native'
+    assert result.details['actions'] > 0
+    assert len(result.details['seat_decisions']) == 10
+    assert all(count > 0 for count in result.details['seat_decisions'])
+    assert any(Path(command[0]).name.startswith('gota_match-') for command in no_docker)
+    assert not any('coworld' in map(str, command) for command in no_docker)
+    assert gate('g5_telemetry').run(BASELINE, context).ok

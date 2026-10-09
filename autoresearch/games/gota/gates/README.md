@@ -39,8 +39,11 @@ Its G5 receipt is not an executed GateResult: it records `applicable: false`,
 `outcome`. The artifact is its own G4 baseline mirror. See [bootstrap](../GAME.md#starter-policy)
 for committed-input provenance and the shared upload handoff.
 
-No command uploads or submits a policy. The manifest and container image must
-already be available for the intended live release. G2 uses the project lockfile for coworld and softmax-cli through offline
+No command uploads or submits a policy. The manifest must already be available for
+the intended live release. G2's runner is chosen by `GOTA_G2_RUNNER`: unset or
+`native` (the default) runs the native match binary and needs no Docker; `docker`
+runs `coworld run-episode`, which needs Docker and the release's container image.
+The Docker runner uses the project lockfile for coworld and softmax-cli through offline
 `uv run`; it does not override the locked versions. `tools/lasthit_eval.py` uses
 the same `uv run --project PROJECT --locked --offline --python 3.12` invocation,
 with the project directory resolved from the script rather than the caller's
@@ -51,7 +54,11 @@ working directory. Cache the locked dependencies before either command.
 The G3/G4 workload in a build or full `local_check` takes approximately
 55 minutes, measured on the autoresearch EC2 test box (m7i.xlarge), 2026-10-08.
 This is a reported operating estimate, not a new benchmark or a separate
-measurement of each gate. No independent timings for G1, G2, G3, G4 or G5 are established here.
+measurement of each gate. No independent timings for G1, G3, G4 or G5 are established here.
+One native G2 episode of v13-live (31200 ticks, all ten seats) took 18 seconds of
+match time and 40 seconds for the whole `local_check --gate g2_episode --gate
+g5_telemetry` command with warm native caches, on an Apple M4 Pro, 2026-10-09.
+That is one sample on a faster single core than the hosted sandbox; expect longer there.
 Compiler generation/repair and cold native preparation add work outside that
 estimate; host speed, policy, early game ends and cache reuse affect the total.
 
@@ -93,13 +100,25 @@ success.
   VM error flags remain explicit policy failures. The Python reader validates
   outcome consistency, compile counters and complete runtime counters/results
   before interpreting measurements as policy evidence.
-- G2 executes all ten seats through pinned coworld and reads back staged artifact
-  hashes, every completed private log, BASIC errors, ten active scripts, decisions,
-  nonzero aggregate actions, and full results. Missing runner/completion markers,
-  truncated results and non-finite measurements are tool errors. Complete
-  measurements showing inactive seats, zero decisions or zero actions are policy
-  failures. Positive XP is compatibility
-  evidence for v13-live, not a general G2 requirement for every possible policy.
+- G2 runs one episode with the candidate in all ten seats at the manifest
+  variant's seed, `max_ticks` and draft mode. The default native runner
+  (`tools/gota_local.py` `match`, recording on) uses the `gota_match` binary for
+  the context's resolved engine commit, or `engine.env`'s pin when none is set,
+  and validates its build receipt before and after. The binary bakes in that
+  engine's competition `game_config`; a manifest config it cannot reproduce, or a
+  binary engine other than the requested one, is a tool error. It reads back each
+  seat's artifact hash, the one policy source all ten seats loaded, VM failures
+  and `BASIC error:` lines in `seat-N.log`, per-seat decisions, recorded actions
+  and full results (`episode/job.json`, `meta.json`, `result.json`, `replay.bin`).
+  `GOTA_G2_RUNNER=docker` runs pinned coworld instead and reads back staged artifact
+  hashes, every completed private log (`logs/policy_agent_N.log`), BASIC errors,
+  ten active scripts, decisions, nonzero aggregate actions, and full results.
+  Either way, missing runner/completion markers, truncated results and non-finite
+  measurements are tool errors. Complete measurements showing VM failures,
+  inactive seats, zero decisions or zero actions are policy failures. `details.runner`
+  names the runner. Positive XP is compatibility evidence for v13-live, not a
+  general G2 requirement for every possible policy. What the native runner does not
+  prove is listed in [GAME.md](../GAME.md#g2-episode-runner).
 - G3 enforces legacy ceilings of 256 globals, 32 arrays, 4096 cells and 65536
   source bytes, or structured ceilings of 512 globals, 128 arrays, 262144 cells
   and 65535 policy bytes (host injection excluded from this byte count), 64 routines
@@ -114,7 +133,8 @@ success.
   advisory. Identical artifact hashes reuse one mirror match per seed and read
   both teams for both side assignments. These are local screens; they do not
   establish league performance or full historical behavioral equivalence.
-- G5 parses the legacy `LH` snapshots from all ten G2 logs through the existing
+- G5 parses the legacy `LH` snapshots from all ten G2 seat logs (either runner's
+  layout) through the existing
   toolkit parser, rejecting every malformed snapshot before parsing the final
   one. It reports `compiler_trace_coverage: null`: submitted v13 has no compiler
   goal trace. Passing LH parsing does not establish compiler tracing coverage,
@@ -130,7 +150,7 @@ artifact hash, opponent hash, seed, tick budget and side. Defaults sample all te
 seeds for 31200 ticks each, ending earlier on a game end. A caller may request a
 shorter G3 sample, which is explicitly reported as `sample_ticks`; it proves only
 those decisions. G4 requires the full tick budget. Native screens use OpenDraft but do not prove an exhaustive resource bound
-for every future observation or every manifest setting. G2 supplies separate real manifest execution proof.
+for every future observation or every manifest setting. G2 supplies a separate full-length episode at the manifest's competition settings.
 
 Current PRINT accounting follows Bassy `parsePrint` and `chargePrint`, not an
 assumed constant number of events per item. `PRINT "X", 12` emits four events and

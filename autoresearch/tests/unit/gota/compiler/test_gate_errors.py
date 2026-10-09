@@ -67,6 +67,7 @@ def test_shared_gate_unexpected_exception_is_errored(tmp_path, monkeypatch, name
     if name in ('g1_lint', 'g3_budget', 'g4_screen'):
         monkeypatch.setattr(module, 'measure', broken)
     elif name == 'g2_episode':
+        monkeypatch.setenv('GOTA_G2_RUNNER', 'docker')
         monkeypatch.setattr(module.subprocess, 'run', broken)
     else:
         monkeypatch.setattr(module, 'inspect_episode', broken)

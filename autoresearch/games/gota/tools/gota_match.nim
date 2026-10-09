@@ -399,10 +399,13 @@ proc match(job: JsonNode): JsonNode =
       "peak_instructions": peakInstructions[seat], "peak_work": peakWork[seat]}
   if game.recordingError.len > 0: raise newException(IOError, game.recordingError)
   if job{"replay"}.getBool: saveReplay(output / "replay.bin", game.recorder.data)
+  # Submitted actions on the recorded tape (accepted or not), as a hosted replay
+  # counts them; null when this match ran without a recorder.
+  let actions = if tables or job{"replay"}.getBool: %game.recorder.data.actions.len else: newJNull()
   result = %*{"outcome": game.world.outcome(), "ticks": game.world.tick,
     "battle_ticks": game.world.battleTick(), "draft_ticks": game.world.draftTicks, "state_hash": stateHash(game).toHex(16),
     "heroes": heroes, "config": configNode, "engine": PolyworldCommit, "bassy": BassyCommit,
-    "seconds": (getMonoTime() - started).inMilliseconds.float / 1000}
+    "actions": actions, "seconds": (getMonoTime() - started).inMilliseconds.float / 1000}
   writeFile(output / "result.json", result.pretty & "\n")
 
 proc commandCounts(game: Game): seq[int64] =

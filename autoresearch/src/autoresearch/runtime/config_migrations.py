@@ -62,6 +62,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_DAILY_BUDGET_USD",
     "AUTORESEARCH_FALLBACK_PRICES",
     "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
+    "GOTA_G2_RUNNER",  # GotA G2 episode runner in worker builds: native (default) or docker
 ]
 APPROVAL_DENY = [
     "coworld player use*",
