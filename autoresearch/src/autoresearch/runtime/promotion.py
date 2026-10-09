@@ -132,7 +132,7 @@ class Promotion:
     help_requested: bool = False  # recovery attempts exhausted; an operator must act
     history: list[dict] = field(default_factory=list)
     # ``experiment``: an evaluated candidate (``submit_promotion``). ``bootstrap``: the first
-    # champion on a fresh install, the game's shipped strategy, with no experiment (A14,
+    # champion on a fresh install, the game's starter policy, with no experiment (A14,
     # ``bootstrap_promotion``). Records written before kinds existed are ``experiment``.
     kind: str = "experiment"
 
@@ -1044,7 +1044,7 @@ def bootstrap_promotion(
     platform_id: str,
     league_id: str,
 ) -> SubmitOutcome:
-    """Promote the game's shipped strategy as the first champion (amendment A14): the same
+    """Promote the game's starter policy as the first champion (amendment A14): the same
     C8 path as ``submit_promotion`` (acquire -> intent -> submit -> submitted -> stage; the
     merge records and publishes it; A11 recovery applies), as a ``bootstrap`` promotion with
     no experiment, evaluation outcome or decision. ``version`` is the uploaded build's version

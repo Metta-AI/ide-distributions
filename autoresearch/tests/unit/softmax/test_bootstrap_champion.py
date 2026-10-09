@@ -1,7 +1,7 @@
 """First champion on a fresh install (amendment A14): ``softmax bootstrap-champion``.
 
 With no champion (no published promotion and no leaderboard entry for our player, A9), a card
-builds the game's shipped strategy, uploads it, and promotes it through the normal C8
+builds the game's starter policy, uploads it, and promotes it through the normal C8
 promotion (acquire -> intent -> submit -> recorded -> published) as a ``bootstrap`` promotion:
 no experiment, no evaluation outcome, no decision. Experiments then compare against it.
 """
@@ -61,7 +61,7 @@ def started(board, mode="maintenance"):
 
 
 def shipped_build(board, worker, name="champion"):
-    """The fakegame baseline build: the shipped STRATEGY of the worktree (GAME.md)."""
+    """The fakegame starter policy build: the shipped STRATEGY of the worktree (GAME.md)."""
     out = board.tmp_path / name
     fake_build(worker.worktree / "strategy", out)
     return out

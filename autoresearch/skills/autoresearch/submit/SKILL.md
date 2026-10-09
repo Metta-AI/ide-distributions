@@ -54,8 +54,9 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 
 ## Bootstrap card (first champion, A14)
 
-On a fresh install there is no champion to compare against, so the game's shipped strategy
-becomes the first champion without an experiment: it is built, uploaded, and promoted through
+When the league shows no policy competing for our player (a fresh install), there is no
+champion to compare against, so the game's starter policy becomes the first champion without
+an experiment: it is built, uploaded, and promoted through
 the normal promotion. Its first league submission is unevaluated, on purpose. Run this when
 `experiment` step 3 (or the card) says so.
 
@@ -65,9 +66,9 @@ the normal promotion. Its first league submission is unevaluated, on purpose. Ru
    Go on only if `current_champion` is null and `note` says "no champion known", and no
    promotion is in `intent`, `submitted` or `recorded`. Otherwise record it and finish
    (`done` when a champion exists; `partial` when a promotion is in flight).
-2. Read the `## Baseline build` section of `GAME.md` (see `queue` for its path and
+2. Read the `## Starter policy` section of `GAME.md` (see `queue` for its path and
    `AR_HOME`). If there is no such section, do not invent a build: send a `help_request`
-   and finish `blocked`. Build the shipped strategy with the game's `build` binding as it
+   and finish `blocked`. Build the starter policy with the game's `build` binding as it
    says, from `"$AR_HOME"`, into `<worktree>/.scratch/build/champion`. Every non-advisory
    gate must pass.
 3. Run the game's `local_check` binding on it the same way (D-04: never evidence).
@@ -89,7 +90,7 @@ Refusals of `softmax bootstrap-champion`, by `error.reason`:
 | `champion_exists` | A promotion is published or our leaderboard has a champion. | Nothing to bootstrap. Finish `done`. |
 | `promotion_in_flight`, `promotion_refused` | Another card is promoting (or took the lock first), or a push failed. | Run `"$AUTORESEARCH_CLI" promotion status`. If this card is the holder at `submitted` (an earlier run of this command succeeded), the bootstrap is done: journal the ids from `promotion status` and finish `done`. Otherwise finish `partial`. |
 | `not_shipped_strategy` | `strategy/STRATEGY.md` in your worktree or on your branch differs from the shipped one, or the build compiled another STRATEGY.md. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, rebuild from it as `GAME.md` says, and run it again. |
-| `gates_failed`, `bad_build`, `artifact_mismatch` | The shipped strategy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
+| `gates_failed`, `bad_build`, `artifact_mismatch` | The starter policy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
 | `platform` | The platform failed. | Run it once more (the same build reuses its upload). After a second failure, finish `partial`. |
 

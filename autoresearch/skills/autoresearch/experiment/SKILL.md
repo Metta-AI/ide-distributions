@@ -35,7 +35,7 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    - "champion unknown" (the promotion ledger and the leaderboard disagree): stop. Send a
      `help_request` and finish `blocked`.
    - "no champion known": this is a fresh install. Make the first champion in this card
-     with the `submit` skill, section "Bootstrap card" (A14: the game's shipped strategy is
+     with the `submit` skill, section "Bootstrap card" (A14: the game's starter policy is
      promoted as champion, with no experiment). Then request the experiment again so it
      designs against that champion:
      `"$AUTORESEARCH_CLI" queue request create --title "Experiment for <H-id>" --mode experimentation --why "first champion bootstrapped; design against it" --ref ar://hypothesis/<H-id>`

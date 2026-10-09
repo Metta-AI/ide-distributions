@@ -40,7 +40,7 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   experiment's candidate.
 - ``bootstrap-champion --build-dir D``: ``softmax_tool.submit.bootstrap_champion``, the
   first champion on a fresh install (A14): with no champion (no published promotion, no
-  leaderboard entry), upload the game's shipped strategy build and promote it through the C8
+  leaderboard entry), upload the game's starter policy build and promote it through the C8
   promotion as a ``bootstrap`` promotion (no experiment). Prints ``{version_id,
   platform_policy_version_id, promotion_id, submission_id, champion_path}``. Refusals:
   ``champion_exists``, ``promotion_in_flight``, ``not_shipped_strategy``,
@@ -743,7 +743,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
         commands,
         "bootstrap-champion",
         _bootstrap_champion,
-        "fresh install: upload the shipped strategy and promote it as the first champion",
+        "fresh install: upload the game's starter policy and promote it as the first champion",
     )
     sub.add_argument("--build-dir", required=True)
 

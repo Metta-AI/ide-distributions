@@ -15,7 +15,7 @@ Design documents (open the HTML files in a browser):
 - [Runtime](docs/designs/autoresearch-runtime-2026-10-06.html): how it runs on Hermes.
 - [Open questions](docs/designs/autoresearch-open-questions-2026-10-07.html).
 - [Implementation plan](docs/plans/2026-10-07-autoresearch-v0/00-overview.md): contracts
-  C1-C12 and amendments A1-A12. The contract numbers in this file refer to it.
+  C1-C12 and amendments A1-A14. The contract numbers in this file refer to it.
 - [Verified Hermes facts](docs/plans/findings/hermes-facts.md): what was checked on Hermes
   v0.21.5.
 
@@ -192,11 +192,11 @@ Read state with the CLI:
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
 On a fresh install there is no champion. The first card that needs one bootstraps it by
-itself (amendment A14): it builds the game's shipped strategy (the `## Baseline build`
+itself (amendment A14): it builds the game's starter policy (the `## Starter policy`
 section of `games/<game>/GAME.md`) and runs
 `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <build dir>`, which uploads it and
 promotes it through the normal promotion, without an experiment. So the first league
-submission is the shipped strategy, unevaluated. Check it with
+submission is the game's starter policy, unevaluated. Check it with
 `"$AUTORESEARCH_CLI" promotion status` and `"$AUTORESEARCH_CLI" softmax leaderboard`.
 
 Where things live:

@@ -60,7 +60,7 @@ def build(candidate: Path, out: Path) -> dict:
         "artifact": "policy.json",
         "strategy_sha256": artifact_hash,
         # The compiled source is a STRATEGY.md: the bootstrap check compares its hash with the
-        # shipped champion STRATEGY (softmax bootstrap-champion, A14).
+        # shipped champion STRATEGY (the starter policy; softmax bootstrap-champion, A14).
         "source_path": "STRATEGY.md",
         "source_hashes": {"STRATEGY.md": artifact_hash},
         "gates": {"local_check": {"passed": True}},

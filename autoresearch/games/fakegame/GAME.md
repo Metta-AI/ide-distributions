@@ -63,10 +63,10 @@ Run each binding from `"$AR_HOME"` with absolute paths.
 - `replay_inspect`: `python3 games/fakegame/tools/fake_eval.py --replay --policy <id> --seed
   <n> --json` prints a per-tick summary. Fake XP requests store no replay files.
 
-## Baseline build
+## Starter policy
 
-The baseline is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.md` (the seed
-strategy). Build it with the `build` binding:
-`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/baseline --json`,
+The starter policy is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.md` (the
+seed strategy). Build it with the `build` binding:
+`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/starter --json`,
 check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
-then promote it as the first champion with `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <worktree>/.scratch/build/baseline`.
+then submit it as the first champion with `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <worktree>/.scratch/build/starter`.

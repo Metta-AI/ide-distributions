@@ -23,7 +23,7 @@ candidate STRATEGY at the champion path in the worker's worktree. Its refusals b
 ``promotion_refused``. On success the version gets a ``submitted`` event in the worktree.
 
 ``bootstrap_champion`` is the other guarded path (amendment A14): on a fresh install with no
-champion, it uploads the game's shipped strategy build and promotes it as the first champion
+champion, it uploads the game's starter policy build and promotes it as the first champion
 through ``promotion.bootstrap_promotion`` (the same C8 steps, a ``bootstrap`` promotion with no
 experiment, outcome or decision). Its guards, in order, before anything is uploaded:
 
@@ -38,7 +38,7 @@ experiment, outcome or decision). Its guards, in order, before anything is uploa
    HEAD's, and every STRATEGY.md source hash the build records (``source_hashes`` entries for
    a ``STRATEGY.md``, or ``strategy_sha256`` when ``source_path`` is one) equals it
    (``not_shipped_strategy``). A build that names no STRATEGY.md source (a prebuilt
-   artifact) cannot be tied to it here; the game's ``## Baseline build`` and the build's
+   artifact) cannot be tied to it here; the game's ``## Starter policy`` section and the build's
    provenance are responsible for that.
 
 Then ``upload.upload_bootstrap`` (idempotent within the card's view of the records), a commit
