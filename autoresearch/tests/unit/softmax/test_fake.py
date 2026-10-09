@@ -51,6 +51,12 @@ def test_whoami_answers_for_the_credential_not_the_expected_player(tmp_path):
     assert plain.whoami().player_id == "ply_x"  # no player in the credential: the expected one
 
 
+def test_agent_token_credential_has_no_expiry(tmp_path):
+    sm = make(tmp_path, AUTORESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="cga_abc")
+    assert sm.whoami().expires_at is None
+    sm.submit("pv_1", "lg_1")  # the C6 check passes: a non-expiring Player
+
+
 def test_identity_faults(tmp_path):
     sm = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="identity=user;player=ply_other;expires_in=60")
     ident = sm.whoami()

@@ -8,7 +8,16 @@ from autoresearch.softmax_tool.fake import FakeSoftmax
 from autoresearch.softmax_tool.identity import IdentityError
 from autoresearch.softmax_tool.protocol import from_env
 
-from .conftest import FIXTURES, LEAGUE_ID, PLAYER_ID, completed, recorded, synthetic
+from .conftest import (
+    AGENT_TOKEN,
+    FIXTURES,
+    LEAGUE_ID,
+    PLAYER_ID,
+    FakeRunner,
+    completed,
+    recorded,
+    synthetic,
+)
 
 LABEL = "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA:v1"
 SPEC = {"league_id": LEAGUE_ID, "num_episodes": 4, "roster": [{"player": {"random": True}}] * 10}
@@ -239,3 +248,34 @@ def test_game_version_is_stripped(env, runner, tmp_path):
     runner.on("coworld", "leagues", response=completed(recorded("leagues_get.json")))
     runner.on("coworld", "show", response=completed(json.dumps({**shown, "version": " 7.1\n"})))
     assert make(env, runner, tmp_path).game_version(LEAGUE_ID) == "7.1"
+
+
+def test_agent_token_on_a_local_server_runs_the_whole_cycle(env, tmp_path):
+    """A ``cga_`` agent token with ``COGAMES_API_URL`` set (the hosting runtime's setup): every
+    mutating call still checks whoami first, and every call (``FakeRunner`` asserts it) passes
+    the configured server as ``--server``."""
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    env["COGAMES_API_URL"] = "http://127.0.0.1:8000/api"
+    runner = FakeRunner(server="http://127.0.0.1:8000/api")
+    runner.on("softmax", "status", response=completed(recorded("softmax_status.txt")))
+    with_mutations(runner).on(
+        "coworld", "submissions", response=completed(recorded("submissions_league.json"))
+    )
+    sm = make(env, runner, tmp_path)
+    assert sm.whoami().expires_at is None
+    sm.upload(tmp_path / "policy.bas", "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA")
+    sm.submit(LABEL, LEAGUE_ID)
+    sm.xp_create("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", 9, 1, SPEC)
+    sm.submissions(PLAYER_ID)
+    tools = [argv[:2] for argv in runner.argvs()]
+    assert tools == [
+        ["softmax", "status"],
+        ["softmax", "status"],
+        ["coworld", "upload-policy"],
+        ["softmax", "status"],
+        ["coworld", "submit"],
+        ["coworld", "xp-request"],
+        ["softmax", "status"],
+        ["coworld", "xp-request"],
+        ["coworld", "submissions"],
+    ]

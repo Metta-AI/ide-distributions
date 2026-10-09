@@ -343,8 +343,9 @@ def signal_persists(
     )
 
 
-def agent_paused(reasons: str, paused_at: str) -> RuntimeMessage:
-    """queue-keeper preflight failed and paused the agent (one per pause)."""
+def agent_paused(reasons: str, paused_at: str, key: str | None = None) -> RuntimeMessage:
+    """queue-keeper preflight failed and paused the agent: one per pause, or one per ``key``
+    when given (a streak of unavailable ``whoami`` runs)."""
     body = (
         f"The agent is paused because the preflight check failed: {reasons}. No new cards "
         "start, and pending cards were unassigned. Running cards stop at their next identity "
@@ -355,8 +356,8 @@ def agent_paused(reasons: str, paused_at: str) -> RuntimeMessage:
         "help_request",
         "Agent paused: preflight failed",
         body,
-        key=f"paused:{paused_at}",
-        legacy_title=f"Agent paused at {paused_at}",
+        key=key or f"paused:{paused_at}",
+        legacy_title=None if key else f"Agent paused at {paused_at}",
     )
 
 

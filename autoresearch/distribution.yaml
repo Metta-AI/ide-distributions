@@ -9,8 +9,9 @@ env_requires:
   - name: SOFTMAX_PLAYER_CREDENTIAL
     required: true
     description: >-
-      Credential of the Softmax player account the agent acts as, as JSON
-      {"token": "ply_...", "expires_at": "<ISO 8601>"} (one entry of
+      Credential of the Softmax player account the agent acts as: a bare cga_ agent
+      token (what Softmax hosting provisions; it does not expire), or a Player session
+      as JSON {"token": "ply_...", "expires_at": "<ISO 8601>"} (one entry of
       player_sessions.<server>.cache written by `coworld player use <ply_id>`).
   - name: AUTORESEARCH_PLAYER_ID
     required: true
@@ -18,6 +19,12 @@ env_requires:
   - name: AUTORESEARCH_WORKSPACE_REMOTE
     required: true
     description: Git remote URL of the canonical workspace repository.
+  - name: COGAMES_API_URL
+    required: false
+    default: https://softmax.com/api
+    description: >-
+      Softmax API server. Every softmax/coworld call passes it as --server. Softmax
+      hosting writes it to the profile .env.
   - name: OPENROUTER_MODEL
     required: false
     default: moonshotai/kimi-k3

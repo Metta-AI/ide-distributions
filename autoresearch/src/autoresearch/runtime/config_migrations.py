@@ -49,6 +49,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_QUEUE",  # the serial fallback selects the queue through it (A4)
     "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
     "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
+    "COGAMES_API_URL",  # the Softmax API server; the hosting runtime writes it to the .env
 ]
 APPROVAL_DENY = [
     "coworld player use*",
