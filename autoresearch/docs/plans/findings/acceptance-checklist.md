@@ -201,7 +201,7 @@ Full text: `00-overview.md` and `hermes-facts.md`.
 
 | Id | Issue | What to do |
 |---|---|---|
-| A1 | `uv tool install git+...` fails (Hermes `setup.py` refuses wheel builds). | Clone tag `v2026.9.24` and run `uv tool install --python 3.12 -e .`, or use `install.sh`. |
+| A1 | `uv tool install git+...` fails (Hermes `setup.py` refuses wheel builds). | Clone tag `v2026.9.24` and run `uv tool install --python 3.12 -e .`, or use `install.sh`. The EC2 target image runs Hermes v0.21.6; both versions are supported ([image check](hermes-image-compat.md)). |
 | A2 | `kanban init` fails on a new board slug. | Bootstrap uses `hermes kanban boards create`. No action. Board databases are host-wide. |
 | A3 | One gateway dispatcher per host uses the host default profile config. | Set the three host settings (2.2). |
 | A4 | Under the gateway, a cron script gets only the names on `terminal.env_passthrough`. Worker terminals see the whole profile `.env` except provider keys. | The plugin, not env filtering, protects the Softmax credential (see 2.8, risk 1). |
