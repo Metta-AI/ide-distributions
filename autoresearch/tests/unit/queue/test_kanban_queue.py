@@ -348,10 +348,16 @@ def test_drop_archives_a_pending_card_hermes_will_not_complete(fake, queue, stat
     fake.reply("show", {"task": task_json(status), "runs": []})
     queue.drop("t_abc", "obsolete")
     assert fake.argvs()[-2:] == [
-        [*BOARD, "comment", "t_abc", "dropped: obsolete"],
         [*BOARD, "archive", "t_abc"],
+        [*BOARD, "comment", "t_abc", "dropped: obsolete"],  # after: a retry does not repeat it
     ]
     assert all(argv[3] != "complete" for argv in fake.argvs())
+
+
+def test_archived_task_ids_come_from_the_list_with_archived_tasks(fake, queue):
+    fake.reply("list", [task_json("archived", task_id="t_gone"), task_json("ready")])
+    assert queue.archived_task_ids() == {"t_gone"}
+    assert fake.argvs()[-1] == [*BOARD, "list", "--archived", "--json"]
 
 
 def test_an_archived_card_reads_as_completed(fake, queue):

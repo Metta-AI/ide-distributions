@@ -565,6 +565,103 @@ def test_a_failing_op_is_contained_retried_then_given_up_once(host, monkeypatch)
     assert len(_help_requests(host, drop)) == 1
 
 
+def test_a_give_up_whose_marker_commit_fails_is_not_reported_twice(host, monkeypatch):
+    from autoresearch.runtime import queue_ops
+
+    host.tick(at(0))
+    stuck = host.runtime_request(spec=_spec("Stuck child"))
+    host.tick(at(1))
+
+    def refuse(task_id, reason):
+        raise RuntimeError("cannot complete: unsatisfied parent dependencies")
+
+    monkeypatch.setattr(host.queue, "drop", refuse)
+    real_record = queue_ops._record
+    failed_records = []
+
+    def lose_first_failed_marker(canonical, request, state, detail):
+        if state == "failed" and not failed_records:
+            failed_records.append(state)
+            raise RuntimeError("commit failed")
+        real_record(canonical, request, state, detail)
+
+    monkeypatch.setattr(queue_ops, "_record", lose_first_failed_marker)
+    drop = host.runtime_request("drop", target_request=stuck, reason="stale")
+    for minute in (2, 3, 4):
+        host.tick(at(minute))
+    assert host.committed(host.ledger / "ops" / f"{drop}.json") is None  # its commit failed
+    assert len(_help_requests(host, drop)) == 1  # published before the marker
+
+    assert host.tick(at(5)).ops[0].state == "failed"
+    assert host.committed(host.ledger / "ops" / f"{drop}.json")["state"] == "failed"
+    assert len(_help_requests(host, drop)) == 1  # not published again
+
+
+def test_a_given_up_drop_is_recorded_once_a_human_archives_the_card(host, monkeypatch):
+    """The give-up help_request asks a human to archive the card; the runtime then records
+    the drop (receipt dropped), and the archived card is never rebuilt or re-admitted."""
+    from support.archiving_queue import ArchivingQueue
+
+    host.queue = ArchivingQueue(host.queue)
+    host.tick(at(0))
+    stuck = host.runtime_request(spec=_spec("Stuck child"))
+    host.tick(at(1))
+    stuck_task = host.receipt(stuck)["tasks"][-1]["task_id"]
+
+    def refuse(task_id, reason):
+        raise RuntimeError("cannot complete: unsatisfied parent dependencies")
+
+    monkeypatch.setattr(host.queue, "drop", refuse)
+    drop = host.runtime_request("drop", target_request=stuck, reason="stale")
+    for minute in (2, 3, 4):
+        host.tick(at(minute))
+    assert host.committed(host.ledger / "ops" / f"{drop}.json")["state"] == "failed"
+    assert host.tick(at(5)).ops == []  # still on the board: nothing to record
+
+    host.queue.archive(stuck_task)  # the human follows the help_request
+    result = host.tick(at(6))
+
+    assert [(o.request_id, o.state) for o in result.ops] == [(drop, "applied")]
+    assert host.committed(host.ledger / "ops" / f"{drop}.json")["state"] == "applied"
+    assert host.receipt(stuck)["state"] == "dropped"
+    assert result.rebuilt == []
+    assert len(host.receipt(stuck)["tasks"]) == 1  # never re-admitted
+    assert host.tick(at(7)).ops == []
+
+
+def test_a_crash_between_the_archive_and_its_commit_settles_without_a_rebuild(host, monkeypatch):
+    from support.archiving_queue import ArchivingQueue
+
+    from autoresearch.runtime import queue_ops
+
+    host.queue = ArchivingQueue(host.queue)
+    host.tick(at(0))
+    lose = host.runtime_request(spec=_spec("Lose"))
+    host.tick(at(1))
+    lose_task = host.receipt(lose)["tasks"][-1]["task_id"]
+    real_record = queue_ops._record
+    calls = []
+
+    def crash_once(canonical, request, state, detail):
+        calls.append(state)
+        if len(calls) == 1:
+            raise RuntimeError("killed before the commit")
+        real_record(canonical, request, state, detail)
+
+    monkeypatch.setattr(queue_ops, "_record", crash_once)
+    drop = host.runtime_request("drop", target_request=lose, reason="no longer needed")
+    first = host.tick(at(2))
+    assert lose_task in host.queue.archived  # the archive happened, its commit did not
+    assert first.ops[0].state == "retrying"
+    assert host.receipt(lose)["state"] == "admitted"
+
+    second = host.tick(at(3))
+    assert second.rebuilt == []
+    assert [(o.request_id, o.state) for o in second.ops] == [(drop, "applied")]
+    assert host.receipt(lose)["state"] == "dropped"
+    assert len(host.receipt(lose)["tasks"]) == 1
+
+
 def test_missing_host_requirements_get_one_help_request_and_no_pause(host):
     """On the box GotA build cards each failed fast for want of GOTA_* and Nim; queue-keeper
     now says so once instead of every card discovering it."""

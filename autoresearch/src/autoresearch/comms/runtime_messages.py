@@ -374,7 +374,7 @@ def queue_op_failed(
         what_now = (
             "The card stays on the board and may still run. To remove it, archive it with "
             f"`hermes kanban --board {board} archive <card>`, where <card> is the card named "
-            "in this message's about field."
+            "in this message's about field; the runtime then records the drop."
         )
     else:
         what_now = "The card keeps its old priority. Send a new task if the order matters."

@@ -71,3 +71,4 @@ def test_drop_of_a_todo_child_of_a_blocked_parent(queue, tmp_path):
     assert (dropped.state, dropped.board_status) == ("completed", "archived")
     assert queue.get(parent).board_status == "blocked"
     assert [c.task_id for c in queue.list()] == [parent]  # archived cards are hidden
+    assert queue.archived_task_ids() == {child}  # rebuild reads them separately

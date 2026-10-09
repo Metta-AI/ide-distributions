@@ -23,7 +23,11 @@ step. Its failure is counted in ``.supervisor/runtime/op_failures.json``
 ``OP_FAILURE_RUNS`` consecutive failing runs the runtime gives up on it: the marker is
 committed with ``state: failed`` (so it is never retried) and one runtime ``help_request``
 (``runtime_key`` ``queue-op-failed:<Q-id>``) says what failed and, for a drop, how a human
-archives the card. On 2026-10-09 on the box, every run failed the whole step on one drop
+archives the card. A ``failed`` drop is looked at again every run: once its card is archived
+(by a human) or otherwise dropped, the marker becomes ``applied`` and the receipt
+``dropped``. Until then rebuild does not re-admit an archived card either
+(``rebuild._classify``), so neither a human archive nor a crash between the archive and this
+module's commit brings the card back. On 2026-10-09 on the box, every run failed the whole step on one drop
 that Hermes refused (``complete`` of a child whose parent was blocked).
 """
 
@@ -193,6 +197,24 @@ def _apply_one(
     return outcome(state, detail)
 
 
+def _settle_failed_drop(ctx: RunContext, queue: Queue, request: dict) -> OpOutcome | None:
+    """A drop the runtime gave up on whose card is now dropped (a human archived it, as the
+    help_request asks): record it ``applied`` and the receipt ``dropped``. None while the
+    card is still there, or when the check fails (tried again next run)."""
+    canonical = ctx.canonical
+    target = receipt_path(ledger_of(canonical), request["target_request"])
+    try:
+        receipt = committed_json(canonical, target)
+        if not _already_dropped(_target_card(queue, receipt)):
+            return None
+        detail = "card dropped (archived) after the runtime gave up"
+        with canonical_lock(canonical):
+            _record(canonical, request, "applied", detail)
+    except Exception:  # noqa: BLE001 - per-op containment; checked again next run
+        return None
+    return OpOutcome(request["id"], "drop", request["target_request"], "applied", detail)
+
+
 def apply_ops(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> list[OpOutcome]:
     """Apply every committed reprioritize/drop request with no marker yet (module docstring).
     One op's failure is contained and counted; it never raises out of here for a queue or
@@ -204,7 +226,12 @@ def apply_ops(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> l
     for request in read_requests(canonical, "HEAD"):
         if request.get("op") not in OPS:
             continue
-        if committed_json(canonical, op_marker_path(canonical, request["id"])) is not None:
+        marker = committed_json(canonical, op_marker_path(canonical, request["id"]))
+        if marker is not None:
+            if marker["state"] == "failed" and request["op"] == "drop":
+                settled = _settle_failed_drop(ctx, queue, request)
+                if settled is not None:
+                    outcomes.append(settled)
             continue
         pending.append(request["id"])
         outcomes.append(_apply_one(ctx, queue, request, failures, allow_no_remote))
