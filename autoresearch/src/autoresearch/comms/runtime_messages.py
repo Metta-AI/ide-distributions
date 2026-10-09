@@ -497,6 +497,25 @@ def card_models_invalid(value: str, problems: list[str]) -> RuntimeMessage:
     )
 
 
+def host_requirements_missing(game: str, problems: list[str]) -> RuntimeMessage:
+    """The workers lack something the game's ``host_requirements`` declare (one per game and
+    distinct set of problems)."""
+    digest = hashlib.sha256("\n".join(sorted(problems)).encode("utf-8")).hexdigest()[:12]
+    body = (
+        f"The {game} game needs these on the host for its builds, and the agent's workers do "
+        f"not have them: {'; '.join(problems)}. Cards that build a policy will fail until "
+        "they are set up; other work goes on. Please have the operator fix the host setup "
+        "(the profile .env, or the provisioning that writes it). The game's GAME.md says "
+        "what each one is."
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title("Host setup missing for game builds", game),
+        body,
+        key=f"host-requirements:{game}:{digest}",
+    )
+
+
 # --- queue-keeper ---
 
 

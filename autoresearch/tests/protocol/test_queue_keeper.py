@@ -565,6 +565,27 @@ def test_a_failing_op_is_contained_retried_then_given_up_once(host, monkeypatch)
     assert len(_help_requests(host, drop)) == 1
 
 
+def test_missing_host_requirements_get_one_help_request_and_no_pause(host):
+    """On the box GotA build cards each failed fast for want of GOTA_* and Nim; queue-keeper
+    now says so once instead of every card discovering it."""
+    host.game = dataclasses.replace(
+        host.game, host_env=("GAME_BUILD_PYTHON",), host_tools=("no-such-tool-xyz",)
+    )
+    host.tick(at(0))
+    result = host.tick(at(1))
+    assert len(result.host_problems) == 2
+    assert not result.paused and "host" not in result.failures
+    [help_request] = _help_requests(host, "Host setup missing")
+    assert "GAME_BUILD_PYTHON" in help_request["body"] and "no-such-tool-xyz" in help_request["body"]
+    host.tick(at(2))
+    assert len(_help_requests(host, "Host setup missing")) == 1  # once per distinct set
+
+    with (host.home / ".env").open("a") as env_file:
+        env_file.write("GAME_BUILD_PYTHON=/usr/bin/env\n")
+    assert host.tick(at(3)).host_problems == ["no-such-tool-xyz is not on the workers' PATH"]
+    assert len(_help_requests(host, "Host setup missing")) == 2  # a new set is reported
+
+
 def test_a_second_planning_request_joins_the_backlog(host):
     host.tick(at(0))  # the cadence planning request
     extra = host.runtime_request(spec=_spec("Plan the jungle", "planning"))

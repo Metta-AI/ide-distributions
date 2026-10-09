@@ -57,6 +57,13 @@ silent fallback. Core code never names a game.
   queue-keeper fetches `repo` into `$HERMES_HOME/local/game-source/<game>/` and renews
   claims whose cited lines did not change (and requests re-verification for the others).
   Without `source`, claims only go stale on a game-version change.
+- `host_requirements` (optional): `{env: [<VAR>, …], tools: [<executable>, …]}`, what a
+  worker needs on the host to run the bindings (for example a build). Queue-keeper checks
+  them every run against what workers see (the profile `.env` over the job's environment,
+  and its `PATH`): a variable must be set (and, when its value is an absolute path, that
+  path must exist), and a tool must be on that `PATH`. Missing ones are logged and reported
+  in one runtime `help_request` per distinct set, instead of each card discovering them
+  through a failing build.
 
 The body must have a `## Seats and opponents` section: how many seats an episode has, which
 slots our policy fills (`seats` in a design), any team rules (which slots play together), and

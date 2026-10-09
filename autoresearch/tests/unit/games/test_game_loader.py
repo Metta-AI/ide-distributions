@@ -212,3 +212,23 @@ def test_source_is_optional_and_validated(tmp_path):
         bad()
     message = str(error.value)
     assert "source.repo" in message and "source.pin" in message and "source.extra" in message
+
+
+def test_host_requirements_are_optional_and_validated(tmp_path):
+    fakegame = load_game(Path(__file__).resolve().parents[3], "fakegame")
+    assert (fakegame.host_env, fakegame.host_tools) == ((), ())
+    game = _game_with(tmp_path, "host_requirements: {env: [GAME_PY], tools: [nim]}\n")()
+    assert (game.host_env, game.host_tools) == (("GAME_PY",), ("nim",))
+    bad = _game_with(tmp_path / "b", "host_requirements: {env: GAME_PY, tool: [nim]}\n")
+    with pytest.raises(GameError) as error:
+        bad()
+    assert "host_requirements.env" in str(error.value)
+    assert "host_requirements.tool" in str(error.value)
+
+
+def test_gota_declares_its_build_host_requirements():
+    """On the box, GotA builds failed fast on workers for want of these (GAME.md documents
+    them as host requirements)."""
+    gota = load_game(Path(__file__).resolve().parents[3], "gota")
+    assert set(gota.host_env) == {"GOTA_HERMES_PYTHON", "GOTA_TIRITH_BIN"}
+    assert gota.host_tools == ("nim",)

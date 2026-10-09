@@ -155,6 +155,15 @@ FIXTURES = {
             "refs": [],
         }
     ],
+    "host_requirements_missing": [
+        {
+            "game": "gota",
+            "problems": [
+                "GOTA_HERMES_PYTHON is not set in the profile .env",
+                "nim is not on the workers' PATH",
+            ],
+        }
+    ],
     "card_models_invalid": [
         {"value": "planing=z-ai/glm-5.3", "problems": ["unknown card mode 'planing' (skipped)"]}
     ],

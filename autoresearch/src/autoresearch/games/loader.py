@@ -45,6 +45,10 @@ class Game:
       how to read the commit the current game version runs (one of ``PIN_SOURCES``). With it,
       queue-keeper renews code citations when the commit changes; without it, claims only go
       stale on a version change.
+    - host_env, host_tools: optional ``host_requirements: {env: [...], tools: [...]}``: the
+      environment variables and executables (on PATH) a worker needs for the bindings, such as
+      a build. Queue-keeper checks them against what workers see
+      (``preflight.host_requirement_problems``) and warns once when one is missing.
     """
 
     name: str
@@ -59,6 +63,8 @@ class Game:
     compiler: Literal["pw", "basic", "none"]
     guide: str
     source: dict[str, str] | None = None
+    host_env: tuple[str, ...] = ()
+    host_tools: tuple[str, ...] = ()
 
 
 def _is_text(value) -> bool:
@@ -121,7 +127,23 @@ def _check_fields(meta: dict) -> list[str]:
     if meta.get("compiler") not in COMPILERS:
         problems.append("compiler: must be one of pw, basic, none")
     _check_source(meta, problems)
+    _check_host_requirements(meta, problems)
     return problems
+
+
+def _check_host_requirements(meta: dict, problems: list[str]) -> None:
+    requirements = meta.get("host_requirements")
+    if requirements is None:
+        return
+    if not isinstance(requirements, dict):
+        problems.append("host_requirements: must be a map with env and/or tools")
+        return
+    for key in ("env", "tools"):
+        names = requirements.get(key, [])
+        if not isinstance(names, list) or not all(_is_text(name) for name in names):
+            problems.append(f"host_requirements.{key}: must be a list of names")
+    for extra in sorted(set(requirements) - {"env", "tools"}):
+        problems.append(f"host_requirements.{extra}: unknown field")
 
 
 def _check_source(meta: dict, problems: list[str]) -> None:
@@ -160,6 +182,8 @@ def load_game(repo_root: Path, name: str) -> Game:
         compiler=meta["compiler"],
         guide=body,
         source=dict(meta["source"]) if meta.get("source") is not None else None,
+        host_env=tuple((meta.get("host_requirements") or {}).get("env", [])),
+        host_tools=tuple((meta.get("host_requirements") or {}).get("tools", [])),
     )
 
 

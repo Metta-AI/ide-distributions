@@ -4,7 +4,10 @@
 Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
-2. ``preflight`` (C6, A3, A5, A10). On failure, including a preflight that raises: pause
+2. ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
+   them (``preflight.host_requirement_problems``: the profile ``.env`` over this job's
+   environment): missing ones are logged and get one runtime ``help_request`` per distinct
+   set, and the run goes on. On preflight failure, including a preflight that raises: pause
    (C7), one runtime ``help_request`` per pause (per streak for a repeatedly unavailable
    ``whoami``: ``PreflightResult.pause_key``), and stop (exit 0). No admission while paused.
    A ``skipped`` preflight (``whoami`` unavailable, fewer than 3 times in a row) stops the run
@@ -129,7 +132,11 @@ from autoresearch.runtime.memory_snapshot import snapshot_memory
 from autoresearch.runtime.merge import find_orphan_done, process_handoffs
 from autoresearch.runtime.pause import is_paused, pause, pause_path, resume
 from autoresearch.runtime.planning import planning_request
-from autoresearch.runtime.preflight import PreflightResult, preflight
+from autoresearch.runtime.preflight import (
+    PreflightResult,
+    host_requirement_problems,
+    preflight,
+)
 from autoresearch.runtime.queue_ops import apply_ops
 from autoresearch.runtime.rebuild import needs_rebuild, rebuild, request_calibration
 from autoresearch.runtime.routing import (
@@ -179,6 +186,7 @@ class KeeperRun:
     published: list[PublishResult] = field(default_factory=list)
     admitted: list[AdmissionResult] = field(default_factory=list)
     ops: list = field(default_factory=list)
+    host_problems: list = field(default_factory=list)  # game host requirements workers lack
     signals: list = field(default_factory=list)
     planning: CardSpec | None = None
     orphans: list[str] = field(default_factory=list)
@@ -697,6 +705,25 @@ def _card_models_check(
             publish_message(ctx.canonical, message, allow_no_remote, expects_response=True)
 
 
+def _host_requirements_check(
+    ctx: RunContext, game: Game, env: Mapping[str, str], allow_no_remote: bool
+) -> list[str]:
+    """The game's ``host_requirements`` that workers lack (``preflight``): a log line every
+    run and one help_request per distinct set. A warning, not a pause or a step failure: a
+    missing build tool stops builds, not the rest of the agent's work."""
+    problems = host_requirement_problems(game.host_env, game.host_tools, env, ctx.hermes_home)
+    if not problems:
+        return []
+    _log(ctx, f"host requirements of {game.name} missing: {'; '.join(problems)}")
+    if not (ctx.canonical / ".git").exists():
+        return problems
+    message = runtime_messages.host_requirements_missing(game.name, problems)
+    with canonical_lock(ctx.canonical):
+        if not already_published(ctx.canonical, message):
+            publish_message(ctx.canonical, message, allow_no_remote, expects_response=True)
+    return problems
+
+
 def _rebuild_step(ctx, queue, sm, game_version, now, allow_no_remote) -> list[CardSpec]:
     if not needs_rebuild(ctx, queue):
         return []
@@ -757,6 +784,9 @@ def _run_steps(
     for warning in run.preflight.warnings:
         _log(ctx, f"preflight warning: {warning}")
     _card_models_check(run, ctx, env, allow_no_remote)
+    run.host_problems = (
+        _step(run, ctx, "host", _host_requirements_check, ctx, game, env, allow_no_remote) or []
+    )
     if run.preflight.skipped:
         _log(ctx, "preflight skipped this run: whoami unavailable")
         # The spend caps read only the local state.db and the board, not Softmax: cards keep

@@ -20,6 +20,9 @@ compiler: pw
 league_id: league_3c60897b-25cf-4b37-9d1a-8554c1198f28
 noise_source: league_episodes
 layers: [P,K,S,SK,C,G,ST,A]
+host_requirements:
+  env: [GOTA_HERMES_PYTHON, GOTA_TIRITH_BIN]
+  tools: [nim]
 ---
 # Gods of the Arena
 
@@ -137,7 +140,9 @@ v0.21.5. Set `GOTA_HERMES_PYTHON` to that Hermes installation's Python executabl
 installed, verified executable tirith scanner. The adapter creates a separate compiler
 Hermes home, copies that scanner into its fresh home and synchronously verifies readiness before
 model execution, and restricts child writes to compiler scratch. Host provisioning
-and credentials remain the installer's responsibility.
+and credentials remain the installer's responsibility. The front matter's
+`host_requirements` lists the variables and tools workers need; queue-keeper sends
+one help request when one of them is missing from what workers see.
 
 Online builds resolve the current league through `"$AUTORESEARCH_CLI" softmax
 game-version` and the shared credential-preserving platform transport. Set
