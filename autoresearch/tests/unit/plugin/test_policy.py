@@ -534,6 +534,76 @@ def test_file_tools_and_code_cannot_write_the_inbox(layout):
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        '"$AUTORESEARCH_CLI" runtime accept-commits abc1234',
+        "cd {canon} && python -m autoresearch runtime accept-commits HEAD",
+        "{cli} runtime accept-commits HEAD",
+        "python3 -c \"import subprocess; subprocess.run(['{cli}', 'runtime', 'accept-commits', 'x'])\"",
+    ],
+)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_accepting_canonical_commits_is_blocked_in_every_agent_session(layout, command, card):
+    """C1: a commit the runtime did not make pauses the agent until a human checks it."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed and "human operator" in reason and "D-27" in reason
+    assert _terminal(layout, '"$AUTORESEARCH_CLI" runtime check-commits', card=card)[0]
+
+
+# The 2026-10-09 incident, and other interpreter code that writes canonical (C1, D-27).
+INCIDENT_SCRIPT = """cd {worker} && python3 - <<'PYEOF'
+import fcntl, json, subprocess
+ws = "{canon}"
+lock = open(ws + "/.supervisor/runtime/canonical.lock", "a")
+fcntl.flock(lock, fcntl.LOCK_EX)
+json.dump({{"state": "admitted"}}, open(ws + "/.supervisor/ledger/requests/Q-1.json", "w"))
+subprocess.run(["git", "-C", ws, "commit", "-am", "admit Q-1"], check=True)
+PYEOF"""
+CANONICAL_CODE_WRITES = [
+    INCIDENT_SCRIPT,
+    "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', '-C', '{canon}', 'commit', '-m', 'x'])\nEOF",
+    "python3 <<< \"open('{canon}/plan.md', 'w').write('x')\"",
+    "echo \"import os; os.rename('{canon}/plan.md', 'y')\" | python3 - --flag",
+    "python3 -c \"import os; open(os.environ['AUTORESEARCH_WORKSPACE'] + '/plan.md', 'w')\"",
+    "python -c \"import fcntl; fcntl.flock(open('x/canonical.lock'), 2)\"",
+    "python3 -c \"open('.supervisor/ledger/pause.json', 'w').write('{{}}')\"",
+]
+
+
+@pytest.mark.parametrize("command", CANONICAL_CODE_WRITES)
+def test_interpreter_code_that_writes_canonical_is_refused(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert not allowed, command
+    assert "only the runtime writes canonical" in reason and "D-27" in reason
+
+
+def test_execute_code_that_writes_canonical_is_refused(layout):
+    ctx = layout.ctx()
+    code = f"import subprocess\nsubprocess.run(['git', '-C', '{layout.canonical}', 'commit'])"
+    allowed, reason = tool_policy("execute_code", {"code": code}, ctx, WORKING)
+    assert not allowed and "D-27" in reason
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        # the worker's own worktree, under canonical/.worktrees/
+        "open('{worker}/notes/a.md', 'w').write('x')",
+        "import subprocess; subprocess.run(['git', '-C', '{worker}', 'commit', '-am', 'x'])",
+        # reading canonical
+        "print(open('{canon}/plan.md').read())",
+        "import subprocess; subprocess.run(['git', '-C', '{canon}', 'log', '-1'])",
+    ],
+)
+def test_interpreter_code_in_the_worktree_or_reading_canonical_is_allowed(layout, code):
+    filled = _fill(code, layout)
+    assert tool_policy("execute_code", {"code": filled}, layout.ctx(), WORKING)[0], code
+    heredoc = f"python3 - <<'EOF'\n{filled}\nEOF"
+    assert tool_policy("terminal", {"command": heredoc}, layout.ctx(), WORKING)[0], code
+    assert _terminal(layout, "python3 .scratch/s.py")[0]  # a script file is not inspected
+
+
+@pytest.mark.parametrize(
     ("command", "program"),
     [
         ('"$AUTORESEARCH_CLI" queue list | grep x', "grep"),

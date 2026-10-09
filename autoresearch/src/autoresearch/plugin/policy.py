@@ -36,7 +36,19 @@
   queue-keeper adopts only files they own (`comms.inbound.adopt_direct_writes`);
 - resolving a champion conflict (A9: the pause holds until a human resolves it): the
   operator command `promotion accept-champion` in any agent session (also the approvals deny
-  globs `*promotion accept-champion[ *]`; the command itself refuses in a card context).
+  globs `*promotion accept-champion[ *]`; the command itself refuses in a card context);
+- clearing a commit provenance pause (C1, ``runtime.provenance``): the operator command
+  `runtime accept-commits` in any agent session (approvals deny globs
+  `*runtime accept-commits[ *]`; the command refuses in a card context), and code text that
+  names it;
+- canonical writes from interpreter code (C1, D-27; best effort): `python -c`, a Python
+  script read from stdin (`python3 - <<EOF`, a here-string, a pipe) and `execute_code` text
+  that names the canonical workspace (its path, not under `.worktrees/`, or
+  `AUTORESEARCH_WORKSPACE` / `HERMES_WRITE_SAFE_ROOT`), `.supervisor/ledger` or
+  `canonical.lock`, and also looks like a write, a lock or a git write
+  (``CANONICAL_WRITE_HINT``). On 2026-10-09 a card worker committed on canonical `main` from
+  a `python3 - <<'PYEOF'` script after reasoning that `git commit` would be refused.
+  queue-keeper's provenance check detects such a commit after the fact, whatever wrote it.
 
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
 (`tools/terminal_tool.py`
@@ -72,9 +84,10 @@ blocked command, not an adversary. Known unhandled forms:
   `HERMES_DELEGATED_CHILD_CONTEXT`; nothing stops raw sqlite), and a command word taken from a
   variable set by a substitution (`h=$(which hermes); "$h" kanban create ...`);
 - interpreter writes in general: a `python -c`, `execute_code`, `node -e`, `perl -e`, ... body
-  can write any file the user can. Only a literal check stops `python -c` and `execute_code`
-  text that names the identity files (the profile `.env` with `HERMES_HOME` or its path, or
-  `.softmax`); a constructed path passes. The softmax tool therefore never takes identity
+  can write any file the user can. Only a literal check stops `python -c`, stdin Python and
+  `execute_code` text that names the identity files (the profile `.env` with `HERMES_HOME` or
+  its path, or `.softmax`) or the canonical workspace with a write; a constructed path, a
+  script file run by name, and other interpreters pass. The softmax tool therefore never takes identity
   from the `.env` (it only refuses when the `.env` differs from its spawn-time identity).
   The same holds for `comms/inbox`: a constructed path passes the literal check, which is why
   inbox adoption also checks the file owner when `AUTORESEARCH_INBOX_WRITERS` is set.
@@ -241,6 +254,18 @@ ACCEPT_CHAMPION = (
     "until a person resolves it (A9). Record the conflict in the journal; the runtime already "
     "told the user."
 )
+ACCEPT_COMMITS = (
+    "`runtime accept-commits` is for a human operator: a commit the runtime did not make "
+    "pauses the agent until a person checks it (C1). Do not work around this (D-27)."
+)
+CANONICAL_WRITE = (
+    "code that writes the canonical workspace, its ledger or canonical.lock is blocked: only "
+    "the runtime writes canonical (C1). A refusal is not something to work around (D-27): do "
+    "not reach the same effect through another interpreter, script, path or identity. Record "
+    "the refusal in your journal, stage a help_request, and finish blocked "
+    '("$AUTORESEARCH_CLI" card finish --outcome blocked). Your own changes go in your '
+    "worktree; canonical bookkeeping goes through \"$AUTORESEARCH_CLI\"."
+)
 INBOX_DIR_TEXT = "comms/inbox"
 # Interpreter code naming the inbox is refused only when it also looks like a write; a read
 # (`print(open(".../comms/inbox/x.json").read())`) passes. Literal and best effort, like the
@@ -249,6 +274,20 @@ CODE_WRITE_HINT = re.compile(
     r"""['"][rwax]?[wax+][bt]?['"]|write|rename|replace|symlink|link|copy|move|touch|mkdir"""
     r"""|unlink|remove|rmtree|chmod|truncate|dump"""
 )
+
+
+# Canonical names in code (besides its path): the ledger, the canonical lock, and the env
+# vars that hold the canonical path. Interpreter code naming one of them is refused when it
+# also looks like a write, a lock or a git write. Literal and best effort.
+CANONICAL_TEXTS = (
+    ".supervisor/ledger", "canonical.lock", "AUTORESEARCH_WORKSPACE", "HERMES_WRITE_SAFE_ROOT",
+)
+CANONICAL_WRITE_HINT = re.compile(
+    CODE_WRITE_HINT.pattern
+    + r"|flock|lockf|\bcommit|update-ref"
+    + r"|\b(?:merge|rebase|reset|cherry-pick|revert|checkout|stash|add|rm|mv|am|apply|clean)\b"
+)
+ACCEPT_COMMITS_TEXT = re.compile(rf"\bruntime{_SEP}accept-commits\b")
 
 
 def _code_writes_inbox(code: str) -> bool:
@@ -305,8 +344,8 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
                 )
             if isinstance(code, str) and guard.names_identity_files(code):
                 return _block(IDENTITY_FILES)
-            if isinstance(code, str) and _code_writes_inbox(code):
-                return _block(INBOX_WRITE)
+            if isinstance(code, str):
+                guard.check_code(code)
             return ALLOW
     except _Blocked as blocked:
         return _block(str(blocked))
@@ -339,6 +378,31 @@ class _Guard:
         self.inbox_dir = _real(ctx.canonical / INBOX_DIR_TEXT)
         self.trusted = _trusted_cli_words(ctx)
         self.foreground = False  # set per terminal call: waiting rules apply only then
+
+    def names_canonical(self, text: str) -> bool:
+        """Literal check: ``text`` names a canonical text (``CANONICAL_TEXTS``), or the
+        canonical path anywhere but at the start of a path under its ``.worktrees/`` (where
+        card worktrees live, so a worker naming its own worktree passes)."""
+        if any(name in text for name in CANONICAL_TEXTS):
+            return True
+        for root in {str(self.ctx.canonical), str(_real(self.ctx.canonical))}:
+            for match in re.finditer(re.escape(root.rstrip("/")) + r"(?![\w.-])", text):
+                if not text.startswith("/.worktrees/", match.end()):
+                    return True
+        return False
+
+    def check_code(self, code: str) -> None:
+        """Raise `_Blocked` for interpreter code (`python -c`, stdin Python, `execute_code`)
+        that names a blocked command or a protected file and looks like it acts on it."""
+        _refuse_text(code)
+        if ACCEPT_COMMITS_TEXT.search(code):
+            raise _Blocked(ACCEPT_COMMITS)
+        if self.names_identity_files(code):
+            raise _Blocked(IDENTITY_FILES)
+        if _code_writes_inbox(code):
+            raise _Blocked(INBOX_WRITE)
+        if self.names_canonical(code) and CANONICAL_WRITE_HINT.search(code):
+            raise _Blocked(CANONICAL_WRITE)
 
     def names_identity_files(self, text: str) -> bool:
         """Literal check (module docstring): ``text`` names ``.softmax``, or ``.env`` together
@@ -497,6 +561,8 @@ class _Guard:
                 raise _Blocked(INBOX_WRITE)
             if subcommand == ["promotion", "accept-champion"]:
                 raise _Blocked(ACCEPT_CHAMPION)
+            if subcommand == ["runtime", "accept-commits"]:
+                raise _Blocked(ACCEPT_COMMITS)
             if trusted:
                 return []
         if first.startswith("$"):  # `c=coworld; $c submit`
@@ -587,12 +653,14 @@ class _Guard:
                     return [words[module_at].split(".")[0], *words[module_at + 1:]]
                 if "-c" in rest:
                     code_at = index + 1 + rest.index("-c") + 1
-                    code = words[code_at] if code_at < len(words) else ""
-                    _refuse_text(code)
-                    if self.names_identity_files(code):
-                        raise _Blocked(IDENTITY_FILES)
-                    if _code_writes_inbox(code):
-                        raise _Blocked(INBOX_WRITE)
+                    self.check_code(words[code_at] if code_at < len(words) else "")
+                elif _reads_script_from_stdin(rest):
+                    # `python3 - <<'EOF'`, `python3 <<< "..."`, `... | python3`: the script
+                    # is the here-document, here-string or (piped) the whole line.
+                    for text in line.bodies + line.herestrings:
+                        self.check_code(text)
+                    if line.piped:
+                        self.check_code(line.raw)
                 return words[index:]
             elif name in SHELLS:
                 mode, script_at = _shell_mode(words, index + 1)
@@ -672,6 +740,20 @@ class _Guard:
                 inner = [w for w in core[start:] if w not in {";", "+", "{}"}]
                 return self._inspect(inner, cwd, depth, notes, line)
         return []
+
+
+def _reads_script_from_stdin(args: list[str]) -> bool:
+    """Python's arguments after the interpreter name: no script file (only options), or the
+    script ``-`` (stdin)."""
+    index = 0
+    while index < len(args):
+        word = args[index]
+        if word == "-":
+            return True
+        if not word.startswith("-"):
+            return False  # a script file: run by name, not inspected (module docstring)
+        index += 2 if word in PYTHON_VALUE_OPTIONS else 1
+    return True
 
 
 def _check_hermes(args: list[str]) -> None:
