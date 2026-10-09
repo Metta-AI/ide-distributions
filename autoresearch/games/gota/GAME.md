@@ -50,10 +50,11 @@ why those policies answer the question.
 Run bindings from the `autoresearch/` distribution root with the project environment.
 Append the arguments below to the exact front-matter command.
 
-Treat `build` and `local_check` as long commands: Phase H's EC2 timing report
-(`VERDICT-H`, 2026-10-09) attributes approximately 55 minutes to their G3/G4
-workload, not to each gate separately or to model generation. Host speed,
-policy, cache reuse and compiler repair rounds can change the total. See
+Treat `build` and `local_check` as long commands: their G3/G4 workload takes
+approximately 55 minutes, measured on the autoresearch EC2 test box
+(m7i.xlarge), 2026-10-08. This is not a separate timing for each gate or for
+model generation. Host speed, policy, cache reuse and compiler repair rounds
+can change the total. See
 [gate durations](gates/README.md#durations-and-waiting) for the scope.
 Follow the shared `queue` skill's **Long commands** procedure: start each build
 or full local check with the terminal tool's `background: true`, keep its
@@ -232,9 +233,9 @@ git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidat
 ```
 
 Run the build below in its own terminal call with `background: true`. The G3/G4
-workload is approximately 55 minutes on EC2 according to `VERDICT-H`
-(2026-10-09); the separate full `local_check` repeats that workload in a fresh
-context, so budget for both commands. This is not a measured total for every
+workload is approximately 55 minutes, measured on the autoresearch EC2 test box
+(m7i.xlarge), 2026-10-08; the separate full `local_check` repeats that workload
+in a fresh context, so budget for both commands. This is not a measured total for every
 host or a separate 55-minute timing for each gate. Keep the build `session_id`
 and call `process_manage` with `action: "wait"`, that `session_id`,
 `timeout: 1800`; repeat only if `status: "timeout"`, with no polling or sleep

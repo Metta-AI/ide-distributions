@@ -48,10 +48,10 @@ working directory. Cache the locked dependencies before either command.
 
 ## Durations and waiting
 
-Phase H's EC2 timing report (`VERDICT-H`, 2026-10-09) attributes approximately
-55 minutes to the G3/G4 workload in a build or full `local_check`. This is a
-reported operating estimate, not a new benchmark or a separate measurement of
-each gate. No independent timings for G1, G2, G3, G4 or G5 are established here.
+The G3/G4 workload in a build or full `local_check` takes approximately
+55 minutes, measured on the autoresearch EC2 test box (m7i.xlarge), 2026-10-08.
+This is a reported operating estimate, not a new benchmark or a separate
+measurement of each gate. No independent timings for G1, G2, G3, G4 or G5 are established here.
 Compiler generation/repair and cold native preparation add work outside that
 estimate; host speed, policy, early game ends and cache reuse affect the total.
 
