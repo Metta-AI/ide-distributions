@@ -36,7 +36,6 @@ card so the planning cadence does not add an unscripted card, and the go files.
 import hashlib
 import json
 import os
-import shutil
 import signal
 import sqlite3
 import subprocess
@@ -46,6 +45,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from support.hermes_python import hermes_python
 from support.promotion_board import BASELINE_PV, LEAGUE, PV_A, VERSION, design_dict, design_sha256
 
 from autoresearch.io import gitops
@@ -84,12 +84,6 @@ HYPOTHESIS_BODY = (
 
 
 # --- small helpers ----------------------------------------------------------------------
-
-
-def hermes_python() -> str:
-    """The interpreter Hermes runs cron scripts with (as in ``conftest.hermes_python``)."""
-    first_line = Path(shutil.which("hermes")).resolve().read_text(errors="replace").splitlines()[0]
-    return first_line.removeprefix("#!").strip()
 
 
 def openrouter_usage(key: str) -> float:

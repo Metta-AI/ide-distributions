@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from support.hermes_python import hermes_python
 
 DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # .../autoresearch
 REPO_ROOT = DISTRIBUTION_ROOT.parent
@@ -36,13 +37,6 @@ def _test_failed(item) -> bool:
         getattr(item, f"report_{when}", None) is not None and getattr(item, f"report_{when}").failed
         for when in ("setup", "call")
     )
-
-
-def hermes_python() -> str:
-    """The interpreter Hermes runs cron scripts with (its own ``sys.executable``)."""
-    hermes = shutil.which("hermes")
-    first_line = Path(hermes).resolve().read_text(errors="replace").splitlines()[0]
-    return first_line.removeprefix("#!").strip()
 
 
 def uv_cache_dir() -> str:
