@@ -126,7 +126,7 @@ def test_kanban_backend_uses_fake_hermes(worker_env, tmp_path):
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     code, out = run_cli(env, "list")
     assert code == 0 and out["data"]["cards"] == []
-    assert "--board alpha" in log.read_text()
+    assert "--board autoresearch" in log.read_text()  # the board slug, not the profile name
 
 
 def test_kanban_missing_hermes_exits_3(worker_env, tmp_path):
