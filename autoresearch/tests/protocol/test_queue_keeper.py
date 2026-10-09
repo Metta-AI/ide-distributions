@@ -16,7 +16,7 @@ from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import promotion, proposals, queue_keeper, xp_poll
+from autoresearch.runtime import promotion, proposals, provenance, queue_keeper, xp_poll
 from autoresearch.runtime.foreign import report_foreign_cards
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
@@ -831,7 +831,19 @@ def test_foreign_cards_are_reported_once_and_never_merged_while_others_merge(hos
     normal_record = normal.finish()
     host.queue = ForeignBoard(host.queue, forged.task_id, running.task_id, title="Hand-made")
 
-    run = host.tick(at(2))
+    # First protection: the forged receipt was committed on canonical outside the runtime,
+    # so the provenance check pauses before anything merges (C1).
+    stopped = host.tick(at(2))
+    violation = stopped.provenance_violation
+    assert violation.kind == provenance.UNKNOWN_COMMITS and stopped.handoffs == []
+    [forged_commit] = violation.commits
+    assert forged_commit.subject.startswith("admit ")
+    assert len([m for m in host.outbox() if m.get("runtime_key", "").startswith("provenance")]) == 1
+    with canonical_lock(host.canonical):  # what the operator's runtime accept-commits does
+        provenance.accept(host.canonical, forged_commit.sha)
+
+    # Second protection: once accepted, the foreign cards are still never merged.
+    run = host.tick(at(2.5))
 
     assert {"foreign", "handoffs"}.isdisjoint(run.failures)
     assert sorted(run.foreign) == sorted([forged.task_id, running.task_id])

@@ -429,15 +429,15 @@ command in an operator shell prints `false`.
 - **Pause timing.** A budget pause, like a preflight pause, unassigns pending cards on the
   next queue-keeper run; a card Hermes itself returns to `ready` (a crash retry keeps its
   assignee) can start again in the minute before that.
-- **A card worker can still write the canonical workspace through interpreter code.** The
-  plugin refuses shell and file-tool writes outside the worktree, but not a `python3 - <<EOF`
-  script that writes files and runs `git` itself (a residual risk listed in
-  `plugin/policy.py`). On 2026-10-09 a worker used this to commit its own receipt to canonical
-  `main` (`admit Q-... (manual admission repair ...)`), so `card finish` took the handoff of a
-  card that skipped admission. queue-keeper now refuses to merge such a card's work (above),
-  but the single-writer rule (C1) is enforced only by the workers' cooperation, not by the OS.
-  `card finish` now refuses a receipt whose request was never committed, and foreign cards are
-  decided from the ledger, but a worker that can write canonical can forge those files too.
+- **A card worker can still write the canonical workspace through interpreter code.** On
+  2026-10-09 a worker committed its own receipt to canonical `main` from a `python3 - <<EOF`
+  script (`admit Q-... (manual admission repair ...)`), so `card finish` took the handoff of a
+  card that skipped admission. Since then: the plugin refuses literal interpreter writes to
+  canonical (best effort), `card finish` refuses a receipt whose request was never committed,
+  foreign cards are decided from the ledger and never merged (above), and the commit
+  provenance check pauses the agent on any commit the runtime did not make (Operate, and the
+  one-OS-user bullet below). A worker that writes canonical another way can still forge
+  files, but its commit is detected.
 - **A malformed ledger file stops a step.** Routing, handoff processing and rebuild parse every
   committed receipt and handoff; one file that is not valid JSON (only a direct write as above
   can produce one) fails that step every run until a human fixes or removes it.
