@@ -298,3 +298,15 @@ def test_register_registers_five_hooks():
         "pre_llm_call": adapters.pre_llm_call,
         "kanban_task_completed": adapters.kanban_task_completed,
     }
+
+
+def test_first_turn_records_the_session_of_the_card_run(worker_env):
+    """The runtime prices a card from its sessions in state.db (spend caps): the first turn
+    records which session works the card, before anything that can fail."""
+    adapters.pre_llm_call(session_id="20261009_004428_844652", is_first_turn=True)  # no briefing
+    adapters.pre_llm_call(session_id="20261009_004428_844652", is_first_turn=False)
+    [event] = _lines(worker_env / "kanban_events.jsonl")
+    assert event["event"] == "session_start"
+    assert (event["task"], event["run"], event["session_id"]) == (
+        "t_1", "r_1", "20261009_004428_844652",
+    )

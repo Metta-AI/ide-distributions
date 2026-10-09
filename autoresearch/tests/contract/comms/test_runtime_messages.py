@@ -111,6 +111,23 @@ FIXTURES = {
             "refs": [],
         }
     ],
+    "card_over_cap": [
+        {
+            "card_title": "Build and upload the baseline",
+            "why": "it started run 5, and the cap is 4 runs per card",
+            "allowance": "4 more runs and an estimated $4.00 of model spend",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "stop": 1,
+            "refs": [],
+            "outcome": outcome,
+        }
+        for outcome in (rm.STOPPED, rm.TRIAGED, rm.HELD, rm.NOT_STOPPED)
+    ],
+    "card_models_invalid": [
+        {"value": "planing=z-ai/glm-5.3", "problems": ["unknown card mode 'planing' (skipped)"]}
+    ],
+    "daily_budget_reached": [{"spent_usd": 25.31, "budget_usd": 25.0, "day": "2026-10-08"}],
     "signal_persists": [
         {
             "code": "stale_card",

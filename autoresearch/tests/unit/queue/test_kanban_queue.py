@@ -539,3 +539,81 @@ def test_list_skips_a_card_removed_between_list_and_show(fake, queue):
     fake.reply("show", code=1, stderr="kanban: database is locked")
     with pytest.raises(KanbanError, match="locked"):
         queue.list()
+
+
+def test_create_pins_the_model_of_the_card_mode(fake, tmp_path):
+    """Mechanical modes run on a cheaper model: Hermes ``kanban create --model --provider``
+    sets the task's model override, which the dispatcher passes to the worker as ``-m``."""
+    queue = KanbanQueue("board1", "prof", models={"planning": "z-ai/glm-5.3"})
+    fake.reply("create", {"id": "t_abc", "status": "ready", "assignee": None})
+    planning = CardSpec("Q-2", "Plan", "planning", "because", [], "tester", "P2")
+    queue.create_unassigned(planning, "card/Q-2", tmp_path / "wt")
+    queue.create_unassigned(SPEC, "card/Q-1", tmp_path / "wt")  # investigation: not in the map
+    pinned, default = fake.argvs()
+    assert pinned[pinned.index("--model") + 1] == "z-ai/glm-5.3"
+    assert pinned[pinned.index("--provider") + 1] == "openrouter"
+    assert "--model" not in default and "--provider" not in default
+
+
+def test_card_models_default_and_override():
+    from autoresearch.queue.select import DEFAULT_CARD_MODELS, card_models
+
+    assert card_models({}) == DEFAULT_CARD_MODELS == {
+        "planning": "z-ai/glm-5.3",
+        "scouting": "z-ai/glm-5.3",
+        "maintenance": "z-ai/glm-5.3",
+    }
+    assert card_models({"AUTORESEARCH_CARD_MODELS": "planning=a/b, scouting=default"}) == {
+        "planning": "a/b"
+    }
+    assert card_models({"AUTORESEARCH_CARD_MODELS": "none"}) == {}
+
+
+def test_bad_card_model_entries_are_skipped_never_raised():
+    """A typo must not stop queue-keeper, health or submit (they all build the queue)."""
+    from autoresearch.queue.select import card_models, parse_card_models
+
+    models, problems = parse_card_models("planing=a/b, scouting, maintenance=c/d")
+    assert models == {"maintenance": "c/d"}
+    assert len(problems) == 2 and "planing" in problems[0] and "scouting" in problems[1]
+    assert card_models({"AUTORESEARCH_CARD_MODELS": "planning="}) == {}
+
+
+def test_queue_from_env_gives_the_kanban_queue_the_model_map(tmp_path):
+    from autoresearch.queue.select import queue_from_env
+    from autoresearch.runctx import RunContext
+
+    ctx = RunContext(tmp_path / "autoresearch", tmp_path / "ws", None, None, None)
+    queue = queue_from_env({"AUTORESEARCH_CARD_MODELS": "planning=x/y"}, ctx)
+    assert queue.models == {"planning": "x/y"}
+
+
+def _shown(status, events=()):
+    return {"task": task_json(status=status), "runs": [], "events": list(events)}
+
+
+def test_stop_blocks_the_task_with_a_typed_kind_and_reports_where_it_landed(fake, queue):
+    fake.reply("show", _shown("running"))
+    fake.reply("block", "Blocked t_abc")
+    assert queue.stop("t_abc", "spend-cap: card used $4.10 of $4.00") == "running"  # fake show
+    block = [argv for argv in fake.argvs() if "block" in argv]
+    assert block == [[*BOARD, "block", "t_abc", "spend-cap: card used $4.10 of $4.00",
+                      "--kind", "capability"]]
+
+
+def test_a_repeat_stop_alternates_the_kind_so_hermes_keeps_it_blocked(fake, queue):
+    """Same-kind block -> unblock -> block goes to triage in Hermes (BLOCK_RECURRENCE_LIMIT)."""
+    fake.reply("show", _shown("ready", [
+        {"kind": "blocked", "payload": {"kind": "capability"}}, {"kind": "unblocked"},
+    ]))
+    queue.stop("t_abc", "spend-cap: x")
+    [block] = [argv for argv in fake.argvs() if "block" in argv]
+    assert block[-2:] == ["--kind", "needs_input"]
+
+
+@pytest.mark.parametrize("status", ["triage", "todo", "review", "blocked", "scheduled"])
+def test_stop_refuses_statuses_hermes_cannot_block(fake, queue, status):
+    fake.reply("show", _shown(status))
+    with pytest.raises(ValueError):
+        queue.stop("t_abc", "spend-cap: x")
+    assert not [argv for argv in fake.argvs() if "block" in argv]

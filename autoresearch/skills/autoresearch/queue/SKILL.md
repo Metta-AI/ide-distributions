@@ -39,6 +39,28 @@ Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23.
   comes from `"$AUTORESEARCH_CLI" softmax game-version`. Do not read it from a card title or
   an old record.
 
+## Long commands: wait without the model
+
+Every tool call sends the whole conversation to the model again, so each call costs money.
+Waiting is free only inside one call. Use this pattern for every command that can run long
+(a build, a local check, a long fetch):
+
+1. If the command ends within 10 minutes, run it in the foreground and set the terminal
+   `timeout` (at most 600). The call returns as soon as the command ends.
+2. Otherwise start it with the terminal tool's `background: true`, keep the `session_id`,
+   and call the native `process_manage` tool once: action `wait`, that `session_id`,
+   `timeout` 1800 (the longest wait this profile allows). It returns when the process exits,
+   with its exit code and the end of its output. Only if it returns `status: "timeout"`,
+   call `wait` again. Do nothing else in between.
+3. To wait for a process you did not start (a holder that another of your commands left
+   running), start a loop that waits for it with `background: true`, for example
+   `while kill -0 <pid>; do sleep 30; done`, and wait on that loop as in step 2.
+
+Never wait any other way: no `sleep` of 30 seconds or more, no `sleep` loops that check
+`pgrep`, `ps` or `kill -0` in a foreground command (the plugin refuses them), no repeated
+`poll` or `log` calls, and no `kanban_heartbeat` calls to pass the time (Hermes records that
+you are alive while a tool runs). `notify` does not reach a card worker: always `wait`.
+
 ## Procedure
 
 1. Read the briefing. It is in the first message of the card. It names the card title,

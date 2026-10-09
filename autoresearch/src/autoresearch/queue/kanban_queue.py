@@ -11,6 +11,7 @@ import os
 import sqlite3
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 
@@ -54,6 +55,11 @@ class KanbanError(RuntimeError):
 _DELEGATE_FENCE_MESSAGE = "cannot mutate Kanban"
 # Names a board DB read in a KanbanError when no Hermes command ran (``board_db_only``).
 _BOARD_DB_ARGV = ["board-db"]
+# Provider of every per-mode model: the profile's model.provider (config.yaml). Pinned with
+# the model so the worker resolves it on the intended backend (Hermes kanban_parser --provider).
+MODEL_PROVIDER = "openrouter"
+# Hermes statuses ``kanban block`` accepts (``kanban_db.block_task``).
+STOPPABLE_STATUSES = ("running", "ready")
 
 
 class KanbanQueue:
@@ -65,11 +71,21 @@ class KanbanQueue:
         run=subprocess.run,
         hermes_home: Path | None = None,
         board_db_only: bool = False,
+        models: Mapping[str, str] | None = None,
+        model_provider: str = MODEL_PROVIDER,
     ):
         """``board_db_only``: read the board DB directly (read-only) and never run Hermes, for
         callers inside a worker process (the plugin), where every read command would fail on
-        the delegate fence after a costly subprocess start. Mutations still go to Hermes."""
+        the delegate fence after a costly subprocess start. Mutations still go to Hermes.
+
+        ``models``: card mode -> model id. A card of a listed mode is created with Hermes'
+        per-task model override (``kanban create --model <id> --provider <model_provider>``;
+        the dispatcher spawns its worker with ``-m <id> --provider ...``,
+        ``kanban_db_dispatch._worker_argv``). Other modes run on the profile's
+        ``model.default``."""
         self.board = board
+        self.models = dict(models or {})
+        self.model_provider = model_provider
         self.board_db_only = board_db_only
         self.profile = profile
         self.hermes_bin = hermes_bin
@@ -245,6 +261,8 @@ class KanbanQueue:
     def create_unassigned(
         self, spec: CardSpec, branch: str, worktree: Path, idempotency_key: str | None = None
     ) -> str:
+        model = self.models.get(spec.mode)
+        pin = ["--model", model, "--provider", self.model_provider] if model else []
         with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as body_file:
             body_file.write(json.dumps(asdict(spec)))
             body_file.flush()
@@ -255,6 +273,7 @@ class KanbanQueue:
                 "--workspace", f"worktree:{worktree}",
                 "--priority", str(kanban_priority(spec.priority, spec.order)),
                 "--idempotency-key", idempotency_key or f"req:{spec.request_id}",
+                *pin,
                 "--json",
             )  # fmt: skip
         return json.loads(output)["id"]
@@ -281,6 +300,7 @@ class KanbanQueue:
             block_run_id=str(blocking["id"]) if blocking else None,
             current_run_id=current_run_id,
             last_heartbeat_at=last_heartbeat_at,
+            board_status=task["status"],
         )
 
     def list(self, state: str | None = None) -> list[Card]:
@@ -326,6 +346,38 @@ class KanbanQueue:
             self._kanban("reclaim", task_id)
         else:
             raise ValueError(f"cannot requeue a {state} card")
+
+    def stop(self, task_id: str, reason: str) -> str:
+        """``kanban block --kind <kind>``: a ``running`` or ``ready`` task becomes ``blocked``
+        and its run ends with the reason as summary (``kanban_db.block_task``; a never-claimed
+        task gets a zero-length blocked run). Returns the Hermes status the task landed in.
+
+        The kind is ``capability`` (a human-bucket kind no worker path uses), or
+        ``needs_input`` when the task's latest block event already was ``capability``: Hermes counts
+        same-kind block -> unblock -> block cycles and sends the second one to ``triage``
+        (``_route_block``, ``BLOCK_RECURRENCE_LIMIT`` 2), which has no command back to
+        ``ready``. The runtime never unblocks a spend-cap stop itself, so a repeat here is a
+        human's deliberate unblock, not the automatic loop the breaker exists for.
+
+        The worker of a running task is not signalled here: the dispatcher's
+        ``reap_terminal_workers`` ends a worker that outlived its run, 120 s after the run
+        ended, on its next tick. ValueError for another status."""
+        shown = self._show_task(task_id)
+        task = shown["task"]
+        if task["status"] not in STOPPABLE_STATUSES:
+            raise ValueError(f"cannot stop a {task['status']} task")
+        kind = "needs_input" if self._last_block_kind(shown) == "capability" else "capability"
+        self._kanban("block", task_id, reason, "--kind", kind)
+        return self._show_task(task_id)["task"]["status"]
+
+    @staticmethod
+    def _last_block_kind(shown: dict) -> str | None:
+        """The kind of the task's latest block. The show JSON has no ``block_kind`` field, so
+        it is read from the latest ``blocked``/``block_loop_detected`` event's payload."""
+        for event in reversed(shown.get("events") or []):
+            if event.get("kind") in ("blocked", "block_loop_detected"):
+                return (event.get("payload") or {}).get("kind")
+        return None
 
     def _require_pending(self, task_id: str, action: str) -> Card:
         card = self.get(task_id)

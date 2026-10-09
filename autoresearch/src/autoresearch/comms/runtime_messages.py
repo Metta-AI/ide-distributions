@@ -26,6 +26,7 @@ Each builder here returns a ``RuntimeMessage``; ``publisher.publish_message`` pu
 id or commit reaches the text, and that runtime code publishes nothing else.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 
@@ -314,6 +315,109 @@ def card_tool_fault(
     )
 
 
+# --- spend caps (runtime.spend) ---
+
+
+# What happened to a card at its spend cap (``card_over_cap``).
+STOPPED = "stopped"  # blocked by the runtime
+TRIAGED = "triaged"  # blocked, but Hermes moved it to triage
+HELD = "held"  # already blocked; kept blocked instead of being requeued
+NOT_STOPPED = "not_stopped"  # the block failed
+_CAP_LEAD = {
+    STOPPED: "The runtime stopped the card “{title}” and blocked it, because {why}.",
+    TRIAGED: (
+        "The runtime stopped the card “{title}”, because {why}. Hermes put it in triage, not "
+        "in blocked, because it had been blocked and unblocked before."
+    ),
+    HELD: "The runtime kept the blocked card “{title}” blocked, because {why}.",
+    NOT_STOPPED: (
+        "The runtime tried to stop the card “{title}”, because {why}. The card may still be "
+        "running: please block it by hand with hermes kanban."
+    ),
+}
+_CAP_NEXT = {
+    STOPPED: "If the work should go on, unblock the card: it then gets {allowance}.",
+    TRIAGED: (
+        "Hermes has no command that moves a triage card back to the queue, so if the work "
+        "should go on, drop the card and send the task again."
+    ),
+    HELD: "If the work should go on, unblock the card: it then gets {allowance}.",
+    NOT_STOPPED: (
+        "The runtime keeps trying to stop it every minute and will report again only after "
+        "a stop works."
+    ),
+}
+
+
+def card_over_cap(
+    card_title: str,
+    why: str,
+    allowance: str,
+    task_id: str,
+    request_id: str,
+    stop: int,
+    refs: list,
+    outcome: str = STOPPED,
+) -> RuntimeMessage:
+    """A card reached its run or estimated-cost cap. ``stop`` counts the card's recorded
+    stops, so a card a human unblocked that reaches the cap again is reported again. For
+    ``NOT_STOPPED`` it counts the stops that worked, so one failure streak (the runtime
+    retries every minute) gets one message."""
+    title = _line(card_title, 80)
+    body = (
+        f"{_CAP_LEAD[outcome].format(title=title, why=why)} It will not be put back in the "
+        f"queue or get a repair card. {_CAP_NEXT[outcome].format(allowance=allowance)} "
+        "Otherwise leave it, or send a smaller task."
+    )
+    lead = "Card not stopped at its spend cap" if outcome == NOT_STOPPED else (
+        "Card stopped at its spend cap"
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title(lead, card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id),
+        key=f"spend-cap:{task_id}:{stop}" + (":not-stopped" if outcome == NOT_STOPPED else ""),
+    )
+
+
+def daily_budget_reached(spent_usd: float, budget_usd: float, day: str) -> RuntimeMessage:
+    """Today's estimated model spend reached the daily budget; queue-keeper paused (one per
+    UTC day)."""
+    body = (
+        f"The agent is paused: today's estimated model spend (UTC day {day}) is "
+        f"${spent_usd:.2f}, at or over the daily budget of ${budget_usd:.2f}. No new cards "
+        "start; cards already running finish under their own caps. The agent resumes by "
+        "itself on the next UTC day. To resume today, raise AUTORESEARCH_DAILY_BUDGET_USD in "
+        "the profile .env (restart the gateway if the next queue-keeper run does not pick it "
+        "up)."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Agent paused: daily spend budget reached",
+        body,
+        key=f"daily-budget:{day}",
+    )
+
+
+def card_models_invalid(value: str, problems: list[str]) -> RuntimeMessage:
+    """Entries of AUTORESEARCH_CARD_MODELS were skipped (one per distinct value)."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    body = (
+        "Some entries of AUTORESEARCH_CARD_MODELS in the profile .env cannot be used: "
+        f"{'; '.join(problems)}. Cards of those modes run on the default model, which costs "
+        "more. Please fix the value; modes are investigation, scouting, experimentation, "
+        "maintenance and planning."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Card model setting has errors",
+        body,
+        key=f"card-models:{digest}",
+    )
+
+
 # --- queue-keeper ---
 
 
@@ -363,8 +467,9 @@ def agent_paused(reasons: str, paused_at: str, key: str | None = None) -> Runtim
 
 def agent_resumed(count: int) -> RuntimeMessage:
     body = (
-        f"The preflight check passes again, so the agent resumed. {count} pending card(s) "
-        "were assigned again. Nothing needs to be done."
+        f"The cause of the pause has cleared (the preflight check passes and today's spend is "
+        f"under the daily budget), so the agent resumed. {count} pending card(s) were "
+        "assigned again. Nothing needs to be done."
     )
     return RuntimeMessage("note", "Agent resumed", body)
 

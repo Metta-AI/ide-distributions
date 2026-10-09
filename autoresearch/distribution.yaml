@@ -46,6 +46,38 @@ env_requires:
       external agent such as the Softmax IDE bridge, run as its own user). When set, only
       inbox files they own are adopted. When unset, any valid file is adopted and
       queue-keeper logs that direct writes are unauthenticated.
+  - name: AUTORESEARCH_CARD_MODELS
+    required: false
+    default: planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3
+    description: >-
+      Model per card mode, as mode=model pairs. queue-keeper creates each card with that
+      model (Hermes per-task model override); modes not listed, or set to "default", use
+      model.default. "none" puts every mode on model.default.
+  - name: AUTORESEARCH_MAX_CARD_RUNS
+    required: false
+    default: "4"
+    description: >-
+      Runs per card before queue-keeper stops it (blocks it with a help_request; never
+      requeued). Unblocking a stopped card gives it this many runs again. 0 turns it off.
+  - name: AUTORESEARCH_MAX_CARD_USD
+    required: false
+    default: "4"
+    description: >-
+      Estimated model spend (USD, Hermes' estimate in state.db) per card before
+      queue-keeper stops it. 0 turns it off.
+  - name: AUTORESEARCH_DAILY_BUDGET_USD
+    required: false
+    default: "25"
+    description: >-
+      Estimated model spend per UTC day of all sessions of this profile. At the budget
+      queue-keeper pauses dispatch with a help_request; it resumes the next UTC day. 0 turns
+      it off.
+  - name: AUTORESEARCH_FALLBACK_PRICES
+    required: false
+    default: input=3,output=12,cache_read=0.75,cache_write=3
+    description: >-
+      USD per million tokens for a session Hermes could not price (no estimate), as
+      kind=price pairs over the defaults.
   - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
     required: false
     default: "30"

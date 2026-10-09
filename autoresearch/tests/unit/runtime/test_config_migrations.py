@@ -16,6 +16,11 @@ EXPECTED_PASSTHROUGH = [
     "OPENROUTER_MODEL",
     "AUTORESEARCH_INBOX_WRITERS",
     "COGAMES_API_URL",
+    "AUTORESEARCH_CARD_MODELS",
+    "AUTORESEARCH_MAX_CARD_RUNS",
+    "AUTORESEARCH_MAX_CARD_USD",
+    "AUTORESEARCH_DAILY_BUDGET_USD",
+    "AUTORESEARCH_FALLBACK_PRICES",
 ]
 
 
@@ -67,7 +72,8 @@ def test_empty_profile_gets_every_row(tmp_path):
     }
     assert config["auxiliary"]["background_review"]["enabled"] is False
     assert config["tool_loop_guardrails"]["hard_stop_enabled"] is True
-    assert config["agent"] == {"max_turns": 150, "run_budget_seconds": 2700}
+    assert config["agent"] == {"max_turns": 150, "run_budget_seconds": 5400}
+    assert config["terminal"]["timeout"] == 1800  # the longest process_manage wait
     assert config["approvals"]["mode"] == "off"
     assert config["approvals"]["deny"] == cm.APPROVAL_DENY
     assert config["terminal"]["env_passthrough"] == EXPECTED_PASSTHROUGH
@@ -83,6 +89,7 @@ def test_missing_only_rows_keep_tuned_values(tmp_path):
         "kanban": {"max_in_progress": 3},
         "tool_loop_guardrails": {"hard_stop_enabled": False},
         "agent": {"max_turns": 40, "run_budget_seconds": 600},
+        "terminal": {"timeout": 600},
     }
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(tuned))
     cm.apply(Recorder(), tmp_path)
@@ -90,6 +97,7 @@ def test_missing_only_rows_keep_tuned_values(tmp_path):
     assert config["kanban"]["max_in_progress"] == 3
     assert config["tool_loop_guardrails"]["hard_stop_enabled"] is False
     assert config["agent"] == {"max_turns": 40, "run_budget_seconds": 600}
+    assert config["terminal"]["timeout"] == 600
 
 
 def test_always_rows_overwrite_drifted_values(tmp_path):
@@ -142,3 +150,13 @@ def test_openrouter_model_env_overrides_the_model(tmp_path):
 
     cm.apply(Recorder(), tmp_path, {})
     assert config_of(tmp_path)["model"]["default"] == "z-ai/glm-5.3-flash"
+
+
+def test_earlier_shipped_defaults_are_upgraded_but_tuned_values_kept(tmp_path):
+    old = {"agent": {"max_turns": 150, "run_budget_seconds": 2700}, "terminal": {"timeout": 180}}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(old))
+    cm.apply(Recorder(), tmp_path)
+    config = config_of(tmp_path)
+    assert config["agent"]["run_budget_seconds"] == 5400
+    assert config["terminal"]["timeout"] == 1800
+    assert cm.pending(tmp_path) == []

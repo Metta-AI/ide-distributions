@@ -126,7 +126,7 @@ directly.
 | Status for a later card | "E-12 batch 1 failed on seed 7; retry it" | Next card | Already handled: journal, handoff, briefing. A Kanban comment on the follow-up card also works. |
 
 Seconds-level latency never matters for this research loop. XP takes minutes to hours. Cards run
-for up to 45 minutes (`agent.run_budget_seconds: 2700`). "On the recipient's next tool call" is
+for up to 90 minutes (`agent.run_budget_seconds: 5400`; 2700 when this was written). "On the recipient's next tool call" is
 fast enough everywhere.
 
 ## Options
@@ -329,7 +329,8 @@ disposable.
 - **Experiment lock** (`softmax_tool/cli.py` `experiment_lock`): `xp create`, `upload` and
   `submit` hold `fcntl.flock` on `.supervisor/runtime/locks/xp-<E>.lock` (canonical
   workspace, through `io.locks.file_lock`) for the whole command. A second process waits up
-  to 60 s (`LOCK_WAIT_S`, below Hermes' 180 s foreground terminal timeout), then refuses with
+  to 60 s (`LOCK_WAIT_S`, below the default foreground terminal timeout: Hermes' 180 s, 1800 s
+  in this profile's `terminal.timeout`), then refuses with
   reason `busy` and does nothing. The holder writes `{task_id, run_id, pid, command,
   started_at}` into the lock file and empties it before release; `busy` carries it in
   `details.holder`, with `details.own_run` when the holder is the caller's own card run (an

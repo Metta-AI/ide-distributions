@@ -24,14 +24,24 @@ before ``kanban_block``); this one covers the runtime's view and a worker that c
 human unblocks the card and a later non-tool-fault block follows, the marker is ignored and
 the card follows the ordinary requeue-then-repair path.
 
+Spend caps (``runtime.spend``) come first. A card stopped at a cap (reason starting
+``spend-cap:``, or held at a cap) is skipped: never requeued, never repaired. With a
+``spend_config``, a card that would be requeued or repaired but has reached its run cap or
+its estimated-cost cap is held instead (``spend.hold_blocked``: one runtime
+``help_request``; the card stays blocked for a human).
+
 Hermes limit: a second ``kanban_block`` with the same kind after an unblock (D-26 uses
 ``needs_input``) is routed to ``triage``, which the Queue reports as ``pending``, so this
-module never sees it. That repeat is reported only by the agent's own help_request.
+module never sees it. That repeat is reported only by the agent's own help_request. A spend
+stop can set this up: it blocks with ``needs_input`` when the card's previous block was
+``capability`` (``KanbanQueue.stop``), so after a human unblocks it, the worker's own D-26
+tool-fault block (also ``needs_input``) lands in ``triage``.
 
 The queue change comes before the commit, so a crash between them at worst requeues a card
 a second time; it never skips straight to a repair.
 """
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,13 +51,14 @@ from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import promotion
+from autoresearch.runtime import promotion, spend
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.markers import repair_blocked_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 
 REQUEUED = "requeued"
 REPAIRED = "repaired"
+SPEND_CAP = "spend-cap"
 TOOL_FAULT = "tool-fault"
 TOOL_FAULT_PREFIX = "tool-fault:"
 REPAIR_PRIORITY = "P1"
@@ -56,7 +67,7 @@ REPAIR_PRIORITY = "P1"
 @dataclass
 class BlockedAction:
     task_id: str
-    action: str  # requeued | repaired | tool-fault
+    action: str  # requeued | repaired | tool-fault | spend-cap
     repair_request: str | None = None
 
 
@@ -155,14 +166,32 @@ def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool)
     return BlockedAction(task_id, TOOL_FAULT)
 
 
+UNREADABLE = "state.db unreadable"
+
+
+def _cap_reached(ctx: RunContext, card: Card, config: spend.SpendConfig) -> str | None:
+    """``spend.cap_reached``, or ``UNREADABLE`` when ``state.db`` cannot be read: the
+    conservative choice is to leave the card alone this run, not to requeue it."""
+    try:
+        return spend.cap_reached(ctx, card, config)
+    except sqlite3.Error:
+        return UNREADABLE
+
+
 def handle_blocked(
-    ctx: RunContext, queue: Queue, allow_no_remote: bool = False
+    ctx: RunContext,
+    queue: Queue,
+    allow_no_remote: bool = False,
+    spend_config: spend.SpendConfig | None = None,
 ) -> list[BlockedAction]:
     """Requeue each blocked card once, then repair; a ``tool-fault:`` block only asks for
-    help (module docstring). The caller must not hold the canonical lock."""
+    help; cards at a spend cap are left to the caps (module docstring). The caller must not
+    hold the canonical lock."""
     canonical = ctx.canonical
     actions = []
     for card in queue.list("blocked"):
+        if spend.is_held(canonical, card):
+            continue
         record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
         reason = card.block_reason or ""
         if reason.startswith(TOOL_FAULT_PREFIX):
@@ -173,6 +202,15 @@ def handle_blocked(
             )
             if not reported:
                 actions.append(_tool_fault(canonical, card, reason, allow_no_remote))
+        elif (
+            spend_config is not None
+            and (record is None or record["state"] in (TOOL_FAULT, REQUEUED))
+            and (why := _cap_reached(ctx, card, spend_config))
+        ):
+            if why is UNREADABLE:
+                continue  # state.db unreadable: neither requeue nor hold this run
+            spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
+            actions.append(BlockedAction(card.task_id, SPEND_CAP))
         elif record is None or record["state"] == TOOL_FAULT:
             actions.append(_requeue(canonical, queue, card))
         elif record["state"] == REQUEUED:

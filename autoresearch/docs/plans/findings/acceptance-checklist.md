@@ -148,6 +148,8 @@ Source of truth: `distribution.yaml` (`env_requires`). Details and examples: REA
 | `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but the serial job that runs its cards is not built (see 2.6). |
 | `AUTORESEARCH_SOFTMAX` | no | Tests only (`fake`). Never set in production. |
 | `COGAMES_API_URL` | no | Softmax API server. Default `https://softmax.com/api`. Passed as `--server` to every `softmax`/`coworld` call. Softmax hosting writes it. |
+| `AUTORESEARCH_MAX_CARD_RUNS`, `AUTORESEARCH_MAX_CARD_USD`, `AUTORESEARCH_DAILY_BUDGET_USD`, `AUTORESEARCH_FALLBACK_PRICES` | no | Spend caps: 4 runs and an estimated $4 per card, $25 per UTC day (README). Set the daily budget to what the OpenRouter key may spend. |
+| `AUTORESEARCH_CARD_MODELS` | no | Model per card mode. Default: `planning`, `scouting` and `maintenance` on `z-ai/glm-5.3`, the other modes on `model.default` (README). |
 
 Bootstrap writes `AUTORESEARCH_CLI` and `HERMES_WRITE_SAFE_ROOT`. Do not set them by hand.
 
@@ -259,6 +261,9 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Softmax tool against the live platform, as a Player | `findings/player-xp-probe.md` (create, get, list, episodes, download as Games Bond: PASS) and `findings/softmax-client.md` (read-only probes: PASS; league episodes readable by a Player) |
 | Skills and doctrine consistency | `tests/unit/test_skills.py`, `tests/unit/test_doctrine.py` (pytest) |
 | Models glm-5.3, glm-5.3-flash tool calling in Hermes | `hermes-facts.md` item 11 |
+| Spend caps: card stopped at run 5 or at an estimated $4 (blocked `spend-cap:`, one help request, never requeued or repaired; unblock gives a new allowance); a blocked card at either cap held; caps run while preflight fails; a failed stop is retried every minute, reported once per streak and grants no new allowance; daily budget pauses until the next UTC day | `tests/protocol/test_spend.py`, `tests/unit/runtime/test_spend.py`, `tests/unit/queue/test_kanban_queue.py` (pytest, fake board and a minimal `state.db`). Real Hermes v0.21.5, 2026-10-08, throwaway home: four stop/unblock cycles after an untyped block all landed in `blocked` with the alternating `--kind`; the same kind twice landed in `triage`; `stop` of a `blocked` task refused |
+| Waiting without the model: plugin refuses foreground `sleep` >= 30 s and sleep loops that check a process; `terminal.timeout` 1800 | `tests/unit/plugin/test_policy.py`, `tests/unit/runtime/test_config_migrations.py` (pytest) |
+| Per-mode card model (`AUTORESEARCH_CARD_MODELS`): `kanban create --model --provider` sets the task's `model_override`/`provider_override` | `tests/unit/queue/test_kanban_queue.py` (pytest); real Hermes v0.21.5 in a throwaway home, 2026-10-08 (create, then `show --json`: `model_override: z-ai/glm-5.3`, `provider_override: openrouter`). **UNVERIFIED:** a dispatched worker actually running on glm-5.3 (no paid run). |
 
 ### 3.2 Needs the hosted or live run
 
@@ -276,6 +281,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Token refresh in practice (2.4) | - | **UNVERIFIED.** No owner. |
 | Restore on a second machine from a real remote | README | **UNVERIFIED.** |
 | First champion on the live platform (`softmax bootstrap-champion` of the game's shipped strategy, A14; text pending James's sign-off) | A14 | **NOT RUN.** Only the fake path is tested. Blocked for GotA until `games/gota/GAME.md` has a `## Baseline build` section (Codex). Observe once: how long `coworld memberships --champions-only` takes to list the submission; until it does, after publish the champion reads "unknown" and experiment cards block with a `help_request`. |
+| Spend caps on a live host: a running worker ends after `hermes kanban block` (dispatcher `reap_terminal_workers`, about 2 minutes), Hermes cost estimates in `state.db` match the plugin's `session_start` sessions, workers use `process_manage` wait instead of polling | Spend controls (2026-10-08) | **UNVERIFIED.** Only unit and fake-board tests, plus a `block` of a `ready` task on real Hermes. |
 | Friday leaderboard measurement (section 1) | - | **NOT RUN.** Needs a real submission in the league first. |
 
 ### 3.3 Go and no-go before handing over

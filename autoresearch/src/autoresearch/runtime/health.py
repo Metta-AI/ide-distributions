@@ -4,7 +4,8 @@
 Checks (Runtime §2, §8):
 
 - Blocked cards (``blocked.handle_blocked``, shared with queue-keeper): requeue once, then a
-  repair request and a runtime ``help_request``.
+  repair request and a runtime ``help_request``; a card at the run cap of ``runtime.spend``
+  (``AUTORESEARCH_MAX_CARD_RUNS``) is held blocked instead.
 - Disk: less than 1 GB free under canonical.
 - Credential: Softmax refused the credential or it is missing or malformed
   (``CredentialRejected``/``CredentialError``), it has expired, or it expires within 2 hours (a
@@ -40,6 +41,7 @@ from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.blocked import BlockedAction, handle_blocked
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.preflight import EXPIRY_WARNING, MIN_FREE_BYTES
+from autoresearch.runtime.spend import SpendConfig
 from autoresearch.softmax_tool.identity import CredentialRejected
 from autoresearch.softmax_tool.platform_cli import CredentialError
 from autoresearch.softmax_tool.protocol import Softmax
@@ -118,9 +120,8 @@ def run(
     env: Mapping[str, str],
     disk_free: Callable = shutil.disk_usage,
 ) -> HealthRun:
-    """One health run (module docstring). ``env`` is accepted for symmetry with the other
-    jobs; ``disk_free`` is the test seam."""
-    del env
+    """One health run (module docstring). ``env`` gives the spend caps; ``disk_free`` is the
+    test seam."""
     result = HealthRun()
     if not (ctx.canonical / ".git").exists():
         result.skipped = True
@@ -128,7 +129,10 @@ def run(
     try:
         with file_lock(runtime_dir(ctx) / RUN_LOCK, timeout_s=0):
             try:
-                result.blocked = handle_blocked(ctx, queue, allow_no_remote=True)
+                config = SpendConfig.from_env(env)
+                result.blocked = handle_blocked(
+                    ctx, queue, allow_no_remote=True, spend_config=config
+                )
             except Exception as error:  # noqa: BLE001 - the other checks still run
                 result.failures["blocked"] = f"{type(error).__name__}: {error}"
                 _log(ctx, f"blocked check failed: {error}\n{traceback.format_exc()}")
