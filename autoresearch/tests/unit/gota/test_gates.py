@@ -193,7 +193,10 @@ def write_manifest(path, config):
 
 @pytest.fixture
 def no_docker(monkeypatch, tmp_path):
-    """PATH holds only git and nim (no docker, no uv); coworld/docker processes are refused."""
+    """PATH holds only git and nim (no docker, no uv); coworld/docker processes are refused.
+
+    Every process start goes through Popen (subprocess.run included), so the guard wraps it.
+    """
     tools = tmp_path / 'path-without-docker'
     tools.mkdir()
     for name in ('git', 'nim'):
@@ -201,15 +204,15 @@ def no_docker(monkeypatch, tmp_path):
             (tools / name).symlink_to(shutil.which(name))
     monkeypatch.setenv('PATH', str(tools))
     monkeypatch.delenv('GOTA_G2_RUNNER', raising=False)
-    real_run = subprocess.run
     spawned = []
 
-    def guarded(command, *args, **kwargs):
-        spawned.append(command)
-        if any(part in ('docker', 'coworld', 'run-episode', 'uv') for part in map(str, command)):
-            raise AssertionError(f'native G2 spawned {command}')
-        return real_run(command, *args, **kwargs)
-    monkeypatch.setattr(subprocess, 'run', guarded)
+    class Guarded(subprocess.Popen):
+        def __init__(self, command, *args, **kwargs):
+            spawned.append(command)
+            if any(part in ('docker', 'coworld', 'run-episode', 'uv') for part in map(str, command)):
+                raise AssertionError(f'native G2 spawned {command}')
+            super().__init__(command, *args, **kwargs)
+    monkeypatch.setattr(subprocess, 'Popen', Guarded)
     assert shutil.which('docker') is None
     return spawned
 
@@ -220,12 +223,15 @@ def fake_native(monkeypatch, tmp_path, no_docker):
     local = gate('g2_episode').gota_local
     monkeypatch.setattr(local, 'binary_identity', lambda commit: {'fingerprint': 'fake-gota-match'})
     monkeypatch.setattr(local, 'binary', lambda commit: tmp_path / 'gota_match-fake')
-    runner = {'failures': {}, 'config': NATIVE_CONFIG, 'actions': 5000, 'calls': [], 'commits': []}
+    monkeypatch.setattr(local, 'binary_path', lambda commit: tmp_path / 'gota_match-fake')
+    runner = {'failures': {}, 'config': NATIVE_CONFIG, 'actions': 5000, 'calls': [], 'commits': [],
+              'options': []}
 
-    def invoke(command, job_path, *, commit):
+    def invoke(command, job_path, *, commit, **options):
         job = json.loads(Path(job_path).read_text())
         runner['calls'].append((command, job))
         runner['commits'].append(commit)
+        runner['options'].append(options)
         out = Path(job['out'])
         telemetry = (FIXTURES / 'v13-live-telemetry.log').read_text()
         heroes = []
@@ -267,6 +273,10 @@ def test_native_episode_passes_without_docker(fake_native, no_docker, native_con
     assert command == 'match'
     assert job['seats'] == [str(BASELINE.resolve())] * 10
     assert (job['seed'], job['ticks'], job['draft'], job['replay']) == (2026, 600, 'open', True)
+    [options] = fake_native['options']
+    assert options['timeout'] == native_context.timeout
+    assert options['env']['COGAME_LLM'] == 'off'  # no paid LLM requests during G2
+    assert options['executable'] == native_context.work_dir / 'gota_match-fake'
     # G5 reads the same native episode's ten seat logs.
     assert native_context.episode_dir == native_context.work_dir / 'episode'
     assert gate('g5_telemetry').run(BASELINE, native_context).ok
@@ -292,6 +302,21 @@ def test_native_episode_missing_binary_errors(monkeypatch, no_docker, native_con
     result = gate('g2_episode').run(BASELINE, native_context)
     assert result.outcome == 'errored'
     assert not any('coworld' in map(str, command) for command in no_docker)
+
+
+def test_native_episode_timeout_kills_match_and_errors(monkeypatch, no_docker, native_context,
+                                                       tmp_path):
+    """A hung match binary is killed at context.timeout and the gate reports a tool fault."""
+    local = gate('g2_episode').gota_local
+    hung = tmp_path / 'gota_match-hung'
+    hung.write_text('#!/bin/sh\nexec /bin/sleep 60\n')
+    hung.chmod(0o755)
+    monkeypatch.setattr(local, 'binary_identity', lambda commit: {'fingerprint': 'fake'})
+    monkeypatch.setattr(local, 'binary_path', lambda commit: hung)
+    native_context.timeout = 1
+    result = gate('g2_episode').run(BASELINE, native_context)
+    assert result.outcome == 'errored'
+    assert result.details['error']['message'] == 'gota_match timed out after 1s'
 
 
 def test_native_episode_uses_resolved_engine_binary(fake_native, native_context):

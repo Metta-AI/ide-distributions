@@ -104,9 +104,11 @@ success.
   variant's seed, `max_ticks` and draft mode. The default native runner
   (`tools/gota_local.py` `match`, recording on) uses the `gota_match` binary for
   the context's resolved engine commit, or `engine.env`'s pin when none is set,
-  and validates its build receipt before and after. The binary bakes in that
+  and validates its build receipt once, before the match. The binary bakes in that
   engine's competition `game_config`; a manifest config it cannot reproduce, or a
-  binary engine other than the requested one, is a tool error. It reads back each
+  binary engine other than the requested one, is a tool error. The match runs with
+  `COGAME_LLM=off` and is killed (with its process group) after the context timeout
+  (default 600 seconds), which is a tool error. It reads back each
   seat's artifact hash, the one policy source all ten seats loaded, VM failures
   and `BASIC error:` lines in `seat-N.log`, per-seat decisions, recorded actions
   and full results (`episode/job.json`, `meta.json`, `result.json`, `replay.bin`).

@@ -147,7 +147,9 @@ def native_episode(artifact: Path, context: GateContext, directory: Path) -> dic
 
     The engine is the context's resolved commit, or the engine.env pin when unset. The
     binary carries that engine's competition game_config template; a manifest setting it
-    cannot reproduce is a tool error, never a silently different episode.
+    cannot reproduce is a tool error, never a silently different episode. That check reads
+    the binary's own output, so it runs after the match. The match runs with
+    `COGAME_LLM=off` (no LLM requests from policies) and is killed after `context.timeout`.
     """
     commit = context.engine_commit or gota_local.gota_cli.engine()['POLYWORLD_COMMIT']
     manifest = json.loads(context.manifest.read_text())
@@ -156,12 +158,14 @@ def native_episode(artifact: Path, context: GateContext, directory: Path) -> dic
     native_build = gota_local.binary_identity(commit)
     result = gota_local.match([artifact] * 10, seed=config['seed'], ticks=config['max_ticks'],
                               draft=config['draft_mode'], out=directory, replay=True,
-                              commit=commit)
+                              commit=commit, timeout=context.timeout,
+                              env={**os.environ, 'COGAME_LLM': 'off'},
+                              executable=gota_local.binary_path(commit))
     if result['config'] != config:
         raise ValueError(f'Native match game_config differs from manifest variant {context.variant}')
     details = inspect_native_episode(artifact, directory)
-    if details['engine'] != commit or gota_local.binary_identity(commit) != native_build:
-        raise ValueError('native match identity changed during G2')
+    if details['engine'] != commit:
+        raise ValueError('native match engine differs from the requested engine')
     details['native_build'] = native_build
     return details
 

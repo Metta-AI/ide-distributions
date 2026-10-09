@@ -114,6 +114,8 @@ Native G2 does not prove:
 - the coworld runner path: staging the artifact as an uploaded player file,
   the per-seat player processes and their protocol and timeouts, and coworld's own
   `results.json` and replay writer;
+- policy behavior that depends on LLM host calls: native G2 runs with `COGAME_LLM=off`,
+  so no LLM request is made (and none is paid for);
 - anything set in the manifest outside the variant's `game_config`, such as the
   runnable's `env` (for example `COGAME_PLAYER_SEATS_SCHEMA`): the native runner
   does not read it.
