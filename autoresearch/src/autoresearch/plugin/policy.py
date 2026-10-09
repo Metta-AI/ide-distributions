@@ -37,17 +37,28 @@
 - resolving a champion conflict (A9: the pause holds until a human resolves it): the
   operator command `promotion accept-champion` in any agent session (also the approvals deny
   globs `*promotion accept-champion[ *]`; the command itself refuses in a card context);
-- clearing a commit provenance pause (C1, ``runtime.provenance``): the operator command
-  `runtime accept-commits` in any agent session (approvals deny globs
-  `*runtime accept-commits[ *]`; the command refuses in a card context), and code text that
-  names it;
+- clearing a commit provenance pause (C1, ``runtime.provenance``): any terminal command or
+  code that contains `accept-commits` (approvals deny globs `*runtime accept-commits[ *]`
+  too). The command itself refuses in a card context and in any agent session: the plugin
+  sets ``AUTORESEARCH_AGENT_SESSION`` in the agent process on load
+  (``adapters.register``), its terminals and code inherit it, and the CLI checks it, so a
+  command word assembled from variables is refused at run time;
+- the provenance journal and key (``runtime.provenance``): any tool call (terminal, file
+  tools, code, ...) whose arguments name `.git/autoresearch`, `provenance.key`,
+  `provenance.jsonl`, the module (`runtime.provenance`, `runtime import ... provenance`) or
+  ``AUTORESEARCH_AGENT_SESSION`` (``PROVENANCE_TEXT``). The OS cannot hide the key from
+  workers (same user, and `card finish` writes the journal); this refusal is policy;
 - canonical writes from interpreter code (C1, D-27; best effort): `python -c`, a Python
   script read from stdin (`python3 - <<EOF`, a here-string, a pipe) and `execute_code` text
   that names the canonical workspace (its path, not under `.worktrees/`, or
   `AUTORESEARCH_WORKSPACE` / `HERMES_WRITE_SAFE_ROOT`), `.supervisor/ledger` or
-  `canonical.lock`, and also looks like a write, a lock or a git write
-  (``CANONICAL_WRITE_HINT``). On 2026-10-09 a card worker committed on canonical `main` from
-  a `python3 - <<'PYEOF'` script after reasoning that `git commit` would be refused.
+  `canonical.lock`, and writes it by a line-based heuristic (``_Guard.writes_canonical``): a
+  line with a write-shaped call (``CANONICAL_WRITE_SHAPES``: `open` with a write mode,
+  `write_text`/`write_bytes`, `os.replace/rename/remove/unlink`, `shutil` copy/move/rmtree)
+  that names canonical, a git write subcommand aimed elsewhere than the worktree
+  (``GIT_WRITE_SHAPES``, ``GIT_ELSEWHERE``), or `flock`/`lockf` with `canonical.lock`.
+  Reads, and writes to the worktree, pass; the refusal says to read the worktree copy. On 2026-10-09 a card worker committed on canonical `main` from a
+  `python3 - <<'PYEOF'` script after reasoning that `git commit` would be refused.
   queue-keeper's provenance check detects such a commit after the fact, whatever wrote it.
 
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
@@ -258,13 +269,20 @@ ACCEPT_COMMITS = (
     "`runtime accept-commits` is for a human operator: a commit the runtime did not make "
     "pauses the agent until a person checks it (C1). Do not work around this (D-27)."
 )
+_D27 = (
+    "Do not work around a refusal to get the refused effect (D-27): no other interpreter, "
+    "script, path or identity. Record it in your journal and end the card the way your skill "
+    'says; if nothing else applies, stage a help_request and finish blocked.'
+)
 CANONICAL_WRITE = (
     "code that writes the canonical workspace, its ledger or canonical.lock is blocked: only "
-    "the runtime writes canonical (C1). A refusal is not something to work around (D-27): do "
-    "not reach the same effect through another interpreter, script, path or identity. Record "
-    "the refusal in your journal, stage a help_request, and finish blocked "
-    '("$AUTORESEARCH_CLI" card finish --outcome blocked). Your own changes go in your '
-    "worktree; canonical bookkeeping goes through \"$AUTORESEARCH_CLI\"."
+    "the runtime writes canonical (C1). If you only meant to read, read the same file in your "
+    "worktree copy. Your own changes go in your worktree; canonical bookkeeping goes through "
+    f'"$AUTORESEARCH_CLI". {_D27}'
+)
+PROVENANCE_FILES = (
+    "the runtime's commit provenance journal, its key and the provenance module are for the "
+    f"runtime only (C1). {_D27}"
 )
 INBOX_DIR_TEXT = "comms/inbox"
 # Interpreter code naming the inbox is refused only when it also looks like a write; a read
@@ -282,12 +300,42 @@ CODE_WRITE_HINT = re.compile(
 CANONICAL_TEXTS = (
     ".supervisor/ledger", "canonical.lock", "AUTORESEARCH_WORKSPACE", "HERMES_WRITE_SAFE_ROOT",
 )
-CANONICAL_WRITE_HINT = re.compile(
-    CODE_WRITE_HINT.pattern
-    + r"|flock|lockf|\bcommit|update-ref"
-    + r"|\b(?:merge|rebase|reset|cherry-pick|revert|checkout|stash|add|rm|mv|am|apply|clean)\b"
+_GIT_WRITE_WORDS = (
+    r"commit|commit-tree|update-ref|push|add|rm|mv|reset|merge|rebase|cherry-pick|revert"
+    r"|checkout|switch|restore|stash|apply|am|clean|pull|tag|branch"
 )
-ACCEPT_COMMITS_TEXT = re.compile(rf"\bruntime{_SEP}accept-commits\b")
+CANONICAL_WRITE_SHAPES = re.compile(
+    r"""\bopen\([^)]*?['"][rbt]*[wax+][rwabxt+]*['"]"""  # open(path, "w" / "a" / "x" / "r+")
+    r"|\bwrite_(?:text|bytes)\s*\("
+    r"|\bos\.(?:replace|rename|renames|remove|unlink|rmdir|removedirs|makedirs|mkdir|symlink"
+    r"|link|truncate|chmod)\s*\("
+    r"|\bshutil\.(?:copy\w*|move|rmtree)\s*\("
+    r"|\.(?:unlink|rename|touch|mkdir|rmdir|symlink_to|hardlink_to)\s*\("
+    r"|\b(?:flock|lockf)\b"
+)
+GIT_WRITE_SHAPES = re.compile(
+    rf"""['"](?:{_GIT_WRITE_WORDS})['"]"""  # a git write subcommand as an argv element
+    rf"|\bgit\b[^\n'\"]*?\s(?:{_GIT_WRITE_WORDS})\b"  # "git -C x commit ..." in a string
+)
+# Code that points git somewhere other than the current directory (the worktree).
+GIT_ELSEWHERE = re.compile(r"""['"]-C['"]|\s-C\s|\bcwd\s*=|\bchdir\b|--git-dir|--work-tree""")
+LOCK_CALLS = re.compile(r"\b(?:flock|lockf)\b")
+ACCEPT_COMMITS_TEXT = re.compile(r"accept-commits")
+PROVENANCE_TEXT = re.compile(
+    r"\.git/autoresearch|provenance\.(?:key|jsonl)|runtime\.provenance\b"
+    r"|runtime\s+import\s[^\n]*\bprovenance\b|AUTORESEARCH_AGENT_SESSION"
+)
+
+
+def _strings(value) -> list[str]:
+    """Every string inside a tool call's arguments."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _strings(item)]
+    if isinstance(value, list | tuple):
+        return [text for item in value for text in _strings(item)]
+    return []
 
 
 def _code_writes_inbox(code: str) -> bool:
@@ -315,6 +363,13 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
     """Decide one tool call: `(allowed, reason)`. `card` is `runtime/cards/<task>.json` or None."""
     args = args if isinstance(args, dict) else {}
     guard = _Guard(ctx, card)
+    texts = _strings(args)
+    if any(PROVENANCE_TEXT.search(text) for text in texts):
+        return _block(PROVENANCE_FILES)
+    if tool_name in ("terminal", "execute_code") and any(
+        ACCEPT_COMMITS_TEXT.search(text) for text in texts
+    ):
+        return _block(ACCEPT_COMMITS)
     try:
         if tool_name == "terminal":
             command = args.get("command")
@@ -397,12 +452,39 @@ class _Guard:
         _refuse_text(code)
         if ACCEPT_COMMITS_TEXT.search(code):
             raise _Blocked(ACCEPT_COMMITS)
+        if PROVENANCE_TEXT.search(code):
+            raise _Blocked(PROVENANCE_FILES)
         if self.names_identity_files(code):
             raise _Blocked(IDENTITY_FILES)
         if _code_writes_inbox(code):
             raise _Blocked(INBOX_WRITE)
-        if self.names_canonical(code) and CANONICAL_WRITE_HINT.search(code):
+        if self.writes_canonical(code):
             raise _Blocked(CANONICAL_WRITE)
+
+    def writes_canonical(self, code: str) -> bool:
+        """Literal, line-based heuristic (module docstring), for code that names canonical: a
+        line with a write-shaped call that names canonical; a git write on a line that does
+        not name the worker's worktree, when the code points git elsewhere (``-C``, ``cwd=``,
+        ...) or the line names canonical; a lock call when the code names canonical.lock. A
+        write through a variable that holds a canonical path, on a line that does not name
+        it, passes (and the provenance check catches a commit)."""
+        if not self.names_canonical(code):
+            return False
+        if "canonical.lock" in code and LOCK_CALLS.search(code):
+            return True
+        elsewhere = bool(GIT_ELSEWHERE.search(code))
+        for line in code.splitlines():
+            if CANONICAL_WRITE_SHAPES.search(line) and self.names_canonical(line):
+                return True
+            git_write = GIT_WRITE_SHAPES.search(line) and not self._names_worker(line)
+            if git_write and (elsewhere or self.names_canonical(line)):
+                return True
+        return False
+
+    def _names_worker(self, text: str) -> bool:
+        return self.worker is not None and (
+            str(self.ctx.worker) in text or str(self.worker) in text
+        )
 
     def names_identity_files(self, text: str) -> bool:
         """Literal check (module docstring): ``text`` names ``.softmax``, or ``.env`` together

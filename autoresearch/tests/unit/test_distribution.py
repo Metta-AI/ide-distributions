@@ -77,6 +77,7 @@ def test_plugin_stub_registers_five_hooks_and_logs_tool_events(tmp_path, monkeyp
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv("AUTORESEARCH_WORKSPACE", raising=False)
+    monkeypatch.setenv("AUTORESEARCH_AGENT_SESSION", "")  # register sets it; restored after
     hooks = {}
 
     class FakeCtx:

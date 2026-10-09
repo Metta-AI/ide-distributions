@@ -587,6 +587,73 @@ def test_execute_code_that_writes_canonical_is_refused(layout):
 @pytest.mark.parametrize(
     "code",
     [
+        # read-only analysis the first version refused (review I-2)
+        "import json\nprint(json.dumps(json.load(open('{canon}/.supervisor/ledger/board.json'))))",
+        "import pandas as pd\ndf = pd.read_csv('{canon}/stats/a.csv')\nd2 = df.copy()",
+        "s = set()\nfor l in open('{canon}/plan.md'):\n    s.add(l)",
+        (
+            "import os\nt = open(os.environ['AUTORESEARCH_WORKSPACE'] + '/plan.md').read()\n"
+            "print(t.replace('a', 'b'))"
+        ),
+        (
+            "import subprocess\nout = subprocess.run(['git', '-C', '{canon}', 'show', "
+            "'HEAD:plan.md'], capture_output=True).stdout\n"
+            "open('{worker}/notes/plan.md', 'wb').write(out)"
+        ),
+    ],
+)
+def test_read_only_code_that_names_canonical_is_allowed(layout, code):
+    filled = _fill(code, layout)
+    allowed, reason = tool_policy("execute_code", {"code": filled}, layout.ctx(), WORKING)
+    assert allowed, (code, reason)
+    heredoc = f"python3 - <<'EOF'\n{filled}\nEOF"
+    assert tool_policy("terminal", {"command": heredoc}, layout.ctx(), WORKING)[0], code
+
+
+def test_the_canonical_write_refusal_says_how_to_read(layout):
+    code = "open('{canon}/plan.md', 'w').write('x')"
+    allowed, reason = tool_policy("execute_code", {"code": _fill(code, layout)}, layout.ctx(), WORKING)
+    assert not allowed and "worktree copy" in reason
+
+
+PROVENANCE_ACCESS = [
+    ("terminal", {"command": "cat {canon}/.git/autoresearch/provenance.key"}),
+    ("terminal", {"command": "tail -1 {canon}/.git/autoresearch/provenance.jsonl"}),
+    ("terminal", {"command": "env -u AUTORESEARCH_AGENT_SESSION {cli} runtime check-commits"}),
+    ("read_file", {"path": "{canon}/.git/autoresearch/provenance.key"}),
+    ("search_files", {"pattern": "mac", "path": "{canon}/.git/autoresearch"}),
+    ("write_file", {"path": "{canon}/.git/autoresearch/provenance.jsonl", "content": "{{}}"}),
+    ("execute_code", {"code": "import os\nfrom autoresearch.runtime import provenance as p\n"
+                      "p.accept(os.getcwd().split('/.worktrees')[0], 'HEAD')"}),
+    ("execute_code", {"code": "import autoresearch.runtime.provenance as p; p.record('.', 'x', 'y')"}),
+    ("terminal", {"command": "python3 -c 'from autoresearch.runtime import ledger, provenance'"}),
+]
+
+
+@pytest.mark.parametrize(("tool", "args"), PROVENANCE_ACCESS)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_the_provenance_journal_key_and_module_are_refused_to_any_tool(layout, tool, args, card):
+    """Review I-3: the OS cannot hide the key from workers; the policy refuses model access."""
+    allowed, reason = tool_policy(tool, _fill(args, layout), layout.ctx(worker=card is not None), card)
+    assert not allowed and "provenance journal" in reason and "D-27" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'a=accept-commits; "$AUTORESEARCH_CLI" runtime $a HEAD',
+        "{cli} runtime 'accept-commits' HEAD",
+        'git commit -m "x" && "$AUTORESEARCH_CLI" runtime accept-commits HEAD',
+    ],
+)
+def test_accept_commits_is_refused_however_the_command_is_written(layout, command):
+    allowed, reason = _terminal(layout, command, card=None, worker=False)
+    assert not allowed and "human operator" in reason
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
         # the worker's own worktree, under canonical/.worktrees/
         "open('{worker}/notes/a.md', 'w').write('x')",
         "import subprocess; subprocess.run(['git', '-C', '{worker}', 'commit', '-am', 'x'])",
