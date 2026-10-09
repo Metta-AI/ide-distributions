@@ -629,3 +629,48 @@ def test_a_commit_a_crash_left_unsettled_is_recovered_on_the_next_run(host, monk
     assert _staged(host) == ""
     entries, _ = provenance._entries(host.canonical)
     assert any(e["kind"] == provenance.COMMIT and e["sha"] == landed for e in entries)
+
+
+def test_a_crash_while_settling_is_settled_and_recorded_next_run(host, monkeypatch):
+    """Codex review of PR #24 round 3, item 1: a closed intent must mean a settled index.
+    A kill during the settle leaves the intent open, so the next run settles and records."""
+    def crash(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(gitops, "settle", crash)
+    with pytest.raises(KeyboardInterrupt):
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "landed\n")
+        )
+    monkeypatch.undo()
+    landed = host.head()
+    assert _staged(host) == "plan.md"
+    assert host.tick(at(1)).provenance_violation is None
+    assert _staged(host) == ""
+    entries, _ = provenance._entries(host.canonical)
+    assert any(e["kind"] == provenance.COMMIT and e["sha"] == landed for e in entries)
+
+
+def test_a_crash_inside_recovery_is_retried(host, monkeypatch):
+    """Item 1: recovery also settles before it records, so a crash between the two is
+    finished by the run after."""
+    def crash(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(provenance, "record", crash)
+    monkeypatch.setattr(gitops, "settle", crash)
+    with pytest.raises(KeyboardInterrupt):
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "landed\n")
+        )
+    monkeypatch.undo()
+    monkeypatch.setattr(provenance, "record", crash)
+    with pytest.raises(KeyboardInterrupt), file_lock(
+        host.canonical / ".supervisor" / "runtime" / "canonical.lock"
+    ):
+        provenance.recover(host.canonical)
+    monkeypatch.undo()
+    assert _staged(host) == ""  # settled before the crash
+    assert host.tick(at(1)).provenance_violation is None
+    entries, _ = provenance._entries(host.canonical)
+    assert any(e["kind"] == provenance.COMMIT and e["sha"] == host.head() for e in entries)

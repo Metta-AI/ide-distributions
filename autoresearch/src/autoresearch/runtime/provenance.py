@@ -297,7 +297,9 @@ def commit_recorded(
     The ``intent`` entry names that exact commit before HEAD moves to it, then the
     ``commit`` entry follows: a crash in between is recognized, and an intent vouches for no
     other commit. A failure before the intent writes nothing; a move of HEAD that fails
-    (``gitops.land`` is all or nothing) closes the intent with a ``void`` entry."""
+    (``gitops.land`` is all or nothing) closes the intent with a ``void`` entry. After the
+    move the index is settled before the ``commit`` entry is written, so a closed intent is
+    always a settled one."""
     prepared = prepare()
     if prepared is None:
         return None
@@ -317,10 +319,11 @@ def commit_recorded(
     except gitops.GitError:
         _append(canonical, {"kind": VOID, "intent": intent, "at": _now()})
         raise
-    try:
-        record(canonical, prepared.sha, message, intent)
-    finally:  # HEAD moved: the index must follow even when recording failed (``recover``)
-        gitops.settle(canonical, prepared)
+    # Settle, then record: the commit entry closes the intent, so it comes last. A crash or
+    # failure before it leaves the intent open, and ``recover`` settles (again; idempotent)
+    # and records it on the next run.
+    gitops.settle(canonical, prepared)
+    record(canonical, prepared.sha, message, intent)
     return prepared.sha
 
 
@@ -349,12 +352,13 @@ def recover(canonical: Path) -> list[str]:
             continue
         if not _is_ancestor(canonical, entry["sha"], head):
             continue
-        record(canonical, entry["sha"], entry["step"], entry["intent"])
+        # Settle first (idempotent), record last: a crash in between is retried next run.
         if entry.get("merge"):
             if _merging(canonical):
                 gitops.git(canonical, "merge", "--quit")
         elif entry.get("paths"):
             gitops.git(canonical, "reset", "-q", "HEAD", "--", *entry["paths"])
+        record(canonical, entry["sha"], entry["step"], entry["intent"])
         recovered.append(entry["sha"])
     return recovered
 
