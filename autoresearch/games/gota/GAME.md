@@ -23,11 +23,27 @@ layers: [P,K,S,SK,C,G,ST,A]
 ---
 # Gods of the Arena
 
-GotA has ten fixed hero seats: red seats 0–4 and blue seats 5–9.
 Read [mechanics](docs/mechanics.md), [policy surface](docs/policy-surface.md),
 [game guide](docs/game-guide.md), and [replay format](docs/replay-format.md).
 Semantic candidates use the PW compiler. Exact committed BASIC artifacts use
 the prebuilt path below. COM is not supported.
+
+## Seats and opponents
+
+GotA has ten fixed hero seats: red seats 0–4 and blue seats 5–9.
+The design's `seats` are the slots our candidate fills in the candidate arm and
+our champion fills in the baseline arm. For a seat-specific question, use the
+verified subject seat (`seats: [N]`, where N is 0–9). For a team question, use
+one complete team: `seats: [0, 1, 2, 3, 4]` for red or
+`seats: [5, 6, 7, 8, 9]` for blue. Seats on the same team cooperate and share an
+episode; their measurements are aggregated into one episode observation.
+
+Set `opponent_count` to `10 - len(seats)`: 9 for one subject or 5 for a complete
+team. These league-sampled policy refs fill every remaining slot in ascending
+order, including teammates when only one subject is ours. `stats design` samples
+the line-ups at design time and pins one per seed for both arms of the pair.
+A narrow fixed `opponents` set instead requires an `opponent_rationale` stating
+why those policies answer the question.
 
 ## Commands
 
@@ -133,9 +149,9 @@ The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 to the installed shared CLI executable. That shared tool performs the C6 identity
 check immediately before mutation; this wrapper has no alternate upload route.
 
-## Baseline build
+## Starter policy
 
-The prebuilt `v13-live.bas` is the shipped strategy's policy by construction: `make_v13_live.py` transforms submitted v13, its adjacent provenance file records that relationship, and equivalence to the seed `STRATEGY.md` is shown only by M1 on engine `801749e5`.
+The prebuilt `v13-live.bas` is GotA's starter policy and the shipped strategy's policy by construction: `make_v13_live.py` transforms submitted v13, its adjacent provenance file records that relationship, and equivalence to the seed `STRATEGY.md` is shown only by M1 on engine `801749e5`.
 
 `build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json --prebuilt FILE.bas`
 freezes the exact committed artifact bytes and runs the existing G1–G4 gates.
@@ -166,7 +182,7 @@ under `version.build.compiler.prebuilt_provenance`. In prebuilt mode, the shared
 `policy_sha256`), and `source_path` names that BASIC file. `compiler.mode` is
 `prebuilt`; these fields do not claim STRATEGY.md compilation or semantic proof.
 
-The prebuilt runtime baseline requires no game test fixtures. This does not
+The prebuilt starter policy requires no game test fixtures. This does not
 establish fixture-free operation of the full compiler profile.
 The installed distribution includes the byte-identical original at
 `games/gota/baselines/submitted-v13.bas`, with its historical origin in the

@@ -51,14 +51,17 @@ platform scores (zero for loss/draw/timeout); `win_rate` is team outcome.
 `xp_per_1k_ticks` and `team_xp_lead` describe the subject, not ten independent
 observations. Repeated teammates share an episode and must be aggregated.
 
-Use leaderboard `current_champion`. If it is null, read `note`: "champion unknown"
-requires the core `experiment` help-request path; "no champion known" requires
-the exact prebuilt bootstrap below in this same card. Finish that bootstrap card
+Use leaderboard `current_champion` as `baseline_version`. If it is null, run
+the starter-policy bootstrap below in this same card. Finish that bootstrap card
 before designing an experiment in a follow-up card (core `experiment` step 3).
 A copied v13 STRATEGY is not proof of policy identity. Freeze full game version,
-baseline policy version, subject seats, fixed opponent refs, unique paired seeds,
-metrics/directions,
+champion policy version, subject seats, unique paired seeds, metrics/directions,
 effect thresholds, anti-gaming guardrails and noise revision before results.
+Take `seats` and `opponent_count` from `## Seats and opponents` in
+`games/gota/GAME.md`. `stats design` samples league line-ups at design time and
+freezes one per seed in `lineups` with its `league_snapshot`; both arms face the
+same line-up in the same slots. Use fixed `opponents` instead of
+`opponent_count` only with an `opponent_rationale` explaining the narrow question.
 Require N >= max(40, calibrated n_min) independent pairs. Calibration must match
 the current game version; absent calibration blocks experimentation.
 
@@ -69,8 +72,9 @@ the current game version; absent calibration blocks experimentation.
 ```
 
 Use the exact core experiment/design JSON schemas. One request per seed and arm,
-one episode each; fixed opponents make true pairing, random/top_n selectors give
-seed-only pairing. Do not stop early after peeking. Smoke episodes debug only.
+one episode each; sampled line-ups (or fixed refs with a rationale) give true
+pairing, random/top_n selectors give seed-only pairing. Do not stop early after
+peeking. Smoke episodes debug only.
 A seat-specific question may pin one subject; a team question must preserve and
 name the roster, not disguise teammate copies as additional N. Diagnose by
 red/blue seat, draft class and opponent composition before pooling.
@@ -103,7 +107,7 @@ error as policy evidence or a strategy repair task.
 
 ## Missing champion: exact prebuilt bootstrap in the same card
 
-Read `## Baseline build` and the sidecar contract in `games/gota/GAME.md`.
+Read `## Starter policy` and the sidecar contract in `games/gota/GAME.md`.
 Follow its installed-profile commands from this card's worktree: copy
 `$AR_HOME/games/gota/baselines/submitted-v13.bas` to
 `strategy/candidates/bootstrap/submitted-v13.bas` and commit the original input

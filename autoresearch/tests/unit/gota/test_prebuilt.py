@@ -472,10 +472,10 @@ def test_cli_prebuilt_validation_fault_retains_nonuploadable_report(candidate, t
         _read_build(out)
 
 
-def test_baseline_build_contract_matches_shared_bootstrap_champion():
+def test_starter_policy_contract_matches_shared_bootstrap_champion():
     game = (ROOT / 'games/gota/GAME.md').read_text()
-    assert '\n## Baseline build\n' in game
-    section = game.split('\n## Baseline build\n', 1)[1].split('\n## ', 1)[0]
+    assert '\n## Starter policy\n' in game
+    section = game.split('\n## Starter policy\n', 1)[1].split('\n## ', 1)[0]
     commands = ('make_v13_live.py', 'tools/build.py', '-m games.gota.gates',
                 'softmax bootstrap-champion')
     positions = [section.index(command) for command in commands]
