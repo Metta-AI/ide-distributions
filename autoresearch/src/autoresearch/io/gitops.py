@@ -119,5 +119,15 @@ def push(repo: Path, remote: str, refspecs: list[str]) -> bool:
     return _run(repo, "push", remote, *refspecs, check=False).returncode == 0
 
 
+def push_with_rejections(repo: Path, remote: str, refspecs: list[str]) -> tuple[bool, list[str]]:
+    """Push; return (all refs pushed, destination refs the remote rejected, e.g. non-fast-forward)."""
+    result = _run(repo, "push", "--porcelain", remote, *refspecs, check=False)
+    rejected = []
+    for line in result.stdout.decode(errors="replace").splitlines():
+        if line.startswith("!"):  # "!\t<src>:<dst>\t[rejected] (reason)"
+            rejected.append(line.split("\t")[1].split(":")[-1])
+    return result.returncode == 0, rejected
+
+
 def merge_base(repo: Path, a: str, b: str) -> str:
     return git(repo, "merge-base", a, b)

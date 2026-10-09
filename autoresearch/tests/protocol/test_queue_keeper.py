@@ -349,7 +349,9 @@ def test_a_rejected_submission_is_told_once_and_does_not_pause(host, monkeypatch
     second = host.tick(at(2))
     assert first.champion_conflict is None and second.champion_checked
     assert not (host.ledger / "pause.json").exists()
-    notes = [m for m in host.outbox() if m["title"] == "The league did not accept a submitted policy"]
+    notes = [
+        m for m in host.outbox() if m["title"] == "The league did not accept a submitted policy"
+    ]
     assert len(notes) == 1 and notes[0]["kind"] == "note"
     assert notes[0]["about"]["league_status"] == "membership disqualified (inactive)"
 
@@ -472,6 +474,49 @@ def test_three_failed_pushes_raise_one_help_request(host):
     assert host.remote_head() == host.head()
     state = read_json(host.canonical / ".supervisor" / "runtime" / "push_state.json")
     assert state["consecutive_failures"] == 0 and state["help_sent"] is False
+
+
+def _diverge_remote_card_branch(host, card_branch):
+    """Leave origin with a card branch the local one is not a fast-forward of (a retried card)."""
+    gitops.git(host.canonical, "branch", card_branch, "HEAD")
+    gitops.push(host.canonical, "origin", [f"refs/heads/{card_branch}"])
+    gitops.git(host.canonical, "commit", "--allow-empty", "-m", "rebuilt card")
+    gitops.git(host.canonical, "branch", "-f", card_branch, "HEAD")
+    gitops.git(host.canonical, "reset", "--hard", "HEAD~1")
+
+
+def test_a_rebuilt_card_branch_is_force_pushed_and_main_still_reaches_origin(host):
+    host.tick(at(0))
+    _diverge_remote_card_branch(host, "card/Q-01REBUILT")
+
+    result = host.tick(at(1))
+
+    assert result.pushed is True
+    remote = gitops.git(host.origin, "rev-parse", "refs/heads/card/Q-01REBUILT")
+    assert remote == gitops.git(host.canonical, "rev-parse", "refs/heads/card/Q-01REBUILT")
+    log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
+    assert "card branch was rejected" not in log
+
+
+def test_a_rejected_card_ref_is_logged_once_and_never_hides_a_main_failure(host, monkeypatch):
+    host.tick(at(0))
+    real = gitops.push_with_rejections
+    refused = "refs/heads/card/Q-01REFUSED"
+    monkeypatch.setattr(
+        queue_keeper.gitops,
+        "push_with_rejections",
+        lambda repo, remote, refspecs: (
+            (False, [refused]) if refspecs[0].startswith("+") else real(repo, remote, refspecs)
+        ),
+    )
+
+    for minute in (1, 2, 3):
+        assert host.tick(at(minute)).pushed is True
+    log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
+    assert log.count(f"push: card branch rejected by origin: {refused}") == 1
+
+    gitops.git(host.canonical, "remote", "set-url", "origin", str(host.tmp_path / "gone.git"))
+    assert host.tick(at(4)).pushed is False
 
 
 def test_bootstrap_failure_exits_1(tmp_path):
