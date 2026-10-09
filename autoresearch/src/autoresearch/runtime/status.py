@@ -137,7 +137,7 @@ def _spend(ctx: RunContext, env: Mapping[str, str], now: datetime.datetime, warn
     return {"today_usd": today, "daily_budget_usd": config.daily_usd}
 
 
-def _number(value) -> float | None:
+def finite_number(value) -> float | None:
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -150,9 +150,9 @@ def _key(env, hermes_home: Path, http_get: HttpGet, warnings: list[str]) -> dict
     warnings.extend(key_warnings)
     data = data or {}
     return {
-        "limit_usd": _number(data.get("limit")),
-        "usage_usd": _number(data.get("usage")),
-        "limit_remaining_usd": _number(data.get("limit_remaining")),
+        "limit_usd": finite_number(data.get("limit")),
+        "usage_usd": finite_number(data.get("usage")),
+        "limit_remaining_usd": finite_number(data.get("limit_remaining")),
     }
 
 

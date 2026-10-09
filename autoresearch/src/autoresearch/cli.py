@@ -29,6 +29,7 @@ GROUP_MODULES = (
     "autoresearch.softmax_tool.cli",
     "autoresearch.games.cli",
     "autoresearch.runtime.status_cli",
+    "autoresearch.runtime.report_cli",
 )
 
 

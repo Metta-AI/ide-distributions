@@ -1,5 +1,6 @@
 """A minimal Hermes ``state.db`` for spend tests: the ``sessions`` columns ``runtime.spend``
-reads (Hermes v0.21.5 ``hermes_state_common.py`` sessions DDL), and plugin session events."""
+and ``runtime.baseline`` read (Hermes v0.21.5 ``hermes_state_common.py`` sessions DDL), and
+plugin session events."""
 
 import json
 import sqlite3
@@ -7,8 +8,8 @@ import time
 from pathlib import Path
 
 SESSIONS_DDL = """CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY, source TEXT NOT NULL, parent_session_id TEXT,
-    started_at REAL NOT NULL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+    id TEXT PRIMARY KEY, source TEXT NOT NULL, model TEXT, parent_session_id TEXT,
+    started_at REAL NOT NULL, ended_at REAL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
     cache_read_tokens INTEGER DEFAULT 0, cache_write_tokens INTEGER DEFAULT 0,
     estimated_cost_usd REAL, actual_cost_usd REAL, cost_status TEXT
 )"""
@@ -24,17 +25,21 @@ def add_session(
     status: str | None = "estimated",
     tokens: tuple[int, int, int, int] = (0, 0, 0, 0),
     actual: float | None = None,
+    source: str = "kanban",
+    model: str | None = None,
+    ended_at: float | None = None,
 ) -> None:
     """Insert one session (``tokens``: input, output, cache read, cache write)."""
     connection = sqlite3.connect(Path(hermes_home) / "state.db")
     try:
         connection.execute(SESSIONS_DDL)
         connection.execute(
-            "INSERT INTO sessions (id, source, parent_session_id, started_at, input_tokens, "
-            "output_tokens, cache_read_tokens, cache_write_tokens, estimated_cost_usd, "
-            "actual_cost_usd, cost_status) VALUES (?, 'kanban', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, parent, time.time() if started_at is None else started_at, *tokens,
-             usd, actual, status),
+            "INSERT INTO sessions (id, source, model, parent_session_id, started_at, ended_at, "
+            "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, "
+            "estimated_cost_usd, actual_cost_usd, cost_status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, source, model, parent, time.time() if started_at is None else started_at,
+             ended_at, *tokens, usd, actual, status),
         )
         connection.commit()
     finally:

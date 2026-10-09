@@ -163,6 +163,7 @@ ALLOWED_COMMANDS = [
     "$AUTORESEARCH_CLI card show",
     "{cli} card show",
     '"$AUTORESEARCH_CLI" status --json',
+    '"$AUTORESEARCH_CLI" report baseline --since 2026-10-01 --json',
     "FOO=1 {cli} card show 2>/dev/null",
     'git commit -m "avoid coworld submit"',
     'echo "coworld submit is blocked here"',

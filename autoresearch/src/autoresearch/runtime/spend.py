@@ -181,7 +181,7 @@ def card_sessions(ctx: RunContext) -> dict[str, set[str]]:
     return found
 
 
-def _session_usd(row: sqlite3.Row, prices: Mapping[str, float]) -> tuple[float, bool]:
+def session_usd(row: sqlite3.Row, prices: Mapping[str, float]) -> tuple[float, bool]:
     """(cost, priced from tokens?) of one session row (module docstring)."""
     actual = row["actual_cost_usd"] or 0.0
     if actual > 0:
@@ -200,7 +200,7 @@ _COLUMNS = "s.id, s.actual_cost_usd, s.estimated_cost_usd, s.cost_status, " + ",
 )
 
 
-def _rows(hermes_home: Path, query: str, params: tuple) -> list[sqlite3.Row]:
+def state_rows(hermes_home: Path, query: str, params: tuple) -> list[sqlite3.Row]:
     """Rows of a read-only query on the profile ``state.db``; none before the first session."""
     path = Path(hermes_home) / STATE_DB
     if not path.exists():
@@ -216,7 +216,7 @@ def _rows(hermes_home: Path, query: str, params: tuple) -> list[sqlite3.Row]:
 def _total(rows: list[sqlite3.Row], prices: Mapping[str, float]) -> Cost:
     cost = Cost()
     for row in rows:
-        usd, unpriced = _session_usd(row, prices)
+        usd, unpriced = session_usd(row, prices)
         cost.usd += usd
         if unpriced:
             cost.unpriced.append(row["id"])
@@ -233,14 +233,14 @@ def sessions_cost(hermes_home: Path, roots: set[str], prices: Mapping[str, float
         "UNION SELECT s.id FROM sessions s JOIN tree t ON s.parent_session_id = t.id) "
         f"SELECT {_COLUMNS} FROM sessions s JOIN tree USING (id)"
     )
-    return _total(_rows(hermes_home, query, tuple(sorted(roots))), prices)
+    return _total(state_rows(hermes_home, query, tuple(sorted(roots))), prices)
 
 
 def day_cost(hermes_home: Path, now: datetime.datetime, prices: Mapping[str, float]) -> Cost:
     """Cost of every session that started on ``now``'s UTC day."""
     day = now.astimezone(datetime.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     query = f"SELECT {_COLUMNS} FROM sessions s WHERE s.started_at >= ?"
-    return _total(_rows(hermes_home, query, (day.timestamp(),)), prices)
+    return _total(state_rows(hermes_home, query, (day.timestamp(),)), prices)
 
 
 def card_cost(ctx: RunContext, task_id: str, prices: Mapping[str, float]) -> Cost:

@@ -218,6 +218,7 @@ Read state with the CLI:
 "$AUTORESEARCH_CLI" promotion status
 "$AUTORESEARCH_CLI" softmax whoami
 "$AUTORESEARCH_CLI" status --json
+"$AUTORESEARCH_CLI" report baseline --since 2026-10-09 --json
 ```
 
 `status --json` is one read-only snapshot, also allowed to cards: the distribution version
@@ -227,6 +228,18 @@ whether the agent started, today's estimated spend against the daily budget, the
 key's limit, usage and remaining credit, running cards, open questions, the champion and any
 conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
 `warnings` entry. It never prints a credential.
+
+`report baseline --since <YYYY-MM-DD> --json` reports performance and cost from that UTC
+day on, read only and allowed to cards (the coach chat's `baseline_report`): per card (mode,
+model, runs, wall time, tokens, estimated USD, outcome), per day (estimated USD by session
+source, today's key usage from OpenRouter's `usage_daily`, cards finished), per experiment
+(XP requests, episodes, time from creation to its latest evidence, the cost of the cards that
+ref it; `credits` is null because no per-request credit cost is stored), per uploaded build
+(wall time and each gate's seconds, null when the build did not record them), and the key.
+`estimated_usd_by_source` always has `cli` (card workers: Hermes sources `kanban` and `cli`),
+`api_server` (the coach chat), `compiler` (GotA compiler copies, below) and `cron`; any other
+source seen, such as `delegate`, is an extra key with its own total. Module docstring:
+`src/autoresearch/runtime/baseline.py`.
 
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
@@ -248,6 +261,7 @@ Where things live:
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
 | Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
 | Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
+| GotA compiler child sessions, one copy per build (read by `report baseline`) | `$PROFILE/gota-compiler/<build id>-<suffix>/state.db` |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
