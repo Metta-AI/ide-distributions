@@ -579,3 +579,8 @@ def test_queue_from_env_gives_the_kanban_queue_the_model_map(tmp_path):
     ctx = RunContext(tmp_path / "autoresearch", tmp_path / "ws", None, None, None)
     queue = queue_from_env({"AUTORESEARCH_CARD_MODELS": "planning=x/y"}, ctx)
     assert queue.models == {"planning": "x/y"}
+
+
+def test_stop_blocks_the_task_with_the_reason(fake, queue):
+    queue.stop("t_abc", "spend-cap: card used $4.10 of $4.00")
+    assert fake.argvs() == [[*BOARD, "block", "t_abc", "spend-cap: card used $4.10 of $4.00"]]

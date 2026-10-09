@@ -60,6 +60,19 @@ elif command == "complete":
     entry["runs"].append({"id": len(entry["runs"]) + 1, "outcome": "completed",
                           "ended_at": 1, "metadata": json.loads(flag("--metadata"))})
     save()
+elif command == "block":
+    entry = find(rest[0])
+    if entry["task"]["status"] not in ("ready", "running"):
+        sys.exit("cannot block")
+    for run in entry["runs"]:
+        if run["ended_at"] is None:
+            run.update(ended_at=1, outcome="blocked", summary=rest[1])
+            break
+    else:
+        entry["runs"].append({"id": len(entry["runs"]) + 1, "outcome": "blocked",
+                              "ended_at": 1, "metadata": None, "summary": rest[1]})
+    entry["task"]["status"] = "blocked"
+    save()
 else:
     sys.exit("unsupported: " + command)
 """
@@ -140,3 +153,11 @@ def test_requeue_pending_is_rejected(queue, tmp_path):
     task_id = queue.create_unassigned(make_spec(1), "card/1", tmp_path)
     with pytest.raises(ValueError):
         queue.requeue(task_id, "x")
+
+
+def test_stop_blocks_a_pending_card_with_the_reason(queue, tmp_path):
+    task_id = queue.create_unassigned(make_spec(1), "card/1", tmp_path)
+    queue.stop(task_id, "spend-cap: 4 runs")
+    card = queue.get(task_id)
+    assert card.state == "blocked" and card.block_reason == "spend-cap: 4 runs"
+    assert card.block_run_id == card.runs[-1].run_id and card.runs[-1].outcome == "blocked"

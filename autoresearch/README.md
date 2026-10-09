@@ -87,6 +87,10 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but no shipped job runs its cards (see below). |
 | `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
 | `AUTORESEARCH_CARD_MODELS` | no | Model per card mode, as `mode=model` pairs separated by commas. Default `planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3`: mechanical cards run on the cheaper model, `investigation` and `experimentation` on `model.default`. A mode set to `default` (or the whole value `none`) uses `model.default`. queue-keeper pins the model when it creates the card (`hermes kanban create --model ... --provider openrouter`), so a change applies to new cards only; `hermes kanban --board autoresearch set-model <task> <model>` changes a card already on the board. An unknown mode makes queue-keeper and the queue commands fail at start. |
+| `AUTORESEARCH_MAX_CARD_RUNS` | no | Runs per card. Default 4. queue-keeper stops a card that would start, or has started, one more run: it blocks it (reason `spend-cap: ...`) and sends one help request. A stopped card is never requeued or repaired; unblocking it gives it another full allowance. `health` also keeps a card blocked (no requeue) once it has this many runs. `0` turns the cap off. |
+| `AUTORESEARCH_MAX_CARD_USD` | no | Estimated model spend per card, in USD. Default 4. Same stop as above. The estimate is Hermes' own (`state.db`, `sessions.estimated_cost_usd`), summed over the sessions of the card's runs and their compression and subagent sessions. `0` turns the cap off. |
+| `AUTORESEARCH_DAILY_BUDGET_USD` | no | Estimated model spend per UTC day of every session of this profile. Default 25. At the budget queue-keeper pauses dispatch (the usual pause: pending cards unassigned, no admission) and sends one help request a day; running cards finish under their own caps. It resumes by itself on the next UTC day, or after you raise the value. `0` turns it off. |
+| `AUTORESEARCH_FALLBACK_PRICES` | no | USD per million tokens for a session Hermes could not price (its estimate missing, for example when OpenRouter pricing was unreachable), as `kind=price` pairs. Default `input=3,output=12,cache_read=0.75,cache_write=3`, above kimi-k3's observed rate on purpose. queue-keeper logs each session priced this way once. |
 | `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
@@ -134,9 +138,9 @@ hermes -p autoresearch cron list
 
 | Job | Runs | Does |
 |---|---|---|
-| `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning. The only writer of the canonical workspace. |
+| `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. |
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
-| `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
+| `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card stopped at a spend cap, or blocked with `AUTORESEARCH_MAX_CARD_RUNS` runs, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
 To start a `queue-keeper` run at the next scheduler tick instead of waiting for the
 schedule:
@@ -209,6 +213,8 @@ Where things live:
 | Canonical workspace (git) | `$PROFILE/workspace/` |
 | Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
+| Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
+| Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
@@ -238,7 +244,14 @@ is [`schemas/comms/`](schemas/comms/README.md); that README also says how to add
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a
 `keeper_step_failed` signal. The agent pauses itself when preflight fails (identity,
 expired credential, low disk, low OpenRouter credit, wrong host Kanban config). It sends
-a help request. It resumes by itself when preflight passes again.
+a help request. It resumes by itself when preflight passes again. It also pauses when
+today's estimated spend reaches `AUTORESEARCH_DAILY_BUDGET_USD`, and then resumes only once
+the spend is under the budget again (the next UTC day).
+
+Workers wait on long commands without model calls: a build or local check runs with the
+terminal tool's `background: true` and one `process_manage` wait of up to 1800 s
+(`terminal.timeout` in the profile config, which caps a wait). The plugin refuses foreground
+`sleep` of 30 s or more and loops that sleep while checking a process.
 
 ## Restore on a new host
 
@@ -301,6 +314,12 @@ automatic update; `updates.check` is set to false so it does not even check.
 - **Credits.** A Player credential cannot read credits (HTTP 403). Preflight only warns,
   and experiments that wait for credits are retried with backoff (A10).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
+- **Spend caps see only this profile's sessions.** GotA compiler child runs (their own
+  `HERMES_HOME`) and spend outside the profile are not counted. A card's cost needs the
+  plugin's `session_start` event for each run, so sessions from before this feature count
+  only through their `session_end` event. A stopped running worker is ended by the Hermes
+  dispatcher about two minutes after the stop (`reap_terminal_workers`), not at once; this is
+  not yet observed on a live host.
 
 ## Integrations
 

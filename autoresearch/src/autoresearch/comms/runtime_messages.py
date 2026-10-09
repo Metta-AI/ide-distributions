@@ -314,6 +314,58 @@ def card_tool_fault(
     )
 
 
+# --- spend caps (runtime.spend) ---
+
+
+def card_over_cap(
+    card_title: str,
+    why: str,
+    allowance: str,
+    task_id: str,
+    request_id: str,
+    stop: int,
+    refs: list,
+    running: bool = True,
+) -> RuntimeMessage:
+    """A card reached its run or estimated-cost cap; ``stop`` counts the card's stops, so a
+    card a human unblocked that reaches the cap again is reported again."""
+    action = (
+        "stopped the card and blocked it" if running else "kept the blocked card blocked"
+    )
+    body = (
+        f"The runtime {action}: “{_line(card_title, 80)}”, because {why}. It will not put "
+        f"the card back in the queue or open a repair card. If the work should go on, unblock "
+        f"the card: it then gets {allowance}. Otherwise leave it blocked, or drop it and send "
+        "a smaller task."
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title("Card stopped at its spend cap", card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id),
+        key=f"spend-cap:{task_id}:{stop}",
+    )
+
+
+def daily_budget_reached(spent_usd: float, budget_usd: float, day: str) -> RuntimeMessage:
+    """Today's estimated model spend reached the daily budget; queue-keeper paused (one per
+    UTC day)."""
+    body = (
+        f"The agent is paused: today's estimated model spend (UTC day {day}) is "
+        f"${spent_usd:.2f}, at or over the daily budget of ${budget_usd:.2f}. No new cards "
+        "start; cards already running finish under their own caps. The agent resumes by "
+        "itself on the next UTC day. To resume today, raise AUTORESEARCH_DAILY_BUDGET_USD in "
+        "the profile .env."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Agent paused: daily spend budget reached",
+        body,
+        key=f"daily-budget:{day}",
+    )
+
+
 # --- queue-keeper ---
 
 
@@ -362,8 +414,9 @@ def agent_paused(reasons: str, paused_at: str) -> RuntimeMessage:
 
 def agent_resumed(count: int) -> RuntimeMessage:
     body = (
-        f"The preflight check passes again, so the agent resumed. {count} pending card(s) "
-        "were assigned again. Nothing needs to be done."
+        f"The cause of the pause has cleared (the preflight check passes and today's spend is "
+        f"under the daily budget), so the agent resumed. {count} pending card(s) were "
+        "assigned again. Nothing needs to be done."
     )
     return RuntimeMessage("note", "Agent resumed", body)
 

@@ -344,6 +344,14 @@ class KanbanQueue:
         else:
             raise ValueError(f"cannot requeue a {state} card")
 
+    def stop(self, task_id: str, reason: str) -> None:
+        """``kanban block``: a ``running`` or ``ready`` task becomes ``blocked`` and its run
+        ends with the reason as summary (``kanban_db.block_task``; a never-claimed task gets a
+        zero-length blocked run). The worker of a running task is not signalled here: the
+        dispatcher's ``reap_terminal_workers`` ends a worker that outlived its run, 120 s after
+        the run ended, on its next tick. Raises KanbanError for another status."""
+        self._kanban("block", task_id, reason)
+
     def _require_pending(self, task_id: str, action: str) -> Card:
         card = self.get(task_id)
         if card.state != "pending":

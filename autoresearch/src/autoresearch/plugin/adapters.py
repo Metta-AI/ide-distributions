@@ -215,12 +215,15 @@ def on_session_end(
         _log_error(ctx, "on_session_end", error)
 
 
-def pre_llm_call(is_first_turn=False, **kwargs):
+def pre_llm_call(is_first_turn=False, session_id=None, **kwargs):
     """The card briefing, injected into the first user turn of a Kanban card worker, with
     the run id (the journal ``iteration``) and the other cards running now (``peers``; left
     out, and the error logged, when the board cannot be read). It also records the worker identity for the
     worker's subprocesses, which Hermes strips of ``HERMES_KANBAN_TASK``/``_RUN_ID``
-    (``runctx`` module docstring)."""
+    (``runctx`` module docstring), and a ``session_start`` event naming the session that works
+    this card run: the runtime's spend caps price a card from its sessions in ``state.db``
+    (``runtime.spend``). Later sessions of the run (context compression, subagents) carry it
+    as ``parent_session_id``."""
     task = os.environ.get(runctx.ENV_CARD_ID)
     if not is_first_turn or not task:
         return None
@@ -229,6 +232,13 @@ def pre_llm_call(is_first_turn=False, **kwargs):
         ctx = _run_context()
         try:  # first, before anything that can fail: a stale record must never survive
             runctx.record_worker_identity(ctx)
+        except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in
+            _log_error(ctx, "pre_llm_call", error)
+        try:
+            _append(ctx, KANBAN_EVENTS_FILE, {
+                "ts": time.time(), "event": "session_start", "task": ctx.card_id,
+                "run": ctx.run_id, "session_id": session_id,
+            })
         except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in
             _log_error(ctx, "pre_llm_call", error)
         text = (runctx.runtime_dir(ctx) / "briefings" / f"{task}.md").read_text(encoding="utf-8")

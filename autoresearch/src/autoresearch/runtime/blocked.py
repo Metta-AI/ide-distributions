@@ -24,6 +24,12 @@ before ``kanban_block``); this one covers the runtime's view and a worker that c
 human unblocks the card and a later non-tool-fault block follows, the marker is ignored and
 the card follows the ordinary requeue-then-repair path.
 
+Spend caps (``runtime.spend``) come first. A card stopped at a cap (reason starting
+``spend-cap:``, or held at the run cap) is skipped: never requeued, never repaired. With a
+``spend_config``, a card that would be requeued or repaired but already has the cap's number
+of runs is held instead (``spend.hold_blocked``: one runtime ``help_request``; the card stays
+blocked for a human).
+
 Hermes limit: a second ``kanban_block`` with the same kind after an unblock (D-26 uses
 ``needs_input``) is routed to ``triage``, which the Queue reports as ``pending``, so this
 module never sees it. That repeat is reported only by the agent's own help_request.
@@ -41,13 +47,14 @@ from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import promotion
+from autoresearch.runtime import promotion, spend
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.markers import repair_blocked_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 
 REQUEUED = "requeued"
 REPAIRED = "repaired"
+RUN_CAP = "run-cap"
 TOOL_FAULT = "tool-fault"
 TOOL_FAULT_PREFIX = "tool-fault:"
 REPAIR_PRIORITY = "P1"
@@ -56,7 +63,7 @@ REPAIR_PRIORITY = "P1"
 @dataclass
 class BlockedAction:
     task_id: str
-    action: str  # requeued | repaired | tool-fault
+    action: str  # requeued | repaired | tool-fault | run-cap
     repair_request: str | None = None
 
 
@@ -156,13 +163,19 @@ def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool)
 
 
 def handle_blocked(
-    ctx: RunContext, queue: Queue, allow_no_remote: bool = False
+    ctx: RunContext,
+    queue: Queue,
+    allow_no_remote: bool = False,
+    spend_config: spend.SpendConfig | None = None,
 ) -> list[BlockedAction]:
     """Requeue each blocked card once, then repair; a ``tool-fault:`` block only asks for
-    help (module docstring). The caller must not hold the canonical lock."""
+    help; cards at a spend cap are left to the caps (module docstring). The caller must not
+    hold the canonical lock."""
     canonical = ctx.canonical
     actions = []
     for card in queue.list("blocked"):
+        if spend.is_held(canonical, card):
+            continue
         record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
         reason = card.block_reason or ""
         if reason.startswith(TOOL_FAULT_PREFIX):
@@ -173,6 +186,13 @@ def handle_blocked(
             )
             if not reported:
                 actions.append(_tool_fault(canonical, card, reason, allow_no_remote))
+        elif (
+            spend_config is not None
+            and (record is None or record["state"] in (TOOL_FAULT, REQUEUED))
+            and spend.run_cap_reached(canonical, card, spend_config)
+        ):
+            spend.hold_blocked(ctx, card, spend_config, allow_no_remote)
+            actions.append(BlockedAction(card.task_id, RUN_CAP))
         elif record is None or record["state"] == TOOL_FAULT:
             actions.append(_requeue(canonical, queue, card))
         elif record["state"] == REQUEUED:

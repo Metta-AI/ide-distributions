@@ -28,3 +28,7 @@ class Queue(Protocol):
 
     def requeue(self, task_id: str, reason: str) -> None:
         """Return a blocked or claimed card to pending."""
+
+    def stop(self, task_id: str, reason: str) -> None:
+        """Block a pending or claimed card with ``reason`` (the runtime's spend caps). A
+        claimed card's run ends with outcome ``blocked``; Hermes ends its worker process."""

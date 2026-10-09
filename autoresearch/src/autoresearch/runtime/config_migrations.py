@@ -50,6 +50,11 @@ ENV_PASSTHROUGH = [
     "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
     "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
     "AUTORESEARCH_CARD_MODELS",  # queue-keeper creates cards with the per-mode model
+    # spend caps (runtime.spend), read by queue-keeper and health
+    "AUTORESEARCH_MAX_CARD_RUNS",
+    "AUTORESEARCH_MAX_CARD_USD",
+    "AUTORESEARCH_DAILY_BUDGET_USD",
+    "AUTORESEARCH_FALLBACK_PRICES",
 ]
 APPROVAL_DENY = [
     "coworld player use*",

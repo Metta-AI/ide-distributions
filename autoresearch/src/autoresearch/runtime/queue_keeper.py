@@ -34,8 +34,11 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
     into the planning backlog. Then reprioritize/drop requests (``queue_ops``).
 11. Signals (with this run's failed steps as input), then the planning request (cadence, or
     queue growth).
-12. Orphaned done cards (C3), blocked cards (``blocked.handle_blocked``), the daily re-raise
-    of unanswered proposals, and resume when paused and preflight passed.
+12. Orphaned done cards (C3), spend caps (``spend.enforce``: stop cards over their run or
+    estimated-cost cap; pause when today's spend reaches the daily budget), blocked cards
+    (``blocked.handle_blocked``), the daily re-raise of unanswered proposals, and resume when
+    paused, preflight passed and today's spend is under the daily budget
+    (``spend.may_resume``).
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
@@ -93,7 +96,7 @@ from autoresearch.queue.requests import read_requests
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import config_migrations, promotion, proposals
+from autoresearch.runtime import config_migrations, promotion, proposals, spend
 from autoresearch.runtime.admission import (
     NEEDS_CALIBRATION,
     PLANNING_OWNED,
@@ -138,7 +141,7 @@ PUSH_REFSPECS = ["HEAD:refs/heads/main", "refs/heads/card/*:refs/heads/card/*"]
 GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
-LATE_STEPS = ("planning", "orphans", "blocked", "proposals", "resume", "push_final")
+LATE_STEPS = ("planning", "orphans", "spend", "blocked", "proposals", "resume", "push_final")
 CRASH_EXIT = 70  # exit code of an injected crash (module docstring)
 
 
@@ -159,6 +162,7 @@ class KeeperRun:
     signals: list = field(default_factory=list)
     planning: CardSpec | None = None
     orphans: list[str] = field(default_factory=list)
+    spend_run: spend.SpendRun | None = None  # None: the spend step failed
     blocked: list = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     reraised: list[str] = field(default_factory=list)
@@ -560,6 +564,28 @@ def admission_step(
     run.ops = _step(run, ctx, "ops", apply_ops, ctx, queue) or []
 
 
+def _spend_step(
+    run: KeeperRun, ctx: RunContext, queue: Queue, config: spend.SpendConfig,
+    now: datetime.datetime, allow_no_remote: bool,
+) -> spend.SpendRun:
+    result = spend.enforce(ctx, queue, config, now, allow_no_remote)
+    for task_id, why in result.stopped:
+        _log(ctx, f"spend: stopped card {task_id}: {why}")
+    for task_id, error in result.failures.items():
+        run.failures[f"spend {task_id}"] = error
+        _log(ctx, f"spend: could not stop card {task_id}: {error}")
+    if result.paused:
+        _log(ctx, f"spend: paused, today's estimated spend is ${result.day_usd:.2f}")
+    new = spend.new_unpriced(ctx, result.unpriced)
+    if new:
+        _log(
+            ctx,
+            f"spend: warning: Hermes has no cost estimate for session(s) {', '.join(new)}; "
+            f"priced from token counts with {spend.ENV_FALLBACK_PRICES}",
+        )
+    return result
+
+
 def _rebuild_step(ctx, queue, sm, game_version, now, allow_no_remote) -> list[CardSpec]:
     if not needs_rebuild(ctx, queue):
         return []
@@ -671,9 +697,17 @@ def _run_steps(
     )
     run.planning = _step(run, ctx, "planning", _planning_step, ctx, queue, now, run.signals)
     run.orphans = _step(run, ctx, "orphans", find_orphan_done, queue, ledger_of(canonical)) or []
-    run.blocked = _step(run, ctx, "blocked", handle_blocked, ctx, queue, allow_no_remote) or []
+    spend_config = _step(run, ctx, "spend", spend.SpendConfig.from_env, env)
+    if spend_config is not None:
+        run.spend_run = _step(
+            run, ctx, "spend", _spend_step, run, ctx, queue, spend_config, now, allow_no_remote
+        )
+    run.blocked = (
+        _step(run, ctx, "blocked", handle_blocked, ctx, queue, allow_no_remote, spend_config)
+        or []
+    )
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
-    if is_paused(ledger_of(canonical)):
+    if is_paused(ledger_of(canonical)) and spend.may_resume(canonical, run.spend_run):
         run.resumed = _step(run, ctx, "resume", resume_after_preflight, ctx, queue, allow_no_remote)
     run.pushed = _step(run, ctx, "push_final", push_step, ctx, allow_no_remote)
 
