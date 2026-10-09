@@ -5,6 +5,7 @@ fakegame, with scripted card workers (``tests/support/keeper_host.py``)."""
 import dataclasses
 import datetime
 import re
+import types
 
 import pytest
 import yaml
@@ -19,6 +20,7 @@ from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
 from autoresearch.runtime.signals import KEEPER_STEP_FAILED
+from autoresearch.softmax_tool.protocol import SubmissionState
 
 T0 = datetime.datetime.now(datetime.UTC).replace(minute=5, second=0, microsecond=0)
 
@@ -326,6 +328,27 @@ def test_a_champion_conflict_pauses_tells_the_user_once_and_waits_for_agreement(
     fourth = host.tick(at(4))  # the league and the loop agree again
     assert fourth.champion_checked and fourth.champion_conflict is None
     assert not (host.ledger / "pause.json").exists()
+    resumed = [m for m in host.outbox() if m["title"] == "Agent resumed"][-1]
+    assert "agree on the champion" in resumed["body"]
+
+
+def test_a_rejected_submission_is_told_once_and_does_not_pause(host, monkeypatch):
+    host.tick(at(0))
+    basis = types.SimpleNamespace(
+        id="P-01M4EJ9RQMHVH6XK3N4T760MNG",
+        platform_policy_version_id="ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1",
+        replaces="fake-house:v1",
+    )
+    rejected = SubmissionState("rejected", detail="membership disqualified (inactive)")
+    check = promotion.LeagueCheck("fake-house:v1", basis, rejected, None)
+    monkeypatch.setattr(promotion, "league_check", lambda *args, **kwargs: check)
+    first = host.tick(at(1))
+    second = host.tick(at(2))
+    assert first.champion_conflict is None and second.champion_checked
+    assert not (host.ledger / "pause.json").exists()
+    notes = [m for m in host.outbox() if m["title"] == "The league did not accept a submitted policy"]
+    assert len(notes) == 1 and notes[0]["kind"] == "note"
+    assert notes[0]["about"]["league_status"] == "membership disqualified (inactive)"
 
 
 def test_grace_minutes_must_be_positive():

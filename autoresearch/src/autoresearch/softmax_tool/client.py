@@ -46,7 +46,13 @@ from pathlib import Path
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.identity import require_player, whoami
 from autoresearch.softmax_tool.platform_cli import HttpGet, PlatformCli, Runner, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
+from autoresearch.softmax_tool.protocol import (
+    CreditDenied,
+    Identity,
+    SubmissionState,
+    XpHandle,
+    XpStatus,
+)
 
 UPLOAD_TIMEOUT_S = 600
 _FULL_SHA = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
@@ -184,7 +190,52 @@ class SoftmaxClient:
         return submission_id
 
     def submissions(self, player_id: str) -> list[dict]:
-        return self._cli.run_json_pages("coworld", ["submissions", "--player", player_id])
+        """``coworld submissions --player P --json`` rows (``LeagueSubmissionPublic``), each
+        with the flat keys the protocol uses added: ``submission_id``, ``policy_version_id``
+        (the ``<name>:v<N>`` label), ``league_id`` and ``player_id``."""
+        rows = self._cli.run_json_pages("coworld", ["submissions", "--player", player_id])
+        return [
+            {
+                **row,
+                "submission_id": row["id"],
+                "policy_version_id": row["policy_version"]["label"],
+                "league_id": row["league"]["id"],
+                "player_id": (row.get("player") or {}).get("id", player_id),
+            }
+            for row in rows
+        ]
+
+    def submission_state(
+        self, player_id: str, league_id: str, policy_version_id: str
+    ) -> SubmissionState:
+        """Our latest league membership of the policy (``coworld memberships --league L
+        --player P --policy <label> --json``: ``status`` submitted|qualifying|competing|
+        disqualified, ``substatus``, ``is_champion``; verified live 2026-10-09), else our
+        latest submission of it (``status`` pending|processing|placed|rejected|withdrawn)."""
+        args = ["memberships", "--league", league_id, "--player", player_id]
+        rows = self._cli.run_json_pages("coworld", [*args, "--policy", policy_version_id])
+        rows = [r for r in rows if r["policy_version"]["label"] == policy_version_id]
+        if rows:
+            row = max(rows, key=lambda r: r.get("start_time") or r.get("created_at") or "")
+            status, substatus = row["status"], row.get("substatus")
+            detail = f"membership {status}" + (f" ({substatus})" if substatus else "")
+            if status == "competing":
+                return SubmissionState("competing", bool(row.get("is_champion")), detail)
+            if status == "disqualified":
+                return SubmissionState("rejected", False, detail)
+            return SubmissionState("pending", False, detail)
+        mine = [
+            s
+            for s in self.submissions(player_id)
+            if s["policy_version_id"] == policy_version_id and s["league_id"] == league_id
+        ]
+        if not mine:
+            return SubmissionState("unknown")
+        status = max(mine, key=lambda s: s.get("created_at") or "")["status"]
+        stages = {"pending": "pending", "processing": "pending"}
+        stages |= {"rejected": "rejected", "withdrawn": "rejected"}
+        stage = stages.get(status, "unknown")  # "placed" with no membership: unknown
+        return SubmissionState(stage, False, f"submission {status}")
 
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None:
         args = ["memberships", "--league", league_id, "--player", player_id, "--champions-only"]

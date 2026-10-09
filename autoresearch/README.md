@@ -86,7 +86,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
 | `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
-| `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long after our own submission the league may still show the policy it replaced before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
+| `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long the league may take to make our admitted submission the champion (or, when its membership cannot be found, how long after the submit) before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
 | `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
@@ -245,11 +245,14 @@ that run instead; only the third such run in a row pauses, with one help request
 The champion is whatever policy the Softmax league shows competing for our player
 (amendment A9); the promotion ledger only records what the agent submitted and why. When the
 league shows something other than what the agent expects (a policy submitted by hand, a
-retired membership, or our own submission still not shown
-`AUTORESEARCH_CHAMPION_GRACE_MINUTES` after we submitted it), queue-keeper pauses the agent
-and sends one help request with both policies in its `about`. It stays paused until they
+retired or disqualified champion, or our own submission admitted but still not champion
+`AUTORESEARCH_CHAMPION_GRACE_MINUTES` after queue-keeper first saw it admitted),
+queue-keeper pauses the agent and sends one help request with both policies in its `about`.
+A submission still qualifying is not a conflict; one the league rejects is reported once as
+a note. While a conflict is open, `softmax submit` and `softmax bootstrap-champion` refuse. It stays paused until they
 agree: either make the league show the expected policy again, or accept what it shows with
-`"$AUTORESEARCH_CLI" promotion accept-champion` (in an operator shell, above). It resumes on the
+`"$AUTORESEARCH_CLI" promotion accept-champion` (in an operator shell, above; agents cannot
+run it). It resumes on the
 next queue-keeper run after that.
 
 ## Restore on a new host

@@ -361,10 +361,16 @@ def agent_paused(reasons: str, paused_at: str, key: str | None = None) -> Runtim
     )
 
 
-def agent_resumed(count: int) -> RuntimeMessage:
+def agent_resumed(count: int, champion: bool = False) -> RuntimeMessage:
+    """The agent resumed; ``champion``: the pause was a champion conflict (A9)."""
+    why = (
+        "The league and the agent agree on the champion again"
+        if champion
+        else "The preflight check passes again"
+    )
     body = (
-        f"The preflight check passes again, so the agent resumed. {count} pending card(s) "
-        "were assigned again. Nothing needs to be done."
+        f"{why}, so the agent resumed. {count} pending card(s) were assigned again. Nothing "
+        "needs to be done."
     )
     return RuntimeMessage("note", "Agent resumed", body)
 
@@ -494,6 +500,36 @@ def champion_conflict(
         body,
         about=_about(expected_policy=expected or "none", league_policy=shown or "none"),
         key=f"champion-conflict:{expected or 'none'}:{shown or 'none'}",
+    )
+
+
+def submission_rejected(
+    league_id: str,
+    promotion_id: str,
+    policy: str,
+    replaced: str | None,
+    detail: str,
+) -> RuntimeMessage:
+    """The league did not take a policy the agent submitted (A9): rejected, withdrawn, or its
+    membership disqualified. A real outcome, published once per promotion."""
+    body = (
+        f"The {league_id} league did not take a policy the agent submitted. The league decides, "
+        "so the agent now expects the policy that was the champion before (none, if there was "
+        "none) and compares new experiments against what the league shows. Nothing needs to be "
+        "done unless you expected the submission to be accepted. The policies and the "
+        "league's status are in this message's details (`about`)."
+    )
+    return RuntimeMessage(
+        "note",
+        "The league did not accept a submitted policy",
+        body,
+        about=_about(
+            promotion=promotion_id,
+            submitted_policy=policy,
+            previous_champion=replaced or "none",
+            league_status=detail,
+        ),
+        key=f"submission-rejected:{promotion_id}",
     )
 
 

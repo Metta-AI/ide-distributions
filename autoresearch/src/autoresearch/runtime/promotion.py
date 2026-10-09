@@ -76,6 +76,7 @@ path in it, normally ``strategy/candidates/<E-id>/STRATEGY.md``.
 
 import datetime
 import logging
+import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
@@ -101,7 +102,8 @@ from autoresearch.runtime.ledger import (
     ledger_of,
     now_iso,
 )
-from autoresearch.softmax_tool.protocol import Softmax
+from autoresearch.runtime.pause import pause_path
+from autoresearch.softmax_tool.protocol import Softmax, SubmissionState
 
 CHAMPION_PATH = "strategy/STRATEGY.md"
 PROMOTION_FILE_REL = ".supervisor/ledger/promotion.json"
@@ -112,6 +114,7 @@ MAIN_REFSPEC = "HEAD:refs/heads/main"
 IN_FLIGHT = ("intent", "submitted", "recorded")
 REACHED_SUBMIT = ("intent", "submitted", "recorded", "published")  # may have reached the league
 DEFAULT_CHAMPION_GRACE = datetime.timedelta(minutes=30)
+CHAMPION_PAUSE = "champion conflict"  # the start of pause.json's reason for an A9 pause
 GRACE_ENV = "AUTORESEARCH_CHAMPION_GRACE_MINUTES"
 RUNTIME = "runtime"
 MAX_RECOVERY_ATTEMPTS = 3
@@ -411,7 +414,7 @@ def _stage_time(promotion: Promotion, stage: str) -> datetime.datetime | None:
     return None
 
 
-def _latest_reached(canonical: Path) -> Promotion | None:
+def latest_reached(canonical: Path) -> Promotion | None:
     """The latest promotion that may have reached the league: the current one if it got to
     ``intent`` or later, else the latest published one."""
     current = load(canonical)
@@ -430,25 +433,37 @@ def champion_conflict(
     on_board: str | None,
     now: datetime.datetime,
     grace: datetime.timedelta = DEFAULT_CHAMPION_GRACE,
+    submission: SubmissionState | None = None,
+    competing_since: datetime.datetime | None = None,
 ) -> ChampionConflict | None:
     """Compare what the loop expects with the league's champion ``on_board`` (amendment A9).
     The league is right either way; a conflict means a human must look (queue-keeper pauses).
 
     The expectation comes from the latest promotion that may have reached the league
-    (``_latest_reached``), unless a human accepted the league's champion after it
+    (``latest_reached``), unless a human accepted the league's champion after it
     (``promotion accept-champion``, ledger ``champion_accepted.json``), which then is the
-    expectation. With no promotion and nothing accepted there is no expectation (a fresh
-    install, or a champion submitted before the loop ran: the league is taken as is).
+    expectation (the promotion's own policy, once the league shows it, also agrees). With no
+    promotion and nothing accepted there is no expectation (a fresh install, or a champion
+    submitted before the loop ran: the league is taken as is).
 
-    Grace window: while our own submission is in flight, the league may still show the policy
-    it replaced (``Promotion.replaces``). That counts only after ``grace`` has passed since
-    the submit (never while the promotion is at ``intent``: reconcile settles that from the
-    submissions list). Any other policy, including one submitted by hand, is a conflict."""
-    basis = _latest_reached(canonical)
+    When the league shows the policy that promotion replaced (``Promotion.replaces``), what
+    counts is where our submission stands (``submission``, ``Softmax.submission_state``):
+
+    - ``pending`` (submitted, qualifying, held): no conflict; it is not admitted yet. Neither
+      at ``intent`` (reconcile settles that from the submissions list).
+    - ``competing`` but not champion: admitted, and an admitted membership becomes champion
+      by default, so the league gets ``grace`` from ``competing_since`` (when the runtime
+      first saw it admitted) to show it; after that it is a conflict (``waited_out``).
+    - ``rejected`` (rejected, withdrawn, disqualified): a real outcome, not a conflict; the
+      loop now expects the replaced policy (queue-keeper tells the user once).
+    - ``unknown`` (neither list names it, or no state was read): ``grace`` from the submit.
+
+    Any other policy on the league is a conflict at once, including one submitted by hand."""
+    basis = latest_reached(canonical)
     accepted = committed_json(canonical, accepted_path(canonical))
     if accepted is not None and accepted.get("after_promotion") == (basis.id if basis else None):
         expected = accepted.get("policy_version_id")
-        if on_board == expected:
+        if on_board == expected or (basis is not None and on_board == basis.platform_policy_version_id):
             return None
         return ChampionConflict(
             expected,
@@ -458,28 +473,139 @@ def champion_conflict(
         )
     if basis is None:
         return None
-    new = basis.platform_policy_version_id
+    new, old = basis.platform_policy_version_id, basis.replaces
     if on_board == new:
         return None
-    if on_board == basis.replaces:
-        submitted_at = _stage_time(basis, "submitted")
-        if basis.stage == "intent" or submitted_at is None or now - submitted_at < grace:
+    stage = submission.stage if submission is not None else "unknown"
+    if stage == "rejected":
+        if on_board == old:
             return None
-        minutes = int((now - submitted_at).total_seconds() // 60)
+        return ChampionConflict(
+            old,
+            on_board,
+            f"the league did not take {new} ({submission.detail}), so the loop expects "
+            f"{_shown(old)} to stay the champion, but the league shows {_shown(on_board)}",
+        )
+    if on_board != old:
         return ChampionConflict(
             new,
             on_board,
-            f"the loop submitted {new} {minutes} minutes ago, but the league still shows "
-            f"{_shown(on_board)} (the grace window is {int(grace.total_seconds() // 60)} "
-            "minutes)",
-            waited_out=True,
+            f"the loop's latest promotion submitted {new}, but the league shows "
+            f"{_shown(on_board)} (a policy submitted by hand, a retired membership, or a "
+            "disqualified champion)",
         )
+    if basis.stage == "intent" or stage == "pending":
+        return None
+    since = (competing_since or now) if stage == "competing" else _stage_time(basis, "submitted")
+    if since is None or now - since < grace:
+        return None
+    minutes = int((now - since).total_seconds() // 60)
+    what = "admitted" if stage == "competing" else "submitted"
     return ChampionConflict(
         new,
         on_board,
-        f"the loop's latest promotion submitted {new}, but the league shows {_shown(on_board)} "
-        "(a policy submitted by hand, a retired membership, or a submission the league "
-        "rejected)",
+        f"the league {what} {new} {minutes} minutes ago, but still shows {_shown(on_board)} "
+        f"as our champion (the grace window is {int(grace.total_seconds() // 60)} minutes)",
+        waited_out=True,
+    )
+
+
+@dataclass(frozen=True)
+class LeagueCheck:
+    """One read of the league against the loop (``league_check``)."""
+
+    shown: str | None  # the league's champion for us
+    basis: Promotion | None  # the latest promotion that may have reached the league
+    submission: SubmissionState | None  # its state, read only when the league does not show it
+    conflict: ChampionConflict | None
+
+
+def watch_path(canonical: Path) -> Path:
+    """Disposable runtime state: when the runtime first saw a promotion's policy admitted."""
+    return Path(canonical) / ".supervisor" / "runtime" / "champion_watch.json"
+
+
+def _competing_since(
+    canonical: Path, promotion_id: str, submission: SubmissionState | None,
+    now: datetime.datetime, record: bool,
+) -> datetime.datetime | None:
+    path = watch_path(canonical)
+    try:
+        seen = read_json(path) if path.exists() else {}
+    except ValueError:
+        seen = {}
+    if submission is None or submission.stage != "competing":
+        if record and promotion_id in seen:
+            write_json(path, {k: v for k, v in seen.items() if k != promotion_id})
+        return None
+    if promotion_id in seen:
+        return datetime.datetime.fromisoformat(seen[promotion_id])
+    if record:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, {**seen, promotion_id: now.isoformat()})
+    return now
+
+
+def league_check(
+    ctx: RunContext,
+    sm: Softmax,
+    league_id: str,
+    now: datetime.datetime,
+    grace: datetime.timedelta = DEFAULT_CHAMPION_GRACE,
+    record: bool = False,
+) -> LeagueCheck:
+    """Read the league's champion and, when it is not the latest promotion's policy, where
+    that submission stands, and compare (``champion_conflict``). queue-keeper passes
+    ``record=True`` to keep ``champion_watch.json`` (when an admission was first seen); every
+    other caller only reads it."""
+    shown = current_champion(ctx, sm, league_id)
+    basis = latest_reached(ctx.canonical)
+    submission = None
+    since = None
+    if basis is not None and shown != basis.platform_policy_version_id:
+        player = sm.whoami().player_id
+        submission = sm.submission_state(player, league_id, basis.platform_policy_version_id)
+        since = _competing_since(ctx.canonical, basis.id, submission, now, record)
+    conflict = champion_conflict(ctx.canonical, shown, now, grace, submission, since)
+    return LeagueCheck(shown, basis, submission, conflict)
+
+
+def open_conflict(ctx: RunContext, sm: Softmax, league_id: str) -> str | None:
+    """Why no submission may start now (A9), or None: the league and the loop disagree
+    (``league_check``, grace from the environment, default on a malformed value), or the agent
+    is paused for a champion conflict that no human has resolved yet."""
+    pause_file = pause_path(ledger_of(ctx.canonical))
+    if pause_file.exists():
+        reason = str(read_json(pause_file).get("reason", ""))
+        if reason.startswith(CHAMPION_PAUSE):
+            return f"the agent is paused for a champion conflict: {reason}"
+    try:
+        grace = champion_grace(os.environ)
+    except ValueError:
+        grace = DEFAULT_CHAMPION_GRACE
+    now = datetime.datetime.now(datetime.UTC)
+    conflict = league_check(ctx, sm, league_id, now, grace).conflict
+    return None if conflict is None else f"champion conflict: {conflict.detail}"
+
+
+def bootstrap_blocker(canonical: Path) -> str | None:
+    """Why a bootstrap may not run although the league shows no champion (A9, A14), or None.
+    A bootstrap is for a fresh install: once a promotion of the loop may have reached the
+    league, "no champion" means that champion was lost, which a human must look at, unless a
+    human already accepted "no champion" after it (``promotion accept-champion``)."""
+    basis = latest_reached(canonical)
+    if basis is None:
+        return None
+    accepted = committed_json(canonical, accepted_path(canonical))
+    if (
+        accepted is not None
+        and accepted.get("after_promotion") == basis.id
+        and accepted.get("policy_version_id") is None
+    ):
+        return None
+    return (
+        f"promotion {basis.id} already submitted {basis.platform_policy_version_id}; the league "
+        "showing no champion means it was lost, not a fresh install (a human resolves it)"
     )
 
 
@@ -492,7 +618,7 @@ def accept_champion(ctx: RunContext, sm: Softmax, league_id: str) -> dict:
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     canonical = ctx.canonical
     with canonical_lock(canonical):
-        basis = _latest_reached(canonical)
+        basis = latest_reached(canonical)
         record = {
             "policy_version_id": on_board,
             "after_promotion": basis.id if basis else None,
@@ -995,7 +1121,21 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
     return Action("help_requested", promotion.id, message.title)
 
 
-def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
+def _league_undecided(ctx: RunContext, sm: Softmax, league_id: str, promotion: Promotion) -> bool:
+    """True while the league neither shows the promotion's policy nor disagrees with the loop
+    (its submission still qualifying, or within the grace window): a recovery card could do
+    nothing but finish ``partial`` (A9, A11)."""
+    try:
+        grace = champion_grace(os.environ)
+    except ValueError:
+        grace = DEFAULT_CHAMPION_GRACE
+    check = league_check(ctx, sm, league_id, datetime.datetime.now(datetime.UTC), grace)
+    return check.shown != promotion.platform_policy_version_id and check.conflict is None
+
+
+def reconcile(
+    ctx: RunContext, queue: Queue, sm: Softmax, league_id: str | None = None
+) -> list[Action]:
     """C8 runtime reconciliation, each queue-keeper run; the caller must not hold the lock.
 
     1. ``intent`` with the holder run terminal (or an earlier board epoch): ``submitted``
@@ -1006,6 +1146,10 @@ def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
        ``reconcile``, ``superseded``, or ``published`` without recording all count as
        "needs recovery". Then the next recovery attempt is requested (at most one live);
        after ``MAX_RECOVERY_ATTEMPTS`` one runtime ``help_request`` is published instead.
+       With ``league_id`` (queue-keeper passes the game's league), no attempt is requested
+       while the league has not decided (``_league_undecided``: our submission is still
+       qualifying or the league is within the grace window), so waiting on the league uses
+       up no attempts (A9, A11).
     3. ``recorded`` whose recording handoff is already ``published``: ``published``."""
     canonical = ctx.canonical
     promotion = load(canonical)
@@ -1019,13 +1163,16 @@ def reconcile(ctx: RunContext, queue: Queue, sm: Softmax) -> list[Action]:
         if action is None:
             return []
         actions.append(action)
+    undecided = False
+    if league_id is not None and load(canonical).stage == "submitted":
+        undecided = _league_undecided(ctx, sm, league_id, load(canonical))  # outside the lock
     with canonical_lock(canonical):
         current = load(canonical)
         if current is None or current.id != promotion.id:
             return actions
         if current.stage == "submitted":
             live = _task_live(canonical, queue, current.holder_task, current.board_epoch)
-            if not live and not _recovery_live(canonical, queue, current):
+            if not live and not undecided and not _recovery_live(canonical, queue, current):
                 if len(current.recovery_requests) < MAX_RECOVERY_ATTEMPTS:
                     actions.append(_request_recovery(ctx, current))
                 elif not current.help_requested:
@@ -1185,7 +1332,9 @@ def bootstrap_promotion(
     Allowed only while there is no champion and only for the shipped strategy: after taking
     the lock (one promotion in flight, so two bootstrapping cards cannot both submit), it is
     refused (aborted, ``code``) once the league shows a policy competing for our player
-    (A9; ``champion_exists``), and unless ``CHAMPION_PATH`` on the card's branch is
+    (A9; ``champion_exists``), when a loop promotion already reached the league or a champion
+    conflict is open (``bootstrap_blocker``, ``open_conflict``; ``champion_conflict``), and
+    unless ``CHAMPION_PATH`` on the card's branch is
     byte-identical to canonical HEAD's (``not_shipped_strategy``: the one unevaluated
     promotion must not carry an edit). The caller must not hold the lock."""
     if not _take_lock(ctx, queue, "bootstrap", None, version, platform_id, CHAMPION_PATH):
@@ -1195,6 +1344,9 @@ def bootstrap_promotion(
     if on_board is not None:
         reason = f"the {league_id} league shows {on_board} competing for us: the champion (A9)"
         return _refuse(ctx, promotion, reason, code="champion_exists")
+    blocker = bootstrap_blocker(ctx.canonical) or open_conflict(ctx, sm, league_id)
+    if blocker is not None:
+        return _refuse(ctx, promotion, blocker, code="champion_conflict")
     shipped = gitops.show(ctx.canonical, "HEAD", CHAMPION_PATH)
     branch = f"refs/heads/{promotion.candidate_branch}"
     if gitops.show(ctx.canonical, branch, CHAMPION_PATH) != shipped:

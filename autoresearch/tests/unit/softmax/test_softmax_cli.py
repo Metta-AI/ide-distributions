@@ -829,6 +829,7 @@ def test_leaderboard(board):
         "current_champion": BASELINE_PV,
         "note": "",
         "conflict": None,
+        "submission": None,
     }
 
 

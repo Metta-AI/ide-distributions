@@ -331,3 +331,40 @@ def test_agent_token_on_a_local_server_runs_the_whole_cycle(env, tmp_path):
         ["coworld", "xp-request"],
         ["coworld", "submissions"],
     ]
+
+
+# --- submission state (A9): fixtures shaped like the live rows of 2026-10-09 ---
+
+GOTA = "league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
+
+
+@pytest.mark.parametrize(
+    "fixture, label, expected",
+    [
+        ("memberships_policy_champion.json", "games-bond-gota:v7", ("competing", True)),
+        ("memberships_policy_benched.json", "games-bond-gota:v5", ("competing", False)),
+        ("memberships_policy_disqualified.json", "games-bond-gota:v6", ("rejected", False)),
+        ("memberships_policy_qualifying.json", "games-bond-gota:v8", ("pending", False)),
+    ],
+)
+def test_submission_state_reads_our_membership(env, runner, fixture, label, expected):
+    runner.on("coworld", "memberships", response=completed(synthetic(fixture)))
+    state = make(env, runner, None).submission_state(PLAYER_ID, GOTA, label)
+    assert (state.stage, state.is_champion) == expected and "membership" in state.detail
+    assert runner.argvs() == [
+        ["coworld", "memberships", "--league", GOTA, "--player", PLAYER_ID, "--policy", label,
+         "--json"],
+    ]  # fmt: skip
+
+
+def test_submission_state_falls_back_to_the_submission(env, runner):
+    """No membership yet: the submission's own status decides (recorded rows are ``placed``,
+    which without a membership is ``unknown``)."""
+    runner.on("coworld", "memberships", response=completed(synthetic("memberships_policy_none.json")))
+    runner.on("coworld", "submissions", response=completed(recorded("submissions_league.json")))
+    client = make(env, runner, None)
+    [row, *_] = client.submissions(PLAYER_ID)
+    assert row["submission_id"] == row["id"] and row["policy_version_id"].count(":v") == 1
+    state = client.submission_state(PLAYER_ID, row["league_id"], row["policy_version_id"])
+    assert state.stage == "unknown" and state.detail == "submission placed"
+    assert client.submission_state(PLAYER_ID, GOTA, "never-submitted:v1").stage == "unknown"

@@ -128,7 +128,7 @@ FIXTURES = {
         },
     ],
     "agent_paused": [{"reasons": "identity: wrong player", "paused_at": SINCE}],
-    "agent_resumed": [{"count": 2}],
+    "agent_resumed": [{"count": 2}, {"count": 0, "champion": True}],
     "staged_not_published": [
         {"message_id": MESSAGE, "staged_title": title, "problems": ["kind: bad"]}
         for title in ("Towers matter", None)
@@ -164,6 +164,16 @@ FIXTURES = {
             ("ar-bootstrap-0123456789ab:v1", None, True),
             (None, "hand-made:v2", False),
         )
+    ],
+    "submission_rejected": [
+        {
+            "league_id": "league_x",
+            "promotion_id": PROMOTION,
+            "policy": "ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1",
+            "replaced": replaced,
+            "detail": "membership disqualified (inactive)",
+        }
+        for replaced in ("hand-made:v2", None)
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [

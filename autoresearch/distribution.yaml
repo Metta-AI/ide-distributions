@@ -46,7 +46,7 @@ env_requires:
   - name: AUTORESEARCH_CHAMPION_GRACE_MINUTES
     required: false
     default: "30"
-    description: Minutes after a submission during which the league may still show the replaced champion before queue-keeper pauses the agent for a champion conflict.
+    description: Minutes the league may take to make our admitted submission the champion (from the submit when its membership cannot be found) before queue-keeper pauses the agent for a champion conflict.
   - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
     required: false
     default: "30"

@@ -13,8 +13,10 @@ path (Plan 03 Task 3.3, Overview C6/C8, amendment A9).
 4. the credential is the expected unexpired Player (``identity``; checked here so a bad
    credential never even acquires the promotion, and again by the client right before submit);
 5. there is a champion (``promotion.champion_status``: the policy the league shows competing
-   for our player, A9; ``champion_unknown`` when it shows none) and it is the champion the
-   outcome was evaluated against (``champion_mismatch``).
+   for our player, A9; ``champion_unknown`` when it shows none), no champion conflict is open
+   (``promotion.open_conflict``: the league and the loop disagree, or the agent is paused for
+   one; ``champion_conflict``), and it is the champion the outcome was evaluated against
+   (``champion_mismatch``).
 
 Then ``promotion.submit_promotion`` does the C8 steps: acquire, champion == baseline, intent
 (committed and pushed with the candidate branch), Softmax submit, submitted, and stages the
@@ -32,7 +34,9 @@ experiment, outcome or decision). Its guards, in order, before anything is uploa
 3. no promotion is in flight (``promotion_in_flight``; ``acquire`` would refuse it anyway,
    this only saves the upload);
 4. no champion exists: the league shows no policy competing for our player
-   (``champion_exists``, A9);
+   (``champion_exists``, A9); no promotion of the loop has reached the league yet unless a
+   human accepted "no champion" after it, and no champion conflict is open
+   (``promotion.bootstrap_blocker``, ``promotion.open_conflict``; ``champion_conflict``);
 5. the worktree's ``strategy/STRATEGY.md`` (committed or not) is byte-identical to canonical
    HEAD's, and every STRATEGY.md source hash the build records (``source_hashes`` entries for
    a ``STRATEGY.md``, or ``strategy_sha256`` when ``source_path`` is one) equals it
@@ -134,6 +138,9 @@ def submit(
     champion, why_unknown = promotion.champion_status(ctx, sm, league_id)
     if champion is None:
         raise Refused("champion_unknown", why_unknown)
+    conflict = promotion.open_conflict(ctx, sm, league_id)
+    if conflict is not None:
+        raise Refused("champion_conflict", conflict)
     if outcome.get("champion") != champion:
         raise Refused(
             "champion_mismatch",
@@ -187,6 +194,11 @@ def _refuse_if_champion(ctx: RunContext, sm: Softmax, league_id: str) -> None:
             "champion_exists",
             f"the {league_id} league shows {on_board} competing for us: the champion (A9, A14)",
         )
+    blocker = promotion.bootstrap_blocker(ctx.canonical) or promotion.open_conflict(
+        ctx, sm, league_id
+    )
+    if blocker is not None:
+        raise Refused("champion_conflict", blocker)
 
 
 def _strategy_source_hashes(build: dict) -> list[str]:

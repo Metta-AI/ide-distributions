@@ -44,15 +44,17 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   competing for our player, A9), upload the game's starter policy build and promote it through the C8
   promotion as a ``bootstrap`` promotion (no experiment). Prints ``{version_id,
   platform_policy_version_id, promotion_id, submission_id, champion_path}``. Refusals:
-  ``champion_exists``, ``promotion_in_flight``, ``not_shipped_strategy``,
+  ``champion_exists``, ``champion_conflict``, ``promotion_in_flight``, ``not_shipped_strategy``,
   ``promotion_refused``, ``identity`` and the build reader's
   ``gates_failed``/``bad_build``/``artifact_mismatch``.
 - ``leaderboard``: ``{league_id, player_id, leaderboard_champion, current_champion, note,
   conflict}``. The champion is the policy the league shows competing for our player (A9);
   ``leaderboard_champion`` and ``current_champion`` are both that policy (null: none, and
-  ``note`` says so). ``conflict`` is null, or ``{expected, shown, detail}`` when what the loop
-  expects differs from the league (``promotion.champion_conflict``; queue-keeper pauses the
-  agent for it).
+  ``note`` says so). ``conflict`` is null, or ``{expected, shown, detail, waited_out}`` when
+  what the loop expects differs from the league (``promotion.league_check``; queue-keeper
+  pauses the agent for it). ``submission`` is null, or ``{stage, is_champion, detail}``: where
+  the latest promotion's submission stands when the league does not show it (``pending``,
+  ``competing``, ``rejected``, ``unknown``). A malformed grace setting warns on stderr.
 - ``game-version``: ``{league_id, game_version}``, the league's current game version
   (``Softmax.game_version``; the version noise records and designs must match, C10).
 - ``standings``: ``{league_id, rows}``, the league standings (``Softmax.standings``), read-only.
@@ -117,10 +119,11 @@ from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.preflight import env_file_value
 from autoresearch.runtime.promotion import (
+    DEFAULT_CHAMPION_GRACE,
     PromotionError,
-    champion_conflict,
     champion_grace,
     champion_status,
+    league_check,
 )
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
@@ -644,16 +647,20 @@ def _leaderboard(ctx, sm, args) -> dict:
     league_id = _league_id()
     player_id = sm.whoami().player_id
     current, note = champion_status(ctx, sm, league_id)
-    conflict = champion_conflict(
-        ctx.canonical, current, datetime.now(UTC), champion_grace(os.environ)
-    )
+    try:
+        grace = champion_grace(os.environ)
+    except ValueError as error:  # a read-only command: warn and use the default
+        print(f"warning: {error}; using {DEFAULT_CHAMPION_GRACE}", file=sys.stderr)
+        grace = DEFAULT_CHAMPION_GRACE
+    check = league_check(ctx, sm, league_id, datetime.now(UTC), grace)
     return {
         "league_id": league_id,
         "player_id": player_id,
         "leaderboard_champion": current,
         "current_champion": current,
         "note": note,
-        "conflict": None if conflict is None else asdict(conflict),
+        "conflict": None if check.conflict is None else asdict(check.conflict),
+        "submission": None if check.submission is None else asdict(check.submission),
     }
 
 

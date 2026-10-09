@@ -10,9 +10,11 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    A ``skipped`` preflight (``whoami`` unavailable, fewer than 3 times in a row) stops the run
    without pausing.
 3. Champion check (A9): the league's champion for our player against what the loop expects
-   (``promotion.champion_conflict``, grace ``AUTORESEARCH_CHAMPION_GRACE_MINUTES``). On a
-   conflict: pause (C7), one runtime ``help_request`` per (expected, shown) pair, and the
-   run goes on (merges and reconcile still settle promotions) without resuming. Then abort a
+   (``promotion.league_check``: our submission's membership state, grace
+   ``AUTORESEARCH_CHAMPION_GRACE_MINUTES``). On a conflict: pause (C7), one runtime
+   ``help_request`` per (expected, shown) pair, and the run goes on (merges and reconcile
+   still settle promotions) without resuming. A rejected submission gets one runtime note per
+   promotion. Then abort a
    stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
@@ -146,7 +148,8 @@ GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
 LATE_STEPS = ("planning", "orphans", "blocked", "proposals", "resume", "push_final")
-CRASH_EXIT = 70  # exit code of an injected crash (module docstring)
+CRASH_EXIT = 70
+CHAMPION_PAUSE = promotion.CHAMPION_PAUSE  # exit code of an injected crash (module docstring)
 
 
 @dataclass
@@ -284,16 +287,31 @@ def check_champion(
     env: Mapping[str, str],
     allow_no_remote: bool,
 ) -> None:
-    """A9: compare the league's champion with what the loop expects; on a conflict pause and
-    publish one help_request per (expected, shown) pair. ``run.champion_checked`` is set only
-    when the check completes, so a failed league read never lets the agent resume."""
+    """A9: compare the league's champion with what the loop expects
+    (``promotion.league_check``, which also tracks our submission's membership); on a conflict
+    pause and publish one help_request per (expected, shown) pair. When the league did not take
+    our submission (rejected, withdrawn, disqualified), tell the user once per promotion: a
+    real outcome, not a conflict. ``run.champion_checked`` is set only when the check
+    completes, so a failed league read never lets the agent resume."""
     canonical = ctx.canonical
-    shown = promotion.current_champion(ctx, sm, game.league_id)
-    conflict = promotion.champion_conflict(canonical, shown, now, promotion.champion_grace(env))
-    run.champion_conflict = conflict
+    check = promotion.league_check(
+        ctx, sm, game.league_id, now, promotion.champion_grace(env), record=True
+    )
+    conflict = run.champion_conflict = check.conflict
+    if check.submission is not None and check.submission.stage == "rejected":
+        rejected = runtime_messages.submission_rejected(
+            game.league_id,
+            check.basis.id,
+            check.basis.platform_policy_version_id,
+            check.basis.replaces,
+            check.submission.detail,
+        )
+        with canonical_lock(canonical):
+            if not already_published(canonical, rejected):
+                publish_message(canonical, rejected, allow_no_remote, priority="P1")
     if conflict is not None:
         _log(ctx, f"champion conflict: {conflict.detail}")
-        pause(queue, ledger_of(canonical), f"champion conflict: {conflict.detail}")
+        pause(queue, ledger_of(canonical), f"{CHAMPION_PAUSE}: {conflict.detail}")
         message = runtime_messages.champion_conflict(
             game.league_id, conflict.expected, conflict.shown, conflict.waited_out
         )
@@ -307,9 +325,11 @@ def check_champion(
 
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
     canonical = ctx.canonical
+    reason = read_json(pause_path(ledger_of(canonical))).get("reason", "")
     resumed = resume(queue, ledger_of(canonical))
+    message = runtime_messages.agent_resumed(len(resumed), reason.startswith(CHAMPION_PAUSE))
     with canonical_lock(canonical):
-        publish_message(canonical, runtime_messages.agent_resumed(len(resumed)), allow_no_remote)
+        publish_message(canonical, message, allow_no_remote)
     return resumed
 
 
@@ -674,7 +694,7 @@ def _run_steps(
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
     game_version = _step(run, ctx, "game_version", sm.game_version, game.league_id)
     game_version = str(game_version).strip() if game_version is not None else None
-    _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm)
+    _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm, game.league_id)
     run.rebuilt = (
         _step(
             run, ctx, "rebuild", _rebuild_step, ctx, queue, sm, game_version, now, allow_no_remote

@@ -57,7 +57,13 @@ from autoresearch.softmax_tool.identity import (
     IdentityError,
     identity_problems,
 )
-from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
+from autoresearch.softmax_tool.protocol import (
+    CreditDenied,
+    Identity,
+    SubmissionState,
+    XpHandle,
+    XpStatus,
+)
 from autoresearch.softmax_tool.xp import handle_order
 
 FAULTS_ENV = "AUTORESEARCH_FAKE_FAULTS"
@@ -399,6 +405,28 @@ class FakeSoftmax:
             return [s for s in state["submissions"] if s["player_id"] == player_id]
 
         return self._operate("submissions", action, persist=False)
+
+    def submission_state(
+        self, player_id: str, league_id: str, policy_version_id: str
+    ) -> SubmissionState:
+        """Like the platform with immediate admission: our latest submission in the league is
+        the champion, earlier ones are benched. A state entry ``memberships[<policy>] =
+        {stage, is_champion}`` (tests set it) overrides that."""
+
+        def action(state: dict) -> SubmissionState:
+            override = (state.get("memberships") or {}).get(policy_version_id)
+            if override is not None:
+                return SubmissionState(override["stage"], bool(override.get("is_champion")))
+            ours = [
+                s["policy_version_id"]
+                for s in state["submissions"]
+                if s["player_id"] == player_id and s["league_id"] == league_id
+            ]
+            if policy_version_id not in ours:
+                return SubmissionState("unknown")
+            return SubmissionState("competing", ours[-1] == policy_version_id)
+
+        return self._operate("submission_state", action, persist=False)
 
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None:
         matching = [

@@ -160,6 +160,18 @@ def test_refuses_when_champion_unknown(tmp_path):
     assert refusal(board, board.promoter(experiment), experiment).reason == "champion_unknown"
 
 
+def test_refuses_while_paused_for_a_champion_conflict(board):
+    experiment, _ = board.reviewed_experiment()
+    worker = board.promoter(experiment)
+    ledger = board.canonical / ".supervisor" / "ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    (ledger / "pause.json").write_text(
+        json.dumps({"reason": "champion conflict: test", "paused_at": "t", "tasks": {}})
+    )
+    assert refusal(board, worker, experiment).reason == "champion_conflict"
+    assert load(board.canonical) is None
+
+
 @pytest.mark.parametrize("faults", ["identity=user", "player=ply_other", "expires_in=-60"])
 def test_identity_fault_refuses_before_any_promotion(board, faults):
     experiment, _ = board.reviewed_experiment()

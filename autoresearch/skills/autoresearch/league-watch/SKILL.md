@@ -21,7 +21,9 @@ Doctrine upheld: D-03, D-04, D-07.
    `"$AUTORESEARCH_CLI" softmax leaderboard`
    The data has `league_id`, `player_id`, `leaderboard_champion` and `current_champion`
    (both the policy the league shows competing for us: the champion, A9), `note` (when there
-   is none), and `conflict` (null, or what the loop expected and what the league shows).
+   is none), `conflict` (null, or what the loop expected and what the league shows), and
+   `submission` (null, or where the latest promotion's submission stands when the league
+   does not show it: `pending`, `competing`, `rejected`, `unknown`).
 2. Read the full league standings (every division, every player, with rank, score and
    rounds played):
    `"$AUTORESEARCH_CLI" softmax standings`

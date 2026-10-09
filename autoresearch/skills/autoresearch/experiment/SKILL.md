@@ -31,8 +31,10 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 3. Find the baseline: the current champion.
    `"$AUTORESEARCH_CLI" softmax leaderboard`
    Use `current_champion` (a platform policy version id: the policy the league shows
-   competing for us, A9) as the baseline. When it is null (`note` says "no champion"), this
-   is a fresh install. Make the first champion in this card
+   competing for us, A9) as the baseline. When `conflict` is set, stop: record it and finish
+   `blocked` (the runtime paused the agent and told the user). When `current_champion` is
+   null (`note` says "no champion") and `conflict` is null, this is a fresh install. Make the
+   first champion in this card
      with the `submit` skill, section "Bootstrap card" (A14: the game's starter policy is
      promoted as champion, with no experiment). Then request the experiment again so it
      designs against that champion:

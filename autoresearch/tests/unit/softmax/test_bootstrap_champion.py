@@ -218,6 +218,40 @@ def test_refused_when_a_leaderboard_champion_exists(tmp_path):
     assert load(board.canonical) is None
 
 
+def test_a_lost_champion_is_not_a_fresh_install(fresh, capsys, monkeypatch):
+    """A9 x A14: once a loop promotion reached the league, "no champion" means it was lost;
+    a bootstrap is refused until a human accepts "no champion" (``accept-champion``)."""
+    worker = started(fresh)
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 0, data
+    publish(fresh, worker)
+    state_path = fresh.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["submissions"] = []  # the league dropped our champion
+    state_path.write_text(json.dumps(state))
+
+    again = started(fresh)
+    code, refused = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again"))
+    assert code == 1 and refused["error"]["reason"] == "champion_conflict"
+    assert "lost" in refused["error"]["message"]
+
+    record = promotion.accept_champion(fresh.ctx(), fresh.sm, LEAGUE)
+    assert record["policy_version_id"] is None
+    assert promotion.bootstrap_blocker(fresh.canonical) is None
+
+
+def test_refused_while_paused_for_a_champion_conflict(fresh):
+    ledger = fresh.canonical / ".supervisor" / "ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    (ledger / "pause.json").write_text(
+        json.dumps({"reason": "champion conflict: test", "paused_at": "t", "tasks": {}})
+    )
+    worker = started(fresh)
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 1 and data["error"]["reason"] == "champion_conflict"
+    assert uploads(fresh) == {}
+
+
 def test_refused_unless_the_strategy_is_the_shipped_one(fresh):
     worker = started(fresh)
     strategy = worker.worktree / CHAMPION_PATH
