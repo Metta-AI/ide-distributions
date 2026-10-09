@@ -288,3 +288,19 @@ def test_a_budget_reached_today_holds_the_pause_when_state_db_is_unreadable(host
     (host.home / "state.db").write_bytes(b"not a database")
     result = host.tick(at(4))
     assert "spend_db" in result.failures and result.resumed is None and is_paused(host.ledger)
+
+
+def test_a_stop_that_cannot_be_recorded_does_not_end_enforcement(host, monkeypatch):
+    """Codex review of PR #24, F2: recording a stop is a canonical commit, which a broken
+    provenance journal fails; the card is still stopped and the spend step still returns
+    (the daily budget is still checked)."""
+    task_id = _runs(host, 5, end_claimed=True)
+
+    def broken(*_args, **_kwargs):
+        raise PermissionError("provenance journal unreadable")
+
+    monkeypatch.setattr(spend, "_report", broken)
+    result = host.tick(at(2))
+    assert host.queue.get(task_id).state == "blocked"
+    assert result.spend_run is not None
+    assert f"spend record {task_id}" in result.failures

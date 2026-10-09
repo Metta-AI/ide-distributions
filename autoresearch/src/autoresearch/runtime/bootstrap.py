@@ -27,7 +27,9 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    back on the next run). queue-keeper's routing then adopts them like any direct write. Bootstrap's own canonical
    commits are recorded in the provenance journal, and when the journal has no anchor yet it
    trusts the current HEAD once (``provenance.initialize``: a new or restored workspace, or the
-   first run of the provenance check on an existing one).
+   first run of the provenance check on an existing one). A journal or key that cannot be read
+   does not fail bootstrap (``BootstrapResult.provenance_error``): queue-keeper treats it as
+   a provenance check that cannot run, and pauses.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -81,6 +83,9 @@ class BootstrapResult:
     ok: bool = True
     error: str | None = None
     board_created: bool = False
+    # The provenance journal could not be read or initialized; queue-keeper fails closed on
+    # it (provenance pause, spend caps) instead of failing bootstrap.
+    provenance_error: str | None = None
     actions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -350,8 +355,15 @@ def _ensure_workspace(
 
 
 def _ensure_provenance(canonical: Path, fresh: bool, result: BootstrapResult) -> None:
-    with canonical_lock(canonical):
-        action = provenance.initialize(canonical, fresh)
+    """Initialize the journal. A failure (an unreadable journal or key) does not fail
+    bootstrap: queue-keeper must still reach its fail-closed provenance pause."""
+    try:
+        with canonical_lock(canonical):
+            action = provenance.initialize(canonical, fresh)
+    except Exception as error:  # noqa: BLE001 - reported as the provenance step failure
+        result.provenance_error = f"{type(error).__name__}: {error}"
+        result.warnings.append(f"provenance journal: {result.provenance_error}")
+        return
     if action:
         result.actions.append(action)
 

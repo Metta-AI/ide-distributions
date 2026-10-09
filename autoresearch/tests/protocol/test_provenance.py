@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
-from support.keeper_host import Host
+from support.keeper_host import PROFILE, Host
 
 from autoresearch.cli import main
 from autoresearch.io import gitops
@@ -465,3 +465,27 @@ def test_a_short_write_still_appends_the_whole_entry(host, monkeypatch):
                                                       "at": "now"})  # fmt: skip
     entries, invalid = provenance._entries(host.canonical)
     assert entries[-1] == written and invalid == 0
+
+
+def test_an_unreadable_journal_pauses_and_keeps_the_spend_caps(host):
+    """Codex review of PR #24, F2: a journal key bootstrap cannot read must not stop the run
+    before the fail-closed pause: pending cards are unassigned (even though the pause commit
+    itself cannot be recorded) and the spend step still runs. Fixing it resumes."""
+    host.tick(at(1))  # admits the planning request: a pending card assigned to the profile
+    assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
+    key = provenance.journal_dir(host.canonical) / provenance.KEY_FILE
+    key.chmod(0)
+    try:
+        run = host.tick(at(2))
+        assert run.bootstrap.ok and "provenance" in run.failures
+        assert run.paused and run.preflight is None and run.admitted == []
+        assert run.spend_run is not None  # the caps still apply to running cards
+        assert [card.assignee for card in host.queue.list("pending")] == [None]
+        pause = json.loads((host.ledger / "pause.json").read_text())
+        assert pause["reason"].startswith(provenance.PAUSE_REASON)
+        assert host.tick(at(3)).paused
+    finally:
+        key.chmod(0o600)
+    resumed = host.tick(at(4))
+    assert not resumed.paused and not (host.ledger / "pause.json").exists()
+    assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]

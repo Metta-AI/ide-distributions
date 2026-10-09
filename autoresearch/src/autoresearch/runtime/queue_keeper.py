@@ -833,7 +833,11 @@ def _run_steps(
     signal_config: SignalConfig,
 ) -> None:
     canonical = ctx.canonical
-    _step(run, ctx, "provenance", check_provenance, run, ctx, queue, now, allow_no_remote)
+    if run.bootstrap is not None and run.bootstrap.provenance_error:
+        # Bootstrap could not read the journal: the check would fail the same way.
+        run.failures["provenance"] = f"bootstrap: {run.bootstrap.provenance_error}"
+    else:
+        _step(run, ctx, "provenance", check_provenance, run, ctx, queue, now, allow_no_remote)
     if "provenance" in run.failures:
         # Fail closed: a check that cannot run is treated like a violation (no merge, publish
         # or admission, and no resume). The step failure escalates like any failing step.

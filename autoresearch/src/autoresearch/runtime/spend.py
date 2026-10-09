@@ -440,7 +440,13 @@ def enforce_cards(
         why = _over_cap(card, counted_runs(card) - runs, cost.usd - usd, config)
         if why is None:
             continue
-        problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        try:
+            problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        except Exception as error:  # noqa: BLE001 - recording failed; keep capping the others
+            # ``_stop`` blocks before it records, and its recording is a canonical commit,
+            # which a broken provenance journal fails: the other cards must still be stopped.
+            result.failures[f"record {card.task_id}"] = f"{type(error).__name__}: {error}"
+            continue
         if problem is None:
             result.stopped.append((card.task_id, why))
         else:

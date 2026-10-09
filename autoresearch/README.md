@@ -329,8 +329,12 @@ by a killed writer is ended before the next entry, so it never swallows that ent
 for agents (best effort: plugin policy, approvals deny list, and the command refuses in a
 card or any agent session; see Known gaps), and every accept is announced: queue-keeper
 publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is
-visible. A check that cannot run (an unreadable journal, a git error) also
-pauses the agent; a step that keeps failing gets its usual help request. A runtime writer
+visible. A check that cannot run (an unreadable journal or key, also when bootstrap finds
+it so, or a git error) also pauses the agent and still applies the spend caps; a step that
+keeps failing gets its usual help request. The pause unassigns pending cards even when its
+own commit fails (a journal that cannot be written fails every canonical commit, so then the
+help request cannot be published either and is only logged and retried; the uncommitted
+`pause.json` holds the pause until the journal is fixed). A runtime writer
 builds each commit before it moves `main` and first records an intent naming that exact
 commit, so a crash between moving `main` and the journal entry is recognized, not reported;
 an intent vouches for no other commit (one made on the same parent with the same subject is
