@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from autoresearch.runctx import BOARD
+
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = "ar-plugin-it"
 MODEL = "z-ai/glm-5.3-flash"
@@ -66,18 +68,18 @@ def installed(tmp_path):
         "SOFTMAX_PLAYER_CREDENTIAL=fake\nAUTORESEARCH_PLAYER_ID=player_fake\n"
         "AUTORESEARCH_WORKSPACE_REMOTE=/nonexistent\nAUTORESEARCH_SOFTMAX=fake\n"
     )
-    _hermes(env, "kanban", "boards", "create", PROFILE)
+    _hermes(env, "kanban", "boards", "create", BOARD)
     return env, canonical, profile_home
 
 
 def _wait_terminal(env, task_id):
     deadline = time.monotonic() + TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        task = json.loads(_hermes(env, "kanban", "--board", PROFILE, "show", task_id, "--json"))
+        task = json.loads(_hermes(env, "kanban", "--board", BOARD, "show", task_id, "--json"))
         task = task.get("task", task)
         if task.get("status") in {"done", "blocked", "archived"}:
             return task
-        _hermes(env, "-p", PROFILE, "kanban", "--board", PROFILE, "dispatch", "--json")
+        _hermes(env, "-p", PROFILE, "kanban", "--board", BOARD, "dispatch", "--json")
         time.sleep(10)
     pytest.fail(f"task {task_id} did not finish in {TIMEOUT_SECONDS}s")
 
@@ -99,7 +101,7 @@ def test_player_switch_blocked_and_briefing_injected(installed):
     env, canonical, _ = installed
     worktree = canonical / ".worktrees" / "Q-it"
     created = _hermes(
-        env, "kanban", "--board", PROFILE, "create", "Plugin probe", "--body", CARD_BODY,
+        env, "kanban", "--board", BOARD, "create", "Plugin probe", "--body", CARD_BODY,
         "--branch", "card/Q-it", "--workspace", f"worktree:{worktree}",
         "--model", MODEL, "--provider", "openrouter", "--json",
     )
@@ -114,7 +116,7 @@ def test_player_switch_blocked_and_briefing_injected(installed):
     marker = f"<!-- autoresearch-briefing task={task_id} -->"
     (runtime / "briefings" / f"{task_id}.md").write_text(f"{marker}\n# Card Q-it\nProbe card.\n")
 
-    _hermes(env, "kanban", "--board", PROFILE, "assign", task_id, PROFILE)
+    _hermes(env, "kanban", "--board", BOARD, "assign", task_id, PROFILE)
     _wait_terminal(env, task_id)
 
     result = (worktree / "result.txt").read_text()

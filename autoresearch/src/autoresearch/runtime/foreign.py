@@ -27,7 +27,7 @@ from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
-from autoresearch.runctx import RunContext
+from autoresearch.runctx import BOARD, RunContext
 from autoresearch.runtime.admission import admitted_spec
 from autoresearch.runtime.handoff import HANDOFFS_DIR
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
@@ -108,8 +108,7 @@ def report_foreign_cards(ctx: RunContext, queue: Queue, allow_no_remote: bool) -
                 continue
             title = card.spec.title or None
             forged = _has_handoff(canonical, card.task_id)
-            board = ctx.hermes_home.name
-            if record_foreign(canonical, card.task_id, title, board, allow_no_remote, forged):
+            if record_foreign(canonical, card.task_id, title, BOARD, allow_no_remote, forged):
                 recorded.append(card.task_id)
         except Exception as error:  # noqa: BLE001 - per-card containment, raised below
             failures.append(f"{card.task_id}: {type(error).__name__}: {error}")

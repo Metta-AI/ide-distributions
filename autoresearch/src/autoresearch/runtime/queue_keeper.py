@@ -980,8 +980,8 @@ def run(
     http_get: Callable | None = None,
     signal_config: SignalConfig | None = None,
 ) -> KeeperRun:
-    """One queue-keeper run (module docstring). ``profile`` (default: the profile home's
-    name) is the assignee of admitted cards; ``allow_no_remote`` lets tests run without an
+    """One queue-keeper run (module docstring). ``profile`` (default: ``ctx.profile``, the
+    install name) is the assignee of admitted cards; ``allow_no_remote`` lets tests run without an
     ``origin``; ``runner``, ``disk_free`` and ``http_get`` are the bootstrap and preflight
     seams."""
     result = KeeperRun()
@@ -1011,7 +1011,7 @@ def run(
                 game,
                 now,
                 env=env,
-                profile=profile or ctx.hermes_home.name,
+                profile=profile or ctx.profile,
                 allow_no_remote=allow_no_remote,
                 preflight_kwargs=preflight_kwargs,
                 signal_config=signal_config or SignalConfig(),

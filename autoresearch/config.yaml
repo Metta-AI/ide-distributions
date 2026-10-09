@@ -7,7 +7,7 @@ fallback_providers:
   - provider: openrouter
     model: z-ai/glm-5.3
 
-# These rows govern `hermes -p autoresearch kanban dispatch` and profile tools only.
+# These rows govern `hermes -p <profile> kanban dispatch` and profile tools only.
 # The host gateway runs one dispatcher with the host default profile's kanban.*
 # config (amendment A3); queue-keeper preflight checks that config.
 kanban:

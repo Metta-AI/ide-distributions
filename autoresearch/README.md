@@ -52,17 +52,21 @@ Or use the official `install.sh` from the Hermes repository on a host.
 ## Install the profile
 
 ```sh
-hermes profile install /path/to/ide-mvp/autoresearch --name autoresearch
+export PROFILE_NAME=autoresearch
+hermes profile install /path/to/ide-mvp/autoresearch --name "$PROFILE_NAME"
 ```
 
-This creates the profile `autoresearch` under `<host root>/profiles/`. The host root is
-`~/.hermes` unless `HERMES_HOME` is set in your shell. Use that name everywhere below. The
-Kanban board has the same name. The three cron jobs arrive paused.
+The profile works under any install name. Below, `<profile>` (the shell variable
+`$PROFILE_NAME`) is that name: `optimizer` on Softmax hosting, `autoresearch` in a manual
+install. This creates the profile `<profile>` under `<host root>/profiles/`. The host root is
+`~/.hermes` unless `HERMES_HOME` is set in your shell. Cards are assigned to `<profile>`.
+The Kanban board is always named `autoresearch`, whatever the install name. The three cron
+jobs arrive paused.
 
 Set `PROFILE` once. Every path below is relative to it:
 
 ```sh
-export PROFILE="${HERMES_HOME:-$HOME/.hermes}/profiles/autoresearch"
+export PROFILE="${HERMES_HOME:-$HOME/.hermes}/profiles/$PROFILE_NAME"
 ```
 
 Do not confuse the two homes. The host root holds all profiles. `$PROFILE` is the home of
@@ -123,7 +127,7 @@ helpers prepared once on the host. Details: [games/gota/GAME.md](games/gota/GAME
 ## Host configuration
 
 One Hermes gateway runs one Kanban dispatcher for the whole host. It uses the config of the
-host default profile, not the config of `autoresearch` (amendment A3). The profile
+host default profile, not the config of `<profile>` (amendment A3). The profile
 configuration cannot fix this. Set it once on the host:
 
 ```sh
@@ -148,10 +152,10 @@ Start the gateway if it is not running (`hermes gateway start`).
 The jobs arrive paused. Review them, then resume them:
 
 ```sh
-hermes -p autoresearch cron resume queue-keeper
-hermes -p autoresearch cron resume xp-poll
-hermes -p autoresearch cron resume health
-hermes -p autoresearch cron list
+hermes -p "$PROFILE_NAME" cron resume queue-keeper
+hermes -p "$PROFILE_NAME" cron resume xp-poll
+hermes -p "$PROFILE_NAME" cron resume health
+hermes -p "$PROFILE_NAME" cron list
 ```
 
 | Job | Runs | Does |
@@ -163,7 +167,7 @@ hermes -p autoresearch cron list
 To start a `queue-keeper` run now instead of waiting for the schedule:
 
 ```sh
-hermes -p autoresearch cron run queue-keeper
+hermes -p "$PROFILE_NAME" cron run queue-keeper
 ```
 
 `cron run` claims the job and runs it in the foreground, then prints `Ran now: succeeded.` or
@@ -171,7 +175,7 @@ hermes -p autoresearch cron run queue-keeper
 `tools/cronjob_tools.py`, `_action_run`). It does not wait for the gateway. If the scheduler
 already holds the job it prints "Already being fired by the scheduler" and does not run it
 again; if the CLI inherits a gateway session it may instead report that the job runs in the
-background. `hermes -p autoresearch cron tick` runs every due job once, by hand.
+background. `hermes -p <profile> cron tick` runs every due job once, by hand.
 
 To run only bootstrap (no cards), use a subshell. It loads the profile `.env`, because the runtime
 reads `AUTORESEARCH_WORKSPACE_REMOTE` and the other keys from the environment. `uv` must be
@@ -200,7 +204,7 @@ profile `.env` sets it).
 
 `AUTORESEARCH_CLI` is only in the profile `.env`, and the CLI needs `HERMES_HOME` to be the
 profile home. Softmax commands also need `SOFTMAX_PLAYER_CREDENTIAL` and
-`AUTORESEARCH_PLAYER_ID`, and `COGAMES_API_URL` when the server is not softmax.com. Prepare each operator shell like this (after `PROFILE` is set):
+`AUTORESEARCH_PLAYER_ID`, and `COGAMES_API_URL` when the server is not softmax.com. Prepare each operator shell like this (after `PROFILE_NAME` and `PROFILE` are set):
 
 ```sh
 set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"
@@ -208,7 +212,7 @@ set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"
 
 Now `HERMES_HOME` is the profile home in this shell. Run `hermes` commands for the host
 (`hermes config`, `hermes gateway`) in a different shell, or with `HERMES_HOME` unset.
-`hermes -p autoresearch ...` commands work in both.
+`hermes -p <profile> ...` commands work in both.
 
 Read state with the CLI:
 
@@ -378,7 +382,7 @@ cp "$PROFILE/workspace/.supervisor/hermes-memory.md" "$PROFILE/memories/MEMORY.m
 ## Update
 
 ```sh
-hermes profile update autoresearch -y
+hermes profile update "$PROFILE_NAME" -y
 ```
 
 This replaces the files the distribution owns (code, doctrine, skills, cron job definitions)

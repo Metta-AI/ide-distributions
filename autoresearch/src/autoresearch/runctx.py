@@ -26,6 +26,10 @@ ENV_RUN_ID = "HERMES_KANBAN_RUN_ID"
 
 WORKERS_RELATIVE = Path(".supervisor/runtime/workers")
 
+# The Kanban board slug. Fixed: the profile's install name varies (``optimizer`` on Softmax
+# hosting, ``autoresearch`` in a manual install), the board does not (plan D2).
+BOARD = "autoresearch"
+
 
 @dataclass(frozen=True)
 class RunContext:
@@ -34,6 +38,11 @@ class RunContext:
     worker: Path | None
     card_id: str | None
     run_id: str | None
+
+    @property
+    def profile(self) -> str:
+        """The install name of this profile (the card assignee): the profile home's name."""
+        return self.hermes_home.name
 
 
 def worker_identity_path(canonical: Path, worker: Path) -> Path:
