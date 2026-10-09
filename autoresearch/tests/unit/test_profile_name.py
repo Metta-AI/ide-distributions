@@ -79,8 +79,12 @@ def test_admission_assigns_cards_to_the_install_name(tmp_path, monkeypatch):
 
 # -- docs: the agent's text never hard-codes the install name ----------------------------
 
-HARD_CODED = re.compile(r"-p autoresearch\b|profiles/autoresearch\b")
-AGENT_TEXT = ("skills", "doctrine", "SOUL.md", "config.yaml", "games")
+HARD_CODED = re.compile(r"""(-p|--profile)[ =]+["']?autoresearch\b|profiles/autoresearch\b""")
+AGENT_TEXT = (
+    "skills", "doctrine", "games", "scripts", "plugins",
+    "SOUL.md", "config.yaml", "distribution.yaml", "cron/jobs.json",
+)  # fmt: skip
+TEXT_SUFFIXES = {".md", ".py", ".yaml", ".json"}
 README_MANUAL_INSTALL = "## Install the profile"
 
 
@@ -88,7 +92,10 @@ def agent_text_files() -> list[Path]:
     files = []
     for name in AGENT_TEXT:
         path = DISTRIBUTION / name
-        files += sorted(p for p in path.rglob("*.md")) if path.is_dir() else [path]
+        if path.is_dir():
+            files += sorted(p for p in path.rglob("*") if p.suffix in TEXT_SUFFIXES)
+        else:
+            files.append(path)
     return files
 
 

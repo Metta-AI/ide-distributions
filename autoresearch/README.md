@@ -61,7 +61,13 @@ The profile works under any install name. Below, `<profile>` (the shell variable
 install. This creates the profile `<profile>` under `<host root>/profiles/`. The host root is
 `~/.hermes` unless `HERMES_HOME` is set in your shell. Cards are assigned to `<profile>`.
 The Kanban board is always named `autoresearch`, whatever the install name. The three cron
-jobs arrive paused.
+jobs arrive paused. Shell variables do not survive a new shell: export `PROFILE_NAME` (and
+`PROFILE`, below) again in each new shell before running the commands in this guide.
+
+An existing install not named `autoresearch` (an earlier version named its board after the
+profile) gets a new `autoresearch` board with a new board epoch on its next queue-keeper run.
+Cards on the old profile-named board stay there: let them finish or archive each one with
+`hermes kanban --board "$PROFILE_NAME" archive <card>` (`hermes kanban --board "$PROFILE_NAME" list` shows them).
 
 Set `PROFILE` once. Every path below is relative to it:
 

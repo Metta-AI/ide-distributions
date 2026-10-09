@@ -112,7 +112,7 @@ def host_config_problems(hermes_home: Path) -> tuple[list[str], list[str]]:
     if not isinstance(config, dict) or not isinstance(config.get("kanban") or {}, dict):
         return [f"host config {path} is not a mapping with a kanban mapping"], []
     kanban = config.get("kanban") or {}
-    profile = Path(hermes_home).name
+    profile = Path(hermes_home).name  # the install name, as RunContext.profile (card assignee)
     reasons = []
     if kanban.get("default_assignee"):
         reasons.append(
