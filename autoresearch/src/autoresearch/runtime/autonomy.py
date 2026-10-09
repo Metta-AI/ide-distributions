@@ -3,8 +3,9 @@
 ``always`` (the default): the agent plans its own research. ``on-request``: on hosted Softmax
 any user can click Start, so the agent plans nothing (cadence, queue growth, board rebuild)
 until the coach's first task arrives. That task, an inbound ``task`` whose ``author`` starts
-with ``coach:``, commits ``ledger/started.json`` ``{"started_at": ISO, "by": "<inbound id>"}``;
-the marker is permanent. A coach ``steer`` (what cancelling a task produces) does not start the
+with ``coach:`` and that routing accepted (not one answered with a rejection note), commits
+``ledger/started.json`` ``{"started_at": ISO, "by": "<inbound id>"}``; the marker is
+permanent. A coach ``steer`` (what cancelling a task produces) does not start the
 agent, and neither does a task from anyone else.
 
 This is a convenience, not a security control: everything in the sandbox runs as one uid, so
@@ -45,16 +46,29 @@ def is_started(canonical: Path) -> bool:
     return committed_json(canonical, started_path(canonical)) is not None
 
 
+def _accepted(record: dict | None) -> bool:
+    """Routing took the task: it went to a card request or the planning backlog. A task
+    answered with a rejection note (``task_not_started``: bad shape or refs) has no one
+    responsible, and one not routed yet waits for a later run."""
+    if record is None:
+        return False
+    responsible = record["responsible"]
+    return bool(responsible["request_id"]) or responsible["backlog"]
+
+
 def start_on_first_coach_task(canonical: Path) -> str | None:
-    """Commit ``started.json`` for the first coach task in the inbox; return that task's id,
-    or None when there is none or the agent is already started. Idempotent. Takes the
+    """Commit ``started.json`` for the first coach task in the inbox that routing accepted;
+    return that task's id, or None when there is none or the agent is already started. Idempotent. Takes the
     canonical lock: the caller must not hold it."""
     with canonical_lock(canonical):
         if is_started(canonical):
             return None
+        records = delivery.records(canonical)
         for inbound_id, message in delivery.inbox(canonical).items():
-            if message.get("kind") == "task" and str(message.get("author", "")).startswith(
-                COACH_AUTHOR_PREFIX
+            if (
+                message.get("kind") == "task"
+                and str(message.get("author", "")).startswith(COACH_AUTHOR_PREFIX)
+                and _accepted(records.get(inbound_id))
             ):
                 path = started_path(canonical)
                 write_json(path, {"started_at": now_iso(), "by": inbound_id})

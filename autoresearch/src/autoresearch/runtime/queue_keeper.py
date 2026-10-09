@@ -45,8 +45,9 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    still refuses is logged once. The run ends with the same push (step 13).
 8. Sweep staged skills into ``skills-proposed/`` (``proposals.sweep_skills``).
 9. Route inbound (C11), before admission so new requests carry their inbound. With
-    ``AUTORESEARCH_AUTONOMY=on-request``, the first coach task then starts the agent
-    (``runtime.autonomy``).
+    ``AUTORESEARCH_AUTONOMY=on-request``, the first coach task routing accepted then starts
+    the agent (``runtime.autonomy``; step ``autonomy_start``, distinct from the setting check's
+    step ``autonomy``).
 10. Admission (C3, C10, C11) of every committed create request (merged from cards, or written
     by the runtime) still without a final receipt. Briefings get the card's inbound, the
     planning backlog and open proposals (planning cards), and the latest signals.
@@ -914,7 +915,7 @@ def _run_steps(
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
     _step(run, ctx, "routing", _routing_step, run, ctx, queue, env, allow_no_remote)
     if autonomy_mode == autonomy.ON_REQUEST:
-        _step(run, ctx, "autonomy", autonomy.start_on_first_coach_task, canonical)
+        _step(run, ctx, "autonomy_start", autonomy.start_on_first_coach_task, canonical)
     _step(
         run, ctx, "admission", admission_step,
         run, ctx, queue, game, game_version, profile, now, allow_no_remote,

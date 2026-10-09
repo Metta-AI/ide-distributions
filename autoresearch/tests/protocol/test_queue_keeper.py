@@ -1141,11 +1141,17 @@ def _started(host: Host) -> dict | None:
     return host.committed(host.ledger / "started.json")
 
 
-def _send_task(host: Host, author: str) -> str:
+def _send_task(host: Host, author: str, refs: list[str] | None = None) -> str:
     return submit_inbound(
         host.canonical,
         "task",
-        {"title": "Scout andre", "mode": "scouting", "why": "Leads.", "refs": [], "priority": "P1"},
+        {
+            "title": "Scout andre",
+            "mode": "scouting",
+            "why": "Leads.",
+            "refs": refs or [],
+            "priority": "P1",
+        },
         author,
     )
 
@@ -1176,6 +1182,23 @@ def test_first_coach_task_starts_the_agent(host):
     assert host.clean()
     host.tick(at(2))
     assert len(_planning_requests(host)) == 1  # the agent plans from now on
+
+
+def test_a_rejected_coach_task_does_not_start_the_agent(host):
+    """M1: a coach task routing answers with a rejection note (its refs do not resolve) does
+    not start the agent; the next accepted coach task does."""
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    rejected = _send_task(host, "coach:ply_x", refs=["ar://claim/C-01K6Z3V8QX0000000000000009"])
+
+    run = host.tick(at(1))
+
+    record = host.committed(host.ledger / "inbound" / f"{rejected}.json")
+    assert record["state"] == "acknowledged" and record["responsible"]["request_id"] is None
+    assert _started(host) is None and run.planning_skipped and run.failures == {}
+    task = _send_task(host, "coach:ply_x")
+    host.tick(at(2))
+    assert _started(host)["by"] == task
 
 
 def test_coach_steer_does_not_start_the_agent(host):
