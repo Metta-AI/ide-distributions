@@ -23,9 +23,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   only, which see the whole profile ``.env``, so it is deliberately not on
   ``terminal.env_passthrough``: a cron job would not get it); ``lifecycle.credit_denials``
   counts consecutive denials and ``lifecycle.credits_at_denial`` is the balance read right
-  after the denial (null when unreadable). xp-poll relaunches as soon as the balance is above
-  0, unless the denial came with a positive balance (the batch needs more than is left), in
-  which case only the backoff relaunches it. Rerunning the same ``--batch``/``--attempt`` later creates only
+  after the denial (null when unreadable). xp-poll relaunches when the balance covers the
+  remaining requests and is above that value, else after the backoff
+  (``runtime.xp_poll.relaunch_due``). Rerunning the same ``--batch``/``--attempt`` later creates only
   the missing requests. A new attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
   the next number (``bad_attempt``), the batch's latest attempt has every request

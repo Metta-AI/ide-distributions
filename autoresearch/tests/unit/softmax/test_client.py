@@ -217,6 +217,20 @@ def test_credits_reads_the_balance_as_the_player(env, runner):
     assert runner.calls == []
 
 
+def test_episode_cost_is_the_recent_mean(env, runner):
+    body = {
+        "status": CREDITS_BODY["status"],
+        "recent_requests": [
+            {"episodes": 2, "compute_cost_credits": 3.0},
+            {"episodes": 4, "compute_cost_credits": 9.0},
+        ],
+    }
+    client = SoftmaxClient(env, run=runner, http_get=lambda url, headers: json.dumps(body))
+    assert client.episode_cost() == 2.0
+    empty = SoftmaxClient(env, run=runner, http_get=lambda url, headers: json.dumps(CREDITS_BODY))
+    assert empty.episode_cost() is None
+
+
 def test_credits_use_the_configured_server(env, runner):
     """The token goes only to the configured server (COGAMES_API_URL), never a constant."""
     seen = []

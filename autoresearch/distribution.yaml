@@ -47,6 +47,10 @@ env_requires:
     required: false
     default: "30"
     description: Minutes the league may take to make our admitted submission the champion (from the submit when its membership cannot be found) before queue-keeper pauses the agent for a champion conflict.
+  - name: AUTORESEARCH_RELAUNCH_MIN_CREDITS
+    required: false
+    default: "100"
+    description: Credits an experiment refused for credits needs before it is relaunched, when the cost per XP episode cannot be estimated from recent requests.
   - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
     required: false
     default: "30"

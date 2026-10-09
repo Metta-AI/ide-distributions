@@ -242,6 +242,9 @@ class FakeSoftmax:
     def _current_credits(self, state: dict) -> int:
         return int(self._faults["credits"]) if "credits" in self._faults else state["credits"]
 
+    def episode_cost(self) -> float | None:
+        return 1.0  # the fake deducts one credit per (one-episode) request
+
     def credits(self) -> int:
         return self._operate("credits", self._current_credits, persist=False)
 

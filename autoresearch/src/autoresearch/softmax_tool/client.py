@@ -102,6 +102,14 @@ class SoftmaxClient:
         except (KeyError, TypeError, ValueError):
             raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
 
+    def episode_cost(self) -> float | None:
+        """Mean credits per episode over the account's recent XP requests (the same route's
+        ``recent_requests``: ``episodes``, ``compute_cost_credits``); None without episodes."""
+        rows = self._cli.api_get_json(CREDITS_PATH).get("recent_requests") or []
+        episodes = sum(int(row.get("episodes") or 0) for row in rows)
+        cost = sum(float(row.get("compute_cost_credits") or 0) for row in rows)
+        return cost / episodes if episodes > 0 and cost > 0 else None
+
     def _league_coworld(self, league_id: str) -> dict:
         league = self._cli.run_json("coworld", ["leagues", league_id])
         game = league["game"]

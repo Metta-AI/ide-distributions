@@ -84,6 +84,11 @@ class Softmax(Protocol):
         cannot be read."""
         ...
 
+    def episode_cost(self) -> float | None:
+        """Credits one XP episode has cost lately (our recent requests), or None when there
+        is nothing to go by. Raises when it cannot be read."""
+        ...
+
     def game_version(self, league_id: str) -> str:
         """The league's current game version (a dotted number such as ``2026.10.7.2``),
         stripped of surrounding whitespace. Every implementation normalizes it here."""

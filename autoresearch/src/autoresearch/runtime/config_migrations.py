@@ -50,6 +50,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
     "AUTORESEARCH_CHAMPION_GRACE_MINUTES",  # queue-keeper's champion check (A9)
     "COGAMES_API_URL",  # the Softmax API server; the hosting runtime writes it to the .env
+    "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
 ]
 APPROVAL_DENY = [
     "coworld player use*",
