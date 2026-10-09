@@ -158,6 +158,20 @@ def test_host_config_defaults_pass(tmp_path):
     assert host_run(tmp_path / "b", {"kanban": {"dispatch_profiles": ["autoresearch"]}}).ok
 
 
+def test_a_stale_queue_setting_in_the_env_file_warns(tmp_path):
+    """A13: AUTORESEARCH_QUEUE is no longer an installer setting; worker terminals would
+    still read it from the .env."""
+    home = tmp_path / "root" / "profiles" / "autoresearch"
+    home.mkdir(parents=True)
+    (home / ".env").write_text("AUTORESEARCH_QUEUE=file\n")
+    env = {"AUTORESEARCH_PLAYER_ID": "ply_a"}
+    sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)
+    result = preflight(
+        env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB), hermes_home=home
+    )
+    assert result.ok and any("AUTORESEARCH_QUEUE" in w for w in result.warnings)
+
+
 def test_host_default_assignee_fails(tmp_path):
     result = host_run(tmp_path, {"kanban": {"default_assignee": "default"}})
     assert not result.ok and any("default_assignee" in r for r in result.reasons)

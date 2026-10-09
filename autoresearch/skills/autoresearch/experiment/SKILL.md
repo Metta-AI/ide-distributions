@@ -75,7 +75,10 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    beat X specifically"), give `"opponents": ["<policy ref>", …]` and
    `"opponent_rationale": "<why>"` instead of `opponent_count`. Then:
    `"$AUTORESEARCH_CLI" stats design <E-id> --request-file .scratch/design-request.json`
-   It reads recent league episodes and the standings (allow a minute), computes `n_min` (at
+   It reads recent league episodes and the standings: about a minute for the default 100
+   episodes, so give the terminal call a timeout of 300 seconds, and do not lower
+   `opponent_episodes` to save time (fewer episodes make the sample less league-like). It
+   computes `n_min` (at
    least the game's floor) and `delta` from the noise record of the current game version,
    records the record's revision as `noise_rev`, and writes `evaluation_design` into the
    experiment, with the sampled `lineups` and the `league_snapshot` they came from. Read `data.evaluation_design.n_min`: you need at

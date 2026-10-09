@@ -165,7 +165,8 @@ The queue is Hermes Kanban. The Kanban go/no-go passed (GO, 2026-10-08,
 [protocol-slice.md](docs/plans/findings/protocol-slice.md)), so v0 has no other queue. The
 serial fallback was never built and its queue option was removed (amendment A13).
 `FileQueue` remains only as the tests' stand-in for Kanban (`AUTORESEARCH_QUEUE=file` is a
-test hook, like `AUTORESEARCH_SOFTMAX=fake`; never set it on a host).
+test hook, like `AUTORESEARCH_SOFTMAX=fake`; never set it on a host: preflight warns when the
+profile `.env` sets it).
 
 ## Operate
 

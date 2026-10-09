@@ -63,9 +63,11 @@ class EvaluationDesign:
     opponent_rationale: str | None = None  # why a fixed ``opponents`` set (A12)
 
     def opponents_for(self, seed: int) -> tuple[str, ...]:
-        """The opponents both arms of ``seed``'s pair face: its line-up, else ``opponents``."""
+        """The opponents both arms of ``seed``'s pair face: its line-up, else ``opponents``.
+        A seed outside a sampled design has none (``()``); ingest drops its rows as
+        ``wrong_seed``."""
         if self.lineups is not None:
-            return self.lineups[str(seed)]
+            return self.lineups.get(str(seed), ())
         return self.opponents
 
     @property
