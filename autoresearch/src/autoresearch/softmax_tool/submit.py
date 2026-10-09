@@ -12,10 +12,11 @@ path (Plan 03 Task 3.3, Overview C6/C8, amendment A9).
    (``design_sha256``) (``stale_outcome``);
 4. the credential is the expected unexpired Player (``identity``; checked here so a bad
    credential never even acquires the promotion, and again by the client right before submit);
-5. the current champion (``promotion.champion_status``: the latest published promotion
-   confirmed against the leaderboard, or the leaderboard champion before the first
-   publication, A9) is known (``champion_unknown``) and is the champion the outcome was
-   evaluated against (``champion_mismatch``).
+5. there is a champion (``promotion.champion_status``: the policy the league shows competing
+   for our player, A9; ``champion_unknown`` when it shows none), no champion conflict is open
+   (``promotion.open_conflict``: the league and the loop disagree, or the agent is paused for
+   one; ``champion_conflict``), and it is the champion the outcome was evaluated against
+   (``champion_mismatch``).
 
 Then ``promotion.submit_promotion`` does the C8 steps: acquire, champion == baseline, intent
 (committed and pushed with the candidate branch), Softmax submit, submitted, and stages the
@@ -23,7 +24,7 @@ candidate STRATEGY at the champion path in the worker's worktree. Its refusals b
 ``promotion_refused``. On success the version gets a ``submitted`` event in the worktree.
 
 ``bootstrap_champion`` is the other guarded path (amendment A14): on a fresh install with no
-champion, it uploads the game's shipped strategy build and promotes it as the first champion
+champion, it uploads the game's starter policy build and promotes it as the first champion
 through ``promotion.bootstrap_promotion`` (the same C8 steps, a ``bootstrap`` promotion with no
 experiment, outcome or decision). Its guards, in order, before anything is uploaded:
 
@@ -32,13 +33,15 @@ experiment, outcome or decision). Its guards, in order, before anything is uploa
 2. the credential is the expected unexpired Player (``identity``);
 3. no promotion is in flight (``promotion_in_flight``; ``acquire`` would refuse it anyway,
    this only saves the upload);
-4. no champion exists: no published promotion and no leaderboard entry for our player
-   (``champion_exists``);
+4. no champion exists: the league shows no policy competing for our player
+   (``champion_exists``, A9); no promotion of the loop has reached the league yet unless a
+   human accepted "no champion" after it, and no champion conflict is open
+   (``promotion.bootstrap_blocker``, ``promotion.open_conflict``; ``champion_conflict``);
 5. the worktree's ``strategy/STRATEGY.md`` (committed or not) is byte-identical to canonical
    HEAD's, and every STRATEGY.md source hash the build records (``source_hashes`` entries for
    a ``STRATEGY.md``, or ``strategy_sha256`` when ``source_path`` is one) equals it
    (``not_shipped_strategy``). A build that names no STRATEGY.md source (a prebuilt
-   artifact) cannot be tied to it here; the game's ``## Baseline build`` and the build's
+   artifact) cannot be tied to it here; the game's ``## Starter policy`` section and the build's
    provenance are responsible for that.
 
 Then ``upload.upload_bootstrap`` (idempotent within the card's view of the records), a commit
@@ -135,6 +138,9 @@ def submit(
     champion, why_unknown = promotion.champion_status(ctx, sm, league_id)
     if champion is None:
         raise Refused("champion_unknown", why_unknown)
+    conflict = promotion.open_conflict(ctx, sm, league_id)
+    if conflict is not None:
+        raise Refused("champion_conflict", conflict)
     if outcome.get("champion") != champion:
         raise Refused(
             "champion_mismatch",
@@ -182,14 +188,17 @@ def _refuse_if_champion(ctx: RunContext, sm: Softmax, league_id: str) -> None:
             f"promotion {current.id} is {current.stage}; only one promotion runs at a time",
             {"promotion_id": current.id},
         )
-    if promotion.has_published(ctx.canonical):
-        raise Refused("champion_exists", "a promotion is published, so the champion exists (A14)")
-    on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
+    on_board = promotion.current_champion(ctx, sm, league_id)
     if on_board is not None:
         raise Refused(
             "champion_exists",
-            f"our {league_id} leaderboard champion {on_board} is the champion (A9, A14)",
+            f"the {league_id} league shows {on_board} competing for us: the champion (A9, A14)",
         )
+    blocker = promotion.bootstrap_blocker(ctx.canonical) or promotion.open_conflict(
+        ctx, sm, league_id
+    )
+    if blocker is not None:
+        raise Refused("champion_conflict", blocker)
 
 
 def _strategy_source_hashes(build: dict) -> list[str]:

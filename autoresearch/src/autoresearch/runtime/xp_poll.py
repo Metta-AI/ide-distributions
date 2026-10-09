@@ -16,7 +16,8 @@ game's ``evaluate`` binding reads each ``results.json`` (``<evaluate> --results 
   ``<request id>:<file dir>:<episode>`` when the request has several results files; ``seed``
   from the file's top-level ``seed``, else our lowest seat's entry, else the request's;
   ``policy_version`` from the request's arm: the candidate binding's platform id or the
-  design's baseline; ``seats`` and ``opponents`` from the frozen design; ``game_version`` from
+  design's baseline; ``seats`` and ``opponents`` from the frozen design (``opponents``: the
+  request seed's sampled line-up, A12, or the fixed set); ``game_version`` from
   the file, else the league's current version; ``metrics`` as below);
 - ``evidence/index/<EV-id>.json``: kind ``xp-result``, ``source_ids.xreq`` = the request id
   (so ``ar://xreq/<id>`` resolves), the file's sha256, paths, batch, attempt, seed and arm;
@@ -43,10 +44,18 @@ experiment, its hypothesis and the hypothesis's Topics, ``rebuild.review_refs``,
 review may update them under D-23) is committed, unless an open request already covers the
 experiment.
 
-``awaiting-credits``: relaunch (A10). When ``lifecycle.next_launch_after`` has passed (the
-softmax tool sets it on a credit denial: 30 minutes, doubling, capped at 8 hours), the credit
-balance is not known to be 0 (only FakeSoftmax can read it; a Player credential cannot), and
-no open request covers the experiment, one runtime launch request with marker
+``awaiting-credits``: relaunch (A10). The Player can read the credit balance
+(``Softmax.credits``), read once per run. The balance refills continuously, so "above 0" is
+not enough: relaunch at once only when it covers the experiment's remaining requests
+(``relaunch_need``: the requests of the design not yet created, one episode each, times the
+cost per episode of our recent XP requests, ``Softmax.episode_cost``; when that is unknown,
+``AUTORESEARCH_RELAUNCH_MIN_CREDITS``, default 100) and is above the balance read at the denial
+(``lifecycle.credits_at_denial``). Otherwise the backoff decides: relaunch once
+``lifecycle.next_launch_after`` has passed (the softmax tool sets it on a credit denial: 30
+minutes, doubling, capped at 8 hours), also when the balance cannot be read. A balance read
+as 0 or less never relaunches. At most one experiment is relaunched per run (the oldest
+first), so a refill does not start every waiting experiment at once. In every case no open
+request may cover the experiment. One runtime launch request with marker
 ``launch:<E>:<attempt>:after:<next_launch_after>`` (``markers.relaunch_marker``: one relaunch
 per denial). The card runs
 ``xp recover`` and then ``xp create`` with the same attempt, which creates only the requests
@@ -83,7 +92,7 @@ from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
 from autoresearch.runtime.markers import next_launch_attempt, relaunch_marker, review_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request
 from autoresearch.runtime.rebuild import launch_step, open_experiment_refs, review_refs
-from autoresearch.softmax_tool.protocol import Softmax, XpHandle, XpStatus
+from autoresearch.softmax_tool.protocol import Softmax, XpHandle, XpStatus, read_credits
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.xp import ArtifactsIncomplete
 from autoresearch.stats.design import EvaluationDesign
@@ -98,6 +107,8 @@ CARD_PRIORITY = "P1"
 REMOTE = "origin"
 GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
+MIN_CREDITS_ENV = "AUTORESEARCH_RELAUNCH_MIN_CREDITS"
+DEFAULT_MIN_CREDITS = 100.0
 
 
 @dataclass
@@ -208,7 +219,7 @@ def _episode_row(
         policy_version=policy,
         seed=int(seed),
         seats=tuple(design.seats),
-        opponents=tuple(design.opponents),
+        opponents=design.opponents_for(handle.seed if handle.seed is not None else int(seed)),
         metrics=metrics,
         status="completed" if reason is None else "failed",
         reason=reason,
@@ -385,26 +396,88 @@ def _request_review(
         return commit_runtime_request(canonical, review_marker(experiment), spec)
 
 
-def _credits_known_zero(sm: Softmax) -> bool:
-    try:
-        return sm.credits() == 0
-    except Exception:  # noqa: BLE001 - a Player credential cannot read credits (A10)
+def relaunch_need(experiment: dict, episode_cost: float | None, min_credits: float) -> float:
+    """Credits the experiment's remaining XP requests should cost (module docstring): the
+    design's (seed, arm) pairs without a request yet, one episode each, times
+    ``episode_cost``; ``min_credits`` when the cost per episode is unknown."""
+    if episode_cost is None:
+        return min_credits
+    seeds = (experiment.get("evaluation_design") or {}).get("seeds") or []
+    created = {(entry.get("seed"), entry.get("arm")) for entry in experiment.get("xp_requests") or []}
+    remaining = max(2 * len(seeds) - len(created), 1)
+    return remaining * episode_cost
+
+
+def relaunch_due(
+    lifecycle: dict, credits: float | None, now: datetime.datetime, need: float = 0.0
+) -> bool:
+    """Whether an ``awaiting-credits`` experiment should relaunch now (A10, module docstring):
+    at once when the readable balance covers ``need`` and is above the balance at the denial;
+    otherwise once the backoff has passed (also when the balance cannot be read); never at a
+    balance of 0 or less."""
+    after = _parse_time(lifecycle.get("next_launch_after"))
+    if after is None:  # the softmax tool sets it with every denial
+        raise ValueError("awaiting-credits without next_launch_after")
+    if credits is not None and credits <= 0:
         return False
+    at_denial = lifecycle.get("credits_at_denial")
+    if credits is not None and credits >= need and (at_denial is None or credits > at_denial):
+        return True
+    return now >= after
+
+
+@dataclass
+class CreditView:
+    """The credit facts of one xp-poll run, each read at most once (minor: one HTTP read)."""
+
+    sm: Softmax
+    min_credits: float
+    _read: dict = field(default_factory=dict)
+
+    def balance(self) -> float | None:
+        if "balance" not in self._read:
+            self._read["balance"] = read_credits(self.sm)
+        return self._read["balance"]
+
+    def episode_cost(self) -> float | None:
+        if "cost" not in self._read:
+            try:
+                self._read["cost"] = self.sm.episode_cost()
+            except Exception:  # noqa: BLE001 - unknown cost: the threshold applies
+                self._read["cost"] = None
+        return self._read["cost"]
+
+
+def min_relaunch_credits(env: Mapping[str, str]) -> float:
+    """``AUTORESEARCH_RELAUNCH_MIN_CREDITS`` (a non-negative number), else 100; a malformed
+    value falls back to the default (xp-poll must not stop for it)."""
+    try:
+        value = float(env.get(MIN_CREDITS_ENV) or DEFAULT_MIN_CREDITS)
+    except ValueError:
+        return DEFAULT_MIN_CREDITS
+    return value if value >= 0 else DEFAULT_MIN_CREDITS
 
 
 def _request_relaunch(
-    canonical: Path, sm: Softmax, experiment: dict, now: datetime.datetime
+    canonical: Path, credits_view: CreditView, experiment: dict, now: datetime.datetime
 ) -> CardSpec | None:
     lifecycle = experiment.get("lifecycle") or {}
-    after = _parse_time(lifecycle.get("next_launch_after"))
-    if after is None:  # the softmax tool sets it with every denial
-        raise ValueError(f"{experiment['id']} is awaiting-credits without next_launch_after")
-    if now < after or _credits_known_zero(sm):
+    credits = credits_view.balance()
+    need = relaunch_need(experiment, credits_view.episode_cost(), credits_view.min_credits)
+    try:
+        due = relaunch_due(lifecycle, credits, now, need)
+    except ValueError as error:
+        raise ValueError(f"{experiment['id']}: {error}") from None
+    if not due:
         return None
     denials = int(lifecycle.get("credit_denials", 0))
     attempt = next_launch_attempt(experiment)
     marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
-    reason = f"relaunch after credit denial {denials}; the backoff has passed"
+    if credits is not None and credits >= need:
+        when = f"{credits:g} credits available, about {need:g} needed"
+    else:
+        when = "the backoff has passed"
+    reason = f"relaunch after credit denial {denials}; {when}"
     marker, title, why, mode = launch_step(experiment, reason, marker)
     spec = CardSpec("", title, mode, why, _experiment_refs(experiment), RUNTIME, CARD_PRIORITY)
     with canonical_lock(canonical):
@@ -431,9 +504,11 @@ def poll_experiment(
     evaluate: Evaluate,
     league_version: Callable[[], str],
     result: XpPollRun,
+    credits_view: CreditView | None = None,
 ) -> None:
     """Evidence, then the review (``evaluating``) or relaunch (``awaiting-credits``)."""
     canonical, experiment_id = ctx.canonical, experiment["id"]
+    credits_view = credits_view or CreditView(sm, DEFAULT_MIN_CREDITS)
     handles = latest_handles(sm.xp_recover(experiment_id))
     statuses = _statuses(sm, handles, result)
     for handle in handles:
@@ -462,8 +537,8 @@ def poll_experiment(
             )
             if review is not None:
                 result.reviews.append(review)
-    elif experiment.get("status") == "awaiting-credits":
-        launch = _request_relaunch(canonical, sm, experiment, now)
+    elif experiment.get("status") == "awaiting-credits" and not result.launches:
+        launch = _request_relaunch(canonical, credits_view, experiment, now)
         if launch is not None:
             result.launches.append(launch)
 
@@ -479,9 +554,9 @@ def run(
     repo_root: Path = REPO_ROOT,
 ) -> XpPollRun:
     """One xp-poll run (module docstring). ``evaluate`` defaults to the game's binding.
-    ``env`` is accepted for symmetry with the other jobs (the Softmax client reads its own)."""
-    del env
+    ``env`` gives ``AUTORESEARCH_RELAUNCH_MIN_CREDITS`` (the Softmax client reads its own)."""
     result = XpPollRun()
+    credits_view = CreditView(sm, min_relaunch_credits(env))
     evaluate = evaluate or binding_evaluate(game, repo_root)
     league: dict[str, str] = {}
 
@@ -498,7 +573,9 @@ def run(
                 if experiment.get("status") not in WATCHED:
                     continue
                 try:
-                    poll_experiment(ctx, sm, experiment, now, evaluate, league_version, result)
+                    poll_experiment(
+                        ctx, sm, experiment, now, evaluate, league_version, result, credits_view
+                    )
                 except Exception as error:  # noqa: BLE001 - one experiment never stops the rest
                     result.failures[experiment_id] = f"{type(error).__name__}: {error}"
                     _log(ctx, f"{experiment_id} failed: {error}\n{traceback.format_exc()}")

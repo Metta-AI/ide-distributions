@@ -10,7 +10,13 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    A ``skipped`` preflight (``whoami`` unavailable, fewer than 3 times in a row) stops the run
    without pausing. Both a failed and a skipped preflight still run the spend step (step 12)
    before stopping, since running cards keep running.
-3. Abort a stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
+3. Champion check (A9): the league's champion for our player against what the loop expects
+   (``promotion.league_check``: our submission's membership state, grace
+   ``AUTORESEARCH_CHAMPION_GRACE_MINUTES``). On a conflict: pause (C7), one runtime
+   ``help_request`` per (expected, shown) pair, and the run goes on (merges and reconcile
+   still settle promotions, spend caps still apply) without resuming. A rejected submission
+   gets one runtime note per promotion. Then abort a
+   stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
 5. ``process_handoffs`` with publication (C3, C5), then the MEMORY.md snapshot
@@ -40,8 +46,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 12. Orphaned done cards (C3), spend caps (``spend.enforce``: stop cards over their run or
     estimated-cost cap; pause when today's spend reaches the daily budget), blocked cards
     (``blocked.handle_blocked``), the daily re-raise of unanswered proposals, and resume when
-    paused, preflight passed and today's spend is under the daily budget
-    (``spend.may_resume``).
+    paused, preflight passed, this run's champion check found the league and the loop in
+    agreement, and today's spend is under the daily budget (``spend.may_resume``).
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
@@ -146,6 +152,7 @@ DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
 LATE_STEPS = ("planning", "orphans", "spend", "blocked", "proposals", "resume", "push_final")
 CRASH_EXIT = 70  # exit code of an injected crash (module docstring)
+CHAMPION_PAUSE = promotion.CHAMPION_PAUSE
 
 
 @dataclass
@@ -157,6 +164,8 @@ class KeeperRun:
     bootstrap: BootstrapResult | None = None
     preflight: PreflightResult | None = None
     paused: bool = False  # preflight failed and this run paused (or kept paused) the agent
+    champion_checked: bool = False  # the A9 champion check ran to the end this run
+    champion_conflict: promotion.ChampionConflict | None = None
     rebuilt: list[CardSpec] = field(default_factory=list)
     handoffs: list = field(default_factory=list)
     published: list[PublishResult] = field(default_factory=list)
@@ -272,11 +281,56 @@ def pause_for_preflight(
         )
 
 
+def check_champion(
+    run: KeeperRun,
+    ctx: RunContext,
+    queue: Queue,
+    sm: Softmax,
+    game: Game,
+    now: datetime.datetime,
+    env: Mapping[str, str],
+    allow_no_remote: bool,
+) -> None:
+    """A9: compare the league's champion with what the loop expects
+    (``promotion.league_check``, which also tracks our submission's membership); on a conflict
+    pause and publish one help_request per (expected, shown) pair. When the league did not take
+    our submission (rejected, withdrawn, disqualified), tell the user once per promotion: a
+    real outcome, not a conflict. ``run.champion_checked`` is set only when the check
+    completes, so a failed league read never lets the agent resume."""
+    canonical = ctx.canonical
+    check = promotion.league_check(
+        ctx, sm, game.league_id, now, promotion.champion_grace(env), record=True
+    )
+    conflict = run.champion_conflict = check.conflict
+    if check.submission is not None and check.submission.stage == "unknown":
+        detail = check.submission.detail or "not listed"
+        _log(ctx, f"champion check: our submission's league state is unknown ({detail})")
+    if check.submission is not None and check.submission.stage == "rejected":
+        rejected = promotion.rejection_message(check.basis, game.league_id, check.submission.detail)
+        with canonical_lock(canonical):
+            if not already_published(canonical, rejected):
+                publish_message(canonical, rejected, allow_no_remote, priority="P1")
+    if conflict is not None:
+        _log(ctx, f"champion conflict: {conflict.detail}")
+        pause(queue, ledger_of(canonical), f"{CHAMPION_PAUSE}: {conflict.detail}")
+        message = runtime_messages.champion_conflict(
+            game.league_id, conflict.expected, conflict.shown, conflict.waited_out
+        )
+        with canonical_lock(canonical):
+            if not already_published(canonical, message):
+                publish_message(
+                    canonical, message, allow_no_remote, priority="P0", expects_response=True
+                )
+    run.champion_checked = True
+
+
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
     canonical = ctx.canonical
+    reason = read_json(pause_path(ledger_of(canonical))).get("reason", "")
     resumed = resume(queue, ledger_of(canonical))
+    message = runtime_messages.agent_resumed(len(resumed), reason.startswith(CHAMPION_PAUSE))
     with canonical_lock(canonical):
-        publish_message(canonical, runtime_messages.agent_resumed(len(resumed)), allow_no_remote)
+        publish_message(canonical, message, allow_no_remote)
     return resumed
 
 
@@ -705,10 +759,13 @@ def _run_steps(
         _spend_steps(run, ctx, queue, env, now, allow_no_remote)
         return
 
+    _step(
+        run, ctx, "champion", check_champion, run, ctx, queue, sm, game, now, env, allow_no_remote
+    )
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
     game_version = _step(run, ctx, "game_version", sm.game_version, game.league_id)
     game_version = str(game_version).strip() if game_version is not None else None
-    _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm)
+    _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm, game.league_id)
     run.rebuilt = (
         _step(
             run, ctx, "rebuild", _rebuild_step, ctx, queue, sm, game_version, now, allow_no_remote
@@ -757,7 +814,12 @@ def _run_steps(
         or []
     )
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
-    if is_paused(ledger_of(canonical)) and spend.may_resume(ctx, run.spend_run, now):
+    if (
+        is_paused(ledger_of(canonical))
+        and run.champion_checked
+        and not run.champion_conflict
+        and spend.may_resume(ctx, run.spend_run, now)
+    ):
         run.resumed = _step(run, ctx, "resume", resume_after_preflight, ctx, queue, allow_no_remote)
     run.pushed = _step(run, ctx, "push_final", push_step, ctx, allow_no_remote)
 

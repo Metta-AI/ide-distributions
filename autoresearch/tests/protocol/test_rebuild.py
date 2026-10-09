@@ -34,8 +34,9 @@ from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FAULTS_ENV, FakeSo
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[2]
 GAME_VERSION = "fake-1"  # FakeSoftmax's game version
-LEAGUE = "league_fake"
 FAKE_LEAGUE = "fake-league"  # games/fakegame league_id (XP requests)
+# Promotions submit to the game's league too: queue-keeper's champion check (A9) reads it.
+LEAGUE = FAKE_LEAGUE
 PROFILE = "autoresearch"
 BASELINE_PV = "autoresearch-fake:v0"
 CANDIDATE_PV = "autoresearch-fake:v1"

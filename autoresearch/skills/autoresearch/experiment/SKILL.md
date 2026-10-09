@@ -30,12 +30,12 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    Reopen a refuted lever only with evidence that meets the claim's `revise_if`.
 3. Find the baseline: the current champion.
    `"$AUTORESEARCH_CLI" softmax leaderboard`
-   Use `current_champion` (a platform policy version id) as the baseline. When it is null,
-   read `note`:
-   - "champion unknown" (the promotion ledger and the leaderboard disagree): stop. Send a
-     `help_request` and finish `blocked`.
-   - "no champion known": this is a fresh install. Make the first champion in this card
-     with the `submit` skill, section "Bootstrap card" (A14: the game's shipped strategy is
+   Use `current_champion` (a platform policy version id: the policy the league shows
+   competing for us, A9) as the baseline. When `conflict` is set, stop: record it and finish
+   `blocked` (the runtime paused the agent and told the user). When `current_champion` is
+   null (`note` says "no champion") and `conflict` is null, this is a fresh install. Make the
+   first champion in this card
+     with the `submit` skill, section "Bootstrap card" (A14: the game's starter policy is
      promoted as champion, with no experiment). Then request the experiment again so it
      designs against that champion:
      `"$AUTORESEARCH_CLI" queue request create --title "Experiment for <H-id>" --mode experimentation --why "first champion bootstrapped; design against it" --ref ar://hypothesis/<H-id>`
@@ -66,13 +66,22 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    with `{"hypothesis": "<H-id>", "mode": "experimentation", "lever": …, "baseline": "<champion>", "change": {"components": […], "description": …}, "environment": {"game_id": "<$AUTORESEARCH_GAME>", "game_version": "<data.game_version of step 6>"}, "status": "designed", "xp_requests": [], "results": [], "lifecycle": {"launch_attempts": 0}}`.
 9. Freeze the evaluation design from the noise record (D-09). Write the request to
    `.scratch/design-request.json`:
-   `{"baseline_version": "<champion of step 3>", "seats": [<our seat slots>], "opponents": ["<fixed policy ref>" or "random", …], "seeds": [<unique integers, one candidate/baseline pair each>], "primary_metrics": [{"name", "direction", "min_effect"}], "guardrails": [{"name", "direction", "tolerance"}]}`
-   (optional `"k"`, default 0.5). Fixed policy refs give true pairing; `"random"` gives
-   seed-only pairing. Then:
+   `{"baseline_version": "<champion of step 3>", "seats": [<our seat slots>], "opponent_count": <opponents per episode>, "seeds": [<unique integers, one candidate/baseline pair each>], "primary_metrics": [{"name", "direction", "min_effect"}], "guardrails": [{"name", "direction", "tolerance"}]}`
+   (optional `"k"`, default 0.5; optional `"opponent_episodes"`, default 100). Take `seats`
+   and `opponent_count` from the `## Seats and opponents` section of `GAME.md` (seat count
+   and team rules). The opponents are sampled from the current league (A12): each seed gets
+   its own line-up, weighted toward the policies we actually meet, and both arms of the
+   pair face it. Only when the question is about specific opponents (for example "does this
+   beat X specifically"), give `"opponents": ["<policy ref>", …]` and
+   `"opponent_rationale": "<why>"` instead of `opponent_count`. Then:
    `"$AUTORESEARCH_CLI" stats design <E-id> --request-file .scratch/design-request.json`
-   It computes `n_min` (at least the game's floor) and `delta` from the noise record of the
-   current game version, records the record's revision as `noise_rev`, and writes
-   `evaluation_design` into the experiment. Read `data.evaluation_design.n_min`: you need at
+   It reads recent league episodes and the standings: about a minute for the default 100
+   episodes, so give the terminal call a timeout of 300 seconds, and do not lower
+   `opponent_episodes` to save time (fewer episodes make the sample less league-like). It
+   computes `n_min` (at
+   least the game's floor) and `delta` from the noise record of the current game version,
+   records the record's revision as `noise_rev`, and writes `evaluation_design` into the
+   experiment, with the sampled `lineups` and the `league_snapshot` they came from. Read `data.evaluation_design.n_min`: you need at
    least that many seeds. The design is frozen once the status leaves `designed`. Never edit
    the rule after (D-09).
 10. Make the candidate: copy `strategy/STRATEGY.md` to

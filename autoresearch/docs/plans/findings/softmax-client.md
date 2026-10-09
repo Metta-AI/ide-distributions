@@ -38,8 +38,11 @@ Verified 2026-10-07 against coworld 0.1.57, softmax-cli 0.26.38 (both pinned in 
 | XP artifacts | `coworld xp-request download <xreq> --include results --include replay -d <dest>` | `<dest>/manifest.jsonl` receipts; exit 2 = evidence pending |
 | upload | `coworld upload-policy --file <path> --name <name>` (no `--json`) | `Upload complete: <name>:v<N>` |
 | submit | `coworld submit <name>:v<N> --league <L> --player <ply> --no-open-browser` (no `--json`) | `Submission: sub_…` |
-| submissions | `coworld submissions --player <ply> --json` | `entries` |
+| submissions | `coworld submissions --player <ply> --json` | `entries` (the client adds flat `submission_id`, `policy_version_id` = label, `league_id`, `player_id`; before 2026-10-09 it returned the raw rows, which `promotion._settle_intent` could not read) |
 | champion | `coworld memberships --league <L> --player <ply> --champions-only --json` | `entries[0].policy_version.label` |
+| submission state (A9) | `coworld memberships --league <L> --player <ply> --policy <name>:v<N> --json` | latest row's `status` (`submitted`/`qualifying`/`competing`/`disqualified`), `substatus` (`held`/`active`/`benched`/`inactive`), `is_champion`; else the submission row's `status` (`pending`/`processing`/`placed`/`rejected`/`withdrawn`) |
+
+League memberships, live 2026-10-09 (Player `ply_f39295d0`, GotA league): `--league L` without `--player` returns only our own memberships (a Player cannot list other players'). Our six: v6 `disqualified`/`inactive` (it was the champion until 2026-10-07), v1–v5 `competing`/`benched`, none `is_champion`, so `--champions-only` is empty. metta (observatory-competitions `league_policy_memberships.py`, `policy_membership_events.py`): an admitted competing membership is made champion by default (`auto_champion: always` on our submissions) and the previous champion becomes `benched`; a champion is `status == competing and is_champion`.
 
 ## XP tagging and duplicates
 - coworld 0.1.57 has no tag or metadata field on an XP request. The tag `ar:<experiment>:b<batch>:a<attempt>:s<seed>:<arm>` (amendment A12: one request per seed and arm, each with `game_config_overrides: {"seed": <seed>}` and `num_episodes: 1`; older tags without `:s<seed>:<arm>` still parse) goes in `title` (found again by `recover`) and in `idempotency_key`. The server returns the existing request for a repeated key in the same league (observatory-api `v2/experience_requests.py`), checked before credit admission. Experiment ids are ULIDs, so keys do not collide across installs.
@@ -47,6 +50,7 @@ Verified 2026-10-07 against coworld 0.1.57, softmax-cli 0.26.38 (both pinned in 
 
 ## Credits
 - `GET /usage/me/credits` and `/usage/me/status` answer 403 "Player credentials are not authorized for this route". No CLI command reads credits. `SoftmaxClient.credits()` raises `CreditsUnavailable`; preflight records it as a warning.
+  - **Superseded 2026-10-09 (A10 revised).** metta #27052 (merged 2026-10-08) admits Player credentials on `GET /usage/me/credits`. Live check on the box as the profile's Player (`ply_f39295d0`, coworld 0.1.57 installed there, 0.1.58 pinned in the repo): `GET https://softmax.com/api/observatory/usage/me/credits` answered 200 with `status.balance_credits` (and `max_balance_credits`, `refill_credits`, `refill_cadence`, `enforced`). Without a User-Agent header Cloudflare answers 403 "error code: 1010". The `coworld credits [--json]` command from the same PR is not in any release yet (latest coworld 0.1.58, latest softmax-cli 0.26.38), so `SoftmaxClient.credits()` reads the route over HTTP (`PlatformCli.api_get_json`) and returns the balance. `/usage/me/status` was not rechecked.
 - Denial at create time: HTTP 402. For a Player the detail is "The owning account cannot admit this experience request under its current credit allowance". The CLI prints `Error: Request failed (402) for /v2/experience-requests: <detail>` on stderr and exits 1. The client maps this to `CreditDenied`. HTTP 429 (pending-episode cap) is a plain error.
 
 ## Artifact hashes

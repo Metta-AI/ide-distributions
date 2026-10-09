@@ -47,7 +47,7 @@ Primary command (read-only, uses the player credential):
 ```
 
 - `standings` prints `{"ok": true, "data": {"league_id", "rows"}}`. Each row has `division_id`, `division_name`, `level`, `rank`, `player_id`, `player_name`, `score`, `rounds_played`. The code reads `coworld results <league>` (divisions) and then `coworld results <division>` (entries). Source: `src/autoresearch/softmax_tool/client.py`, method `standings`.
-- `leaderboard` prints our champion policy version (`leaderboard_champion`) and the ledger champion (`current_champion`, `note`). Use it to record which policy version is measured. On a fresh install the first champion is the shipped strategy (A14, `softmax bootstrap-champion`).
+- `leaderboard` prints our champion: the policy the league shows competing for our player (`leaderboard_champion` = `current_champion`, A9), `note` when there is none, and `conflict` when what the loop expects differs (queue-keeper then pauses the agent). Use it to record which policy version is measured. On a fresh install the first champion is the game's starter policy (A14, `softmax bootstrap-champion`).
 
 Read-only alternative without the autoresearch CLI (project-pinned coworld 0.1.58, not the global one):
 
@@ -145,7 +145,6 @@ Source of truth: `distribution.yaml` (`env_requires`). Details and examples: REA
 | `OPENROUTER_MODEL` | no | Default `moonshotai/kimi-k3`; fallback `z-ai/glm-5.3`. |
 | `AUTORESEARCH_GAME` | no | Default `gota`. GotA builds also need `GOTA_HERMES_PYTHON`, `GOTA_TIRITH_BIN` and the native helpers ([games/gota/GAME.md](../../../games/gota/GAME.md), "Build and upload"). |
 | `AUTORESEARCH_WORKSPACE` | no | Default `$PROFILE/workspace`. |
-| `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but the serial job that runs its cards is not built (see 2.6). |
 | `AUTORESEARCH_SOFTMAX` | no | Tests only (`fake`). Never set in production. |
 | `COGAMES_API_URL` | no | Softmax API server. Default `https://softmax.com/api`. Passed as `--server` to every `softmax`/`coworld` call. Softmax hosting writes it. |
 | `AUTORESEARCH_MAX_CARD_RUNS`, `AUTORESEARCH_MAX_CARD_USD`, `AUTORESEARCH_DAILY_BUDGET_USD`, `AUTORESEARCH_FALLBACK_PRICES` | no | Spend caps: 4 runs and an estimated $4 per card, $25 per UTC day (README). Set the daily budget to what the OpenRouter key may spend. |
@@ -228,7 +227,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
    - Python code that calls coworld through a library or a built string.
 
    Other layers: the `approvals.deny` globs in `config.yaml` (coarse) and the `whoami` identity check before every platform change (C6).
-3. **OpenRouter credit preflight.** The broker key `openrouter.inference` had about 0.95 USD left on 2026-10-07 (hermes-facts.md, item 11). Preflight pauses the agent when `limit_remaining` is below a threshold (default 10 USD). A Player credential cannot read Softmax credits (HTTP 403); preflight only warns, and XP requests that hit a credit denial (HTTP 402) retry with backoff (A10). The protocol slice and M1 ran on dedicated funded test keys (protocol-slice.md, compiler-task-2.4-m1.md). **UNVERIFIED:** the credit level on the hosted key.
+3. **OpenRouter credit preflight.** The broker key `openrouter.inference` had about 0.95 USD left on 2026-10-07 (hermes-facts.md, item 11). Preflight pauses the agent when `limit_remaining` is below a threshold (default 10 USD). The Player reads the Softmax XP credit balance (A10, verified 2026-10-09); preflight records it and warns at 0, and an experiment refused for credits (HTTP 402) relaunches when the balance is above 0 again, with the backoff only as a fallback. The protocol slice and M1 ran on dedicated funded test keys (protocol-slice.md, compiler-task-2.4-m1.md). **UNVERIFIED:** the credit level on the hosted key.
 4. **Credential expiry** every 24 hours (2.4) with a Player session credential. The agent pauses at expiry. A `cga_` agent token (Softmax hosting) does not expire.
 5. **GotA qualification is tied to one engine.** `games/gota` and its bindings exist. The compiler passed M1 locally on 2026-10-08 on Coworld 2026.10.7.2 / polyworld `801749e5` ([compiler-task-2.4-m1.md](compiler-task-2.4-m1.md)); M1 G4 showed zero glory for both candidate and reference, so it shows no competitive strength. The build follows the live engine (2026.10.8.1 on 2026-10-08), where only native compatibility and one full mirror match were checked ([gota-live-engine.md](gota-live-engine.md)). **UNVERIFIED:** semantic qualification on the current engine.
 6. **Live platform drift.** The coworld version changed from 2026.10.5.1 to 2026.10.6.1 to 2026.10.7.2 to 2026.10.8.1 within four days. Noise records and designs are tied to a game version (C10); a version change triggers calibration again.
@@ -257,7 +256,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | KB maintenance, code-citation renewal | `tests/unit/kb` (pytest) |
 | Statistics, noise, calibration, decision rule | `tests/unit/stats` (pytest) |
 | Softmax tool against the fake | `tests/unit/softmax`, `tests/fixtures/softmax` (pytest) |
-| First champion on a fresh install (A14): `softmax bootstrap-champion` promotes the shipped strategy (bootstrap promotion to `published`, league submission), refusals (champion exists, edited STRATEGY, failed build, identity), two bootstrappers, crash retries, A11 recovery with the version record restored in canonical, then an experiment designs and launches against it | `tests/unit/softmax/test_bootstrap_champion.py` (pytest, fake platform and fakegame) |
+| First champion on a fresh install (A14): `softmax bootstrap-champion` promotes the game's starter policy (bootstrap promotion to `published`, league submission), refusals (champion exists, edited STRATEGY, failed build, identity), two bootstrappers, crash retries, A11 recovery with the version record restored in canonical, then an experiment designs and launches against it | `tests/unit/softmax/test_bootstrap_champion.py` (pytest, fake platform and fakegame) |
 | Softmax tool against the live platform, as a Player | `findings/player-xp-probe.md` (create, get, list, episodes, download as Games Bond: PASS) and `findings/softmax-client.md` (read-only probes: PASS; league episodes readable by a Player) |
 | Skills and doctrine consistency | `tests/unit/test_skills.py`, `tests/unit/test_doctrine.py` (pytest) |
 | Models glm-5.3, glm-5.3-flash tool calling in Hermes | `hermes-facts.md` item 11 |
@@ -280,7 +279,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Gateway cron jobs (`queue-keeper`, `xp-poll`, `health`) running for hours on a host | README | **UNVERIFIED.** Only short runs under test. |
 | Token refresh in practice (2.4) | - | **UNVERIFIED.** No owner. |
 | Restore on a second machine from a real remote | README | **UNVERIFIED.** |
-| First champion on the live platform (`softmax bootstrap-champion` of the game's shipped strategy, A14; text pending James's sign-off) | A14 | **NOT RUN.** Only the fake path is tested. Blocked for GotA until `games/gota/GAME.md` has a `## Baseline build` section (Codex). Observe once: how long `coworld memberships --champions-only` takes to list the submission; until it does, after publish the champion reads "unknown" and experiment cards block with a `help_request`. |
+| First champion on the live platform (`softmax bootstrap-champion` of the game's starter policy, A14) | A14 | **NOT RUN.** Only the fake path is tested. For GotA, `games/gota/GAME.md` gets its `## Starter policy` and `## Seats and opponents` sections in Codex's 8fde009 (branch `jboggs/autoresearch-gota-amendments`, merged together with the amendments). Live state 2026-10-09: our GotA player has no `is_champion` membership (v6 disqualified 2026-10-07, v1–v5 benched), so the league shows no champion; with no loop promotion in the box ledger, the first experiment card would bootstrap the starter policy. Observe once: how long the submission stays qualifying and how long after admission `coworld memberships --champions-only` lists it (A9: qualifying is no conflict; admitted-but-not-champion pauses after `AUTORESEARCH_CHAMPION_GRACE_MINUTES`). |
 | Spend caps on a live host: a running worker ends after `hermes kanban block` (dispatcher `reap_terminal_workers`, about 2 minutes), Hermes cost estimates in `state.db` match the plugin's `session_start` sessions, workers use `process_manage` wait instead of polling | Spend controls (2026-10-08) | **UNVERIFIED.** Only unit and fake-board tests, plus a `block` of a `ready` task on real Hermes. |
 | Friday leaderboard measurement (section 1) | - | **NOT RUN.** Needs a real submission in the league first. |
 

@@ -503,6 +503,22 @@ def test_inbound_forgery_is_blocked_in_every_agent_session(layout, command, card
     assert not allowed and "comms/inbox" in reason
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"$AUTORESEARCH_CLI" promotion accept-champion',
+        "cd {canon} && python -m autoresearch promotion accept-champion",
+        "{cli} promotion accept-champion",
+    ],
+)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_accepting_the_league_champion_is_blocked_in_every_agent_session(layout, command, card):
+    """A9: a champion conflict pauses the agent until a human resolves it."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed and "human operator" in reason
+    assert _terminal(layout, '"$AUTORESEARCH_CLI" promotion status', card=card)[0]
+
+
 def test_file_tools_and_code_cannot_write_the_inbox(layout):
     ctx = layout.ctx(worker=False)
     target = {"path": str(layout.canonical / "comms" / "inbox" / "x.json"), "content": "{}"}

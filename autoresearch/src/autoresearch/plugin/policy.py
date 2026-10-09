@@ -33,7 +33,10 @@
   `comms/inbox` and looks like a write (``CODE_WRITE_HINT``; reads pass). Only external
   agents write the inbox (Runtime 9.2). The real boundary is the
   OS user: run external writers as their own user and set `AUTORESEARCH_INBOX_WRITERS`, so
-  queue-keeper adopts only files they own (`comms.inbound.adopt_direct_writes`).
+  queue-keeper adopts only files they own (`comms.inbound.adopt_direct_writes`);
+- resolving a champion conflict (A9: the pause holds until a human resolves it): the
+  operator command `promotion accept-champion` in any agent session (also the approvals deny
+  globs `*promotion accept-champion[ *]`; the command itself refuses in a card context).
 
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
 (`tools/terminal_tool.py`
@@ -232,6 +235,11 @@ INBOX_WRITE = (
     "the inbox (comms/inbox/) is written only by external agents: an inbound message carries "
     "the human's authority (C11). To tell the human something, stage an outbound message with "
     '"$AUTORESEARCH_CLI" comms stage; to read an inbound message use comms get <id>.'
+)
+ACCEPT_CHAMPION = (
+    "`promotion accept-champion` is for a human operator: a champion conflict pauses the agent "
+    "until a person resolves it (A9). Record the conflict in the journal; the runtime already "
+    "told the user."
 )
 INBOX_DIR_TEXT = "comms/inbox"
 # Interpreter code naming the inbox is refused only when it also looks like a write; a read
@@ -484,10 +492,11 @@ class _Guard:
         )
         if trusted or os.path.basename(first) == "autoresearch":
             # `python -m autoresearch ...` unwraps to `autoresearch ...` too.
-            if [word for word in core[1:] if not word.startswith("-")][:2] == [
-                "comms", "inbound",
-            ]:
+            subcommand = [word for word in core[1:] if not word.startswith("-")][:2]
+            if subcommand == ["comms", "inbound"]:
                 raise _Blocked(INBOX_WRITE)
+            if subcommand == ["promotion", "accept-champion"]:
+                raise _Blocked(ACCEPT_CHAMPION)
             if trusted:
                 return []
         if first.startswith("$"):  # `c=coworld; $c submit`

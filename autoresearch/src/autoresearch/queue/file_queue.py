@@ -1,4 +1,6 @@
-"""File-backed Queue: the test backend and the serial-fallback backend.
+"""File-backed Queue: the test double for the Kanban backend (protocol tests, and CLI tests
+that run the real entry point select it with ``AUTORESEARCH_QUEUE=file``, see
+``queue.select``). No shipped job runs its cards (amendment A13).
 
 One JSON file per card under ``<directory>/cards/`` plus ``index.json`` (idempotency keys
 and a creation counter). Every mutation runs under ``<directory>/queue.lock``.

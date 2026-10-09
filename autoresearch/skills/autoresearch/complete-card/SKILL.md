@@ -46,9 +46,7 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
 
    - `iteration`: the number on the `- Run:` line at the end of the briefing (Kanban run
      ids are integers per board). Your shell does not have `$HERMES_KANBAN_RUN_ID` or
-     `$HERMES_KANBAN_TASK`: Hermes removes them from worker commands. In the serial fallback
-     (run ids look like `r-<ULID>`), use the number of runs of this card:
-     `"$AUTORESEARCH_CLI" queue show <task id>` and count `data.runs`.
+     `$HERMES_KANBAN_TASK`: Hermes removes them from worker commands.
    - The doctrine version is `N` in the first line of `AGENTS.md`
      (`<!-- doctrine-version: N -->`).
 
@@ -104,8 +102,6 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    "provide at least one of: summary (preferred), result". Do not set `board`; the tool
    uses this card's board. For example:
    `{"summary": "andre opens with a two-tower push. I wrote a hypothesis that waiting for kill range beats it, and asked for an experiment to test it.", "metadata": {<data>}}`
-   Serial fallback: when the `kanban_complete` tool does not exist, `card finish` alone
-   ends the card.
 7. Stop. After `card finish` the plugin blocks every file write in this card.
 
 ## Tool fault

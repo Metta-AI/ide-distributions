@@ -275,12 +275,13 @@ def test_credit_denial_relaunches_after_backoff_without_duplicate_xp(host, monke
     gitops.commit_all(host.canonical, "launch: credit denied")
     meta, _ = host.store.load(experiment)
     assert meta["status"] == "awaiting-credits"
+    assert meta["lifecycle"]["credits_at_denial"] == 0  # read right after the denial (A10)
     backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
 
-    # Before the backoff ends: evidence for the partial batch, but no relaunch.
+    # Before the backoff ends: evidence for the partial batch, but no relaunch (0 credits).
     early = _poll(host, backoff_end - datetime.timedelta(minutes=5))
     assert early.launches == [] and len(early.evidence) == 2
-    # After it, still no credits (the fake can read them): no relaunch.
+    # After it, still no credits (the balance is readable): no relaunch.
     assert _poll(host, backoff_end + datetime.timedelta(minutes=1)).launches == []
 
     _set_fake_state(host, credits=100)
@@ -306,6 +307,79 @@ def test_credit_denial_relaunches_after_backoff_without_duplicate_xp(host, monke
     final = _poll(host, backoff_end + datetime.timedelta(minutes=6))
     assert len(final.evidence) == 2 and len(final.reviews) == 1
     assert len(_evidence(host)) == len(planned)
+
+
+def test_relaunch_happens_when_credits_return_before_the_backoff(host, monkeypatch):
+    """A10: a readable balance above 0 relaunches at once; the backoff is only a fallback."""
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    experiment = _experiment(host, "uploaded")
+    _set_fake_state(host, credits=0)
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    assert softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))["credit_denied"]
+    gitops.commit_all(host.canonical, "launch: credit denied")
+    meta, _ = host.store.load(experiment)
+    backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+
+    _set_fake_state(host, credits=100)
+    [launch] = _poll(host, backoff_end - datetime.timedelta(minutes=20)).launches
+    assert "100 credits available, about" in launch.why
+
+
+def test_at_most_one_relaunch_per_poll(host, monkeypatch):
+    """A refill must not start every waiting experiment on the same poll (A10)."""
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    waiting = []
+    for _ in range(2):
+        experiment = _experiment(host, "uploaded")
+        _set_fake_state(host, credits=0)
+        assert softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))["credit_denied"]
+        gitops.commit_all(host.canonical, "launch: credit denied")
+        waiting.append(experiment)
+    meta, _ = host.store.load(waiting[0])
+    early = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+    _set_fake_state(host, credits=1000)
+    first = _poll(host, early - datetime.timedelta(minutes=20))
+    [launch] = first.launches
+    assert waiting[0] in launch.why  # the oldest first
+    [second] = _poll(host, early - datetime.timedelta(minutes=19)).launches
+    assert waiting[1] in second.why
+
+
+T_DUE = datetime.datetime(2026, 10, 9, 12, tzinfo=datetime.UTC)
+
+
+@pytest.mark.parametrize(
+    "credits, at_denial, need, minutes_past_backoff, due",
+    [
+        (50.0, 0, 40, -10, True),  # covers the remaining requests: at once
+        (50.0, None, 40, -10, True),  # balance unreadable at denial, readable now
+        (5.0, 0, 40, -10, False),  # a trickle of refill does not cover it: wait
+        (5.0, 0, 40, 10, True),  # ... until the backoff passes (the fallback)
+        (0.0, 0, 0, 10, False),  # readable zero never relaunches
+        (None, 0, 40, -10, False),  # unreadable: the backoff decides
+        (None, 0, 40, 10, True),
+        (50.0, 60.0, 40, -10, False),  # not above the balance the denial came with
+        (70.0, 60.0, 40, -10, True),
+    ],
+)
+def test_relaunch_due(credits, at_denial, need, minutes_past_backoff, due):
+    lifecycle = {"next_launch_after": T_DUE.isoformat(), "credits_at_denial": at_denial}
+    now = T_DUE + datetime.timedelta(minutes=minutes_past_backoff)
+    assert xp_poll.relaunch_due(lifecycle, credits, now, need) is due
+
+
+def test_relaunch_need_counts_the_remaining_requests():
+    experiment = {
+        "evaluation_design": {"seeds": [1, 2, 3]},
+        "xp_requests": [{"seed": 1, "arm": "candidate"}, {"seed": 1, "arm": "baseline"}],
+    }
+    assert xp_poll.relaunch_need(experiment, 2.5, 100) == 4 * 2.5
+    assert xp_poll.relaunch_need(experiment, None, 100) == 100
+    assert xp_poll.min_relaunch_credits({xp_poll.MIN_CREDITS_ENV: "7"}) == 7
+    assert xp_poll.min_relaunch_credits({xp_poll.MIN_CREDITS_ENV: "x"}) == 100
 
 
 class _Clock(datetime.datetime):

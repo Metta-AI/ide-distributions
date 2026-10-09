@@ -314,8 +314,6 @@ disposable.
     worker knows the board was checked.
   - When the board cannot be read, the section is left out (not "None") and the error goes
     to `runtime/plugin_errors.jsonl`; the briefing still goes in.
-  - The serial fallback (`AUTORESEARCH_QUEUE=file`) gets no section: it runs one card at a
-    time.
   - At most 10 peers are listed, titles cut at 120 characters.
 - **`queue list` liveness** (`queue/card.py`, `queue/kanban_queue.py`): `Card` gained
   `current_run_id` (the open run, else null) and `last_heartbeat_at` (epoch seconds, the open

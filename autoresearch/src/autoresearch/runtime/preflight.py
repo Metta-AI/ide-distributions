@@ -1,8 +1,10 @@
 """Start-of-run checks; a failed preflight pauses the agent (C6, amendments A3, A5, A10).
 
 Checks, in order: the credential's identity (C6), free disk under canonical, XP credits
-(unreadable with a Player credential: a warning only, A10), the host dispatcher config (A3)
-and the OpenRouter key's remaining credit (A5).
+(recorded in ``credits``; read as the Player, A10; a failed read or a zero balance is a
+warning only: xp-poll relaunches credit-denied experiments when the balance returns), the host
+dispatcher config (A3), a stale ``AUTORESEARCH_QUEUE`` in the profile ``.env`` (a warning: the
+option was removed, A13), and the OpenRouter key's remaining credit (A5).
 
 Identity. A failed ``whoami`` pauses at once only when Softmax refused the credential
 (``CredentialRejected``) or the credential is missing or malformed (``CredentialError``); an
@@ -56,6 +58,7 @@ OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
 SKIP_OPENROUTER_ENV = "AUTORESEARCH_SKIP_OPENROUTER_CHECK"
 OPENROUTER_MIN_CREDIT_USD = 10.0
 HTTP_TIMEOUT_S = 15
+STALE_QUEUE_ENV = "AUTORESEARCH_QUEUE"  # removed installer setting (A13), still a test hook
 WHOAMI_FAILURE_LIMIT = 3
 WHOAMI_FAILURES = Path(".supervisor") / "runtime" / "whoami_failures.json"
 
@@ -68,7 +71,7 @@ class PreflightResult:
     ok: bool
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    credits: int | None = None
+    credits: float | None = None
     identity_problems: list[str] = field(default_factory=list)  # also in reasons (signals)
     skipped: bool = False  # whoami unavailable this run: do nothing else, do not pause
     pause_key: str | None = None  # the help request's runtime_key when it is not per pause
@@ -237,13 +240,19 @@ def preflight(
     except Exception as error:  # noqa: BLE001 - credit lookup failure is non-fatal
         result.warnings.append(f"credits unavailable: {error}")
     else:
-        if result.credits == 0:
+        if result.credits <= 0:
             result.warnings.append("no credits remaining")
 
     if hermes_home is not None:
         reasons, warnings = host_config_problems(hermes_home)
         result.reasons += reasons
         result.warnings += warnings
+        if env_file_value(Path(hermes_home) / ".env", STALE_QUEUE_ENV):
+            result.warnings.append(
+                f"{STALE_QUEUE_ENV} is set in the profile .env: remove it. It is a test hook "
+                "(A13); worker terminals read the whole .env and would use a file queue while "
+                "queue-keeper uses Kanban"
+            )
     reasons, warnings = openrouter_problems(env, hermes_home, http_get)
     result.reasons += reasons
     result.warnings += warnings

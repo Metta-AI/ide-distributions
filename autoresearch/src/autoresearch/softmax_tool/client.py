@@ -45,8 +45,14 @@ from pathlib import Path
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.identity import require_player, whoami
-from autoresearch.softmax_tool.platform_cli import PlatformCli, Runner, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
+from autoresearch.softmax_tool.platform_cli import HttpGet, PlatformCli, Runner, SoftmaxCliError
+from autoresearch.softmax_tool.protocol import (
+    CreditDenied,
+    Identity,
+    SubmissionState,
+    XpHandle,
+    XpStatus,
+)
 
 UPLOAD_TIMEOUT_S = 600
 _FULL_SHA = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
@@ -55,8 +61,7 @@ EPISODE_PAGE_LIMIT = 100  # coworld episodes --limit max
 LEAGUE_FETCH_WORKERS = 4  # concurrent episode fetches (each one runs two coworld processes)
 
 
-class CreditsUnavailable(SoftmaxCliError):
-    """The credit balance cannot be read with a Player credential."""
+CREDITS_PATH = "/observatory/usage/me/credits"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
@@ -73,8 +78,9 @@ class SoftmaxClient:
         run: Runner = subprocess.run,
         bin_dir: Path | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        http_get: HttpGet | None = None,
     ):
-        self._cli = PlatformCli(env, run=run, bin_dir=bin_dir)
+        self._cli = PlatformCli(env, run=run, bin_dir=bin_dir, http_get=http_get)
         self._expected_player = env.get("AUTORESEARCH_PLAYER_ID", "")
         self._clock = clock
 
@@ -86,10 +92,23 @@ class SoftmaxClient:
     def whoami(self) -> Identity:
         return whoami(self._cli)
 
-    def credits(self) -> int:
-        # /usage/me/credits answers 403 "Player credentials are not authorized for this route"
-        # (verified 2026-10-07), and neither CLI exposes it. Callers treat this as unknown.
-        raise CreditsUnavailable("credit balance is not readable with a Player credential")
+    def credits(self) -> float:
+        """The owning account's XP credit balance (``status.balance_credits``), read as the
+        Player (A10; verified live 2026-10-09). Raises ``SoftmaxCliError`` when it cannot be
+        read; callers then fall back to the credit-denial backoff."""
+        payload = self._cli.api_get_json(CREDITS_PATH)
+        try:
+            return float(payload["status"]["balance_credits"])
+        except (KeyError, TypeError, ValueError):
+            raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
+
+    def episode_cost(self) -> float | None:
+        """Mean credits per episode over the account's recent XP requests (the same route's
+        ``recent_requests``: ``episodes``, ``compute_cost_credits``); None without episodes."""
+        rows = self._cli.api_get_json(CREDITS_PATH).get("recent_requests") or []
+        episodes = sum(int(row.get("episodes") or 0) for row in rows)
+        cost = sum(float(row.get("compute_cost_credits") or 0) for row in rows)
+        return cost / episodes if episodes > 0 and cost > 0 else None
 
     def _league_coworld(self, league_id: str) -> dict:
         league = self._cli.run_json("coworld", ["leagues", league_id])
@@ -179,7 +198,54 @@ class SoftmaxClient:
         return submission_id
 
     def submissions(self, player_id: str) -> list[dict]:
-        return self._cli.run_json_pages("coworld", ["submissions", "--player", player_id])
+        """``coworld submissions --player P --json`` rows (``LeagueSubmissionPublic``), each
+        with the flat keys the protocol uses added: ``submission_id``, ``policy_version_id``
+        (the ``<name>:v<N>`` label), ``league_id`` and ``player_id``."""
+        rows = self._cli.run_json_pages("coworld", ["submissions", "--player", player_id])
+        return [
+            {
+                **row,
+                "submission_id": row["id"],
+                "policy_version_id": row["policy_version"]["label"],
+                "league_id": row["league"]["id"],
+                "player_id": (row.get("player") or {}).get("id", player_id),
+            }
+            for row in rows
+        ]
+
+    def submission_state(
+        self, player_id: str, league_id: str, policy_version_id: str
+    ) -> SubmissionState:
+        """Our latest league membership of the policy (``coworld memberships --league L
+        --player P --policy <label> --json``: ``status`` submitted|qualifying|competing|
+        disqualified, ``substatus``, ``is_champion``; verified live 2026-10-09), else our
+        latest submission of it (``status`` pending|processing|placed|rejected|withdrawn)."""
+        args = ["memberships", "--league", league_id, "--player", player_id]
+        rows = self._cli.run_json_pages("coworld", [*args, "--policy", policy_version_id])
+        rows = [r for r in rows if r["policy_version"]["label"] == policy_version_id]
+        if rows:
+            row = max(rows, key=lambda r: r.get("start_time") or r.get("created_at") or "")
+            status, substatus = row["status"], row.get("substatus")
+            detail = f"membership {status}" + (f" ({substatus})" if substatus else "")
+            if status == "competing":
+                return SubmissionState("competing", bool(row.get("is_champion")), detail)
+            if status == "disqualified":
+                return SubmissionState("rejected", False, detail)
+            if status in ("submitted", "qualifying"):  # PolicyMembershipStatus, metta
+                return SubmissionState("pending", False, detail)
+            return SubmissionState("unknown", False, detail)  # a status we do not know
+        mine = [
+            s
+            for s in self.submissions(player_id)
+            if s["policy_version_id"] == policy_version_id and s["league_id"] == league_id
+        ]
+        if not mine:
+            return SubmissionState("unknown")
+        status = max(mine, key=lambda s: s.get("created_at") or "")["status"]
+        stages = {"pending": "pending", "processing": "pending"}
+        stages |= {"rejected": "rejected", "withdrawn": "rejected"}
+        stage = stages.get(status, "unknown")  # "placed" with no membership: unknown
+        return SubmissionState(stage, False, f"submission {status}")
 
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None:
         args = ["memberships", "--league", league_id, "--player", player_id, "--champions-only"]

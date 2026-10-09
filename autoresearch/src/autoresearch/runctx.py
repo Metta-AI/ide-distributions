@@ -6,8 +6,7 @@ from every subprocess of a Kanban worker (``agent/delegation_context.py``
 not see them; ``HERMES_KANBAN_WORKSPACE`` does survive. The plugin, which runs inside the
 worker process, records the identity on the worker's first turn
 (``record_worker_identity``) in ``runtime/workers/<worktree name>.json``, and ``from_env``
-reads it back for a worktree when the variables are missing (the serial fallback's
-``serial_current.json`` wins when it names the same worktree). Model writes there are blocked
+reads it back for a worktree when the variables are missing. Model writes there are blocked
 by the plugin's write policy (outside the worktree).
 """
 
@@ -25,7 +24,6 @@ ENV_WORKER = "HERMES_KANBAN_WORKSPACE"
 ENV_CARD_ID = "HERMES_KANBAN_TASK"
 ENV_RUN_ID = "HERMES_KANBAN_RUN_ID"
 
-SERIAL_CURRENT_RELATIVE = Path(".supervisor/runtime/serial_current.json")
 WORKERS_RELATIVE = Path(".supervisor/runtime/workers")
 
 
@@ -36,13 +34,6 @@ class RunContext:
     worker: Path | None
     card_id: str | None
     run_id: str | None
-
-
-def _read_serial_current(canonical: Path) -> dict:
-    path = canonical / SERIAL_CURRENT_RELATIVE
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
 
 
 def worker_identity_path(canonical: Path, worker: Path) -> Path:
@@ -88,19 +79,9 @@ def from_env(env: Mapping[str, str] = os.environ) -> RunContext:
     card_id = env.get(ENV_CARD_ID)
     run_id = env.get(ENV_RUN_ID)
     if card_id is None and worker:
-        serial = _read_serial_current(canonical)
-        recorded = (
-            serial
-            if serial.get("worker") == worker
-            else _read_worker_identity(canonical, Path(worker))
-        )
+        recorded = _read_worker_identity(canonical, Path(worker))
         card_id = recorded.get("task_id")
         run_id = recorded.get("run_id", run_id)
-    if card_id is None:
-        serial = _read_serial_current(canonical)
-        card_id = serial.get("task_id")
-        run_id = serial.get("run_id", run_id)
-        worker = serial.get("worker", worker)
     return RunContext(
         hermes_home=hermes_home,
         canonical=canonical,

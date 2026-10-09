@@ -6,8 +6,8 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 - ``whoami``: the credential's identity (``expires_at`` is null for a ``cga_`` agent token,
   which does not expire); exit 1 (``identity``) unless it is the expected
   (``AUTORESEARCH_PLAYER_ID``) unexpired Player.
-- ``credits``: ``{available: true, credits}``, or ``{available: false, reason}`` when the
-  balance cannot be read (always, for a Player credential: amendment A10).
+- ``credits``: ``{available: true, credits}`` (the account's XP credit balance, readable with
+  the Player credential, amendment A10), or ``{available: false, reason}`` when the read fails.
 - ``xp create <E> --batch N --attempt N [--batches K]``: launch batch N of a paired evaluation:
   one seeded XP request per (seed, arm) in the batch's slice of ``design.seeds`` (see
   ``xp_specs`` for the mapping, A12). It recovers once, backfills any recovered request missing
@@ -22,7 +22,10 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   the worker's environment, read before any request is created; it is read in worker terminals
   only, which see the whole profile ``.env``, so it is deliberately not on
   ``terminal.env_passthrough``: a cron job would not get it); ``lifecycle.credit_denials``
-  counts consecutive denials. Rerunning the same ``--batch``/``--attempt`` later creates only
+  counts consecutive denials and ``lifecycle.credits_at_denial`` is the balance read right
+  after the denial (null when unreadable). xp-poll relaunches when the balance covers the
+  remaining requests and is above that value, else after the backoff
+  (``runtime.xp_poll.relaunch_due``). Rerunning the same ``--batch``/``--attempt`` later creates only
   the missing requests. A new attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
   the next number (``bad_attempt``), the batch's latest attempt has every request
@@ -37,14 +40,21 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 - ``submit <E>``: ``softmax_tool.submit``, the only path to a real league submission of an
   experiment's candidate.
 - ``bootstrap-champion --build-dir D``: ``softmax_tool.submit.bootstrap_champion``, the
-  first champion on a fresh install (A14): with no champion (no published promotion, no
-  leaderboard entry), upload the game's shipped strategy build and promote it through the C8
+  first champion on a fresh install (A14): with no champion (the league shows no policy
+  competing for our player, A9), upload the game's starter policy build and promote it through the C8
   promotion as a ``bootstrap`` promotion (no experiment). Prints ``{version_id,
   platform_policy_version_id, promotion_id, submission_id, champion_path}``. Refusals:
-  ``champion_exists``, ``promotion_in_flight``, ``not_shipped_strategy``,
+  ``champion_exists``, ``champion_conflict``, ``promotion_in_flight``, ``not_shipped_strategy``,
   ``promotion_refused``, ``identity`` and the build reader's
   ``gates_failed``/``bad_build``/``artifact_mismatch``.
-- ``leaderboard``: our leaderboard champion and the confirmed current champion (A9).
+- ``leaderboard``: ``{league_id, player_id, leaderboard_champion, current_champion, note,
+  conflict}``. The champion is the policy the league shows competing for our player (A9);
+  ``leaderboard_champion`` and ``current_champion`` are both that policy (null: none, and
+  ``note`` says so). ``conflict`` is null, or ``{expected, shown, detail, waited_out}`` when
+  what the loop expects differs from the league (``promotion.league_check``; queue-keeper
+  pauses the agent for it). ``submission`` is null, or ``{stage, is_champion, detail}``: where
+  the latest promotion's submission stands when the league does not show it (``pending``,
+  ``competing``, ``rejected``, ``unknown``). A malformed grace setting warns on stderr.
 - ``game-version``: ``{league_id, game_version}``, the league's current game version
   (``Softmax.game_version``; the version noise records and designs must match, C10).
 - ``standings``: ``{league_id, rows}``, the league standings (``Softmax.standings``), read-only.
@@ -108,12 +118,17 @@ from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.preflight import env_file_value
-from autoresearch.runtime.promotion import PromotionError, champion_status
-from autoresearch.softmax_tool.client import CreditsUnavailable
+from autoresearch.runtime.promotion import (
+    DEFAULT_CHAMPION_GRACE,
+    PromotionError,
+    champion_grace,
+    champion_status,
+    league_check,
+)
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
 from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
-from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle
+from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle, read_credits
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.submit import bootstrap_champion, submit
 from autoresearch.softmax_tool.upload import upload, worker_store
@@ -306,13 +321,14 @@ def _opponent(entry: str) -> dict:
     return {"slot": -1, "player": player}
 
 
-def _roster(design: EvaluationDesign, policy: str) -> list[dict]:
-    """Our policy in each ``design.seats`` slot, then ``design.opponents`` in order in the
-    remaining slots (ascending, skipping our seats). Fixed slots keep a pair's seating
+def _roster(design: EvaluationDesign, policy: str, seed: int) -> list[dict]:
+    """Our policy in each ``design.seats`` slot, then the seed's opponents
+    (``design.opponents_for(seed)``: its sampled line-up, or the fixed set, A12) in order in
+    the remaining slots (ascending, skipping our seats). Fixed slots keep a pair's seating
     identical; with ``slot: -1`` the platform would rotate open seats per episode."""
     roster = [{"slot": seat, "player": {"policy_ref": policy}} for seat in design.seats]
     free_slots = (slot for slot in itertools.count() if slot not in design.seats)
-    for entry, slot in zip(design.opponents, free_slots, strict=False):
+    for entry, slot in zip(design.opponents_for(seed), free_slots, strict=False):
         roster.append({**_opponent(entry), "slot": slot})
     return roster
 
@@ -331,9 +347,11 @@ def xp_specs(
       play the same board. The tag ``ar:<E>:b<batch>:a<attempt>:s<seed>:<arm>`` is unique.
     - The candidate arm plays the binding's platform id, the baseline arm
       ``design.baseline_version``, each in every ``design.seats`` slot.
-    - Opponents fill the other slots in order as fixed seats: a policy ref is identical across
-      the pair; ``"random"`` is sampled per request by the platform, so pairing is then
-      seed-only (``EvaluationDesign.pairing``). The roster must fill the game's seat count.
+    - Opponents fill the other slots in order as fixed seats: the seed's line-up sampled from
+      the league at design time (``design.lineups``, A12), or the design's fixed
+      ``opponents``. A policy ref is identical across the pair; ``"random"`` is sampled per
+      request by the platform, so pairing is then seed-only (``EvaluationDesign.pairing``).
+      The roster must fill the game's seat count.
     """
     if batches < 1 or not 1 <= batch <= batches:
         raise BadArguments(f"--batch must be between 1 and --batches ({batches}), got {batch}")
@@ -358,7 +376,7 @@ def xp_specs(
                 "league_id": league_id,
                 "num_episodes": 1,
                 "game_config_overrides": {"seed": seed},
-                "roster": _roster(parsed, policies[arm]),
+                "roster": _roster(parsed, policies[arm], seed),
             },
         )
         for seed in seeds
@@ -385,11 +403,13 @@ def _whoami(ctx, sm, args) -> dict:
 def _credits(ctx, sm, args) -> dict:
     try:
         return {"available": True, "credits": sm.credits()}
-    except CreditsUnavailable as error:
+    except SoftmaxCliError as error:
         return {"available": False, "reason": str(error)}
 
 
-def _credit_denied(store, experiment: str, meta: dict, reason: str, base: timedelta) -> dict:
+def _credit_denied(
+    store, experiment: str, meta: dict, reason: str, base: timedelta, credits: float | None
+) -> dict:
     lifecycle = dict(meta.get("lifecycle") or {})
     denials = int(lifecycle.get("credit_denials", 0)) + 1
     after = datetime.now(UTC) + credit_backoff(denials, base)
@@ -399,6 +419,7 @@ def _credit_denied(store, experiment: str, meta: dict, reason: str, base: timede
             **lifecycle,
             "credit_denials": denials,
             "next_launch_after": next_launch_after,
+            "credits_at_denial": credits,
         }
     }
     if meta["status"] in ("uploaded", "evaluating"):
@@ -529,14 +550,20 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     }
     meta, _ = store.load(experiment)
     if denial is not None:
-        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base)}
+        credits = read_credits(sm)
+        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}
 
     patch: dict = {}
     if meta["status"] in ("uploaded", "awaiting-credits"):
         patch["status"] = "evaluating"
     lifecycle = meta.get("lifecycle") or {}
     if lifecycle.get("credit_denials") or lifecycle.get("next_launch_after"):
-        patch["lifecycle"] = {**lifecycle, "credit_denials": 0, "next_launch_after": None}
+        patch["lifecycle"] = {
+            **lifecycle,
+            "credit_denials": 0,
+            "next_launch_after": None,
+            "credits_at_denial": None,
+        }
     if patch:
         store.update(experiment, patch)
     return {**report, "credit_denied": False}
@@ -619,14 +646,21 @@ def _bootstrap_champion(ctx, sm, args) -> dict:
 def _leaderboard(ctx, sm, args) -> dict:
     league_id = _league_id()
     player_id = sm.whoami().player_id
-    on_board = sm.leaderboard_champion(player_id, league_id)
     current, note = champion_status(ctx, sm, league_id)
+    try:
+        grace = champion_grace(os.environ)
+    except ValueError as error:  # a read-only command: warn and use the default
+        print(f"warning: {error}; using {DEFAULT_CHAMPION_GRACE}", file=sys.stderr)
+        grace = DEFAULT_CHAMPION_GRACE
+    check = league_check(ctx, sm, league_id, datetime.now(UTC), grace)
     return {
         "league_id": league_id,
         "player_id": player_id,
-        "leaderboard_champion": on_board,
+        "leaderboard_champion": current,
         "current_champion": current,
         "note": note,
+        "conflict": None if check.conflict is None else asdict(check.conflict),
+        "submission": None if check.submission is None else asdict(check.submission),
     }
 
 
@@ -733,7 +767,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
         commands,
         "bootstrap-champion",
         _bootstrap_champion,
-        "fresh install: upload the shipped strategy and promote it as the first champion",
+        "fresh install: upload the game's starter policy and promote it as the first champion",
     )
     sub.add_argument("--build-dir", required=True)
 

@@ -21,8 +21,10 @@ from autoresearch.runtime.merge import find_orphan_done
 from autoresearch.runtime.promotion import (
     CHAMPION_PATH,
     PromotionError,
+    accept_champion,
     acquire,
     adopt,
+    champion_conflict,
     current_champion,
     load,
     reconcile,
@@ -31,6 +33,7 @@ from autoresearch.runtime.promotion import (
     submit_promotion,
 )
 from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
+from autoresearch.softmax_tool.protocol import SubmissionState
 
 LEAGUE = "league_fake"
 # Platform policy version ids are opaque labels (the real client uses ``name:vN``).
@@ -478,20 +481,190 @@ def test_old_promotion_branch_after_another_published_is_reconciled(board):
 # --- champion ---
 
 
-def test_current_champion_needs_ledger_and_leaderboard_to_agree(board):
+def test_the_league_alone_decides_the_champion(board):
+    """A9: the champion is what the league shows for us, before and after promotions; a
+    policy submitted by hand is the champion too, and a conflict for queue-keeper."""
+    now = datetime.datetime.now(datetime.UTC)
     assert current_champion(board.ctx(), board.sm, LEAGUE) == BASELINE_PV  # nothing promoted
+    assert champion_conflict(board.canonical, BASELINE_PV, now) is None  # no expectation yet
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    assert board.promotion().replaces == BASELINE_PV
+    a.finish()
+    board.process()
+    assert current_champion(board.ctx(), board.sm, LEAGUE) == PV_A
+    assert champion_conflict(board.canonical, PV_A, now) is None
+
+    board.sm.submit("other-policy:v1", LEAGUE)  # submitted by hand: the league moved
+    assert current_champion(board.ctx(), board.sm, LEAGUE) == "other-policy:v1"
+    conflict = champion_conflict(board.canonical, "other-policy:v1", now)
+    assert (conflict.expected, conflict.shown, conflict.waited_out) == (
+        PV_A,
+        "other-policy:v1",
+        False,
+    )
+    # An experiment designed against the old champion no longer matches the league.
+    b = Promoter(board, PV_B, baseline=PV_A)
+    outcome = b.submit()
+    assert outcome.ok is False and "not the experiment baseline" in outcome.reason
+    assert board.submissions_of(PV_B) == []
+
+
+def test_grace_window_while_our_submission_is_in_flight(board):
+    """A9: while our submission is unconfirmed the league may still show the replaced policy;
+    after the grace window that is a conflict. Any third policy is a conflict at once."""
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    submitted_at = datetime.datetime.fromisoformat(board.promotion().history[-1]["at"])
+    grace = datetime.timedelta(minutes=30)
+    soon = submitted_at + datetime.timedelta(minutes=5)
+    late = submitted_at + datetime.timedelta(minutes=31)
+    assert champion_conflict(board.canonical, PV_A, late, grace) is None  # confirmed
+    assert champion_conflict(board.canonical, BASELINE_PV, soon, grace) is None  # not yet
+    waited = champion_conflict(board.canonical, BASELINE_PV, late, grace)
+    assert waited.waited_out and waited.expected == PV_A and waited.shown == BASELINE_PV
+    third = champion_conflict(board.canonical, "other-policy:v1", soon, grace)
+    assert third is not None and not third.waited_out
+
+
+def test_our_submission_state_decides_while_the_league_shows_the_old_policy(board):
+    """A9 grace from the league's own membership: qualifying is never a conflict; once
+    admitted (competing, not champion) the league gets the grace window to make it champion;
+    a rejection is an outcome (the loop then expects the old policy), not a conflict."""
     a = Promoter(board, PV_A)
     assert a.submit().ok
     a.finish()
     board.process()
-    assert current_champion(board.ctx(), board.sm, LEAGUE) == PV_A
+    submitted_at = datetime.datetime.fromisoformat(board.promotion().history[1]["at"])
+    grace = datetime.timedelta(minutes=30)
+    days_later = submitted_at + datetime.timedelta(days=2)
 
-    board.sm.submit("other-policy:v1", LEAGUE)  # the leaderboard moved without a promotion
-    assert current_champion(board.ctx(), board.sm, LEAGUE) is None
-    b = Promoter(board, PV_B, baseline=PV_A)
-    outcome = b.submit()
-    assert outcome.ok is False and "unknown" in outcome.reason
-    assert board.submissions_of(PV_B) == []
+    def conflict(shown, state, since=None):
+        return champion_conflict(board.canonical, shown, days_later, grace, state, since)
+
+    pending = SubmissionState("pending", detail="membership qualifying (held)")
+    assert conflict(BASELINE_PV, pending) is None  # still qualifying, however long
+    competing = SubmissionState("competing", False, "membership competing (benched)")
+    assert conflict(BASELINE_PV, competing, days_later - datetime.timedelta(minutes=10)) is None
+    waited = conflict(BASELINE_PV, competing, days_later - datetime.timedelta(minutes=31))
+    assert waited.waited_out and "admitted" in waited.detail
+    assert conflict(BASELINE_PV, competing) is None  # first seen admitted just now
+    rejected = SubmissionState("rejected", detail="membership disqualified (inactive)")
+    assert conflict(BASELINE_PV, rejected) is None  # the league kept the old champion
+    other = conflict(None, rejected)
+    assert other.expected == BASELINE_PV and other.shown is None and not other.waited_out
+    assert conflict("hand-made:v1", pending).expected == PV_A  # a third policy, at once
+
+
+def test_league_check_tracks_when_the_admission_was_first_seen(board):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.finish()
+    board.process()
+    player = board.sm.whoami().player_id
+    state = json.loads((board.canonical / ".supervisor/runtime/fake_softmax.json").read_text())
+    state["memberships"] = {PV_A: {"stage": "competing", "is_champion": False}}
+    state["submissions"] = [s for s in state["submissions"] if s["policy_version_id"] != PV_A]
+    (board.canonical / ".supervisor/runtime/fake_softmax.json").write_text(json.dumps(state))
+    assert board.sm.leaderboard_champion(player, LEAGUE) == BASELINE_PV
+    t0 = datetime.datetime.now(datetime.UTC)
+    grace = datetime.timedelta(minutes=30)
+    first = promotion.league_check(board.ctx(), board.sm, LEAGUE, t0, grace, record=True)
+    assert first.conflict is None and first.submission.stage == "competing"
+    later = t0 + datetime.timedelta(minutes=45)
+    peek = promotion.league_check(board.ctx(), board.sm, LEAGUE, later, grace)
+    assert peek.conflict is not None and peek.conflict.waited_out
+
+
+def test_recovery_waits_while_the_league_has_not_decided(board):
+    """A9 x A11: no recovery attempt is spent while our submission is still qualifying."""
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    state_path = board.canonical / ".supervisor/runtime/fake_softmax.json"
+    real = json.loads(state_path.read_text())
+    qualifying = {**real, "memberships": {PV_A: {"stage": "pending"}}}
+    qualifying["submissions"] = [s for s in real["submissions"] if s["policy_version_id"] != PV_A]
+    state_path.write_text(json.dumps(qualifying))
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []
+    assert board.promotion().recovery_requests == []
+
+    state_path.write_text(json.dumps(real))  # admitted and champion
+    [action] = reconcile(board.ctx(), board.queue, board.sm, LEAGUE)
+    assert action.kind == "recovery_requested"
+
+
+def _league_rejects(board, policy: str) -> None:
+    """The league disqualifies ``policy``'s membership and keeps the old champion."""
+    state_path = board.canonical / ".supervisor/runtime/fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["memberships"] = {policy: {"stage": "rejected"}}
+    state["submissions"] = [s for s in state["submissions"] if s["policy_version_id"] != policy]
+    state_path.write_text(json.dumps(state))
+
+
+def test_a_rejected_submission_frees_the_slot_at_once(board):
+    """N1: holder dead and the league rejects: reconcile settles the promotion as ``rejected``
+    in one run, one message goes out, and a later submit is allowed."""
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    _league_rejects(board, PV_A)
+    [action] = reconcile(board.ctx(), board.queue, board.sm, LEAGUE)
+    assert action.kind == "rejected"
+    rejected = board.promotion()
+    assert rejected.stage == "rejected" and rejected.recovery_requests == []
+    assert "the league rejected it" in rejected.history[-1]["note"]
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []  # settled once
+    outbox = [
+        json.loads(path.read_text())
+        for path in sorted((board.canonical / "comms" / "outbox").glob("*.json"))
+    ]
+    messages = [m for m in outbox if "did not accept" in m["title"]]
+    assert len(messages) == 1 and messages[0]["kind"] == "note"
+    assert champion_conflict(board.canonical, BASELINE_PV, datetime.datetime.now(datetime.UTC)) is None
+
+    b = Promoter(board, PV_B)  # the slot is free; the champion is still the old one
+    assert b.submit().ok
+    assert board.promotion().stage == "submitted" and board.promotion().replaces == BASELINE_PV
+
+
+def test_a_pending_submission_asks_for_help_once_after_the_cap(board, monkeypatch):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    state_path = board.canonical / ".supervisor/runtime/fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["memberships"] = {PV_A: {"stage": "pending"}}
+    state["submissions"] = [s for s in state["submissions"] if s["policy_version_id"] != PV_A]
+    state_path.write_text(json.dumps(state))
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []  # waiting, quietly
+    monkeypatch.setattr(promotion, "PENDING_CAP", datetime.timedelta(0))
+    [action] = reconcile(board.ctx(), board.queue, board.sm, LEAGUE)
+    assert action.kind == "help_requested"
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []  # once
+    assert board.promotion().stage == "submitted" and board.promotion().recovery_requests == []
+
+
+def test_accepting_the_league_champion_resolves_the_conflict(board):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.finish()
+    board.process()
+    board.sm.submit("other-policy:v1", LEAGUE)
+    now = datetime.datetime.now(datetime.UTC)
+    assert champion_conflict(board.canonical, "other-policy:v1", now) is not None
+    record = accept_champion(board.ctx(), board.sm, LEAGUE)
+    assert record["policy_version_id"] == "other-policy:v1"
+    assert champion_conflict(board.canonical, "other-policy:v1", now) is None
+    # The acceptance holds until the league moves again; the loop's own policy agrees too.
+    assert champion_conflict(board.canonical, "third:v1", now).expected == "other-policy:v1"
+    assert champion_conflict(board.canonical, PV_A, now) is None
+    # A newer promotion that reaches the league replaces the acceptance as the expectation.
+    b = Promoter(board, PV_B, baseline="other-policy:v1")
+    assert b.submit().ok
+    assert board.promotion().replaces == "other-policy:v1"
+    assert champion_conflict(board.canonical, PV_B, now) is None
 
 
 def test_adopt_only_by_the_recovery_card(board):
@@ -640,7 +813,7 @@ def test_no_champion_known_refusal_message(board):
     a = Promoter(board, PV_A)
     newcomer = FakeSoftmax(board.canonical, {"AUTORESEARCH_PLAYER_ID": "ply_new"})
     outcome = a.submit(sm=newcomer)
-    assert outcome.ok is False and outcome.reason.startswith("no champion known")
+    assert outcome.ok is False and outcome.reason.startswith("no champion: the")
 
 
 # --- the promotion CLI ---
@@ -697,3 +870,23 @@ def test_stage_champion_git_failure_is_a_json_error(board, capsys, monkeypatch):
     gitops.git(board.canonical, "remote", "set-url", "origin", str(board.tmp_path / "missing"))
     code, env = _cli(capsys, monkeypatch, a.worker, "stage-champion", board.promotion().id)
     assert code == 1 and "GitError" in env["error"]["message"]
+
+
+def test_accept_champion_through_the_promotion_cli(board, capsys, monkeypatch, tmp_path):
+    """The operator command reads the game's league (fakegame's ``fake-league``, where this
+    board's fake player has no champion) and records what it shows. A card cannot run it."""
+    worker = board.admit(mode="maintenance")
+    worker.start()
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    code, env = _cli(capsys, monkeypatch, worker, "accept-champion")
+    assert code == 1 and "human operator" in env["error"]["message"]
+    assert not (board.ledger / "champion_accepted.json").exists()
+
+    for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
+        monkeypatch.delenv(name)  # an operator shell
+    code, env = main(["promotion", "accept-champion"]), json.loads(capsys.readouterr().out)
+    assert code == 0, env
+    assert env["data"]["policy_version_id"] is None
+    assert env["data"]["league_id"] == "fake-league"
+    assert board.committed(board.ledger / "champion_accepted.json") == env["data"]

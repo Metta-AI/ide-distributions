@@ -18,16 +18,21 @@ Files under the workspace root:
   ``error.reason``: ``needs_calibration`` (no noise record for the current version),
   ``not_designed``, ``version_mismatch`` or ``bad_request`` (the request does not freeze).
   ``--planned-pairs`` (the pairs ``delta`` is computed for) defaults to the request's seed count.
+  Opponents (A12): a request with ``opponent_count: N`` (and optionally ``opponent_episodes``,
+  default 100) is sampled here: the league snapshot from that many recent league episodes and
+  the standings (``stats.opponents.league_snapshot``, our player from ``whoami``, our policy
+  the request's ``baseline_version``), one line-up of N per seed salted with the experiment
+  id, both frozen into the design. A refusal to sample (no opponents in the snapshot) is
+  ``bad_request``. A fixed ``opponents`` set needs ``opponent_rationale``.
 - ``stats/outcomes/<E-id>.json``: the last ``stats evaluate`` outcome, with the champion and
   candidate it was evaluated against, ``rows_sha256`` (of the rows file) and ``design_sha256``
   (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
   detect a stale outcome by recomputing both hashes.
 
 The champion for ``stats evaluate`` comes from ``runtime.promotion.current_champion`` (the
-latest published promotion confirmed against the Softmax leaderboard of the game's league)
-when the command runs inside a profile (``HERMES_HOME`` and ``AUTORESEARCH_GAME`` set);
-``--champion`` must then agree with it. Outside a profile, or when the champion is unknown,
-``--champion`` is required.
+policy the game's league shows competing for our player, A9) when the command runs inside a
+profile (``HERMES_HOME`` and ``AUTORESEARCH_GAME`` set); ``--champion`` must then agree with
+it. Outside a profile, or when the league shows no champion, ``--champion`` is required.
 """
 
 import argparse
@@ -36,6 +41,7 @@ import json
 import os
 import re
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 from autoresearch import runctx
@@ -45,7 +51,7 @@ from autoresearch.io.docs import _atomic_write_text
 from autoresearch.paths import Layout
 from autoresearch.records.cli import BadArguments, _check_id, _ok, _run
 from autoresearch.records.store import RecordStore
-from autoresearch.runtime.promotion import current_champion, has_published
+from autoresearch.runtime.promotion import current_champion
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
 from autoresearch.stats.design import DesignError, EvaluationDesign
@@ -58,6 +64,7 @@ from autoresearch.stats.noise import (
     noise_revision,
     write_noise,
 )
+from autoresearch.stats.opponents import DEFAULT_EPISODES, league_snapshot, sample_lineups
 
 # games/ lives at the autoresearch project root, next to schemas/.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -235,8 +242,9 @@ def _design(args, store: RecordStore) -> int:
     if planned < 1:
         raise BadArguments("--planned-pairs must be positive (or give the request seeds)")
     try:
+        sampled = _with_sampled_opponents(request, experiment, game.league_id)
         design = freeze_design(
-            {"evaluation_design_request": request},
+            {"evaluation_design_request": sampled},
             game,
             noise,
             planned,
@@ -253,6 +261,32 @@ def _design(args, store: RecordStore) -> int:
     )
 
 
+def _with_sampled_opponents(request: dict, experiment: str, league_id: str) -> dict:
+    """The request plus ``lineups`` and ``league_snapshot`` when it asks for
+    ``opponent_count`` sampled opponents (module docstring, A12); else the request as is."""
+    if "opponent_count" not in request:
+        return request
+    count = request["opponent_count"]
+    episodes = request.get("opponent_episodes", DEFAULT_EPISODES)
+    if not isinstance(count, int) or not isinstance(episodes, int) or episodes < 1:
+        raise DesignError("opponent_count and opponent_episodes must be positive integers")
+    ctx = runctx.from_env()
+    sm = softmax_from_env(os.environ, ctx.canonical)
+    try:
+        snapshot = league_snapshot(
+            sm.league_episodes(league_id, episodes),
+            sm.standings(league_id),
+            league_id,
+            sm.whoami().player_id,
+            request.get("baseline_version"),
+            datetime.now(UTC).isoformat(timespec="seconds"),
+        )
+    except (RuntimeError, OSError) as error:
+        raise ValueError(f"cannot read the league to sample opponents: {error}") from None
+    lineups = sample_lineups(snapshot, request.get("seeds") or [], count, experiment)
+    return {**request, "lineups": lineups, "league_snapshot": snapshot}
+
+
 def _json_object_file(path: str) -> dict:
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -265,39 +299,32 @@ def _json_object_file(path: str) -> dict:
     return value
 
 
-def _confirmed_champion() -> tuple[str | None, bool]:
-    """(champion, ledger owns it) inside a profile; (None, False) outside one. The champion
-    is None when unknown; the ledger owns it once any promotion is published, and then
-    ``--champion`` cannot stand in for it."""
+def _confirmed_champion() -> str | None:
+    """The league's champion for our player inside a profile (None when it shows none, A9);
+    None outside a profile."""
     game_name = os.environ.get(GAME_ENV)
     if not game_name:
-        return None, False
+        return None
     try:
         ctx = runctx.from_env()
     except KeyError:
-        return None, False
+        return None
     try:
         game = load_game(_REPO_ROOT, game_name)
     except GameError as error:
         raise BadArguments(str(error)) from None
     try:
         sm = softmax_from_env(os.environ, ctx.canonical)
-        champion = current_champion(ctx, sm, game.league_id)
+        return current_champion(ctx, sm, game.league_id)
     except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
         raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
-    return champion, has_published(ctx.canonical)
 
 
 def _resolve_champion(args) -> str:
-    """The confirmed champion when there is one (``--champion`` must then agree), else
-    ``--champion`` (refused once the promotion ledger owns the champion)."""
-    champion, ledger_owned = _confirmed_champion()
+    """The league's champion when there is one (``--champion`` must then agree), else
+    ``--champion``."""
+    champion = _confirmed_champion()
     if champion is None:
-        if ledger_owned:
-            raise ValueError(
-                "champion unknown: the promotion ledger and the leaderboard disagree; "
-                "--champion is not accepted until they agree"
-            )
         if not args.champion:
             raise BadArguments(CHAMPION_UNKNOWN)
         return args.champion

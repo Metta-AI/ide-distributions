@@ -160,6 +160,7 @@ REQUEST = {
     "baseline_version": "pv-base",
     "seats": [0, 1],
     "opponents": ["pv-opp"],
+    "opponent_rationale": "a fixed opponent keeps these freeze tests about the noise maths",
     "seeds": list(range(250)),  # at least n_min (197): each seed is one pair
     "primary_metrics": [{"name": "hits", "direction": "up", "min_effect": 2.0}],
     "guardrails": [{"name": "deaths", "direction": "down", "tolerance": 0.05}],

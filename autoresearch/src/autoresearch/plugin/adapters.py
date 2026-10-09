@@ -26,10 +26,6 @@ PLUGIN_ERRORS_FILE = "plugin_errors.jsonl"
 BRIEFING_MARKER = "<!-- autoresearch-briefing task={task_id} -->"
 SUMMARY_MAX = 500
 
-# Same value as autoresearch.queue.select.ENV_QUEUE (not imported: that module is not
-# stdlib-only). "file" is the serial fallback, which runs one card at a time.
-ENV_QUEUE = "AUTORESEARCH_QUEUE"
-
 # Card metadata cache: path -> ((mtime_ns, size), card).
 _card_cache: dict[Path, tuple[tuple[int, int], dict]] = {}
 
@@ -248,8 +244,6 @@ def pre_llm_call(is_first_turn=False, session_id=None, **kwargs):
     except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
         _log_error(ctx, "pre_llm_call", error)
         return None
-    if os.environ.get(ENV_QUEUE) == "file":
-        return text
     try:
         return f"{text}\n{peers.running_peers_section(ctx)}"
     except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in

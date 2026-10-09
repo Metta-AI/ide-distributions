@@ -51,9 +51,9 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_GAME",
     "AUTORESEARCH_SOFTMAX",
     "AUTORESEARCH_CLI",
-    "AUTORESEARCH_QUEUE",  # the serial fallback selects the queue through it (A4)
     "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
     "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
+    "AUTORESEARCH_CHAMPION_GRACE_MINUTES",  # queue-keeper's champion check (A9)
     "COGAMES_API_URL",  # the Softmax API server; the hosting runtime writes it to the .env
     "AUTORESEARCH_CARD_MODELS",  # queue-keeper creates cards with the per-mode model
     # spend caps (runtime.spend), read by queue-keeper and health
@@ -61,6 +61,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_MAX_CARD_USD",
     "AUTORESEARCH_DAILY_BUDGET_USD",
     "AUTORESEARCH_FALLBACK_PRICES",
+    "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
 ]
 APPROVAL_DENY = [
     "coworld player use*",
@@ -75,6 +76,10 @@ APPROVAL_DENY = [
     "hermes kanban link*",
     "hermes kanban --board * create*",
     "hermes kanban --board * link*",
+    # A human resolves a champion conflict (A9). Anchored at the end, so a commit message or
+    # journal text that merely mentions the command is not denied.
+    "*promotion accept-champion",
+    "*promotion accept-champion *",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 

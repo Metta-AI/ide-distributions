@@ -41,7 +41,7 @@ Doctrine upheld: D-06, D-09.
 
 - Do not peek and stop. N was committed with the rule (D-09). Evaluate only when every
   request is terminal.
-- `stats evaluate` exit 1 "champion unknown" or "champion mismatch": the ledger and the
-  leaderboard disagree, or the champion changed. Record it; the review decision is `hold`
-  and a re-evaluation against the new champion is the follow-up card.
+- `stats evaluate` exit 1 "champion mismatch" (the league's champion changed), or exit 2
+  "champion unknown" (the league shows no champion for us): record it; the review decision
+  is `hold` and a re-evaluation against the current champion is the follow-up card.
 - Never edit `stats/rows/` or `stats/outcomes/` by hand. `softmax submit` checks their hashes.

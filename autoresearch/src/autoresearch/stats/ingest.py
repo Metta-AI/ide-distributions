@@ -59,15 +59,19 @@ def ingest_rows(
 def ingest(
     rows: list[EpisodeRow], design: EvaluationDesign
 ) -> tuple[list[EpisodeRow], IngestReport]:
-    """``ingest_rows`` plus the design's seat and opponent checks (both count as wrong_seats)."""
+    """``ingest_rows`` plus the design's seat, seed and opponent checks (a seat or opponent
+    mismatch counts as wrong_seats). A row's opponents must be its seed's
+    (``design.opponents_for``: the sampled line-up, A12, or the fixed set)."""
     kept, report = ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
-    seats, opponents, seeds = tuple(design.seats), tuple(design.opponents), set(design.seeds)
+    seats, seeds = tuple(design.seats), set(design.seeds)
     in_design = []
     for row in kept:
-        if tuple(row.seats) != seats or tuple(row.opponents) != opponents:
+        if tuple(row.seats) != seats:
             report.wrong_seats += 1
         elif row.seed not in seeds:
             report.wrong_seed += 1
+        elif tuple(row.opponents) != tuple(design.opponents_for(row.seed)):
+            report.wrong_seats += 1
         else:
             in_design.append(row)
     report.kept = len(in_design)

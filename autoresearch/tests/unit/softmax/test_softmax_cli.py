@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -112,12 +113,20 @@ def test_credits_fake(board):
     assert code == 0 and env["data"] == {"available": True, "credits": 100}
 
 
-def test_credits_real_client_is_unavailable(board):
-    env = base_env(board)
-    del env["AUTORESEARCH_SOFTMAX"]
-    code, data = softmax(env, "credits")
-    assert code == 0 and data["data"]["available"] is False
-    assert "Player" in data["data"]["reason"]
+def test_credits_read_failure_is_unavailable_not_an_error(tmp_path):
+    from autoresearch.softmax_tool.client import SoftmaxClient
+
+    def http_get(url, headers):
+        raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
+
+    env = {
+        "HERMES_HOME": str(tmp_path),
+        "SOFTMAX_PLAYER_CREDENTIAL": json.dumps(
+            {"token": "ply_x", "expires_at": "2099-01-01T00:00:00+00:00"}
+        ),
+    }
+    data = softmax_cli._credits(None, SoftmaxClient(env, http_get=http_get), None)
+    assert data["available"] is False and "HTTP 503" in data["reason"]
 
 
 def test_missing_tool_is_exit_3(board, monkeypatch, capsys, tmp_path):
@@ -129,8 +138,8 @@ def test_missing_tool_is_exit_3(board, monkeypatch, capsys, tmp_path):
     )
     real_init = PlatformCli.__init__
 
-    def empty_bin(self, env, run=subprocess.run, bin_dir=None):
-        real_init(self, env, run=run, bin_dir=tmp_path / "empty-bin")
+    def empty_bin(self, env, run=subprocess.run, bin_dir=None, http_get=None):
+        real_init(self, env, run=run, bin_dir=tmp_path / "empty-bin", http_get=http_get)
 
     monkeypatch.setattr(PlatformCli, "__init__", empty_bin)
     code = main(["softmax", "whoami"])
@@ -195,6 +204,34 @@ def test_xp_specs_one_seeded_request_per_seed_and_arm():
     ]
     assert baseline["roster"][2:] == candidate["roster"][2:]
     assert baseline["game_config_overrides"] == {"seed": 11}
+
+
+def test_xp_specs_sampled_lineups_are_per_seed_and_shared_by_the_pair():
+    """A12: a design with league-sampled line-ups seats each seed's line-up for both arms."""
+    from support.promotion_board import design_dict
+
+    lineups = {"11": ["a:v1", "b:v2"], "12": ["c:v3", "a:v1"]}
+    snapshot = {"league_id": LEAGUE, "taken_at": "t", "basis": "league_episodes", "entries": []}
+    design = {
+        **design_dict(),
+        "seeds": [11, 12],
+        "n_min": 2,
+        "opponents": [],
+        "lineups": lineups,
+        "league_snapshot": snapshot,
+    }
+    specs = softmax_cli.xp_specs(design, {"platform_policy_version_id": PV_A}, LEAGUE, 1, 1)
+    opponents = {
+        (seed, arm): [entry["player"]["policy_ref"] for entry in spec["roster"][2:]]
+        for seed, arm, spec in specs
+    }
+    assert opponents == {
+        (11, "candidate"): ["a:v1", "b:v2"],
+        (11, "baseline"): ["a:v1", "b:v2"],
+        (12, "candidate"): ["c:v3", "a:v1"],
+        (12, "baseline"): ["c:v3", "a:v1"],
+    }
+    assert [entry["slot"] for entry in specs[0][2]["roster"]] == [0, 1, 2, 3]
 
 
 def test_xp_specs_opponent_slots_skip_our_seats():
@@ -791,6 +828,8 @@ def test_leaderboard(board):
         "leaderboard_champion": BASELINE_PV,
         "current_champion": BASELINE_PV,
         "note": "",
+        "conflict": None,
+        "submission": None,
     }
 
 

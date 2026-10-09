@@ -15,7 +15,7 @@ Design documents (open the HTML files in a browser):
 - [Runtime](docs/designs/autoresearch-runtime-2026-10-06.html): how it runs on Hermes.
 - [Open questions](docs/designs/autoresearch-open-questions-2026-10-07.html).
 - [Implementation plan](docs/plans/2026-10-07-autoresearch-v0/00-overview.md): contracts
-  C1-C12 and amendments A1-A12. The contract numbers in this file refer to it.
+  C1-C12 and amendments A1-A14. The contract numbers in this file refer to it.
 - [Verified Hermes facts](docs/plans/findings/hermes-facts.md): what was checked on Hermes
   v0.21.5.
 
@@ -85,14 +85,15 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_GAME` | no | Directory name under `games/`. Default `gota`. |
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
-| `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but no shipped job runs its cards (see below). |
 | `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
 | `AUTORESEARCH_CARD_MODELS` | no | Model per card mode, as `mode=model` pairs separated by commas. Default `planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3`: mechanical cards run on the cheaper model, `investigation` and `experimentation` on `model.default`. A mode set to `default` (or the whole value `none`) uses `model.default`. queue-keeper pins the model when it creates the card (`hermes kanban create --model ... --provider openrouter`), so a change applies to new cards only; `hermes kanban --board autoresearch set-model <task> <model>` changes a card already on the board. A bad entry (unknown mode, no model) is skipped, so that mode uses `model.default`; queue-keeper logs it, records the step failure `card_models`, and sends one help request per distinct value. |
 | `AUTORESEARCH_MAX_CARD_RUNS` | no | Runs per card. Default 4. queue-keeper stops a card that would start, or has started, one more run: it blocks it (`hermes kanban block --kind capability`, or `needs_input` when its last block was `capability`, so Hermes' unblock-loop breaker does not send it to triage; reason `spend-cap: ...`) and sends one help request. Only `running` and `ready` cards can be blocked; others are skipped. A stop that fails is retried every minute and reported once per failure streak; it grants no new allowance. A stopped card is never requeued or repaired; unblocking it gives it another full allowance. The blocked-card check (queue-keeper and `health`) also keeps a blocked card blocked, without requeue or repair, once it has reached this cap or the cost cap. The caps also run while preflight fails and the agent is paused. `0` turns the cap off. |
 | `AUTORESEARCH_MAX_CARD_USD` | no | Estimated model spend per card, in USD. Default 4. Same stop as above. The estimate is Hermes' own (`state.db`, `sessions.estimated_cost_usd`), summed over the sessions of the card's runs and their compression and subagent sessions. `0` turns the cap off. |
 | `AUTORESEARCH_DAILY_BUDGET_USD` | no | Estimated model spend per UTC day of every session of this profile. Default 25. At the budget queue-keeper pauses dispatch (the usual pause: pending cards unassigned, no admission) and sends one help request a day; running cards finish under their own caps. It resumes by itself on the next UTC day, or after you raise the value. `0` turns it off. |
 | `AUTORESEARCH_FALLBACK_PRICES` | no | USD per million tokens for a session Hermes could not price (its estimate missing, for example when OpenRouter pricing was unreachable), as `kind=price` pairs. Default `input=3,output=12,cache_read=0.75,cache_write=3`, above kimi-k3's observed rate on purpose. queue-keeper logs each session priced this way once. |
-| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
+| `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long the league may take to make our admitted submission the champion (or, when its membership cannot be found, how long after the submit) before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
+| `AUTORESEARCH_RELAUNCH_MIN_CREDITS` | no | Credits an experiment refused for credits needs before xp-poll relaunches it, when the cost per XP episode cannot be estimated from recent requests (A10). Default 100. |
+| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them
@@ -171,10 +172,11 @@ Later runs skip each step that is already done.
 ## Kanban go/no-go switch
 
 The queue is Hermes Kanban. The Kanban go/no-go passed (GO, 2026-10-08,
-[protocol-slice.md](docs/plans/findings/protocol-slice.md)), so v0 has no other queue.
-`AUTORESEARCH_QUEUE=file` selects a file queue that keeps its cards in the canonical runtime
-directory, but the serial job that would run those cards (Plan 01 Task 5.2) is not built.
-Do not set it on a host: cards would be admitted and never run.
+[protocol-slice.md](docs/plans/findings/protocol-slice.md)), so v0 has no other queue. The
+serial fallback was never built and its queue option was removed (amendment A13).
+`FileQueue` remains only as the tests' stand-in for Kanban (`AUTORESEARCH_QUEUE=file` is a
+test hook, like `AUTORESEARCH_SOFTMAX=fake`; never set it on a host: preflight warns when the
+profile `.env` sets it).
 
 ## Operate
 
@@ -204,11 +206,11 @@ Read state with the CLI:
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
 On a fresh install there is no champion. The first card that needs one bootstraps it by
-itself (amendment A14): it builds the game's shipped strategy (the `## Baseline build`
+itself (amendment A14): it builds the game's starter policy (the `## Starter policy`
 section of `games/<game>/GAME.md`) and runs
 `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <build dir>`, which uploads it and
 promotes it through the normal promotion, without an experiment. So the first league
-submission is the shipped strategy, unevaluated. Check it with
+submission is the game's starter policy, unevaluated. Check it with
 `"$AUTORESEARCH_CLI" promotion status` and `"$AUTORESEARCH_CLI" softmax leaderboard`.
 
 Where things live:
@@ -266,6 +268,21 @@ bootstrap raises the earlier shipped defaults (2700 s, and Hermes' 180 s for
 if you want exactly 2700 or 180, set a nearby value (2701, 181), or bootstrap raises it again. The plugin refuses foreground
 `sleep` of 30 s or more and loops that sleep while checking a process.
 
+The champion is whatever policy the Softmax league shows competing for our player
+(amendment A9); the promotion ledger only records what the agent submitted and why. When the
+league shows something other than what the agent expects (a policy submitted by hand, a
+retired or disqualified champion, or our own submission admitted but still not champion
+`AUTORESEARCH_CHAMPION_GRACE_MINUTES` after queue-keeper first saw it admitted),
+queue-keeper pauses the agent and sends one help request with both policies in its `about`.
+A submission still qualifying is not a conflict (one still pending after 24 hours gets a
+help request); one the league rejects closes its promotion (stage `rejected`) and is reported
+once: a note, or for the first champion (the starter policy) a help request that says what to
+run. While a conflict is open, `softmax submit` and `softmax bootstrap-champion` refuse. It stays paused until they
+agree: either make the league show the expected policy again, or accept what it shows with
+`"$AUTORESEARCH_CLI" promotion accept-champion` (in an operator shell, above; agents cannot
+run it). It resumes on the
+next queue-keeper run after that.
+
 ## Restore on a new host
 
 Privacy note: the memory snapshot is committed to the workspace and pushed to
@@ -311,10 +328,6 @@ automatic update; `updates.check` is set to false so it does not even check.
 
 ## Known gaps
 
-- **Serial fallback is not shipped.** `AUTORESEARCH_QUEUE=file` selects the queue backend,
-  but the `research-serial` cron job and its pre-run script (Plan 01 Task 5.2) are not
-  built: the Kanban go/no-go passed (GO, `docs/plans/findings/protocol-slice.md`), so Kanban
-  is the v0 queue.
 - **GotA is bound but not yet proven end to end.** `games/gota` has real `build`,
   `local_check`, `evaluate` and `upload` bindings (Plan 02 Task 2.5). The build follows the
   live engine. The compiler passed M1 on 2026.10.7.2 only; a newer engine has no semantic
@@ -324,8 +337,12 @@ automatic update; `updates.check` is set to false so it does not even check.
   are safe because the curator only manages skills with an agent-created record, and
   `curator.prune_builtins` is set to false. Do not run `hermes curator adopt` on a shipped
   skill.
-- **Credits.** A Player credential cannot read credits (HTTP 403). Preflight only warns,
-  and experiments that wait for credits are retried with backoff (A10).
+- **Credits.** The Player reads the XP credit balance over HTTP
+  (`GET /observatory/usage/me/credits`), because coworld 0.1.58 has no `credits` command yet.
+  Preflight records it and warns at 0. An experiment refused for credits relaunches when the
+  balance covers its remaining requests (the recent cost per episode, or
+  `AUTORESEARCH_RELAUNCH_MIN_CREDITS`), at most one experiment per xp-poll run; otherwise the
+  backoff decides (A10).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
 - **Spend caps see only this profile's sessions.** GotA compiler child runs (their own
   `HERMES_HOME`) and spend outside the profile are not counted. A card's cost needs the
