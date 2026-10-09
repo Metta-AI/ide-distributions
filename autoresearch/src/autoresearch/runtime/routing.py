@@ -3,11 +3,17 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
 
 ``route_all`` takes the canonical lock once (the caller must not hold it) and:
 
-1. **Receive.** Every committed ``comms/inbox/<I-id>.json`` without a delivery record gets one
+0. **Adopt.** Files an external agent wrote into ``comms/inbox/`` directly are committed when
+   valid (``comms.inbound.adopt_direct_writes``); an invalid one gets a runtime ``note`` in
+   reply to its id, once, its id is recorded in ``.supervisor/ledger/inbound-rejected/`` and
+   is final. A committed inbox entry that does not parse is skipped (action ``unreadable``)
+   so one bad file never stops routing.
+1. **Receive.** Every committed ``comms/inbox/<id>.json`` without a delivery record gets one
    (``comms.delivery``; state ``received``), with ``thread`` (the thread of the outbound
    message it answers: its ``thread``, else its id) and ``late`` (a reply after that
    message's ``expires``). One commit.
-2. **Route** each ``received`` record, one commit per message:
+2. **Route** each ``received`` record, one commit per message, by its kind's handler
+   (``HANDLERS``, one per inbound kind of the registry ``comms.kinds``):
 
    - ``seen``: nothing to do (the seen ledger was written on submission) -> ``acknowledged``.
    - ``task``: checked again (shape, and its refs must resolve at HEAD). Invalid -> a runtime
@@ -57,18 +63,24 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from autoresearch.comms import delivery
+from autoresearch.comms import delivery, kinds, runtime_messages
 from autoresearch.comms.envelope import FROM_RUNTIME
-from autoresearch.comms.inbound import inbound_problems, is_late, parse_time
+from autoresearch.comms.inbound import (
+    adopt_direct_writes,
+    inbound_problems,
+    is_late,
+    parse_time,
+)
 from autoresearch.comms.publisher import (
     commit_and_push,
     find_reply,
     message_id_of_seq,
-    publish_runtime,
+    publish_message,
 )
 from autoresearch.comms.reader import get as get_published
 from autoresearch.comms.reader import read_since
 from autoresearch.comms.resolver import ResolveError, resolve
+from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.kb.requests import bracketed, has_marker
@@ -93,8 +105,11 @@ BACKLOG = {"task_id": None, "request_id": None, "backlog": True}
 
 @dataclass
 class Action:
-    """One thing ``route_all`` did: ``received``, ``card_requested``, ``routed_to_card``,
-    ``backlogged``, ``rejected`` (a task answered with a note), ``acknowledged`` (a seen),
+    """One thing ``route_all`` did: ``adopted`` (a direct inbox write committed), ``received``,
+    ``card_requested``, ``routed_to_card``,
+    ``backlogged``, ``rejected`` (a task answered with a note), ``write_rejected`` (a direct
+    inbox write answered with a note),
+    ``acknowledged`` (a seen), ``unreadable`` (a committed inbox entry that does not parse),
     ``bound`` (a record got its task id) or ``returned`` (back to the backlog)."""
 
     kind: str
@@ -112,36 +127,15 @@ def _checkpoint(step: str) -> None:
 # --- reading ---
 
 
+def _text_field(message: dict, name: str) -> str | None:
+    """A text field of an inbound message, which may not have passed validation."""
+    value = message.get(name)
+    return value if isinstance(value, str) else None
+
+
 def _one_line(text: str, limit: int) -> str:
     line = " ".join(str(text).split())
     return line if len(line) <= limit else line[: limit - 1] + "…"
-
-
-def _describe(message: dict) -> str:
-    """The full text of an inbound message for a briefing."""
-    kind = message["kind"]
-    if kind == "reply":
-        parts = [f"Reply to {message['in_reply_to']}."]
-        if message.get("choice"):
-            parts.append(f"Choice: {message['choice']}.")
-        if message.get("text"):
-            parts.append(str(message["text"]))
-        return " ".join(parts)
-    if kind == "steer":
-        text = f"Steer (urgency {message['urgency']}): {message['text']}"
-        topic = message.get("proposed_topic")
-        if isinstance(topic, dict):
-            text += (
-                f"\n\nProposed topic: {topic.get('title')} — {topic.get('objective')} "
-                f"(priority {topic.get('priority')})"
-            )
-        return text
-    if kind == "task":
-        return (
-            f"Task: {message['title']} (mode {message['mode']}, priority "
-            f"{message['priority']}). Why: {message['why']}"
-        )
-    return f"{kind}: {message.get('ids')}"
 
 
 def _committed_json_dir(canonical: Path, directory: str) -> list[dict]:
@@ -248,7 +242,7 @@ def _write_backlog_entry(canonical: Path, message: dict) -> Path:
         "source": "inbound",
         "kind": message["kind"],
         "author": message.get("author"),
-        "summary": _one_line(_describe(message), SUMMARY_LIMIT),
+        "summary": _one_line(kinds.describe(message), SUMMARY_LIMIT),
         "proposed_topic": message.get("proposed_topic"),
         "created_at": now_iso(),
     }
@@ -314,28 +308,26 @@ def _route_to_backlog(canonical: Path, record: dict, message: dict, note: str) -
 
 
 def _answer_with_note(
-    canonical: Path, record: dict, title: str, body: str, allow_no_remote: bool
+    canonical: Path, record: dict, note: RuntimeMessage, allow_no_remote: bool
 ) -> list[Action]:
     """Publish (once) a runtime note answering the inbound, and acknowledge it with that."""
     message_id = find_reply(canonical, record["id"], FROM_RUNTIME)
     if message_id is None:
-        result = publish_runtime(
-            canonical,
-            "note",
-            title,
-            body,
-            [],
-            allow_no_remote=allow_no_remote,
-            in_reply_to=record["id"],
+        result = publish_message(
+            canonical, note, allow_no_remote=allow_no_remote, in_reply_to=record["id"]
         )
         message_id = message_id_of_seq(canonical, result.seq)
     _checkpoint("note_published")
     answered = delivery.moved(
-        record, "acknowledged", note=title, responsible=dict(NO_ONE), acknowledged_by=message_id
+        record,
+        "acknowledged",
+        note=note.title,
+        responsible=dict(NO_ONE),
+        acknowledged_by=message_id,
     )
     path = delivery.write_record(canonical, answered)
     commit_and_push(canonical, [path], f"inbound {record['id']}: answered by {message_id}")
-    return [Action("rejected", record["id"], body)]
+    return [Action("rejected", record["id"], note.body)]
 
 
 # --- routing rules ---
@@ -360,15 +352,14 @@ def planning_owned(canonical: Path, queue: Queue) -> bool:
 
 
 def _task_problems(canonical: Path, message: dict) -> list[str]:
-    payload = {key: message.get(key) for key in ("title", "mode", "why", "refs", "priority")}
-    problems = inbound_problems(canonical, "task", payload, message.get("author"))
+    problems = inbound_problems(canonical, message)
     if problems:
         return problems
     for uri in message["refs"]:
         try:
             resolve(canonical, uri)
-        except ResolveError as error:
-            problems.append(f"refs: {uri} does not resolve at canonical HEAD: {error}")
+        except ResolveError:  # its text names a commit; the uri says what is missing
+            problems.append(f"refs: {uri} does not point to anything in the workspace")
     return problems
 
 
@@ -464,28 +455,34 @@ def _task_spec(message: dict) -> CardSpec:
     )
 
 
-def _route_one(
+def _route_seen(
     ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
 ) -> list[Action]:
-    canonical, kind, inbound_id = ctx.canonical, record["kind"], record["id"]
-    if kind == "seen":
-        done = delivery.moved(record, "acknowledged", note="seen recorded")
-        commit_and_push(
-            canonical, [delivery.write_record(canonical, done)], f"inbound {inbound_id}: seen"
-        )
-        return [Action("acknowledged", inbound_id)]
-    if kind == "task":
-        problems = _task_problems(canonical, message)
-        if problems:
-            body = f"Inbound task {inbound_id} was not turned into a card:\n\n" + "\n".join(
-                f"- {problem}" for problem in problems
-            )
-            title = f"Task {inbound_id} rejected"
-            return _answer_with_note(canonical, record, title, body, allow_no_remote)
-        if message["mode"] == "planning" and planning_owned(canonical, queue):
-            return _route_to_backlog(canonical, record, message, "planning is owned")
-        return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
-    if kind == "steer" and message.get("urgency") == URGENT:
+    done = delivery.moved(record, "acknowledged", note="seen recorded")
+    commit_and_push(
+        ctx.canonical, [delivery.write_record(ctx.canonical, done)], f"inbound {record['id']}: seen"
+    )
+    return [Action("acknowledged", record["id"])]
+
+
+def _route_task(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    canonical, inbound_id = ctx.canonical, record["id"]
+    problems = _task_problems(canonical, message)
+    if problems:
+        note = runtime_messages.task_not_started(_text_field(message, "title"), problems)
+        return _answer_with_note(canonical, record, note, allow_no_remote)
+    if message["mode"] == "planning" and planning_owned(canonical, queue):
+        return _route_to_backlog(canonical, record, message, "planning is owned")
+    return _route_to_request(canonical, record, f"task:{inbound_id}", _task_spec(message))
+
+
+def _route_steer(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    canonical, inbound_id = ctx.canonical, record["id"]
+    if message.get("urgency") == URGENT:
         extra: list[Path] = []
         mode = "planning" if message.get("proposed_topic") else "investigation"
         if mode == "planning" and planning_owned(canonical, queue):
@@ -493,12 +490,59 @@ def _route_one(
             extra.append(_write_topic_entry(canonical, message))
         spec = _steer_spec(message, mode)
         return _route_to_request(canonical, record, f"steer:{inbound_id}", spec, extra)
-    if kind == "steer" and message.get("proposed_topic"):
+    if message.get("proposed_topic"):
         return _route_to_backlog(canonical, record, message, "proposed topic")
     return _route_to_thread_or_backlog(ctx, queue, record, message)
 
 
+def _route_reply(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    return _route_to_thread_or_backlog(ctx, queue, record, message)
+
+
+# One handler per inbound kind of the registry (``comms.kinds``); the kind registry
+# conformance test checks that the two sets are the same. Records come from messages
+# validated against the registry, so a record's kind is always here; removing a kind while
+# records of it remain would make routing raise (KeyError) until they are dealt with.
+HANDLERS = {
+    "seen": _route_seen,
+    "task": _route_task,
+    "steer": _route_steer,
+    "reply": _route_reply,
+}
+
+
+def _route_one(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    return HANDLERS[record["kind"]](ctx, queue, record, message, allow_no_remote)
+
+
 # --- receive, resolve ---
+
+
+def _reject_direct_writes(
+    canonical: Path, rejected: dict[str, list[str]], allow_no_remote: bool
+) -> list[Action]:
+    """Answer each newly rejected direct inbox write with one runtime note in reply to its
+    id, then record the rejection (``delivery.write_rejection``): the id is final. The file
+    is never committed, so it gets no delivery record. A note found already (a crash before
+    the record) is reused."""
+    actions, paths = [], []
+    for inbound_id, problems in sorted(rejected.items()):
+        message_id = find_reply(canonical, inbound_id, FROM_RUNTIME)
+        if message_id is None:
+            note = runtime_messages.inbox_write_rejected(problems)
+            result = publish_message(
+                canonical, note, allow_no_remote=allow_no_remote, in_reply_to=inbound_id
+            )
+            message_id = message_id_of_seq(canonical, result.seq)
+            actions.append(Action("write_rejected", inbound_id, note.body))
+        paths.append(delivery.write_rejection(canonical, inbound_id, problems, message_id))
+    if paths:
+        commit_and_push(canonical, paths, f"inbound: {len(paths)} direct writes rejected")
+    return actions
 
 
 def _receive(canonical: Path, inbox: dict[str, dict]) -> list[Action]:
@@ -546,9 +590,8 @@ def _closed(
     canonical = ctx.canonical
     reason = receipt.get("reason", "")
     if record["kind"] == "task" and receipt["state"] == "rejected" and PLANNING_OWNED not in reason:
-        title = f"Task {record['id']} rejected"
-        body = f"Admission rejected the card for inbound task {record['id']}: {reason}"
-        return [], _answer_with_note(canonical, record, title, body, allow_no_remote)
+        note = runtime_messages.task_not_admitted(_text_field(message, "title"), reason)
+        return [], _answer_with_note(canonical, record, note, allow_no_remote)
     note = f"request {receipt['request_id']} {receipt['state']} without acknowledging it"
     return _backlog_record(canonical, record, message, note), [
         Action("returned", record["id"], note, request_id=receipt["request_id"])
@@ -566,10 +609,12 @@ def _resolve(
             continue
         responsible = record["responsible"]
         receipt = receipts.get(responsible["request_id"]) if responsible["request_id"] else None
-        if receipt is not None and receipt["state"] in CLOSED_RECEIPT_STATES:
-            written, done = _closed(ctx, record, receipt, inbox[inbound_id], allow_no_remote)
-            paths += written
-            actions += done
+        closed = receipt is not None and receipt["state"] in CLOSED_RECEIPT_STATES
+        if closed:
+            if inbound_id in inbox:  # an unreadable entry is reported, not resolved
+                written, done = _closed(ctx, record, receipt, inbox[inbound_id], allow_no_remote)
+                paths += written
+                actions += done
             continue
         if receipt is not None:
             task_id = _current_task(receipt)
@@ -618,17 +663,31 @@ def _resolve(
     return actions
 
 
-def route_all(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> list[Action]:
+def route_all(
+    ctx: RunContext,
+    queue: Queue,
+    allow_no_remote: bool = False,
+    inbox_writers: frozenset[int] | None = None,
+    adopt: bool = True,
+) -> list[Action]:
     """Receive, route and resolve every inbound message (C11); see the module docstring.
     Takes the canonical lock: the caller must not hold it. Idempotent; safe to rerun after
-    a crash at any point. ``allow_no_remote`` is for runtime notes (tests, local runs)."""
+    a crash at any point. ``allow_no_remote`` is for runtime notes (tests, local runs);
+    ``inbox_writers`` restricts adoption to files those uids own (``comms.inbound``);
+    ``adopt=False`` skips adoption (the writer list could not be resolved)."""
     canonical = ctx.canonical
     actions: list[Action] = []
     with canonical_lock(canonical):
-        inbox = delivery.inbox(canonical)
+        if adopt:
+            adoption = adopt_direct_writes(canonical, inbox_writers)
+            actions += [Action("adopted", inbound_id) for inbound_id in adoption.adopted]
+            actions += _reject_direct_writes(canonical, adoption.rejected, allow_no_remote)
+        skipped: list[str] = []
+        inbox = delivery.inbox(canonical, skipped)
+        actions += [Action("unreadable", path) for path in skipped]
         actions += _receive(canonical, inbox)
         for inbound_id, record in delivery.records(canonical).items():
-            if record["state"] == "received":
+            if record["state"] == "received" and inbound_id in inbox:
                 actions += _route_one(ctx, queue, record, inbox[inbound_id], allow_no_remote)
         actions += _resolve(ctx, queue, inbox, allow_no_remote)
     return actions
@@ -643,7 +702,7 @@ def _briefing_entry(message: dict, record: dict, responsible_task: str | None) -
         "kind": message["kind"],
         "urgency": message.get("urgency"),
         "author": message.get("author"),
-        "body": _describe(message),
+        "body": kinds.describe(message),
         "late": record["late"],
         "responsible_task": responsible_task,
     }

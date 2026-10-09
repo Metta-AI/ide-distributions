@@ -34,7 +34,10 @@ _SELECT_TASKS = (
     "SELECT id, title, body, assignee, status, priority FROM tasks WHERE status != 'archived'"
 )
 _SELECT_TASK = "SELECT id, title, body, assignee, status, priority FROM tasks WHERE id = ?"
-_SELECT_RUNS = "SELECT id, ended_at, outcome, metadata FROM task_runs WHERE task_id = ? ORDER BY id"
+_SELECT_RUNS = (
+    "SELECT id, ended_at, outcome, metadata, summary, last_heartbeat_at FROM task_runs"
+    " WHERE task_id = ? ORDER BY id"
+)
 
 
 class KanbanError(RuntimeError):
@@ -49,6 +52,8 @@ class KanbanError(RuntimeError):
 # Substring of Hermes' fence error (kanban_db.py:147, raised from write_txn at
 # kanban_db_connect.py:~1201 and from the CLI guard at kanban.py:153).
 _DELEGATE_FENCE_MESSAGE = "cannot mutate Kanban"
+# Names a board DB read in a KanbanError when no Hermes command ran (``board_db_only``).
+_BOARD_DB_ARGV = ["board-db"]
 
 
 class KanbanQueue:
@@ -59,8 +64,13 @@ class KanbanQueue:
         hermes_bin: str = "hermes",
         run=subprocess.run,
         hermes_home: Path | None = None,
+        board_db_only: bool = False,
     ):
+        """``board_db_only``: read the board DB directly (read-only) and never run Hermes, for
+        callers inside a worker process (the plugin), where every read command would fail on
+        the delegate fence after a costly subprocess start. Mutations still go to Hermes."""
         self.board = board
+        self.board_db_only = board_db_only
         self.profile = profile
         self.hermes_bin = hermes_bin
         self._run = run
@@ -90,6 +100,8 @@ class KanbanQueue:
         ``delegate_task`` children. The refusal is the same on every call, so fall back to a
         read-only DB read only for that message; mutating commands never take this path.
         """
+        if self.board_db_only:
+            return self._read_board_db(_BOARD_DB_ARGV, _SELECT_TASKS)
         try:
             return json.loads(self._kanban("list", "--json"))
         except KanbanError as error:
@@ -99,18 +111,23 @@ class KanbanQueue:
 
     def _show_task(self, task_id: str) -> dict:
         """``kanban show --json`` as ``{"task": ..., "runs": [...]}`` (same fallback as list)."""
+        if self.board_db_only:
+            return self._show_from_board_db(_BOARD_DB_ARGV, task_id)
         try:
             return json.loads(self._kanban("show", task_id, "--json"))
         except KanbanError as error:
             if _DELEGATE_FENCE_MESSAGE not in error.stderr:
                 raise
-            tasks = self._read_board_db(error.argv, _SELECT_TASK, (task_id,))
-            if not tasks:
-                raise KanbanError(error.argv, f"no such task: {task_id}") from None
-            runs = self._read_board_db(error.argv, _SELECT_RUNS, (task_id,))
-            for run in runs:
-                run["metadata"] = self._tolerant_json_object(run["metadata"])
-            return {"task": tasks[0], "runs": runs}
+            return self._show_from_board_db(error.argv, task_id)
+
+    def _show_from_board_db(self, argv: list[str], task_id: str) -> dict:
+        tasks = self._read_board_db(argv, _SELECT_TASK, (task_id,))
+        if not tasks:
+            raise KanbanError(argv, f"no such task: {task_id}")
+        runs = self._read_board_db(argv, _SELECT_RUNS, (task_id,))
+        for run in runs:
+            run["metadata"] = self._tolerant_json_object(run["metadata"])
+        return {"task": tasks[0], "runs": runs}
 
     @staticmethod
     def _tolerant_json_object(text: str | None) -> dict | None:
@@ -180,7 +197,34 @@ class KanbanQueue:
     def _run_info(run: dict) -> RunInfo:
         # Drops are recorded as outcome "completed" by Hermes; our metadata says "dropped".
         outcome = (run.get("metadata") or {}).get("outcome") or run["outcome"]
-        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome)
+        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome, run.get("summary"))
+
+    @staticmethod
+    def _liveness(shown: dict) -> tuple[str | None, int | None]:
+        """``(current run id, its latest heartbeat)``. The current run is the open one. Its
+        heartbeat is ``task_runs.last_heartbeat_at`` on the board DB path; Hermes' show JSON
+        has no such field, so there it is the run's latest ``heartbeat`` event (Hermes
+        ``heartbeat_worker`` writes the column and the event in one transaction)."""
+        current = next((run for run in reversed(shown["runs"]) if run["ended_at"] is None), None)
+        if current is None:
+            return None, None
+        heartbeat = current.get("last_heartbeat_at")
+        if heartbeat is None:
+            beats = [
+                event["created_at"] for event in shown.get("events") or []
+                if event.get("kind") == "heartbeat" and event.get("run_id") == current["id"]
+            ]
+            heartbeat = max(beats, default=None)
+        return str(current["id"]), heartbeat
+
+    @staticmethod
+    def _blocking_run(status: str, runs: list[dict]) -> dict | None:
+        """The run a worker's block ended, if the card is blocked and that run is the latest.
+        Hermes ends it with the block reason as its summary. A card the circuit breaker parked
+        later has no ``blocked`` run after it, so an old reason is never read as current."""
+        if status == "blocked" and runs and runs[-1]["outcome"] == "blocked":
+            return runs[-1]
+        return None
 
     # -- Queue protocol --
 
@@ -225,18 +269,25 @@ class KanbanQueue:
             spec = self._parse_spec(task)
         except ValueError as error:
             raise KanbanError(["kanban", "show", task_id], str(error)) from error
+        blocking = self._blocking_run(task["status"], shown["runs"])
+        current_run_id, last_heartbeat_at = self._liveness(shown)
         return Card(
             task_id=task["id"],
             spec=spec,
             state=_STATE_BY_STATUS[task["status"]],
             assignee=task["assignee"],
             runs=[self._run_info(run) for run in shown["runs"]],
+            block_reason=blocking.get("summary") if blocking else None,
+            block_run_id=str(blocking["id"]) if blocking else None,
+            current_run_id=current_run_id,
+            last_heartbeat_at=last_heartbeat_at,
         )
 
     def list(self, state: str | None = None) -> list[Card]:
         """Cards on the board (archived hidden), with runs; foreign tasks are skipped.
 
-        Costs one ``show`` per card because the list JSON carries no runs.
+        Costs one ``show`` per card because the list JSON carries no runs. A card deleted
+        between the list and its ``show`` is skipped.
         """
         cards = []
         for task in self._list_tasks():
@@ -246,7 +297,11 @@ class KanbanQueue:
                 self._parse_spec(task)
             except ValueError:
                 continue
-            cards.append(self.get(task["id"]))
+            try:
+                cards.append(self.get(task["id"]))
+            except KanbanError as error:
+                if "no such task" not in error.stderr:
+                    raise
         return cards
 
     def reprioritize(self, task_id: str, priority: Priority, order: int = 0) -> None:

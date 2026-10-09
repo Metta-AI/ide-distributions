@@ -14,11 +14,14 @@ not found, unresolvable), 2 bad arguments or no workspace.
   ``N`` or after C's cursor; ``--advance`` then moves C's cursor to ``last_seq``. The listing
   and ``last_seq`` come from one commit snapshot (``rev`` in the data), so a publication
   that lands meanwhile is left for the next read. Data: ``{messages, last_seq, cursor, rev}``.
-- ``get <seq|M-id>``, ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
+- ``get <seq|M-id|inbound id>`` (an inbound message as committed in ``comms/inbox/``),
+  ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
   data: ``{id, published, seq, published_rev, seen_by}`` plus, for a published message, the
   derived ``state`` (open | answered | withdrawn | expired) and ``late``.
-- ``inbound KIND (--json J | --file F) --author A``: an external agent submits a
-  ``reply``, ``steer``, ``task`` or ``seen`` (``comms.inbound``).
+- ``inbound KIND (--json J | --file F) --author A``: an external agent submits an inbound
+  message of one of the registry's inbound kinds (``comms.kinds``; ``comms.inbound``).
+  Refused (exit 2) in a card worker (``WORKER_ENV_MARKERS``); the plugin blocks it in every
+  agent session too.
 
 Every command except ``stage`` works on the canonical workspace (``--root`` overrides it).
 """
@@ -26,11 +29,12 @@ Every command except ``stage`` works on the canonical workspace (``--root`` over
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
 
 from autoresearch import runctx
 from autoresearch.cli import register_group
-from autoresearch.comms import reader
+from autoresearch.comms import delivery, kinds, reader
 from autoresearch.comms.envelope import PRIORITIES, MessageProblems
 from autoresearch.comms.inbound import (
     INBOUND_KINDS,
@@ -128,8 +132,14 @@ def _list(args) -> int:
 
 
 def _get(args) -> int:
-    key = int(args.key) if args.key.isdigit() else args.key
-    return _ok(reader.get(_canonical(args), key))
+    canonical = _canonical(args)
+    if args.key.isdigit() or args.key.startswith("M-"):
+        key = int(args.key) if args.key.isdigit() else args.key
+        return _ok(reader.get(canonical, key))
+    message = delivery.inbox(canonical).get(args.key)
+    if message is None:
+        raise LookupError(f"no published or inbound message {args.key!r}")
+    return _ok(message)
 
 
 def _status(args) -> int:
@@ -157,7 +167,17 @@ def _resolve(args) -> int:
     return _ok(data)
 
 
+# Set in every Kanban worker and its subprocesses (Hermes strips HERMES_KANBAN_TASK from
+# subprocesses, but these survive; hermes-facts "delegate_task and Kanban").
+WORKER_ENV_MARKERS = (runctx.ENV_WORKER, runctx.ENV_CARD_ID, "HERMES_DELEGATED_CHILD_CONTEXT")
+
+
 def _inbound(args) -> int:
+    if any(os.environ.get(name) for name in WORKER_ENV_MARKERS):
+        raise BadArguments(
+            "comms inbound is for external agents; a card worker cannot submit inbound "
+            "messages (C11). Stage an outbound message with comms stage."
+        )
     text = _read_file(args.file) if args.file is not None else args.json
     payload = _json_object(text, "--json")
     inbound_id = submit_inbound(_canonical(args), args.kind, payload, author=args.author)
@@ -215,8 +235,8 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--advance", action="store_true", help="move the cursor to last_seq")
     sub.add_argument("--all-kinds", action="store_true", help="include unknown kinds")
 
-    sub = command("get", _get, "one published message by seq or M-id")
-    sub.add_argument("key", metavar="SEQ|M-ID")
+    sub = command("get", _get, "one published message (seq or M-id) or inbound message (its id)")
+    sub.add_argument("key", metavar="SEQ|M-ID|INBOUND-ID")
 
     sub = command("status", _status, "publication, seen and derived status of a message")
     sub.add_argument("message_id", metavar="M-ID")
@@ -226,8 +246,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--rev", help="workspace commit (default: HEAD)")
     sub.add_argument("--game", help="game under games/ whose reference types to add")
 
-    sub = command("inbound", _inbound, "submit an inbound reply, steer, task or seen")
-    sub.add_argument("kind", choices=INBOUND_KINDS)
+    sub = command(
+        "inbound", _inbound, "submit an inbound message (" + ", ".join(INBOUND_KINDS) + ")"
+    )
+    kind_help = "; ".join(f"{name}: {kinds.get('inbound', name).summary}" for name in INBOUND_KINDS)
+    sub.add_argument("kind", choices=INBOUND_KINDS, help=kind_help)
     payload = sub.add_mutually_exclusive_group(required=True)
     payload.add_argument("--json", help="the message fields as a JSON object")
     payload.add_argument("--file", help="path to the message fields as a JSON object")

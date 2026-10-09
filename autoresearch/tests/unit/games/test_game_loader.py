@@ -95,6 +95,18 @@ def test_fake_build_deterministic(tmp_path):
     assert third["data"]["artifact_hash"] != first["data"]["artifact_hash"]
 
 
+def test_fake_build_takes_a_candidate_directory_and_reads_parameters(tmp_path):
+    candidate = tmp_path / "strategy" / "candidates" / "E-1"
+    candidate.mkdir(parents=True)
+    (candidate / "STRATEGY.md").write_text("# Strategy\n\n- aggression: 3\n- patience: 7.5\n")
+    by_dir = _run("fake_build.py", str(candidate), "--out", str(tmp_path / "b1"))
+    by_file = _run("fake_build.py", str(candidate / "STRATEGY.md"), "--out", str(tmp_path / "b2"))
+    assert by_dir["data"]["parameters"] == {"aggression": 3, "patience": 7.5}
+    assert by_dir["data"]["artifact_hash"] == by_file["data"]["artifact_hash"]
+    policy = json.loads((tmp_path / "b1" / "policy.json").read_text())
+    assert policy["parameters"] == {"aggression": 3, "patience": 7.5}
+
+
 def test_fake_eval_deterministic_per_seed():
     a = _run("fake_eval.py", "--policy", "pol-a", "--seed", "1")
     assert a == _run("fake_eval.py", "--policy", "pol-a", "--seed", "1")

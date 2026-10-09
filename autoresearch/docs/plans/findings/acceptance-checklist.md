@@ -7,8 +7,8 @@ Rule for this file: every item that nobody has checked is marked **UNVERIFIED**.
 Related documents:
 
 - Operations guide (install, `.env`, host config, cron jobs, restore, update): [README.md](../../../README.md). This file links to it and does not repeat it.
-- Contracts and amendments A1-A13: [00-overview.md](../2026-10-07-autoresearch-v0/00-overview.md).
-- Findings: [hermes-facts.md](hermes-facts.md), [softmax-client.md](softmax-client.md), [player-xp-probe.md](player-xp-probe.md), [protocol-slice.md](protocol-slice.md), [compiler-task-2.4-m1.md](compiler-task-2.4-m1.md), [gota-task25-bindings.md](gota-task25-bindings.md), [gota-live-engine.md](gota-live-engine.md).
+- Contracts and amendments A1-A14: [00-overview.md](../2026-10-07-autoresearch-v0/00-overview.md).
+- Findings: [hermes-facts.md](hermes-facts.md), [softmax-client.md](softmax-client.md), [player-xp-probe.md](player-xp-probe.md), [protocol-slice.md](protocol-slice.md), [compiler-task-2.4-m1.md](compiler-task-2.4-m1.md), [gota-task25-bindings.md](gota-task25-bindings.md), [gota-live-engine.md](gota-live-engine.md), [fake-cycle.md](fake-cycle.md).
 
 ## 1. Friday leaderboard measurement
 
@@ -47,7 +47,7 @@ Primary command (read-only, uses the player credential):
 ```
 
 - `standings` prints `{"ok": true, "data": {"league_id", "rows"}}`. Each row has `division_id`, `division_name`, `level`, `rank`, `player_id`, `player_name`, `score`, `rounds_played`. The code reads `coworld results <league>` (divisions) and then `coworld results <division>` (entries). Source: `src/autoresearch/softmax_tool/client.py`, method `standings`.
-- `leaderboard` prints our champion policy version (`leaderboard_champion`) and the ledger champion (`current_champion`, `note`). Use it to record which policy version is measured.
+- `leaderboard` prints our champion policy version (`leaderboard_champion`), the ledger champion (`current_champion`, `note`; before any league entry it is the bootstrap baseline, A14) and the bootstrap `baseline`. Use it to record which policy version is measured; a baseline that was never submitted is not on the leaderboard.
 
 Read-only alternative without the autoresearch CLI (project-pinned coworld 0.1.58, not the global one):
 
@@ -252,6 +252,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | KB maintenance, code-citation renewal | `tests/unit/kb` (pytest) |
 | Statistics, noise, calibration, decision rule | `tests/unit/stats` (pytest) |
 | Softmax tool against the fake | `tests/unit/softmax`, `tests/fixtures/softmax` (pytest) |
+| First-baseline bootstrap on a fresh install (A14): `softmax upload-baseline`, then design, upload and XP launch against it | `tests/unit/softmax/test_upload_baseline.py` (pytest, fake platform and fakegame) |
 | Softmax tool against the live platform, as a Player | `findings/player-xp-probe.md` (create, get, list, episodes, download as Games Bond: PASS) and `findings/softmax-client.md` (read-only probes: PASS; league episodes readable by a Player) |
 | Skills and doctrine consistency | `tests/unit/test_skills.py`, `tests/unit/test_doctrine.py` (pytest) |
 | Models glm-5.3, glm-5.3-flash tool calling in Hermes | `hermes-facts.md` item 11 |
@@ -263,13 +264,14 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Protocol slice on the real Kanban dispatcher with recovery tests | Plan 01 Task 5.1 | **PASS: GO** (2026-10-08, [protocol-slice.md](protocol-slice.md)). |
 | Serial fallback queue | Plan 01 Task 5.2 | **NOT SHIPPED.** Built only if 5.1 fails. |
 | kimi-k3 tool calling inside Hermes | A5 | **PASS** (2026-10-08, hermes-facts item 11). |
-| Full research cycle on the fake game, real cheap model, 90 minutes, with `credits=0` injection | Plan 03 Task 6.0 (`tests/integration/test_fake_cycle.py`) | **NOT RUN.** The file does not exist at this commit. Cost and time go to `findings/fake-cycle.md`. |
+| Full research cycle on the fake game, real cheap model, 90 minutes, with `credits=0` injection | Plan 03 Task 6.0 (`tests/integration/test_fake_cycle.py`) | **PASS** (2026-10-08, glm-5.3; runs 1 and 3 passed, about 30 min each; [fake-cycle.md](fake-cycle.md)). The operator steer named the lever (patience) and waived the replay gate; the D-05 first-replay question stays open for Task 6.1. |
 | Real research cycle on GotA (calibration, planning, investigation, experiment, XP, review, promotion) | Plan 03 Task 6.1 | **NOT RUN.** `games/gota` and its build binding exist now; see 2.8, risks 5 and 7. Record in `findings/first-real-cycle.md`. |
 | Compiler M1 baseline (semantic to policy, with goal tracing) | Plan 02 | **PASS locally** (2026-10-08, [compiler-task-2.4-m1.md](compiler-task-2.4-m1.md)) on Coworld 2026.10.7.2. **UNVERIFIED** on the current live engine. |
 | Upload and submit as a Player | Plan 03 Task 3.x | Documented as working in the coworld-player-swap skill; the submit path was **not re-tested live** (`player-xp-probe.md`). **UNVERIFIED.** |
 | Gateway cron jobs (`queue-keeper`, `xp-poll`, `health`) running for hours on a host | README | **UNVERIFIED.** Only short runs under test. |
 | Token refresh in practice (2.4) | - | **UNVERIFIED.** No owner. |
 | Restore on a second machine from a real remote | README | **UNVERIFIED.** |
+| First baseline on the live platform (`softmax upload-baseline` of the game's baseline build, A14; James's sign-off on A14 pending) | A14 | **NOT RUN.** Only the fake path is tested. |
 | Friday leaderboard measurement (section 1) | - | **NOT RUN.** Needs a real submission in the league first. |
 
 ### 3.3 Go and no-go before handing over

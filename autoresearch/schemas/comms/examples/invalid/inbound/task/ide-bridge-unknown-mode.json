@@ -1,0 +1,13 @@
+{
+  "_why": "mode: must be one of",
+  "id": "ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1:task:tsk_42",
+  "created": "2026-10-08T20:00:00Z",
+  "author": "coach:ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1",
+  "on_behalf_of": "human",
+  "kind": "task",
+  "title": "Profile macromackie's opening",
+  "mode": "strategy",
+  "why": "They lead the division.\n\nDone when: an opponent model exists.",
+  "refs": [],
+  "priority": "P2"
+}

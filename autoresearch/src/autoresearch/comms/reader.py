@@ -16,9 +16,9 @@ Per-consumer ``seen`` records are durable: ``.supervisor/ledger/seen/<consumer>.
 """
 
 import json
-import re
 from pathlib import Path
 
+from autoresearch.comms import kinds
 from autoresearch.comms.envelope import KINDS
 from autoresearch.comms.publisher import OUTBOX_DIR, OUTBOX_NAME, RECEIPTS_DIR
 from autoresearch.io import gitops
@@ -26,12 +26,16 @@ from autoresearch.io.docs import read_json, write_json
 
 CURSORS_DIR = ".supervisor/runtime/cursors"
 SEEN_DIR = ".supervisor/ledger/seen"
-CONSUMER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def check_consumer(consumer: str) -> str:
-    if not CONSUMER_NAME.fullmatch(consumer) or ".." in consumer:
-        raise ValueError(f"invalid consumer name {consumer!r}: use letters, digits, '.', '_', '-'")
+    """``consumer`` if it is a consumer name: the inbound envelope's ``author`` rule
+    (``kinds.is_consumer_name``). ':' is allowed for external authors such as the IDE
+    bridge's "coach:<player id>"."""
+    if not kinds.is_consumer_name(consumer):
+        raise ValueError(
+            f"invalid consumer name {consumer!r}: use letters, digits, '.', '_', '-', ':'"
+        )
     return consumer
 
 

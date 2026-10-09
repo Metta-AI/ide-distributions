@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 """Fake build, local check and upload. Stdlib only. Always prints {"ok", "data"|"error"}.
 
-  fake_build.py <candidate-dir> --out <build-dir> --json   build: hash STRATEGY.md
-  fake_build.py --check <candidate-dir> --json             STRATEGY.md exists and has content
-  fake_build.py --upload <build-dir> --json                fake policy_version_id (no network)
+  fake_build.py <candidate> --out <build-dir> --json   build: hash STRATEGY.md, read parameters
+  fake_build.py --check <candidate> --json             STRATEGY.md exists and has content
+  fake_build.py --upload <build-dir> --json            fake policy_version_id (no network)
+
+``<candidate>`` is a STRATEGY.md file, a directory that holds STRATEGY.md (for example
+``strategy/candidates/<E-id>/``), or a directory that holds ``strategy/STRATEGY.md``.
+
+The policy artifact ``policy.json`` is ``{"policy": <sha256 of STRATEGY.md>, "parameters":
+{name: number}}``. The parameters are the ``- <name>: <number>`` list items of STRATEGY.md;
+the fake platform plays a policy by them (see the GAME.md body, "Mechanics").
 """
 
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
+
+PARAMETER = re.compile(r"^\s*[-*]\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
 class ToolError(Exception):
@@ -18,16 +28,32 @@ class ToolError(Exception):
 
 
 def _strategy_path(candidate: Path) -> Path:
-    strategy = candidate / "strategy" / "STRATEGY.md"
-    if not strategy.is_file():
-        raise ToolError(f"{strategy} not found")
-    return strategy
+    for strategy in (candidate, candidate / "STRATEGY.md", candidate / "strategy" / "STRATEGY.md"):
+        if strategy.is_file():
+            return strategy
+    raise ToolError(
+        f"no STRATEGY.md at {candidate} (give the file, its directory, or a directory with "
+        f"strategy/STRATEGY.md)"
+    )
+
+
+def parameters(text: str) -> dict[str, float]:
+    """The ``- <name>: <number>`` list items of a STRATEGY.md (integers stay integers)."""
+    found: dict[str, float] = {}
+    for line in text.splitlines():
+        match = PARAMETER.match(line)
+        if match:
+            number = float(match.group(2))
+            found[match.group(1)] = int(number) if number.is_integer() else number
+    return found
 
 
 def build(candidate: Path, out: Path) -> dict:
-    artifact_hash = hashlib.sha256(_strategy_path(candidate).read_bytes()).hexdigest()
+    strategy = _strategy_path(candidate)
+    artifact_hash = hashlib.sha256(strategy.read_bytes()).hexdigest()
+    policy = {"policy": artifact_hash, "parameters": parameters(strategy.read_text("utf-8"))}
     out.mkdir(parents=True, exist_ok=True)
-    (out / "policy.json").write_text(json.dumps({"policy": artifact_hash}, sort_keys=True) + "\n")
+    (out / "policy.json").write_text(json.dumps(policy, sort_keys=True) + "\n")
     # The version.json contract read by `softmax upload` (softmax_tool/upload.py).
     version = {
         "artifact_hash": artifact_hash,
@@ -36,7 +62,7 @@ def build(candidate: Path, out: Path) -> dict:
         "gates": {"local_check": {"passed": True}},
     }
     (out / "version.json").write_text(json.dumps(version, indent=2, sort_keys=True) + "\n")
-    return version
+    return {**version, "parameters": policy["parameters"]}
 
 
 def check(candidate: Path) -> dict:

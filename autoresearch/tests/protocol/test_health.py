@@ -6,8 +6,10 @@ import datetime
 import pytest
 from support.keeper_host import Host, Usage
 
+from autoresearch.comms.publisher import publish_runtime
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runtime import health
+from autoresearch.runtime.ledger import canonical_lock
 
 T0 = datetime.datetime.now(datetime.UTC)
 GB = 1024**3
@@ -33,13 +35,20 @@ def _check(host: Host, now: datetime.datetime, free: int = 100 * GB) -> health.H
 
 
 def _help(host: Host, text: str) -> list[dict]:
-    return [m for m in host.outbox() if m["kind"] == "help_request" and text in m["title"]]
+    """Help requests whose title contains ``text`` or whose ``about`` names it."""
+    return [
+        m
+        for m in host.outbox()
+        if m["kind"] == "help_request" and (text in m["title"] or text in m.get("about", {}).values())
+    ]
 
 
-def _block(host: Host, task_id: str) -> None:
+def _block(host: Host, task_id: str, reason: str | None = None, run: str = "r-1") -> None:
     path = host.queue.directory / "cards" / f"{task_id}.json"
     record = read_json(path)
     record["state"] = "blocked"
+    record["block_reason"] = reason
+    record["block_run_id"] = run
     write_json(path, record)
 
 
@@ -72,6 +81,71 @@ def test_blocked_card_is_requeued_once_then_repaired_with_one_help_request(host)
     assert _check(host, at(4)).blocked == []  # nothing more for this card
     assert len(_help(host, card.task_id)) == 1
     assert host.remote_head() == host.head() and host.clean()
+
+
+def test_tool_fault_block_is_not_requeued_or_repaired_and_asks_for_help_once(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "tool-fault: softmax build raised FileNotFoundError")
+
+    [action] = _check(host, at(2)).blocked
+    assert action.action == "tool-fault" and action.repair_request is None
+    assert host.queue.get(card.task_id).state == "blocked"  # stays for a human
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+    [help_request] = _help(host, card.task_id)
+    assert help_request["expects_response"] and help_request["priority"] == "P1"
+    assert "tool-fault: softmax build raised FileNotFoundError" in help_request["body"]
+
+    assert _check(host, at(3)).blocked == []  # idempotent
+    assert len(_help(host, card.task_id)) == 1
+    assert host.remote_head() == host.head() and host.clean()
+
+
+def test_a_tool_fault_in_a_later_run_is_reported_again(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "tool-fault: first", run="r-1")
+    _check(host, at(2))
+    _block(host, card.task_id, "tool-fault: second", run="r-2")
+    second = _check(host, at(3))
+    [action] = second.blocked
+    assert action.action == "tool-fault"
+    assert len(_help(host, card.task_id)) == 2
+
+
+def test_tool_fault_after_a_requeue_is_reported_without_repair(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id)
+    assert [a.action for a in _check(host, at(2)).blocked] == ["requeued"]
+    _block(host, card.task_id, "tool-fault: x", run="r-2")
+    assert [a.action for a in _check(host, at(3)).blocked] == ["tool-fault"]
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+
+
+def test_ordinary_block_after_a_tool_fault_is_requeued(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "tool-fault: x")
+    _check(host, at(2))
+    _block(host, card.task_id, None, run="r-2")  # e.g. the breaker, after a human unblock
+    assert [a.action for a in _check(host, at(3)).blocked] == ["requeued"]
+
+
+def test_other_block_reasons_are_requeued_as_before(host):
+    [card] = host.queue.list("pending")
+    _block(host, card.task_id, "circuit breaker open")
+    assert [a.action for a in _check(host, at(2)).blocked] == ["requeued"]
+
+
+def test_a_help_request_published_before_runtime_key_existed_still_counts(host):
+    """Upgrade: today's disk problem published under the old title is not repeated."""
+    day = f"{at(2).astimezone(datetime.UTC):%Y-%m-%d}"
+    with canonical_lock(host.canonical):
+        publish_runtime(
+            host.canonical, "help_request", f"Health: disk problem ({day})", "Old.", [],
+            allow_no_remote=True,
+        )  # fmt: skip
+
+    _check(host, at(2), free=GB // 4)
+
+    assert [m["title"] for m in host.outbox()] == [f"Health: disk problem ({day})"]
 
 
 def test_low_disk_raises_one_help_request_a_day(host):

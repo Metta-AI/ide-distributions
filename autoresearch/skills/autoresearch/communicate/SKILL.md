@@ -23,7 +23,7 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
 | `note` | A decision or status change worth a human knowing. Send these sparingly. Also every acknowledgement. |
 | `question` | A choice where human judgement adds value. Give the options and your recommendation, and say whether work is parked. |
 | `suggestion` | Something a human can do, for example look at a replay. Also each doctrine proposal. |
-| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. |
+| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. For a tool fault (D-26), name the command and the error text. |
 | `highlight` | One message per event: a supported or falsified hypothesis, a newly verified claim, a promotion, or a surprising result. |
 
 ## Procedure
@@ -39,7 +39,7 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
    `--thread <thread>`, `--in-reply-to <id>`, `--supersedes <M-id>`, `--expires <ISO time>`.
    A `--ref` can also be a JSON object `{"uri": "ar://…", "role": "subject|evidence|context", "note": "…"}`.
 4. Acknowledge each `reply` and `steer` this card is responsible for (D-02):
-   `"$AUTORESEARCH_CLI" comms stage note --title "Applied: <subject>" --body-file .scratch/ack.md --in-reply-to <I-id> --ref <ar://ref>`
+   `"$AUTORESEARCH_CLI" comms stage note --title "Applied: <subject>" --body-file .scratch/ack.md --in-reply-to <inbound id> --ref <ar://ref>`
    The outcome is applied, declined with a reason, or noted. Card finish fails while a
    responsible `reply` or `steer` has no acknowledgement. Do not acknowledge a `task` (the
    runtime does it when the card publishes) or a `seen`.
@@ -48,6 +48,8 @@ Doctrine upheld: D-02, D-18, D-19, D-20.
 6. To see the state of an earlier message, for example whether a question has an answer:
    `"$AUTORESEARCH_CLI" comms status <M-id>`
    `"$AUTORESEARCH_CLI" comms get <M-id>`
+   `comms get <inbound id>` prints an inbound message; your briefing already shows the ones
+   delivered to this card.
 
 ## Proposals
 

@@ -27,6 +27,7 @@ class RunInfo:
     run_id: str
     terminal: bool
     outcome: str | None
+    summary: str | None = None  # what the run ended with (kanban_complete summary, block reason)
 
 
 @dataclass
@@ -36,6 +37,16 @@ class Card:
     state: CardState
     assignee: str | None
     runs: list[RunInfo] = field(default_factory=list)
+    # Set only while the card is blocked by a worker (Kanban ``block``): the reason, and the id
+    # of the run the block ended. None for other parks, such as the circuit breaker.
+    block_reason: str | None = None
+    block_run_id: str | None = None
+    # Liveness, for workers checking their running peers: the run in flight (None when no run
+    # is open) and the latest heartbeat of that run, in epoch seconds (None before the first
+    # one; Hermes writes one at most every 60 s while the worker is active). FileQueue has no
+    # heartbeats.
+    current_run_id: str | None = None
+    last_heartbeat_at: int | None = None
 
 
 def kanban_priority(priority: Priority, order: int = 0) -> int:

@@ -22,7 +22,7 @@ fires and ends when it stops). The committed marker
 ``signals.json`` is lost (host rebuilt), a still-firing signal continues its latest
 escalated episode from that marker instead of escalating again. A signal that clears and
 returns is a new episode and can escalate again. A crash between publication and the marker
-commit is caught by looking for the key and episode in the outbox titles first. Identity mismatch is not escalated: it is a hard stop
+commit is caught by looking for the key and episode in the outbox (``runtime_key``) first. Identity mismatch is not escalated: it is a hard stop
 that preflight already answers with a pause and a help request (C6).
 
 Signals and their data sources:
@@ -34,8 +34,15 @@ Signals and their data sources:
   the signal fires and the agent answers it (explain, or change course).
 - ``plateau``: M experiments reviewed since the last published promotion, or D days since
   it (since the canonical root commit when nothing was ever promoted).
-- ``repeated_tool_error``: the same tool and error type 3 times within
-  ``tool_error_window`` in ``runtime/tool_events.jsonl`` (the plugin's post_tool_call log).
+- ``repeated_tool_error``: the same command and error signature (System Design §8) failed in
+  3 card runs (iterations) within ``tool_error_window``, from ``runtime/tool_events.jsonl``
+  (the plugin's post_tool_call log). The command is ``cmd_signature`` (setup such as
+  ``cd ... &&`` skipped); the error signature is ``error_signature`` (terminal: ``exit <code>``
+  plus ``timeout`` or the autoresearch CLI's ``reason``; other tools: the masked first line of
+  the error), else the error type. Retries inside one run count once: Hermes's own loop guard
+  answers those. Not errors: exit 1 of the program the exit code came from (the last command
+  of the line) when its 1 means "no match" or "false" (``grep``, ``test``, ``diff``, ...),
+  and an autoresearch CLI envelope with ``problems`` (validation feedback the card fixes).
 - ``long_iterations``: the last 3 journals (by ``started``) each ran over 45 minutes.
 - ``stale_plan``: ``plan.md`` unchanged for 6 iterations while no experiment was reviewed
   and no promotion published.
@@ -71,7 +78,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -101,6 +109,8 @@ NOT_ESCALATED = frozenset({ESCALATION, IDENTITY_MISMATCH})
 STATE_FILE = "signals.json"
 TOOL_EVENTS_FILE = "tool_events.jsonl"  # written by plugin.adapters.post_tool_call
 OK_TOOL_STATUSES = frozenset({None, "", "ok", "success", "completed"})
+# Exit status 1 of these programs is an answer (no match, false, files differ), not a failure.
+EXIT_1_ANSWERS = frozenset({"grep", "egrep", "fgrep", "rg", "test", "[", "diff", "cmp"})
 OPEN_EXPERIMENT_STATES = frozenset({"designed", "built", "uploaded", "evaluating"})
 SAMPLE_EVERY = datetime.timedelta(hours=1)
 
@@ -250,10 +260,11 @@ def _thrash(inputs: _Inputs) -> list[_Raw]:
     for experiment in inputs.experiments:
         lever = experiment.get("lever")
         if experiment.get("status") in OPEN_EXPERIMENT_STATES and lever in refuted:
+            # No ids in the text: the experiment is the signal's entity (a ref when it
+            # escalates), and the refuted claim is the one on this lever.
             detail = (
-                f"experiment {experiment['id']} acts on lever {lever}, which refuted mechanism "
-                f"claim {refuted[lever]} covers; it needs new evidence that meets the claim's "
-                f"revise_if"
+                f"an open experiment acts on lever {lever}, which a refuted mechanism claim "
+                f"covers; it needs new evidence that meets the claim's revise_if"
             )
             found.append(_Raw(THRASH, experiment["id"], detail))
     return found
@@ -294,21 +305,39 @@ def _tool_events(inputs: _Inputs) -> list[dict]:
     return events
 
 
+def _tool_error(event: dict) -> str | None:
+    """The error signature of a failed tool event, or None when it is not a failure."""
+    error = event.get("error_type") or (
+        None if event.get("status") in OK_TOOL_STATUSES else event.get("status")
+    )
+    if not error:
+        return None
+    signature = event.get("error_signature")
+    if isinstance(signature, str) and signature.endswith(" problems"):
+        return None  # validation feedback: the card reads the problems and fixes them
+    program = event.get("exit_program")
+    if "exit_program" not in event:  # events written before exit_program was recorded
+        program = str(event.get("cmd_signature") or "").removeprefix("terminal: ").split(" ")[0]
+    if event.get("exit_code") == 1 and program in EXIT_1_ANSWERS:
+        return None
+    return signature or error
+
+
 def _repeated_tool_error(inputs: _Inputs) -> list[_Raw]:
     cutoff = (inputs.now - inputs.cfg.tool_error_window).timestamp()
-    counts: Counter = Counter()
+    runs: dict[str, set] = {}
     for event in _tool_events(inputs):
         if not isinstance(event.get("ts"), int | float) or event["ts"] < cutoff:
             continue
-        error = event.get("error_type") or (
-            None if event.get("status") in OK_TOOL_STATUSES else event.get("status")
-        )
+        error = _tool_error(event)
         if error:
-            counts[f"{event.get('tool')}:{error}"] += 1
+            command = event.get("cmd_signature") or event.get("tool")
+            key = f"{command} [{error}]"
+            runs.setdefault(key, set()).add((event.get("task"), event.get("run")))
     return [
-        _Raw(REPEATED_TOOL_ERROR, key, f"{key} failed {count} times recently")
-        for key, count in sorted(counts.items())
-        if count >= inputs.cfg.tool_error_repeats
+        _Raw(REPEATED_TOOL_ERROR, key, f"{key} failed in {len(found)} card runs recently")
+        for key, found in sorted(runs.items())
+        if len(found) >= inputs.cfg.tool_error_repeats
     ]
 
 
@@ -387,7 +416,7 @@ def _stale_card(inputs: _Inputs) -> list[_Raw]:
         at = admitted.get(card.task_id)
         if at is not None and inputs.now - at > limit:
             days = (inputs.now - at).days
-            detail = f"card {card.task_id} ({card.spec.title}) has been pending {days} days"
+            detail = f"the card “{card.spec.title}” has been pending {days} days"
             found.append(_Raw(STALE_CARD, card.task_id, detail))
     return found
 
@@ -493,19 +522,14 @@ def _escalate(ctx: RunContext, signal: Signal, first_iteration: int, allow_no_re
     (once per episode). Takes the canonical lock."""
     canonical = ctx.canonical
     marker = escalation_marker_path(canonical, signal.key, signal.first_seen)
-    # The stable part of the title (key and episode), for the outbox check.
-    prefix = f"Signal {signal.key} (since {signal.first_seen}) persists"
-    title = f"{prefix} after {signal.count - 1} iterations"
+    message = runtime_messages.signal_persists(
+        signal.code, signal.entity, signal.detail, signal.first_seen, signal.count - 1
+    )
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not outbox_has_title(canonical, prefix):
-            body = (
-                f"The self-monitoring signal {signal.key} first fired at {signal.first_seen} and "
-                f"still fires {signal.count - 1} iterations later, after the agent's response. "
-                f"Detail: {signal.detail}. Please look at the research state and steer."
-            )
-            publish_runtime(canonical, "help_request", title, body, [], allow_no_remote)
+        if not already_published(canonical, message):  # its key names the episode
+            publish_message(canonical, message, allow_no_remote)
         record = {
             "key": signal.key,
             "first_seen": signal.first_seen,

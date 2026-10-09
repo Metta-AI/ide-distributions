@@ -56,3 +56,12 @@ Notes:
 - Seat order is `participants[].position`, which lines up with the 10-element arrays in `episode-results`.
 
 **Verdict: PASS.** A Player-only credential can list rounds, list episodes per round, and read per-episode detail, results.json (seed, scores, outcome, total_xp) and per-seat policy ids and labels for league episodes. The `league_episodes` path in `client.py` is viable as a Player.
+
+## League episode read latency (EC2 box, 2026-10-08)
+
+Measured from the box's Hermes session log (read-only; no platform calls made for this note):
+
+- `--limit 20` ran 41 s and then failed on the first evaluate (the old missing `--seat` bug). The client then fetched every episode before evaluating any, so about 2 s per episode is the fetch alone: two coworld processes per episode (`episodes <ereq>`, `episode-results <ereq>`), mostly CLI start-up plus one HTTP call each.
+- `--limit 200` hit the 300 s terminal timeout; `--limit 500` ran over 10 minutes with no output. A background `--limit 200` later finished (200 episodes, 2000 seat rows).
+
+Change (this branch): the client yields episodes in listing order while 4 threads (`LEAGUE_FETCH_WORKERS`) fetch details ahead (window 2 x 4), and the CLI evaluates each as it arrives, prints progress to stderr every 10 episodes, and writes `--out` once at the end. The estimate for 200 episodes is about 100 s of fetching (2 s x 200 / 4), overlapped with evaluation. That is a design estimate from the fixture-timed tests and the numbers above, not a live measurement; confirm it on the next box run. Concurrency is safe on our side because `PlatformCli.run` rewrites the same credential with an atomic, uniquely named temp file. Not verified: whether the coworld CLI itself writes files under the shared `HOME` (a token or cache refresh) while 4 copies run. Each episode fetch is retried once, so one transient failure does not discard the read; after a hard error the read still waits for the in-flight fetches (at most 4) to end. The calibrate-noise skill keeps `--limit 200` (400 at most) with a 600 s foreground timeout.

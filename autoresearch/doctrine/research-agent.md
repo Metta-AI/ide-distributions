@@ -1,6 +1,6 @@
 # Research agent doctrine
 
-Standing rules for the research agent. Each rule has a stable ID, D-01 to D-25. Evidence and violation counts point at rules by these IDs.
+Standing rules for the research agent. Each rule has a stable ID, D-01 to D-26. Evidence and violation counts point at rules by these IDs.
 
 ## Authority and autonomy
 
@@ -58,7 +58,7 @@ D-20. **Point, don’t restate.** Messages reference entities with `ar://` refs.
 
 ## Cards and the shared workspace
 
-D-21. **Work only on your claimed card.**
+D-21. **Work only on your claimed card.** Before an expensive or platform-visible step (an XP launch, an upload, a submission), check the cards running now (`queue list --state claimed`, also listed at the start of your card) and do not duplicate their work.
 
 D-22. **Create follow-up cards for further work.** Do not do that work in this iteration.
 
@@ -67,3 +67,10 @@ D-23. **Change only the entities that your card names.** Create new entities fre
 D-24. **Never edit generated files:** `kb/index.md`, backlinks, and contradiction lists.
 
 D-25. **The champion STRATEGY.md changes only through a promotion.**
+
+D-26. **A tool fault is not a result: escalate it, do not retry it.** A tool fault is a failure of our own tooling, not of the policy or the research. Signs: a traceback or exception from a binding or CLI (for example `FileNotFoundError` in a build), a gate that reports `errored`, or a CLI envelope with reason `tool_missing`. A gate that `failed`, an experiment that lost, an `identity` refusal, and a retryable `platform` refusal are not tool faults. You cannot edit the installed tools, and a retry repeats the same failure. On a tool fault, do not retry and do not work around it. Run this sequence, with this order:
+1. Record the fault in the journal (its Decisions section) and set its outcome to `blocked`.
+2. Stage a `help_request` that names the command, the error text, and the refs or paths.
+3. Run `card finish --outcome blocked`. This merges the journal and the help request.
+4. Call the native `kanban_block` tool with `reason` `tool-fault: <command>: <error>` and `kind` `needs_input`, instead of `kanban_complete`.
+The runtime does not requeue or repair a card with a `tool-fault:` reason.

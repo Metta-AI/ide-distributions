@@ -24,6 +24,10 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
   null live, and ``game_config.seed`` is a config value, not the episode's seed.
 - Game version: the detail's ``coworld_version``; only when it is missing,
   ``coworld show <coworld_id> --json`` ``version`` (cached per Coworld).
+- Throughput: episode details are fetched by ``LEAGUE_FETCH_WORKERS`` threads ahead of the
+  consumer (each thread runs the CLI as a subprocess; ``PlatformCli.run`` rewrites the same
+  credential atomically, so concurrent calls are safe). Serially, 200 episodes took over 5
+  minutes on the box (about 2 s each); with 4 workers the fetch is about 4 times faster.
 - ``standings``: ``coworld results <league_id> --json`` (the division ladder:
   ``[{id, name, level, member_count}]``) → ``coworld results <div_id> --json`` per division
   (``LeaderboardEntryPublic``: ``rank``, ``player_id``, ``player_name``, ``score``,
@@ -33,7 +37,9 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
 import json
 import re
 import subprocess
-from collections.abc import Callable, Mapping
+from collections import deque
+from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -46,6 +52,7 @@ UPLOAD_TIMEOUT_S = 600
 _FULL_SHA = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])")
 ROUND_PAGE_LIMIT = 200  # coworld rounds --limit max
 EPISODE_PAGE_LIMIT = 100  # coworld episodes --limit max
+LEAGUE_FETCH_WORKERS = 4  # concurrent episode fetches (each one runs two coworld processes)
 
 
 class CreditsUnavailable(SoftmaxCliError):
@@ -181,9 +188,35 @@ class SoftmaxClient:
 
     # --- league reads (read-only) ----------------------------------------
 
-    def league_episodes(self, league_id: str, limit: int) -> list[dict]:
-        episodes: list[dict] = []
-        versions: dict[str, str] = {}
+    def league_episodes(self, league_id: str, limit: int) -> Iterator[dict]:
+        """Episodes in listing order, as they arrive. Each episode costs two coworld calls
+        (about 2 s on the box, mostly CLI start-up), so ``LEAGUE_FETCH_WORKERS`` threads fetch
+        details ahead of the consumer, which evaluates one while the next ones load. The
+        window is bounded, so an early stop or an error leaves little work in flight."""
+        versions: dict[str, str] = {}  # a race only repeats one `coworld show`
+        pool = ThreadPoolExecutor(max_workers=LEAGUE_FETCH_WORKERS)
+        window: deque[Future] = deque()
+        try:
+            for episode_id in self._completed_episode_ids(league_id, limit):
+                window.append(pool.submit(self._fetch_episode, episode_id, versions))
+                if len(window) > 2 * LEAGUE_FETCH_WORKERS:
+                    yield window.popleft().result()
+            while window:
+                yield window.popleft().result()
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
+
+    def _fetch_episode(self, episode_id: str, versions: dict[str, str]) -> dict:
+        """One episode, retried once: a transient CLI or HTTP failure on one of hundreds of
+        episodes should not throw away the whole read (``--out`` is written only at the end)."""
+        try:
+            return self._league_episode(episode_id, versions)
+        except SoftmaxCliError:
+            return self._league_episode(episode_id, versions)
+
+    def _completed_episode_ids(self, league_id: str, limit: int) -> Iterator[str]:
+        """Up to ``limit`` completed episode ids, round by round (no league-wide listing)."""
+        found = 0
         cursor: str | None = None
         while True:
             args = ["rounds", "--league", league_id, "--status", "completed"]
@@ -195,12 +228,13 @@ class SoftmaxClient:
                 for summary in self._cli.run_json_pages("coworld", listing):
                     if summary.get("status") != "completed":
                         continue
-                    episodes.append(self._league_episode(summary["id"], versions))
-                    if len(episodes) >= limit:
-                        return episodes
+                    yield summary["id"]
+                    found += 1
+                    if found >= limit:
+                        return
             cursor = page.get("next_cursor")
             if not cursor:
-                return episodes
+                return
 
     def _league_episode(self, episode_id: str, versions: dict[str, str]) -> dict:
         detail = self._cli.run_json("coworld", ["episodes", episode_id])

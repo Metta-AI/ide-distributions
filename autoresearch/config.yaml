@@ -47,6 +47,10 @@ approvals:
     - "git push -f*"
     - "git push*--force*"
     - "git push* -f*"
+    - "hermes kanban create*"
+    - "hermes kanban link*"
+    - "hermes kanban --board * create*"
+    - "hermes kanban --board * link*"
 
 terminal:
   env_passthrough:
@@ -59,6 +63,7 @@ terminal:
     - AUTORESEARCH_CLI
     - AUTORESEARCH_QUEUE
     - OPENROUTER_MODEL
+    - AUTORESEARCH_INBOX_WRITERS
 
 plugins:
   enabled:

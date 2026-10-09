@@ -1,6 +1,8 @@
 """Thin subprocess wrappers around git. Every function takes the repo path first."""
 
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -10,8 +12,16 @@ class GitError(RuntimeError):
         self.stderr = stderr
 
 
-def _run(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=False)
+def _run(
+    repo: Path,
+    *args: str,
+    check: bool = True,
+    input: bytes | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, check=False, input=input, env=env
+    )
     if check and result.returncode != 0:
         raise GitError(args, result.stderr.decode(errors="replace"))
     return result
@@ -43,6 +53,30 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> str | None:
         return None
     git(repo, "commit", "-m", message, "--", *paths)
     return head(repo)
+
+
+def commit_blobs(repo: Path, blobs: dict[str, bytes], paths: list[str], message: str) -> str:
+    """Commit ``blobs`` (repo-relative path -> exact bytes, as regular files, whatever the
+    working tree holds now) plus the working-tree content of ``paths``, on top of HEAD.
+
+    The commit is built in a temporary index, so whatever the real index holds (a leftover
+    staged by a crashed writer) neither blocks it nor rides along, and a failure leaves
+    nothing staged. Afterwards the real index entries of exactly these paths are set to the
+    new HEAD; every other entry is left as it was."""
+    parent = head(repo)
+    with tempfile.TemporaryDirectory(prefix="ar-index-") as directory:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(directory) / "index")}
+        _run(repo, "read-tree", parent, env=env)
+        for path, data in blobs.items():
+            blob = _run(repo, "hash-object", "-w", "--stdin", input=data).stdout.decode().strip()
+            _run(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}", env=env)
+        if paths:
+            _run(repo, "add", "-A", "--", *paths, env=env)
+        tree = _run(repo, "write-tree", env=env).stdout.decode().strip()
+    commit = git(repo, "commit-tree", tree, "-p", parent, "-m", message)
+    git(repo, "update-ref", "-m", f"commit: {message}", "HEAD", commit, parent)
+    git(repo, "reset", "-q", commit, "--", *blobs, *paths)
+    return commit
 
 
 def diff_paths(repo: Path, a: str, b: str) -> list[str]:

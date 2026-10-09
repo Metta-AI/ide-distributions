@@ -48,6 +48,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_CLI",
     "AUTORESEARCH_QUEUE",  # the serial fallback selects the queue through it (A4)
     "OPENROUTER_MODEL",  # bootstrap applies it to model.default (ENV_OVERRIDES)
+    "AUTORESEARCH_INBOX_WRITERS",  # queue-keeper's routing adopts direct inbox writes by owner
 ]
 APPROVAL_DENY = [
     "coworld player use*",
@@ -58,6 +59,10 @@ APPROVAL_DENY = [
     "git push -f*",
     "git push*--force*",
     "git push* -f*",
+    "hermes kanban create*",
+    "hermes kanban link*",
+    "hermes kanban --board * create*",
+    "hermes kanban --board * link*",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 

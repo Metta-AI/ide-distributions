@@ -10,11 +10,12 @@ import pytest
 import yaml
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
-from autoresearch.comms.publisher import PublishResult
+from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import queue_keeper, xp_poll
+from autoresearch.runtime import proposals, queue_keeper, xp_poll
+from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
 from autoresearch.runtime.signals import KEEPER_STEP_FAILED
@@ -32,7 +33,12 @@ def host(tmp_path) -> Host:
 
 
 def _help_requests(host: Host, text: str = "") -> list[dict]:
-    return [m for m in host.outbox() if m["kind"] == "help_request" and text in m["title"]]
+    """Help requests whose title contains ``text`` or whose ``about`` names it."""
+    return [
+        m
+        for m in host.outbox()
+        if m["kind"] == "help_request" and (text in m["title"] or text in m.get("about", {}).values())
+    ]
 
 
 def _subsequence(patterns: list[str], subjects: list[str]) -> bool:
@@ -442,6 +448,31 @@ def _suggestions(host: Host) -> list[dict]:
     return [m for m in host.outbox() if m["kind"] == "suggestion"]
 
 
+def test_a_skill_proposed_before_runtime_key_existed_is_not_proposed_again(host):
+    """Upgrade: a suggestion titled the old way (``Skill proposal: <name> (<hash>)``, no
+    runtime_key) still counts, and a later change supersedes it."""
+    host.tick(at(0))
+    _stage_skill(host, "farm-faster", "# Farm faster\n")
+    staged = proposals._files(host.home / "local" / "skills-staging" / "farm-faster")
+    with canonical_lock(host.canonical):
+        publish_runtime(
+            host.canonical,
+            "suggestion",
+            f"Skill proposal: farm-faster ({proposals._tree_hash(staged)})",
+            "Reply adopt, reject, or revise.",
+            [{"uri": "ar://skill-proposal/farm-faster", "rev": host.head()}],
+            allow_no_remote=True,
+            expects_response=True,
+        )
+
+    assert host.tick(at(1)).skills == []
+    [legacy] = _suggestions(host)
+
+    _stage_skill(host, "farm-faster", "# Farm faster v2\n")
+    assert host.tick(at(2)).skills == ["farm-faster"]
+    assert _suggestions(host)[-1]["supersedes"] == legacy["id"]
+
+
 def test_staged_skills_are_proposed_once_and_reraised_daily(host):
     host.tick(at(0))
     _stage_skill(host, "farm-faster", "# Farm faster\n")
@@ -472,7 +503,7 @@ def test_skipped_staged_messages_are_reported_once(host):
     results = [PublishResult(skipped={"M-01K00000000000000000000000": ["kind: bad"]})]
     report_skipped(host.canonical, results, allow_no_remote=False)
     report_skipped(host.canonical, results, allow_no_remote=False)
-    notes = [m for m in host.outbox() if "was not published" in m["title"]]
+    notes = [m for m in host.outbox() if m["title"].startswith("Not published")]
     assert len(notes) == 1 and "kind: bad" in notes[0]["body"]
     assert host.clean()
 
@@ -499,6 +530,27 @@ def test_blocked_card_is_requeued_once_then_repaired(host):
     assert action.action == "repaired" and action.repair_request
     assert len(_help_requests(host, card.task_id)) == 1
     assert host.tick(at(4)).blocked == []  # nothing more
+
+
+def test_tool_fault_sequence_publishes_the_agents_help_request_and_keeps_the_card_blocked(host):
+    host.tick(at(0))
+    host.tick(at(1))
+    worker = host.claim()
+    worker.block_for_tool_fault("softmax build E-1", "FileNotFoundError: gate.py")
+
+    run = host.tick(at(2))
+    assert [a.action for a in run.blocked] == ["tool-fault"]
+    assert host.queue.get(worker.task_id).state == "blocked"
+    [agent_help] = _help_requests(host, "softmax build E-1 failed")  # merged via the handoff
+    assert "FileNotFoundError" in agent_help["body"]
+    [runtime_help] = _help_requests(host, "Blocked by a tool fault")
+    assert runtime_help["about"]["card"] == worker.task_id
+    assert [r for r in host.requests() if "repair-blocked" in r["spec"]["why"]] == []
+
+    assert host.tick(at(3)).blocked == []  # nothing more
+    assert len(_help_requests(host, "softmax build E-1 failed")) == 1
+    assert len(_help_requests(host, "Blocked by a tool fault")) == 1
+    assert host.clean()
 
 
 def test_main_builds_the_run_from_the_environment(host, monkeypatch, capsys):

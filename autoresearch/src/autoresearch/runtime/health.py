@@ -10,8 +10,8 @@ Checks (Runtime §2, §8):
   Identity mismatches are preflight's (queue-keeper pauses and asks for help, C6).
 
 Each problem becomes one runtime ``help_request`` per kind (``disk``, ``whoami``,
-``credential expiring``, ``credential expired``) per UTC day (the title carries the kind and
-the date; the outbox is the dedupe state). The run ends with a push of ``main``. The job skips
+``credential expiring``, ``credential expired``) per UTC day (its ``runtime_key`` carries the kind
+and the date; the outbox is the dedupe state). The run ends with a push of ``main``. The job skips
 quietly before bootstrap has created the canonical workspace, and runs one at a time
 (``runtime/health.run.lock``). Failures are logged to ``.supervisor/runtime/health.log``.
 """
@@ -27,7 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
-from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.queue.base import Queue
@@ -89,18 +90,14 @@ def _report(
 ) -> None:
     """One help_request per problem kind per UTC day."""
     canonical = ctx.canonical
-    title = f"Health: {kind} problem ({now.astimezone(datetime.UTC):%Y-%m-%d})"
+    message = runtime_messages.health_problem(
+        kind, problem, f"{now.astimezone(datetime.UTC):%Y-%m-%d}"
+    )
     with canonical_lock(canonical):
-        if outbox_has_title(canonical, title, exact=True):
+        if already_published(canonical, message):
             return
-        body = (
-            f"The health check found a problem: {problem}. Research cards may fail until it "
-            f"is fixed. Please look at the host."
-        )
-        publish_runtime(
-            canonical, "help_request", title, body, [], allow_no_remote=True, expects_response=True
-        )
-    result.published.append(title)
+        publish_message(canonical, message, allow_no_remote=True, expects_response=True)
+    result.published.append(message.title)
 
 
 def run(

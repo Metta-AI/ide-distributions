@@ -48,6 +48,11 @@ class FileQueue:
             state=record["state"],
             assignee=record["assignee"],
             runs=[RunInfo(**run) for run in record["runs"]],
+            block_reason=record.get("block_reason"),
+            block_run_id=record.get("block_run_id"),
+            current_run_id=next(
+                (run["run_id"] for run in record["runs"] if not run["terminal"]), None
+            ),
         )
 
     # -- Queue protocol --
@@ -152,7 +157,7 @@ class FileQueue:
             self._save_record(best)
             return self._to_card(best)
 
-    def finish(self, task_id: str, run_id: str, outcome: str) -> None:
+    def finish(self, task_id: str, run_id: str, outcome: str, summary: str | None = None) -> None:
         with file_lock(self._lock_path):
             record = self._load_record(task_id)
             run = next((r for r in record["runs"] if r["run_id"] == run_id), None)
@@ -164,7 +169,23 @@ class FileQueue:
                 raise ValueError(f"run {run_id} already finished with outcome {run['outcome']!r}")
             run["terminal"] = True
             run["outcome"] = outcome
+            run["summary"] = summary
             record["state"] = "completed"
+            self._save_record(record)
+
+    def block(self, task_id: str, run_id: str, reason: str) -> None:
+        """Block the card as a worker's ``kanban_block`` does: the run ends with outcome
+        ``blocked`` and the card keeps the reason and the run id."""
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            run = next((r for r in record["runs"] if r["run_id"] == run_id), None)
+            if run is None or run["terminal"]:
+                raise ValueError(f"card {task_id} has no running run {run_id}")
+            run["terminal"] = True
+            run["outcome"] = "blocked"
+            record["state"] = "blocked"
+            record["block_reason"] = reason
+            record["block_run_id"] = run_id
             self._save_record(record)
 
     @staticmethod

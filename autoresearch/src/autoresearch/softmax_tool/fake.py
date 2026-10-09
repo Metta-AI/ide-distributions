@@ -7,7 +7,8 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 ``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
 (creating a new XP request raises once N exist, like the platform's pending-request cap), and
-``crash_after=<label>`` (read by runtime code through :func:`fault`).
+``crash_after=<label>`` (read by runtime code through :func:`fault`). A request whose state
+entry has ``"failed": true`` (tests set it in the state file) reports status ``failed``.
 
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
 JSON with a ``player_id`` (a fake-only field), that is the player; otherwise the credential is
@@ -20,8 +21,17 @@ an ``identity=``, ``player=`` or ``expires_in=`` fault stops a running worker at
 
 Seeds (A12): like the platform, a spec's ``game_config_overrides.seed`` pins the request's
 episodes to that seed. Results of a seeded request depend only on (seed, our roster policy,
-episode index), so the same seed and policy give the same episode in any request; unseeded
-results depend on the request id.
+episode index, seat), so the same seed and policy give the same episode in any request;
+unseeded results depend on the request id.
+
+Mechanics of seeded results (``_seeded_metrics``; fakegame's ``GAME.md`` documents them for the
+agent). ``upload`` keeps the ``parameters`` of a fakegame ``policy.json`` artifact; a policy
+uploaded without them (or never uploaded here) plays ``DEFAULT_PARAMETERS`` with noise keyed
+on its id. ``score`` = 50 + a per-seed board term (+-4) + 0.5 per ``aggression`` point above 3
++ episode noise (+-1) keyed on (seed, episode, seat, aggression). ``errors`` = an integer 0..2
+keyed on (seed, episode, seat, patience) + ``max(0, 8 - patience)``. So a policy that differs
+only in ``patience`` plays the same score on every seed and fewer errors when patience is
+higher (down to the floor at 8): a real, measurable lever for the fake research cycle.
 
 League reads: ``league_episodes`` is generated, not stored. Episode ``i`` plays seed
 ``1000 + i // 3`` with ``LEAGUE_POLICIES[i % 3]`` in seat 0 and ``LEAGUE_HOUSE`` in seat 1, so
@@ -51,6 +61,7 @@ DEFAULT_EPISODES = 2
 LEAGUE_POLICIES = ("fake-alpha:v1", "fake-beta:v1", "fake-gamma:v1")
 LEAGUE_HOUSE = "fake-house:v1"
 LEAGUE_FIRST_SEED = 1000
+DEFAULT_PARAMETERS = {"aggression": 3, "patience": 5}  # fakegame's seed STRATEGY.md
 
 
 def parse_faults(env: Mapping[str, str]) -> dict[str, str]:
@@ -112,6 +123,30 @@ def _league_episode(league_id: str, index: int, game_version: str) -> dict:
             ],
         },
     }
+
+
+def _artifact_parameters(artifact: Path) -> dict | None:
+    """The ``parameters`` of a fakegame ``policy.json`` artifact, or None for any other file."""
+    try:
+        policy = json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    parameters = policy.get("parameters") if isinstance(policy, dict) else None
+    return parameters if isinstance(parameters, dict) else None
+
+
+def _seeded_metrics(
+    seed: int, index: int, slot: int, policy: str | None, parameters: dict | None
+) -> dict:
+    """One seat's metrics in a seeded episode (module docstring, "Mechanics")."""
+    played = {**DEFAULT_PARAMETERS, **(parameters or {})}
+    aggression, patience = played["aggression"], played["patience"]
+    score_key = aggression if parameters is not None else policy
+    errors_key = patience if parameters is not None else policy
+    score = 50 + (_unit(seed, "board") - 0.5) * 8 + 0.5 * (aggression - 3)
+    score += (_unit(seed, index, slot, "score", score_key) - 0.5) * 2
+    errors = int(_unit(seed, index, slot, "errors", errors_key) * 3) + max(0, 8 - patience)
+    return {"score": round(score, 4), "errors": errors}
 
 
 def _roster_slots(spec: dict) -> list[int]:
@@ -257,6 +292,8 @@ class FakeSoftmax:
             request = state["xp"][handle.request_id]
             request["polls"] += 1
             total = request["episodes"]
+            if request.get("failed"):  # set by tests in the state file: a failed request
+                return XpStatus("failed", 0, total)
             if request["polls"] >= state["polls_to_complete"]:
                 return XpStatus("completed", total, total)
             return XpStatus("running", 0, total)
@@ -264,20 +301,28 @@ class FakeSoftmax:
         return self._operate("xp_status", action)
 
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]:
-        request = self._operate(
-            "xp_artifacts", lambda state: dict(state["xp"][handle.request_id]), persist=False
-        )
+        def read(state: dict) -> dict:
+            request = dict(state["xp"][handle.request_id])
+            upload = state["uploads"].get(request.get("policy") or "") or {}
+            request["parameters"] = upload.get("parameters")
+            return request
+
+        request = self._operate("xp_artifacts", read, persist=False)
         game_seed = request.get("game_seed")
         source = handle.request_id if game_seed is None else f"{game_seed}|{request['policy']}"
         episodes = []  # one entry per (episode, seat), like a multi-seat game's results
         for index in range(request["episodes"]):
             for slot in request.get("slots") or [0]:
-                episode = {
-                    "episode": index,
-                    "seat": slot,
-                    "score": int(_short_hash(source, index, slot, "score"), 16) % 100,
-                    "errors": int(_short_hash(source, index, slot, "errors"), 16) % 5,
-                }
+                if game_seed is None:
+                    metrics = {
+                        "score": int(_short_hash(source, index, slot, "score"), 16) % 100,
+                        "errors": int(_short_hash(source, index, slot, "errors"), 16) % 5,
+                    }
+                else:
+                    metrics = _seeded_metrics(
+                        game_seed, index, slot, request["policy"], request.get("parameters")
+                    )
+                episode = {"episode": index, "seat": slot, **metrics}
                 if game_seed is not None:
                     episode["seed"] = game_seed
                 episodes.append(episode)
@@ -309,10 +354,13 @@ class FakeSoftmax:
 
     def upload(self, artifact: Path, name: str) -> str:
         self._require_player()
+        parameters = _artifact_parameters(Path(artifact))
 
         def action(state: dict) -> str:
             policy_version_id = f"pv_{_short_hash(name, len(state['uploads']))}"
             state["uploads"][policy_version_id] = {"name": name}
+            if parameters is not None:
+                state["uploads"][policy_version_id]["parameters"] = parameters
             return policy_version_id
 
         return self._operate("upload", action)

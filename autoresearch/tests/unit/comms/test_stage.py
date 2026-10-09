@@ -55,7 +55,7 @@ def test_every_known_kind_stages(tmp_path):
         ("note", [], {"supersedes": "M-1"}, "supersedes"),
         ("note", [Ref("https://example.com")], {}, "refs/0/uri"),
         ("note", [Ref("ar://plan", rev="HEAD")], {}, "refs/0/rev"),
-        ("note", [], {"in_reply_to": "nope"}, "in_reply_to"),
+        ("note", [], {"in_reply_to": "not an id/x"}, "in_reply_to"),
     ],
 )
 def test_stage_refuses_an_invalid_message(tmp_path, kind, refs, fields, needle):

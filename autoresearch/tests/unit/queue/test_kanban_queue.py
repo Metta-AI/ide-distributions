@@ -139,6 +139,34 @@ def test_assign_and_unassign(fake, queue):
     ]
 
 
+def test_get_exposes_the_block_reason_of_a_blocked_card(fake, queue):
+    runs = [
+        {"id": 1, "outcome": "reclaimed", "ended_at": 5, "summary": None},
+        {"id": 2, "outcome": "blocked", "ended_at": 9, "summary": "tool-fault: build crashed"},
+    ]
+    fake.reply("show", {"task": task_json("blocked"), "runs": runs})
+    card = queue.get("t_abc")
+    assert (card.block_reason, card.block_run_id) == ("tool-fault: build crashed", "2")
+
+
+def test_an_older_block_reason_is_not_current_after_a_later_run(fake, queue):
+    runs = [
+        {"id": 1, "outcome": "blocked", "ended_at": 5, "summary": "tool-fault: old"},
+        {"id": 2, "outcome": "crashed", "ended_at": 9, "summary": None},
+    ]
+    fake.reply("show", {"task": task_json("blocked"), "runs": runs})
+    card = queue.get("t_abc")
+    assert (card.block_reason, card.block_run_id) == (None, None)
+
+
+def test_block_reason_is_none_without_a_blocked_run_or_a_blocked_card(fake, queue):
+    fake.reply("show", {"task": task_json("blocked"), "runs": []})  # e.g. a circuit-breaker park
+    assert queue.get("t_abc").block_reason is None
+    run = {"id": 1, "outcome": "blocked", "ended_at": 9, "summary": "tool-fault: old"}
+    fake.reply("show", {"task": task_json("ready"), "runs": [run]})
+    assert queue.get("t_abc").block_reason is None
+
+
 def test_get_parses_task_and_runs(fake, queue):
     show = {
         "task": task_json("running", "prof"),
@@ -156,6 +184,43 @@ def test_get_parses_task_and_runs(fake, queue):
         ("1", True, "reclaimed"),
         ("2", False, None),
     ]
+
+
+def test_get_reads_the_current_run_and_its_latest_heartbeat(fake, queue):
+    """Hermes' JSON has no heartbeat column; the ``heartbeat`` events of the run in flight
+    carry it (``heartbeat_worker`` writes both in one transaction)."""
+    show = {
+        "task": task_json("running", "prof"),
+        "runs": [
+            {"id": 1, "outcome": "crashed", "ended_at": 5},
+            {"id": 2, "outcome": None, "ended_at": None},
+        ],
+        "events": [
+            {"kind": "heartbeat", "created_at": 4, "run_id": 1},
+            {"kind": "claimed", "created_at": 6, "run_id": 2},
+            {"kind": "heartbeat", "created_at": 70, "run_id": 2},
+            {"kind": "heartbeat", "created_at": 130, "run_id": 2},
+            {"kind": "commented", "created_at": 140, "run_id": None},
+        ],
+    }
+    fake.reply("show", show)
+    card = queue.get("t_abc")
+    assert (card.current_run_id, card.last_heartbeat_at) == ("2", 130)
+
+
+def test_no_current_run_means_no_heartbeat(fake, queue):
+    show = {
+        "task": task_json("done"),
+        "runs": [{"id": 1, "outcome": "completed", "ended_at": 9}],
+        "events": [{"kind": "heartbeat", "created_at": 4, "run_id": 1}],
+    }
+    fake.reply("show", show)
+    card = queue.get("t_abc")
+    assert (card.current_run_id, card.last_heartbeat_at) == (None, None)
+    fake.reply("show", {"task": task_json("running"), "runs": [{"id": 3, "ended_at": None,
+                                                                "outcome": None}]})
+    card = queue.get("t_abc")
+    assert (card.current_run_id, card.last_heartbeat_at) == ("3", None)  # no heartbeat yet
 
 
 @pytest.mark.parametrize(
@@ -311,7 +376,7 @@ def fenced(fake, tmp_path, monkeypatch):
         "CREATE TABLE tasks (id TEXT, title TEXT, body TEXT, assignee TEXT, status TEXT,"
         " priority INTEGER);"
         "CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,"
-        " outcome TEXT, metadata TEXT);"
+        " outcome TEXT, metadata TEXT, summary TEXT, last_heartbeat_at INTEGER);"
     )
     body = json.dumps(asdict(SPEC))
     db.executemany(
@@ -324,10 +389,10 @@ def fenced(fake, tmp_path, monkeypatch):
         ],
     )
     db.executemany(
-        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
-            (1, "t_run", 5, "completed", '{"outcome": "dropped"}'),
-            (2, "t_run", None, None, None),
+            (1, "t_run", 5, "completed", '{"outcome": "dropped"}', None, 4),
+            (2, "t_run", None, None, None, None, 130),
         ],
     )
     db.commit()
@@ -335,6 +400,18 @@ def fenced(fake, tmp_path, monkeypatch):
     for command in ("list", "show"):
         fake.reply(command, code=1, stderr=FENCE_ERROR)
     return KanbanQueue("board1", "prof", hermes_home=home)
+
+
+def test_delegate_child_reads_the_block_reason_from_the_board_db(fenced, tmp_path):
+    db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
+    db.execute("UPDATE tasks SET status = 'blocked' WHERE id = 't_ready'")
+    db.execute(
+        "INSERT INTO task_runs VALUES (5, 't_ready', 9, 'blocked', NULL, 'tool-fault: x', NULL)"
+    )
+    db.commit()
+    db.close()
+    card = fenced.get("t_ready")
+    assert (card.state, card.block_reason, card.block_run_id) == ("blocked", "tool-fault: x", "5")
 
 
 def test_list_in_delegate_child_reads_the_board_db(fenced):
@@ -347,6 +424,9 @@ def test_list_in_delegate_child_reads_the_board_db(fenced):
         ("2", False, None),
     ]
     assert fenced.list("pending")[0].task_id == "t_ready"
+    # liveness comes from the run in flight: task_runs.last_heartbeat_at
+    assert (cards["t_run"].current_run_id, cards["t_run"].last_heartbeat_at) == ("2", 130)
+    assert (cards["t_ready"].current_run_id, cards["t_ready"].last_heartbeat_at) == (None, None)
 
 
 def test_get_in_delegate_child_reads_the_board_db(fenced):
@@ -425,8 +505,10 @@ def test_delegate_child_reads_the_pinned_db(fenced, tmp_path, monkeypatch):
 
 def test_malformed_run_metadata_and_corrupt_db_are_tolerated(fenced, tmp_path):
     db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
-    db.execute("INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json')")
-    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]')")
+    db.execute(
+        "INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json', NULL, NULL)"
+    )
+    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]', NULL, NULL)")
     db.commit()
     db.close()
     assert [r.outcome for r in fenced.get("t_ready").runs] == ["completed", "completed"]
@@ -436,3 +518,24 @@ def test_unreadable_board_db_raises_kanban_error(fenced, tmp_path):
     (tmp_path / "hermes-home/kanban/boards/board1/kanban.db").write_text("not a database")
     with pytest.raises(KanbanError, match="board DB read failed"):
         fenced.list()
+
+
+def test_board_db_only_reads_the_db_without_running_hermes(fenced, fake, tmp_path):
+    """The plugin reads the board inside the worker process, where Hermes reads fail anyway."""
+    queue = KanbanQueue("board1", "prof", hermes_home=tmp_path / "hermes-home", board_db_only=True)
+    running = queue.list("claimed")
+    assert [(c.task_id, c.current_run_id, c.last_heartbeat_at) for c in running] == [
+        ("t_run", "2", 130)
+    ]
+    with pytest.raises(KanbanError, match="no such task"):
+        queue.get("t_missing")
+    assert fake.calls() == []
+
+
+def test_list_skips_a_card_removed_between_list_and_show(fake, queue):
+    fake.reply("list", [task_json("running", task_id="t_gone")])
+    fake.reply("show", code=1, stderr="no such task: t_gone")
+    assert queue.list() == []
+    fake.reply("show", code=1, stderr="kanban: database is locked")
+    with pytest.raises(KanbanError, match="locked"):
+        queue.list()

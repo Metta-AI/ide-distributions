@@ -4,10 +4,12 @@ Later tasks add subcommand groups with `register_group(name, setup_fn)`, where
 `setup_fn(subparser)` adds arguments and sets `func=<handler>` as a parser default.
 A handler takes the parsed `argparse.Namespace` and returns an exit code. A group module
 calls `register_group` at import time; list it in `GROUP_MODULES` so the parser imports it.
+A group option named `--root` (dest `root`) is made absolute here, before any handler runs.
 """
 
 import argparse
 import importlib
+import os
 from collections.abc import Callable, Sequence
 
 from autoresearch import __version__
@@ -47,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)  # argparse exits with code 2 on bad arguments
+    if getattr(args, "root", None):
+        # Every group's --root (records, stats, kb, comms). Handlers pass paths under it to
+        # tools that run in another directory (``git -C``), so a relative root breaks them.
+        args.root = os.path.abspath(args.root)
     handler = getattr(args, "func", None)
     if handler is None:
         parser.print_help()

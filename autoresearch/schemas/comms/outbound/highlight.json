@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "comms/outbound/highlight.json",
+  "title": "Outbound highlight (ar-comms/0)",
+  "x-autoresearch": {
+    "direction": "outbound",
+    "summary": "One notable event: a supported or falsified hypothesis, a verified claim, a promotion, a surprising result."
+  },
+  "allOf": [{"$ref": "../envelope.outbound.json"}],
+  "properties": {"kind": {"const": "highlight"}}
+}

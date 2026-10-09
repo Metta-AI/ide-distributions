@@ -5,13 +5,15 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from support.promotion_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, SubmitBoard
 
 from autoresearch.cli import main
-from autoresearch.io.docs import read_json
+from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.select import FILE_QUEUE_RELATIVE
 from autoresearch.records.store import RecordStore
@@ -227,6 +229,20 @@ def test_credit_backoff_doubles_and_caps():
     assert minutes == [30, 60, 120, 240, 480, 480, 480]
 
 
+def test_credit_backoff_base_comes_from_the_environment(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker, **{FAULTS_ENV: "credits=0", softmax_cli.BACKOFF_ENV: "2"})
+    before = datetime.now(UTC)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["credit_denied"] is True
+    after = datetime.fromisoformat(data["data"]["next_launch_after"])
+    assert timedelta(minutes=1) < after - before < timedelta(minutes=3)
+    bad = base_env(board, worker, **{softmax_cli.BACKOFF_ENV: "soon"})
+    code, data = softmax(bad, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 2 and data["error"]["reason"] == "bad_arguments"
+    assert worker.store.load(experiment)[0]["xp_requests"] == []  # refused before any create
+
+
 def test_xp_create_records_request_and_starts_evaluating(board, launch):
     worker, experiment = launch  # design_dict: seeds (1, 2)
     env = base_env(board, worker)
@@ -315,6 +331,64 @@ def test_xp_create_credit_denied_mid_batch_reports_missing_and_relaunch_fills_th
     meta = worker.store.load(experiment)[0]
     assert len(meta["xp_requests"]) == 4 and meta["status"] == "evaluating"
     assert meta["lifecycle"]["credit_denials"] == 0
+
+
+def test_xp_create_refuses_a_new_attempt_while_the_last_is_incomplete(board, launch):
+    """Fake cycle run 2: after a credit denial the agent relaunched with --attempt 2 and
+    repeated every request. A new attempt must wait until the latest one is complete."""
+    worker, experiment = launch  # seeds (1, 2): four requests per attempt
+    env = base_env(board, worker)
+    _set_fake_credits(board, 3)
+    softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    _set_fake_credits(board, 100)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 1 and data["error"]["reason"] == "attempt_incomplete", data
+    assert "--attempt 1" in data["error"]["message"]
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
+    assert code == 1 and data["error"]["reason"] == "bad_attempt", data
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 3  # nothing new
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and [(r["seed"], r["arm"]) for r in data["data"]["created"]] == [
+        (2, "baseline")
+    ]
+    # A second relauncher after the first completed the attempt: nothing failed, so refused.
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 4
+
+
+def data_first_request(worker, experiment) -> str:
+    return worker.store.load(experiment)[0]["xp_requests"][0]["request_id"]
+
+
+def _fail_fake_request(board, request_id: str) -> None:
+    path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(path)
+    state["xp"][request_id]["failed"] = True
+    write_json(path, state)
+
+
+def test_xp_create_new_attempt_only_after_a_failed_request(board, launch):
+    worker, experiment = launch  # seeds (1, 2): four requests per attempt
+    env = base_env(board, worker)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and len(data["data"]["created"]) == 4
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
+    failed = data_first_request(worker, experiment)
+    _fail_fake_request(board, failed)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(data["data"]["created"]) == 4, (failed, data)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
+    assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
+
+
+def test_credit_backoff_rejects_infinite_minutes(board, launch):
+    worker, experiment = launch
+    for value in ("inf", "1e400", "nan"):
+        env = base_env(board, worker, **{softmax_cli.BACKOFF_ENV: value})
+        code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+        assert code == 2 and data["error"]["reason"] == "bad_arguments", (value, data)
 
 
 def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launch):
@@ -440,6 +514,158 @@ def test_xp_create_needs_a_binding(board):
 # --- upload, submit, leaderboard ---
 
 
+# --- per-experiment lock (two relaunchers at the same moment) ---
+
+HOLD_LOCK = """
+import sys
+from autoresearch.io.locks import file_lock
+with file_lock(sys.argv[1], timeout_s=10) as handle:
+    if len(sys.argv) > 2:  # the holder record, as experiment_lock writes it
+        handle.write(sys.argv[2])
+        handle.flush()
+    print("held", flush=True)
+    sys.stdin.read()  # hold until the test closes stdin
+"""
+
+
+def _hold_lock_in_another_process(path, holder_record=None):
+    extra = [json.dumps(holder_record)] if holder_record else []
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_LOCK, str(path), *extra],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+    )
+    assert holder.stdout.readline().strip() == "held"
+    return holder
+
+
+def _lock_path(board, experiment):
+    return board.canonical / ".supervisor" / "runtime" / "locks" / f"xp-{experiment}.lock"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["xp", "create", "{E}", "--batch", "1", "--attempt", "1"],
+        ["upload", "{E}", "--build-dir", "/nonexistent"],
+        ["submit", "{E}"],
+    ],
+    ids=["xp-create", "upload", "submit"],
+)
+def test_mutations_refuse_busy_while_another_card_holds_the_experiment(
+    board, launch, monkeypatch, capsys, argv
+):
+    """``xp create``, ``upload`` and ``submit`` of one experiment take one cross-process lock
+    first: a second process waits a bounded time, then refuses with ``busy``, names the
+    holder, and does nothing."""
+    worker, experiment = launch
+    for name, value in base_env(board, worker).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(softmax_cli, "LOCK_WAIT_S", 0.2)
+    argv = [word.format(E=experiment) for word in argv]
+    record = {"task_id": "t_peer", "run_id": "41", "pid": 999, "command": "xp create",
+              "started_at": "2026-10-08T12:00:00+00:00"}
+    holder = _hold_lock_in_another_process(_lock_path(board, experiment), record)
+    try:
+        code = main(["softmax", *argv])
+        payload = json.loads(capsys.readouterr().out)
+        error = payload["error"]
+        assert code == 1 and error["reason"] == "busy", payload
+        assert error["details"] == {"holder": record, "own_run": False}
+        assert experiment in error["message"] and "t_peer" in error["message"]
+        assert "queue list --state claimed" in error["message"]
+        assert worker.store.load(experiment)[0].get("xp_requests") in (None, [])
+    finally:
+        holder.stdin.close()
+        holder.wait(timeout=10)
+
+
+def test_busy_on_your_own_runs_lock_says_wait_for_that_command(board, launch, monkeypatch,
+                                                               capsys):
+    """A long ``xp create`` can go to the background (Hermes promotes long terminal calls);
+    a rerun from the same card must not read the busy as a peer and give up."""
+    worker, experiment = launch
+    for name, value in base_env(board, worker).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(softmax_cli, "LOCK_WAIT_S", 0.2)
+    record = {"task_id": worker.task_id, "run_id": worker.run_id, "pid": 999,
+              "command": "xp create", "started_at": "2026-10-08T12:00:00+00:00"}
+    holder = _hold_lock_in_another_process(_lock_path(board, experiment), record)
+    try:
+        code = main(["softmax", "xp", "create", experiment, "--batch", "1", "--attempt", "1"])
+        error = json.loads(capsys.readouterr().out)["error"]
+        assert code == 1 and error["reason"] == "busy" and error["details"]["own_run"] is True
+        assert "your own earlier" in error["message"] and "wait" in error["message"]
+    finally:
+        holder.stdin.close()
+        holder.wait(timeout=10)
+
+
+def test_the_holder_is_recorded_while_held_and_cleared_after(board, launch, monkeypatch):
+    worker, experiment = launch
+    for name, value in base_env(board, worker).items():
+        monkeypatch.setenv(name, value)
+    from autoresearch import runctx
+
+    ctx = runctx.from_env()
+    lock = _lock_path(board, experiment)
+    with softmax_cli.experiment_lock(ctx, experiment, "upload"):
+        record = json.loads(lock.read_text())
+        assert record.pop("started_at")
+        assert record == {"task_id": worker.task_id, "run_id": worker.run_id,
+                          "pid": os.getpid(), "command": "upload"}
+    assert lock.read_text() == ""
+
+
+def test_xp_create_waits_for_the_other_process_then_runs(board, launch, monkeypatch, capsys):
+    import threading
+
+    from autoresearch.io.locks import file_lock
+
+    worker, experiment = launch
+    for name, value in base_env(board, worker).items():
+        monkeypatch.setenv(name, value)
+    lock = _lock_path(board, experiment)
+    holder = _hold_lock_in_another_process(lock)
+    release = threading.Timer(0.5, holder.stdin.close)  # held when the command starts
+    release.start()
+    started = time.monotonic()
+    code = main(["softmax", "xp", "create", experiment, "--batch", "1", "--attempt", "1"])
+    waited = time.monotonic() - started
+    release.join()
+    holder.wait(timeout=10)
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and len(payload["data"]["created"]) == 4, payload
+    assert waited >= 0.4
+    with file_lock(lock, timeout_s=0):  # not held after the command
+        pass
+
+
+def test_two_concurrent_launches_create_one_set_of_requests(board, launch):
+    """The headline guarantee: two relaunchers at the same moment, one set of requests."""
+    worker, experiment = launch
+    env = base_env(board, worker)
+    argv = [sys.executable, "-m", "autoresearch", "softmax", "xp", "create", experiment,
+            "--batch", "1", "--attempt", "1"]
+    procs = [
+        subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for _ in range(2)
+    ]
+    results = [json.loads(proc.communicate(timeout=120)[0]) for proc in procs]
+    assert all(result["ok"] for result in results), results
+    assert sorted(len(result["data"]["created"]) for result in results) == [0, 4]
+    code, recovered = softmax(env, "xp", "recover", experiment)
+    assert code == 0 and len(recovered["data"]) == 4
+
+
+def test_an_experiment_id_that_is_not_an_e_id_is_a_bad_argument(board, launch):
+    worker, _ = launch
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", "../../x", "--batch", "1", "--attempt", "1"
+    )
+    assert code == 2 and data["error"]["reason"] == "bad_arguments"
+    assert not (board.canonical / ".supervisor" / "runtime" / "locks").exists()
+
+
 def test_upload_from_fakegame_build(board):
     from records.fixtures import EXP_DESIGNED
 
@@ -557,6 +783,7 @@ def test_leaderboard(board):
         "player_id": PLAYER,
         "leaderboard_champion": BASELINE_PV,
         "current_champion": BASELINE_PV,
+        "baseline": None,
         "note": "",
     }
 

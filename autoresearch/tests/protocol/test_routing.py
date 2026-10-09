@@ -8,7 +8,7 @@ import jsonschema
 import pytest
 from support.board import Board
 
-from autoresearch.comms import publisher
+from autoresearch.comms import publisher, runtime_messages
 from autoresearch.comms.inbound import derived_status, submit_inbound
 from autoresearch.comms.publisher import publish_hook, publish_runtime
 from autoresearch.comms.reader import read_since, seen_path
@@ -141,11 +141,82 @@ def test_task_is_acknowledged_by_the_runtime_when_its_card_publishes(board):
     assert outcome.state == "published"
     [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
     assert ack["kind"] == "note" and ack["from"] == "runtime"
+    # The task as the sender phrased it, then the card's own summary (its journal's opening).
+    assert (ack["title"], ack["body"]) == ("Done: Scout", "Did things.")
+    handoff = worker.handoff()
+    assert ack["about"] == {
+        "card": worker.task_id,
+        "request": request["id"],
+        "merge_commit": handoff["merge_sha"],
+        "outcome": "done",
+    }
+    journal = handoff["journal"].rsplit("/", 1)[-1].removesuffix(".md")
+    assert [(ref["uri"], ref["rev"]) for ref in ack["refs"]] == [
+        (f"ar://handoff/{worker.task_id}/{worker.run_id}", ack["published_rev"]),
+        (f"ar://journal/{journal}", handoff["merge_sha"]),
+    ]
     record = _delivery(board, task)
     assert record["state"] == "acknowledged" and record["acknowledged_by"] == ack["id"]
     _assert_clean(board)
     board.process(publish=local_hook)  # nothing left: no second acknowledgement
     assert len([m for m in _outbox(board) if m.get("in_reply_to") == task]) == 1
+
+
+def _finished_task_card(board: Board, title: str = "Scout"):
+    task = _send(board, "task", "ide", title=title, mode="scouting", why="W", refs=[], priority="P1")
+    _route(board)
+    [request] = _requests(board)
+    worker = board.admit_follow_up(request["id"])
+    worker.start()
+    worker.write_journal()
+    return task, worker
+
+
+def test_task_acknowledgement_quotes_the_runs_summary_and_the_cards_messages(board):
+    task, worker = _finished_task_card(board)
+    stage(Layout(worker.worktree), "highlight", "Towers win lanes", "Found it.", [])
+    worker.finish(outcome="partial", terminal=False)
+    board.queue.finish(worker.task_id, worker.run_id, "partial", summary="Towers win.")
+
+    board.process(publish=local_hook)
+
+    [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert ack["title"] == "Partly done: Scout"
+    assert ack["body"] == (
+        "Towers win. The rest of the task is not done yet. "
+        "The agent also sent: “Towers win lanes”."
+    )
+
+
+def test_a_blocked_cards_ack_prefers_its_journal_over_the_block_reason(board):
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked", terminal=False)
+    reason = "tool-fault: softmax build: FileNotFoundError"
+    board.queue.finish(worker.task_id, worker.run_id, "blocked", summary=reason)
+
+    board.process(publish=local_hook)
+
+    [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert ack["body"].startswith("Did things. ") and reason not in ack["body"]
+
+
+def test_a_summary_that_names_ids_gives_way_to_the_journal_or_is_made_plain(board):
+    task, worker = _finished_task_card(board)
+    stage(Layout(worker.worktree), "help_request", "Stuck on H-01K6Z3V8QX0000000000000000", "B", [])
+    worker.finish(outcome="blocked", terminal=False)
+    ids_summary = f"Created {board.hypothesis} and requested its experiment card."
+    board.queue.finish(worker.task_id, worker.run_id, "blocked", summary=ids_summary)
+
+    board.process(publish=local_hook)
+
+    [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
+    assert ack["body"] == (
+        "Did things. The agent needs help to go on; its help request says what it needs. "
+        "The agent also sent: “Stuck on the hypothesis”."
+    )
+    assert runtime_messages.plainest_summary([ids_summary, f"See ar://claim/C-x at {'a1' * 6}."]) == (
+        "Created the hypothesis and requested its experiment card."
+    )
 
 
 def test_invalid_task_gets_a_runtime_note_with_its_errors(board):
@@ -159,7 +230,8 @@ def test_invalid_task_gets_a_runtime_note_with_its_errors(board):
     assert _requests(board) == []
     [note] = _outbox(board)
     assert note["kind"] == "note" and note["in_reply_to"] == task and note["from"] == "runtime"
-    assert missing in note["body"]
+    assert missing in note["body"] and note["title"] == "Not started: T"
+    assert note["about"] == {"outcome": "rejected"} and task not in note["body"]
     record = _delivery(board, task)
     assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
     assert record["responsible"] == {"task_id": None, "request_id": None, "backlog": False}
@@ -479,7 +551,7 @@ def test_backlog_task_acknowledgement_does_not_claim_the_card_was_created_for_it
     board.process(publish=local_hook)
 
     [ack] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
-    assert "from the planning backlog" in ack["body"] and "created for" not in ack["body"]
+    assert "planning card that was already open took this task on" in ack["body"]
 
 
 def test_reply_on_a_thread_whose_card_is_claimed_goes_to_the_backlog(board):
@@ -535,7 +607,8 @@ def test_task_rejected_by_admission_gets_a_runtime_note_with_the_reason(board):
     _route(board)
 
     [note] = [m for m in _outbox(board) if m.get("in_reply_to") == task]
-    assert note["from"] == "runtime" and "unresolved ref ar://claim/C-gone" in note["body"]
+    assert note["from"] == "runtime" and note["title"] == "Not started: T"
+    assert "ar://claim/C-gone" in note["body"] and "references that exist" in note["body"]
     record = _delivery(board, task)
     assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
     _assert_clean(board)

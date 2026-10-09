@@ -85,6 +85,8 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
 | `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but no shipped job runs its cards (see below). |
+| `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
+| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them
@@ -133,7 +135,7 @@ hermes -p autoresearch cron list
 |---|---|---|
 | `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning. The only writer of the canonical workspace. |
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
-| `health` | every 15 minutes | Checks blocked cards, free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
+| `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
 To start a `queue-keeper` run at the next scheduler tick instead of waiting for the
 schedule:
@@ -190,6 +192,13 @@ Read state with the CLI:
 
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
+On a fresh install there is no champion and no baseline policy version. The first
+experimentation card bootstraps one by itself (amendment A14): it builds the game's baseline
+(the `## Baseline build` section of `games/<game>/GAME.md`) and runs
+`"$AUTORESEARCH_CLI" softmax upload-baseline --build-dir <build dir>`. The baseline is only the
+comparison champion until the first promotion; it is never submitted. Check it with
+`"$AUTORESEARCH_CLI" softmax leaderboard` (field `baseline`).
+
 Where things live:
 
 | What | Where |
@@ -199,6 +208,7 @@ Where things live:
 | Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
+| Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
 | Hermes logs, cron output | `$PROFILE/logs/`, `$PROFILE/cron/` |
 | Card worktrees | `$PROFILE/workspace/.worktrees/` |
@@ -206,6 +216,22 @@ Where things live:
 | Staged skills (not adopted) | `$PROFILE/local/skills-staging/` |
 | Hermes memory | `$PROFILE/memories/MEMORY.md` |
 | Memory snapshot (committed) | `$PROFILE/workspace/.supervisor/hermes-memory.md` |
+| Outbound messages (read by external agents) | `$PROFILE/workspace/comms/outbox/<seq>-<M-id>.json` |
+| Inbound messages | `$PROFILE/workspace/comms/inbox/<id>.json` |
+
+External agents send inbound messages in one of two ways: `"$AUTORESEARCH_CLI" comms inbound`
+(validates, gives an `I-` id, commits), or by writing `comms/inbox/<id>.json` directly with
+their own id and a `created` time (the Softmax IDE bridge does this). queue-keeper commits a
+valid direct write unchanged on its next run. It answers an invalid one (or a symlink, or a
+file whose owner is not in `AUTORESEARCH_INBOX_WRITERS`) once with a runtime `note` in reply
+to its id and records the id in `.supervisor/ledger/inbound-rejected/`; a rejected id is
+final. Run the external agent as its own OS user and set `AUTORESEARCH_INBOX_WRITERS`: the
+agent's own workers run as the workspace user, and the plugin blocking their inbox writes is
+best effort. See
+[softmax-ide-bridge-compat.md](docs/integrations/softmax-ide-bridge-compat.md).
+
+The message contract (every outbound and inbound kind, as JSON Schema with example messages)
+is [`schemas/comms/`](schemas/comms/README.md); that README also says how to add a kind.
 
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a
 `keeper_step_failed` signal. The agent pauses itself when preflight fails (identity,

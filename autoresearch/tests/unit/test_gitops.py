@@ -113,3 +113,26 @@ def test_commit_paths_commits_only_named_paths(repo):
     (repo / "ledger.json").unlink()
     gitops.commit_paths(repo, ["ledger.json"], "remove")
     assert gitops.show(repo, "HEAD", "ledger.json") is None
+
+
+def test_commit_blobs_ignores_and_keeps_unrelated_staged_changes(repo):
+    (repo / "stray.txt").write_text("staged by someone else\n")
+    gitops.git(repo, "add", "stray.txt")
+    (repo / "inbox.json").write_text("rewritten later\n")  # the committed bytes are the blob's
+    (repo / "seen.json").write_text("{}\n")
+
+    sha = gitops.commit_blobs(repo, {"inbox.json": b"validated\n"}, ["seen.json"], "adopt")
+
+    assert gitops.head(repo) == sha
+    assert gitops.show(repo, "HEAD", "inbox.json") == b"validated\n"
+    assert gitops.show(repo, "HEAD", "seen.json") == b"{}\n"
+    assert gitops.show(repo, "HEAD", "stray.txt") is None
+    assert gitops.git(repo, "diff", "--cached", "--name-only") == "stray.txt"
+
+
+def test_commit_blobs_leaves_nothing_staged_when_it_fails(repo):
+    before = gitops.head(repo)
+    with pytest.raises(gitops.GitError):
+        gitops.commit_blobs(repo, {"inbox.json": b"x\n"}, ["missing.json"], "adopt")
+    assert gitops.head(repo) == before
+    assert gitops.git(repo, "diff", "--cached", "--name-only") == ""

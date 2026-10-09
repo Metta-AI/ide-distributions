@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "comms/inbound/steer.json",
+  "title": "Inbound steer (ar-comms/0): direction from the human, which outranks the agent's own plan.",
+  "x-autoresearch": {
+    "direction": "inbound",
+    "ack": "card",
+    "summary": "Direction that outranks the agent's plan; urgency now gets a P0 card, and it may propose a topic.",
+    "describe": [
+      "Steer (urgency {urgency}): {text}",
+      "\n\nProposed topic: {proposed_topic[title]} — {proposed_topic[objective]} (priority {proposed_topic[priority]})"
+    ]
+  },
+  "allOf": [{"$ref": "../envelope.inbound.json"}],
+  "required": ["text", "urgency"],
+  "properties": {
+    "kind": {"const": "steer"},
+    "text": {"type": "string", "pattern": "\\S", "x-message": "required text"},
+    "urgency": {
+      "enum": ["now", "next", "whenever"],
+      "x-message": "must be one of now, next, whenever"
+    },
+    "proposed_topic": {
+      "description": "A research topic to plan; null is the same as absent.",
+      "type": ["object", "null"],
+      "x-message": "must be an object",
+      "required": ["title", "objective", "metrics", "priority"],
+      "properties": {
+        "title": {"type": "string", "pattern": "\\S", "x-message": "required text"},
+        "objective": {"type": "string", "pattern": "\\S", "x-message": "required text"},
+        "metrics": {"type": "array", "x-message": "must be a list"},
+        "priority": {
+          "enum": ["P0", "P1", "P2", "P3", "P4", "P5"],
+          "x-message": "must be one of P0, P1, P2, P3, P4, P5"
+        }
+      }
+    }
+  }
+}

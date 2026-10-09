@@ -64,7 +64,8 @@ from pathlib import Path
 import jsonschema
 from ulid import ULID
 
-from autoresearch.comms.publisher import outbox_has_title, publish_runtime
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
@@ -261,18 +262,12 @@ def _unrecoverable(ctx: RunContext, receipt: dict, allow_no_remote: bool) -> Non
         f"board rebuild could not re-admit {request_id}: cards/requests/{request_id}.json "
         f"is not committed in canonical"
     )
-    title = f"Request {request_id} lost in a board rebuild"
+    message = runtime_messages.request_lost_in_rebuild(request_id, receipt.get("mode"))
     with canonical_lock(canonical):
         if committed_json(canonical, marker) is not None:
             return
-        if not outbox_has_title(canonical, title):
-            body = (
-                f"After the work board was lost, request {request_id} (admitted, no handoff) "
-                f"had to be re-admitted, but its spec cards/requests/{request_id}.json is not "
-                f"committed, so no card can be created. Its receipt is now rejected. If the "
-                f"work still matters, request it again."
-            )
-            publish_runtime(canonical, "help_request", title, body, [], allow_no_remote)
+        if not already_published(canonical, message):
+            publish_message(canonical, message, allow_no_remote)
         path = receipt_path(ledger_of(canonical), request_id)
         rejected = receipt | {
             "state": "rejected",

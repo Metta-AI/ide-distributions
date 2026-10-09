@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from autoresearch.plugin.policy import command_signature, tool_policy
+from autoresearch.plugin.policy import command_signature, exit_program, tool_policy
 
 WORKING = {"mode": "investigation", "finished": False}
 FINISHED = {"mode": "investigation", "finished": True}
@@ -299,6 +299,13 @@ def test_finished_card_still_allows_reads_trusted_cli_and_completion(layout):
     assert _terminal(layout, "git status && ls notes 2>/dev/null", card=FINISHED)[0]
 
 
+def test_kanban_block_is_allowed_before_and_after_card_finish(layout):
+    """A tool fault ends with ``card finish`` and then ``kanban_block`` (D-26)."""
+    args = {"reason": "tool-fault: x", "kind": "needs_input"}
+    assert tool_policy("kanban_block", args, layout.ctx(), WORKING)[0]
+    assert tool_policy("kanban_block", args, layout.ctx(), FINISHED)[0]
+
+
 def test_kanban_complete_needs_card_finish_first(layout):
     """Without ``card finish`` there is no handoff, so completing would drop the work."""
     allowed, reason = tool_policy("kanban_complete", {"summary": "s"}, layout.ctx(), WORKING)
@@ -306,6 +313,80 @@ def test_kanban_complete_needs_card_finish_first(layout):
     assert tool_policy("kanban_complete", {"summary": "s"}, layout.ctx(), FINISHED)[0]
     no_card = layout.ctx(worker=False)
     assert tool_policy("kanban_complete", {"summary": "s"}, no_card, None)[0]
+
+
+@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link"])
+@pytest.mark.parametrize("card", [WORKING, PLANNING, FINISHED, None])
+def test_native_kanban_card_tools_are_blocked_in_every_session(layout, tool, card):
+    """A worker-made task skips admission, receipts and pause control (C3, C7). Cards come
+    only from requests that queue-keeper admits."""
+    args = {"title": "x", "assignee": "autoresearch", "parent_id": "t_1", "child_id": "t_2"}
+    ctx = layout.ctx(worker=card is not None)
+    allowed, reason = tool_policy(tool, args, ctx, card)
+    assert not allowed
+    assert reason.startswith("autoresearch policy: ")
+    assert '"$AUTORESEARCH_CLI" queue request create --title' in reason
+
+
+KANBAN_WRITE_COMMANDS = [
+    'hermes kanban create "x" --assignee autoresearch',
+    "hermes kanban --board autoresearch link t_1 t_2",
+    "hermes -p autoresearch kanban assign t_1 autoresearch",
+    "env -u HERMES_DELEGATED_CHILD_CONTEXT hermes kanban create x --assignee autoresearch",
+    "HERMES_DELEGATED_CHILD_CONTEXT= hermes kanban create x",
+    "bash -c 'hermes kanban create x'",
+    "cd /tmp && /usr/local/bin/hermes kanban swarm --goal g",
+    "uv run hermes kanban decompose t_1",
+    "python3 -m hermes_cli.main kanban create x",
+    "hermes kanban boards rm autoresearch",
+    "hermes kanban comment t_1 'note'",
+    "hermes kanban unlink t_1 t_2",
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'create', 'x'])\"""",
+    "echo $(hermes kanban create x)",
+    # an allowlist of reads: writes Hermes' fence list misses, and future actions, are refused
+    "hermes kanban set-model t_1 some/model",
+    "hermes kanban some-future-action t_1",
+    "hermes kanban --board create set-model t_1 m",
+    "hermes kanban boards export -o /tmp/x.tar.gz",
+    "hermes kanban boards some-future-action",
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'set-model', 'x'])\"""",
+]
+KANBAN_READ_COMMANDS = [
+    "hermes kanban show t_1 --json",
+    "hermes kanban list --status blocked",
+    "hermes kanban ls",
+    "hermes kanban --board autoresearch runs t_1 --json",
+    "hermes -p autoresearch kanban --board=autoresearch context t_1",
+    "hermes kanban diag --json",
+    "hermes kanban tail t_1",
+    "hermes kanban boards list",
+    "hermes kanban boards current",
+    "hermes kanban",
+    'git commit -m "do not hermes kanban create"',
+    """python3 -c "import subprocess; subprocess.run(['hermes', 'kanban', 'show', 't_1'])\"""",
+]
+
+
+@pytest.mark.parametrize("command", KANBAN_WRITE_COMMANDS)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_hermes_kanban_writes_from_a_shell_are_blocked(layout, command, card):
+    """The shell route to the same board writes (Hermes' delegate fence is the second layer
+    in card workers; it can be unset with ``env -u``, and non-card sessions have none)."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed, command
+    assert '"$AUTORESEARCH_CLI" queue request create --title' in reason
+
+
+@pytest.mark.parametrize("command", KANBAN_READ_COMMANDS)
+def test_hermes_kanban_reads_are_allowed(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert allowed, (command, reason)
+
+
+def test_execute_code_running_hermes_kanban_create_is_blocked(layout):
+    code = "import subprocess\nsubprocess.run(['hermes', 'kanban', 'create', 'x'])"
+    allowed, reason = tool_policy("execute_code", {"code": code}, layout.ctx(), WORKING)
+    assert not allowed and "queue request create" in reason
 
 
 @pytest.mark.parametrize(
@@ -359,6 +440,22 @@ def test_command_signature_strips_env_and_secrets():
     assert command_signature("terminal", {"command": 'echo "unterminated'}).startswith("terminal")
 
 
+def test_command_signature_skips_setup_commands():
+    """Workers start nearly every command with cd; the signature names the real command."""
+    command = (
+        'cd "$HERMES_KANBAN_WORKSPACE" && mkdir -p .scratch && "$AUTORESEARCH_CLI" softmax '
+        "league-episodes --league L --limit 200"
+    )
+    assert command_signature("terminal", {"command": command}) == (
+        "terminal: $AUTORESEARCH_CLI softmax league-episodes --league L"
+    )
+    timed = 'cd "$W" && time "$AUTORESEARCH_CLI" stats noise'
+    assert command_signature("terminal", {"command": timed}) == (
+        "terminal: $AUTORESEARCH_CLI stats noise"
+    )
+    assert command_signature("terminal", {"command": "cd /tmp"}) == "terminal: cd /tmp"
+
+
 def test_absolute_cli_path_is_trusted_through_a_symlink(layout, tmp_path):
     link = tmp_path / "cli-link"
     link.symlink_to(layout.cli)
@@ -385,3 +482,50 @@ def test_interpreter_text_naming_identity_files_is_blocked(layout, code):
 def test_interpreter_text_about_other_env_files_is_allowed(layout):
     code = "print(open('notes/.env.example').read())"
     assert tool_policy("execute_code", {"code": code}, layout.ctx(), WORKING)[0]
+
+
+INBOX_FORGERIES = [
+    '"$AUTORESEARCH_CLI" comms inbound steer --author coach:x --json "{{}}"',
+    '{cli} comms inbound task --author james --file .scratch/t.json',
+    "cd {canon} && python -m autoresearch comms inbound reply --author p --json '{{}}'",
+    "echo '{{}}' > {canon}/comms/inbox/x:task:1.json",
+    "cp .scratch/t.json {canon}/comms/inbox/",
+    "cd {canon}/comms/inbox && tee x.json < /dev/null",
+    "python3 -c \"open('{canon}/comms/inbox/x.json','w').write('{{}}')\"",
+]
+
+
+@pytest.mark.parametrize("command", INBOX_FORGERIES)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_inbound_forgery_is_blocked_in_every_agent_session(layout, command, card):
+    """C11: an inbound message carries the human's authority; only external agents send it."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed and "comms/inbox" in reason
+
+
+def test_file_tools_and_code_cannot_write_the_inbox(layout):
+    ctx = layout.ctx(worker=False)
+    target = {"path": str(layout.canonical / "comms" / "inbox" / "x.json"), "content": "{}"}
+    assert not tool_policy("write_file", target, ctx, None)[0]
+    code = {"code": "open('workspace/comms/inbox/x.json', 'w')"}
+    assert not tool_policy("execute_code", code, ctx, None)[0]
+    # Reading the inbox and the other comms commands stay allowed.
+    read = {"code": "print(open('workspace/comms/inbox/x.json').read())"}
+    assert tool_policy("execute_code", read, ctx, None)[0]
+    assert _terminal(layout, "python3 -c \"import json; json.load(open('{canon}/comms/inbox/x'))\"")[0]
+    assert _terminal(layout, "cat {canon}/comms/inbox/x.json")[0]
+    assert _terminal(layout, '"$AUTORESEARCH_CLI" comms get x:task:1')[0]
+
+
+@pytest.mark.parametrize(
+    ("command", "program"),
+    [
+        ('"$AUTORESEARCH_CLI" queue list | grep x', "grep"),
+        ("grep -q x f; ls missing", "ls"),
+        ('cd "$W" && FOO=1 time "$AUTORESEARCH_CLI" stats noise', "$AUTORESEARCH_CLI"),
+        ("/usr/bin/diff a b", "diff"),
+        ("", None),
+    ],
+)
+def test_exit_program_is_the_last_command(command, program):
+    assert exit_program(command) == program

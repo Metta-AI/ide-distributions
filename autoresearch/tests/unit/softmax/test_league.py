@@ -3,13 +3,15 @@
 league-episodes`` commands feeding ``stats ingest --league`` and ``stats noise``."""
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
 import yaml
 
 from autoresearch.cli import main
-from autoresearch.softmax_tool.client import SoftmaxClient
+from autoresearch.softmax_tool.client import LEAGUE_FETCH_WORKERS, SoftmaxClient
 from autoresearch.softmax_tool.fake import LEAGUE_HOUSE, LEAGUE_POLICIES, FakeSoftmax
 from autoresearch.softmax_tool.league import episode_rows
 
@@ -126,7 +128,7 @@ def league_runner(runner, results_response=None):
 
 def test_real_league_episodes_read_rounds_then_episodes(env, runner):
     sm = SoftmaxClient(env, run=league_runner(runner))
-    episodes = sm.league_episodes(LEAGUE_ID, 10)
+    episodes = list(sm.league_episodes(LEAGUE_ID, 10))
     assert len(episodes) == 1  # the failed episode request is skipped
     episode = episodes[0]
     # The seed is results.json's per-episode seed (the detail's seed is null, and
@@ -154,14 +156,73 @@ def test_real_league_episodes_read_rounds_then_episodes(env, runner):
 
 def test_real_league_episodes_stop_at_limit(env, runner):
     sm = SoftmaxClient(env, run=league_runner(runner))
-    assert len(sm.league_episodes(LEAGUE_ID, 1)) == 1
+    assert len(list(sm.league_episodes(LEAGUE_ID, 1))) == 1
+
+
+def many_episodes_runner(runner, count: int, delay: float = 0.02):
+    """A round of ``count`` completed episodes whose detail calls are slow and counted."""
+    listing = {
+        "entries": [{"id": f"ereq_{i:04d}", "status": "completed"} for i in range(count)],
+        "next_cursor": None,
+    }
+    detail = synthetic("coworld_episode_detail.json")
+    state = {"in_flight": 0, "most": 0, "details": 0}
+    lock = threading.Lock()
+
+    def slow_detail(argv, kwargs):
+        with lock:
+            state["in_flight"] += 1
+            state["details"] += 1
+            state["most"] = max(state["most"], state["in_flight"])
+        time.sleep(delay)
+        with lock:
+            state["in_flight"] -= 1
+        return completed(detail)
+
+    league_runner(runner).on(
+        "coworld", "episodes", "--round", response=completed(json.dumps(listing))
+    )
+    for i in range(count):
+        runner.on("coworld", "episodes", f"ereq_{i:04d}", response=slow_detail)
+    return state
+
+
+def test_real_league_episodes_fetch_concurrently_in_order(env, runner):
+    state = many_episodes_runner(runner, 20)
+    episodes = list(SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 20))
+    assert [e["episode_id"] for e in episodes] == [f"ereq_{i:04d}" for i in range(20)]
+    assert 1 < state["most"] <= LEAGUE_FETCH_WORKERS
+
+
+def test_real_league_episodes_stop_early_with_little_in_flight(env, runner):
+    state = many_episodes_runner(runner, 40)
+    stream = SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 40)
+    next(stream)
+    stream.close()  # the consumer failed (for example an evaluate error)
+    assert state["details"] <= 2 * LEAGUE_FETCH_WORKERS + 1  # the window, nothing more
+
+
+def test_real_league_episode_fetch_is_retried_once(env, runner):
+    many_episodes_runner(runner, 3, delay=0)
+    failures = {"left": 1}
+    detail = synthetic("coworld_episode_detail.json")
+
+    def flaky(argv, kwargs):
+        if failures["left"]:
+            failures["left"] -= 1
+            return completed(stderr="502 Bad Gateway", returncode=1)
+        return completed(detail)
+
+    runner.on("coworld", "episodes", "ereq_0001", response=flaky)
+    episodes = list(SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 3))
+    assert [e["episode_id"] for e in episodes] == ["ereq_0000", "ereq_0001", "ereq_0002"]
 
 
 def test_real_version_falls_back_to_coworld_show(env, runner):
     detail = json.loads(synthetic("coworld_episode_detail.json"))
     del detail["coworld_version"]
     league_runner(runner).on("coworld", "episodes", EREQ, response=completed(json.dumps(detail)))
-    [episode] = SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 5)
+    [episode] = list(SoftmaxClient(env, run=runner).league_episodes(LEAGUE_ID, 5))
     assert episode["game_version"] == "65"
 
 
@@ -208,6 +269,19 @@ def profile(tmp_path, monkeypatch):
 def run(capsys, *argv):
     code = main(list(argv))
     return code, json.loads(capsys.readouterr().out)
+
+
+def test_league_episodes_reports_progress_on_stderr(profile, capsys):
+    out = profile / "rows.jsonl"
+    assert main(["softmax", "league-episodes", "--limit", "25", "--out", str(out)]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["data"]["episodes"] == 25  # stdout stays one envelope
+    lines = captured.err.splitlines()
+    assert [line.split(" (")[0] for line in lines] == [
+        "league-episodes: 10/25 episodes, 20 rows",
+        "league-episodes: 20/25 episodes, 40 rows",
+        "league-episodes: done: 25 episodes, 50 rows",
+    ]
 
 
 def test_game_version_and_standings_commands(profile, capsys):

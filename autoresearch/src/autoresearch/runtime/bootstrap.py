@@ -18,6 +18,8 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    workspace only gets missing ``.gitignore`` lines (committed) and an ``origin`` remote when
    it has none. Seeded, cloned and existing workspaces get ``AGENTS.md`` re-seeded (one
    canonical commit) when ``doctrine/VERSION`` differs from the version in its header.
+   Every run also makes sure ``comms/inbox/`` and ``comms/outbox/`` exist (empty
+   directories, untracked) for external agents.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -32,6 +34,7 @@ from pathlib import Path
 
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_text
+from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import config_migrations
@@ -251,6 +254,14 @@ def _ensure_workspace(
         _seed(canonical, env.get(GAME_ENV) or DEFAULT_GAME, remote, repo_root, result)
 
 
+def _ensure_comms_dirs(canonical: Path) -> None:
+    """``comms/inbox/`` and ``comms/outbox/`` exist from the first run (empty, so git does not
+    track them). An external agent reads a missing outbox as "not initialized yet" and the
+    Softmax IDE bridge waits until it exists; the first publication may be hours away."""
+    for directory in (Layout(canonical).comms_inbox, Layout(canonical).comms_outbox):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
 def _ensure_board(ctx: RunContext, queue: Queue, result: BootstrapResult) -> None:
     board_exists = getattr(queue, "board_exists", None)
     ensure_board = getattr(queue, "ensure_board", None)
@@ -293,6 +304,7 @@ def bootstrap(
         if set_env_lines(home / ".env", env_values):
             result.actions.append("updated the profile .env")
         _ensure_workspace(ctx, env, Path(repo_root), result)
+        _ensure_comms_dirs(ctx.canonical)
         _ensure_board(ctx, queue, result)
         if result.board_created:
             _push(ctx.canonical, result)

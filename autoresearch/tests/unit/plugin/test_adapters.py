@@ -151,6 +151,41 @@ def test_pre_llm_call_needs_a_kanban_task(worker_env, monkeypatch):
     assert adapters.pre_llm_call(is_first_turn=True) is None
 
 
+def test_pre_llm_call_appends_the_running_peers_after_the_briefing(worker_env, layout,
+                                                                   monkeypatch):
+    from .test_peers import BoardDb
+
+    db = layout.hermes_home / "kanban.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db))
+    board = BoardDb(db)
+    board.add("t_1", run=1)
+    board.add("t_peer", run=7)
+    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
+    text = adapters.pre_llm_call(is_first_turn=True)
+    briefing, section = text.split("## Other cards running now")
+    assert "- Run: r_1" in briefing
+    assert '- t_peer (run 7, investigation, P2) "Probe"' in section
+    assert "t_1 (" not in section
+
+
+def test_an_unreadable_board_leaves_the_peers_section_out_and_logs(worker_env, layout,
+                                                                  monkeypatch):
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(layout.hermes_home / "missing.db"))
+    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
+    text = adapters.pre_llm_call(is_first_turn=True)
+    assert "- Run: r_1" in text and "Other cards running now" not in text
+    errors = _lines(worker_env / "plugin_errors.jsonl")
+    assert errors[0]["hook"] == "pre_llm_call" and "does not exist" in errors[0]["error"]
+
+
+def test_the_serial_fallback_gets_no_peers_section(worker_env, monkeypatch):
+    monkeypatch.setenv("AUTORESEARCH_QUEUE", "file")
+    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
+    text = adapters.pre_llm_call(is_first_turn=True)
+    assert "Other cards running now" not in text
+    assert not (worker_env / "plugin_errors.jsonl").exists()
+
+
 def test_unreadable_briefing_never_raises(worker_env):
     (worker_env / "briefings" / "t_1.md").mkdir()
     assert adapters.pre_llm_call(is_first_turn=True) is None
@@ -166,12 +201,70 @@ def test_post_tool_call_records_a_tool_event(worker_env):
     event = _lines(worker_env / "tool_events.jsonl")[0]
     assert set(event) == {
         "ts", "task", "run", "tool", "status", "error_type", "duration_ms", "cmd_signature",
+        "exit_code", "exit_program", "error_signature",
     }
     assert (event["task"], event["run"], event["tool"]) == ("t_1", "r_1", "terminal")
     assert (event["status"], event["error_type"], event["duration_ms"]) == (
         "error", "tool_error", 12,
     )
     assert event["cmd_signature"] == "terminal: curl"
+    assert event["exit_code"] is None  # the result carried no exit code
+
+
+def test_post_tool_call_records_the_terminal_exit_code(worker_env):
+    adapters.post_tool_call(
+        tool_name="terminal", args={"command": "grep -q x f"}, status="error",
+        error_type="tool_error", result='{"output": "", "exit_code": 1, "error": null}',
+    )
+    adapters.post_tool_call(tool_name="terminal", args={"command": "ls"}, result="not json")
+    first, second = _lines(worker_env / "tool_events.jsonl")
+    assert (first["exit_code"], second["exit_code"]) == (1, None)
+    assert (first["exit_program"], first["error_signature"]) == ("grep", "exit 1")
+
+
+@pytest.mark.parametrize(
+    ("command", "output", "code", "program", "signature"),
+    [
+        ('"$AUTORESEARCH_CLI" queue list | grep x', "", 1, "grep", "exit 1"),
+        ("cli x", "[Command timed out after 300s]", 124, "cli", "exit 124 timeout"),
+        (
+            'cd "$W" && "$AUTORESEARCH_CLI" softmax league-episodes --limit 5',
+            '{"error": {"message": "403 token=abc", "reason": "platform"}, "ok": false}',
+            1, "$AUTORESEARCH_CLI", "exit 1 reason platform",
+        ),
+        (
+            '"$AUTORESEARCH_CLI" records validate --all',
+            'noise\n{"error": {"message": "x", "problems": ["a"]}, "ok": false}',
+            1, "$AUTORESEARCH_CLI", "exit 1 problems",
+        ),
+        ("FOO=1 time make", "", 0, "make", None),
+    ],
+)
+def test_terminal_events_name_the_exit_program_and_error(
+    worker_env, command, output, code, program, signature
+):
+    result = json.dumps({"output": output, "exit_code": code, "error": None})
+    adapters.post_tool_call(
+        tool_name="terminal", args={"command": command}, status="error" if code else "ok",
+        error_type="tool_error" if code else None, result=result,
+    )
+    [event] = _lines(worker_env / "tool_events.jsonl")
+    assert (event["exit_program"], event["error_signature"]) == (program, signature)
+    assert "abc" not in json.dumps(event)  # error text never reaches the event
+
+
+def test_other_tools_get_a_masked_error_signature(worker_env):
+    adapters.post_tool_call(
+        tool_name="kanban_complete", args={}, status="error", error_type="tool_error",
+        error_message="kanban_complete: unknown parameter(s) at 1791486871 for t_e87ed360\nmore",
+    )
+    adapters.post_tool_call(
+        tool_name="web_fetch", args={}, status="error", error_type="tool_error",
+        error_message="401 bad token sk-123",
+    )
+    first, second = _lines(worker_env / "tool_events.jsonl")
+    assert first["error_signature"] == "kanban_complete: unknown parameter(s) at # for t_#"
+    assert second["error_signature"] == "# bad"
 
 
 def test_session_end_and_task_completed_append_kanban_events(worker_env):

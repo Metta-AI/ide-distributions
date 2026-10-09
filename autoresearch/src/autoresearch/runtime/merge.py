@@ -76,7 +76,10 @@ OPEN_RECEIPT_STATES = ("admitted", "handed_off")
 RUNTIME = "runtime"
 
 # publish(canonical, merge_sha, handoff record): called after a merge, under the canonical lock.
+# The record it gets also has ``run_summary`` (never stored): the summary the card's run ended
+# with on the board (``RunInfo.summary``, the ``kanban_complete`` summary), or None.
 Publish = Callable[[Path, str, dict], None]
+RUN_SUMMARY = "run_summary"
 
 
 @dataclass
@@ -152,20 +155,24 @@ def _task_epoch(receipt: dict | None, task_id: str) -> str | None:
     return None
 
 
-def _run_is_terminal(queue: Queue, canonical: Path, record: dict) -> bool:
-    """True if the run has ended, or its task belongs to an earlier board epoch (adopted with
-    no run lookup, C3/C12). An unknown task in the current epoch keeps waiting."""
+def _terminal_run(queue: Queue, canonical: Path, record: dict) -> tuple[bool, str | None]:
+    """(terminal, run summary): terminal if the run has ended, or its task belongs to an
+    earlier board epoch (adopted with no run lookup and no summary, C3/C12). An unknown task in
+    the current epoch keeps waiting."""
     ledger = ledger_of(canonical)
     receipt = committed_json(canonical, receipt_path(ledger, record["request_id"]))
     epoch = _task_epoch(receipt, record["card"])
     if epoch is not None and epoch != board_epoch(ledger):
-        return True
+        return True, None
     try:
         card = queue.get(record["card"])
     except LookupError:
-        return False
+        return False, None
     run_id = str(record["run_id"])
-    return any(str(run.run_id) == run_id and run.terminal for run in card.runs)
+    for run in card.runs:
+        if str(run.run_id) == run_id and run.terminal:
+            return True, run.summary
+    return False, None
 
 
 # --- follow-up requests ---
@@ -355,10 +362,12 @@ def _supersede(canonical: Path, ref: str, by: str) -> list[Path]:
     return written
 
 
-def _publish(canonical: Path, path: Path, record: dict, publish: Publish) -> dict:
+def _publish(
+    canonical: Path, path: Path, record: dict, publish: Publish, summary: str | None
+) -> dict:
     """Run ``publish``, then in one commit: handoff ``published``, its receipt
     ``published{merge_sha}``, and every repair/reconcile handoff it references superseded."""
-    publish(canonical, record["merge_sha"], record)
+    publish(canonical, record["merge_sha"], record | {RUN_SUMMARY: summary})
     by = _label(record)
     written = []
     for ref in record["refs"]:
@@ -382,7 +391,9 @@ def _publish_then_promote(ctx: RunContext, publish: Publish) -> Publish:
     return run
 
 
-def _advance(ctx: RunContext, path: Path, store: RecordStore, publish: Publish) -> dict:
+def _advance(
+    ctx: RunContext, path: Path, store: RecordStore, publish: Publish, summary: str | None
+) -> dict:
     """Drive one handoff as far as it goes; call under the canonical lock."""
     canonical = ctx.canonical
     record = committed_json(canonical, path)
@@ -407,7 +418,7 @@ def _advance(ctx: RunContext, path: Path, store: RecordStore, publish: Publish) 
         # promotion.WAIT: stays validated until reconcile settles the promotion's intent
     if record["state"] == "merged":
         promotion.after_merge(ctx, record)
-        record = _publish(canonical, path, record, _publish_then_promote(ctx, publish))
+        record = _publish(canonical, path, record, _publish_then_promote(ctx, publish), summary)
     return record
 
 
@@ -425,10 +436,11 @@ def process_handoffs(
     for path, record in _committed_handoffs(canonical):
         if record["state"] not in PROCESS_STATES:
             continue
-        if not _run_is_terminal(queue, canonical, record):
+        terminal, summary = _terminal_run(queue, canonical, record)
+        if not terminal:
             continue
         with canonical_lock(canonical):
-            record = _advance(ctx, path, store, publish)
+            record = _advance(ctx, path, store, publish, summary)
         outcomes.append(
             HandoffOutcome(
                 task_id=record["card"],

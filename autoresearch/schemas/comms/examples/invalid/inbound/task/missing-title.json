@@ -1,0 +1,12 @@
+{
+  "_why": "title: required text",
+  "schema": "ar-comms/0",
+  "id": "I-01K6Z3V8QX0000000000000004",
+  "kind": "task",
+  "author": "preston",
+  "received_at": "2026-10-08T22:04:00+00:00",
+  "mode": "scouting",
+  "why": "W",
+  "refs": [],
+  "priority": "P1"
+}

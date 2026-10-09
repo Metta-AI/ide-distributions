@@ -139,3 +139,14 @@ def test_board_exists_and_ensure_board(tmp_path):
     assert queue.board_exists() is False  # C12: a missing directory is a missing board
     queue.ensure_board()
     assert queue.board_exists() is True and queue.list() == []
+
+
+def test_current_run_is_the_claimed_run(queue, tmp_path):
+    """FileQueue has no heartbeats; the current run is the claimed one until it ends."""
+    task_id = add(queue, tmp_path, 1)
+    assert queue.get(task_id).current_run_id is None
+    run_id = queue.claim_next("w").runs[-1].run_id
+    card = queue.get(task_id)
+    assert (card.current_run_id, card.last_heartbeat_at) == (run_id, None)
+    queue.finish(task_id, run_id, "done")
+    assert queue.get(task_id).current_run_id is None

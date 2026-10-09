@@ -1,9 +1,8 @@
-"""Doctrine files (Plan 03 Task 4.1): rule IDs, code references, communication kinds."""
+"""Doctrine files (Plan 03 Task 4.1): rule IDs and code references. The kinds that
+``communication.md`` lists are checked by ``tests/contract/comms/test_kind_registry.py``."""
 
 import re
 from pathlib import Path
-
-from autoresearch.comms.envelope import KINDS
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCTRINE = ROOT / "doctrine"
@@ -15,7 +14,7 @@ def rule_ids() -> list[str]:
 
 
 def test_rule_ids_are_unique_contiguous_and_ordered():
-    assert rule_ids() == [f"D-{n:02d}" for n in range(1, 26)]
+    assert rule_ids() == [f"D-{n:02d}" for n in range(1, 27)]
 
 
 def test_groups_hold_the_rules_in_order():
@@ -40,10 +39,11 @@ def test_every_rule_code_used_in_src_exists():
     assert used <= set(rule_ids())
 
 
-def test_communication_lists_exactly_the_outbound_kinds():
-    text = (DOCTRINE / "communication.md").read_text(encoding="utf-8")
-    section = text.split("## The five outbound kinds")[1].split("\n## ")[0]
-    assert re.findall(r"^\| `(\w+)` \|", section, re.MULTILINE) == list(KINDS)
+def test_tool_fault_rule_names_the_exact_block_call():
+    text = (DOCTRINE / "research-agent.md").read_text(encoding="utf-8")
+    rule = text[text.index("D-26.") :]
+    for required in ("kanban_block", "needs_input", "tool-fault:", "card finish --outcome blocked"):
+        assert required in rule
 
 
 def test_communication_does_not_redefine_rule_ids():
