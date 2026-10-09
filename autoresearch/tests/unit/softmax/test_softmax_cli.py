@@ -535,6 +535,34 @@ def test_xp_create_empty_batch_is_refused_without_status_change(board):
     assert meta["status"] == "uploaded" and not meta.get("xp_requests")
 
 
+def test_xp_create_refuses_a_baseline_that_is_no_longer_the_champion(board, launch):
+    """Another policy became champion after the design froze: the experiment can never
+    promote, so nothing is launched (no credits spent on it)."""
+    worker, experiment = launch
+    board.sm.submit(PV_A, LEAGUE)  # the league now shows another champion
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
+    )
+    assert code == 1 and data["error"]["reason"] == "baseline_not_champion"
+    assert PV_A in data["error"]["message"] and BASELINE_PV in data["error"]["message"]
+    meta = worker.store.load(experiment)[0]
+    assert meta["status"] == "uploaded" and not meta.get("xp_requests")
+    assert board.sm.xp_recover(experiment) == []
+
+
+def test_xp_create_refuses_while_the_league_shows_no_champion(board, launch):
+    worker, experiment = launch
+    state_file = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(state_file)
+    state["submissions"] = []
+    write_json(state_file, state)
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
+    )
+    assert code == 1 and data["error"]["reason"] == "champion_unknown"
+    assert board.sm.xp_recover(experiment) == []
+
+
 def test_xp_create_identity_fault_is_refused(board, launch):
     worker, experiment = launch
     env = base_env(board, worker, **{FAULTS_ENV: "player=ply_other"})

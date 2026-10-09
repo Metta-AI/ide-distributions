@@ -591,6 +591,43 @@ def open_conflict(ctx: RunContext, sm: Softmax, league_id: str) -> str | None:
     return None if conflict is None else f"champion conflict: {conflict.detail}"
 
 
+def baseline_problem(
+    ctx: RunContext, sm: Softmax, league_id: str, baseline: str | None
+) -> tuple[str, str] | None:
+    """Why an experiment may not use ``baseline`` now, as ``(reason, message)``, or None when
+    it is the current champion. An experiment designed or launched against any other policy
+    can never promote (``submit_promotion`` requires champion == baseline), so ``stats
+    design`` and ``softmax xp create`` refuse it. Reasons: ``champion_conflict``
+    (``open_conflict``), ``champion_unknown`` (the league shows no champion: the starter-policy
+    bootstrap comes first, A14), ``baseline_not_champion`` (any other policy, such as a
+    leftover uploaded version)."""
+    conflict = open_conflict(ctx, sm, league_id)
+    if conflict is not None:
+        message = (
+            f"{conflict}. Do not design or launch until a human resolves it: record it and "
+            "finish blocked"
+        )
+        return "champion_conflict", message
+    champion, why_none = champion_status(ctx, sm, league_id)
+    if champion is None:
+        message = (
+            f"{why_none}. There is no baseline yet: make the first champion with the "
+            'starter-policy bootstrap (submit skill, section "Bootstrap card"; `softmax '
+            "bootstrap-champion`), then design against it. An uploaded version that is not "
+            "the champion is never a baseline"
+        )
+        return "champion_unknown", message
+    if baseline != champion:
+        message = (
+            f"baseline {baseline!r} is not the current champion {champion}: an experiment "
+            "promotes only against the champion. Design against the champion "
+            "(baseline_version and the experiment's baseline); a leftover uploaded version "
+            "is never a baseline"
+        )
+        return "baseline_not_champion", message
+    return None
+
+
 def bootstrap_blocker(canonical: Path) -> str | None:
     """Why a bootstrap may not run although the league shows no champion (A9, A14), or None.
     A bootstrap is for a fresh install: once a promotion of the loop may have reached the

@@ -67,7 +67,8 @@ platform scores (zero for loss/draw/timeout); `win_rate` is team outcome.
 `xp_per_1k_ticks` and `team_xp_lead` describe the subject, not ten independent
 observations. Repeated teammates share an episode and must be aggregated.
 
-Use leaderboard `current_champion` as `baseline_version`. Run the starter-policy
+Use leaderboard `current_champion` as `baseline_version`, never another uploaded
+version (`stats design` refuses it: `baseline_not_champion`). Run the starter-policy
 bootstrap below in this same card only when both `current_champion` and `conflict`
 are null. If `conflict` is open, send a `help_request` and finish blocked. Finish
 a successful bootstrap card before designing an experiment in a follow-up card

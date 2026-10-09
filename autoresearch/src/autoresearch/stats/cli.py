@@ -13,10 +13,16 @@ Files under the workspace root:
   ``evaluation_design`` (``stats.freeze.freeze_design``) from the request, the game contract
   (``--game`` or ``AUTORESEARCH_GAME``) and the noise record for the league's current game
   version (``Softmax.game_version``, so it needs a profile context). It stores the request as
-  ``evaluation_design_request``. The experiment must be ``designed`` and its
-  ``environment.game_version`` must be the current version. A refusal is exit 1 with
-  ``error.reason``: ``needs_calibration`` (no noise record for the current version),
-  ``not_designed``, ``version_mismatch`` or ``bad_request`` (the request does not freeze).
+  ``evaluation_design_request``. The experiment must be ``designed``, the request's
+  ``baseline_version`` must be the current champion (``check_baseline``: the policy the
+  league shows competing for our player, A9, because a promotion requires champion ==
+  baseline), and its ``environment.game_version`` must be the current version. A refusal is
+  exit 1 with ``error.reason``: ``not_designed``; ``champion_conflict`` (the league and the
+  loop disagree, or the agent is paused for it: ``promotion.open_conflict``);
+  ``champion_unknown`` (the league shows no champion: run the starter-policy bootstrap first,
+  A14); ``baseline_not_champion`` (any other policy, such as a leftover uploaded version);
+  ``version_mismatch``; ``needs_calibration`` (no noise record for the current version); or
+  ``bad_request`` (the request does not freeze).
   ``--planned-pairs`` (the pairs ``delta`` is computed for) defaults to the request's seed count.
   Opponents (A12): a request with ``opponent_count: N`` (and optionally ``opponent_episodes``,
   default 100) is sampled here: the league snapshot from that many recent league episodes and
@@ -51,7 +57,7 @@ from autoresearch.io.docs import _atomic_write_text
 from autoresearch.paths import Layout
 from autoresearch.records.cli import BadArguments, _check_id, _ok, _run
 from autoresearch.records.store import RecordStore
-from autoresearch.runtime.promotion import current_champion
+from autoresearch.runtime.promotion import baseline_problem, current_champion
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
 from autoresearch.stats.design import DesignError, EvaluationDesign
@@ -226,6 +232,7 @@ def _design(args, store: RecordStore) -> int:
             "not_designed",
             f"{experiment} is {meta.get('status')}; the design freezes only while designed",
         )
+    check_baseline(request.get("baseline_version"), game.league_id)
     version = _current_game_version(game.league_id)
     declared = (meta.get("environment") or {}).get("game_version")
     if declared is None or str(declared).strip() != version:
@@ -259,6 +266,24 @@ def _design(args, store: RecordStore) -> int:
     return _ok(
         {"experiment": experiment, "evaluation_design": design.to_dict(), "planned_pairs": planned}
     )
+
+
+def check_baseline(baseline: str | None, league_id: str) -> None:
+    """Refuse (``Refusal``) unless ``baseline`` is the current champion
+    (``promotion.baseline_problem``, module docstring). Needs a profile context."""
+    try:
+        ctx = runctx.from_env()
+    except KeyError as error:
+        raise BadArguments(
+            f"{error.args[0]} is not set: the champion check needs a profile context"
+        ) from None
+    sm = softmax_from_env(os.environ, ctx.canonical)
+    try:
+        problem = baseline_problem(ctx, sm, league_id, baseline)
+    except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
+        raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
+    if problem is not None:
+        raise Refusal(*problem)
 
 
 def _with_sampled_opponents(request: dict, experiment: str, league_id: str) -> dict:

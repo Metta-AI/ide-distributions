@@ -43,6 +43,13 @@ Doctrine upheld: D-01, D-12, D-13, D-21, D-22, D-23.
    A drop affects only a card that has not started.
 8. Request cards for under-served Topics and open threads (step 5 command). Answer each
    stuck signal in the briefing (§5.9, D-13).
+   Experiments compare against the current champion only (`softmax leaderboard`,
+   `current_champion`). Never name a version record as an experiment's baseline in a
+   request, and never request a card to "build and upload a baseline version": an
+   uploaded version is not the champion, and `stats design` refuses any baseline that is
+   not (`baseline_not_champion`). When `current_champion` is null, request one experiment
+   card; its `experiment` step 3 makes the first champion from the game's starter policy
+   (A14).
 9. Check that no two pending cards change the same entity. Merge them, or order them with
    `--order` or priorities.
 10. Update `plan.md`: the Priorities, the active Topics, and the open threads. Record the
