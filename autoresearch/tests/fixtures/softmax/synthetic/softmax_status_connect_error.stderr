@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/venv/lib/python3.12/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+    yield
+httpcore.ConnectError: [Errno 61] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+httpx.ConnectError: [Errno 61] Connection refused

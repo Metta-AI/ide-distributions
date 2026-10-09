@@ -6,8 +6,10 @@ Checks (Runtime §2, §8):
 - Blocked cards (``blocked.handle_blocked``, shared with queue-keeper): requeue once, then a
   repair request and a runtime ``help_request``.
 - Disk: less than 1 GB free under canonical.
-- Credential: ``whoami`` fails, the credential has expired, or it expires within 2 hours (a
-  ``cga_`` agent token has no expiry, so only a failed ``whoami`` counts for it).
+- Credential: Softmax refused the credential or it is missing or malformed
+  (``CredentialRejected``/``CredentialError``), it has expired, or it expires within 2 hours (a
+  ``cga_`` agent token has no expiry). Any other ``whoami`` failure (network, 5xx) is not
+  reported here: queue-keeper's preflight counts those and asks for help after 3 in a row.
   Identity mismatches are preflight's (queue-keeper pauses and asks for help, C6).
 
 Each problem becomes one runtime ``help_request`` per kind (``disk``, ``whoami``,
@@ -38,6 +40,8 @@ from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.blocked import BlockedAction, handle_blocked
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.preflight import EXPIRY_WARNING, MIN_FREE_BYTES
+from autoresearch.softmax_tool.identity import CredentialRejected
+from autoresearch.softmax_tool.platform_cli import CredentialError
 from autoresearch.softmax_tool.protocol import Softmax
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 
@@ -77,8 +81,10 @@ def credential_problem(sm: Softmax, now: datetime.datetime) -> tuple[str, str] |
     """(kind, problem) for the credential, or None when it is fine for 2 more hours."""
     try:
         identity = sm.whoami()
-    except Exception as error:  # noqa: BLE001 - any failure means the credential is unusable
+    except (CredentialRejected, CredentialError) as error:
         return "whoami", f"whoami failed: {type(error).__name__}: {error}"
+    except Exception:  # noqa: BLE001 - not a verdict on the credential; preflight counts these
+        return None
     if identity.expires_at is None:  # a cga_ agent token does not expire
         return None
     if identity.expires_at <= now:

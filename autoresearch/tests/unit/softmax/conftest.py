@@ -34,6 +34,10 @@ def synthetic(name: str) -> str:
     return (SYNTHETIC / name).read_text()
 
 
+class ServerOptionMissing(BaseException):
+    """A CLI call without the explicit ``--server`` (see ``FakeRunner``)."""
+
+
 class FakeRunner:
     """Answers ``run(argv, **kwargs)`` by the first registered argv prefix that matches.
 
@@ -41,8 +45,10 @@ class FakeRunner:
     recorded with its argv (tool name instead of the full executable path) and keyword arguments.
 
     Every call must end with ``--server <server>`` (``server``: the default API server unless a
-    test sets it), or the runner fails the test; so every test checks that each CLI call names
-    its server explicitly. The recorded argv leaves that pair out, to keep assertions short.
+    test sets it), or the runner raises ``ServerOptionMissing``; so every test checks that each
+    CLI call names its server explicitly. That is a ``BaseException``, so code under test that
+    catches ``Exception`` (preflight, health, queue-keeper steps) cannot swallow it. The
+    recorded argv leaves that pair out, to keep assertions short.
     """
 
     def __init__(self, server: str = DEFAULT_SERVER):
@@ -60,7 +66,7 @@ class FakeRunner:
     def __call__(self, argv, **kwargs):
         server_option = ["--server", self.server]
         if list(argv[-2:]) != server_option:
-            raise AssertionError(f"CLI call does not end with {server_option}: {argv}")
+            raise ServerOptionMissing(f"CLI call does not end with {server_option}: {argv}")
         short = [Path(argv[0]).name, *argv[1:-2]]
         self.calls.append((short, kwargs))
         for prefix, response in self.responses:
@@ -87,3 +93,4 @@ def env(tmp_path) -> dict[str, str]:
         "AUTORESEARCH_PLAYER_ID": PLAYER_ID,
         "AUTORESEARCH_SOFTMAX": "real",
     }
+

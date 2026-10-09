@@ -4,7 +4,8 @@ State lives in ``<canonical>/.supervisor/runtime/fake_softmax.json``; every oper
 read-modify-write under a file lock, so separate processes share one fake platform.
 
 Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value``):
-``credits=N``, ``identity=user``, ``player=<id>``, ``expires_in=<seconds>``,
+``credits=N``, ``identity=user``, ``identity=rejected`` (``whoami`` raises
+``CredentialRejected``, as for a revoked token), ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
 (creating a new XP request raises once N exist, like the platform's pending-request cap), and
 ``crash_after=<label>`` (read by runtime code through :func:`fault`). A request whose state
@@ -51,7 +52,11 @@ from pathlib import Path
 
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.io.locks import file_lock
-from autoresearch.softmax_tool.identity import IdentityError, identity_problems
+from autoresearch.softmax_tool.identity import (
+    CredentialRejected,
+    IdentityError,
+    identity_problems,
+)
 from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
 from autoresearch.softmax_tool.xp import handle_order
 
@@ -213,6 +218,8 @@ class FakeSoftmax:
     # --- identity and account -------------------------------------------
 
     def whoami(self) -> Identity:
+        if self._faults.get("identity") == "rejected":
+            raise CredentialRejected("Softmax did not accept the player credential (fake)")
         lifetime = timedelta(seconds=float(self._faults.get("expires_in", 24 * 3600)))
         identity = Identity(
             subject_type="user" if self._faults.get("identity") == "user" else "player",

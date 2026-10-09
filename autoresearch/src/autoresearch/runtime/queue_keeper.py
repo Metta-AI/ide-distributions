@@ -5,8 +5,10 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
 2. ``preflight`` (C6, A3, A5, A10). On failure, including a preflight that raises: pause
-   (C7), one runtime ``help_request`` per pause, and stop (exit 0). No admission while
-   paused.
+   (C7), one runtime ``help_request`` per pause (per streak for a repeatedly unavailable
+   ``whoami``: ``PreflightResult.pause_key``), and stop (exit 0). No admission while paused.
+   A ``skipped`` preflight (``whoami`` unavailable, fewer than 3 times in a row) stops the run
+   without pausing.
 3. Abort a stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
@@ -257,7 +259,7 @@ def pause_for_preflight(
     pause(queue, ledger_of(canonical), f"preflight failed: {reasons}")
     with canonical_lock(canonical):
         paused_at = read_json(pause_path(ledger_of(canonical)))["paused_at"]
-        message = runtime_messages.agent_paused(reasons, paused_at)
+        message = runtime_messages.agent_paused(reasons, paused_at, key=result.pause_key)
         if already_published(canonical, message):
             return
         publish_message(
@@ -619,6 +621,9 @@ def _run_steps(
         run.preflight = PreflightResult(ok=False, reasons=[reason])
     for warning in run.preflight.warnings:
         _log(ctx, f"preflight warning: {warning}")
+    if run.preflight.skipped:
+        _log(ctx, "preflight skipped this run: whoami unavailable")
+        return
     if not run.preflight.ok:
         run.paused = True
         _log(ctx, f"preflight failed: {run.preflight.reasons}")

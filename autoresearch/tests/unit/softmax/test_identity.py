@@ -1,5 +1,6 @@
 import json
 import stat
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 import yaml
 
 from autoresearch.softmax_tool.identity import (
+    CredentialRejected,
     IdentityError,
     identity_problems,
     require_player,
@@ -20,6 +22,7 @@ from .conftest import (
     PLAYER_ID,
     TOKEN,
     FakeRunner,
+    ServerOptionMissing,
     completed,
     credential_value,
     recorded,
@@ -191,21 +194,52 @@ def test_other_shapes_are_still_rejected_without_echoing(env, runner, value):
     "output",
     [
         synthetic("softmax_status_rejected.txt"),
-        "Error: Request failed (401) for /whoami: Failed to authenticate",
+        synthetic("softmax_status_401.stderr"),  # softmax-cli's rendering of a 401
+        "Error: Request failed (401) for /whoami: Failed to authenticate",  # coworld's
+        "Active player session expired (ply_x). Run softmax player use to refresh.",
         "Not authenticated. Run softmax login first.",
     ],
 )
-def test_rejected_credential_is_a_plain_identity_error(env, runner, output):
+def test_rejected_credential_is_a_plain_credential_rejected(env, runner, output):
     """A revoked agent token (or a disabled player) reads as anonymous on /whoami, which
-    ``softmax status`` reports as an invalid token; other routes answer 401."""
+    ``softmax status`` reports as an invalid token; other routes answer 401. The message keeps
+    the platform's words but not the CLI's advice (``softmax login`` is not our recovery)."""
     env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
-    runner.on("softmax", "status", response=completed(stdout=output, returncode=1))
-    with pytest.raises(IdentityError) as raised:
+    runner.on("softmax", "status", response=completed(stderr=output, returncode=1))
+    with pytest.raises(CredentialRejected) as raised:
         whoami(make_cli(env, runner))
     message = str(raised.value)
     assert "Softmax did not accept the player credential" in message
     assert "SOFTMAX_PLAYER_CREDENTIAL" in message and DEFAULT_SERVER in message
+    assert "softmax login" not in message and "Run " not in message and "Next:" not in message
     assert AGENT_TOKEN not in message
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        synthetic("softmax_status_503.stderr"),
+        synthetic("softmax_status_connect_error.stderr"),
+        "Error: Request failed (502) for /whoami: Bad Gateway",
+    ],
+)
+def test_unreachable_platform_is_not_a_rejection(env, runner, output):
+    """A network error or a 5xx says nothing about the credential: a plain ``IdentityError``
+    (mutating calls still fail closed), never ``CredentialRejected``."""
+    runner.on("softmax", "status", response=completed(stderr=output, returncode=1))
+    with pytest.raises(IdentityError) as raised:
+        whoami(make_cli(env, runner))
+    assert not isinstance(raised.value, CredentialRejected)
+    assert "whoami failed" in str(raised.value)
+    assert "did not accept" not in str(raised.value)
+
+
+def test_timeout_is_not_a_rejection(env):
+    def hang(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        whoami(PlatformCli(env, run=hang))
 
 
 # --- server selection ---
@@ -230,3 +264,18 @@ def test_server_comes_from_cogames_api_url(env):
 
 def test_server_defaults_to_softmax_com(env):
     assert make_cli(env, FakeRunner()).server == "https://softmax.com/api" == DEFAULT_SERVER
+
+
+# --- the fake runner's --server check ---
+
+
+def test_missing_server_option_escapes_except_exception():
+    runner = FakeRunner().on("softmax", "status", response=completed())
+    swallowed = []
+    with pytest.raises(ServerOptionMissing):
+        try:
+            runner(["/venv/bin/softmax", "status"])
+        except Exception as error:  # noqa: BLE001 - what code under test does
+            swallowed.append(error)
+    assert swallowed == []
+    assert runner(["/venv/bin/softmax", "status", "--server", DEFAULT_SERVER]).returncode == 0

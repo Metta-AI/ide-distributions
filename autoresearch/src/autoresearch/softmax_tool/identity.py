@@ -8,9 +8,12 @@ credential itself, because ``/whoami`` does not report it; a ``cga_`` agent toke
 
 A credential the platform does not accept (a revoked agent token, a disabled player, an expired
 session, or a token for another server) makes ``softmax status`` exit 1: ``/whoami`` treats an
-unknown token as anonymous ("Token is invalid or expired"), and other routes answer 401. That
-becomes an ``IdentityError`` with a plain explanation, which preflight turns into a pause and a
-help request.
+unknown token as anonymous ("Token is invalid or expired"), and other routes answer 401
+(softmax-cli: "returned HTTP 401"; coworld: "(401)"). That raises ``CredentialRejected``, with a
+plain explanation and without the CLI's own advice ("Run softmax login" is not our recovery).
+Preflight pauses on it at once. Any other failure (network error, 5xx, unreadable output) is
+an ordinary ``IdentityError`` ("whoami failed"): it says nothing about the credential, so
+preflight only pauses after several in a row, while mutating calls still refuse (C6).
 """
 
 import re
@@ -24,11 +27,29 @@ from autoresearch.softmax_tool.platform_cli import (
 )
 from autoresearch.softmax_tool.protocol import Identity
 
-__all__ = ["IdentityError", "identity_problems", "parse_status", "require_player", "whoami"]
+__all__ = [
+    "CredentialRejected",
+    "IdentityError",
+    "identity_problems",
+    "parse_status",
+    "require_player",
+    "whoami",
+]
 
 _REJECTED = re.compile(
-    r"invalid or expired|session expired|Not authenticated|Failed to authenticate|\(40[13]\)"
+    r"invalid or expired|session expired|Not authenticated|Failed to authenticate"
+    r"|\(40[13]\)|HTTP 40[13]\b"
 )
+_CLI_ADVICE = re.compile(r"^(Next|Docs|Request id):.*$|\s*Run [^.\n]*\.?", re.MULTILINE)
+
+
+class CredentialRejected(IdentityError):
+    """Softmax answered and refused the credential (module docstring)."""
+
+
+def _platform_words(error: SoftmaxCliError) -> str:
+    """The CLI's failure text without its advice lines, on one line."""
+    return " ".join(_CLI_ADVICE.sub("", str(error)).split())
 
 
 def parse_status(text: str) -> tuple[str, str]:
@@ -51,11 +72,11 @@ def whoami(cli: PlatformCli) -> Identity:
         raise  # an installation problem, not an identity one
     except SoftmaxCliError as error:
         if _REJECTED.search(str(error)):
-            raise IdentityError(
+            raise CredentialRejected(
                 f"Softmax did not accept the player credential at {cli.server}: it may be "
                 "revoked, the player disabled, a session expired, or the server wrong. Replace "
                 f"SOFTMAX_PLAYER_CREDENTIAL with a current credential, or fix COGAMES_API_URL "
-                f"({error})"
+                f"({_platform_words(error)})"
             ) from None
         raise IdentityError(f"whoami failed: {error}") from None
     subject_type, subject_id = parse_status(result.stdout)

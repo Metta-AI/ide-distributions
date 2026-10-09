@@ -171,11 +171,19 @@ def test_credential_expiring_soon_or_expired(host):
     assert len(_help(host, "credential")) == 2
 
 
-def test_whoami_failure_is_reported(host):
+def test_rejected_credential_is_reported(host):
+    host.set_faults("identity=rejected")
+    result = _check(host, at(2))
+    assert any("did not accept" in problem for problem in result.problems)
+    assert len(_help(host, "whoami")) == 1
+
+
+def test_unreachable_whoami_is_left_to_preflight(host):
+    """A network error or 5xx is no verdict on the credential: queue-keeper's preflight counts
+    those and asks for help after 3 in a row; health does not add a daily help request."""
     host.set_faults("fail_after=whoami")
     result = _check(host, at(2))
-    assert any("whoami" in problem for problem in result.problems)
-    assert len(_help(host, "whoami")) == 1
+    assert result.problems == [] and _help(host, "whoami") == []
 
 
 def test_no_workspace_yet_is_not_an_error(tmp_path):

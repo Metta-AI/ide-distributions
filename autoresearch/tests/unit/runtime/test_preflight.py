@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import yaml
 
 from autoresearch.runtime.preflight import preflight
+from autoresearch.softmax_tool.client import SoftmaxClient
 from autoresearch.softmax_tool.fake import FakeSoftmax
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
@@ -67,9 +68,46 @@ def test_zero_credits_warns(tmp_path):
     assert result.ok and result.credits == 0 and result.warnings
 
 
-def test_whoami_exception(tmp_path):
+def test_whoami_blip_skips_the_run_without_pausing(tmp_path):
+    """A whoami failure that is not a rejection (network, 5xx, timeout) is a warning and a
+    skipped run, not a pause, until it repeats (I1)."""
     result = run(tmp_path, "fail_after=whoami")
-    assert not result.ok and "injected fault" in result.reasons[0]
+    assert result.skipped and not result.ok and not result.reasons
+    assert any("injected fault" in w and "1 in a row" in w for w in result.warnings)
+
+
+def test_three_whoami_failures_in_a_row_pause_with_one_key(tmp_path):
+    first = run(tmp_path, "fail_after=whoami")
+    second = run(tmp_path, "fail_after=whoami")
+    third = run(tmp_path, "fail_after=whoami")
+    fourth = run(tmp_path, "fail_after=whoami")
+    assert first.skipped and second.skipped
+    for paused in (third, fourth):
+        assert not paused.ok and not paused.skipped
+    assert "3 times in a row" in third.reasons[0] and "4 times in a row" in fourth.reasons[0]
+    assert third.pause_key == fourth.pause_key == f"whoami-unavailable:{NOW.isoformat()}"
+
+
+def test_a_good_whoami_resets_the_failure_count(tmp_path):
+    run(tmp_path, "fail_after=whoami")
+    run(tmp_path, "fail_after=whoami")
+    assert run(tmp_path).ok
+    assert run(tmp_path, "fail_after=whoami").skipped  # counting starts again
+
+
+def test_rejected_credential_pauses_at_once(tmp_path):
+    result = run(tmp_path, "identity=rejected")
+    assert not result.ok and not result.skipped
+    assert "did not accept" in result.reasons[0] and result.pause_key is None
+
+
+def test_malformed_credential_pauses_at_once(tmp_path):
+    """The real client's ``CredentialError`` (bad or missing credential) is not a blip."""
+    env = {"AUTORESEARCH_PLAYER_ID": "ply_a", "HERMES_HOME": str(tmp_path / "home")}
+    sm = SoftmaxClient(env)
+    result = preflight(env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB))
+    assert not result.ok and not result.skipped
+    assert "SOFTMAX_PLAYER_CREDENTIAL is not set" in result.reasons[0]
 
 
 def test_missing_player_id_fails(tmp_path):
