@@ -508,6 +508,7 @@ def process_handoffs(
     publish = publish or _no_publish
     outcomes = []
     failures: list[str] = []
+    journal = None
     for path, record in _committed_handoffs(canonical):
         if record["state"] not in PROCESS_STATES or is_foreign(canonical, record["card"]):
             continue
@@ -515,6 +516,7 @@ def process_handoffs(
             ready, summary = _ready(ctx, queue, record, allow_no_remote)
         except Exception as error:  # noqa: BLE001 - per-card containment, raised below
             failures.append(f"{_label(record)}: {type(error).__name__}: {error}")
+            journal = journal or provenance.journal_error(error)
             continue
         if not ready:
             continue
@@ -526,6 +528,7 @@ def process_handoffs(
             if not _left_unchanged(canonical, head_before):
                 raise
             failures.append(f"{_label(record)}: {type(error).__name__}: {error}")
+            journal = journal or provenance.journal_error(error)
             continue
         outcomes.append(
             HandoffOutcome(
@@ -536,8 +539,11 @@ def process_handoffs(
                 follow_up_request=record.get("follow_up_request"),
             )
         )
+    message = "handoff(s) not processed: " + "; ".join(failures)
+    if journal is not None:  # typed, so queue-keeper fails closed
+        raise provenance.JournalError(message) from journal
     if failures:
-        raise RuntimeError("handoff(s) not processed: " + "; ".join(failures))
+        raise RuntimeError(message)
     return outcomes
 
 

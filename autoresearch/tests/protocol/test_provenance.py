@@ -802,3 +802,29 @@ def test_appends_reuse_the_verified_journal_instead_of_rereading_it(host, monkey
     assert len(calls) <= lines + 2 * appends
     entries, invalid = provenance._entries(host.canonical, fresh=True)
     assert invalid == 0 and [e["at"] for e in entries[-appends:]] == [str(n) for n in range(appends)]
+
+
+def test_a_journal_failure_inside_blocked_card_handling_fails_closed(host, monkeypatch):
+    """Codex review of PR #24 round 4: handle_blocked collects per-card failures; a
+    JournalError among them must stay typed so the run pauses (cards unassigned)."""
+    from autoresearch.queue.card import CardSpec
+    from autoresearch.runtime import blocked
+
+    host.tick(at(1))  # admits the planning card
+    planning = host.claim()
+    host.runtime_request(spec=CardSpec("", "Scout", "scouting", "W.", [], "runtime", "P2"))
+    host.tick(at(2))  # admits the scouting card: pending, assigned
+    host.queue.stop(planning.task_id, "blocked for the test")
+    pending = host.queue.list("pending")
+    assert pending and {card.assignee for card in pending} == {PROFILE}
+    assert [card.task_id for card in host.queue.list("blocked")] == [planning.task_id]
+
+    def broken(*_args, **_kwargs):
+        raise provenance.JournalError("cannot write the provenance journal: disk full")
+
+    monkeypatch.setattr(blocked, "_handle_one", broken)
+    run = host.tick(at(3))
+    assert run.paused and "provenance" in run.failures and run.spend_run is not None
+    assert {card.assignee for card in host.queue.list("pending")} == {None}
+    pause = json.loads((host.ledger / "pause.json").read_text())
+    assert pause["reason"].startswith(provenance.PAUSE_REASON)

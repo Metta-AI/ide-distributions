@@ -91,7 +91,20 @@ class ProvenanceError(RuntimeError):
 
 class JournalError(RuntimeError):
     """The journal or its key cannot be read or written. Every runtime commit on canonical
-    needs the journal, so callers treat this as the provenance check failing (fail closed)."""
+    needs the journal, so callers treat this as the provenance check failing (fail closed).
+    Code that contains per-item failures must not turn it into a string: keep it
+    (``journal_error``) and raise it after the loop, so queue-keeper still pauses."""
+
+
+def journal_error(error: BaseException | None) -> JournalError | None:
+    """The ``JournalError`` behind ``error`` (itself, or along its cause/context chain)."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, JournalError):
+            return error
+        seen.add(id(error))
+        error = error.__cause__ or error.__context__
+    return None
 
 
 @dataclass(frozen=True)

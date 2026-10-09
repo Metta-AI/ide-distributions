@@ -62,6 +62,7 @@ from autoresearch.queue.kanban_queue import STOPPABLE_STATUSES
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.pause import is_paused, pause, pause_path
+from autoresearch.runtime.provenance import JournalError, journal_error
 
 ENV_MAX_RUNS = "AUTORESEARCH_MAX_CARD_RUNS"
 ENV_MAX_CARD_USD = "AUTORESEARCH_MAX_CARD_USD"
@@ -378,6 +379,9 @@ class SpendRun:
     unpriced: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)  # "spend_db" -> error
     stop_failures: dict[str, str] = field(default_factory=dict)  # task id -> error (retried)
+    # A stop's record could not be committed (the provenance journal): the caller fails
+    # closed once every card was capped and the budget checked.
+    journal_error: JournalError | None = None
 
 
 def _stop(
@@ -446,6 +450,7 @@ def enforce_cards(
             # ``_stop`` blocks before it records, and its recording is a canonical commit,
             # which a broken provenance journal fails: the other cards must still be stopped.
             result.failures[f"record {card.task_id}"] = f"{type(error).__name__}: {error}"
+            result.journal_error = result.journal_error or journal_error(error)
             continue
         if problem is None:
             result.stopped.append((card.task_id, why))

@@ -295,7 +295,7 @@ def _step(run: KeeperRun, ctx: RunContext, name: str, fn: Callable, *args, **kwa
         message = f"{type(error).__name__}: {error}"
         run.failures[name] = message
         _log(ctx, f"step {name} failed: {message}\n{traceback.format_exc()}")
-        if isinstance(error, provenance.JournalError) and not run.paused:
+        if provenance.journal_error(error) is not None and not run.paused:
             raise _JournalFailed(f"step {name}: {message}") from error
         return None
 
@@ -731,7 +731,10 @@ def _spend_step(
     run: KeeperRun, ctx: RunContext, queue: Queue, config: spend.SpendConfig,
     now: datetime.datetime, allow_no_remote: bool,
 ) -> spend.SpendRun:
-    result = spend.enforce(ctx, queue, config, now, allow_no_remote)
+    result = run.spend_run = spend.enforce(ctx, queue, config, now, allow_no_remote)
+    if result.journal_error is not None:
+        # Every card was capped and the budget checked; now fail closed (``_step``).
+        raise result.journal_error
     for task_id, why in result.stopped:
         _log(ctx, f"spend: stopped card {task_id}: {why}")
     for key, error in result.failures.items():

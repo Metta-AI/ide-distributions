@@ -304,3 +304,21 @@ def test_a_stop_that_cannot_be_recorded_does_not_end_enforcement(host, monkeypat
     assert host.queue.get(task_id).state == "blocked"
     assert result.spend_run is not None
     assert f"spend record {task_id}" in result.failures
+
+
+def test_a_journal_failure_recording_a_stop_caps_first_then_fails_closed(host, monkeypatch):
+    """Codex review of PR #24 round 4: a JournalError while recording a stop is kept typed;
+    the card is still stopped and the budget checked, then the run pauses."""
+    from autoresearch.runtime import provenance
+
+    task_id = _runs(host, 5, end_claimed=True)
+
+    def broken(*_args, **_kwargs):
+        raise provenance.JournalError("cannot write the provenance journal: disk full")
+
+    monkeypatch.setattr(spend, "_report", broken)
+    result = host.tick(at(2))
+    assert host.queue.get(task_id).state == "blocked"
+    assert result.spend_run is not None and result.spend_run.journal_error is not None
+    assert result.paused and "provenance" in result.failures
+    assert read_json(host.ledger / "pause.json")["reason"].startswith(provenance.PAUSE_REASON)
