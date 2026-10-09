@@ -7,7 +7,8 @@ Detection (``needs_rebuild``). Rebuild when:
 - the board is missing (``queue.board_exists()`` is False; A2: its DB or list entry is
   gone; a queue without ``board_exists`` is taken to exist), or
 - an earlier rebuild did not finish (``ledger/board.json`` has ``rebuilding: true``), or
-- the ledger lists open requests and the board holds none of their tasks. Open is exactly
+- the ledger lists open requests and the board holds none of their tasks (an archived task
+  counts as held: ``list`` hides it, but it was closed, not lost). Open is exactly
   what rebuild acts on, read from committed state only: an ``admitted`` receipt rebuild would
   re-admit (no committed handoff, not covered by a promotion, spec committed), or a receipt
   with a committed handoff that normal processing will still act on. Requests a promotion
@@ -26,8 +27,9 @@ next run (the unfinished-rebuild rule above brings it back, in the same epoch):
    committed. Tasks of earlier epochs are now gone: their committed handoffs are adopted by
    normal processing (C3 earlier-epoch rule), and promotion holders count as terminal.
 2. ``queue.ensure_board()`` when the queue has it.
-3. Exactly one recovery action per request receipt: ``admitted`` with no handoff ->
-   re-admitted with key ``req:<Q-id>:<epoch>`` (``admission.readmit``; the request's spec is
+3. Exactly one recovery action per request receipt: ``admitted`` whose card is archived on
+   the board -> nothing (it was dropped, by the runtime or a human; ``queue_ops`` records the
+   drop); ``admitted`` with no handoff -> re-admitted with key ``req:<Q-id>:<epoch>`` (``admission.readmit``; the request's spec is
    its committed ``cards/requests/<Q-id>.json``); ``handed_off`` -> nothing (normal
    processing adopts the handoff, and its repair or reconcile is the only follow-up);
    ``published|superseded|dropped|rejected`` -> nothing; covered by a promotion that reached
@@ -214,9 +216,21 @@ def _covered_by_promotion(canonical: Path, receipt: dict) -> bool:
     return any(promotion.covers_task(canonical, t["task_id"]) for t in receipt.get("tasks", []))
 
 
-def _classify(canonical: Path, receipt: dict) -> str:
-    """What rebuild does with ``receipt`` (one of the constants above)."""
+def _archived(queue: Queue) -> set[str]:
+    """Archived task ids on the board (``KanbanQueue.archived_task_ids``); none for a queue
+    without archiving (FileQueue)."""
+    archived = getattr(queue, "archived_task_ids", None)
+    return archived() if archived is not None else set()
+
+
+def _classify(canonical: Path, receipt: dict, archived: set[str] | frozenset = frozenset()) -> str:
+    """What rebuild does with ``receipt`` (one of the constants above). ``archived``: board
+    task ids that are archived; an ``admitted`` receipt whose card is archived was dropped
+    (by queue_ops, perhaps before its commit, or by a human) and is never re-admitted."""
     if receipt["state"] not in OPEN_RECEIPT_STATES:
+        return SETTLED
+    tasks = receipt.get("tasks") or []
+    if receipt["state"] == "admitted" and tasks and tasks[-1]["task_id"] in archived:
         return SETTLED
     if any(is_foreign(canonical, task["task_id"]) for task in receipt.get("tasks", [])):
         return SETTLED  # a forged receipt of a card the runtime did not create
@@ -249,7 +263,11 @@ def needs_rebuild(ctx: RunContext, queue: Queue) -> bool:
             open_tasks.update(task["task_id"] for task in receipt.get("tasks", []))
     if not open_tasks:
         return False
-    return not open_tasks & {card.task_id for card in queue.list()}
+    if open_tasks & {card.task_id for card in queue.list()}:
+        return False
+    # ``list`` hides archived cards; an archived card is held (closed), not lost. Read only
+    # when nothing listed matched, so a normal run makes no extra call.
+    return not open_tasks & _archived(queue)
 
 
 def problem_marker_path(canonical: Path, request_id: str) -> Path:
@@ -292,10 +310,11 @@ def _recover_requests(
     """Step 3: one action per receipt (module docstring)."""
     canonical = ctx.canonical
     readmitted = []
+    archived = _archived(queue)
     for receipt in _receipts(canonical):
         if receipt["state"] == "admitted" and receipt["tasks"][-1]["board_epoch"] == epoch:
             continue  # already re-admitted in this epoch (a resumed rebuild)
-        kind = _classify(canonical, receipt)
+        kind = _classify(canonical, receipt, archived)
         if kind == NO_SPEC:
             _unrecoverable(ctx, receipt, allow_no_remote)
         elif kind == READMIT:

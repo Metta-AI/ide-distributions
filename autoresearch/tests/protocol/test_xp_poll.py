@@ -255,6 +255,12 @@ def test_unknown_arm_or_missing_binding_fails_instead_of_mislabelling(host):
 # --- awaiting-credits: relaunch after the backoff, no duplicate XP ---
 
 
+def _champion_is_the_baseline(host: Host) -> None:
+    """The league shows the design's baseline as our champion: ``xp create`` launches only
+    against the current champion (``promotion.baseline_problem``)."""
+    host.sm.submit(BASELINE_PV, LEAGUE)
+
+
 def _cli_args(experiment: str) -> argparse.Namespace:
     return argparse.Namespace(experiment=experiment, batch=1, attempt=1, batches=1)
 
@@ -263,6 +269,7 @@ def test_credit_denial_relaunches_after_backoff_without_duplicate_xp(host, monke
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
     experiment = _experiment(host, "uploaded")
+    _champion_is_the_baseline(host)
     meta, _ = host.store.load(experiment)
     planned = softmax_cli.xp_specs(
         meta["evaluation_design"], meta["candidate_binding"], LEAGUE, 1, 1
@@ -314,6 +321,7 @@ def test_relaunch_happens_when_credits_return_before_the_backoff(host, monkeypat
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
     experiment = _experiment(host, "uploaded")
+    _champion_is_the_baseline(host)
     _set_fake_state(host, credits=0)
     launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
     assert softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))["credit_denied"]
@@ -334,6 +342,7 @@ def test_at_most_one_relaunch_per_poll(host, monkeypatch):
     waiting = []
     for _ in range(2):
         experiment = _experiment(host, "uploaded")
+        _champion_is_the_baseline(host)
         _set_fake_state(host, credits=0)
         assert softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))["credit_denied"]
         gitops.commit_all(host.canonical, "launch: credit denied")
@@ -424,6 +433,7 @@ def test_each_denial_gets_its_own_relaunch_and_each_batch_its_own_review(host, m
     monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
     monkeypatch.setattr(softmax_cli, "datetime", _Clock)
     experiment = _experiment(host, "uploaded")
+    _champion_is_the_baseline(host)
     launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
 
     def deny(batch: int, at_time: datetime.datetime) -> datetime.datetime:

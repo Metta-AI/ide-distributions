@@ -356,6 +356,42 @@ def foreign_card(
     )
 
 
+def queue_op_failed(
+    op: str,
+    card_title: str | None,
+    tries: int,
+    error: str,
+    request_id: str,
+    task_id: str | None,
+    board: str,
+) -> RuntimeMessage:
+    """A reprioritize or drop request failed several runs in a row; the runtime gave up on it
+    (``runtime.queue_ops``). The other requests and steps went on."""
+    title = plain_ids(card_title) if card_title and card_title.strip() else None
+    named = f"the card “{_line(title, 80)}”" if title else "a card"
+    verb = "drop" if op == "drop" else "change the priority of"
+    if op == "drop":
+        what_now = (
+            "The card stays on the board and may still run. To remove it, archive it with "
+            f"`hermes kanban --board {board} archive <card>`, where <card> is the card named "
+            "in this message's about field; the runtime then records the drop."
+        )
+    else:
+        what_now = "The card keeps its old priority. Send a new task if the order matters."
+    body = (
+        f"The agent asked to {verb} {named}, but the runtime could not, in {tries} tries, "
+        f"and has stopped trying. Last error: {plain_ids(error)}. {what_now}"
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title(f"Could not {verb} a card", title),
+        body,
+        [],
+        _about(request=request_id, card=task_id),
+        key=f"queue-op-failed:{request_id}",
+    )
+
+
 # --- spend caps (runtime.spend) ---
 
 
@@ -458,6 +494,25 @@ def card_models_invalid(value: str, problems: list[str]) -> RuntimeMessage:
         "Card model setting has errors",
         body,
         key=f"card-models:{digest}",
+    )
+
+
+def host_requirements_missing(game: str, problems: list[str]) -> RuntimeMessage:
+    """The workers lack something the game's ``host_requirements`` declare (one per game and
+    distinct set of problems)."""
+    digest = hashlib.sha256("\n".join(sorted(problems)).encode("utf-8")).hexdigest()[:12]
+    body = (
+        f"The {game} game needs these on the host for its builds, and the agent's workers do "
+        f"not have them: {'; '.join(problems)}. Cards that build a policy will fail until "
+        "they are set up; other work goes on. Please have the operator fix the host setup "
+        "(the profile .env, or the provisioning that writes it). The game's GAME.md says "
+        "what each one is."
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title("Host setup missing for game builds", game),
+        body,
+        key=f"host-requirements:{game}:{digest}",
     )
 
 

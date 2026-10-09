@@ -30,7 +30,9 @@ class Queue(Protocol):
         """Pending cards only."""
 
     def drop(self, task_id: str, reason: str) -> None:
-        """Pending cards only: complete the card with outcome ``dropped``."""
+        """Pending cards only: close the card without doing it (completed with outcome
+        ``dropped``; Kanban archives a card Hermes will not complete, see
+        ``KanbanQueue.drop``)."""
 
     def requeue(self, task_id: str, reason: str) -> None:
         """Return a blocked or claimed card to pending."""

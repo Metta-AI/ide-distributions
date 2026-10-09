@@ -53,3 +53,22 @@ def test_operations_against_real_hermes(queue, tmp_path):
     assert [r.outcome for r in queue.list("completed")[0].runs] == ["dropped"]
     with pytest.raises(ValueError):
         queue.drop(task_id, "again")
+
+
+def test_drop_of_a_todo_child_of_a_blocked_parent(queue, tmp_path):
+    """The box (2026-10-09): Hermes refuses ``complete`` of a todo child while its parent is
+    blocked, so the drop archives it; the blocked parent is left as it is."""
+    parent = queue.create_unassigned(SPEC, "card/Q-it1", tmp_path / "wt1")
+    child_spec = CardSpec("Q-it2", "Child", "investigation", "why", ["r"], "tester", "P2", 1)
+    child = queue.create_unassigned(child_spec, "card/Q-it2", tmp_path / "wt2")
+    queue._kanban("link", parent, child)
+    queue._kanban("block", parent, "waiting on a human")
+    assert queue.get(child).board_status == "todo"
+
+    queue.drop(child, "stale")
+
+    dropped = queue.get(child)
+    assert (dropped.state, dropped.board_status) == ("completed", "archived")
+    assert queue.get(parent).board_status == "blocked"
+    assert [c.task_id for c in queue.list()] == [parent]  # archived cards are hidden
+    assert queue.archived_task_ids() == {child}  # rebuild reads them separately

@@ -210,6 +210,25 @@ def test_a_forged_receipt_never_triggers_a_rebuild_and_is_never_adopted(host, tm
 # --- one recovery action per request receipt ---
 
 
+def test_an_archived_card_is_closed_not_lost(host):
+    """``kanban list`` hides archived cards. A card archived by a human, or by queue_ops just
+    before a crash that lost its commit, still has an ``admitted`` receipt: it must neither
+    trigger a rebuild nor be re-admitted by one."""
+    from support.archiving_queue import ArchivingQueue
+
+    archived = host.admit_requested()
+    queue = ArchivingQueue(host.queue)
+    queue.archive(archived.receipt()["tasks"][-1]["task_id"])
+    assert archived.receipt()["state"] == "admitted"
+    assert queue.list() == []  # what made it look lost
+
+    assert needs_rebuild(host.ctx(), queue) is False
+
+    specs = _rebuild(host, queue)  # a rebuild for another reason leaves it alone
+    assert archived.request_id not in {spec.request_id for spec in specs}
+    assert len(archived.receipt()["tasks"]) == 1
+
+
 def test_each_receipt_gets_exactly_one_recovery_action(host, tmp_path):
     admitted = host.admit_requested()
     handed_off = host.admit_requested()

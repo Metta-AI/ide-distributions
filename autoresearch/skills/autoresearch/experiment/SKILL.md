@@ -28,10 +28,15 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 2. Check refuted mechanism claims on its lever (D-10):
    `"$AUTORESEARCH_CLI" records find claim --where status=refuted`
    Reopen a refuted lever only with evidence that meets the claim's `revise_if`.
-3. Find the baseline: the current champion.
+3. Find the baseline: the current champion, and nothing else.
    `"$AUTORESEARCH_CLI" softmax leaderboard`
    Use `current_champion` (a platform policy version id: the policy the league shows
-   competing for us, A9) as the baseline. When `conflict` is set, stop: record it and finish
+   competing for us, A9) as the baseline. Never use another version record as the
+   baseline, even when the card, the plan or a version record names one (for example a
+   version uploaded by an earlier card, or a title that says "baseline exists"): an
+   experiment against anything but the champion can never promote, and `stats design`
+   refuses it (`baseline_not_champion`). Uploading a version does not make it the champion;
+   only a promotion does. When `conflict` is set, stop: record it and finish
    `blocked` (the runtime paused the agent and told the user). When `current_champion` is
    null (`note` says "no champion") and `conflict` is null, this is a fresh install. Make the
    first champion in this card
@@ -111,6 +116,17 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
   - `version_mismatch`: the experiment's `environment.game_version` is not the current
     version. Update it with `records update` (still `designed`) and rerun.
   - `not_designed`: the design is already frozen. Never change it.
+  - `baseline_not_champion`: `baseline_version` is not the current champion. Read
+    `softmax leaderboard` again and use its `current_champion`. If the champion changed
+    since you made the candidate, copy the new `strategy/STRATEGY.md` again and redo the
+    same one change there (step 10); update the experiment's `baseline` with
+    `records update` (still `designed`). Then rerun.
+  - `champion_unknown`: the league shows no champion. Do not design against any other
+    version. Go to step 3: make the first champion in this card (bootstrap), request the
+    experiment again, and finish.
+  - `champion_conflict`: record it and finish `blocked` (the runtime told the user).
+  - `identity` (D-03): the credential is not our Player. Send a `help_request` and finish
+    `blocked`.
 - The hypothesis is not in the card refs: do not change it. Request a card that names it.
 - If you cannot finish the build in this card, request a "Build <E-id>" card as in the
   `needs_calibration` case and finish `partial`. The runtime makes a build card by itself

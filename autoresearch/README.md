@@ -99,6 +99,14 @@ Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them
 by hand.
 
+A game can declare what its bindings need on the host in the `host_requirements` of its
+`GAME.md` (GotA: `GOTA_HERMES_PYTHON`, `GOTA_TIRITH_BIN` and `nim` on `PATH`; see
+`games/gota/GAME.md`, "Build and upload"). Put those in the profile `.env`, which worker
+terminals read (for Nim, a `PATH=/path/to/nim/bin:${PATH}` line extends the PATH workers
+start with; the braces are required, Hermes leaves a bare `$PATH` as literal text). The EC2 shim's provisioning writes them for GotA. Each run, queue-keeper
+checks them as workers see them and, when one is missing, logs it and sends one help request
+per distinct set; it does not pause.
+
 The GotA `build` binding also needs `GOTA_HERMES_PYTHON` (the Python of the installed
 Hermes) and `GOTA_TIRITH_BIN` (an officially installed tirith scanner), plus the GotA native
 helpers prepared once on the host. Details: [games/gota/GAME.md](games/gota/GAME.md),
@@ -250,7 +258,8 @@ The message contract (every outbound and inbound kind, as JSON Schema with examp
 is [`schemas/comms/`](schemas/comms/README.md); that README also says how to add a kind.
 
 A step that fails does not stop the run. It writes a line to `keeper.log` and shows as a
-`keeper_step_failed` signal. The agent pauses itself when preflight fails (identity,
+`keeper_step_failed` signal. A card reprioritize or drop request that fails is contained the
+same way: it is retried, and after 3 failing runs given up with one help request. The agent pauses itself when preflight fails (identity,
 expired or rejected credential, low disk, low OpenRouter credit, wrong host Kanban config). It sends
 a help request. It resumes by itself when preflight passes again. When Softmax cannot be
 reached to check the credential (network error, timeout, server error), queue-keeper skips

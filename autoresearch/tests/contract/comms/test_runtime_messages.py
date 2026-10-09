@@ -117,6 +117,19 @@ FIXTURES = {
          "board": "autoresearch"},
         {"card_title": None, "task_id": CARD, "board": "autoresearch", "forged_handoff": True},
     ],
+    "queue_op_failed": [
+        {
+            "op": op,
+            "card_title": title,
+            "tries": 3,
+            # Hermes's own refusal names the cards: they are made plain.
+            "error": f"KanbanError: cannot complete {CARD}: unsatisfied parent dependencies",
+            "request_id": REQUEST,
+            "task_id": task,
+            "board": "autoresearch",
+        }
+        for op, title, task in (("drop", "Design a tune", CARD), ("reprioritize", None, None))
+    ],
     "card_over_cap": [
         {
             "card_title": "Build and upload the baseline",
@@ -140,6 +153,15 @@ FIXTURES = {
             "request_id": REQUEST,
             "stop": 1,
             "refs": [],
+        }
+    ],
+    "host_requirements_missing": [
+        {
+            "game": "gota",
+            "problems": [
+                "GOTA_HERMES_PYTHON is not set in the profile .env",
+                "nim is not on the workers' PATH",
+            ],
         }
     ],
     "card_models_invalid": [

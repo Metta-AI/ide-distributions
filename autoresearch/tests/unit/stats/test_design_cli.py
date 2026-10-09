@@ -6,13 +6,17 @@ import pytest
 from records.fixtures import EXP_DESIGNED
 
 from autoresearch.cli import main
+from autoresearch.io import gitops
 from autoresearch.paths import Layout
 from autoresearch.records.store import RecordStore
+from autoresearch.runtime.pause import pause_path
+from autoresearch.softmax_tool.fake import FakeSoftmax
 from autoresearch.stats.noise import write_noise
 
 VERSION = "fake-1"  # FakeSoftmax's default game version
+CHAMPION = "pv-base"  # the policy the fake league shows competing for us (A9)
 REQUEST = {
-    "baseline_version": "pv-base",
+    "baseline_version": CHAMPION,
     "seats": [0],
     "opponent_count": 1,  # sampled from the (fake) league per seed (A12)
     "seeds": list(range(40)),
@@ -39,8 +43,13 @@ def ws(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(root))
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", "ply_fake")  # FakeSoftmax's default player
     for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
         monkeypatch.delenv(name, raising=False)
+    root.mkdir()
+    gitops.git(root, "init", "-q", "-b", "main")
+    gitops.commit_all(root, "empty canonical", allow_empty=True)
+    FakeSoftmax(root, {}).submit(CHAMPION, "fake-league")
     return root
 
 
@@ -186,3 +195,51 @@ def test_versions_compare_without_surrounding_whitespace(ws, tmp_path, capsys):
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 0, env
     assert env["data"]["evaluation_design"]["game_version"] == VERSION
+
+
+# --- the baseline is the champion (A9, A14) ---
+
+
+def test_a_baseline_that_is_not_the_champion_is_refused(ws, tmp_path, capsys):
+    """On the box a design froze against a leftover uploaded version; it could never
+    promote (the promotion requires champion == baseline)."""
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
+    leftover = {**REQUEST, "baseline_version": "V-01M4F1T68CREX794M76JRB1R29"}
+    code, env = design(capsys, ws, tmp_path, exp, request=leftover)
+    assert code == 1 and env["error"]["reason"] == "baseline_not_champion"
+    assert CHAMPION in env["error"]["message"]
+    assert "evaluation_design" not in store.load(exp)[0]
+
+
+def test_no_champion_asks_for_the_starter_policy_bootstrap(ws, tmp_path, capsys):
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
+    state_file = ws / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_file.read_text())
+    state["submissions"] = []  # a fresh install: the league shows no policy for us
+    state_file.write_text(json.dumps(state))
+    code, env = design(capsys, ws, tmp_path, exp)
+    assert code == 1 and env["error"]["reason"] == "champion_unknown"
+    assert "bootstrap" in env["error"]["message"]
+    assert "evaluation_design" not in store.load(exp)[0]
+
+
+def test_an_open_champion_conflict_is_refused(ws, tmp_path, capsys):
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
+    pause_file = pause_path(ws / ".supervisor" / "ledger")
+    pause_file.parent.mkdir(parents=True, exist_ok=True)
+    pause_file.write_text(json.dumps({"reason": "champion conflict: the league shows X"}))
+    code, env = design(capsys, ws, tmp_path, exp)
+    assert code == 1 and env["error"]["reason"] == "champion_conflict"
+    assert "evaluation_design" not in store.load(exp)[0]
+
+
+def test_a_wrong_credential_is_refused_before_the_champion_is_read(ws, tmp_path, capsys, monkeypatch):
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
+    monkeypatch.setenv("AUTORESEARCH_FAKE_FAULTS", "player=ply_other")
+    code, env = design(capsys, ws, tmp_path, exp)
+    assert code == 1 and env["error"]["reason"] == "identity"
+    assert "evaluation_design" not in store.load(exp)[0]

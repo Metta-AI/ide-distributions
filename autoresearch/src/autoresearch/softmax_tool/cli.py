@@ -13,9 +13,13 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   ``xp_specs`` for the mapping, A12). It recovers once, backfills any recovered request missing
   from ``experiment.xp_requests``, creates only the missing requests, and appends
   ``{batch, attempt, seed, arm, request_id, policy}`` for each one as soon as it is created (so
-  a platform error or crash mid-batch loses no record), then moves ``uploaded|awaiting-credits`` to ``evaluating``. It
-  prints ``{created, existing, missing, pairing, credit_denied}``. A credit denial stops the
-  batch with exit 0 and ``credit_denied: true``: requests already created stay (and are
+  a platform error or crash mid-batch loses no record), then moves ``uploaded|awaiting-credits`` to ``evaluating``.
+  Before it creates any request it checks the identity and that ``design.baseline_version``
+  is still the current champion (``promotion.baseline_problem``; refusals
+  ``champion_conflict``, ``champion_unknown``, ``baseline_not_champion``, and nothing is
+  created): an experiment whose baseline is not the champion can never promote. It prints
+  ``{created, existing, missing, pairing, credit_denied}``. A credit denial stops the batch
+  with exit 0 and ``credit_denied: true``: requests already created stay (and are
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating``) and ``lifecycle.next_launch_after`` is set
   by ``credit_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
@@ -121,6 +125,7 @@ from autoresearch.runtime.preflight import env_file_value
 from autoresearch.runtime.promotion import (
     DEFAULT_CHAMPION_GRACE,
     PromotionError,
+    baseline_problem,
     champion_grace,
     champion_status,
     league_check,
@@ -518,6 +523,16 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         for handle in recovered
         if (handle.batch, handle.attempt) == (args.batch, args.attempt)
     }
+    if any((seed, arm) not in existing for seed, arm, _ in planned):
+        # Identity first: the champion read is per player, so a wrong credential would
+        # otherwise show up as "no champion" (the create re-checks it anyway, C6).
+        expected = os.environ.get(PLAYER_ENV, "")
+        problems = identity_problems(sm.whoami(), expected, datetime.now(UTC))
+        if problems:
+            raise IdentityError("; ".join(problems))
+        problem = baseline_problem(ctx, sm, _league_id(), design["baseline_version"])
+        if problem is not None:
+            raise Refused(*problem)
     created: list[dict] = []
     denial: CreditDenied | None = None
     for seed, arm, spec in planned:
