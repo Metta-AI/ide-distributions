@@ -334,8 +334,8 @@ by a killed writer is ended before the next entry, so it never swallows that ent
 for agents (best effort: plugin policy, approvals deny list, and the command refuses in a
 card or any agent session; see Known gaps), and every accept is announced: queue-keeper
 publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is
-visible. A check that cannot run (an unreadable journal or key, also when bootstrap finds
-it so, or a git error) also pauses the agent and still applies the spend caps; a step that
+visible. A check that cannot run (an unreadable journal or key, also when bootstrap or one
+of its own commits finds it so, or a git error) also pauses the agent and still applies the spend caps; a step that
 keeps failing gets its usual help request. The pause unassigns pending cards even when its
 own commit fails (a journal that cannot be written fails every canonical commit, so then the
 help request cannot be published either and is only logged and retried; the uncommitted
