@@ -164,8 +164,9 @@ def preflight(
 
     result.identity_problems = identity_problems(identity, expected_player, now)
     result.reasons.extend(result.identity_problems)
-    if now < identity.expires_at and identity.expires_at - now < EXPIRY_WARNING:
-        result.warnings.append(f"credential expires at {identity.expires_at.isoformat()}")
+    expires_at = identity.expires_at  # None for a cga_ agent token: nothing to warn about
+    if expires_at is not None and now < expires_at and expires_at - now < EXPIRY_WARNING:
+        result.warnings.append(f"credential expires at {expires_at.isoformat()}")
 
     try:
         free_bytes = disk_free(canonical).free

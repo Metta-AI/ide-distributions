@@ -12,10 +12,19 @@ from autoresearch.softmax_tool.identity import (
     require_player,
     whoami,
 )
-from autoresearch.softmax_tool.platform_cli import SERVER, PlatformCli
+from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, PlatformCli
 from autoresearch.softmax_tool.protocol import Identity
 
-from .conftest import PLAYER_ID, TOKEN, completed, credential_value, recorded, synthetic
+from .conftest import (
+    AGENT_TOKEN,
+    PLAYER_ID,
+    TOKEN,
+    FakeRunner,
+    completed,
+    credential_value,
+    recorded,
+    synthetic,
+)
 
 
 def make_cli(env, runner) -> PlatformCli:
@@ -39,7 +48,7 @@ def test_credentials_file_is_profile_local_player_session_with_mode_0600(env, ru
     data = yaml.safe_load(path.read_text())
     # No user token: an expired player session cannot fall back to acting as a user.
     assert data["tokens"] == {}
-    sessions = data["player_sessions"][SERVER]
+    sessions = data["player_sessions"][DEFAULT_SERVER]
     assert sessions["cache"][sessions["active"]]["token"] == TOKEN
 
     _, kwargs = runner.calls[0]
@@ -121,3 +130,103 @@ def test_identity_problems_is_the_single_predicate():
     assert len(problems) == 3
     assert any("'user'" in p for p in problems) and any("expired" in p for p in problems)
     assert identity_problems(good, "", now) == ["AUTORESEARCH_PLAYER_ID is not set"]
+
+
+# --- cga_ agent tokens (the Softmax hosting runtime's player credential) ---
+
+
+def test_agent_token_is_a_non_expiring_player_credential(env, runner):
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    identity = require_player(make_cli(env, runner), PLAYER_ID, datetime.now(UTC))
+    assert (identity.subject_type, identity.player_id) == ("player", PLAYER_ID)
+    assert identity.expires_at is None
+    assert runner.argvs() == [["softmax", "status"]]
+
+
+def test_agent_token_is_written_as_the_server_token_like_the_hosting_runtime(env, runner):
+    """metta observatory_hosted_worker/runtime.py writes ``{"tokens": {<server>: cga_...}}``;
+    the profile-local file has the same shape, and no player session."""
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = f"  {AGENT_TOKEN}\n"
+    cli = make_cli(env, runner)
+    whoami(cli)
+    assert stat.S_IMODE(cli.credentials_path.stat().st_mode) == 0o600
+    data = yaml.safe_load(cli.credentials_path.read_text())
+    assert data == {"tokens": {DEFAULT_SERVER: AGENT_TOKEN}, "player_sessions": {}}
+    _, kwargs = runner.calls[0]
+    assert all(AGENT_TOKEN not in value for value in kwargs["env"].values())
+
+
+def test_switching_credential_kind_rewrites_the_whole_file(env, runner):
+    cli = make_cli(env, runner)
+    whoami(cli)
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    whoami(make_cli(env, runner))
+    data = yaml.safe_load(cli.credentials_path.read_text())
+    assert data["player_sessions"] == {}  # the old player session is gone
+
+
+def test_agent_token_never_expires_in_identity_problems():
+    now = datetime.now(UTC)
+    assert identity_problems(Identity("player", PLAYER_ID, None), PLAYER_ID, now) == []
+
+
+def test_agent_token_for_another_player_is_refused(env, runner):
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    with pytest.raises(IdentityError, match="ply_other"):
+        require_player(make_cli(env, runner), "ply_other", datetime.now(UTC))
+
+
+@pytest.mark.parametrize(
+    "value", [json.dumps({"token": AGENT_TOKEN}), "cga_", "ply_bare_token", "cga_has space"]
+)
+def test_other_shapes_are_still_rejected_without_echoing(env, runner, value):
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = value
+    with pytest.raises(IdentityError) as raised:
+        whoami(make_cli(env, runner))
+    assert AGENT_TOKEN not in str(raised.value) and "ply_bare_token" not in str(raised.value)
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        synthetic("softmax_status_rejected.txt"),
+        "Error: Request failed (401) for /whoami: Failed to authenticate",
+        "Not authenticated. Run softmax login first.",
+    ],
+)
+def test_rejected_credential_is_a_plain_identity_error(env, runner, output):
+    """A revoked agent token (or a disabled player) reads as anonymous on /whoami, which
+    ``softmax status`` reports as an invalid token; other routes answer 401."""
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    runner.on("softmax", "status", response=completed(stdout=output, returncode=1))
+    with pytest.raises(IdentityError) as raised:
+        whoami(make_cli(env, runner))
+    message = str(raised.value)
+    assert "Softmax did not accept the player credential" in message
+    assert "SOFTMAX_PLAYER_CREDENTIAL" in message and DEFAULT_SERVER in message
+    assert AGENT_TOKEN not in message
+
+
+# --- server selection ---
+
+
+def test_server_comes_from_cogames_api_url(env):
+    """``COGAMES_API_URL`` is what the hosting runtime writes and what softmax-cli reads; the
+    credential is keyed by it and every call passes it as ``--server``."""
+    env["COGAMES_API_URL"] = "http://localhost:8000/api/"
+    runner = FakeRunner(server="http://localhost:8000/api")
+    runner.on("softmax", "status", response=completed(recorded("softmax_status.txt")))
+    for value in (credential_value(), AGENT_TOKEN):
+        env["SOFTMAX_PLAYER_CREDENTIAL"] = value
+        cli = make_cli(env, runner)
+        assert cli.server == "http://localhost:8000/api"
+        whoami(cli)
+        data = yaml.safe_load(cli.credentials_path.read_text())
+        assert set(data["tokens"]) | set(data["player_sessions"]) == {"http://localhost:8000/api"}
+    _, kwargs = runner.calls[0]
+    assert "COGAMES_API_URL" not in kwargs["env"]  # the explicit --server is the only source
+
+
+def test_server_defaults_to_softmax_com(env):
+    assert make_cli(env, FakeRunner()).server == "https://softmax.com/api" == DEFAULT_SERVER

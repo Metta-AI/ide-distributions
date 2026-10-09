@@ -6,7 +6,8 @@ Checks (Runtime §2, §8):
 - Blocked cards (``blocked.handle_blocked``, shared with queue-keeper): requeue once, then a
   repair request and a runtime ``help_request``.
 - Disk: less than 1 GB free under canonical.
-- Credential: ``whoami`` fails, the credential has expired, or it expires within 2 hours.
+- Credential: ``whoami`` fails, the credential has expired, or it expires within 2 hours (a
+  ``cga_`` agent token has no expiry, so only a failed ``whoami`` counts for it).
   Identity mismatches are preflight's (queue-keeper pauses and asks for help, C6).
 
 Each problem becomes one runtime ``help_request`` per kind (``disk``, ``whoami``,
@@ -78,6 +79,8 @@ def credential_problem(sm: Softmax, now: datetime.datetime) -> tuple[str, str] |
         identity = sm.whoami()
     except Exception as error:  # noqa: BLE001 - any failure means the credential is unusable
         return "whoami", f"whoami failed: {type(error).__name__}: {error}"
+    if identity.expires_at is None:  # a cga_ agent token does not expire
+        return None
     if identity.expires_at <= now:
         return "credential expired", f"the credential expired at {identity.expires_at.isoformat()}"
     if identity.expires_at - now < EXPIRY_WARNING:

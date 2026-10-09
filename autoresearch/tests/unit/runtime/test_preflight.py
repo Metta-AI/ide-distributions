@@ -43,6 +43,20 @@ def test_expiring_soon_warns(tmp_path):
     assert result.ok and result.warnings
 
 
+def test_agent_token_never_warns_or_fails_on_expiry(tmp_path):
+    """A ``cga_`` agent token has no expiry: no expiry warning, no expiry pause (even with an
+    ``expires_in`` fault, which only a session credential has)."""
+    env = {
+        "AUTORESEARCH_PLAYER_ID": "ply_a",
+        "SOFTMAX_PLAYER_CREDENTIAL": "cga_fake_agent_token",
+        "AUTORESEARCH_FAKE_FAULTS": "expires_in=-60",
+    }
+    sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)
+    result = preflight(env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB))
+    assert result.ok and not result.reasons
+    assert not any("expire" in warning for warning in result.warnings)
+
+
 def test_low_disk_fails(tmp_path):
     result = run(tmp_path, disk=GB // 2)
     assert not result.ok and "MB free" in result.reasons[0]

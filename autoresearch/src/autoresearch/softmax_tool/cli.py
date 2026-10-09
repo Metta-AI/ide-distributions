@@ -3,7 +3,8 @@
 Commands (the Softmax backend comes from ``AUTORESEARCH_SOFTMAX``: ``fake`` or the real client;
 the game, for its league, from ``AUTORESEARCH_GAME``):
 
-- ``whoami``: the credential's identity; exit 1 (``identity``) unless it is the expected
+- ``whoami``: the credential's identity (``expires_at`` is null for a ``cga_`` agent token,
+  which does not expire); exit 1 (``identity``) unless it is the expected
   (``AUTORESEARCH_PLAYER_ID``) unexpired Player.
 - ``credits``: ``{available: true, credits}``, or ``{available: false, reason}`` when the
   balance cannot be read (always, for a Player credential: amendment A10).
@@ -376,7 +377,7 @@ def _whoami(ctx, sm, args) -> dict:
     return {
         "subject_type": identity.subject_type,
         "player_id": identity.player_id,
-        "expires_at": identity.expires_at.isoformat(),
+        "expires_at": identity.expires_at.isoformat() if identity.expires_at else None,
         "problems": problems,
     }
 

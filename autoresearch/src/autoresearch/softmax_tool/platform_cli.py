@@ -1,16 +1,28 @@
 """Run the pinned ``softmax``/``coworld`` CLIs as the profile's Player, isolated from the host user.
 
-Credential handling (C6, A4):
+Credential handling (C6, A4). ``SOFTMAX_PLAYER_CREDENTIAL`` holds one of two Player credentials:
 
-- ``SOFTMAX_PLAYER_CREDENTIAL`` is a JSON object ``{"token": "ply_...", "expires_at": "<ISO 8601>"}``,
-  the same shape as one entry of ``player_sessions[<server>].cache`` in the file that
-  ``coworld player use <ply_id>`` writes. The server's ``/whoami`` does not report token expiry, so
-  the credential must carry it for preflight's expiry checks. A bare token is rejected.
+- A ``cga_...`` agent token, given bare. The Softmax hosting runtime provisions one per hosted
+  player (metta ``packages/observatory-hosted-worker``). The platform resolves it to the
+  player's PLAYER principal; it has no expiry and stops working when the agent is revoked or
+  the player disabled. It is written as the server's token (``tokens[<server>]``), the same
+  shape the hosting runtime writes to its own ``~/.softmax/credentials.yaml``.
+- A Player session: JSON ``{"token": "ply_...", "expires_at": "<ISO 8601>"}``, the same shape
+  as one entry of ``player_sessions[<server>].cache`` in the file that ``coworld player use
+  <ply_id>`` writes. It lasts about 24 hours, and the server's ``/whoami`` does not report the
+  expiry, so the credential must carry it for preflight's expiry checks. It is written as the
+  active player session, with ``tokens`` empty: with no user token in the file, an expired
+  session makes the CLI report "Not authenticated" instead of silently acting as a user.
+
+Any other shape (a bare ``ply_`` token, JSON without ``expires_at``) is rejected.
+
 - Before every CLI call the credential is written to
   ``$HERMES_HOME/local/softmax/home/.softmax/credentials.yaml`` (mode 0600) in softmax-cli 0.26.38's
-  format (``softmax/auth.py``): ``tokens`` (user tokens per server) is left empty and the Player
-  token is the active player session. With no user token in the file, an expired player session
-  makes the CLI report "Not authenticated" instead of silently acting as a user.
+  format (``softmax/auth.py``), keyed by the server.
+- Server: ``COGAMES_API_URL`` (what the hosting runtime writes to the profile ``.env``, and
+  what softmax-cli itself reads), else ``https://softmax.com/api``; a trailing ``/`` is
+  dropped, as the CLIs do. Every call ends with ``--server <server>``, because coworld 0.1.58
+  ignores ``COGAMES_API_URL`` and both CLIs look the token up by that server.
 - The CLIs run with ``HOME`` pointing at that directory, ``cwd`` inside it, and an environment
   built from scratch, so the host user's ``~/.softmax/credentials.yaml`` is never read or changed
   and the credential env var is not passed on. ``COWORLD_AGENT_GUIDANCE=0`` stops ``upload-policy``
@@ -18,9 +30,9 @@ Credential handling (C6, A4):
 - The executables are the ones installed next to the running interpreter (the profile venv), never
   a global binary.
 """
-
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -32,8 +44,11 @@ import yaml
 
 from autoresearch.io.docs import write_text
 
-SERVER = "https://softmax.com/api"
+DEFAULT_SERVER = "https://softmax.com/api"
+SERVER_ENV = "COGAMES_API_URL"
 CREDENTIAL_ENV = "SOFTMAX_PLAYER_CREDENTIAL"
+# A registered agent's token: "cga_" + urlsafe base64 (metta observatory_core credential_tokens).
+AGENT_TOKEN = re.compile(r"cga_[A-Za-z0-9_\-=]+")
 SESSION_KEY = "autoresearch"  # the active-session key in the file; whoami reports the real player
 DEFAULT_TIMEOUT_S = 120
 PAGE_LIMIT = 200
@@ -63,13 +78,25 @@ class CredentialError(IdentityError):
 @dataclass(frozen=True)
 class PlayerCredential:
     token: str = field(repr=False)
-    expires_at: datetime
+    expires_at: datetime | None  # None: a cga_ agent token, which does not expire
+
+
+def server_from_env(env: Mapping[str, str]) -> str:
+    return (env.get(SERVER_ENV) or DEFAULT_SERVER).rstrip("/")
 
 
 def parse_credential(value: str | None) -> PlayerCredential:
-    expected = f'{CREDENTIAL_ENV} must be JSON {{"token": "ply_...", "expires_at": "<ISO 8601>"}}'
+    expected = (
+        f"{CREDENTIAL_ENV} must be a cga_ agent token, or JSON "
+        '{"token": "ply_...", "expires_at": "<ISO 8601>"}'
+    )
     if not value:
         raise CredentialError(f"{CREDENTIAL_ENV} is not set; {expected}")
+    value = value.strip()
+    if value.startswith("cga_"):
+        if not AGENT_TOKEN.fullmatch(value):
+            raise CredentialError(f"{CREDENTIAL_ENV} is not a well-formed cga_ agent token")
+        return PlayerCredential(token=value, expires_at=None)
     try:
         data = json.loads(value)
     except json.JSONDecodeError:
@@ -96,6 +123,7 @@ class PlatformCli:
         self._credential_value = env.get(CREDENTIAL_ENV)
         self._run = run
         self._bin_dir = bin_dir or Path(sys.executable).parent
+        self.server = server_from_env(env)
         self.home = Path(env["HERMES_HOME"]) / "local" / "softmax" / "home"
 
     @property
@@ -105,11 +133,12 @@ class PlatformCli:
     def install_credential(self) -> PlayerCredential:
         """Parse the credential and (re)write the profile-local credentials file from it."""
         credential = parse_credential(self._credential_value)
-        session = {"token": credential.token, "expires_at": credential.expires_at.isoformat()}
-        data = {
-            "tokens": {},
-            "player_sessions": {SERVER: {"active": SESSION_KEY, "cache": {SESSION_KEY: session}}},
-        }
+        if credential.expires_at is None:
+            data = {"tokens": {self.server: credential.token}, "player_sessions": {}}
+        else:
+            session = {"token": credential.token, "expires_at": credential.expires_at.isoformat()}
+            sessions = {"active": SESSION_KEY, "cache": {SESSION_KEY: session}}
+            data = {"tokens": {}, "player_sessions": {self.server: sessions}}
         for directory in (self.home, self.credentials_path.parent):
             directory.mkdir(parents=True, exist_ok=True)
             directory.chmod(0o700)
@@ -136,12 +165,13 @@ class PlatformCli:
         ok_codes: Sequence[int] = (0,),
         timeout: float = DEFAULT_TIMEOUT_S,
     ) -> subprocess.CompletedProcess:
-        """Run ``<venv>/bin/<tool> <args>`` as the Player; raise unless the exit code is in ok_codes."""
+        """Run ``<venv>/bin/<tool> <args> --server <server>`` as the Player; raise unless the
+        exit code is in ok_codes."""
         self.install_credential()
         executable = self._bin_dir / tool
         try:
             result = self._run(
-                [str(executable), *args],
+                [str(executable), *args, "--server", self.server],
                 input=input,
                 capture_output=True,
                 text=True,

@@ -10,6 +10,7 @@ from autoresearch.comms.publisher import publish_runtime
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runtime import health
 from autoresearch.runtime.ledger import canonical_lock
+from autoresearch.softmax_tool.protocol import Identity
 
 T0 = datetime.datetime.now(datetime.UTC)
 GB = 1024**3
@@ -181,3 +182,13 @@ def test_no_workspace_yet_is_not_an_error(tmp_path):
     host = Host(tmp_path)
     result = health.run(host.ctx, host.queue, host.sm, at(0), env=host.env)
     assert result.skipped and result.problems == []
+
+
+def test_a_non_expiring_credential_has_no_expiry_problem():
+    """A ``cga_`` agent token has no expiry (``expires_at`` None): never expiring or expired."""
+
+    class AgentToken:
+        def whoami(self):
+            return Identity("player", "ply_a", None)
+
+    assert health.credential_problem(AgentToken(), at(2)) is None

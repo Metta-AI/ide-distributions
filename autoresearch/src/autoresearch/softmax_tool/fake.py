@@ -13,7 +13,9 @@ entry has ``"failed": true`` (tests set it in the state file) reports status ``f
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
 JSON with a ``player_id`` (a fake-only field), that is the player; otherwise the credential is
 taken to belong to ``AUTORESEARCH_PLAYER_ID``. So a wrong ``AUTORESEARCH_PLAYER_ID`` with a
-credential that names its player fails the C6 check, as on the real platform.
+credential that names its player fails the C6 check, as on the real platform. A credential
+starting ``cga_`` (an agent token) has no expiry, as on the real platform, and ignores
+``expires_in``.
 
 Like the real client, the mutating calls (``upload``, a new ``xp_create``, ``submit``) re-check
 ``whoami`` first and raise ``IdentityError`` unless it is the expected unexpired Player (C6), so
@@ -178,6 +180,7 @@ class FakeSoftmax:
         self._lock_path = runtime_dir / "fake_softmax.lock"
         self._player_id = env.get("AUTORESEARCH_PLAYER_ID") or DEFAULT_PLAYER_ID
         self._credential_player = credential_player(env) or self._player_id
+        self._agent_token = (env.get(CREDENTIAL_ENV) or "").startswith("cga_")
         self._faults = parse_faults(env)
         self._clock = clock
 
@@ -214,7 +217,7 @@ class FakeSoftmax:
         identity = Identity(
             subject_type="user" if self._faults.get("identity") == "user" else "player",
             player_id=self._faults.get("player", self._credential_player),
-            expires_at=self._clock() + lifetime,
+            expires_at=None if self._agent_token else self._clock() + lifetime,
         )
         return self._operate("whoami", lambda _state: identity, persist=False)
 

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER
+
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "softmax"
 RECORDED = FIXTURES / "recorded"
 SYNTHETIC = FIXTURES / "synthetic"
@@ -15,6 +17,7 @@ SYNTHETIC = FIXTURES / "synthetic"
 PLAYER_ID = "ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1"
 LEAGUE_ID = "league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
 TOKEN = "ply_secret_token_value_that_must_never_be_logged_0001"
+AGENT_TOKEN = "cga_secret_agent_token_that_must_never_be_logged_0001"
 
 Response = subprocess.CompletedProcess | Callable[[list[str], dict], subprocess.CompletedProcess]
 
@@ -36,9 +39,14 @@ class FakeRunner:
 
     A prefix is the tool name (``softmax``/``coworld``) followed by leading arguments. Every call is
     recorded with its argv (tool name instead of the full executable path) and keyword arguments.
+
+    Every call must end with ``--server <server>`` (``server``: the default API server unless a
+    test sets it), or the runner fails the test; so every test checks that each CLI call names
+    its server explicitly. The recorded argv leaves that pair out, to keep assertions short.
     """
 
-    def __init__(self):
+    def __init__(self, server: str = DEFAULT_SERVER):
+        self.server = server
         self.responses: list[tuple[tuple[str, ...], Response]] = []
         self.calls: list[tuple[list[str], dict]] = []
 
@@ -50,7 +58,10 @@ class FakeRunner:
         return [argv for argv, _ in self.calls]
 
     def __call__(self, argv, **kwargs):
-        short = [Path(argv[0]).name, *argv[1:]]
+        server_option = ["--server", self.server]
+        if list(argv[-2:]) != server_option:
+            raise AssertionError(f"CLI call does not end with {server_option}: {argv}")
+        short = [Path(argv[0]).name, *argv[1:-2]]
         self.calls.append((short, kwargs))
         for prefix, response in self.responses:
             if tuple(short[: len(prefix)]) == prefix:

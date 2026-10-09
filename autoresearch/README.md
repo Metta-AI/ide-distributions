@@ -69,7 +69,7 @@ Create `$PROFILE/.env` (mode 0600). Hermes never overwrites it.
 
 ```dotenv
 OPENROUTER_API_KEY=sk-or-...
-SOFTMAX_PLAYER_CREDENTIAL='{"token": "ply_...", "expires_at": "2026-10-08T12:00:00Z"}'
+SOFTMAX_PLAYER_CREDENTIAL=cga_...
 AUTORESEARCH_PLAYER_ID=ply_...
 AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 ```
@@ -77,9 +77,10 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | Key | Required | Meaning |
 |---|---|---|
 | `OPENROUTER_API_KEY` | yes | Key for the research model. Hermes keeps it from model commands. |
-| `SOFTMAX_PLAYER_CREDENTIAL` | yes | The credential of the Softmax player the agent acts as. It is JSON with `token` and `expires_at` (ISO 8601): one entry of `player_sessions.<server>.cache` in the `~/.softmax/credentials.yaml` that `coworld player use <ply_id>` writes. A bare token is rejected. Player tokens last about 24 hours; preflight warns 2 hours before expiry and pauses at expiry. Format details: [softmax-client.md](docs/plans/findings/softmax-client.md). |
+| `SOFTMAX_PLAYER_CREDENTIAL` | yes | The credential of the Softmax player the agent acts as, in one of two forms. (1) A bare `cga_...` agent token: the token Softmax hosting provisions for the hosted player (on that host it is the value under `tokens` in `~/.softmax/credentials.yaml`). It does not expire, so preflight never warns about expiry; if Softmax stops accepting it (agent revoked, player disabled), the agent pauses and sends a help request. (2) A Player session, as JSON `{"token": "ply_...", "expires_at": "2026-10-08T12:00:00Z"}` in single quotes: one entry of `player_sessions.<server>.cache` in the `~/.softmax/credentials.yaml` that `coworld player use <ply_id>` writes. It lasts about 24 hours; preflight warns 2 hours before expiry and pauses at expiry. A bare `ply_` token is rejected. Format details: [softmax-client.md](docs/plans/findings/softmax-client.md). |
 | `AUTORESEARCH_PLAYER_ID` | yes | Id of that player. Every Softmax call checks that the credential belongs to it. |
 | `AUTORESEARCH_WORKSPACE_REMOTE` | yes | Git remote of the canonical workspace. **The repository must exist before the first run.** An empty repository is fine. A relative path is relative to `$PROFILE`. |
+| `COGAMES_API_URL` | no | Softmax API server, for example `http://localhost:8000/api` for a local stack. Default `https://softmax.com/api`. Every `softmax`/`coworld` call the agent makes passes it as `--server`, and the credential is used only for that server. Softmax hosting writes it to the profile `.env`. |
 | `OPENROUTER_MODEL` | no | Model id. Default `moonshotai/kimi-k3`, fallback `z-ai/glm-5.3`. When set, bootstrap writes it to `model.default` in the profile `config.yaml` (Hermes workers read the model only from there). |
 | `AUTORESEARCH_GAME` | no | Directory name under `games/`. Default `gota`. |
 | `AUTORESEARCH_WORKSPACE` | no | Path of the canonical workspace. Default `$PROFILE/workspace`. |
@@ -171,7 +172,7 @@ Do not set it on a host: cards would be admitted and never run.
 
 `AUTORESEARCH_CLI` is only in the profile `.env`, and the CLI needs `HERMES_HOME` to be the
 profile home. Softmax commands also need `SOFTMAX_PLAYER_CREDENTIAL` and
-`AUTORESEARCH_PLAYER_ID`. Prepare each operator shell like this (after `PROFILE` is set):
+`AUTORESEARCH_PLAYER_ID`, and `COGAMES_API_URL` when the server is not softmax.com. Prepare each operator shell like this (after `PROFILE` is set):
 
 ```sh
 set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"
@@ -251,7 +252,7 @@ memory is not in that repository by itself: queue-keeper copies it to
 `.supervisor/hermes-memory.md` after each merge pass, and that file is pushed with `main`.
 
 1. Install Hermes and the profile as above. Write the same `.env` (new credential if the
-   old one expired).
+   old one expired or was revoked).
 2. Run bootstrap once (this is the command that clones the workspace; `uv` must be on `PATH`):
 
 ```sh
