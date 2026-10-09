@@ -217,7 +217,16 @@ Read state with the CLI:
 "$AUTORESEARCH_CLI" comms list
 "$AUTORESEARCH_CLI" promotion status
 "$AUTORESEARCH_CLI" softmax whoami
+"$AUTORESEARCH_CLI" status --json
 ```
+
+`status --json` is one read-only snapshot, also allowed to cards: the distribution version
+and commit (and a failed update, from the profile's `.softmax-update-failed` JSON
+`{"commit", "error"}`), pause state and reasons, coach hold, `AUTORESEARCH_AUTONOMY` and
+whether the agent started, today's estimated spend against the daily budget, the OpenRouter
+key's limit, usage and remaining credit, running cards, open questions, the champion and any
+conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
+`warnings` entry. It never prints a credential.
 
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 

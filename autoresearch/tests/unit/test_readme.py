@@ -67,7 +67,9 @@ def test_every_cli_command_in_the_readme_exists():
     used = [c[1:3] for c in shell_commands() if c[0] == CLI_VARIABLE]
     assert used, "README shows no CLI commands"
     for group, subcommand in used:
-        assert subcommand in available.get(group, []), f"{group} {subcommand}"
+        assert group in available, group
+        if available[group]:  # a group without subcommands (``status``) takes only options
+            assert subcommand in available[group], f"{group} {subcommand}"
 
 
 def test_cron_jobs_in_the_readme_are_shipped_jobs():

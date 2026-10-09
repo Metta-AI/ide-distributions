@@ -250,23 +250,38 @@ def credit_floor(env: Mapping[str, str]) -> tuple[float, list[str]]:
     return value, []
 
 
+def fetch_key_data(
+    env: Mapping[str, str], hermes_home: Path | None, http_get: HttpGet
+) -> tuple[dict | None, list[str]]:
+    """(the ``data`` object of ``GET /api/v1/key``, warnings). None, with a warning, when the
+    check is skipped, there is no key, or the lookup fails. The key never appears in a warning."""
+    if env.get(SKIP_OPENROUTER_ENV) == "1":
+        return None, [f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
+    key = env.get(OPENROUTER_KEY_ENV)
+    if not key and hermes_home is not None:
+        key = env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
+    if not key:
+        return None, [f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
+    try:
+        payload = json.loads(http_get(OPENROUTER_KEY_URL, {"Authorization": f"Bearer {key}"}))
+        return dict(payload.get("data") or {}), []
+    except Exception as error:  # noqa: BLE001 - a lookup failure must not pause the agent
+        return None, [f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
+
+
 def openrouter_problems(
     env: Mapping[str, str], hermes_home: Path | None, http_get: HttpGet
 ) -> tuple[list[str], list[str]]:
     """(reasons, warnings) from the OpenRouter key's remaining credit (A5)."""
     floor, warnings = credit_floor(env)
-    if env.get(SKIP_OPENROUTER_ENV) == "1":
-        return [], [*warnings, f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
-    key = env.get(OPENROUTER_KEY_ENV)
-    if not key and hermes_home is not None:
-        key = env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
-    if not key:
-        return [], [*warnings, f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
+    data, lookup_warnings = fetch_key_data(env, hermes_home, http_get)
+    warnings = [*warnings, *lookup_warnings]
+    if data is None:
+        return [], warnings
     try:
-        payload = json.loads(http_get(OPENROUTER_KEY_URL, {"Authorization": f"Bearer {key}"}))
-        remaining = (payload.get("data") or {}).get("limit_remaining")
+        remaining = data.get("limit_remaining")
         remaining = None if remaining is None else float(remaining)
-    except Exception as error:  # noqa: BLE001 - a lookup failure must not pause the agent
+    except (TypeError, ValueError) as error:
         return [], [*warnings, f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
     if remaining is not None and remaining < floor:
         reason = f"OpenRouter key has ${remaining:.2f} left, below ${floor:g}: top it up (A5)"

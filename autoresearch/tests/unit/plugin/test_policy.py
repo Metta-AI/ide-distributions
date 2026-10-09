@@ -162,6 +162,7 @@ ALLOWED_COMMANDS = [
     "${{AUTORESEARCH_CLI}} kb add notes/x.md",
     "$AUTORESEARCH_CLI card show",
     "{cli} card show",
+    '"$AUTORESEARCH_CLI" status --json',
     "FOO=1 {cli} card show 2>/dev/null",
     'git commit -m "avoid coworld submit"',
     'echo "coworld submit is blocked here"',
