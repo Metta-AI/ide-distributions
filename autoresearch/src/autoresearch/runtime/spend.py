@@ -162,10 +162,10 @@ class Cost:
     unpriced: list[str] = field(default_factory=list)  # sessions priced from token counts
 
 
-def card_sessions(ctx: RunContext) -> dict[str, set[str]]:
-    """task id -> the root sessions the plugin recorded for its runs."""
+def session_runs(ctx: RunContext) -> dict[str, tuple[str, str | None]]:
+    """session id -> (task id, run id) for every session the plugin recorded for a card run."""
     path = runtime_dir(ctx) / EVENTS_FILE
-    found: dict[str, set[str]] = {}
+    found: dict[str, tuple[str, str | None]] = {}
     if not path.exists():
         return found
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -175,9 +175,17 @@ def card_sessions(ctx: RunContext) -> dict[str, set[str]]:
             continue  # a line cut by a crash
         if not isinstance(event, dict):
             continue
-        task, session = event.get("task"), event.get("session_id")
+        task, session, run = event.get("task"), event.get("session_id"), event.get("run")
         if event.get("event") in ("session_start", "session_end") and task and session:
-            found.setdefault(str(task), set()).add(str(session))
+            found.setdefault(str(session), (str(task), str(run) if run else None))
+    return found
+
+
+def card_sessions(ctx: RunContext) -> dict[str, set[str]]:
+    """task id -> the root sessions the plugin recorded for its runs."""
+    found: dict[str, set[str]] = {}
+    for session, (task, _) in session_runs(ctx).items():
+        found.setdefault(task, set()).add(session)
     return found
 
 

@@ -10,18 +10,22 @@ Sources and rules:
   compiler copy at ``<profile>/gota-compiler/*/state.db`` (written by the GotA build adapter,
   ``games/gota/tools/build.py``). A session's cost is ``spend.session_usd`` (actual, else
   Hermes' estimate, else the fallback prices). Days are UTC.
-- **cards**: every card the plugin recorded a session for (``spend.card_sessions``) whose runs
-  started on or after ``since``. Tokens and cost cover each run's session tree
-  (``parent_session_id``); ``wall_s`` sums, per run, the last session end (now for one still
-  open) minus the run's first start; ``model`` lists the runs' models in start order. ``mode``,
-  ``runs`` and ``outcome`` (the last finished run's outcome, else the card state) come from the
-  board, else from the card's latest handoff record.
+- **cards**: every card the plugin recorded a session for (``spend.session_runs``) with a run
+  whose first session started on or after ``since``. Only those runs count (``runs``, tokens,
+  cost, wall time), so card totals agree with the day totals of the same window. Tokens and
+  cost cover each run's session tree (``parent_session_id``). ``wall_s`` sums, per run, the
+  tree's latest known time (an ``ended_at``, or a later session's start; now only for the run
+  in flight on the board) minus the run's first start; a finished run with no end recorded is
+  left out with a warning, and ``wall_s`` is null when no run has one. ``model`` lists the
+  runs' models in start order. ``mode`` and ``outcome`` (the last finished run's outcome, else
+  the card state) come from the board, else from the card's latest handoff record.
 - **days**: ``estimated_usd_by_source`` always has ``cli`` (card workers: Hermes sources
   ``kanban`` and ``cli``), ``api_server`` (the coach chat), ``compiler`` (the compiler copies)
   and ``cron``; any other source seen (``delegate``, ``oneshot``, ...) is an extra key with
   its own total. ``key_usage_delta_usd`` is the key's ``usage_daily`` for today and null for
   earlier days (no key history is kept). ``cards_finished`` counts cards with a ``done``
-  handoff record first committed that day.
+  handoff record first committed that day: finished by the worker, even if a later merge or
+  validation rejected the work. A ``since`` after today gives no days and a warning.
 - **experiments**: experiment records created, or with XP evidence fetched, since ``since``.
   ``xp_requests`` is the record's list; ``episodes`` the rows of its ``xp-result`` evidence;
   ``credits`` is null (no per-request credit cost is stored); ``wall_s_to_evidence`` runs from
@@ -141,6 +145,15 @@ def _id_time(record_id: str) -> datetime.datetime:
     return ULID.from_str(parse_id(record_id)[1]).datetime
 
 
+def _parse_time(value) -> datetime.datetime | None:
+    """An ISO time with a zone, or None (missing, malformed, or without a zone)."""
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
 def _seconds(started: str | None, finished: str | None) -> float | None:
     try:
         begin = datetime.datetime.fromisoformat(str(started))
@@ -167,30 +180,38 @@ def _card_trees(ctx: RunContext, roots: set[str], warnings: list[str]) -> list:
 
 
 def _cards(ctx, start, now, prices, board, handoffs, warnings) -> list[dict]:
-    sessions = spend.card_sessions(ctx)
-    owner = {root: task for task, roots in sessions.items() for root in roots}
-    rows = _card_trees(ctx, set(owner), warnings)
+    """Per card, its runs whose first session started on or after ``start`` (module docstring)."""
+    runs = spend.session_runs(ctx)
+    rows = _card_trees(ctx, set(runs), warnings)
     # A recorded session can be another's descendant (a ``session_end`` after compression):
     # count it once, under the run it continues.
     descendants = {row["id"] for row in rows if row["id"] != row["root"]}
     by_task: dict[str, list] = defaultdict(list)
     for row in rows:
         if row["root"] not in descendants:
-            by_task[owner[row["root"]]].append(row)
+            by_task[runs[row["root"]][0]].append(row)
     latest_handoff = {record.get("card"): record for record in handoffs}
     cards = []
     for task, task_rows in sorted(by_task.items()):
-        root_rows = sorted((row for row in task_rows if row["id"] == row["root"]),
-                           key=lambda row: row["started_at"])
-        if not root_rows or root_rows[-1]["started_at"] < start.timestamp():
+        root_rows = sorted(
+            (row for row in task_rows
+             if row["id"] == row["root"] and row["started_at"] >= start.timestamp()),
+            key=lambda row: row["started_at"],
+        )
+        if not root_rows:
             continue
+        kept = {row["id"] for row in root_rows}
+        task_rows = [row for row in task_rows if row["root"] in kept]
+        card = board.get(task)
+        in_flight = {root for root in kept if card and card.current_run_id
+                     and runs[root][1] == card.current_run_id}
         cards.append(
             {
                 "task": task,
-                **_card_meta(board.get(task), latest_handoff.get(task), len(root_rows)),
+                **_card_meta(card, latest_handoff.get(task), len(root_rows)),
                 "model": ", ".join(dict.fromkeys(r["model"] for r in root_rows if r["model"]))
                 or None,
-                "wall_s": _wall_s(task_rows, root_rows, now),
+                "wall_s": _wall_s(task, task_rows, root_rows, in_flight, now, warnings),
                 "input_tokens": sum(row["input_tokens"] or 0 for row in task_rows),
                 "output_tokens": sum(row["output_tokens"] or 0 for row in task_rows),
                 "cache_read_tokens": sum(row["cache_read_tokens"] or 0 for row in task_rows),
@@ -200,27 +221,47 @@ def _cards(ctx, start, now, prices, board, handoffs, warnings) -> list[dict]:
     return cards
 
 
-def _card_meta(card, handoff: dict | None, sessions_seen: int) -> dict:
+def _card_meta(card, handoff: dict | None, runs_seen: int) -> dict:
+    """Mode and outcome from the board, else the latest handoff; ``runs`` is the number of
+    runs in the report window."""
     if card is not None:
         finished = [run.outcome for run in card.runs if run.terminal and run.outcome]
         return {
             "mode": card.spec.mode,
-            "runs": len(card.runs),
+            "runs": runs_seen,
             "outcome": finished[-1] if finished else card.state,
         }
     return {
         "mode": handoff.get("mode") if handoff else None,
-        "runs": sessions_seen,
+        "runs": runs_seen,
         "outcome": handoff.get("outcome") if handoff else None,
     }
 
 
-def _wall_s(rows, root_rows, now: datetime.datetime) -> float:
-    last_end: dict[str, float] = {}
+def _wall_s(task, rows, root_rows, in_flight, now, warnings) -> float | None:
+    """Sum over runs of (end - first start). A run's end is its tree's latest ``ended_at`` or
+    later ``started_at``; ``now`` only for the run in flight on the board. A finished run
+    with no end recorded (a worker that died) is left out with a warning; null when no run
+    has an end."""
+    latest: dict[str, float] = {}
     for row in rows:
-        end = row["ended_at"] or now.timestamp()
-        last_end[row["root"]] = max(last_end.get(row["root"], 0.0), end)
-    return round(sum(last_end[row["id"]] - row["started_at"] for row in root_rows), 3)
+        known = [row["ended_at"]] if row["ended_at"] else []
+        if row["id"] != row["root"]:
+            known.append(row["started_at"])
+        for value in known:
+            latest[row["root"]] = max(latest.get(row["root"], 0.0), value)
+    total, counted = 0.0, 0
+    for root in root_rows:
+        end = now.timestamp() if root["id"] in in_flight else latest.get(root["id"])
+        if end is None:
+            warnings.append(
+                f"card {task}: run session {root['id']} never recorded an end; its wall time "
+                "is left out"
+            )
+            continue
+        total += end - root["started_at"]
+        counted += 1
+    return round(total, 3) if counted else None
 
 
 # --- days ---
@@ -238,6 +279,8 @@ def _days(ctx, start, now, prices, key_data, handoffs, warnings) -> list[dict]:
             spend_by_day[_utc_date(row["started_at"])]["compiler"] += _usd(row, prices)
     finished = _cards_finished(handoffs)
     today = now.astimezone(datetime.UTC).date()
+    if start.date() > today:
+        warnings.append(f"--since {start.date()} is after today ({today}): no days to report")
     days = []
     day = start.date()
     while day <= today:
@@ -296,8 +339,11 @@ def _read_experiments(ctx, start, prices, board, handoffs, warnings) -> list[dic
     found = []
     for experiment in experiment_ids:
         created = _id_time(experiment)
-        fetched = sorted(str(record.get("fetched_at")) for record in by_experiment[experiment])
-        if created < start and not (fetched and fetched[-1] >= start.isoformat()):
+        fetched = sorted(
+            time for record in by_experiment[experiment]
+            if (time := _parse_time(record.get("fetched_at"))) is not None
+        )
+        if created < start and not (fetched and fetched[-1] >= start):
             continue
         meta, _ = store.load(experiment)
         ref = f"ar://experiment/{experiment}"
@@ -315,8 +361,9 @@ def _read_experiments(ctx, start, prices, board, handoffs, warnings) -> list[dic
                     _count_rows(ctx.canonical, record) for record in by_experiment[experiment]
                 ),
                 "credits": None,
-                "wall_s_to_evidence": _seconds(created.isoformat(), fetched[-1]) if fetched
-                else None,
+                "wall_s_to_evidence": (
+                    round((fetched[-1] - created).total_seconds(), 3) if fetched else None
+                ),
                 "estimated_usd_of_its_cards": None if usd is None else round(usd, 4),
             }
         )

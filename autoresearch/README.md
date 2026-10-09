@@ -261,7 +261,7 @@ Where things live:
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
 | Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
 | Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
-| GotA compiler child sessions, one copy per build (read by `report baseline`) | `$PROFILE/gota-compiler/<build id>-<suffix>/state.db` |
+| GotA compiler child sessions, one full copy per build, not pruned yet (read by `report baseline`) | `$PROFILE/gota-compiler/<build id>-<suffix>/state.db` |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |

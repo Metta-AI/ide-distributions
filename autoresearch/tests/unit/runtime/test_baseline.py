@@ -153,6 +153,45 @@ def test_nothing_before_since_is_reported(ctx, canonical, queue):
     assert [day["date"] for day in data["days"]] == ["2026-10-10"]
 
 
+def test_card_totals_cover_only_runs_since(ctx, canonical, queue):
+    seed(ctx, canonical, queue)
+    data = baseline.build(ctx, ENV, datetime.date(2026, 10, 9), http_get, queue, NOW)["data"]
+    [card] = data["cards"]
+    assert (card["runs"], card["input_tokens"], card["wall_s"]) == (1, 200, 600.0)
+    [day] = data["days"]
+    assert card["estimated_usd"] == day["estimated_usd_by_source"]["cli"] == 2.0
+
+
+def test_wall_time_uses_now_only_for_the_run_in_flight(ctx, canonical, queue):
+    ctx.hermes_home.mkdir()
+    task = queue.create_unassigned(make_spec(), "q", canonical.root)
+    queue.assign(task, "worker")
+    dead = queue.claim_next("worker").runs[-1].run_id
+    queue.requeue(task, "worker died")
+    live = queue.claim_next("worker").runs[-1].run_id
+    add_session(ctx.hermes_home, "dead", 0.1, started_at=ts(9, 8))  # never ended
+    add_session(ctx.hermes_home, "live", 0.1, started_at=ts(9, 10))  # running now
+    record_session_start(canonical.root, task, dead, "dead")
+    record_session_start(canonical.root, task, live, "live")
+
+    result = baseline.build(ctx, ENV, SINCE, http_get, queue, NOW)
+
+    assert result["data"]["cards"][0]["wall_s"] == 2 * 3600.0
+    assert any("dead never recorded an end" in warning for warning in result["warnings"])
+    later = baseline.build(ctx, ENV, SINCE, http_get, queue, NOW + datetime.timedelta(hours=1))
+    assert later["data"]["cards"][0]["wall_s"] == 3 * 3600.0  # only the live run grows
+    queue.finish(task, live, "done")
+    finished = baseline.build(ctx, ENV, SINCE, http_get, queue, NOW)
+    assert finished["data"]["cards"][0]["wall_s"] is None  # no run recorded an end
+
+
+def test_a_since_after_today_warns(ctx, queue):
+    ctx.hermes_home.mkdir()
+    result = baseline.build(ctx, ENV, datetime.date(2026, 10, 12), http_get, queue, NOW)
+    assert result["data"]["days"] == []
+    assert any("after today" in warning for warning in result["warnings"])
+
+
 def test_a_fresh_agent_and_no_key(ctx, queue):
     ctx.hermes_home.mkdir()
     result = baseline.build(ctx, {}, datetime.date(2026, 10, 9), http_get, queue, NOW)
