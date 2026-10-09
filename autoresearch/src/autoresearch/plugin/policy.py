@@ -11,8 +11,8 @@
   every model write after `card finish` (C3), and `memory` writes outside planning cards;
 - the native `kanban_complete` on a card before `card finish` ran (C3): a completed run with no
   handoff record leaves its work unmerged;
-- Kanban board writes in every agent session (C3, C7): the native `kanban_create` and
-  `kanban_link`, and `hermes kanban <action>` from a shell or code for every action except a
+- Kanban board writes in every agent session (C3, C7): the native `kanban_create`,
+  `kanban_link` and `kanban_schedule` (Hermes v0.21.6+), and `hermes kanban <action>` from a shell or code for every action except a
   short allowlist of reads (``KANBAN_READ_ACTIONS``), so new Hermes actions are refused by
   default. A task a model
   creates with an assignee is dispatched with no admission, no receipt and no pause control.
@@ -201,7 +201,10 @@ CARD_REQUEST = (
     '"$AUTORESEARCH_CLI" queue request create --title "<title>" --mode <mode> '
     '--why "<reason>" --ref <ar://ref>. It is admitted after this card\'s branch merges.'
 )
-KANBAN_CARD_TOOLS = {"kanban_create", "kanban_link"}
+# kanban_schedule (new in Hermes v0.21.6) ends the run and parks the card in `scheduled`; nothing in
+# our runtime unblocks it, so the card would sit with its work unmerged. Refusing a tool Hermes
+# v0.21.5 lacks is harmless.
+KANBAN_CARD_TOOLS = {"kanban_create", "kanban_link", "kanban_schedule"}
 FINISHED = "this card is finished (`card finish` ran); no further writes."
 SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
 INBOX_WRITE = (
