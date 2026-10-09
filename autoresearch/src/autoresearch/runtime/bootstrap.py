@@ -19,7 +19,11 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    it has none. Seeded, cloned and existing workspaces get ``AGENTS.md`` re-seeded (one
    canonical commit) when ``doctrine/VERSION`` differs from the version in its header.
    Every run also makes sure ``comms/inbox/`` and ``comms/outbox/`` exist (empty
-   directories, untracked) for external agents.
+   directories, untracked) for external agents. An external agent may write
+   ``comms/inbox/`` before the first bootstrap (the Softmax IDE bridge's ``deliver`` creates
+   the directory when a coach clicks a research button early). Seed and clone set those
+   entries aside under ``HERMES_HOME`` and put them back untracked afterwards, so the seed
+   commit never contains them and queue-keeper's routing adopts them like any direct write.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -28,7 +32,9 @@ A failure is returned in ``BootstrapResult.error``; queue-keeper then stops with
 
 import re
 import shutil
-from collections.abc import Mapping
+import tempfile
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +66,7 @@ AGENTS_PLACEHOLDER = (
     "it here. Until then, follow the card briefing and the skills.\n"
 )
 COMMITTER = ("autoresearch", "autoresearch@localhost")
+INBOX = Path("comms") / "inbox"
 
 
 class BootstrapError(RuntimeError):
@@ -144,15 +151,53 @@ def _ensure_committer(canonical: Path) -> None:
             gitops.git(canonical, "config", key, value)
 
 
+@contextmanager
+def _early_inbox_set_aside(canonical: Path, result: BootstrapResult) -> Iterator[None]:
+    """Move what an external agent wrote to ``comms/inbox/`` before the first bootstrap out
+    of ``canonical`` while it is seeded or cloned, then move it back (names and mtimes kept),
+    untracked, for routing to adopt. The holding directory is a sibling of ``canonical``
+    (same filesystem, so a move is a rename). An entry whose name is taken after a clone is
+    left in the holding directory with a warning instead of overwriting the tracked file."""
+    inbox = canonical / INBOX
+    entries = sorted(inbox.iterdir()) if inbox.is_dir() else []
+    if not entries:
+        yield
+        return
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    holding = Path(tempfile.mkdtemp(prefix=".workspace-early-inbox-", dir=canonical.parent))
+    for entry in entries:
+        shutil.move(entry, holding / entry.name)
+    try:
+        yield
+    finally:
+        inbox.mkdir(parents=True, exist_ok=True)
+        kept = 0
+        for entry in sorted(holding.iterdir()):
+            if (inbox / entry.name).exists():
+                continue
+            shutil.move(entry, inbox / entry.name)
+            kept += 1
+        result.actions.append(f"kept {kept} inbox files written before bootstrap for adoption")
+        left = sorted(entry.name for entry in holding.iterdir())
+        if left:
+            result.warnings.append(
+                f"inbox files {left} written before bootstrap clash with tracked files; "
+                f"left in {holding}"
+            )
+        else:
+            holding.rmdir()
+
+
 def _clone(canonical: Path, remote: str, result: BootstrapResult) -> None:
     """Fetch an existing workspace into ``canonical`` (which may already hold runtime files)."""
-    canonical.mkdir(parents=True, exist_ok=True)
-    gitops.git(canonical, "init", "-b", BRANCH)
-    gitops.git(canonical, "remote", "add", REMOTE, remote)
-    gitops.git(canonical, "fetch", REMOTE)
-    gitops.git(canonical, "checkout", "-B", BRANCH, f"{REMOTE}/{BRANCH}")
-    gitops.git(canonical, "branch", f"--set-upstream-to={REMOTE}/{BRANCH}", BRANCH)
-    _ensure_committer(canonical)
+    with _early_inbox_set_aside(canonical, result):
+        canonical.mkdir(parents=True, exist_ok=True)
+        gitops.git(canonical, "init", "-b", BRANCH)
+        gitops.git(canonical, "remote", "add", REMOTE, remote)
+        gitops.git(canonical, "fetch", REMOTE)
+        gitops.git(canonical, "checkout", "-B", BRANCH, f"{REMOTE}/{BRANCH}")
+        gitops.git(canonical, "branch", f"--set-upstream-to={REMOTE}/{BRANCH}", BRANCH)
+        _ensure_committer(canonical)
     result.actions.append(f"cloned canonical from {remote}")
 
 
@@ -196,16 +241,17 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     seed = repo_root / "games" / game / "seed"
     if not seed.is_dir():
         raise BootstrapError(f"no seed for game {game!r} at {seed}")
-    canonical.mkdir(parents=True, exist_ok=True)
-    gitops.git(canonical, "init", "-b", BRANCH)
-    _ensure_committer(canonical)
-    shutil.copytree(seed, canonical, dirs_exist_ok=True)
-    write_text(canonical / "AGENTS.md", _agents_md(repo_root))
-    write_text(canonical / ".gitignore", "".join(f"{line}\n" for line in GITIGNORE_LINES))
-    (ledger_of(canonical) / ".gitkeep").parent.mkdir(parents=True, exist_ok=True)
-    (ledger_of(canonical) / ".gitkeep").touch()
-    gitops.git(canonical, "remote", "add", REMOTE, remote)
-    gitops.commit_all(canonical, f"bootstrap: seed workspace from games/{game}/seed")
+    with _early_inbox_set_aside(canonical, result):
+        canonical.mkdir(parents=True, exist_ok=True)
+        gitops.git(canonical, "init", "-b", BRANCH)
+        _ensure_committer(canonical)
+        shutil.copytree(seed, canonical, dirs_exist_ok=True)
+        write_text(canonical / "AGENTS.md", _agents_md(repo_root))
+        write_text(canonical / ".gitignore", "".join(f"{line}\n" for line in GITIGNORE_LINES))
+        (ledger_of(canonical) / ".gitkeep").parent.mkdir(parents=True, exist_ok=True)
+        (ledger_of(canonical) / ".gitkeep").touch()
+        gitops.git(canonical, "remote", "add", REMOTE, remote)
+        gitops.commit_all(canonical, f"bootstrap: seed workspace from games/{game}/seed")
     result.actions.append(f"seeded canonical from games/{game}/seed")
     if not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
         result.warnings.append(f"initial push to {remote} failed; queue-keeper retries it")
