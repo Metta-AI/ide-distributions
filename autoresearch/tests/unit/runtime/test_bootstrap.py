@@ -1,6 +1,7 @@
 """Bootstrap (Overview C1 with A2, A6, A7; C9 config migrations)."""
 
 import os
+import shutil
 import stat
 from pathlib import Path
 
@@ -211,6 +212,43 @@ def test_early_inbox_file_is_adopted_not_seeded(tmp_path):
     assert "kept 1 inbox files written before bootstrap for adoption" in result.actions
     assert_left_for_adoption(ctx.canonical, relative, gitops.head(ctx.canonical))
     assert not list(tmp_path.glob("profiles/autoresearch/.workspace-early-inbox*"))
+
+
+def test_bridge_temp_file_is_never_committed(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    write_early_inbox(ctx.canonical)
+    temp = ctx.canonical / "comms" / "inbox" / ".ply_x:task:g-2.json.tmp"
+    temp.write_text('{"id": "')  # the bridge renames it to <id>.json when the write is done
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert "kept 2 inbox files written before bootstrap for adoption" in result.actions
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == ""
+    assert temp.read_text() == '{"id": "'
+
+
+def test_inbox_file_arriving_during_seed_is_not_committed(tmp_path, monkeypatch):
+    """The bridge can write between the first set-aside and the seed commit."""
+    ctx, env, _, queue = setup(tmp_path)
+    copytree = shutil.copytree
+    late = ctx.canonical / "comms" / "inbox" / "ply_x:task:late.json"
+
+    def copytree_then_bridge_writes(*args, **kwargs):
+        copied = copytree(*args, **kwargs)
+        late.parent.mkdir(parents=True, exist_ok=True)
+        late.write_text("{}")
+        return copied
+
+    monkeypatch.setattr(shutil, "copytree", copytree_then_bridge_writes)
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == ""
+    assert gitops.git(ctx.canonical, "status", "--porcelain") == "?? comms/"
+    assert late.read_text() == "{}"
+    assert "kept 1 inbox files written before bootstrap for adoption" in result.actions
 
 
 def test_early_inbox_file_survives_a_clone(tmp_path):

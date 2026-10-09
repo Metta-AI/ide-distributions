@@ -22,8 +22,9 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    directories, untracked) for external agents. An external agent may write
    ``comms/inbox/`` before the first bootstrap (the Softmax IDE bridge's ``deliver`` creates
    the directory when a coach clicks a research button early). Seed and clone set those
-   entries aside under ``HERMES_HOME`` and put them back untracked afterwards, so the seed
-   commit never contains them and queue-keeper's routing adopts them like any direct write.
+   entries aside under ``HERMES_HOME`` (seed looks again right before its commit, for files
+   written meanwhile) and put them back untracked afterwards, so the seed commit never
+   contains them and queue-keeper's routing adopts them like any direct write.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -33,7 +34,7 @@ A failure is returned in ``BootstrapResult.error``; queue-keeper then stops with
 import re
 import shutil
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,32 +153,38 @@ def _ensure_committer(canonical: Path) -> None:
 
 
 @contextmanager
-def _early_inbox_set_aside(canonical: Path, result: BootstrapResult) -> Iterator[None]:
-    """Move what an external agent wrote to ``comms/inbox/`` before the first bootstrap out
-    of ``canonical`` while it is seeded or cloned, then move it back (names and mtimes kept),
-    untracked, for routing to adopt. The holding directory is a sibling of ``canonical``
-    (same filesystem, so a move is a rename). An entry whose name is taken after a clone is
-    left in the holding directory with a warning instead of overwriting the tracked file."""
+def _early_inbox_set_aside(
+    canonical: Path, result: BootstrapResult
+) -> Iterator[Callable[[], None]]:
+    """Move what an external agent wrote to ``comms/inbox/`` before the first bootstrap
+    (dotfiles too: the bridge writes ``.<id>.json.tmp``, then renames it) out of ``canonical``
+    while it is seeded or cloned, then move it back (names and mtimes kept), untracked, for
+    routing to adopt. Yields a sweep that moves whatever arrived since; call it right before
+    a commit that could sweep the inbox in. The holding directory is a sibling of
+    ``canonical`` (same filesystem, so a move is a rename). An entry whose name is taken
+    after a clone is left in the holding directory with a warning, never overwriting the
+    tracked file."""
     inbox = canonical / INBOX
-    entries = sorted(inbox.iterdir()) if inbox.is_dir() else []
-    if not entries:
-        yield
-        return
     canonical.parent.mkdir(parents=True, exist_ok=True)
     holding = Path(tempfile.mkdtemp(prefix=".workspace-early-inbox-", dir=canonical.parent))
-    for entry in entries:
-        shutil.move(entry, holding / entry.name)
+
+    def sweep() -> None:
+        for entry in sorted(inbox.iterdir()) if inbox.is_dir() else []:
+            shutil.move(entry, holding / entry.name)
+
+    sweep()
     try:
-        yield
+        yield sweep
     finally:
-        inbox.mkdir(parents=True, exist_ok=True)
-        kept = 0
-        for entry in sorted(holding.iterdir()):
-            if (inbox / entry.name).exists():
-                continue
-            shutil.move(entry, inbox / entry.name)
-            kept += 1
-        result.actions.append(f"kept {kept} inbox files written before bootstrap for adoption")
+        held = sorted(holding.iterdir())
+        if held:
+            inbox.mkdir(parents=True, exist_ok=True)
+            kept = 0
+            for entry in held:
+                if not (inbox / entry.name).exists():
+                    shutil.move(entry, inbox / entry.name)
+                    kept += 1
+            result.actions.append(f"kept {kept} inbox files written before bootstrap for adoption")
         left = sorted(entry.name for entry in holding.iterdir())
         if left:
             result.warnings.append(
@@ -241,7 +248,7 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     seed = repo_root / "games" / game / "seed"
     if not seed.is_dir():
         raise BootstrapError(f"no seed for game {game!r} at {seed}")
-    with _early_inbox_set_aside(canonical, result):
+    with _early_inbox_set_aside(canonical, result) as sweep_inbox:
         canonical.mkdir(parents=True, exist_ok=True)
         gitops.git(canonical, "init", "-b", BRANCH)
         _ensure_committer(canonical)
@@ -251,6 +258,7 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
         (ledger_of(canonical) / ".gitkeep").parent.mkdir(parents=True, exist_ok=True)
         (ledger_of(canonical) / ".gitkeep").touch()
         gitops.git(canonical, "remote", "add", REMOTE, remote)
+        sweep_inbox()  # the bridge may have written since the first sweep
         gitops.commit_all(canonical, f"bootstrap: seed workspace from games/{game}/seed")
     result.actions.append(f"seeded canonical from games/{game}/seed")
     if not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
