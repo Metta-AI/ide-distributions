@@ -86,6 +86,11 @@ class ProvenanceError(RuntimeError):
     """``accept`` was given a commit it cannot accept."""
 
 
+class JournalError(RuntimeError):
+    """The journal or its key cannot be read or written. Every runtime commit on canonical
+    needs the journal, so callers treat this as the provenance check failing (fail closed)."""
+
+
 @dataclass(frozen=True)
 class CommitInfo:
     sha: str
@@ -184,23 +189,26 @@ def _append(canonical: Path, entry: dict) -> dict:
     writer does), so no other writer appends in between. A last line without its newline (a
     writer killed mid-write) is ended first: it stays one invalid line instead of swallowing
     this entry. A short write is continued until the whole line is written."""
-    key = _key(canonical, create=True)
-    entry = entry | {"seq": _last_seq(_entries(canonical)[0]) + 1}
-    signed = entry | {"mac": _mac(key, entry)}
-    data = (json.dumps(signed, sort_keys=True) + "\n").encode()
-    path = journal_path(canonical)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        size = os.fstat(descriptor).st_size
-        if size and os.pread(descriptor, 1, size - 1) != b"\n":
-            data = b"\n" + data
-        remaining = memoryview(data)
-        while remaining:
-            remaining = remaining[os.write(descriptor, remaining) :]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+        key = _key(canonical, create=True)
+        entry = entry | {"seq": _last_seq(_entries(canonical)[0]) + 1}
+        signed = entry | {"mac": _mac(key, entry)}
+        data = (json.dumps(signed, sort_keys=True) + "\n").encode()
+        path = journal_path(canonical)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            size = os.fstat(descriptor).st_size
+            if size and os.pread(descriptor, 1, size - 1) != b"\n":
+                data = b"\n" + data
+            remaining = memoryview(data)
+            while remaining:
+                remaining = remaining[os.write(descriptor, remaining) :]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as error:
+        raise JournalError(f"cannot write the provenance journal: {error}") from error
     return signed
 
 
@@ -214,11 +222,15 @@ def _entries(canonical: Path) -> tuple[list[dict], int]:
     it, so a signed entry copied to the end again (a replay) is invalid. An entry without
     ``seq`` (written before sequence numbers) counts only before the first one that has it."""
     path = journal_path(canonical)
-    if not path.exists():
-        return [], 0
-    key = _key(canonical, create=False)
+    try:
+        if not path.exists():
+            return [], 0
+        key = _key(canonical, create=False)
+        content = path.read_bytes()
+    except OSError as error:
+        raise JournalError(f"cannot read the provenance journal: {error}") from error
     valid, invalid, last = [], 0, None
-    for line in path.read_bytes().splitlines():
+    for line in content.splitlines():
         if not line.strip():
             continue
         try:  # decoding is inside: one bad byte must not stop the check (it fails closed)

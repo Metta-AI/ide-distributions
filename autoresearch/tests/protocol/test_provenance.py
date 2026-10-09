@@ -562,3 +562,26 @@ def test_every_push_of_main_goes_through_the_provenance_gate():
         ]
     assert found == []
 
+
+@pytest.mark.parametrize("change", ["gitignore", "agents_md"])
+def test_a_bootstrap_commit_that_needs_an_unreadable_journal_still_pauses(host, change):
+    """Codex review of PR #24 round 2, M1: a bootstrap commit made before ``initialize``
+    (a ``.gitignore`` line, an AGENTS.md re-seed) that fails on the journal must not end the
+    run before the fail-closed pause and the spend caps."""
+    host.tick(at(1))
+    assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
+    if change == "gitignore":
+        gitignore = host.canonical / ".gitignore"
+        gitignore.write_text("".join(gitignore.read_text().splitlines(keepends=True)[1:]))
+    else:
+        (host.canonical / "AGENTS.md").write_text("<!-- doctrine-version: 0 -->\nold\n")
+    host.runtime_commit(f"an old {change}")  # so bootstrap's fix is a real commit
+    key = provenance.journal_dir(host.canonical) / provenance.KEY_FILE
+    key.chmod(0)
+    try:
+        run = host.tick(at(2))
+    finally:
+        key.chmod(0o600)
+    assert run.bootstrap.ok and "JournalError" in run.bootstrap.provenance_error
+    assert "provenance" in run.failures and run.paused and run.spend_run is not None
+    assert [card.assignee for card in host.queue.list("pending")] == [None]

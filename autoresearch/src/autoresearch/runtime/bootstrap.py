@@ -28,8 +28,9 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    commits are recorded in the provenance journal, and when the journal has no anchor yet it
    trusts the current HEAD once (``provenance.initialize``: a new or restored workspace, or the
    first run of the provenance check on an existing one). A journal or key that cannot be read
-   does not fail bootstrap (``BootstrapResult.provenance_error``): queue-keeper treats it as
-   a provenance check that cannot run, and pauses.
+   does not fail bootstrap, neither in ``initialize`` nor in another bootstrap commit
+   (``.gitignore``, ``AGENTS.md``, the board epoch; ``BootstrapResult.provenance_error``):
+   queue-keeper treats it as a provenance check that cannot run, and pauses.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -259,6 +260,23 @@ def _agents_md(repo_root: Path) -> str:
     return header + "\n".join(parts)
 
 
+@contextmanager
+def _journal_failures(result: BootstrapResult) -> Iterator[None]:
+    """A bootstrap commit that fails because the provenance journal cannot be read or
+    written does not fail bootstrap: queue-keeper must still reach its fail-closed pause and
+    the spend caps (``BootstrapResult.provenance_error``)."""
+    try:
+        yield
+    except provenance.JournalError as error:
+        _provenance_failed(result, error)
+
+
+def _provenance_failed(result: BootstrapResult, error: Exception) -> None:
+    message = f"{type(error).__name__}: {error}"
+    result.provenance_error = result.provenance_error or message
+    result.warnings.append(f"provenance journal: {message}")
+
+
 def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult) -> None:
     """Rewrite ``AGENTS.md`` when ``doctrine/VERSION`` differs from the header's version."""
     wanted = _doctrine_version(repo_root)
@@ -268,13 +286,13 @@ def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult)
     current = VERSION_HEADER.match(path.read_text(encoding="utf-8")) if path.exists() else None
     if current and current.group(1) == wanted:
         return
-    with canonical_lock(canonical):
+    with _journal_failures(result), canonical_lock(canonical):
         write_text(path, _agents_md(repo_root))
         subject = f"bootstrap: doctrine version {wanted}"
         provenance.commit_recorded(
             canonical, subject, lambda: gitops.prepare_paths(canonical, ["AGENTS.md"], subject)
         )
-    result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
+        result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
 
 
 def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: BootstrapResult):
@@ -310,13 +328,13 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     missing = [line for line in GITIGNORE_LINES if line not in lines]
     if missing:
-        with canonical_lock(canonical):
+        with _journal_failures(result), canonical_lock(canonical):
             write_text(path, "\n".join([*lines, *missing]) + "\n")
             subject = "bootstrap: .gitignore runtime dirs"
             provenance.commit_recorded(
                 canonical, subject, lambda: gitops.prepare_paths(canonical, [".gitignore"], subject)
             )
-        result.actions.append(f"added {missing} to .gitignore")
+            result.actions.append(f"added {missing} to .gitignore")
     remotes = gitops.git(canonical, "remote").split()
     if REMOTE not in remotes:
         if remote:
@@ -361,8 +379,7 @@ def _ensure_provenance(canonical: Path, fresh: bool, result: BootstrapResult) ->
         with canonical_lock(canonical):
             action = provenance.initialize(canonical, fresh)
     except Exception as error:  # noqa: BLE001 - reported as the provenance step failure
-        result.provenance_error = f"{type(error).__name__}: {error}"
-        result.warnings.append(f"provenance journal: {result.provenance_error}")
+        _provenance_failed(result, error)
         return
     if action:
         result.actions.append(action)
@@ -382,10 +399,10 @@ def _ensure_board(ctx: RunContext, queue: Queue, result: BootstrapResult) -> Non
     if board_exists is None or ensure_board is None or board_exists():
         return
     ensure_board()
-    with canonical_lock(ctx.canonical):
-        epoch = new_board_epoch(ctx.canonical, "board created by bootstrap")
     result.board_created = True
-    result.actions.append(f"created the board (epoch {epoch})")
+    with _journal_failures(result), canonical_lock(ctx.canonical):
+        epoch = new_board_epoch(ctx.canonical, "board created by bootstrap")
+        result.actions.append(f"created the board (epoch {epoch})")
 
 
 def _push(canonical: Path, result: BootstrapResult) -> None:
