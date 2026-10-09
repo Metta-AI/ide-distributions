@@ -11,8 +11,9 @@ blocked-card step:
   breaker keeps it in ``blocked``; the dispatcher ends a running worker within about two
   minutes), and one runtime ``help_request`` goes out, worded for where the card landed.
   Only cards Hermes can block (``running``, ``ready``) are tried. A stop that fails is
-  recorded like a stop (one help_request asking a human to block it), so it is not retried
-  every minute. A ``spend-cap:`` block is never requeued or repaired
+  retried every minute (logged); the first failure of a streak is recorded as
+  ``not_stopped``, which grants no new allowance, with one help_request asking a human to
+  block it. A ``spend-cap:`` block is never requeued or repaired
   (``blocked.handle_blocked`` skips it). A card blocked for another reason once it has
   reached either cap is held the same way (``hold_blocked``, called from
   ``handle_blocked``) instead of being requeued. queue-keeper also runs the caps while
@@ -257,12 +258,19 @@ def _record(canonical: Path, task_id: str) -> dict | None:
     return committed_json(canonical, marker_path(canonical, task_id))
 
 
+def _counted_stops(record: dict | None) -> list[dict]:
+    """The recorded stops that worked (``stopped``, ``triaged``, ``held``). A failed stop
+    (``not_stopped``) is recorded for its report only: it grants no new allowance."""
+    stops = record.get("stops", []) if record else []
+    return [stop for stop in stops if stop.get("outcome") != runtime_messages.NOT_STOPPED]
+
+
 def _base(record: dict | None) -> tuple[int, float]:
-    """Runs and cost already used at the latest stop: the caps count from there."""
-    if not record or not record.get("stops"):
+    """Runs and cost already used at the latest stop that worked: the caps count from there."""
+    stops = _counted_stops(record)
+    if not stops:
         return 0, 0.0
-    last = record["stops"][-1]
-    return int(last["runs"]), float(last["cost_usd"])
+    return int(stops[-1]["runs"]), float(stops[-1]["cost_usd"])
 
 
 def is_held(canonical: Path, card: Card) -> bool:
@@ -270,8 +278,8 @@ def is_held(canonical: Path, card: Card) -> bool:
     cap for this block (``hold_blocked``)."""
     if (card.block_reason or "").startswith(SPEND_CAP_PREFIX):
         return True
-    record = _record(canonical, card.task_id)
-    last = record["stops"][-1] if record and record.get("stops") else None
+    stops = _counted_stops(_record(canonical, card.task_id))
+    last = stops[-1] if stops else None
     return bool(card.block_run_id and last and last.get("block_run_id") == card.block_run_id)
 
 
@@ -293,7 +301,8 @@ def _over_cap(card: Card, used_runs: int, used_usd: float, config: SpendConfig) 
 
 
 def cap_reached(ctx: RunContext, card: Card, config: SpendConfig) -> str | None:
-    """Why a (blocked) card is at its run or cost cap, counted from its latest stop."""
+    """Why a (blocked) card is at its run or cost cap, counted from its latest stop. Raises
+    sqlite3.Error when ``state.db`` cannot be read (the caller skips the card this run)."""
     runs, usd = _base(_record(ctx.canonical, card.task_id))
     cost = card_cost(ctx, card.task_id, config.prices).usd
     return _over_cap(card, counted_runs(card) - runs, cost - usd, config)
@@ -338,7 +347,8 @@ def _report(
             config.allowance(),
             card.task_id,
             card.spec.request_id,
-            len(record["stops"]),
+            len(_counted_stops(record)) if outcome == runtime_messages.NOT_STOPPED
+            else len(record["stops"]),
             [{"uri": uri} for uri in card.spec.refs],
             outcome,
         )
@@ -366,7 +376,8 @@ class SpendRun:
     over_budget: bool = False
     paused: bool = False  # this run paused for the budget
     unpriced: list[str] = field(default_factory=list)
-    failures: dict[str, str] = field(default_factory=dict)  # task id or "spend_db" -> error
+    failures: dict[str, str] = field(default_factory=dict)  # "spend_db" -> error
+    stop_failures: dict[str, str] = field(default_factory=dict)  # task id -> error (retried)
 
 
 def _stop(
@@ -375,19 +386,23 @@ def _stop(
 ) -> str | None:
     """Block first, then record: a crash between them loses the help_request but never lets
     the card run on (a recorded stop with the card still running would reset its allowance).
-    A stop that fails is recorded too, with one help_request, so it is not retried every
-    minute; it returns the error."""
+    A stop that fails returns the error; the caller retries it every minute. The first
+    failure of a streak is recorded (``not_stopped``, no new allowance) with one
+    help_request; later failures of the same streak are only logged."""
     # Stopping a pending card adds a zero-length blocked run (Hermes, FileQueue): count it in
     # the base so an unblocked card starts from a full allowance.
     runs = counted_runs(card) + (1 if card.state == "pending" else 0)
     try:
         landed = queue.stop(card.task_id, f"{SPEND_CAP_PREFIX} {why}")
-    except Exception as error:  # noqa: BLE001 - recorded and reported once
+    except Exception as error:  # noqa: BLE001 - retried next run; reported once a streak
         problem = f"{type(error).__name__}: {error}"
-        _report(
-            ctx, card, f"{why} (the stop failed: {problem})", counted_runs(card), cost, config,
-            allow_no_remote, runtime_messages.NOT_STOPPED,
-        )
+        record = _record(ctx.canonical, card.task_id)
+        latest = record["stops"][-1] if record and record.get("stops") else None
+        if not latest or latest.get("outcome") != runtime_messages.NOT_STOPPED:
+            _report(
+                ctx, card, f"{why} (the stop failed: {problem})", counted_runs(card), cost,
+                config, allow_no_remote, runtime_messages.NOT_STOPPED,
+            )
         return problem
     outcome = runtime_messages.STOPPED if landed == "blocked" else runtime_messages.TRIAGED
     _report(ctx, card, why, runs, cost, config, allow_no_remote, outcome)
@@ -421,7 +436,7 @@ def enforce_cards(
         if problem is None:
             result.stopped.append((card.task_id, why))
         else:
-            result.failures[card.task_id] = problem
+            result.stop_failures[card.task_id] = problem
 
 
 def enforce_budget(

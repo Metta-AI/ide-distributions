@@ -577,7 +577,9 @@ def _spend_step(
             _log(ctx, f"spend: cannot read state.db: {error}")
         else:
             run.failures[f"spend {key}"] = error
-            _log(ctx, f"spend: could not stop card {key}: {error}")
+            _log(ctx, f"spend: {key}: {error}")
+    for task_id, error in result.stop_failures.items():  # retried next run: log only
+        _log(ctx, f"spend: could not stop card {task_id} (retrying next run): {error}")
     if result.paused:
         _log(ctx, f"spend: paused, today's estimated spend is ${result.day_usd:.2f}")
     new = spend.new_unpriced(ctx, result.unpriced)

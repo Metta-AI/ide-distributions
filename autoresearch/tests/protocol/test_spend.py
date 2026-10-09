@@ -201,21 +201,43 @@ def test_caps_still_apply_while_preflight_fails(host):
     assert len(_cap_help(host)) == 1
 
 
-def test_a_stop_that_fails_is_reported_once_and_not_retried(host, monkeypatch):
+def test_a_stop_that_fails_is_retried_every_minute_and_reported_once(host, monkeypatch):
+    """A failed stop grants no new allowance: the runtime retries until the stop works."""
     task_id = _runs(host, 5, end_claimed=True)
+    real = host.queue.stop
     calls = []
 
-    def broken(task, reason):
+    def flaky(task, reason):
         calls.append(task)
-        raise RuntimeError("database is locked")
+        if len(calls) < 3:
+            raise RuntimeError("database is locked")
+        return real(task, reason)
 
-    monkeypatch.setattr(host.queue, "stop", broken)
+    monkeypatch.setattr(host.queue, "stop", flaky)
     first = host.tick(at(2))
-    assert first.failures[f"spend {task_id}"].startswith("RuntimeError")
+    assert f"spend {task_id}" not in first.failures  # retried, so only logged
+    assert host.queue.get(task_id).state == "claimed"
     host.tick(at(3))
-    assert calls == [task_id]
-    [help_request] = [m for m in host.outbox() if m["title"].startswith("Card not stopped")]
-    assert "block it by hand" in help_request["body"]
+    host.tick(at(4))  # the third attempt works
+    assert calls == [task_id] * 3
+    assert host.queue.get(task_id).state == "blocked"
+    [not_stopped] = [m for m in host.outbox() if m["title"].startswith("Card not stopped")]
+    assert "keeps trying" in not_stopped["body"]
+    assert len(_cap_help(host)) == 1  # then the stop itself
+    marker = host.committed(spend.marker_path(host.canonical, task_id))
+    assert [stop["outcome"] for stop in marker["stops"]] == ["not_stopped", "stopped"]
+    host.tick(at(5))
+    assert calls == [task_id] * 3
+
+
+def test_an_unreadable_state_db_neither_requeues_nor_holds_a_blocked_card(host):
+    task_id = _runs(host, 1, end_claimed=True)
+    record_session_start(host.canonical, task_id, "r-1", "s1")  # so its cost needs state.db
+    host.queue.block(task_id, host.queue.get(task_id).runs[-1].run_id, "circuit breaker open")
+    (host.home / "state.db").write_bytes(b"not a database")
+    result = host.tick(at(2))
+    assert result.blocked == [] and host.queue.get(task_id).state == "blocked"
+    assert "blocked" not in result.failures
 
 
 def test_a_stop_hermes_sends_to_triage_says_so(host, monkeypatch):

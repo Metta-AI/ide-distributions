@@ -32,12 +32,16 @@ its estimated-cost cap is held instead (``spend.hold_blocked``: one runtime
 
 Hermes limit: a second ``kanban_block`` with the same kind after an unblock (D-26 uses
 ``needs_input``) is routed to ``triage``, which the Queue reports as ``pending``, so this
-module never sees it. That repeat is reported only by the agent's own help_request.
+module never sees it. That repeat is reported only by the agent's own help_request. A spend
+stop can set this up: it blocks with ``needs_input`` when the card's previous block was
+``capability`` (``KanbanQueue.stop``), so after a human unblocks it, the worker's own D-26
+tool-fault block (also ``needs_input``) lands in ``triage``.
 
 The queue change comes before the commit, so a crash between them at worst requeues a card
 a second time; it never skips straight to a repair.
 """
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -162,6 +166,18 @@ def _tool_fault(canonical: Path, card: Card, reason: str, allow_no_remote: bool)
     return BlockedAction(task_id, TOOL_FAULT)
 
 
+UNREADABLE = "state.db unreadable"
+
+
+def _cap_reached(ctx: RunContext, card: Card, config: spend.SpendConfig) -> str | None:
+    """``spend.cap_reached``, or ``UNREADABLE`` when ``state.db`` cannot be read: the
+    conservative choice is to leave the card alone this run, not to requeue it."""
+    try:
+        return spend.cap_reached(ctx, card, config)
+    except sqlite3.Error:
+        return UNREADABLE
+
+
 def handle_blocked(
     ctx: RunContext,
     queue: Queue,
@@ -189,8 +205,10 @@ def handle_blocked(
         elif (
             spend_config is not None
             and (record is None or record["state"] in (TOOL_FAULT, REQUEUED))
-            and (why := spend.cap_reached(ctx, card, spend_config))
+            and (why := _cap_reached(ctx, card, spend_config))
         ):
+            if why is UNREADABLE:
+                continue  # state.db unreadable: neither requeue nor hold this run
             spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
             actions.append(BlockedAction(card.task_id, SPEND_CAP))
         elif record is None or record["state"] == TOOL_FAULT:

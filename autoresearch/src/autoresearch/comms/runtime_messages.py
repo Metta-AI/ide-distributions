@@ -342,7 +342,10 @@ _CAP_NEXT = {
         "should go on, drop the card and send the task again."
     ),
     HELD: "If the work should go on, unblock the card: it then gets {allowance}.",
-    NOT_STOPPED: "The runtime will not try again until the card uses {allowance}.",
+    NOT_STOPPED: (
+        "The runtime keeps trying to stop it every minute and will report again only after "
+        "a stop works."
+    ),
 }
 
 
@@ -357,7 +360,9 @@ def card_over_cap(
     outcome: str = STOPPED,
 ) -> RuntimeMessage:
     """A card reached its run or estimated-cost cap. ``stop`` counts the card's recorded
-    stops, so a card a human unblocked that reaches the cap again is reported again."""
+    stops, so a card a human unblocked that reaches the cap again is reported again. For
+    ``NOT_STOPPED`` it counts the stops that worked, so one failure streak (the runtime
+    retries every minute) gets one message."""
     title = _line(card_title, 80)
     body = (
         f"{_CAP_LEAD[outcome].format(title=title, why=why)} It will not be put back in the "
@@ -373,7 +378,7 @@ def card_over_cap(
         body,
         refs,
         _about(card=task_id, request=request_id),
-        key=f"spend-cap:{task_id}:{stop}",
+        key=f"spend-cap:{task_id}:{stop}" + (":not-stopped" if outcome == NOT_STOPPED else ""),
     )
 
 

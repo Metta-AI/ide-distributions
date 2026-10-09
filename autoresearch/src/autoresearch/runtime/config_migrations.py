@@ -8,7 +8,9 @@ existing installs is applied here with ``hermes config set`` (verified to write 
 - ``MISSING_ONLY``: set only when the key is absent (the installer may tune it).
 - ``UPGRADE_DEFAULTS``: key -> (old default, new default). A value equal to the old default
   (an earlier release shipped it, or Hermes' own default) is raised to the new one; any other
-  value is the installer's and is kept.
+  value is the installer's and is kept. One-way: an installer who set exactly the old value
+  on purpose (2700 or 180) is raised too, on every bootstrap; pick a nearby value (2701,
+  181) to keep it.
 - ``UNSET``: removed with ``hermes config unset`` when present.
 - ``ENV_OVERRIDES``: set from an environment variable when it is set and differs (the
   installer's ``OPENROUTER_MODEL`` in the profile ``.env`` becomes ``model.default``: Hermes
