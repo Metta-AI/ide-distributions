@@ -394,12 +394,13 @@ def test_every_canonical_commit_records_its_provenance():
     the agent on its first commit. Every function that can move a branch either commits
     through ``commit_recorded`` or works only on a card worktree (listed, and checked to
     exist). ``merge --abort`` in ``abort_stale_merge`` moves nothing; ``commit_recorded``
-    is the recorder itself."""
+    is the recorder itself; ``recover`` only resets index paths and runs ``merge --quit``."""
     worktree_only = {
         ("runtime/card_finish.py", "finish"),
         ("softmax_tool/submit.py", "bootstrap_champion"),
         ("runtime/queue_keeper.py", "abort_stale_merge"),
         ("runtime/provenance.py", "commit_recorded"),
+        ("runtime/provenance.py", "recover"),
     }
     found, missing = set(), []
     for path in SRC.rglob("*.py"):
