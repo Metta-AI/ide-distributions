@@ -589,6 +589,11 @@ CANONICAL_CODE_WRITES = [
         "Path('{canon}/plan.md').replace('{worker}/notes/plan.md')\""
     ),
     "python3 -c \"from pathlib import Path; Path('notes/x.md').replace('{canon}/plan.md')\"",
+    # round 3, item 6: literal relative destinations and git's implicit directory resolve
+    # against the shell's directory
+    "python3 -c \"open('../../plan.md', 'w').write('x')\"",
+    "cd {canon} && python3 -c \"import subprocess; subprocess.run(['git', 'commit', '-am', 'x'])\"",
+    "cd {canon} && python3 -c \"from pathlib import Path; Path('plan.md').write_text('x')\"",
     # round 2, L1: -C resolves against the shell's directory, here canonical
     (
         "cd {canon} && python3 -c \"import subprocess; t = open('{canon}/plan.md').read(); "
@@ -641,6 +646,11 @@ def test_execute_code_that_writes_canonical_is_refused(layout):
         "import io\nprint(io.open('{canon}/plan.md').read())",
         "import os\nfd = os.open('{canon}/plan.md', os.O_RDONLY)",
         "print(open('{canon}/plan.md').read().replace('a', 'b'))",
+        # round 3, item 7: only the owning call's cwd counts, and cwd='.' is the worktree
+        (
+            "import subprocess\ntext = open('{canon}/plan.md').read()\n"
+            "subprocess.run(['git', 'add', 'notes/a.md'], cwd='.')"
+        ),
         # round 2, L1: a worktree commit with a relative -C after reading canonical
         (
             "import subprocess\ntext = open('{canon}/plan.md').read()\n"

@@ -60,15 +60,19 @@
   write-shaped call whose destination names canonical (`open`/`io.open`/`codecs.open` with
   a write mode, `os.open` with write flags, `write_text`/`write_bytes` and other `Path` writes
   on a canonical receiver, `Path.rename`/`Path.replace` from or to canonical, `os` writes,
-  `shutil.copy*` to canonical, `shutil.move`/`rmtree`; ``_write_destinations``), a git argv
+  `shutil.copy*` to canonical, `shutil.move`/`rmtree`; ``_write_destinations``; a literal
+  relative destination is resolved against the shell's directory, so `../../plan.md` from a
+  worktree counts), a git argv
   (a list starting with `git`, or a `git ...` string) whose subcommand writes and that is
-  aimed elsewhere than the worktree (a literal `-C` directory is resolved against the
-  command's working directory, so `git -C . commit` in the worktree passes; ``cwd=``,
-  ``chdir``) or names canonical, or
+  aimed elsewhere than the worktree (a literal `-C` directory, and git's own directory, are
+  resolved against the owning call's `cwd=` or else the shell's directory, so `git -C .
+  commit` or `cwd='.'` in the worktree passes and `cd <canonical> && python3 -c "...git
+  commit..."` is refused; ``chdir`` makes it unknown) or names canonical, or
   `flock`/`lockf` with `canonical.lock`. Canonical as the source only (`shutil.copyfile`
   from canonical into the worktree, `git -C <canonical> show`) passes, as do writes to the
   worktree; the refusal says to read the worktree copy. Text that does not parse as Python
-  falls back to a line heuristic (``CANONICAL_WRITE_SHAPES``, ``GIT_WRITE_SHAPES``). On 2026-10-09 a card worker committed on canonical `main` from a
+  falls back to a line heuristic (``CANONICAL_WRITE_SHAPES``, ``GIT_WRITE_SHAPES``). This
+  stays best effort: paths built at run time, variables and other interpreters pass. On 2026-10-09 a card worker committed on canonical `main` from a
   `python3 - <<'PYEOF'` script after reasoning that `git commit` would be refused.
   queue-keeper's provenance check detects such a commit after the fact, whatever wrote it.
 
@@ -331,9 +335,6 @@ GIT_WRITE_SHAPES = re.compile(
 )
 # Code that points git somewhere other than the current directory (the worktree).
 GIT_ELSEWHERE = re.compile(r"""['"]-C['"]|\s-C\s|\bcwd\s*=|\bchdir\b|--git-dir|--work-tree""")
-# Code that runs git somewhere other than the current directory without naming it in git's
-# own arguments (``_Guard.git_argv_writes``).
-CODE_ELSEWHERE = re.compile(r"\bcwd\s*=|\bchdir\b")
 CODE_GIT_WRITES = frozenset(_GIT_WRITE_WORDS.split("|"))
 # Git options that name the directory git works on (each takes a value).
 GIT_TARGET_OPTIONS = {"-C", "--git-dir", "--work-tree"}
@@ -510,24 +511,33 @@ class _Guard:
             raise _Blocked(CANONICAL_WRITE)
 
     def writes_canonical(self, code: str, cwd: Path) -> bool:
-        """Literal heuristic (module docstring), for code that names canonical: a lock call
-        when the code names canonical.lock; a write-shaped call whose destination names
-        canonical (``_write_destinations``: reading canonical to write elsewhere passes); a
-        git argv (a list starting with ``git``, or a ``git ...`` string) with a write
-        subcommand aimed elsewhere than the worker's worktree (``git_argv_writes``). A write
-        through a variable that holds a canonical path passes (and the provenance check
-        catches a commit). Text that does not parse as Python (a piped shell line, an
-        unquoted here-document with shell expansions) falls back to the line heuristic."""
-        if not self.names_canonical(code):
-            return False
+        """Literal, best-effort heuristic (module docstring): a lock call when the code names
+        canonical.lock; a write-shaped call whose destination names canonical or is a literal
+        path that resolves into it from ``cwd`` (the shell's directory; ``../../plan.md`` from
+        a worktree is canonical); a git argv (a list starting with ``git``, or a ``git ...``
+        string) with a write subcommand that runs on canonical (``git_argv_writes``). Reading
+        canonical to write elsewhere passes. A write through a variable that holds a
+        canonical path passes (and the provenance check catches a commit). Text that does
+        not parse as Python (a piped shell line, an unquoted here-document with shell
+        expansions) falls back to the line heuristic when it names canonical."""
+        mentions = self.names_canonical(code)
         if "canonical.lock" in code and LOCK_CALLS.search(code):
             return True
         try:
             tree = ast.parse(code)
         except (SyntaxError, ValueError):
-            return self._writes_canonical_by_line(code)
+            return mentions and self._writes_canonical_by_line(code)
         lines = code.splitlines()
-        code_elsewhere = bool(CODE_ELSEWHERE.search(code))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        # The call whose first argument is a git argv (or command string): its ``cwd=`` is
+        # where git runs. An argv built elsewhere (a variable) runs where an unknown call says.
+        owner = {id(call.args[0]): call for call in calls if call.args}
+        unknown_cwd = bool(re.search(r"\bchdir\b", code)) or any(
+            _keyword(call, "cwd") is not None
+            and call.args
+            and not isinstance(call.args[0], ast.List | ast.Tuple | ast.Constant)
+            for call in calls
+        )
 
         def text(node: ast.AST) -> str:
             return ast.get_source_segment(code, node) or ast.unparse(node)
@@ -535,10 +545,28 @@ class _Guard:
         def line_of(node: ast.AST) -> str:
             return "\n".join(lines[node.lineno - 1 : node.end_lineno])
 
+        def run_dir(node: ast.AST) -> Path | None:
+            """Where git runs for this argv: the owning call's ``cwd=``, else the shell's."""
+            call = owner.get(id(node))
+            value = _keyword(call, "cwd") if call is not None else None
+            if value is None:
+                return None if unknown_cwd and call is None else Path(cwd)
+            literal = _literal_path(value)
+            if literal is not None:
+                return Path(cwd) / os.path.expanduser(literal)
+            return self.worker if self._names_worker(text(value)) else None
+
+        def destination_is_canonical(node: ast.expr) -> bool:
+            if self.names_canonical(text(node)):
+                return True
+            literal = _literal_path(node)
+            return literal is not None and self._in_canonical(
+                Path(cwd) / os.path.expanduser(literal)
+            )
+
         def writes(node: ast.AST) -> bool:
             if isinstance(node, ast.Call):
-                targets = _write_destinations(node)
-                return any(self.names_canonical(text(target)) for target in targets)
+                return any(destination_is_canonical(t) for t in _write_destinations(node))
             if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
                 constant = [isinstance(elt, ast.Constant) for elt in node.elts]
                 argv = [
@@ -548,18 +576,23 @@ class _Guard:
                 return (
                     constant[0]
                     and _is_git(argv[0])
-                    and self.git_argv_writes(argv, constant, line_of(node), code_elsewhere, cwd)
+                    and self.git_argv_writes(argv, constant, line_of(node), run_dir(node), mentions)
                 )
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 return bool(re.search(r"\bgit\b", node.value)) and self._git_string_writes(
-                    node.value, line_of(node), code_elsewhere, cwd
+                    node.value, line_of(node), run_dir(node), mentions
                 )
             return False
 
         return any(writes(node) for node in ast.walk(tree))
 
+    def _in_canonical(self, path: Path) -> bool:
+        """``path`` is inside canonical, not under its ``.worktrees/`` (card worktrees)."""
+        resolved, root = _real(path), _real(self.ctx.canonical)
+        return _within(resolved, root) and not _within(resolved, root / ".worktrees")
+
     def _git_string_writes(
-        self, command: str, line: str, code_elsewhere: bool, cwd: Path
+        self, command: str, line: str, run_dir: Path | None, mentions: bool
     ) -> bool:
         """A ``git ...`` command in a string (``os.system``, ``shell=True``)."""
         try:
@@ -568,21 +601,23 @@ class _Guard:
             words = command.split()
         return any(
             self.git_argv_writes(
-                words[index:], [True] * (len(words) - index), line, code_elsewhere, cwd
+                words[index:], [True] * (len(words) - index), line, run_dir, mentions
             )
             for index, word in enumerate(words)
             if _is_git(word)
         )
 
     def git_argv_writes(
-        self, argv: list[str], constant: list[bool], line: str, code_elsewhere: bool, cwd: Path
+        self, argv: list[str], constant: list[bool], line: str, run_dir: Path | None,
+        mentions: bool,
     ) -> bool:
         """``argv`` (``git`` first; ``constant`` marks the literal elements) runs a git write
-        subcommand (or one taken from a variable) on canonical: ``-C``/``--git-dir``/
-        ``--work-tree`` names a directory other than the worker's worktree, the argv names
-        canonical, or the code sets ``cwd=``/``chdir`` and the line does not name the
-        worktree. A literal directory is resolved against ``cwd`` (``git -C . commit`` in the
-        worktree is the worktree); one from a variable must name the worktree's path."""
+        subcommand (or one taken from a variable) on canonical. ``run_dir`` is where git
+        runs (the owning call's ``cwd=``, else the shell's directory; None when unknown). A
+        literal ``-C``/``--git-dir``/``--work-tree`` directory is resolved against it.
+        Refused: git runs in canonical; or, when the code names canonical, git is pointed
+        at a directory other than the worktree (or one we cannot resolve), or the argv
+        names canonical."""
         targets, index = [], 1
         while index < len(argv) and constant[index] and argv[index].startswith("-"):
             option, _, value = argv[index].partition("=")
@@ -598,18 +633,32 @@ class _Guard:
             return False  # `git --version`
         if constant[index] and argv[index] not in CODE_GIT_WRITES:
             return False
-        if any(not self._is_worker_dir(target, literal, cwd) for target, literal in targets):
-            return True
         if self.names_canonical(" ".join(argv)):
             return True
-        return not targets and code_elsewhere and not self._names_worker(line)
+        directories = []
+        for target, literal in targets:
+            if literal and run_dir is not None:
+                directories.append(run_dir / os.path.expanduser(target))
+            elif self._names_worker(target):
+                directories.append(self.worker)
+            else:
+                directories.append(None)  # from a variable: unknown
+        if not targets:
+            if run_dir is None:
+                return mentions and not self._names_worker(line)
+            directories = [run_dir]
+        for directory in directories:
+            if directory is None:
+                elsewhere = mentions
+            else:
+                pointed_away = targets and mentions and not self._is_worker_dir(directory)
+                elsewhere = self._in_canonical(directory) or pointed_away
+            if elsewhere:
+                return True
+        return False
 
-    def _is_worker_dir(self, target: str, literal: bool, cwd: Path) -> bool:
-        if self._names_worker(target):
-            return True
-        if not literal or self.worker is None:
-            return False
-        return _within(_real(Path(cwd) / os.path.expanduser(target)), self.worker)
+    def _is_worker_dir(self, directory: Path) -> bool:
+        return self.worker is not None and _within(_real(directory), self.worker)
 
     def _writes_canonical_by_line(self, code: str) -> bool:
         """The line heuristic for text that is not Python: a line with a write-shaped call
@@ -1014,6 +1063,23 @@ def _write_destinations(call: ast.Call) -> list[ast.expr]:
         mode = call.args[0] if call.args else _keyword(call, "mode")
         return [func.value] if _write_mode(mode) else []
     return []
+
+
+def _literal_path(node: ast.expr) -> str | None:
+    """A path written as a literal: ``'x'`` or ``Path('x')`` / ``PurePath('x')``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name | ast.Attribute)
+        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr)
+        in {"Path", "PurePath", "PosixPath"}
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        return node.args[0].value
+    return None
 
 
 def _keyword(call: ast.Call, name: str) -> ast.expr | None:
