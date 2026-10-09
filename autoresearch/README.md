@@ -18,6 +18,12 @@ Design documents (open the HTML files in a browser):
   C1-C12 and amendments A1-A14. The contract numbers in this file refer to it.
 - [Verified Hermes facts](docs/plans/findings/hermes-facts.md): what was checked on Hermes
   v0.21.5.
+- [Softmax hosting integration](docs/designs/softmax-integration-plan-2026-10-09.html): how the
+  profile goes into the hosted Hermes fleet (milestones M0-M5, decisions D1-D15). The task-level
+  plan is [plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), with evidence in
+  [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). This is a plan: none of
+  the hosted work is built yet. The coach chat it adds is designed in
+  [coach-chat-role.md](docs/designs/coach-chat-role.md).
 
 ## Prerequisites
 
