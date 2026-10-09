@@ -17,6 +17,9 @@ fields (``schemas/comms/envelope.outbound.json``):
   (2026-10-08) carried their key in the title instead; a builder sets ``legacy_title`` to that
   old title, so a message published before the upgrade still counts and is not repeated.
 
+A ``help_request`` also carries ``priority`` P0 and ``expects_response`` (``HELP_REQUEST_FIELDS``),
+so every publisher of the same message sends the same envelope.
+
 The card's own words (its summary, the titles of its messages) go into a task
 acknowledgement too. They should be plain already (complete-card asks for that), but when they
 name ids anyway, ``plain_ids`` replaces each id with what it names ("the hypothesis").
@@ -33,6 +36,9 @@ from dataclasses import dataclass, field
 from autoresearch.ids import ENTITY_PREFIXES
 
 TITLE_LIMIT = 120
+# A help_request is always urgent and wants an answer, whoever publishes it: the first
+# publisher of a ``runtime_key`` wins, so these must not depend on the call site.
+HELP_REQUEST_FIELDS = {"priority": "P0", "expects_response": True}
 OUTCOME_WORDS = {
     "done": "Done",
     "partial": "Partly done",
@@ -96,6 +102,8 @@ class RuntimeMessage:
             found["about"] = dict(self.about)
         if self.key is not None:
             found["runtime_key"] = self.key
+        if self.kind == "help_request":
+            found.update(HELP_REQUEST_FIELDS)
         return found
 
 

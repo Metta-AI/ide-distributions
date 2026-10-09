@@ -306,3 +306,24 @@ def test_published_runtime_message_is_plain(tmp_path, name, kwargs):
         assert OPAQUE.search(text) is None, text
         assert not [found for found in IDS if found in text], text
     assert all(isinstance(value, str) for value in published.get("about", {}).values())
+
+
+@pytest.mark.parametrize(
+    "name,kwargs",
+    [(name, kwargs) for name, cases in FIXTURES.items() for kwargs in cases],
+    ids=lambda value: value if isinstance(value, str) else "",
+)
+def test_a_runtime_message_carries_the_envelope_fields_of_its_kind(tmp_path, name, kwargs):
+    """Whoever publishes a message gets the same priority and expects_response: the first
+    publisher of a ``runtime_key`` wins, so they must not depend on the call site."""
+    board = Board(tmp_path)
+    message = _builders()[name](**kwargs)
+    with canonical_lock(board.canonical):
+        publish_message(board.canonical, message, allow_no_remote=True)
+    [published] = read_since(board.canonical, "test", after=0, include_unknown=True)
+
+    if message.kind == "help_request":
+        assert published["priority"] == "P0"
+        assert published["expects_response"] is True
+    else:
+        assert published.get("expects_response") is False
