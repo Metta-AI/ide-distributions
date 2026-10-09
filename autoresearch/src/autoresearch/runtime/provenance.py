@@ -4,8 +4,13 @@ make (Overview C1: queue-keeper and the trusted runtime commands are the only wr
 Every runtime writer of the canonical workspace makes each commit through ``commit_recorded``,
 which records it in a journal outside the work tree, in ``<canonical>/.git/autoresearch/``:
 ``provenance.jsonl`` (append-only, one JSON object per line) and ``provenance.key`` (a random
-key, mode 0600). Each entry carries ``mac``, an HMAC-SHA256 of its other fields under that
-key. An entry whose MAC does not verify is ignored: it vouches for nothing.
+key, mode 0600). Each entry carries ``seq`` (one more than the entry before it) and ``mac``,
+an HMAC-SHA256 of its other fields under that key. An entry whose MAC does not verify, or
+whose ``seq`` is not greater than the last valid entry's (a signed entry replayed at the end,
+for example an old anchor appended again after a reset to it), is ignored: it vouches for
+nothing. Truncating the journal itself (cutting off its newest entries) cannot be detected
+from inside the workspace: that needs the latest ``seq`` kept where card workers cannot
+write (D9 options (c) or (d)).
 
 Entry kinds:
 
@@ -180,6 +185,7 @@ def _append(canonical: Path, entry: dict) -> dict:
     writer killed mid-write) is ended first: it stays one invalid line instead of swallowing
     this entry. A short write is continued until the whole line is written."""
     key = _key(canonical, create=True)
+    entry = entry | {"seq": _last_seq(_entries(canonical)[0]) + 1}
     signed = entry | {"mac": _mac(key, entry)}
     data = (json.dumps(signed, sort_keys=True) + "\n").encode()
     path = journal_path(canonical)
@@ -198,23 +204,36 @@ def _append(canonical: Path, entry: dict) -> dict:
     return signed
 
 
+def _last_seq(entries: list[dict]) -> int:
+    return max((entry["seq"] for entry in entries if "seq" in entry), default=0)
+
+
 def _entries(canonical: Path) -> tuple[list[dict], int]:
-    """The valid entries in file order, and the number of lines that did not verify."""
+    """The valid entries in file order, and the number of lines that did not verify. An entry
+    is valid when its MAC verifies and its ``seq`` is greater than every valid entry's before
+    it, so a signed entry copied to the end again (a replay) is invalid. An entry without
+    ``seq`` (written before sequence numbers) counts only before the first one that has it."""
     path = journal_path(canonical)
     if not path.exists():
         return [], 0
     key = _key(canonical, create=False)
-    valid, invalid = [], 0
+    valid, invalid, last = [], 0, None
     for line in path.read_bytes().splitlines():
         if not line.strip():
             continue
         try:  # decoding is inside: one bad byte must not stop the check (it fails closed)
             entry = json.loads(line.decode("utf-8"))
             ok = key is not None and hmac.compare_digest(str(entry.get("mac")), _mac(key, entry))
+            seq = entry.get("seq")
+            if ok and seq is None:
+                ok = last is None
+            elif ok:
+                ok = isinstance(seq, int) and (last is None or seq > last)
         except (ValueError, AttributeError, TypeError):
             ok = False
         if ok:
             valid.append(entry)
+            last = entry.get("seq", last)
         else:
             invalid += 1
     return valid, invalid

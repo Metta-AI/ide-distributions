@@ -306,7 +306,8 @@ next queue-keeper run after that.
 Only the runtime commits on the canonical workspace's `main` (C1): queue-keeper, xp-poll,
 health, bootstrap, and `card finish` (the handoff commit). Each of them records every commit
 it makes in a journal outside the work tree (`.git/autoresearch/provenance.jsonl`, entries
-signed with a key in `provenance.key`). Before it acts, every queue-keeper run checks the
+numbered in sequence and signed with a key in `provenance.key`; a signed entry copied to the
+end again, for example to hide a reset, vouches for nothing). Before it acts, every queue-keeper run checks the
 first-parent history of `main` since the last checked commit. A commit nobody recorded (for
 example one a card worker made itself, working around the plugin), a rewritten history
 (reset, rebase, amend), or a missing or unverifiable journal pauses the agent and sends one

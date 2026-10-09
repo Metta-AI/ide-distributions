@@ -489,3 +489,24 @@ def test_an_unreadable_journal_pauses_and_keeps_the_spend_caps(host):
     resumed = host.tick(at(4))
     assert not resumed.paused and not (host.ledger / "pause.json").exists()
     assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
+
+
+def test_a_replayed_anchor_does_not_hide_a_reset(host):
+    """Codex review of PR #24 round 2, H2: reset main to an old anchored commit and append
+    that anchor's signed line again (no key needed). The replay has an old ``seq``, so it
+    vouches for nothing and the reset is reported."""
+    journal = provenance.journal_path(host.canonical)
+    [anchor_line] = [line for line in journal.read_bytes().splitlines()
+                     if json.loads(line)["kind"] == provenance.ANCHOR]  # fmt: skip
+    anchored = json.loads(anchor_line)["sha"]
+    host.tick(at(1))  # admits the planning request: recorded commits after the anchor
+    host.tick(at(2))
+    assert host.head() != anchored
+    gitops.git(host.canonical, "reset", "--hard", "-q", anchored)
+    with journal.open("ab") as handle:
+        handle.write(anchor_line + b"\n")
+
+    run = host.tick(at(3))
+    assert run.provenance_violation is not None
+    assert run.provenance_violation.kind == provenance.REWRITTEN
+    assert provenance.invalid_lines(host.canonical) == 1
