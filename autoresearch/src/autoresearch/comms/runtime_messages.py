@@ -497,6 +497,22 @@ def card_models_invalid(value: str, problems: list[str]) -> RuntimeMessage:
     )
 
 
+def autonomy_invalid(value: str) -> RuntimeMessage:
+    """``AUTORESEARCH_AUTONOMY`` has an unknown value (one per distinct value)."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    body = (
+        f"AUTORESEARCH_AUTONOMY in the profile .env is {value!r}, which is not a known setting. "
+        "The agent runs as if it were 'always', so it plans its own research without waiting "
+        "for a task. Please set it to 'always' or 'on-request'."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Autonomy setting has errors",
+        body,
+        key=f"autonomy:{digest}",
+    )
+
+
 def host_requirements_missing(game: str, problems: list[str]) -> RuntimeMessage:
     """The workers lack something the game's ``host_requirements`` declare (one per game and
     distinct set of problems)."""

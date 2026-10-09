@@ -63,6 +63,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_FALLBACK_PRICES",
     "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
     "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",  # queue-keeper preflight's credit floor (A5)
+    "AUTORESEARCH_AUTONOMY",  # queue-keeper plans only after the coach's first task (on-request)
 ]
 APPROVAL_DENY = [
     "coworld player use*",

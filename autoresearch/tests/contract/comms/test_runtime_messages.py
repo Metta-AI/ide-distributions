@@ -167,6 +167,7 @@ FIXTURES = {
     "card_models_invalid": [
         {"value": "planing=z-ai/glm-5.3", "problems": ["unknown card mode 'planing' (skipped)"]}
     ],
+    "autonomy_invalid": [{"value": "on_request"}],
     "daily_budget_reached": [{"spent_usd": 25.31, "budget_usd": 25.0, "day": "2026-10-08"}],
     "signal_persists": [
         {

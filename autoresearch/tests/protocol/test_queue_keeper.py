@@ -12,6 +12,7 @@ import yaml
 from support.board import ForeignBoard
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
+from autoresearch.comms.inbound import submit_inbound
 from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -1127,3 +1128,91 @@ def test_a_renewal_failure_keeps_the_pin_and_still_runs_the_kb_step(host, tmp_pa
     monkeypatch.setattr(queue_keeper, "renew_code_citations", lambda *a, **k: None)
     queue_keeper.kb_step(host.canonical, at(2), "fake-2", pin)
     assert read_json(ledger)["pin"] == "b" * 40
+
+
+# --- start on request (AUTORESEARCH_AUTONOMY) ---
+
+
+def _planning_requests(host: Host) -> list[dict]:
+    return [r for r in host.requests() if r.get("spec", {}).get("mode") == "planning"]
+
+
+def _started(host: Host) -> dict | None:
+    return host.committed(host.ledger / "started.json")
+
+
+def _send_task(host: Host, author: str) -> str:
+    return submit_inbound(
+        host.canonical,
+        "task",
+        {"title": "Scout andre", "mode": "scouting", "why": "Leads.", "refs": [], "priority": "P1"},
+        author,
+    )
+
+
+def test_on_request_does_not_plan_before_a_coach_task(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+
+    first, second = host.tick(at(0)), host.tick(at(1))
+
+    for run in (first, second):
+        assert run.planning is None and run.planning_skipped and run.failures == {}
+        assert run.admitted == []
+    assert host.queue.list() == [] and _planning_requests(host) == []
+    assert _started(host) is None
+    log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
+    assert log.count("planning waits for the coach's first task") == 1  # once a day
+
+
+def test_first_coach_task_starts_the_agent(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    task = _send_task(host, "coach:ply_x")
+
+    run = host.tick(at(1))
+
+    assert [r.ok for r in run.admitted] == [True]
+    assert _started(host)["by"] == task and _started(host)["started_at"]
+    assert host.clean()
+    host.tick(at(2))
+    assert len(_planning_requests(host)) == 1  # the agent plans from now on
+
+
+def test_coach_steer_does_not_start_the_agent(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    steer = submit_inbound(
+        host.canonical, "steer", {"text": "Stop that task.", "urgency": "now"}, "coach:ply_x"
+    )
+
+    run = host.tick(at(1))
+
+    assert host.committed(host.ledger / "inbound" / f"{steer}.json") is not None  # adopted
+    assert _started(host) is None and run.planning_skipped
+
+
+def test_non_coach_task_does_not_start_the_agent(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    _send_task(host, "operator")
+
+    run = host.tick(at(1))
+
+    assert [r.ok for r in run.admitted] == [True]
+    assert _started(host) is None and run.planning_skipped
+
+
+def test_always_is_unchanged(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "always"
+    run = host.tick(at(0))
+    assert run.planning is not None and not run.planning_skipped and run.failures == {}
+    assert _started(host) is None
+
+
+def test_unknown_autonomy_runs_as_always_with_one_help_request(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on_request"
+    first = host.tick(at(0))
+    host.tick(at(1))
+    assert first.planning is not None
+    assert "autonomy" in first.failures
+    assert len(_help_requests(host, "Autonomy setting")) == 1
