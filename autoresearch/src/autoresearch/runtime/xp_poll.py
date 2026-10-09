@@ -584,7 +584,7 @@ def run(
                 _log(ctx, f"warning: {warning}")
             if REMOTE in gitops.git(ctx.canonical, "remote").split():
                 with canonical_lock(ctx.canonical):
-                    if not provenance.push_main(ctx.canonical, REMOTE, ["HEAD:refs/heads/main"]):
+                    if not provenance.push_main(ctx.canonical, REMOTE):
                         _log(ctx, "push of main failed; queue-keeper retries it")
     except LockTimeout:
         result.skipped = True

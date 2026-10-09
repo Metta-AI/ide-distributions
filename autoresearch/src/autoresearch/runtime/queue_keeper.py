@@ -170,7 +170,6 @@ STEP_FAILURES_FILE = "step_failures.json"
 STEP_FAILURE_RUNS = 5  # consecutive failing runs of one step before a help_request ...
 STEP_FAILURE_AGE = datetime.timedelta(hours=1)  # ... or this long failing, whichever first
 REMOTE = "origin"
-MAIN_REFSPEC = "HEAD:refs/heads/main"  # never forced
 # Forced: origin's card/* copies are a one-way mirror only this runtime writes, and a retried
 # card rebuilds its branch, so the remote copy is stale rather than newer.
 CARD_REFSPEC = "+refs/heads/card/*:refs/heads/card/*"
@@ -498,7 +497,7 @@ def _remote_main(canonical: Path) -> str | None:
 def _push_main_and_cards(canonical: Path) -> list[str]:
     """Push main, then the card branches separately so a card refusal never touches main's
     result. Returns the card refs origin rejected."""
-    provenance.push_main(canonical, REMOTE, [MAIN_REFSPEC])
+    provenance.push_main(canonical, REMOTE)
     _, rejected = gitops.push_with_rejections(canonical, REMOTE, [CARD_REFSPEC])
     return rejected
 

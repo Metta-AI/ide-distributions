@@ -319,7 +319,9 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     if early:
         result.actions.append(f"kept {len(early)} inbox files written before bootstrap for adoption")
     result.actions.append(f"seeded canonical from games/{game}/seed")
-    if not provenance.push_main(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
+    with canonical_lock(canonical):
+        pushed = provenance.push_main(canonical, REMOTE)
+    if not pushed:
         result.warnings.append(f"initial push to {remote} failed; queue-keeper retries it")
 
 
@@ -408,8 +410,11 @@ def _ensure_board(ctx: RunContext, queue: Queue, result: BootstrapResult) -> Non
 def _push(canonical: Path, result: BootstrapResult) -> None:
     """Push the epoch commit now (queue-keeper's push step would too, but ``--bootstrap-only``
     stops before it)."""
-    has_remote = REMOTE in gitops.git(canonical, "remote").split()
-    if has_remote and not provenance.push_main(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
+    if REMOTE not in gitops.git(canonical, "remote").split():
+        return
+    with canonical_lock(canonical):
+        pushed = provenance.push_main(canonical, REMOTE)
+    if not pushed:
         result.warnings.append("push of the board epoch failed; queue-keeper retries it")
 
 

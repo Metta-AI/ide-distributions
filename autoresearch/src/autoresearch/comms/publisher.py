@@ -231,7 +231,7 @@ def push(canonical: Path, allow_no_remote: bool = False) -> bool:
         if allow_no_remote:
             return False
         raise PublishError(f"canonical {canonical} has no {REMOTE!r} remote to push to")
-    return provenance.push_main(canonical, REMOTE, [BRANCH])
+    return provenance.push_main(canonical, REMOTE)
 
 
 def commit_and_push(canonical: Path, paths: list[Path], message: str) -> bool:

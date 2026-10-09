@@ -456,12 +456,12 @@ def _is_ancestor(canonical: Path, sha: str, of: str) -> bool:
     return True
 
 
-def check(canonical: Path, advance: bool = True) -> Violation | None:
-    """Check canonical HEAD's first-parent history since the last anchored or verified
-    commit (module docstring). Call under the canonical lock. With ``advance``, a clean
-    history moves the verified point to HEAD."""
+def check(canonical: Path, advance: bool = True, head: str | None = None) -> Violation | None:
+    """Check canonical HEAD's (or ``head``'s) first-parent history since the last anchored
+    or verified commit (module docstring). Call under the canonical lock. With ``advance``,
+    a clean history moves the verified point to HEAD."""
     entries, _ = _entries(canonical)
-    head = gitops.head(canonical)
+    head = head or gitops.head(canonical)
     base_index = _base(entries)
     if base_index is None:
         return Violation(JOURNAL_LOST, head, None)
@@ -543,21 +543,21 @@ def accept(canonical: Path, sha: str) -> dict:
 # --- pushing main ---
 
 
-def push_hold(canonical: Path) -> str | None:
-    """Why canonical ``main`` must not be pushed now, or None. While a violation is
-    unresolved (or the check cannot run) the commits nobody recorded stay local: pushing
-    would publish them to the remote before a person accepted them. Messages still reach
-    the coach: the bridge reads ``comms/outbox/`` from the local workspace. A workspace the
-    journal was never initialized on (no journal file and no marker ever committed:
-    bootstrap's first push of a seeded workspace, which ``initialize`` then trusts) is not
-    held."""
+def push_hold(canonical: Path, sha: str | None = None) -> str | None:
+    """Why canonical ``main`` (at ``sha``, default HEAD) must not be pushed now, or None.
+    While a violation is unresolved (or the check cannot run) the commits nobody recorded
+    stay local: pushing would publish them to the remote before a person accepted them.
+    Messages still reach the coach: the bridge reads ``comms/outbox/`` from the local
+    workspace. A workspace the journal was never initialized on (no anchor line in the
+    journal, valid or not, and no marker ever committed: bootstrap's first push of a seeded
+    workspace, which ``initialize`` then trusts) is not held."""
     try:
-        violation = check(canonical, advance=False)
+        violation = check(canonical, advance=False, head=sha)
         never_initialized = (
             violation is not None
             and violation.kind == JOURNAL_LOST
-            and not journal_path(canonical).exists()
             and not _ever_marked(canonical)
+            and not _any_anchor_line(canonical)
         )
         if never_initialized:
             return None  # bootstrap's seed push, before ``initialize``
@@ -566,9 +566,27 @@ def push_hold(canonical: Path) -> str | None:
     return None if violation is None else violation.summary()
 
 
-def push_main(canonical: Path, remote: str, refspecs: list[str]) -> bool:
-    """Every push of canonical ``main`` goes through here (``push_hold``). Returns False
-    when the push is held or fails; the next push retries."""
-    if push_hold(canonical) is not None:
+def _any_anchor_line(canonical: Path) -> bool:
+    """The journal holds an anchor line, valid or not: it was initialized once (a journal
+    whose anchor stopped verifying is not "never initialized")."""
+    path = journal_path(canonical)
+    if not path.exists():
         return False
-    return gitops.push(canonical, remote, refspecs)
+    for line in path.read_bytes().splitlines():
+        try:
+            if json.loads(line).get("kind") == ANCHOR:
+                return True
+        except (ValueError, AttributeError):
+            continue
+    return False
+
+
+def push_main(canonical: Path, remote: str) -> bool:
+    """Every push of canonical ``main`` goes through here. It resolves HEAD to one sha,
+    checks that sha (``push_hold``) and pushes exactly it (``<sha>:refs/heads/main``), so a
+    commit made between the check and the push is not published unchecked. Call under the
+    canonical lock. Returns False when the push is held or fails; the next push retries."""
+    sha = gitops.head(canonical)
+    if push_hold(canonical, sha) is not None:
+        return False
+    return gitops.push(canonical, remote, [f"{sha}:refs/heads/main"])

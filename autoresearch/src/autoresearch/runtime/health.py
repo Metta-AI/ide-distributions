@@ -162,7 +162,7 @@ def _push(ctx: RunContext) -> None:
     """Push the run's commits (markers, requests); queue-keeper owns push failure reports."""
     if REMOTE in gitops.git(ctx.canonical, "remote").split():
         with canonical_lock(ctx.canonical):
-            if not provenance.push_main(ctx.canonical, REMOTE, ["HEAD:refs/heads/main"]):
+            if not provenance.push_main(ctx.canonical, REMOTE):
                 _log(ctx, "push of main failed; queue-keeper retries it")
 
 

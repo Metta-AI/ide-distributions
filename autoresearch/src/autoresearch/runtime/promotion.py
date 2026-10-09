@@ -112,7 +112,6 @@ PROMOTION_FILE_REL = ".supervisor/ledger/promotion.json"
 ACCEPTED_FILE_REL = ".supervisor/ledger/champion_accepted.json"
 HISTORY_DIR_REL = ".supervisor/ledger/promotions"
 REMOTE = "origin"  # canonical's remote (AUTORESEARCH_WORKSPACE_REMOTE, set up by bootstrap)
-MAIN_REFSPEC = "HEAD:refs/heads/main"
 IN_FLIGHT = ("intent", "submitted", "recorded")
 CLOSED = ("published", "aborted", "rejected")  # terminal stages; the promotion slot is free
 REACHED_SUBMIT = ("intent", "submitted", "recorded", "published")  # may have reached the league
@@ -818,7 +817,9 @@ def record_intent(ctx: RunContext, promotion: Promotion, replaces: str | None = 
     with canonical_lock(canonical):
         current = _require(load(canonical), promotion.id, "acquired")
         intent = _move(canonical, current, "intent", candidate_sha=sha, replaces=replaces)
-    if provenance.push_main(canonical, REMOTE, [MAIN_REFSPEC]):
+    with canonical_lock(canonical):
+        pushed = provenance.push_main(canonical, REMOTE)
+    if pushed:
         return
     with canonical_lock(canonical):
         current = load(canonical)
@@ -834,7 +835,9 @@ def record_submitted(ctx: RunContext, promotion: Promotion, submission_id: str) 
     with canonical_lock(canonical):
         current = _require(load(canonical), promotion.id, "intent")
         _move(canonical, current, "submitted", submission_id=submission_id)
-    if not provenance.push_main(canonical, REMOTE, [MAIN_REFSPEC]):
+    with canonical_lock(canonical):
+        pushed = provenance.push_main(canonical, REMOTE)
+    if not pushed:
         log.warning("promotion %s submitted but the ledger push failed", promotion.id)
 
 

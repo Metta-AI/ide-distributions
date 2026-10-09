@@ -527,7 +527,7 @@ def test_a_violation_is_never_pushed_until_it_is_accepted(host, monkeypatch, cap
     [warning] = _provenance_messages(host)  # in the local outbox
     assert warning["kind"] == "help_request"
     assert provenance.push_hold(host.canonical) is not None
-    assert not provenance.push_main(host.canonical, "origin", ["HEAD:refs/heads/main"])
+    assert not provenance.push_main(host.canonical, "origin")
     assert host.remote_head() == pushed
 
     code, _ = _cli(monkeypatch, capsys, host, "accept-commits", forged)
@@ -729,3 +729,21 @@ def test_a_crash_between_the_anchor_and_the_marker_is_resumed(tmp_path, monkeypa
     entries, _ = provenance._entries(repo)
     assert [e["kind"] for e in entries].count(provenance.ANCHOR) == 1
     assert provenance.check(repo) is None
+
+
+def test_push_main_pushes_exactly_the_commit_it_checked(host, monkeypatch):
+    """Round 3, item 3: a commit made between the check and the push is not published."""
+    host.tick(at(1))
+    (host.canonical / "notes.md").write_text("runtime\n")
+    checked = host.runtime_commit("a recorded runtime commit")
+    real_check = provenance.check
+
+    def check_then_race(*args, **kwargs):
+        result = real_check(*args, **kwargs)
+        _commit_plan_outside_the_runtime(host, "raced in after the check\n")
+        return result
+
+    monkeypatch.setattr(provenance, "check", check_then_race)
+    with file_lock(host.canonical / ".supervisor" / "runtime" / "canonical.lock"):
+        assert provenance.push_main(host.canonical, "origin")
+    assert host.remote_head() == checked != host.head()
