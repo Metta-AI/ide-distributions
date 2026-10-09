@@ -36,7 +36,7 @@ status; tool errors always do. Use a fresh work directory for G2.
 The explicit `build --prebuilt FILE.bas` binding runs G1–G4 with this contract.
 Its G5 receipt is not an executed GateResult: it records `applicable: false`,
 `passed: false`, `advisory: true`, and `not applicable: prebuilt`, without an
-`outcome`. The artifact is its own G4 baseline mirror. See [bootstrap](../GAME.md#exact-prebuilt-baseline-and-first-install-bootstrap)
+`outcome`. The artifact is its own G4 baseline mirror. See [bootstrap](../GAME.md#starter-policy)
 for committed-input provenance and the shared upload handoff.
 
 No command uploads or submits a policy. The manifest and container image must
@@ -45,6 +45,40 @@ already be available for the intended live release. G2 uses the project lockfile
 the same `uv run --project PROJECT --locked --offline --python 3.12` invocation,
 with the project directory resolved from the script rather than the caller's
 working directory. Cache the locked dependencies before either command.
+
+## Durations and waiting
+
+Phase H's EC2 timing report (`VERDICT-H`, 2026-10-09) attributes approximately
+55 minutes to the G3/G4 workload in a build or full `local_check`. This is a
+reported operating estimate, not a new benchmark or a separate measurement of
+each gate. No independent timings for G1, G2, G3, G4 or G5 are established here.
+Compiler generation/repair and cold native preparation add work outside that
+estimate; host speed, policy, early game ends and cache reuse affect the total.
+
+G3 defaults to ten seeds at up to 31200 ticks. G4 covers those ten seeds on both
+sides; identical policy hashes share mirror measurements, including G3's
+measurements in the same `GateContext`. Different artifacts require candidate
+versus baseline screens. A separate CLI `local_check` creates a fresh context
+and reruns the workload; do not assume the preceding build's in-memory cache
+survives. Short G3 samples prove only their reported `sample_ticks` and do not
+establish a full gate duration.
+
+Use the shared `queue` skill's **Long commands** procedure for build/full gate
+runs: terminal `background: true`, then `process_manage` with `action: "wait"`,
+the returned `session_id`, and `timeout: 1800`. Repeat only if it returns
+`status: "timeout"`; do nothing between waits. No polling, repeated log calls
+or sleep/probing loops. A shorter command may run in the foreground with
+terminal `timeout` at most 600 seconds only when it is known to fit. Apply the
+same rule to native preparation/builds and episode/replay tools.
+
+After exit, read the command result and `WORK_DIR/gates.json`,
+`engine_identity.json`, `coworld_manifest.json`, and the hashed native
+measurement JSON files with their `native_build` receipts. Follow G2's
+`summary.episode_dir` to results and logs. For builds, read `report.json`,
+`report.md` and `version.json` (`gates`, `engine`, `native_builds`) under the
+build directory instead; prebuilt builds also retain `gates.json`. Failed and
+errored runs retain evidence too. Waiting successfully does not establish gate
+success.
 
 ## Evidence and limits
 
