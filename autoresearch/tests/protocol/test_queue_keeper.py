@@ -413,7 +413,7 @@ def test_stale_merge_head_is_aborted(host):
     gitops.commit_all(canonical, "side")
     gitops.git(canonical, "checkout", "-q", "main")
     (canonical / "plan.md").write_text("main\n")
-    gitops.commit_all(canonical, "main change")
+    host.runtime_commit("main change")
     with pytest.raises(gitops.GitError):
         gitops.git(canonical, "merge", "side")  # conflict: MERGE_HEAD left behind
     assert (canonical / ".git" / "MERGE_HEAD").exists()
@@ -980,7 +980,7 @@ def _claim(host: Host, checked: str, evidence: list | None = None) -> str:
         },
         "Damage is 10.",
     )
-    gitops.commit_all(host.canonical, f"claim {claim}")
+    host.runtime_commit(f"claim {claim}")
     return claim
 
 
@@ -1106,7 +1106,7 @@ def test_a_renewal_failure_keeps_the_pin_and_still_runs_the_kb_step(host, tmp_pa
     claim = _claim(host, GAME_VERSION)
     ledger = host.canonical / ".supervisor" / "ledger" / "game_source.json"
     write_json(ledger, {"pin": "a" * 40, "repo": "r", "updated_at": "t"})
-    gitops.commit_all(host.canonical, "pin a")
+    host.runtime_commit("pin a")
     layout = Layout(host.canonical)
     partial = layout.card_requests / "Q-partial.json"
 

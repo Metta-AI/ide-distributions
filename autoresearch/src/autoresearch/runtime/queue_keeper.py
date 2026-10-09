@@ -4,6 +4,12 @@
 Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
+   Then the commit provenance check (``runtime.provenance``, C1): every commit on canonical
+   HEAD's first-parent history since the last checked one must be one a runtime writer
+   recorded. On a violation (a commit the runtime did not make, a rewritten history, a lost
+   journal): pause (C7), one runtime ``help_request`` per violation, the spend step, and
+   stop. Nothing is merged, published or admitted until an operator runs
+   ``runtime accept-commits``; the run after that resumes the agent like any other pause.
 2. ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
    them (``preflight.host_requirement_problems``: the profile ``.env`` over this job's
    environment): missing ones are logged and get one runtime ``help_request`` per distinct
@@ -116,7 +122,7 @@ from autoresearch.queue.requests import read_requests
 from autoresearch.queue.select import ENV_CARD_MODELS, parse_card_models, queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import config_migrations, promotion, proposals, spend
+from autoresearch.runtime import config_migrations, promotion, proposals, provenance, spend
 from autoresearch.runtime.admission import (
     NEEDS_CALIBRATION,
     PLANNING_OWNED,
@@ -184,6 +190,7 @@ class KeeperRun:
     preflight: PreflightResult | None = None
     paused: bool = False  # preflight failed and this run paused (or kept paused) the agent
     champion_checked: bool = False  # the A9 champion check ran to the end this run
+    provenance_violation: provenance.Violation | None = None  # commits the runtime did not make
     champion_conflict: promotion.ChampionConflict | None = None
     foreign: list[str] = field(default_factory=list)  # foreign tasks recorded this run
     rebuilt: list[CardSpec] = field(default_factory=list)
@@ -345,11 +352,33 @@ def check_champion(
     run.champion_checked = True
 
 
+def check_provenance(
+    run: KeeperRun, ctx: RunContext, queue: Queue, now: datetime.datetime, allow_no_remote: bool
+) -> None:
+    """C1: check that every new commit on canonical is one the runtime made
+    (``provenance.check``); on a violation pause and publish one help_request for it."""
+    canonical = ctx.canonical
+    with canonical_lock(canonical):
+        violation = run.provenance_violation = provenance.check(canonical)
+    if violation is None:
+        return
+    _log(ctx, f"provenance violation: {json.dumps(violation.to_dict(), sort_keys=True)}")
+    pause(queue, ledger_of(canonical), f"{provenance.PAUSE_REASON}: {violation.summary()}")
+    message = runtime_messages.commit_provenance(violation.to_dict(), now.date().isoformat())
+    with canonical_lock(canonical):
+        if not already_published(canonical, message):
+            publish_message(canonical, message, allow_no_remote)
+
+
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
     canonical = ctx.canonical
     reason = read_json(pause_path(ledger_of(canonical))).get("reason", "")
     resumed = resume(queue, ledger_of(canonical))
-    message = runtime_messages.agent_resumed(len(resumed), reason.startswith(CHAMPION_PAUSE))
+    message = runtime_messages.agent_resumed(
+        len(resumed),
+        reason.startswith(CHAMPION_PAUSE),
+        provenance=reason.startswith(provenance.PAUSE_REASON),
+    )
     with canonical_lock(canonical):
         publish_message(canonical, message, allow_no_remote)
     return resumed
@@ -789,6 +818,12 @@ def _run_steps(
     signal_config: SignalConfig,
 ) -> None:
     canonical = ctx.canonical
+    _step(run, ctx, "provenance", check_provenance, run, ctx, queue, now, allow_no_remote)
+    if run.provenance_violation is not None:
+        run.paused = True
+        # Running cards keep running while paused: the caps still apply to them.
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
+        return
     try:
         run.preflight = preflight(env, sm, canonical, now, **preflight_kwargs)
     except Exception as error:  # noqa: BLE001 - a preflight that cannot finish has failed

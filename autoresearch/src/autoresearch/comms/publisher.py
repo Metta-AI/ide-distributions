@@ -65,6 +65,7 @@ from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.records.registry import entity_of_id
+from autoresearch.runtime import provenance
 
 OUTBOX_DIR = "comms/outbox"
 INBOX_DIR = "comms/inbox"
@@ -218,7 +219,10 @@ def _commit_pending(canonical: Path, message: str) -> str | None:
     paths += staged_removed
     if not paths:
         return None
-    return gitops.commit_paths(canonical, sorted(set(paths)), message)
+    sha = gitops.commit_paths(canonical, sorted(set(paths)), message)
+    if sha is not None:
+        provenance.record(canonical, sha, message)
+    return sha
 
 
 def push(canonical: Path, allow_no_remote: bool = False) -> bool:
@@ -237,7 +241,9 @@ def commit_and_push(canonical: Path, paths: list[Path], message: str) -> bool:
     and queue-keeper pushes ``main`` every run. Returns whether the push happened. Call under
     the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
-    gitops.commit_paths(canonical, relative, message)
+    sha = gitops.commit_paths(canonical, relative, message)
+    if sha is not None:
+        provenance.record(canonical, sha, message)
     return push(canonical, allow_no_remote=True)
 
 

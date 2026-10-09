@@ -563,19 +563,97 @@ def agent_paused(reasons: str, paused_at: str, key: str | None = None) -> Runtim
     )
 
 
-def agent_resumed(count: int, champion: bool = False) -> RuntimeMessage:
-    """The agent resumed; ``champion``: the pause was a champion conflict (A9)."""
-    why = (
-        "The league and the agent agree on the champion again"
-        if champion
-        else "The cause of the pause has cleared (the preflight check passes and today's spend "
-        "is under the daily budget)"
-    )
+def agent_resumed(count: int, champion: bool = False, provenance: bool = False) -> RuntimeMessage:
+    """The agent resumed; ``champion``: the pause was a champion conflict (A9);
+    ``provenance``: the pause was a commit the runtime did not make (``runtime.provenance``)."""
+    if champion:
+        why = "The league and the agent agree on the champion again"
+    elif provenance:
+        why = "Every commit on the workspace is now one the runtime made or a person accepted"
+    else:
+        why = (
+            "The cause of the pause has cleared (the preflight check passes and today's spend "
+            "is under the daily budget)"
+        )
     body = (
         f"{why}, so the agent resumed. {count} pending card(s) were assigned again. Nothing "
         "needs to be done."
     )
     return RuntimeMessage("note", "Agent resumed", body)
+
+
+_FILES_LISTED = 8
+_PROVENANCE_TITLES = {
+    "unknown_commits": "Agent paused: the workspace has commits the runtime did not make",
+    "rewritten": "Agent paused: the workspace history was rewritten",
+    "journal_lost": "Agent paused: the runtime's record of its commits is missing",
+}
+
+
+def _commit_line(commit: dict) -> str:
+    files = [plain_ids(path) for path in commit["files"]]
+    shown = ", ".join(files[:_FILES_LISTED]) or "no files"
+    more = len(files) - _FILES_LISTED
+    return (
+        f"by {commit['author']} at {commit['at']}, changing {shown}"
+        + (f" and {more} more" if more > 0 else "")
+    )
+
+
+def commit_provenance(violation: dict, day: str) -> RuntimeMessage:
+    """queue-keeper found commits on canonical ``main`` that the runtime did not make, a
+    rewritten history, or a lost journal (``runtime.provenance.Violation.to_dict()``), and
+    paused the agent. One per set of unrecorded commits (per rewrite, per day for a lost
+    journal)."""
+    kind, commits = violation["kind"], violation["commits"]
+    if kind == "unknown_commits":
+        what = (
+            f"{len(commits)} commit(s) on the main branch of the canonical workspace were not "
+            "made by the runtime. Only the runtime writes there, so a card worker or another "
+            "process probably worked around a guard."
+        )
+        key = "provenance:" + hashlib.sha256(
+            " ".join(commit["sha"] for commit in commits).encode()
+        ).hexdigest()[:16]
+    elif kind == "rewritten":
+        what = (
+            "The history of the main branch of the canonical workspace was rewritten (a "
+            "reset, rebase, amend or forced move): "
+            f"{violation['dropped']} commit(s) the runtime had checked are no longer part of it"
+            + (f", and {len(commits)} newer commit(s) were not made by the runtime." if commits
+               else ".")
+        )
+        key = f"provenance-rewritten:{violation['base']}"
+    else:
+        what = (
+            "The runtime's record of the commits it makes on the canonical workspace (in the "
+            "workspace's .git/autoresearch/) is missing or no longer verifies, so it cannot "
+            "tell its own commits from others."
+        )
+        key = f"provenance-journal:{day}"
+    listed = f"\n\n{_bullets([_commit_line(commit) for commit in commits])}" if commits else ""
+    body = (
+        f"{what}{listed}\n\nThe agent is paused: no new cards start, pending cards were "
+        "unassigned, and finished cards are not merged until a person looks. To inspect, run "
+        '`"$AUTORESEARCH_CLI" runtime check-commits` in an operator shell: it lists each '
+        "commit with its id and files (the ids are also in this message's details, `about`). "
+        "Keep the commits or undo them in the workspace. When the history is as it should be, "
+        'run `"$AUTORESEARCH_CLI" runtime accept-commits <commit>` with the commit '
+        "`check-commits` names to accept (the agent cannot run it). The agent resumes by itself "
+        "on the next run."
+    )
+    return RuntimeMessage(
+        "help_request",
+        _PROVENANCE_TITLES[kind],
+        body,
+        about=_about(
+            commits=" ".join(commit["sha"] for commit in commits),
+            accept_commit=violation["accept_sha"],
+            head=violation["head"],
+            last_checked=violation["base"],
+        ),
+        key=key,
+    )
 
 
 def staged_not_published(

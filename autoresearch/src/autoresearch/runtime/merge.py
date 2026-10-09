@@ -56,7 +56,7 @@ from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.registry import parse_record_path
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import promotion
+from autoresearch.runtime import promotion, provenance
 from autoresearch.runtime.admission import admitted_spec, board_epoch, receipt_path
 from autoresearch.runtime.foreign import is_foreign, record_foreign
 from autoresearch.runtime.handoff import (
@@ -339,7 +339,9 @@ def _merge(canonical: Path, path: Path, record: dict, store: RecordStore) -> dic
         return _request_follow_up(
             canonical, path, record, "reconcile", why, overlap=[], conflicts=conflicts
         )
-    return _mark_merged(canonical, path, record, gitops.head(canonical))
+    merge_sha = gitops.head(canonical)
+    provenance.record(canonical, merge_sha, message)
+    return _mark_merged(canonical, path, record, merge_sha)
 
 
 def _supersede(canonical: Path, ref: str, by: str) -> list[Path]:

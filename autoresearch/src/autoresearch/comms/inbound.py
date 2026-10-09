@@ -49,6 +49,7 @@ from autoresearch.ids import new_id
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
 from autoresearch.paths import Layout
+from autoresearch.runtime import provenance
 from autoresearch.runtime.ledger import canonical_lock
 
 INBOUND_KINDS = kinds.inbound_kinds()
@@ -249,9 +250,8 @@ def adopt_direct_writes(
             _record_seen(canonical, author, sorted(ids)).relative_to(canonical).as_posix()
             for author, ids in sorted(seen_ids.items())
         ]
-        gitops.commit_blobs(
-            canonical, blobs, paths, f"inbound: adopted {len(blobs)} direct writes"
-        )
+        subject = f"inbound: adopted {len(blobs)} direct writes"
+        provenance.record(canonical, gitops.commit_blobs(canonical, blobs, paths, subject), subject)
         push(canonical, allow_no_remote=True)
     return result
 

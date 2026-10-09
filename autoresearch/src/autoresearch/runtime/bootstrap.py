@@ -19,7 +19,10 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    it has none. Seeded, cloned and existing workspaces get ``AGENTS.md`` re-seeded (one
    canonical commit) when ``doctrine/VERSION`` differs from the version in its header.
    Every run also makes sure ``comms/inbox/`` and ``comms/outbox/`` exist (empty
-   directories, untracked) for external agents.
+   directories, untracked) for external agents. Bootstrap's own canonical commits are
+   recorded in the provenance journal, and when the journal has no anchor yet it trusts the
+   current HEAD once (``provenance.initialize``: a new or restored workspace, or the first
+   run of the provenance check on an existing one).
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -37,7 +40,7 @@ from autoresearch.io.docs import write_text
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import config_migrations
+from autoresearch.runtime import config_migrations, provenance
 from autoresearch.runtime.config_migrations import Runner
 from autoresearch.runtime.ledger import canonical_lock, ledger_of
 from autoresearch.runtime.rebuild import new_board_epoch
@@ -188,7 +191,10 @@ def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult)
         return
     with canonical_lock(canonical):
         write_text(path, _agents_md(repo_root))
-        gitops.commit_paths(canonical, ["AGENTS.md"], f"bootstrap: doctrine version {wanted}")
+        subject = f"bootstrap: doctrine version {wanted}"
+        sha = gitops.commit_paths(canonical, ["AGENTS.md"], subject)
+        if sha is not None:
+            provenance.record(canonical, sha, subject)
     result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
 
 
@@ -205,7 +211,8 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     (ledger_of(canonical) / ".gitkeep").parent.mkdir(parents=True, exist_ok=True)
     (ledger_of(canonical) / ".gitkeep").touch()
     gitops.git(canonical, "remote", "add", REMOTE, remote)
-    gitops.commit_all(canonical, f"bootstrap: seed workspace from games/{game}/seed")
+    subject = f"bootstrap: seed workspace from games/{game}/seed"
+    provenance.record(canonical, gitops.commit_all(canonical, subject), subject)
     result.actions.append(f"seeded canonical from games/{game}/seed")
     if not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
         result.warnings.append(f"initial push to {remote} failed; queue-keeper retries it")
@@ -218,7 +225,10 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
     if missing:
         with canonical_lock(canonical):
             write_text(path, "\n".join([*lines, *missing]) + "\n")
-            gitops.commit_paths(canonical, [".gitignore"], "bootstrap: .gitignore runtime dirs")
+            subject = "bootstrap: .gitignore runtime dirs"
+            sha = gitops.commit_paths(canonical, [".gitignore"], subject)
+            if sha is not None:
+                provenance.record(canonical, sha, subject)
         result.actions.append(f"added {missing} to .gitignore")
     remotes = gitops.git(canonical, "remote").split()
     if REMOTE not in remotes:
@@ -236,7 +246,8 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
 
 def _ensure_workspace(
     ctx: RunContext, env: Mapping[str, str], repo_root: Path, result: BootstrapResult
-) -> None:
+) -> bool:
+    """Return True when this run created the workspace (cloned or seeded)."""
     canonical = ctx.canonical
     remote = env.get(REMOTE_ENV) or None
     if remote:
@@ -244,7 +255,7 @@ def _ensure_workspace(
     if (canonical / ".git").exists():
         _update_existing(canonical, remote, result)
         _reseed_agents_md(canonical, repo_root, result)
-        return
+        return False
     if not remote:
         raise BootstrapError(f"{REMOTE_ENV} is not set: it is required to create the workspace")
     if _remote_has_main(remote, ctx.hermes_home):
@@ -252,6 +263,14 @@ def _ensure_workspace(
         _reseed_agents_md(canonical, repo_root, result)
     else:
         _seed(canonical, env.get(GAME_ENV) or DEFAULT_GAME, remote, repo_root, result)
+    return True
+
+
+def _ensure_provenance(canonical: Path, fresh: bool, result: BootstrapResult) -> None:
+    with canonical_lock(canonical):
+        action = provenance.initialize(canonical, fresh)
+    if action:
+        result.actions.append(action)
 
 
 def _ensure_comms_dirs(canonical: Path) -> None:
@@ -303,7 +322,8 @@ def bootstrap(
         }
         if set_env_lines(home / ".env", env_values):
             result.actions.append("updated the profile .env")
-        _ensure_workspace(ctx, env, Path(repo_root), result)
+        fresh = _ensure_workspace(ctx, env, Path(repo_root), result)
+        _ensure_provenance(ctx.canonical, fresh, result)
         _ensure_comms_dirs(ctx.canonical)
         _ensure_board(ctx, queue, result)
         if result.board_created:

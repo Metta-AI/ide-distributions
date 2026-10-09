@@ -64,6 +64,16 @@ OPEN_PROPOSAL = {
     "refs": [{"uri": "ar://skill-proposal/replay-diff", "rev": SHA}],
 }
 
+# A commit the runtime did not make (the 2026-10-09 incident), as provenance describes it.
+FORGED_COMMIT = {
+    "sha": SHA,
+    "author": "Autoresearch shim <shim@localhost>",
+    "at": "2026-10-09T00:51:30+00:00",
+    "subject": f"admit {REQUEST} (manual admission repair)",
+    "files": [f".supervisor/ledger/requests/{REQUEST}.json", f"cards/requests/{REQUEST}.json"]
+    + [f"kb/claims/c{n}.md" for n in range(9)],
+}
+
 # Arguments for each builder, every id-carrying argument filled with an id.
 FIXTURES = {
     "task_acknowledgement": [
@@ -185,7 +195,31 @@ FIXTURES = {
         },
     ],
     "agent_paused": [{"reasons": "identity: wrong player", "paused_at": SINCE}],
-    "agent_resumed": [{"count": 2}, {"count": 0, "champion": True}],
+    "agent_resumed": [
+        {"count": 2},
+        {"count": 0, "champion": True},
+        {"count": 1, "provenance": True},
+    ],
+    "commit_provenance": [
+        {
+            "violation": {
+                "kind": kind,
+                "head": SHA,
+                "base": OTHER_SHA if kind != "journal_lost" else None,
+                "accept_sha": SHA,
+                "dropped": 2 if kind == "rewritten" else 0,
+                "commits": commits,
+            },
+            "day": "2026-10-09",
+        }
+        for kind, commits in (
+            ("unknown_commits", [FORGED_COMMIT]),
+            ("unknown_commits", [FORGED_COMMIT, FORGED_COMMIT | {"files": []}]),
+            ("rewritten", []),
+            ("rewritten", [FORGED_COMMIT]),
+            ("journal_lost", []),
+        )
+    ],
     "staged_not_published": [
         {"message_id": MESSAGE, "staged_title": title, "problems": ["kind: bad"]}
         for title in ("Towers matter", None)

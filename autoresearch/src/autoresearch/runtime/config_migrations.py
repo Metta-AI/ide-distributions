@@ -80,6 +80,9 @@ APPROVAL_DENY = [
     # journal text that merely mentions the command is not denied.
     "*promotion accept-champion",
     "*promotion accept-champion *",
+    # A human clears a commit provenance pause (C1), anchored the same way.
+    "*runtime accept-commits",
+    "*runtime accept-commits *",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 
