@@ -14,7 +14,7 @@ from autoresearch.softmax_tool.identity import (
     require_player,
     whoami,
 )
-from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, PlatformCli
+from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, PlatformCli, SoftmaxCliError
 from autoresearch.softmax_tool.protocol import Identity
 
 from .conftest import (
@@ -234,12 +234,26 @@ def test_unreachable_platform_is_not_a_rejection(env, runner, output):
     assert "did not accept" not in str(raised.value)
 
 
-def test_timeout_is_not_a_rejection(env):
-    def hang(argv, **kwargs):
-        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+def hang(argv, **kwargs):
+    raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
 
-    with pytest.raises(subprocess.TimeoutExpired):
+
+def test_timeout_is_a_cli_error_naming_the_command_not_the_token(env):
+    """A hung CLI is a ``SoftmaxCliError`` (worker commands print the normal ``platform``
+    envelope), and the message names the command, never the token."""
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    with pytest.raises(SoftmaxCliError) as raised:
+        PlatformCli(env, run=hang).run("coworld", ["xp-request", "get", "xreq_1"], timeout=5)
+    message = str(raised.value)
+    assert message == "coworld xp-request get xreq_1 timed out after 5 s"
+    assert AGENT_TOKEN not in message
+
+
+def test_timeout_in_whoami_is_not_a_rejection(env):
+    with pytest.raises(IdentityError) as raised:
         whoami(PlatformCli(env, run=hang))
+    assert not isinstance(raised.value, CredentialRejected)
+    assert "whoami failed: softmax status timed out" in str(raised.value)
 
 
 # --- server selection ---

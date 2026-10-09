@@ -166,7 +166,7 @@ class PlatformCli:
         timeout: float = DEFAULT_TIMEOUT_S,
     ) -> subprocess.CompletedProcess:
         """Run ``<venv>/bin/<tool> <args> --server <server>`` as the Player; raise unless the
-        exit code is in ok_codes."""
+        exit code is in ok_codes. A call that runs past ``timeout`` is a ``SoftmaxCliError``."""
         self.install_credential()
         executable = self._bin_dir / tool
         try:
@@ -181,6 +181,10 @@ class PlatformCli:
             )
         except FileNotFoundError:
             raise ToolMissing(f"{executable} is not installed (reinstall the profile venv)") from None
+        except subprocess.TimeoutExpired:
+            # argv never holds the token (it is only in the credentials file).
+            command = " ".join([tool, *args[:3]])
+            raise SoftmaxCliError(f"{command} timed out after {timeout:g} s") from None
         if result.returncode not in ok_codes:
             raise SoftmaxCliError(describe_failure(tool, args, result))
         return result
