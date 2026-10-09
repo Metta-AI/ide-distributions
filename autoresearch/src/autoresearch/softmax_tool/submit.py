@@ -22,12 +22,30 @@ Then ``promotion.submit_promotion`` does the C8 steps: acquire, champion == base
 candidate STRATEGY at the champion path in the worker's worktree. Its refusals become
 ``promotion_refused``. On success the version gets a ``submitted`` event in the worktree.
 
+``bootstrap_champion`` is the other guarded path (amendment A14): on a fresh install with no
+champion, it uploads the game's shipped strategy build and promotes it as the first champion
+through ``promotion.bootstrap_promotion`` (the same C8 steps, a ``bootstrap`` promotion with no
+experiment, outcome or decision). Its guards, in order, before anything is uploaded:
+
+1. the card has a worker worktree (``no_worker``) and the build passed (the shared build
+   reader: ``gates_failed``, ``bad_build``, ``artifact_mismatch``);
+2. the credential is the expected unexpired Player (``identity``);
+3. no promotion is in flight (``promotion_in_flight``; ``acquire`` would refuse it anyway,
+   this only saves the upload);
+4. no champion exists: no published promotion and no leaderboard entry for our player
+   (``champion_exists``).
+
+Then ``upload.upload_bootstrap`` (idempotent) and ``bootstrap_promotion``, whose refusals
+become ``promotion_refused`` (another card took the lock first, or a champion appeared). On
+success the version gets a ``submitted`` event in the worktree.
+
 The outcome, rows and experiment are read from the worker's worktree (a checkout of canonical
 taken when the card started); ``submit_promotion`` reads the binding and baseline from canonical.
 """
 
 import hashlib
 from datetime import UTC, datetime
+from pathlib import Path
 
 from autoresearch.io.docs import read_json
 from autoresearch.queue.base import Queue
@@ -35,7 +53,7 @@ from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion
 from autoresearch.softmax_tool.identity import identity_problems
 from autoresearch.softmax_tool.protocol import Refused, Softmax
-from autoresearch.softmax_tool.upload import worker_store
+from autoresearch.softmax_tool.upload import checked_build, upload_bootstrap, worker_store
 from autoresearch.stats.cli import _design_sha256  # the hash stats evaluate stores
 from autoresearch.stats.design import EvaluationDesign
 
@@ -137,6 +155,64 @@ def submit(
     )
     return {
         "experiment": experiment,
+        "version_id": version_id,
+        "platform_policy_version_id": platform_id,
+        "promotion_id": result.promotion_id,
+        "submission_id": result.submission_id,
+        "champion_path": promotion.CHAMPION_PATH,
+    }
+
+
+def _refuse_if_champion(ctx: RunContext, sm: Softmax, league_id: str) -> None:
+    current = promotion.load(ctx.canonical)
+    if current is not None and current.stage in promotion.IN_FLIGHT:
+        raise Refused(
+            "promotion_in_flight",
+            f"promotion {current.id} is {current.stage}; only one promotion runs at a time",
+            {"promotion_id": current.id},
+        )
+    if promotion.has_published(ctx.canonical):
+        raise Refused("champion_exists", "a promotion is published, so the champion exists (A14)")
+    on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
+    if on_board is not None:
+        raise Refused(
+            "champion_exists",
+            f"our {league_id} leaderboard champion {on_board} is the champion (A9, A14)",
+        )
+
+
+def bootstrap_champion(
+    ctx: RunContext,
+    queue: Queue,
+    sm: Softmax,
+    build_dir: Path,
+    league_id: str,
+    player_id: str,
+) -> dict:
+    """Run the bootstrap guards (module docstring), upload the shipped strategy build and
+    promote it as the first champion. Returns the submission summary."""
+    store = worker_store(ctx)
+    checked_build(Path(build_dir))
+    problems = identity_problems(sm.whoami(), player_id, datetime.now(UTC))
+    if problems:
+        raise Refused("identity", "; ".join(problems))
+    _refuse_if_champion(ctx, sm, league_id)
+    version_id, platform_id = upload_bootstrap(ctx, sm, Path(build_dir), player_id)
+    result = promotion.bootstrap_promotion(ctx, queue, sm, version_id, platform_id, league_id)
+    if not result.ok:
+        details = {"promotion_id": result.promotion_id}
+        raise Refused("promotion_refused", result.reason or "promotion refused", details)
+    store.add_event(
+        version_id,
+        "submitted",
+        {
+            "submission_id": result.submission_id,
+            "policy_version_id": platform_id,
+            "league_id": league_id,
+            "promotion_id": result.promotion_id,
+        },
+    )
+    return {
         "version_id": version_id,
         "platform_policy_version_id": platform_id,
         "promotion_id": result.promotion_id,

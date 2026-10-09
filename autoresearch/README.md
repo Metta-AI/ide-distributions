@@ -192,12 +192,13 @@ Read state with the CLI:
 
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
-On a fresh install there is no champion and no baseline policy version. The first
-experimentation card bootstraps one by itself (amendment A14): it builds the game's baseline
-(the `## Baseline build` section of `games/<game>/GAME.md`) and runs
-`"$AUTORESEARCH_CLI" softmax upload-baseline --build-dir <build dir>`. The baseline is only the
-comparison champion until the first promotion; it is never submitted. Check it with
-`"$AUTORESEARCH_CLI" softmax leaderboard` (field `baseline`).
+On a fresh install there is no champion. The first card that needs one bootstraps it by
+itself (amendment A14): it builds the game's shipped strategy (the `## Baseline build`
+section of `games/<game>/GAME.md`) and runs
+`"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <build dir>`, which uploads it and
+promotes it through the normal promotion, without an experiment. So the first league
+submission is the shipped strategy, unevaluated. Check it with
+`"$AUTORESEARCH_CLI" promotion status` and `"$AUTORESEARCH_CLI" softmax leaderboard`.
 
 Where things live:
 

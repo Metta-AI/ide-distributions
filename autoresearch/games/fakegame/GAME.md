@@ -69,4 +69,4 @@ The baseline is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.
 strategy). Build it with the `build` binding:
 `python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/baseline --json`,
 check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
-then upload it with `"$AUTORESEARCH_CLI" softmax upload-baseline --build-dir <worktree>/.scratch/build/baseline`.
+then promote it as the first champion with `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <worktree>/.scratch/build/baseline`.

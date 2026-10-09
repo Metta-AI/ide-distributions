@@ -7,7 +7,7 @@ description: Use when a promotion card submits a promoted candidate.
 
 This skill implements the promotion card of System Design §5.5. It adapts optimizer-seed
 `submit`, with the pre-registered decision rule in place of a human gate. It also covers the
-promotion-recovery card.
+bootstrap card (the first champion on a fresh install, A14) and the promotion-recovery card.
 
 Doctrine upheld: D-01, D-03, D-06, D-20, D-25.
 
@@ -52,6 +52,46 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
 | `platform` | The platform failed. | Finish `partial`. The promotion state stays recoverable. |
 
+## Bootstrap card (first champion, A14)
+
+On a fresh install there is no champion to compare against, so the game's shipped strategy
+becomes the first champion without an experiment: it is built, uploaded, and promoted through
+the normal promotion. Its first league submission is unevaluated, on purpose. Run this when
+`experiment` step 3 (or the card) says so.
+
+1. Check that there is no champion and no promotion in flight:
+   `"$AUTORESEARCH_CLI" softmax leaderboard`
+   `"$AUTORESEARCH_CLI" promotion status`
+   Go on only if `current_champion` is null and `note` says "no champion known", and no
+   promotion is in `intent`, `submitted` or `recorded`. Otherwise record it and finish
+   (`done` when a champion exists; `partial` when a promotion is in flight).
+2. Read the `## Baseline build` section of `GAME.md` (see `queue` for its path and
+   `AR_HOME`). If there is no such section, do not invent a build: send a `help_request`
+   and finish `blocked`. Build the shipped strategy with the game's `build` binding as it
+   says, from `"$AR_HOME"`, into `<worktree>/.scratch/build/champion`. Every non-advisory
+   gate must pass.
+3. Run the game's `local_check` binding on it the same way (D-04: never evidence).
+4. Promote it. The tool checks the build, the identity, that no promotion is in flight and
+   that no champion exists, uploads it (the same build is never uploaded twice), takes the
+   promotion lock, submits, and records the submission:
+   `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir .scratch/build/champion`
+5. On success, `data` has `version_id`, `platform_policy_version_id`, `promotion_id` and
+   `submission_id`. Do not edit `strategy/STRATEGY.md`: the shipped strategy already is the
+   champion STRATEGY. Write the ids in the journal's Decisions ("bootstrapped the first
+   champion") and send one `highlight` with ref `ar://version/<V-id>` (D-20).
+6. Finish with `complete-card`, outcome `done`. The runtime records and publishes the
+   promotion when your branch merges.
+
+Refusals of `softmax bootstrap-champion`, by `error.reason`:
+
+| Reason | Meaning | Do |
+| --- | --- | --- |
+| `champion_exists` | A promotion is published or our leaderboard has a champion. | Nothing to bootstrap. Finish `done`. |
+| `promotion_in_flight`, `promotion_refused` | Another card is promoting (or took the lock first). | Finish `partial`. |
+| `gates_failed`, `bad_build`, `artifact_mismatch` | The shipped strategy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
+| `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
+| `platform` | The platform failed. | Run it once more (the same build reuses its upload). After a second failure, finish `partial`. |
+
 ## Promotion-recovery card
 
 The runtime makes this card ("Recover promotion P-…", mode `maintenance`, P0) when a
@@ -71,4 +111,5 @@ names the promotion id, the candidate commit, and the holder's branch. Never sub
    and then `published`.
 
 If `adopt` or `stage-champion` exits 1 (refused), record the message in the journal, send a
-`help_request` that names the promotion id and refs the experiment, and finish `blocked`.
+`help_request` that names the promotion id and refs the experiment (or, for a bootstrap
+promotion, the version), and finish `blocked`.

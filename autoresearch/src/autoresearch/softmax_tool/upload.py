@@ -19,18 +19,11 @@ artifact hash, that version id is returned without uploading; a version record o
 and the event write uploads again on retry, which creates a second platform version under the
 same name; the binding still names exactly one.)
 
-``upload_baseline`` (amendment A14) is the first-install bootstrap: it uploads a passed build
-as the baseline, with no experiment, so that evaluation designs have a ``baseline_version`` to
-name. Same build reader, same C6 check (the client's ``whoami`` right before the upload), same
-retry safety; the version record has ``role: baseline`` and ``experiment: null`` and the policy
-name is ``policy_name("baseline", artifact hash)``. The identity is also checked before any
-record is written, so a wrong credential leaves nothing behind. It refuses (``champion_exists``) once a
-promotion is published or the leaderboard has our champion (A9): experiments then compare
-against the champion, so a separate baseline could never pass the decision rule's
-``baseline_not_champion`` check, and there is no override. It refuses (``baseline_exists``)
-when another baseline is current, unless ``supersedes`` names exactly that baseline (for
-example after a game update retired it); a wrong ``supersedes`` is ``bad_supersedes``. The same
-build as the current baseline is a retry and returns it.
+``upload_bootstrap`` uploads the first champion on a fresh install (amendment A14; called by
+``submit.bootstrap_champion``, which checks the identity and that no champion exists first):
+the same build reader, version provenance and retry safety, with ``experiment: null`` and the
+policy name ``policy_name("bootstrap", artifact hash)``. The same build again finds its
+version by that name and does not upload again.
 
 ``version.json`` contract (every build binding writes it; ``games/fakegame`` and the GotA
 build both follow it):
@@ -52,22 +45,13 @@ The artifact hash is the sha256 of the file, or for a directory the sha256 of th
 
 import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 from autoresearch.io import gitops
 from autoresearch.paths import Layout
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
-from autoresearch.runtime.promotion import has_published
-from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.protocol import Refused, Softmax
-from autoresearch.softmax_tool.versions import (
-    BASELINE_ROLE,
-    Baseline,
-    current_baseline,
-    uploaded_policy,
-)
 
 PROVENANCE_FIELDS = (
     "build_id",
@@ -142,7 +126,7 @@ def _read_build(build_dir: Path) -> tuple[dict, Path]:
     return build, artifact
 
 
-def _checked_build(build_dir: Path) -> tuple[dict, Path, str]:
+def checked_build(build_dir: Path) -> tuple[dict, Path, str]:
     """(version.json, artifact path, artifact sha256) of a passed build; Refused otherwise."""
     build, artifact = _read_build(build_dir)
     artifact_hash = artifact_sha256(artifact)
@@ -167,8 +151,7 @@ def _strategy_sha256(build: dict) -> str:
 def _version_meta(
     ctx: RunContext, build: dict, artifact_hash: str, name: str, player_id: str | None
 ) -> dict:
-    """The provenance every version record carries; callers add ``experiment`` (and
-    ``role``)."""
+    """The provenance every version record carries; callers add ``experiment``."""
     return {
         "parents": list(build.get("parents") or []),
         "strategy_sha256": _strategy_sha256(build),
@@ -186,10 +169,16 @@ def _existing_version(store: RecordStore, experiment: str, artifact_hash: str) -
     return found[0] if found else None
 
 
+def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
+    for event_id in store.find("version_event", version=version_id, kind="uploaded"):
+        return store.load(event_id)[0]["data"]["policy_version_id"]
+    return None
+
+
 def _upload_once(store: RecordStore, sm: Softmax, version_id: str, artifact: Path) -> str:
     """The platform id of ``version_id``: its ``uploaded`` event, or a new upload (C6 is
     checked by the client) recorded as that event."""
-    platform_id = uploaded_policy(store, version_id)
+    platform_id = _uploaded_policy(store, version_id)
     if platform_id is None:
         name = store.load(version_id)[0]["policy_name"]
         platform_id = sm.upload(artifact, name)
@@ -208,7 +197,7 @@ def upload(
     Raises ``Refused`` (nothing uploaded) or the platform's errors (``IdentityError``, ...)."""
     store = worker_store(ctx)
     build_dir = Path(build_dir)
-    build, artifact, artifact_hash = _checked_build(build_dir)
+    build, artifact, artifact_hash = checked_build(build_dir)
     meta, _ = store.load(experiment)
     binding = meta.get("candidate_binding")
     if binding:
@@ -240,75 +229,22 @@ def upload(
     return version_id
 
 
-def _refuse_if_champion(
-    ctx: RunContext, sm: Softmax, league_id: str, player_id: str | None
-) -> None:
-    """Refuse unless the credential is our unexpired Player (checked before any record is
-    written; the client checks again right before the upload, C6) and no champion exists."""
-    identity = sm.whoami()
-    problems = identity_problems(identity, player_id or "", datetime.now(UTC))
-    if problems:
-        raise IdentityError("; ".join(problems))
-    if has_published(ctx.canonical):
-        raise Refused(
-            "champion_exists",
-            "a promotion is published, so the champion is the comparison baseline; "
-            "no separate baseline is uploaded (A14)",
-        )
-    on_board = sm.leaderboard_champion(identity.player_id, league_id)
-    if on_board is not None:
-        raise Refused(
-            "champion_exists",
-            f"our {league_id} leaderboard champion {on_board} is the champion (A9) and the "
-            "comparison baseline; no separate baseline is uploaded (A14)",
-        )
+BOOTSTRAP_NAME = "bootstrap"  # policy_name("bootstrap", hash) for the first champion (A14)
 
 
-def _check_supersedes(current: Baseline | None, supersedes: str | None) -> None:
-    """A new baseline needs ``supersedes`` to name the current baseline, if there is one."""
-    if current is not None and supersedes is None:
-        raise Refused(
-            "baseline_exists",
-            f"baseline {current.version_id} is current; pass --supersedes {current.version_id} "
-            "to replace it",
-        )
-    if supersedes is not None and (current is None or supersedes != current.version_id):
-        raise Refused(
-            "bad_supersedes",
-            f"--supersedes {supersedes} is not the current baseline "
-            f"({current.version_id if current else 'there is none'})",
-        )
-
-
-def upload_baseline(
-    ctx: RunContext,
-    sm: Softmax,
-    build_dir: Path,
-    league_id: str,
-    player_id: str | None = None,
-    supersedes: str | None = None,
+def upload_bootstrap(
+    ctx: RunContext, sm: Softmax, build_dir: Path, player_id: str | None = None
 ) -> tuple[str, str]:
-    """Upload the build in ``build_dir`` as the baseline version (module docstring, A14);
+    """Upload the build in ``build_dir`` as the first champion's version (module docstring);
     return ``(version id, platform policy version id)``. Raises ``Refused`` (nothing
     uploaded) or the platform's errors (``IdentityError``, ...)."""
     store = worker_store(ctx)
-    build, artifact, artifact_hash = _checked_build(Path(build_dir))
-    current = current_baseline(store)
-    same_build = (
-        current is not None
-        and store.load(current.version_id)[0]["artifact_sha256"] == artifact_hash
-    )
-    if same_build and current.platform_policy_version_id is not None:
-        return current.version_id, current.platform_policy_version_id
-    _refuse_if_champion(ctx, sm, league_id, player_id)
-    if same_build:
-        version_id = current.version_id  # a retry: the record exists, its upload event does not
+    build, artifact, artifact_hash = checked_build(Path(build_dir))
+    name = policy_name(BOOTSTRAP_NAME, artifact_hash)
+    found = store.find("version", policy_name=name)
+    if found:
+        version_id = found[0]  # a retry: reuse the record (and its upload, when recorded)
     else:
-        _check_supersedes(current, supersedes)
-        name = policy_name(BASELINE_ROLE, artifact_hash)
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
-        version_id = store.create(
-            "version",
-            {**version_meta, "role": BASELINE_ROLE, "experiment": None, "supersedes": supersedes},
-        )
+        version_id = store.create("version", {**version_meta, "experiment": None})
     return version_id, _upload_once(store, sm, version_id, artifact)

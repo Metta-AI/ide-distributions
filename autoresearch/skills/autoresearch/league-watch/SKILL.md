@@ -20,9 +20,8 @@ Doctrine upheld: D-03, D-04, D-07.
 1. Read our standing and the current champion:
    `"$AUTORESEARCH_CLI" softmax leaderboard`
    The data has `league_id`, `player_id`, `leaderboard_champion` (our policy on the
-   leaderboard), `current_champion` (that policy, confirmed against the promotion ledger;
-   before our first league entry, the bootstrap baseline, A14), `baseline` (the bootstrap
-   baseline version, or null; it is never on the leaderboard) and `note`.
+   leaderboard), `current_champion` (that policy, confirmed against the promotion ledger),
+   and `note`.
 2. Read the full league standings (every division, every player, with rank, score and
    rounds played):
    `"$AUTORESEARCH_CLI" softmax standings`

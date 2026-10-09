@@ -59,8 +59,8 @@ silent fallback. Core code never names a game.
   Without `source`, claims only go stale on a game-version change.
 
 The body must have a `## Baseline build` section: how to build the game's baseline policy
-with the `build` binding (arguments, input, output directory) so `softmax upload-baseline` can
-upload it on a fresh install that has no champion (amendment A14). The build writes the same
+with the `build` binding (arguments, input, output directory) so `softmax bootstrap-champion`
+can promote it as the first champion on a fresh install (amendment A14). The build writes the same
 `version.json` as any build; every non-advisory gate must pass.
 
 Describe the game here: its rules, primitives, limits, and host data for the STRATEGY.md layers.
