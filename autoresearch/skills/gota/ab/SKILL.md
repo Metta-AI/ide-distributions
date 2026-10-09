@@ -33,6 +33,22 @@ build qualification does not prove every current replay is supported. Historical
 M1 and the v13 seed remain scoped to 2026.10.7.2 / `801749e5`, not a current
 Games Bond champion assertion.
 
+## Long commands
+
+Use the core `queue` skill's **Long commands** procedure for episode runs, Nim
+replay-expander builds (including `replay_stats.py --ref`), replay inspection,
+`gota_local.py` and `gota_episodes.py`, and any build or local check below.
+Run in the foreground with terminal `timeout` at most 600 seconds only when
+known to fit. Otherwise start with terminal `background: true`, keep the
+`session_id`, then call `process_manage` with `action: "wait"`, that `session_id`
+and `timeout: 1800`. Repeat `wait` only on `status: "timeout"`, with nothing
+between waits. No polling, repeated log calls or sleep/probing loops.
+After exit, read the exit code, command output and retained evidence before
+interpreting the results. Build/check receipts are named in GAME.md's
+**Commands** section. Replay inspection writes the requested `<ABS_OUTPUT_JSON>`
+and each decoded episode's `expanded-replay.jsonl` and
+`expanded-replay.cache.json`; check their hashes, coverage and `errors`.
+
 ## Procedure and outputs
 
 Use core `ab-compare` and `review-xp` for the decision. Check completed status,
