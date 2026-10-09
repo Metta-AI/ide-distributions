@@ -3,7 +3,9 @@ card workers that run in worktrees and end with ``card finish``. Used by the han
 (``tests/protocol/test_merge.py``), publication and comms contract tests."""
 
 import json
+from dataclasses import asdict, replace
 from pathlib import Path
+from unittest import mock
 
 from autoresearch.ids import new_id
 from autoresearch.io import gitops
@@ -11,8 +13,10 @@ from autoresearch.io.docs import write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.file_queue import FileQueue
+from autoresearch.queue.kanban_queue import FOREIGN_CREATOR, ForeignCardError
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
+from autoresearch.runtime import card_finish
 from autoresearch.runtime.card_finish import finish
 from autoresearch.runtime.merge import process_handoffs
 
@@ -70,8 +74,15 @@ class Worker:
             "Did things.\n\n## Decisions\n\n- none\n",
         )
 
-    def finish(self, outcome: str = "done", terminal: bool = True) -> dict:
-        result = finish(self.ctx(), outcome)
+    def finish(self, outcome: str = "done", terminal: bool = True, forged: bool = False) -> dict:
+        """``card finish``. ``forged``: as a worker that skips its refusal of an unadmitted
+        request (``card_finish`` checks ``admitted_spec``) and writes the handoff anyway, as a
+        worker that writes canonical directly can (the box, 2026-10-09)."""
+        if forged:
+            with mock.patch.object(card_finish, "admitted_spec", return_value={}):
+                result = finish(self.ctx(), outcome)
+        else:
+            result = finish(self.ctx(), outcome)
         assert result.ok, result.problems
         if terminal:
             self.end_run(outcome)
@@ -131,10 +142,14 @@ class Board:
         content = gitops.show(self.canonical, "HEAD", path.relative_to(self.canonical).as_posix())
         return None if content is None else json.loads(content)
 
-    def admit(self, refs=(), mode="investigation", request_id=None) -> Worker:
+    def admit(
+        self, refs=(), mode="investigation", request_id=None, committed_request=True
+    ) -> Worker:
         """What admission (Task 3.9) does: create and assign the card, commit the receipt and
         write the runtime card file. The assignee is the request id so each worker claims
-        exactly its own card."""
+        exactly its own card. The create request ``cards/requests/<Q-id>.json`` is committed
+        with the receipt (admission admits only committed requests); ``committed_request=False``
+        leaves it out, which is what a forged receipt looks like."""
         spec = CardSpec(
             request_id=request_id or new_id("card_request"),
             title="T",
@@ -161,8 +176,13 @@ class Board:
                 "history": [{"state": "admitted", "at": "2026-10-07T00:00:00+00:00"}],
             },
         )
+        paths = [receipt_file]
+        request_file = self.canonical / "cards" / "requests" / f"{spec.request_id}.json"
+        if committed_request and self.committed(request_file) is None:
+            write_json(request_file, {"id": spec.request_id, "op": "create", "spec": asdict(spec)})
+            paths.append(request_file)
         gitops.commit_paths(
-            self.canonical, [receipt_file.relative_to(self.canonical).as_posix()], "admit"
+            self.canonical, [path.relative_to(self.canonical).as_posix() for path in paths], "admit"
         )
         write_json(
             self.canonical / ".supervisor" / "runtime" / "cards" / f"{task_id}.json",
@@ -184,7 +204,9 @@ class Board:
         return self.admit(refs=spec["refs"], mode=spec["mode"], request_id=request_id)
 
     def process(self, publish=None, queue=None):
-        return process_handoffs(self.ctx(), queue or self.queue, self.store, publish=publish)
+        return process_handoffs(
+            self.ctx(), queue or self.queue, self.store, publish=publish, allow_no_remote=True
+        )
 
     def merge_commits(self) -> list[str]:
         return gitops.git(self.canonical, "rev-list", "--merges", "HEAD").split()
@@ -195,3 +217,38 @@ class Board:
 
 def new_hypothesis(worker: Worker) -> str:
     return worker.store.create("hypothesis", dict(HYPOTHESIS), "New.\n")
+
+
+class ForeignBoard:
+    """A queue that reads like the Kanban board when ``foreign`` (task ids) have no card body:
+    ``get`` raises ``ForeignCardError`` and ``list`` skips them (``KanbanQueue``). Everything
+    else goes to the wrapped queue. Such a card was created outside admission, as by a model's
+    ``kanban_create``; a worker that then forged its receipt can still leave a handoff."""
+
+    BOARD = "autoresearch"
+
+    def __init__(self, queue, *foreign: str, title: str = "Hand-made card"):
+        self.queue = queue
+        self.foreign = set(foreign)
+        self.title = title
+
+    def get(self, task_id):
+        if task_id in self.foreign:
+            argv = ["hermes", "kanban", "--board", self.BOARD, "show", task_id]
+            raise ForeignCardError(argv, task_id, self.title, self.BOARD)
+        return self.queue.get(task_id)
+
+    def list(self, state=None):
+        return [card for card in self.queue.list(state) if card.task_id not in self.foreign]
+
+    def foreign_cards(self):
+        """The foreign cards, with the stand-in spec ``KanbanQueue.foreign_cards`` gives."""
+        stand_in = CardSpec("", self.title, "investigation", "", [], FOREIGN_CREATOR, "P5")
+        return [
+            replace(card, spec=stand_in)
+            for card in self.queue.list()
+            if card.task_id in self.foreign
+        ]
+
+    def __getattr__(self, name):
+        return getattr(self.queue, name)

@@ -17,10 +17,14 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    still settle promotions, spend caps still apply) without resuming. A rejected submission
    gets one runtime note per promotion. Then abort a
    stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
-   commit).
+   commit). Then foreign cards: each board task the runtime did not create is recorded once
+   (``runtime.foreign``: marker and help_request), before rebuild and merges look at the
+   ledger.
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
 5. ``process_handoffs`` with publication (C3, C5), then the MEMORY.md snapshot
-   (``memory_snapshot``). Staged messages the publisher skipped
+   (``memory_snapshot``). A handoff whose request was never committed (a forged receipt) is
+   never merged: one marker and one runtime ``help_request`` (``runtime.foreign``), and the
+   other handoffs go on. Staged messages the publisher skipped
    (invalid envelope) are reported once each by a runtime note (marker
    ``ledger/skipped-staged/<M-id>.json``).
 6. KB: when the game contract has ``source`` and the game source pin changed
@@ -116,6 +120,7 @@ from autoresearch.runtime.admission import (
 from autoresearch.runtime.blocked import handle_blocked
 from autoresearch.runtime.bootstrap import REPO_ROOT, BootstrapResult, bootstrap
 from autoresearch.runtime.briefing import BriefingInputs
+from autoresearch.runtime.foreign import report_foreign_cards
 from autoresearch.runtime.game_source import PinUpdate, pin_update, record_pin
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of
 from autoresearch.runtime.memory_snapshot import snapshot_memory
@@ -166,6 +171,7 @@ class KeeperRun:
     paused: bool = False  # preflight failed and this run paused (or kept paused) the agent
     champion_checked: bool = False  # the A9 champion check ran to the end this run
     champion_conflict: promotion.ChampionConflict | None = None
+    foreign: list[str] = field(default_factory=list)  # foreign tasks recorded this run
     rebuilt: list[CardSpec] = field(default_factory=list)
     handoffs: list = field(default_factory=list)
     published: list[PublishResult] = field(default_factory=list)
@@ -763,6 +769,9 @@ def _run_steps(
         run, ctx, "champion", check_champion, run, ctx, queue, sm, game, now, env, allow_no_remote
     )
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
+    run.foreign = (
+        _step(run, ctx, "foreign", report_foreign_cards, ctx, queue, allow_no_remote) or []
+    )
     game_version = _step(run, ctx, "game_version", sm.game_version, game.league_id)
     game_version = str(game_version).strip() if game_version is not None else None
     _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm, game.league_id)
@@ -780,7 +789,18 @@ def _run_steps(
 
     store = RecordStore(Layout(canonical))
     run.handoffs = (
-        _step(run, ctx, "handoffs", process_handoffs, ctx, queue, store, publish=publish) or []
+        _step(
+            run,
+            ctx,
+            "handoffs",
+            process_handoffs,
+            ctx,
+            queue,
+            store,
+            publish=publish,
+            allow_no_remote=allow_no_remote,
+        )
+        or []
     )
     _step(run, ctx, "memory_snapshot", snapshot_memory, ctx)
     _step(run, ctx, "skipped_staged", report_skipped, canonical, run.published, allow_no_remote)

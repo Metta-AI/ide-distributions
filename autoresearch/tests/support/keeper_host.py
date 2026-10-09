@@ -7,18 +7,21 @@ import datetime
 import json
 from collections import namedtuple
 from pathlib import Path
+from unittest import mock
 
 from autoresearch.comms.stage import stage
 from autoresearch.games.loader import load_game
+from autoresearch.ids import new_id
 from autoresearch.io import gitops
-from autoresearch.io.docs import read_json
+from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.card import Card, CardSpec
 from autoresearch.queue.file_queue import FileQueue
 from autoresearch.queue.requests import write_request
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import queue_keeper
+from autoresearch.runtime import card_finish, queue_keeper
+from autoresearch.runtime.admission import board_epoch
 from autoresearch.runtime.card_finish import finish
 from autoresearch.softmax_tool import cli as softmax_cli
 from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
@@ -192,6 +195,33 @@ class Host:
 
     # --- workers ---
 
+    def foreign_card(self, title: str, forged_receipt: bool = False) -> "CardRun":
+        """A card put on the board outside admission (as by a model's ``kanban_create``) and
+        claimed: no committed request. ``forged_receipt``: its worker also writes an
+        ``admitted`` receipt and its runtime card file itself (the box, 2026-10-09)."""
+        spec = CardSpec(new_id("card_request"), title, "investigation", "W.", [], "t_x", "P2")
+        task_id = self.queue.create_unassigned(spec, f"card/{spec.request_id}", Path("."))
+        worker = f"worker-{task_id}"
+        self.queue.assign(task_id, worker)
+        run = CardRun(self, self.queue.claim_next(worker))
+        if forged_receipt:
+            receipt = self.ledger / "requests" / f"{spec.request_id}.json"
+            epoch = board_epoch(self.ledger)
+            write_json(receipt, {
+                "request_id": spec.request_id, "state": "admitted", "mode": spec.mode,
+                "tasks": [{"task_id": task_id, "board_epoch": epoch}],
+                "history": [{"state": "admitted", "at": "2026-10-09T00:51:30+00:00"}],
+            })  # fmt: skip
+            gitops.commit_paths(
+                self.canonical, [receipt.relative_to(self.canonical).as_posix()],
+                f"admit {spec.request_id} (manual admission repair)",
+            )  # fmt: skip
+            write_json(self.canonical / ".supervisor" / "runtime" / "cards" / f"{task_id}.json", {
+                "task_id": task_id, "request_id": spec.request_id, "mode": spec.mode,
+                "refs": [], "finished": False, "responsible_inbound": [],
+            })  # fmt: skip
+        return run
+
     def claim(self, mode: str | None = None) -> "CardRun":
         """Claim the best pending card assigned to our profile (as the dispatcher would),
         or, with ``mode``, the first pending card of that mode."""
@@ -256,9 +286,15 @@ class CardRun:
         self.host.queue.block(self.task_id, self.run_id, f"tool-fault: {command}: {error}")
         return result.record
 
-    def finish(self, outcome: str = "done") -> dict:
+    def finish(self, outcome: str = "done", forged: bool = False) -> dict:
+        """Journal, ``card finish``, end the run. ``forged``: past card finish's refusal of an
+        unadmitted request, as a worker writing canonical directly could."""
         self.journal()
-        result = finish(self.ctx, outcome)
+        if forged:
+            with mock.patch.object(card_finish, "admitted_spec", return_value={}):
+                result = finish(self.ctx, outcome)
+        else:
+            result = finish(self.ctx, outcome)
         assert result.ok, result.problems
         self.host.queue.finish(self.task_id, self.run_id, outcome)
         return result.record

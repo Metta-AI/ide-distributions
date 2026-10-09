@@ -5,13 +5,12 @@ FakeSoftmax and simulated workers (``tests/support``)."""
 import datetime
 import json
 import shutil
-from dataclasses import asdict
 from pathlib import Path
 
 import jsonschema
 import pytest
 import yaml
-from support.board import Board, Worker, new_hypothesis
+from support.board import Board, ForeignBoard, Worker, new_hypothesis
 from support.keeper_host import PLENTY, no_hermes
 from support.promotion_board import design_dict
 
@@ -89,11 +88,7 @@ class Host(Board):
 
     def admit_requested(self, refs=(), mode="investigation") -> Worker:
         """Admit a card whose request file is committed in canonical (as after its merge)."""
-        worker = self.admit(refs=refs, mode=mode)
-        path = self.canonical / "cards" / "requests" / f"{worker.request_id}.json"
-        write_json(path, {"id": worker.request_id, "op": "create", "spec": asdict(worker.spec)})
-        gitops.commit_paths(self.canonical, [path.relative_to(self.canonical).as_posix()], "req")
-        return worker
+        return self.admit(refs=refs, mode=mode)  # Board.admit commits the request file
 
     def experiment(
         self, status: str, binding: bool = True, design: dict | None = None, **fields
@@ -188,6 +183,28 @@ def test_no_rebuild_without_open_requests(host, tmp_path):
     queue = _lose_board(host, tmp_path)
     queue.ensure_board()
     assert needs_rebuild(host.ctx(), queue) is False
+
+
+def test_a_forged_receipt_never_triggers_a_rebuild_and_is_never_adopted(host, tmp_path):
+    """A foreign card's forged receipt and unmerged handoff look like an open request whose
+    task is not on the board (``KanbanQueue.list`` skips foreign tasks). Its request was never
+    committed, so it is settled: no rebuild for it, and a rebuild for another reason does
+    not adopt its handoff."""
+    foreign = host.admit(committed_request=False)
+    foreign.start()
+    foreign.write_journal()
+    record = foreign.finish(forged=True)
+    queue = ForeignBoard(host.queue, foreign.task_id)
+    assert needs_rebuild(host.ctx(), queue) is False  # before any handoffs step saw it
+
+    lost = _lose_board(host, tmp_path)  # a rebuild for another reason: the board is gone
+    _rebuild(host, lost)
+    host.process(queue=lost)
+
+    assert foreign.handoff()["state"] == "committed"
+    assert not gitops.contains(host.canonical, record["result_sha"])
+    assert host.committed(host.ledger / "foreign" / f"{foreign.task_id}.json") is not None
+    assert needs_rebuild(host.ctx(), lost) is False
 
 
 # --- one recovery action per request receipt ---
@@ -370,7 +387,7 @@ def _help_requests(host: Host, text: str) -> list[dict]:
 
 
 def test_admitted_request_without_a_committed_spec_is_closed_with_one_help_request(host, tmp_path):
-    lost = host.admit()  # admitted, but its cards/requests file was never committed
+    lost = host.admit(committed_request=False)  # its cards/requests file was never committed
     queue = _lose_board(host, tmp_path)
     queue.ensure_board()
     assert needs_rebuild(host.ctx(), queue) is True

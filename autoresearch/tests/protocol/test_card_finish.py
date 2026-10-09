@@ -484,6 +484,19 @@ def test_task_not_in_receipt_is_refused(card):
         finish(card.ctx(), "done")
 
 
+def test_a_receipt_whose_request_was_never_committed_is_refused(card):
+    """A forged receipt (the box, 2026-10-09): admission never saw the request."""
+    request = card.canonical / "cards" / "requests" / f"{card.request_id}.json"
+    gitops.git(card.canonical, "rm", "-q", request.relative_to(card.canonical).as_posix())
+    gitops.commit_all(card.canonical, "no request")
+    card.write_journal()
+    before = _commit_count(card.canonical)
+
+    with pytest.raises(FinishUsageError, match="no committed create request"):
+        finish(card.ctx(), "done")
+    assert _commit_count(card.canonical) == before
+
+
 def test_malformed_card_metadata_is_a_usage_error(card, monkeypatch, capsys):
     card.card_file.write_text("{not json")
     with pytest.raises(FinishUsageError, match="malformed"):

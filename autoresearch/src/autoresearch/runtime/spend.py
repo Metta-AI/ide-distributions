@@ -4,7 +4,7 @@ The box spend report of 2026-10-08 found no cap on a card's runs or cost (one st
 its repair cost about $13 of $40). queue-keeper runs ``enforce`` every minute, before the
 blocked-card step:
 
-- **Per card** (pending or claimed): a card that would start run ``max_runs + 1`` (pending
+- **Per card** (pending or claimed, foreign cards included: ``runtime.foreign``): a card that would start run ``max_runs + 1`` (pending
   with ``max_runs`` counted runs) or has started it (claimed), or whose sessions cost an
   estimated ``max_card_usd`` or more, is stopped: ``queue.stop`` blocks it with a reason
   starting ``spend-cap:`` (Hermes ``kanban block`` with a typed kind, so the unblock-loop
@@ -413,11 +413,12 @@ def enforce_cards(
     ctx: RunContext, queue: Queue, config: SpendConfig, allow_no_remote: bool,
     result: SpendRun,
 ) -> None:
-    """Stop the pending and claimed cards over a cap. Only cards Hermes can block are
-    tried (``running``/``ready``); one card that fails does not stop the others."""
+    """Stop the pending and claimed cards over a cap, foreign cards included
+    (``Queue.foreign_cards``: no admission, but they still spend). Only cards Hermes can block
+    are tried (``running``/``ready``); one card that fails does not stop the others."""
     canonical = ctx.canonical
     sessions = card_sessions(ctx)
-    for card in queue.list():
+    for card in [*queue.list(), *queue.foreign_cards()]:
         if card.state not in ("pending", "claimed"):
             continue
         if card.board_status not in (None, *STOPPABLE_STATUSES):

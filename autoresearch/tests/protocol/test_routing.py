@@ -51,9 +51,11 @@ def _delivery(board: Board, inbound_id: str) -> dict:
 
 
 def _requests(board: Board) -> list[dict]:
-    """Card requests committed at canonical HEAD."""
+    """Card requests committed at canonical HEAD, except those of cards ``Board.admit``
+    admitted (created by "planner")."""
     listing = gitops.git(board.canonical, "ls-tree", "--name-only", "HEAD", "cards/requests/")
-    return [json.loads(gitops.show(board.canonical, "HEAD", path)) for path in listing.split()]
+    requests = [json.loads(gitops.show(board.canonical, "HEAD", path)) for path in listing.split()]
+    return [r for r in requests if (r.get("spec") or {}).get("created_by") != "planner"]
 
 
 def _outbox(board: Board) -> list[dict]:

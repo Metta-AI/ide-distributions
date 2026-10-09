@@ -387,7 +387,9 @@ disposable.
    task created with `assignee: autoresearch` would be dispatched with no admission, no receipt
    and no pause control (C3, C7). From code, not tested live. A one-line policy block fixes it.
    **Closed in step 1:** the policy refuses both tools in every agent session.
-   The same applies to `kanban_link`.
+   The same applies to `kanban_link`. A card created this way before the block (box,
+   2026-10-08) is now handled by queue-keeper as a foreign card (`runtime/foreign.py`): never
+   merged, one help request, and the other cards go on.
 2. **Any non-self Kanban comment on our running card becomes a user-authority steer.** That
    includes a worker of another profile on the same host, which can pass `board="<ours>"`
    (verified in the scratch probe). It also includes a human's `/kanban comment` from a chat

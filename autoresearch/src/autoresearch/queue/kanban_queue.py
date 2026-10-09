@@ -28,6 +28,16 @@ _STATE_BY_STATUS = {
     "done": "completed",
     "archived": "completed",
 }
+# A Hermes status this table does not know (a newer Hermes) reads as ``claimed``, with the raw
+# status in ``Card.board_status``: the card stays visible (spend caps price it, the rebuild
+# check sees it on the board), and nothing requeues, repairs or orphans a claimed card.
+UNKNOWN_STATUS_STATE = "claimed"
+# ``created_by`` of the stand-in spec of a foreign card (``KanbanQueue.foreign_cards``).
+FOREIGN_CREATOR = "foreign"
+
+
+def _state(status: str) -> str:
+    return _STATE_BY_STATUS.get(status, UNKNOWN_STATUS_STATE)
 
 
 # Columns the queue reads, matching the fields of the Hermes JSON output.
@@ -48,6 +58,18 @@ class KanbanError(RuntimeError):
         super().__init__(f"{' '.join(argv)}: {stderr.strip()}")
         self.argv = argv
         self.stderr = stderr
+
+
+class ForeignCardError(KanbanError):
+    """A board task whose body is not an autoresearch card spec: the runtime did not create it
+    (admission writes the spec into every card it creates), so it has no request behind it.
+    Something added it to the board directly, such as a model's ``kanban_create``."""
+
+    def __init__(self, argv: list[str], task_id: str, title: str | None, board: str):
+        super().__init__(argv, f"task {task_id} has no autoresearch card body")
+        self.task_id = task_id
+        self.title = title
+        self.board = board
 
 
 # Substring of Hermes' fence error (kanban_db.py:147, raised from write_txn at
@@ -281,19 +303,14 @@ class KanbanQueue:
     def assign(self, task_id: str, assignee: str | None) -> None:
         self._kanban("assign", task_id, assignee or "none")
 
-    def get(self, task_id: str) -> Card:
-        shown = self._show_task(task_id)
+    def _card(self, shown: dict, spec: CardSpec) -> Card:
         task = shown["task"]
-        try:
-            spec = self._parse_spec(task)
-        except ValueError as error:
-            raise KanbanError(["kanban", "show", task_id], str(error)) from error
         blocking = self._blocking_run(task["status"], shown["runs"])
         current_run_id, last_heartbeat_at = self._liveness(shown)
         return Card(
             task_id=task["id"],
             spec=spec,
-            state=_STATE_BY_STATUS[task["status"]],
+            state=_state(task["status"]),
             assignee=task["assignee"],
             runs=[self._run_info(run) for run in shown["runs"]],
             block_reason=blocking.get("summary") if blocking else None,
@@ -303,15 +320,51 @@ class KanbanQueue:
             board_status=task["status"],
         )
 
+    def get(self, task_id: str) -> Card:
+        shown = self._show_task(task_id)
+        task = shown["task"]
+        try:
+            spec = self._parse_spec(task)
+        except ValueError as error:
+            raise ForeignCardError(
+                ["kanban", "show", task_id], task_id, task.get("title"), self.board
+            ) from error
+        return self._card(shown, spec)
+
+    def foreign_cards(self) -> list[Card]:
+        """The tasks ``list`` skips, those with no card body (archived hidden), with runs, so
+        the runtime can report them and apply the spend caps to them. Their ``spec`` is a
+        stand-in: only ``title`` is real (``request_id`` is empty, ``created_by`` is
+        ``FOREIGN_CREATOR``, the other fields are placeholders); everything else comes from
+        the board."""
+        cards = []
+        for task in self._list_tasks():
+            try:
+                self._parse_spec(task)
+                continue
+            except ValueError:
+                pass
+            try:
+                shown = self._show_task(task["id"])
+            except KanbanError as error:
+                if "no such task" in error.stderr:
+                    continue
+                raise
+            title = shown["task"].get("title") or ""
+            spec = CardSpec("", title, "investigation", "", [], FOREIGN_CREATOR, "P5")
+            cards.append(self._card(shown, spec))
+        return cards
+
     def list(self, state: str | None = None) -> list[Card]:
-        """Cards on the board (archived hidden), with runs; foreign tasks are skipped.
+        """Cards on the board (archived hidden), with runs; foreign tasks are skipped (see
+        ``foreign_cards``).
 
         Costs one ``show`` per card because the list JSON carries no runs. A card deleted
         between the list and its ``show`` is skipped.
         """
         cards = []
         for task in self._list_tasks():
-            if state is not None and _STATE_BY_STATUS[task["status"]] != state:
+            if state is not None and _state(task["status"]) != state:
                 continue
             try:
                 self._parse_spec(task)

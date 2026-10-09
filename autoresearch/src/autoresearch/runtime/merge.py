@@ -22,6 +22,11 @@ is pure, a merge is skipped when canonical already contains the result (no secon
 no revalidation), a follow-up request left uncommitted is found and reused, and ``publish`` is
 called again. ``publish`` must therefore be idempotent.
 
+Foreign cards. A handoff whose request has no committed create request (admission never
+created its card; its receipt was forged, ``runtime.foreign``) is never merged, in any board
+epoch: the card gets one marker and one runtime help_request, and the other handoffs go on.
+The check reads the ledger only, before any board read.
+
 All canonical mutations run under ``canonical.lock``, which is not re-entrant: callers must
 not hold it, and ``publish`` is called while it is held and must not take it.
 
@@ -46,12 +51,14 @@ from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
+from autoresearch.queue.kanban_queue import ForeignCardError
 from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.registry import parse_record_path
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion
-from autoresearch.runtime.admission import board_epoch, receipt_path
+from autoresearch.runtime.admission import admitted_spec, board_epoch, receipt_path
+from autoresearch.runtime.foreign import is_foreign, record_foreign
 from autoresearch.runtime.handoff import (
     HANDOFFS_DIR,
     card_spec,
@@ -422,22 +429,73 @@ def _advance(
     return record
 
 
+def _board_title(queue: Queue, task_id: str) -> str | None:
+    """The card's title on the board, for the foreign-card message; None if unreadable."""
+    try:
+        return queue.get(task_id).spec.title
+    except ForeignCardError as error:
+        return error.title
+    except Exception:  # noqa: BLE001 - the title is only a courtesy for the message
+        return None
+
+
+def _ready(
+    ctx: RunContext, queue: Queue, record: dict, allow_no_remote: bool
+) -> tuple[bool, str | None]:
+    """``(ready, run summary)``: whether ``process_handoffs`` should advance this handoff now.
+    A foreign handoff is recorded (``runtime.foreign``) and is never ready."""
+    canonical = ctx.canonical
+    if admitted_spec(canonical, record["request_id"]) is None:
+        title = _board_title(queue, record["card"])
+        record_foreign(
+            canonical, record["card"], title, ctx.hermes_home.name, allow_no_remote,
+            forged_handoff=True,
+        )  # fmt: skip
+        return False, None
+    return _terminal_run(queue, canonical, record)
+
+
 def process_handoffs(
-    ctx: RunContext, queue: Queue, store: RecordStore, publish: Publish | None = None
+    ctx: RunContext,
+    queue: Queue,
+    store: RecordStore,
+    publish: Publish | None = None,
+    allow_no_remote: bool = False,
 ) -> list[HandoffOutcome]:
     """Advance every committed/validated/merged handoff whose run is terminal (C3).
 
     ``store`` is canonical's record store (its layout maps paths to entity ids). ``publish``
     defaults to a no-op; see the module docstring for its contract. The caller must not hold
-    the canonical lock. Returns one outcome per handoff processed."""
+    the canonical lock. Returns one outcome per handoff processed.
+
+    Foreign handoffs. Before any board read, a handoff whose request has no committed create
+    request (``admission.admitted_spec``) is foreign: admission never created its card, and
+    its receipt was forged. It is never merged, in any board epoch: the card is recorded
+    once (``runtime.foreign``: marker and help_request; ``allow_no_remote`` is for that
+    message) and skipped from then on. The board is not trusted for this: a forged receipt
+    can name an earlier board epoch, which skips the board lookup.
+
+    One card never stops the others: any error while deciding whether a handoff is ready
+    (the board cannot show its card, an admitted card's body is unreadable, recording a
+    foreign card fails) leaves that handoff for the next run, and once every handoff was
+    tried the errors are raised together, so the step is logged as failed. The outcomes of
+    such a run are lost to the caller (only its log counts); the handoffs are committed. An
+    error while advancing a handoff (``_advance``: validate, merge, publish) still stops the
+    step at once: it can leave canonical mid-transaction (a merge or a partial publication),
+    and the next run repairs that first (module docstring, crash safety)."""
     canonical = ctx.canonical
     publish = publish or _no_publish
     outcomes = []
+    failures: list[str] = []
     for path, record in _committed_handoffs(canonical):
-        if record["state"] not in PROCESS_STATES:
+        if record["state"] not in PROCESS_STATES or is_foreign(canonical, record["card"]):
             continue
-        terminal, summary = _terminal_run(queue, canonical, record)
-        if not terminal:
+        try:
+            ready, summary = _ready(ctx, queue, record, allow_no_remote)
+        except Exception as error:  # noqa: BLE001 - per-card containment, raised below
+            failures.append(f"{_label(record)}: {type(error).__name__}: {error}")
+            continue
+        if not ready:
             continue
         with canonical_lock(canonical):
             record = _advance(ctx, path, store, publish, summary)
@@ -450,6 +508,8 @@ def process_handoffs(
                 follow_up_request=record.get("follow_up_request"),
             )
         )
+    if failures:
+        raise RuntimeError("handoff(s) not processed: " + "; ".join(failures))
     return outcomes
 
 

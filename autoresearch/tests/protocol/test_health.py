@@ -8,6 +8,7 @@ from support.keeper_host import Host, Usage
 
 from autoresearch.comms.publisher import publish_runtime
 from autoresearch.io.docs import read_json, write_json
+from autoresearch.queue.card import CardSpec
 from autoresearch.runtime import health
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.softmax_tool.protocol import Identity
@@ -82,6 +83,36 @@ def test_blocked_card_is_requeued_once_then_repaired_with_one_help_request(host)
     assert _check(host, at(4)).blocked == []  # nothing more for this card
     assert len(_help(host, card.task_id)) == 1
     assert host.remote_head() == host.head() and host.clean()
+
+
+class _UnblockFails:
+    """The board refuses to unblock one card; everything else goes to the real queue."""
+
+    def __init__(self, queue, broken: str):
+        self.queue, self.broken = queue, broken
+
+    def requeue(self, task_id, reason):
+        if task_id == self.broken:
+            raise RuntimeError("hermes kanban unblock: database is locked")
+        return self.queue.requeue(task_id, reason)
+
+    def __getattr__(self, name):
+        return getattr(self.queue, name)
+
+
+def test_a_card_that_cannot_be_requeued_does_not_stop_the_other_blocked_cards(host):
+    host.runtime_request(spec=CardSpec("", "Scout", "scouting", "W.", [], "runtime", "P2"))
+    host.tick(at(1.5))
+    broken, other = sorted(host.queue.list("pending"), key=lambda card: card.task_id)
+    _block(host, broken.task_id)
+    _block(host, other.task_id)
+    host.queue = _UnblockFails(host.queue, broken.task_id)
+
+    result = _check(host, at(2))
+
+    assert broken.task_id in result.failures["blocked"]
+    assert host.queue.get(other.task_id).state == "pending"  # requeued all the same
+    assert host.queue.get(broken.task_id).state == "blocked"  # retried next run
 
 
 def test_tool_fault_block_is_not_requeued_or_repaired_and_asks_for_help_once(host):

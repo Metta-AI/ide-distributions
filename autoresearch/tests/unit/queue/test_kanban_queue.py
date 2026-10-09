@@ -14,7 +14,12 @@ from dataclasses import asdict
 import pytest
 
 from autoresearch.queue.card import CardSpec
-from autoresearch.queue.kanban_queue import KanbanError, KanbanQueue
+from autoresearch.queue.kanban_queue import (
+    FOREIGN_CREATOR,
+    ForeignCardError,
+    KanbanError,
+    KanbanQueue,
+)
 
 FAKE_HERMES = """#!/usr/bin/env python3
 import json, os, sys
@@ -277,8 +282,33 @@ def test_foreign_body_skipped_in_list_and_error_in_get(fake, queue):
     fake.reply("show", {"task": task_json("ready"), "runs": []})
     assert [c.task_id for c in queue.list()] == ["t_abc"]
     fake.reply("show", {"task": foreign, "runs": []})
-    with pytest.raises(KanbanError, match="t_foreign"):
+    with pytest.raises(ForeignCardError, match="t_foreign") as raised:
         queue.get("t_foreign")
+    assert (raised.value.task_id, raised.value.title) == ("t_foreign", "Probe")
+
+
+def test_foreign_cards_are_the_tasks_list_skips_with_a_stand_in_spec(fake, queue):
+    foreign = task_json("running", task_id="t_foreign") | {"body": "just some notes"}
+    fake.reply("list", [foreign, task_json("ready", task_id="t_abc")])
+    run = {"id": 7, "outcome": None, "ended_at": None, "metadata": None}
+    fake.reply("show", {"task": foreign, "runs": [run]})
+
+    [card] = queue.foreign_cards()
+
+    assert (card.task_id, card.state, card.board_status) == ("t_foreign", "claimed", "running")
+    assert card.spec.title == "Probe" and card.spec.request_id == ""
+    assert card.spec.created_by == FOREIGN_CREATOR
+    assert card.current_run_id == "7"
+
+
+def test_an_unknown_hermes_status_reads_as_claimed_and_keeps_the_raw_status(fake, queue):
+    fake.reply("list", [task_json("parked")])
+    fake.reply("show", {"task": task_json("parked"), "runs": []})
+
+    [card] = queue.list("claimed")
+
+    assert (card.state, card.board_status) == ("claimed", "parked")
+    assert queue.list("pending") == []
 
 
 def test_reprioritize_pending(fake, queue):

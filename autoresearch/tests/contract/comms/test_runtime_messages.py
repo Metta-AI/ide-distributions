@@ -111,6 +111,12 @@ FIXTURES = {
             "refs": [],
         }
     ],
+    "foreign_card": [
+        # A worker-written title can name ids (the box's did): they are made plain.
+        {"card_title": f"Design a tune (baseline {REQUEST} exists)", "task_id": CARD,
+         "board": "autoresearch"},
+        {"card_title": None, "task_id": CARD, "board": "autoresearch", "forged_handoff": True},
+    ],
     "card_over_cap": [
         {
             "card_title": "Build and upload the baseline",

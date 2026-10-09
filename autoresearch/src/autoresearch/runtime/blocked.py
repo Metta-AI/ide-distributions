@@ -178,6 +178,41 @@ def _cap_reached(ctx: RunContext, card: Card, config: spend.SpendConfig) -> str 
         return UNREADABLE
 
 
+def _handle_one(
+    ctx: RunContext,
+    queue: Queue,
+    card: Card,
+    allow_no_remote: bool,
+    spend_config: spend.SpendConfig | None,
+) -> BlockedAction | None:
+    canonical = ctx.canonical
+    if spend.is_held(canonical, card):
+        return None
+    record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
+    reason = card.block_reason or ""
+    if reason.startswith(TOOL_FAULT_PREFIX):
+        reported = (
+            record is not None
+            and record["state"] == TOOL_FAULT
+            and record.get("block_run_id") == card.block_run_id
+        )
+        return None if reported else _tool_fault(canonical, card, reason, allow_no_remote)
+    if (
+        spend_config is not None
+        and (record is None or record["state"] in (TOOL_FAULT, REQUEUED))
+        and (why := _cap_reached(ctx, card, spend_config))
+    ):
+        if why is UNREADABLE:
+            return None  # state.db unreadable: neither requeue nor hold this run
+        spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
+        return BlockedAction(card.task_id, SPEND_CAP)
+    if record is None or record["state"] == TOOL_FAULT:
+        return _requeue(canonical, queue, card)
+    if record["state"] == REQUEUED:
+        return _repair(canonical, card, record, allow_no_remote)
+    return None
+
+
 def handle_blocked(
     ctx: RunContext,
     queue: Queue,
@@ -186,33 +221,21 @@ def handle_blocked(
 ) -> list[BlockedAction]:
     """Requeue each blocked card once, then repair; a ``tool-fault:`` block only asks for
     help; cards at a spend cap are left to the caps (module docstring). The caller must not
-    hold the canonical lock."""
-    canonical = ctx.canonical
-    actions = []
+    hold the canonical lock.
+
+    One card never stops the others: a card whose handling fails (the board refuses the
+    unblock, say) is left for the next run, and once every card was tried the failures are
+    raised together, so the caller logs the step as failed (the actions of that run are then
+    lost to the caller; their markers are committed)."""
+    actions, failures = [], []
     for card in queue.list("blocked"):
-        if spend.is_held(canonical, card):
+        try:
+            action = _handle_one(ctx, queue, card, allow_no_remote, spend_config)
+        except Exception as error:  # noqa: BLE001 - per-card containment, raised below
+            failures.append(f"{card.task_id}: {type(error).__name__}: {error}")
             continue
-        record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
-        reason = card.block_reason or ""
-        if reason.startswith(TOOL_FAULT_PREFIX):
-            reported = (
-                record is not None
-                and record["state"] == TOOL_FAULT
-                and record.get("block_run_id") == card.block_run_id
-            )
-            if not reported:
-                actions.append(_tool_fault(canonical, card, reason, allow_no_remote))
-        elif (
-            spend_config is not None
-            and (record is None or record["state"] in (TOOL_FAULT, REQUEUED))
-            and (why := _cap_reached(ctx, card, spend_config))
-        ):
-            if why is UNREADABLE:
-                continue  # state.db unreadable: neither requeue nor hold this run
-            spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
-            actions.append(BlockedAction(card.task_id, SPEND_CAP))
-        elif record is None or record["state"] == TOOL_FAULT:
-            actions.append(_requeue(canonical, queue, card))
-        elif record["state"] == REQUEUED:
-            actions.append(_repair(canonical, card, record, allow_no_remote))
+        if action is not None:
+            actions.append(action)
+    if failures:
+        raise RuntimeError("blocked card(s) not handled: " + "; ".join(failures))
     return actions
