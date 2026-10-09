@@ -1,5 +1,6 @@
 """Build adapter for the shared G1–G5 gates; no duplicate gate implementation."""
 
+import time
 from dataclasses import replace
 from pathlib import Path
 from tempfile import mkdtemp
@@ -83,6 +84,7 @@ def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path
     for name, module in zip(
         ("G1", "G2", "G3", "G4", "G5"), (g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry)
     ):
+        gate_started = time.monotonic()
         try:
             result = module.run(policy, context)
             for measurement in context.measurements.values():
@@ -97,6 +99,7 @@ def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path
         if name == "G1" and errors:
             gates[name] = {"outcome": "failed", "passed": False,
                            "summary": {"lint": errors, "compile": result.details}}
+        gates[name]["seconds"] = round(time.monotonic() - gate_started, 3)
         if not gates[name]["passed"] and name in ("G1", "G2"):
             break
     builds.dump(context.work_dir / "gates.json", gates)

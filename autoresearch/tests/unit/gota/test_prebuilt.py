@@ -80,6 +80,8 @@ def test_prebuilt_exact_bytes_shared_reader_and_no_compiler(candidate, tmp_path,
     assert version['gates']['G5'] == {'applicable': False, 'passed': False, 'advisory': True,
                                      'summary': 'not applicable: prebuilt'}
     assert version['native_builds']['gate_probe']['fingerprint'] == 'gate_probe'
+    assert all(version['gates'][name]['seconds'] >= 0 for name in ('G1', 'G2', 'G3', 'G4'))
+    assert version['started'] <= version['finished']
     with pytest.raises(ValueError, match='immutable'):
         build.build(directory, out, offline=True, prebuilt=artifact)
 
