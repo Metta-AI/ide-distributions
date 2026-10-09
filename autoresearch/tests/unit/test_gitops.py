@@ -90,6 +90,26 @@ def test_push_success_and_failure(repo, tmp_path):
     assert gitops.push(repo, "origin", ["nonexistent-ref"]) is False
 
 
+def test_push_with_rejections_names_the_refs_the_remote_refused(repo, tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-b", "main", str(remote)], check=True, capture_output=True
+    )
+    gitops.git(repo, "remote", "add", "origin", str(remote))
+    gitops.git(repo, "branch", "card/Q-1")
+    refspec = ["refs/heads/card/*:refs/heads/card/*"]
+    assert gitops.push_with_rejections(repo, "origin", refspec) == (True, [])
+    # The card is retried: its branch is rebuilt from the same base, so origin's copy diverges.
+    gitops.git(repo, "checkout", "card/Q-1")
+    gitops.commit_all(repo, "first attempt", allow_empty=True)
+    gitops.push_with_rejections(repo, "origin", refspec)
+    gitops.git(repo, "reset", "--hard", "HEAD~1")
+    gitops.commit_all(repo, "second attempt", allow_empty=True)
+    refspec = ["refs/heads/card/*:refs/heads/card/*"]
+    assert gitops.push_with_rejections(repo, "origin", refspec) == (False, ["refs/heads/card/Q-1"])
+    assert gitops.push_with_rejections(repo, "origin", ["+" + refspec[0]]) == (True, [])
+
+
 def test_merge_no_ff_non_conflict_failure_raises_with_stderr(repo):
     with pytest.raises(gitops.GitError) as excinfo:
         gitops.merge_no_ff(repo, "deadbeef" * 5, "m")

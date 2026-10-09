@@ -40,7 +40,9 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    runtime-only: cards run read-only ``kb lint``/``kb hubs`` and edit only claims their refs
    name (D-23).
 7. Push ``main`` and ``refs/heads/card/*`` to ``origin`` (card finish does not push), so
-   merged work leaves the host early. The run ends with the same push (step 13).
+   merged work leaves the host early. ``main`` is pushed on its own and never forced; card
+   branches are force-pushed (a retried card rebuilds its branch), and a card ref origin
+   still refuses is logged once. The run ends with the same push (step 13).
 8. Sweep staged skills into ``skills-proposed/`` (``proposals.sweep_skills``).
 9. Route inbound (C11), before admission so new requests carry their inbound.
 10. Admission (C3, C10, C11) of every committed create request (merged from cards, or written
@@ -160,7 +162,10 @@ STEP_FAILURES_FILE = "step_failures.json"
 STEP_FAILURE_RUNS = 5  # consecutive failing runs of one step before a help_request ...
 STEP_FAILURE_AGE = datetime.timedelta(hours=1)  # ... or this long failing, whichever first
 REMOTE = "origin"
-PUSH_REFSPECS = ["HEAD:refs/heads/main", "refs/heads/card/*:refs/heads/card/*"]
+MAIN_REFSPEC = "HEAD:refs/heads/main"  # never forced
+# Forced: origin's card/* copies are a one-way mirror only this runtime writes, and a retried
+# card rebuilds its branch, so the remote copy is stale rather than newer.
+CARD_REFSPEC = "+refs/heads/card/*:refs/heads/card/*"
 GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
@@ -444,11 +449,19 @@ def _remote_main(canonical: Path) -> str | None:
     return output.split()[0] if output else None
 
 
+def _push_main_and_cards(canonical: Path) -> list[str]:
+    """Push main, then the card branches separately so a card refusal never touches main's
+    result. Returns the card refs origin rejected."""
+    gitops.push(canonical, REMOTE, [MAIN_REFSPEC])
+    _, rejected = gitops.push_with_rejections(canonical, REMOTE, [CARD_REFSPEC])
+    return rejected
+
+
 def push_early(canonical: Path) -> None:
     """Best-effort push after merges (step 7); the final push records the outcome."""
     if REMOTE in gitops.git(canonical, "remote").split():
         with canonical_lock(canonical):
-            gitops.push(canonical, REMOTE, PUSH_REFSPECS)
+            _push_main_and_cards(canonical)
 
 
 def push_step(ctx: RunContext, allow_no_remote: bool) -> bool | None:
@@ -459,15 +472,15 @@ def push_step(ctx: RunContext, allow_no_remote: bool) -> bool | None:
             return None
         raise RuntimeError(f"canonical {canonical} has no {REMOTE!r} remote")
     with canonical_lock(canonical):
-        pushed_all = gitops.push(canonical, REMOTE, PUSH_REFSPECS)
+        rejected_cards = _push_main_and_cards(canonical)
         head = gitops.head(canonical)
     remote_head = _remote_main(canonical)
     ok = remote_head == head
     state = _read_state(ctx, PUSH_STATE_FILE, {})
     failures = 0 if ok else int(state.get("consecutive_failures", 0)) + 1
     help_sent = bool(state.get("help_sent")) and not ok
-    if ok and not pushed_all:
-        _log(ctx, "push: main reached origin but a card branch was rejected")
+    for ref in sorted(set(rejected_cards) - set(state.get("rejected_cards", []))):
+        _log(ctx, f"push: card branch rejected by origin: {ref}")
     if failures >= PUSH_FAILURE_LIMIT and not help_sent:
         with canonical_lock(canonical):
             message = runtime_messages.push_failing(REMOTE, failures, head, remote_head)
@@ -481,6 +494,7 @@ def push_step(ctx: RunContext, allow_no_remote: bool) -> bool | None:
             "remote_head": remote_head,
             "consecutive_failures": failures,
             "help_sent": help_sent,
+            "rejected_cards": sorted(rejected_cards),
             "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         },
     )
