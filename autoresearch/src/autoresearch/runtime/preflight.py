@@ -32,8 +32,8 @@ check with a warning.
 
 OpenRouter (A5). ``GET https://openrouter.ai/api/v1/key`` with the key; ``limit_remaining``
 below the credit floor fails (Hermes would retry 402s forever). The floor is
-``AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD``, default ``OPENROUTER_MIN_CREDIT_USD`` ($10); a
-hosted workspace whose key starts near $10 sets a lower one. A value that is not a finite
+``AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD``, default ``OPENROUTER_MIN_CREDIT_USD`` ($10; a
+fresh $10 key is not below it); a small key can set a lower one. A value that is not a finite
 non-negative number falls back to the default with a warning. A cron script
 under the gateway never receives provider keys (hermes-facts item 7), so the key comes from
 the environment or else the profile ``.env``. No key, or ``AUTORESEARCH_SKIP_OPENROUTER_CHECK=1``
@@ -65,7 +65,7 @@ OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
 SKIP_OPENROUTER_ENV = "AUTORESEARCH_SKIP_OPENROUTER_CHECK"
 MIN_CREDIT_ENV = "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD"
-OPENROUTER_MIN_CREDIT_USD = 10.0  # default floor (A5); hosted workspaces set a lower one
+OPENROUTER_MIN_CREDIT_USD = 10.0  # default floor (A5)
 HTTP_TIMEOUT_S = 15
 STALE_QUEUE_ENV = "AUTORESEARCH_QUEUE"  # removed installer setting (A13), still a test hook
 WHOAMI_FAILURE_LIMIT = 3

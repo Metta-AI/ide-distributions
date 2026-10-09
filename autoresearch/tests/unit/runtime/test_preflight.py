@@ -228,13 +228,17 @@ def test_openrouter_enough_or_unlimited_credit_passes(tmp_path):
 
 
 def test_openrouter_floor_is_configurable(tmp_path):
-    # A hosted workspace's key starts near $10, so the hosting runtime sets a lower floor.
     http = FakeHttp({"data": {"limit_remaining": 4.5}})
     env = {"OPENROUTER_API_KEY": "sk-x", "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD": "1"}
     assert host_run(tmp_path / "a", None, env=env, http_get=http).ok
     http = FakeHttp({"data": {"limit_remaining": 0.5}})
     result = host_run(tmp_path / "b", None, env=env, http_get=http)
     assert not result.ok and any("below $1:" in r for r in result.reasons)
+
+
+def test_a_fresh_ten_dollar_key_is_not_below_the_default_floor(tmp_path):
+    http = FakeHttp({"data": {"limit_remaining": 10.0}})
+    assert host_run(tmp_path, None, env={"OPENROUTER_API_KEY": "sk-x"}, http_get=http).ok
 
 
 def test_bad_openrouter_floor_falls_back_to_default_with_a_warning(tmp_path):
