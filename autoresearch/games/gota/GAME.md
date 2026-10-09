@@ -133,7 +133,9 @@ The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 to the installed shared CLI executable. That shared tool performs the C6 identity
 check immediately before mutation; this wrapper has no alternate upload route.
 
-## Exact prebuilt baseline and first-install bootstrap
+## Baseline build
+
+The prebuilt `v13-live.bas` is the shipped strategy's policy by construction: `make_v13_live.py` transforms submitted v13, its adjacent provenance file records that relationship, and equivalence to the seed `STRATEGY.md` is shown only by M1 on engine `801749e5`.
 
 `build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json --prebuilt FILE.bas`
 freezes the exact committed artifact bytes and runs the existing G1–G4 gates.
@@ -168,46 +170,64 @@ The prebuilt runtime baseline requires no game test fixtures. This does not
 establish fixture-free operation of the full compiler profile.
 The installed distribution includes the byte-identical original at
 `games/gota/baselines/submitted-v13.bas`, with its historical origin in the
-adjacent provenance file. Copy it into the worker candidate and commit that input
-first. Generate v13-live in one command; this resolves the current engine and
-makes only the authorized identifier/division token changes, with no model call:
+adjacent provenance file. On a fresh install, use this shipped input to make
+v13-live, the first champion. Work inside the admitted card's worktree; the
+bootstrap candidate has no experiment id. Resolve the installed environment and
+keep output in the card's scratch space:
 
 ```sh
-mkdir -p /workspace/strategy/candidates/E
-cp games/gota/baselines/submitted-v13.bas /workspace/strategy/candidates/E/submitted-v13.bas
-git -C /workspace add strategy/candidates/E/submitted-v13.bas
-git -C /workspace commit -m "Record exact submitted v13 bootstrap input"
-uv run --locked python games/gota/tools/make_v13_live.py /workspace/strategy/candidates/E/submitted-v13.bas /workspace/strategy/candidates/E/v13-live.bas
-git -C /workspace add strategy/candidates/E/v13-live.bas strategy/candidates/E/v13-live.provenance.json
-git -C /workspace commit -m "Record mechanical v13-live bootstrap candidate"
-uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/E --out /workspace/versions/E-prebuilt --prebuilt /workspace/strategy/candidates/E/v13-live.bas --json
+AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
+AR_PYTHON="$AR_HOME/local/venv/bin/python"
+CARD_WORKTREE="$PWD"
+CANDIDATE="$CARD_WORKTREE/strategy/candidates/bootstrap"
+BUILD="$CARD_WORKTREE/.scratch/build/champion"
+CHECK="$CARD_WORKTREE/.scratch/check/champion"
+mkdir -p "$CANDIDATE"
+cp "$AR_HOME/games/gota/baselines/submitted-v13.bas" "$CANDIDATE/submitted-v13.bas"
+git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/submitted-v13.bas
+git -C "$CARD_WORKTREE" commit -m "Record exact submitted v13 bootstrap input"
+(cd "$AR_HOME" && "$AR_PYTHON" games/gota/tools/make_v13_live.py "$CANDIDATE/submitted-v13.bas" "$CANDIDATE/v13-live.bas")
+git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/v13-live.bas strategy/candidates/bootstrap/v13-live.provenance.json
+git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidate"
+(cd "$AR_HOME" && "$AR_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
 ```
 
-Use the installed profile's Python in workers (see the GotA eval-design skill).
-For an explicit historical build, append `--offline --manifest PATH` to both
-generator and build. Existing outputs are immutable; use a fresh output path.
+Generation resolves the current engine and makes only the authorized
+identifier/division token changes, with no model call. For an explicit historical
+build, append `--offline --manifest PATH` to both generator and build. Existing
+outputs are immutable; use fresh output paths.
 
-The build already records G1–G4 local checks. For a separate `local_check`, run
-only these applicable gates against the frozen artifact and manifest; G5 compiler
-coverage does not apply to this artifact:
+The build records G1–G4 local checks. Before bootstrap, run the separate
+`local_check` on the frozen artifact and manifest, selecting only applicable
+gates; G5 compiler coverage does not apply. For a historical local_check,
+append `--offline` as well:
 
 ```sh
-uv run --locked python -m games.gota.gates /workspace/versions/E-prebuilt/policy.bas --baseline /workspace/versions/E-prebuilt/policy.bas --manifest /workspace/versions/E-prebuilt/coworld_manifest.json --work-dir /workspace/checks/E-prebuilt --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen
+(cd "$AR_HOME" && "$AR_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
 ```
 
-**Shared first-install upload handoff is pending.** The current shared upload
-requires an experiment with status `built` and a previously frozen evaluation
-design that names an existing baseline policy version. An install with no
-baseline cannot yet satisfy that contract. Preserve the successful local build
-in the same card, journal the missing baseline/design contract and send a
-`help_request`; do not fabricate a baseline or evaluation design. The shared
-owner must supply the bootstrap record transition before first upload can proceed.
+After successful build and local_check, follow the core `submit` skill's
+"Bootstrap card" procedure. Check that no champion or promotion in flight exists,
+then run:
 
-For an already valid built experiment, the supported next step is unchanged:
-`"$AUTORESEARCH_CLI" softmax upload E --build-dir /workspace/versions/E-prebuilt`.
-It performs C6 and returns the local version record id; record that id and its
-`candidate_binding.platform_policy_version_id` from `records show E` in the card
-journal. This local prebuilt path has not uploaded or established a platform baseline.
+```sh
+"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir "$BUILD"
+```
+
+The first champion is uploaded and submitted by `softmax bootstrap-champion`,
+never by `softmax upload`. It needs no experiment, frozen evaluation design,
+evaluation outcome or decision. The first league submission is v13-live,
+unevaluated; local checks do not establish competitive strength. The command
+checks C6 identity and the build, uploads the exact artifact, takes the normal
+promotion lock and submits it. Its response includes `data.version_id`,
+`data.platform_policy_version_id`, `data.promotion_id` and `data.submission_id`.
+The immutable version retains the prebuilt provenance and has `experiment: null`.
+Record these ids in the journal's Decisions and send the core `submit` highlight.
+Finish this card with `complete-card`, outcome `done`; its merge publishes the
+promotion. The shipped `strategy/STRATEGY.md` remains the champion strategy source.
+If this card started to design an experiment, request a follow-up through core
+`experiment` step 3 before finishing; that card designs against the published
+champion. Read refusals and recovery instructions in the core `submit` skill.
 
 ## Qualification scope
 
