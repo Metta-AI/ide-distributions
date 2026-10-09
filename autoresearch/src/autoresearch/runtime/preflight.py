@@ -140,32 +140,55 @@ def env_file_value(path: Path, name: str) -> str | None:
     return None
 
 
-_ENV_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+# Hermes reads the profile .env with python-dotenv's parser (quotes stripped, no quote flag
+# kept) and then expands only ``${VAR}`` and ``${VAR:-default}``, in every value, quoted or
+# not (``hermes_cli/env_loader._load_dotenv_with_fallback``; python-dotenv ``variables.py``).
+# A bare ``$VAR`` stays literal. These are the same rules, ported (python-dotenv is not one
+# of our dependencies).
+_DOTENV_REFERENCE = re.compile(r"\$\{(?P<name>[^}:]*)(?::-(?P<default>[^}]*))?\}")
+_BARE_REFERENCE = re.compile(r"\$(?!\{)[A-Za-z_]")
+
+
+def _dotenv_value(raw: str) -> str:
+    """A dotenv value with its quotes (and escapes) or inline comment removed."""
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] == "'":
+        return raw[1:-1].replace("\\'", "'").replace("\\\\", "\\")
+    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+        return raw[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return re.sub(r"\s+#.*", "", raw).rstrip()
+
+
+def _dotenv_entries(path: Path) -> list[tuple[str, str]]:
+    """``(name, value)`` per assignment line of a dotenv file, values unexpanded."""
+    entries = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip().removeprefix("export ")
+        key, separator, raw = line.partition("=")
+        key = key.strip()
+        if separator and key and not key.startswith("#"):
+            entries.append((key, _dotenv_value(raw)))
+    return entries
 
 
 def worker_env(env: Mapping[str, str], hermes_home: Path | None) -> dict[str, str]:
     """What a card worker's terminal sees, as near as a cron job can tell: ``env`` with the
-    profile ``.env`` laid over it (Hermes loads it with override), ``${VAR}``/``$VAR`` in an
-    unquoted or double-quoted value expanded against ``env`` (so ``PATH=/x:${PATH}`` extends
-    the PATH). Provider keys, which Hermes strips from terminals, are not removed here; the
-    host requirements never name them."""
+    profile ``.env`` laid over it as Hermes loads it (override; ``${VAR}`` and
+    ``${VAR:-default}`` expanded against ``env`` and the lines before, in any quoting; a bare
+    ``$VAR`` kept literal), so ``PATH=/x:${PATH}`` extends the PATH. Provider keys, which
+    Hermes strips from terminals, are not removed here; the host requirements never name
+    them."""
     found = dict(env)
     path = Path(hermes_home) / ".env" if hermes_home is not None else None
     if path is None or not path.exists():
         return found
-    for line in path.read_text(encoding="utf-8").splitlines():
-        key, separator, value = line.partition("=")
-        key = key.strip()
-        if not separator or not key or key.startswith("#"):
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] == "'":
-            found[key] = value[1:-1]
-            continue
-        value = value.strip('"')
-        found[key] = _ENV_REFERENCE.sub(
-            lambda match: env.get(match.group(1) or match.group(2), ""), value
-        )
+
+    def resolve(match: re.Match) -> str:
+        value = found.get(match.group("name"), match.group("default") or "")
+        return value if value is not None else ""
+
+    for key, value in _dotenv_entries(path):
+        found[key] = _DOTENV_REFERENCE.sub(resolve, value)
     return found
 
 
@@ -177,9 +200,19 @@ def host_requirement_problems(
 ) -> list[str]:
     """What workers lack of a game's ``host_requirements`` (``Game.host_env``,
     ``Game.host_tools``), one plain line each: a variable that is unset (or names an absolute
-    path that does not exist), or a tool that is not on the workers' PATH."""
+    path that does not exist), a tool that is not on the workers' PATH, or a bare ``$VAR`` in
+    one of these .env values (or ``PATH``), which Hermes leaves literal."""
+    env_names, tools = list(env_names), list(tools)
     seen = worker_env(env, hermes_home)
     problems = []
+    path = Path(hermes_home) / ".env" if hermes_home is not None else None
+    checked = set(env_names) | ({"PATH"} if tools else set())
+    for key, value in _dotenv_entries(path) if path is not None and path.exists() else []:
+        if key in checked and _BARE_REFERENCE.search(value):
+            problems.append(
+                f"{key} in the profile .env has a bare $ reference ({value}), which Hermes "
+                "leaves as literal text: write ${NAME} with braces"
+            )
     for name in env_names:
         value = (seen.get(name) or "").strip()
         if not value:

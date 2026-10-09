@@ -326,3 +326,39 @@ def test_host_requirements_missing_are_named_plainly(tmp_path):
         f"GOTA_TIRITH_BIN is {tmp_path}/gone/tirith, which does not exist",
         "nim is not on the workers' PATH",
     ]
+
+
+def test_worker_env_follows_hermes_dotenv_rules(tmp_path):
+    """Hermes expands ${VAR} (and ${VAR:-default}) in every value, single-quoted included,
+    and never a bare $VAR (hermes_cli/env_loader.py with python-dotenv's parser)."""
+    from autoresearch.runtime.preflight import worker_env
+
+    home = _profile_env(
+        tmp_path,
+        "export A=${PATH}/a\n"
+        "B='${HOME}/b'\n"
+        'C="${MISSING:-/fallback}"\n'
+        "D=$HOME/d  # inline comment\n"
+        "E=${A}:e\n",
+    )
+    seen = worker_env({"PATH": "/usr/bin", "HOME": "/home/x"}, home)
+    assert seen["A"] == "/usr/bin/a"
+    assert seen["B"] == "/home/x/b"
+    assert seen["C"] == "/fallback"
+    assert seen["D"] == "$HOME/d"  # literal, as Hermes leaves it
+    assert seen["E"] == "/usr/bin/a:e"  # earlier lines count
+
+
+def test_a_bare_dollar_path_is_reported_as_a_literal_and_flagged(tmp_path):
+    from autoresearch.runtime.preflight import host_requirement_problems, worker_env
+
+    nim_bin = _executable(tmp_path / "nim" / "bin" / "nim").parent
+    home = _profile_env(tmp_path, f"PATH={nim_bin}:$PATH\n")
+    env = {"PATH": "/usr/bin:/bin"}
+    assert worker_env(env, home)["PATH"] == f"{nim_bin}:$PATH"  # workers lose /usr/bin
+    [problem] = host_requirement_problems([], ["nim"], env, home)
+    assert "bare $ reference" in problem and problem.startswith("PATH ")
+
+    braced = _profile_env(tmp_path / "braced", f"PATH={nim_bin}:${{PATH}}\n")
+    assert worker_env(env, braced)["PATH"] == f"{nim_bin}:/usr/bin:/bin"
+    assert host_requirement_problems([], ["nim"], env, braced) == []

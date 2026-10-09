@@ -102,8 +102,8 @@ by hand.
 A game can declare what its bindings need on the host in the `host_requirements` of its
 `GAME.md` (GotA: `GOTA_HERMES_PYTHON`, `GOTA_TIRITH_BIN` and `nim` on `PATH`; see
 `games/gota/GAME.md`, "Build and upload"). Put those in the profile `.env`, which worker
-terminals read (for Nim, an unquoted `PATH=/path/to/nim/bin:${PATH}` line extends the PATH
-workers start with). The EC2 shim's provisioning writes them for GotA. Each run, queue-keeper
+terminals read (for Nim, a `PATH=/path/to/nim/bin:${PATH}` line extends the PATH workers
+start with; the braces are required, Hermes leaves a bare `$PATH` as literal text). The EC2 shim's provisioning writes them for GotA. Each run, queue-keeper
 checks them as workers see them and, when one is missing, logs it and sends one help request
 per distinct set; it does not pause.
 
