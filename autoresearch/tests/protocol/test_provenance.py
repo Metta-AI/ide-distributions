@@ -674,3 +674,22 @@ def test_a_crash_inside_recovery_is_retried(host, monkeypatch):
     assert host.tick(at(1)).provenance_violation is None
     entries, _ = provenance._entries(host.canonical)
     assert any(e["kind"] == provenance.COMMIT and e["sha"] == host.head() for e in entries)
+
+
+def test_a_late_record_of_an_accepted_ancestor_is_not_a_rewrite(host, monkeypatch):
+    """Round 3, item 4: runtime commit B lands without its entry, C follows, the operator
+    accepts C; recovery then records B after C's anchor. B is C's ancestor, not dropped."""
+    def crash(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(provenance, "record", crash)
+    with pytest.raises(KeyboardInterrupt):
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "b\n")
+        )
+    monkeypatch.undo()
+    (host.canonical / "notes.md").write_text("c\n")
+    accepted = host.runtime_commit("commit c")
+    with file_lock(host.canonical / ".supervisor" / "runtime" / "canonical.lock"):
+        provenance.accept(host.canonical, accepted)
+    assert host.tick(at(1)).provenance_violation is None

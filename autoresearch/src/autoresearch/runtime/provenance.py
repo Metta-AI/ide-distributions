@@ -489,11 +489,15 @@ def check(canonical: Path, advance: bool = True) -> Violation | None:
         return Violation(REWRITTEN, head, base, unrecorded(added), dropped)
     walked = _first_parent_since(canonical, base, head)
     # A runtime commit recorded after the base but no longer in HEAD's history: the commits
-    # made since the last check were reset or rebased away.
+    # made since the last check were reset or rebased away. One the base already covers (an
+    # ancestor of an accepted commit, recorded late by ``recover``) is not lost.
+    since = set(walked)
     lost = [
         entry["sha"]
         for entry in entries[base_index + 1 :]
-        if entry["kind"] == COMMIT and entry["sha"] not in set(walked) and entry["sha"] != base
+        if entry["kind"] == COMMIT
+        and entry["sha"] not in since
+        and not _is_ancestor(canonical, entry["sha"], base)
     ]
     if lost:
         return Violation(REWRITTEN, head, base, unrecorded(walked), len(lost))
