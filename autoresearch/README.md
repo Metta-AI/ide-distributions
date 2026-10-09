@@ -323,7 +323,9 @@ git -C "$PROFILE/workspace" show --stat <commit>
 commit to accept; it changes nothing. Keep the commits, or undo them in the workspace (a
 revert is one more commit to accept; do not reset, which is reported as a rewrite), then run
 `accept-commits` with the commit `check-commits` names: it trusts that commit and everything
-before it, and the next queue-keeper run resumes the agent. `accept-commits` is refused
+before it, and the next queue-keeper run resumes the agent. It reads its entry back before it
+reports success and fails loudly if the journal does not return it (a journal line cut short
+by a killed writer is ended before the next entry, so it never swallows that entry). `accept-commits` is refused
 for agents (best effort: plugin policy, approvals deny list, and the command refuses in a
 card or any agent session; see Known gaps), and every accept is announced: queue-keeper
 publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is

@@ -427,3 +427,41 @@ def test_every_canonical_commit_records_its_provenance():
                 missing.append((relative, function.name))
     assert missing == []
     assert worktree_only <= found  # keep the exemptions honest
+
+
+def test_a_torn_last_line_does_not_swallow_the_accept(host, monkeypatch, capsys):
+    """Codex review of PR #24, F3: a writer killed mid-line leaves no newline; the next
+    entry (here the operator's accept) must still read back, so the pause clears."""
+    forged = _forge(host)
+    assert host.tick(at(1)).paused
+    with provenance.journal_path(host.canonical).open("ab") as handle:
+        handle.write(b'{"kind": "commit", "sha": "torn')  # no newline: the write was cut
+
+    code, envelope = _cli(monkeypatch, capsys, host, "accept-commits", forged)
+    assert code == 0 and envelope["data"]["accepted"] == forged
+    assert provenance.invalid_lines(host.canonical) == 1  # the torn line, alone
+    assert not host.tick(at(2)).paused
+
+
+def test_an_accept_that_does_not_read_back_fails_loudly(host, monkeypatch, capsys):
+    """F3: accept-commits verifies its anchor reads back before it reports success."""
+    forged = _forge(host)
+    real = provenance._entries
+    monkeypatch.setattr(provenance, "_entries", lambda canonical: (real(canonical)[0][:-1], 1))
+    code, envelope = _cli(monkeypatch, capsys, host, "accept-commits", forged)
+    assert code == 1 and "does not read back" in envelope["error"]["message"]
+
+
+def test_a_short_write_still_appends_the_whole_entry(host, monkeypatch):
+    """F3: ``os.write`` may write fewer bytes than asked; the append continues."""
+    real_write = provenance.os.write
+
+    def short_write(descriptor, data):
+        return real_write(descriptor, bytes(data[:7]))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(provenance.os, "write", short_write)
+        written = provenance._append(host.canonical, {"kind": "verified", "sha": host.head(),
+                                                      "at": "now"})  # fmt: skip
+    entries, invalid = provenance._entries(host.canonical)
+    assert entries[-1] == written and invalid == 0

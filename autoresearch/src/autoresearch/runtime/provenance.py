@@ -36,6 +36,8 @@ needs a ``commit`` entry with the same first parent. Otherwise it returns a ``Vi
 
 A line that is not valid JSON, not UTF-8, or whose MAC does not verify vouches for nothing;
 ``invalid_lines`` counts them (queue-keeper logs the count, ``runtime check-commits`` shows it).
+``_append`` ends a torn last line (no newline) before it writes, so the torn line stays one
+invalid line, and ``accept`` checks that its anchor reads back.
 
 What this is not. Every process of the profile runs as one OS user, and card workers write
 the journal legitimately (``card finish`` commits the handoff on canonical), so the OS cannot
@@ -172,18 +174,28 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
 
-def _append(canonical: Path, entry: dict) -> None:
+def _append(canonical: Path, entry: dict) -> dict:
+    """Append one signed entry and return it as written. Call under the canonical lock (every
+    writer does), so no other writer appends in between. A last line without its newline (a
+    writer killed mid-write) is ended first: it stays one invalid line instead of swallowing
+    this entry. A short write is continued until the whole line is written."""
     key = _key(canonical, create=True)
-    line = json.dumps(entry | {"mac": _mac(key, entry)}, sort_keys=True) + "\n"
+    signed = entry | {"mac": _mac(key, entry)}
+    data = (json.dumps(signed, sort_keys=True) + "\n").encode()
     path = journal_path(canonical)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # One write of one line in append mode: concurrent writers never interleave inside a line.
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        os.write(descriptor, line.encode())
+        size = os.fstat(descriptor).st_size
+        if size and os.pread(descriptor, 1, size - 1) != b"\n":
+            data = b"\n" + data
+        remaining = memoryview(data)
+        while remaining:
+            remaining = remaining[os.write(descriptor, remaining) :]
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+    return signed
 
 
 def _entries(canonical: Path) -> tuple[list[dict], int]:
@@ -275,8 +287,8 @@ def commit_recorded(
     return prepared.sha
 
 
-def _anchor(canonical: Path, sha: str, reason: str) -> None:
-    _append(canonical, {"kind": ANCHOR, "sha": sha, "reason": reason, "at": _now()})
+def _anchor(canonical: Path, sha: str, reason: str) -> dict:
+    return _append(canonical, {"kind": ANCHOR, "sha": sha, "reason": reason, "at": _now()})
 
 
 def operator_anchors(canonical: Path) -> list[dict]:
@@ -423,5 +435,12 @@ def accept(canonical: Path, sha: str) -> dict:
     head = gitops.head(canonical)
     if not _is_ancestor(canonical, full, head):
         raise ProvenanceError(f"{full} is not in the history of canonical HEAD {head}")
-    _anchor(canonical, full, ACCEPTED_REASON)
+    written = _anchor(canonical, full, ACCEPTED_REASON)
+    entries, _ = _entries(canonical)
+    if not entries or entries[-1] != written:  # under the lock nothing else appended
+        raise ProvenanceError(
+            f"the accept of {full} was written but does not read back from the journal "
+            f"{journal_path(canonical)}; the pause stays. Check the journal (runtime "
+            "check-commits shows invalid lines) and run accept-commits again"
+        )
     return {"accepted": full, "head": head}
