@@ -329,8 +329,10 @@ card or any agent session; see Known gaps), and every accept is announced: queue
 publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is
 visible. A check that cannot run (an unreadable journal, a git error) also
 pauses the agent; a step that keeps failing gets its usual help request. A runtime writer
-records an intent before each commit, so a crash between a commit and its journal entry is
-recognized, not reported. The first run of this check on an existing workspace, and a newly
+builds each commit before it moves `main` and first records an intent naming that exact
+commit, so a crash between moving `main` and the journal entry is recognized, not reported;
+an intent vouches for no other commit (one made on the same parent with the same subject is
+reported). The first run of this check on an existing workspace, and a newly
 seeded or cloned one, trusts the current `HEAD` once and commits
 `.supervisor/ledger/provenance.json`; once that marker has been in history, a lost journal
 is reported, not trusted again.

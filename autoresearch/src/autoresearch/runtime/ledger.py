@@ -40,7 +40,7 @@ def commit(canonical: Path, paths: list[Path], message: str) -> str | None:
     provenance journal (``runtime.provenance``); call under the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
     return provenance.commit_recorded(
-        canonical, message, lambda: gitops.commit_paths(canonical, relative, message)
+        canonical, message, lambda: gitops.prepare_paths(canonical, relative, message)
     )
 
 

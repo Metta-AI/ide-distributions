@@ -335,10 +335,10 @@ def _merge(canonical: Path, path: Path, record: dict, store: RecordStore) -> dic
     message = f"merge card/{record['request_id']} ({_label(record)})"
     conflicts: list[str] = []
 
-    def merge_commit() -> str | None:
-        merged, found = gitops.merge_no_ff(canonical, record["result_sha"], message)
+    def merge_commit() -> gitops.PreparedCommit | None:
+        prepared, found = gitops.prepare_merge(canonical, record["result_sha"], message)
         conflicts.extend(found)
-        return gitops.head(canonical) if merged else None
+        return prepared
 
     merge_sha = provenance.commit_recorded(canonical, message, merge_commit)
     if merge_sha is None:

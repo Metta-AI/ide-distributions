@@ -9,12 +9,14 @@ key. An entry whose MAC does not verify is ignored: it vouches for nothing.
 
 Entry kinds:
 
-- ``intent``: written just before a runtime commit: ``intent`` (a random id), ``parent``
-  (HEAD then, or null), ``step`` (the commit subject).
+- ``intent``: written after the runtime built a commit object and before it moves ``main``
+  to it: ``intent`` (a random id), ``sha`` (that exact commit), ``parent`` (HEAD then, or
+  null), ``step`` (the commit subject).
 - ``commit``: one runtime commit: ``sha``, ``parent`` (its first parent, or null for a root
   commit), ``step`` (the commit subject, which names the runtime step), ``intent``, ``pid``,
   ``at``.
-- ``void``: the intent made no commit (nothing to commit, or a merge that conflicted).
+- ``void``: the intent's commit never landed (``main`` had moved, so the branch update was
+  refused).
 - ``anchor``: trust ``sha`` and all of its history. Bootstrap writes one when it initializes
   the journal (``initialize``: a new or restored workspace, or the first run of this check on
   an existing one), and the operator command ``runtime accept-commits`` writes one.
@@ -46,9 +48,9 @@ The boundary is a separate OS user for card workers, without write access to can
 
 A runtime writer records its commit before it releases the canonical lock, and ``check``
 runs under that lock, so a check never sees a runtime commit without its entry. A crash
-between a commit and its ``commit`` entry leaves the ``intent`` open: an unrecorded commit
-whose first parent and subject match an open intent is the runtime's own (``check``).
-"""
+between moving ``main`` and the ``commit`` entry leaves the ``intent`` open: a commit whose
+sha an open intent names is the runtime's own (``check``). Only that exact sha: a commit
+someone else makes on the same parent with the same subject is still reported."""
 
 import datetime
 import hashlib
@@ -240,28 +242,37 @@ def record(canonical: Path, sha: str, step: str, intent: str | None = None) -> N
 
 
 def commit_recorded(
-    canonical: Path, message: str, make_commit: Callable[[], str | None]
+    canonical: Path, message: str, prepare: Callable[[], gitops.PreparedCommit | None]
 ) -> str | None:
-    """Make one runtime commit on canonical with ``make_commit`` (which returns the new
-    commit, or None when it made none) and record it: an ``intent`` entry first, then a
-    ``commit`` entry (or ``void``), so a crash in between is still recognized. Call under the
-    canonical lock."""
+    """Make one runtime commit on canonical and record it; return its sha, or None when
+    ``prepare`` found nothing to commit. Call under the canonical lock.
+
+    ``prepare`` builds the commit object without moving any branch (``gitops.prepare_*``).
+    The ``intent`` entry names that exact commit before HEAD moves to it, then the
+    ``commit`` entry follows: a crash in between is recognized, and an intent vouches for no
+    other commit. A failure before the intent writes nothing; a move of HEAD that fails
+    (``gitops.land`` is all or nothing) closes the intent with a ``void`` entry."""
+    prepared = prepare()
+    if prepared is None:
+        return None
     intent = secrets.token_hex(8)
     try:
-        parent = gitops.head(canonical)
+        _append(
+            canonical,
+            {"kind": INTENT, "intent": intent, "sha": prepared.sha, "parent": prepared.parent,
+             "step": _subject(message), "at": _now()},
+        )  # fmt: skip
+    except BaseException:
+        gitops.discard(canonical, prepared)  # leave no merge in progress behind
+        raise
+    try:
+        gitops.land(canonical, prepared)
     except gitops.GitError:
-        parent = None  # an empty repository: the first commit has no parent
-    _append(
-        canonical,
-        {"kind": INTENT, "intent": intent, "parent": parent, "step": _subject(message),
-         "at": _now()},
-    )  # fmt: skip
-    sha = make_commit()
-    if sha is None:
         _append(canonical, {"kind": VOID, "intent": intent, "at": _now()})
-    else:
-        record(canonical, sha, message, intent)
-    return sha
+        raise
+    record(canonical, prepared.sha, message, intent)
+    gitops.settle(canonical, prepared)
+    return prepared.sha
 
 
 def _anchor(canonical: Path, sha: str, reason: str) -> None:
@@ -314,7 +325,7 @@ def initialize(canonical: Path, fresh: bool) -> str | None:
         )
         subject = "provenance: journal initialized"
         commit_recorded(
-            canonical, subject, lambda: gitops.commit_paths(canonical, [MARKER_RELATIVE], subject)
+            canonical, subject, lambda: gitops.prepare_paths(canonical, [MARKER_RELATIVE], subject)
         )
     return f"provenance journal initialized: trusted HEAD {head}"
 
@@ -358,21 +369,20 @@ def check(canonical: Path, advance: bool = True) -> Violation | None:
     # restarts the walk there; commits anchored or verified before still count.
     trusted = {entry["sha"] for entry in entries if entry["kind"] in (ANCHOR, VERIFIED)}
     closed = {entry.get("intent") for entry in entries if entry["kind"] in (COMMIT, VOID)}
+    # An intent names the exact commit it was about to land, so an open one (a writer
+    # crashed between moving HEAD and its commit entry) vouches for that commit only.
     open_intents = {
-        (entry["parent"], entry["step"])
+        entry.get("sha")
         for entry in entries
         if entry["kind"] == INTENT and entry["intent"] not in closed
     }
 
     def is_runtime(sha: str) -> bool:
-        if sha in trusted:
+        if sha in trusted or sha in open_intents:
             return True
-        parent = _first_parent(canonical, sha)
         if sha in recorded:
-            return recorded[sha]["parent"] == parent
-        # A runtime writer crashed between its commit and its commit entry.
-        subject = gitops.git(canonical, "show", "-s", "--format=%s", sha)
-        return (parent, subject) in open_intents
+            return recorded[sha]["parent"] == _first_parent(canonical, sha)
+        return False
 
     def unrecorded(shas: list[str]) -> list[CommitInfo]:
         return [describe(canonical, sha) for sha in shas if not is_runtime(sha)]

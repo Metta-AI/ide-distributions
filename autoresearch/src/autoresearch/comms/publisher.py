@@ -220,7 +220,7 @@ def _commit_pending(canonical: Path, message: str) -> str | None:
     if not paths:
         return None
     return provenance.commit_recorded(
-        canonical, message, lambda: gitops.commit_paths(canonical, sorted(set(paths)), message)
+        canonical, message, lambda: gitops.prepare_paths(canonical, sorted(set(paths)), message)
     )
 
 
@@ -241,7 +241,7 @@ def commit_and_push(canonical: Path, paths: list[Path], message: str) -> bool:
     the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
     provenance.commit_recorded(
-        canonical, message, lambda: gitops.commit_paths(canonical, relative, message)
+        canonical, message, lambda: gitops.prepare_paths(canonical, relative, message)
     )
     return push(canonical, allow_no_remote=True)
 

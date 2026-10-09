@@ -267,7 +267,7 @@ def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult)
         write_text(path, _agents_md(repo_root))
         subject = f"bootstrap: doctrine version {wanted}"
         provenance.commit_recorded(
-            canonical, subject, lambda: gitops.commit_paths(canonical, ["AGENTS.md"], subject)
+            canonical, subject, lambda: gitops.prepare_paths(canonical, ["AGENTS.md"], subject)
         )
     result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
 
@@ -291,7 +291,7 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     paths = [p.relative_to(seed).as_posix() for p in sorted(seed.rglob("*")) if p.is_file()]
     paths += ["AGENTS.md", ".gitignore", gitkeep.relative_to(canonical).as_posix()]
     subject = f"bootstrap: seed workspace from games/{game}/seed"
-    provenance.commit_recorded(canonical, subject, lambda: gitops.commit_paths(canonical, paths, subject))
+    provenance.commit_recorded(canonical, subject, lambda: gitops.prepare_paths(canonical, paths, subject))
     early = sorted((canonical / INBOX).iterdir()) if (canonical / INBOX).is_dir() else []
     if early:
         result.actions.append(f"kept {len(early)} inbox files written before bootstrap for adoption")
@@ -309,7 +309,7 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
             write_text(path, "\n".join([*lines, *missing]) + "\n")
             subject = "bootstrap: .gitignore runtime dirs"
             provenance.commit_recorded(
-                canonical, subject, lambda: gitops.commit_paths(canonical, [".gitignore"], subject)
+                canonical, subject, lambda: gitops.prepare_paths(canonical, [".gitignore"], subject)
             )
         result.actions.append(f"added {missing} to .gitignore")
     remotes = gitops.git(canonical, "remote").split()

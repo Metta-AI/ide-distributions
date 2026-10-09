@@ -253,24 +253,86 @@ def test_deleting_the_journal_and_the_marker_is_still_reported(host):
     assert not any("provenance journal initialized" in a for a in run.bootstrap.actions)
 
 
-def test_a_crash_between_commit_and_record_is_recognized(host):
-    """M-1: the intent entry written before the commit lets the check recognize a runtime
-    commit whose commit entry was never written (a kill in between)."""
-    marker = host.canonical / "plan.md"
+def _prepare_plan(host: Host, text: str, message: str = "a runtime step"):
+    (host.canonical / "plan.md").write_text(text)
+    return gitops.prepare_paths(host.canonical, ["plan.md"], message)
 
-    def commit_then_crash() -> str:
-        marker.write_text("crash\n")
-        gitops.commit_all(host.canonical, "a runtime step")
+
+def _commit_plan_outside_the_runtime(host: Host, text: str) -> str:
+    (host.canonical / "plan.md").write_text(text)
+    return gitops.commit_all(host.canonical, "a runtime step")
+
+
+def test_a_crash_between_commit_and_record_is_recognized(host, monkeypatch):
+    """M-1: the intent entry, written before HEAD moves, lets the check recognize a runtime
+    commit whose commit entry was never written (a kill in between)."""
+    def crash(*_args, **_kwargs):
         raise KeyboardInterrupt  # the process dies before the commit entry
 
+    monkeypatch.setattr(provenance, "record", crash)
     with pytest.raises(KeyboardInterrupt):
-        provenance.commit_recorded(host.canonical, "a runtime step", commit_then_crash)
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "crash\n")
+        )
+    monkeypatch.undo()
     assert host.tick(at(1)).provenance_violation is None
 
-    # The same subject on another parent (or with no intent at all) is not the runtime's.
-    marker.write_text("forged\n")
-    gitops.commit_all(host.canonical, "a runtime step")
+    # The same subject on the same parent, made outside the runtime, is not the runtime's.
+    _commit_plan_outside_the_runtime(host, "forged\n")
     assert host.tick(at(2)).provenance_violation.kind == provenance.UNKNOWN_COMMITS
+
+
+def test_a_writer_that_fails_before_committing_vouches_for_nothing(host):
+    """Codex review of PR #24, F1: a runtime writer that fails before it commits must not
+    leave an intent that a later commit on the same parent with the same subject matches."""
+    def fails():
+        raise gitops.GitError(("commit",), "index.lock exists")
+
+    with pytest.raises(gitops.GitError):
+        provenance.commit_recorded(host.canonical, "a runtime step", fails)
+    forged = _commit_plan_outside_the_runtime(host, "forged\n")
+    violation = host.tick(at(1)).provenance_violation
+    assert violation.kind == provenance.UNKNOWN_COMMITS
+    assert [commit.sha for commit in violation.commits] == [forged]
+
+
+def test_an_open_intent_vouches_only_for_its_exact_commit(host, monkeypatch):
+    """F1: a crash after the intent but before HEAD moved leaves an open intent; it names
+    the prepared commit, so a different commit with the same parent and subject is still
+    reported."""
+    def crash(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(gitops, "land", crash)
+    with pytest.raises(KeyboardInterrupt):
+        provenance.commit_recorded(
+            host.canonical, "a runtime step", lambda: _prepare_plan(host, "runtime\n")
+        )
+    monkeypatch.undo()
+    [intent] = [e for e in provenance._entries(host.canonical)[0] if e["kind"] == "intent"
+                and e["step"] == "a runtime step"]  # fmt: skip
+    forged = _commit_plan_outside_the_runtime(host, "forged\n")
+    assert forged != intent["sha"] and intent["parent"] == gitops.git(
+        host.canonical, "rev-parse", f"{forged}^"
+    )
+    violation = host.tick(at(1)).provenance_violation
+    assert [commit.sha for commit in violation.commits] == [forged]
+
+
+def test_a_refused_branch_update_closes_its_intent(host):
+    """F1: when ``main`` moved after the commit was prepared, the update is refused, HEAD
+    stays, and the intent is closed with a ``void`` entry."""
+    def prepare_then_race():
+        prepared = _prepare_plan(host, "runtime\n")
+        _commit_plan_outside_the_runtime(host, "raced\n")
+        return prepared
+
+    with pytest.raises(gitops.GitError):
+        provenance.commit_recorded(host.canonical, "a runtime step", prepare_then_race)
+    entries, _ = provenance._entries(host.canonical)
+    assert entries[-1]["kind"] == provenance.VOID
+    assert entries[-1]["intent"] == entries[-2]["intent"] and entries[-2]["kind"] == "intent"
+    assert host.head() != entries[-2]["sha"]
 
 
 def test_an_unreadable_journal_line_fails_closed(host):
@@ -307,13 +369,13 @@ GIT_WRITES = {"commit", "commit-tree", "update-ref", "merge", "reset", "rebase",
 
 
 def _commits(call: ast.Call) -> bool:
-    """A call that can move a branch: ``gitops.commit_*`` / ``merge_no_ff``, or
+    """A call that can move a branch: ``gitops.commit_*`` / ``land``, or
     ``gitops.git(repo, "<write subcommand>", ...)``."""
     func = call.func
     if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
             and func.value.id == "gitops"):  # fmt: skip
         return False
-    if func.attr in {"commit_all", "commit_paths", "commit_blobs", "merge_no_ff"}:
+    if func.attr in {"commit_all", "commit_paths", "land"}:
         return True
     first = call.args[1] if func.attr == "git" and len(call.args) > 1 else None
     return isinstance(first, ast.Constant) and first.value in GIT_WRITES
@@ -331,11 +393,13 @@ def test_every_canonical_commit_records_its_provenance():
     """A new canonical commit site that forgets ``provenance.commit_recorded`` would pause
     the agent on its first commit. Every function that can move a branch either commits
     through ``commit_recorded`` or works only on a card worktree (listed, and checked to
-    exist). ``merge --abort`` in ``abort_stale_merge`` moves nothing."""
+    exist). ``merge --abort`` in ``abort_stale_merge`` moves nothing; ``commit_recorded``
+    is the recorder itself."""
     worktree_only = {
         ("runtime/card_finish.py", "finish"),
         ("softmax_tool/submit.py", "bootstrap_champion"),
         ("runtime/queue_keeper.py", "abort_stale_merge"),
+        ("runtime/provenance.py", "commit_recorded"),
     }
     found, missing = set(), []
     for path in SRC.rglob("*.py"):
