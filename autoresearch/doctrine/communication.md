@@ -62,5 +62,6 @@ The briefing of your card lists the inbound messages that were delivered to it.
 | `steer` | Direction from the human. A steer outranks your own plan (D-02). | Yes, the same way as a `reply`. |
 | `task` | A request for work. The runtime makes a card from it. | No. The runtime acknowledges it when the card that was created from it publishes. |
 | `seen` | It only marks other messages as read. | No. |
+| `control` | The coach pauses or resumes research. The runtime applies it and answers it; it never reaches a card. | No. |
 
 Card completion checks that each delivered `reply` and `steer` has an acknowledgement.

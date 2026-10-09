@@ -20,8 +20,8 @@ it with the key ``req:<Q-id>:<epoch>``, appends ``{task_id, board_epoch}`` to ``
 commits (``readmit <Q-id>``). After that, ``admit_and_create`` finishes steps 3-4 as usual.
 
 Rejections for ``TRANSIENT_REASONS`` write no receipt, so the request is retried on a later
-run (after calibration lands, or after resume). Any other rejection is terminal: a
-``rejected`` receipt (``reject <Q-id>``). ``planning_owned`` is terminal because the caller
+run (after calibration lands, or after resume; a coach hold rejects as ``paused`` too). Any
+other rejection is terminal: a ``rejected`` receipt (``reject <Q-id>``). ``planning_owned`` is terminal because the caller
 moves the request into the planning backlog. A terminal rejection on a rerun after a crash
 between step 2 and the receipt also drops the unassigned task step 2 left on the board.
 
@@ -48,7 +48,7 @@ from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
 from autoresearch.runtime.handoff import handoff_path
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
-from autoresearch.runtime.pause import is_paused
+from autoresearch.runtime.pause import is_held, is_paused
 
 NOISE_PATH = "stats/metric-noise.yaml"
 DEFAULT_BOARD_EPOCH = "e0"
@@ -130,12 +130,13 @@ def _planning_owned(canonical: Path, spec: CardSpec, queue: Queue) -> bool:
 def admit(
     canonical: Path, spec: CardSpec, queue: Queue, game: Game, game_version: str
 ) -> list[str]:
-    """Reasons to reject ``spec`` (empty: admissible). Checks: not paused (C7); every ref
+    """Reasons to reject ``spec`` (empty: admissible). Checks: not paused (C7) or held by the
+    coach (D15); every ref
     resolves at canonical HEAD; experimentation has a noise record for ``game_version`` (C10);
     planning has no other owner (C11), unless it is a runtime follow-up of a card's handoff.
     ``game`` is for game-declared ref types (Task 3.5)."""
     del game  # used once the resolver supports game reference types
-    if is_paused(ledger_of(canonical)):
+    if is_paused(ledger_of(canonical)) or is_held(ledger_of(canonical)):
         return [PAUSED]
     reasons = _unresolved_refs(canonical, spec)
     if reasons:
@@ -263,7 +264,7 @@ def admit_and_create(
     The caller must not hold the canonical lock. Safe to rerun at any point."""
     canonical, ledger = ctx.canonical, ledger_of(ctx.canonical)
     path = receipt_path(ledger, spec.request_id)
-    if is_paused(ledger):
+    if is_paused(ledger) or is_held(ledger):
         return AdmissionResult(ok=False, reasons=[PAUSED])
     receipt = read_json(path) if path.exists() else None
 

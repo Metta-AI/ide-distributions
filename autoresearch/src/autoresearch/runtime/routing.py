@@ -27,6 +27,11 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
    - another ``steer`` with a ``proposed_topic`` -> the planning backlog.
    - a ``reply``, or another ``steer``, on a thread with an open card -> that card; else the
      planning backlog.
+   - ``control`` (the coach's ``/pause-research``, ``/resume-research``): applied here, under
+     the lock: ``pause`` sets the coach hold (``runtime.pause.hold``: pending cards
+     unassigned, admission and planning stopped), ``resume`` clears it
+     (``runtime.pause.release_hold``). Answered by a runtime note in reply ->
+     ``acknowledged``; it never reaches a card.
 
    A ``task`` in mode planning while another planning card owns planning goes to the
    backlog instead (single planning owner).
@@ -90,7 +95,8 @@ from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import REQUESTS_DIR, write_request
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.admission import PLANNING_OWNED, PLANNING_OWNING_STATES
-from autoresearch.runtime.ledger import canonical_lock, now_iso
+from autoresearch.runtime.ledger import canonical_lock, ledger_of, now_iso
+from autoresearch.runtime.pause import hold, is_held, is_paused, release_hold
 
 URGENT = "now"
 CLOSED_RECEIPT_STATES = ("rejected", "published", "superseded", "dropped")
@@ -109,7 +115,8 @@ class Action:
     ``card_requested``, ``routed_to_card``,
     ``backlogged``, ``rejected`` (a task answered with a note), ``write_rejected`` (a direct
     inbox write answered with a note),
-    ``acknowledged`` (a seen), ``unreadable`` (a committed inbox entry that does not parse),
+    ``acknowledged`` (a seen), ``controlled`` (a coach pause or resume applied; ``detail``
+    is the action), ``unreadable`` (a committed inbox entry that does not parse),
     ``bound`` (a record got its task id) or ``returned`` (back to the backlog)."""
 
     kind: str
@@ -307,26 +314,39 @@ def _route_to_backlog(canonical: Path, record: dict, message: dict, note: str) -
     return [Action("backlogged", record["id"], note)]
 
 
-def _answer_with_note(
-    canonical: Path, record: dict, note: RuntimeMessage, allow_no_remote: bool
-) -> list[Action]:
-    """Publish (once) a runtime note answering the inbound, and acknowledge it with that."""
-    message_id = find_reply(canonical, record["id"], FROM_RUNTIME)
+def _reply_once(
+    canonical: Path, inbound_id: str, note: RuntimeMessage, allow_no_remote: bool
+) -> str:
+    """Publish a runtime note in reply to the inbound, unless one was published already (a
+    rerun after a crash); return its message id."""
+    message_id = find_reply(canonical, inbound_id, FROM_RUNTIME)
     if message_id is None:
         result = publish_message(
-            canonical, note, allow_no_remote=allow_no_remote, in_reply_to=record["id"]
+            canonical, note, allow_no_remote=allow_no_remote, in_reply_to=inbound_id
         )
         message_id = message_id_of_seq(canonical, result.seq)
     _checkpoint("note_published")
+    return message_id
+
+
+def _acknowledge(canonical: Path, record: dict, title: str, message_id: str) -> None:
     answered = delivery.moved(
         record,
         "acknowledged",
-        note=note.title,
+        note=title,
         responsible=dict(NO_ONE),
         acknowledged_by=message_id,
     )
     path = delivery.write_record(canonical, answered)
     commit_and_push(canonical, [path], f"inbound {record['id']}: answered by {message_id}")
+
+
+def _answer_with_note(
+    canonical: Path, record: dict, note: RuntimeMessage, allow_no_remote: bool
+) -> list[Action]:
+    """Publish (once) a runtime note answering the inbound, and acknowledge it with that."""
+    message_id = _reply_once(canonical, record["id"], note, allow_no_remote)
+    _acknowledge(canonical, record, note.title, message_id)
     return [Action("rejected", record["id"], note.body)]
 
 
@@ -501,6 +521,25 @@ def _route_reply(
     return _route_to_thread_or_backlog(ctx, queue, record, message)
 
 
+def _route_control(
+    ctx: RunContext, queue: Queue, record: dict, message: dict, allow_no_remote: bool
+) -> list[Action]:
+    """Apply a coach pause or resume (the coach hold, ``runtime.pause``) and answer it with a
+    runtime note. The note is built from the state before the change and published first, so
+    a rerun after a crash reuses it and only redoes the change, which is idempotent."""
+    canonical, ledger = ctx.canonical, ledger_of(ctx.canonical)
+    if message["action"] == "pause":
+        note = runtime_messages.research_paused(already=is_held(ledger))
+        message_id = _reply_once(canonical, record["id"], note, allow_no_remote)
+        hold(queue, ledger, message["author"])
+    else:
+        note = runtime_messages.research_resumed(is_held(ledger), is_paused(ledger))
+        message_id = _reply_once(canonical, record["id"], note, allow_no_remote)
+        release_hold(queue, ledger)
+    _acknowledge(canonical, record, note.title, message_id)
+    return [Action("controlled", record["id"], message["action"])]
+
+
 # One handler per inbound kind of the registry (``comms.kinds``); the kind registry
 # conformance test checks that the two sets are the same. Records come from messages
 # validated against the registry, so a record's kind is always here; removing a kind while
@@ -510,6 +549,7 @@ HANDLERS = {
     "task": _route_task,
     "steer": _route_steer,
     "reply": _route_reply,
+    "control": _route_control,
 }
 
 

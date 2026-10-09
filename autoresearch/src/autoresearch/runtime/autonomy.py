@@ -18,6 +18,7 @@ from pathlib import Path
 from autoresearch.comms import delivery
 from autoresearch.io.docs import write_json
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
+from autoresearch.runtime.pause import is_held
 
 ENV_AUTONOMY = "AUTORESEARCH_AUTONOMY"
 ALWAYS = "always"
@@ -79,5 +80,7 @@ def start_on_first_coach_task(canonical: Path) -> str | None:
 
 def may_plan(canonical: Path, mode: str) -> bool:
     """Whether the agent may plan its own research now. Every condition that stops planning
-    belongs here."""
+    belongs here: a coach hold (``pause.is_held``), and on request, no coach task yet."""
+    if is_held(ledger_of(canonical)):
+        return False
     return mode == ALWAYS or is_started(canonical)

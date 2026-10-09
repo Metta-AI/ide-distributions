@@ -259,6 +259,7 @@ Where things live:
 | Canonical workspace (git) | `$PROFILE/workspace/` |
 | Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
+| Coach hold | `$PROFILE/workspace/.supervisor/ledger/coach-hold.json` (exists only while the coach holds research) |
 | Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
 | Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
 | GotA compiler child sessions, one full copy per build, not pruned yet (read by `report baseline`) | `$PROFILE/gota-compiler/<build id>-<suffix>/state.db` |
@@ -325,6 +326,23 @@ agree: either make the league show the expected policy again, or accept what it 
 `"$AUTORESEARCH_CLI" promotion accept-champion` (in an operator shell, above; agents cannot
 run it). It resumes on the
 next queue-keeper run after that.
+
+A coach pauses and resumes research from the IDE chat with the exact lines
+`/pause-research` and `/resume-research`, which send an inbound `control` message
+(`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with
+`"$AUTORESEARCH_CLI" comms inbound control --json '{"action": "pause"}' --author coach:<player id>`.
+queue-keeper applies it on its next run, when it routes inbound. A pause sets the coach hold,
+`.supervisor/ledger/coach-hold.json` (`{"held_at", "by", "tasks"}`: `by` is the message's
+author, `tasks` the pending cards it unassigned and their assignees): no card is admitted, no
+pending card is dispatched, and the agent plans nothing; running cards finish their work
+under their spend caps. A resume removes the file and assigns those cards again. Each is
+answered with a runtime note in reply ("Research paused at your request." or "Research
+resumed."; a resume with no hold says nothing was paused). `status --json` shows the hold as
+`coach_hold`. The hold is independent of the agent's own pauses (preflight, daily budget,
+champion conflict, `pause.json`): queue-keeper never clears the hold, and it does not lift its
+own pause while the hold is set. A resume clears only the hold: if the agent is also paused
+for its own reason, it stays paused (the note says so), the cards the hold unassigned wait in
+`pause.json`, and it resumes by itself once that cause clears.
 
 ## Restore on a new host
 

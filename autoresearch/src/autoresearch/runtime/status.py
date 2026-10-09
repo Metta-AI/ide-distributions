@@ -31,11 +31,10 @@ from autoresearch.queue.base import Queue
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime import autonomy, spend
 from autoresearch.runtime.ledger import ledger_of
-from autoresearch.runtime.pause import is_paused, pause_path
+from autoresearch.runtime.pause import is_held, is_paused, pause_path
 from autoresearch.runtime.preflight import HttpGet, credit_floor, fetch_key_data
 from autoresearch.runtime.promotion import DEFAULT_CHAMPION_GRACE, LeagueCheck, champion_grace
 
-COACH_HOLD_FILE = "coach-hold.json"
 DISTRIBUTION_FILE = "distribution.yaml"
 COMMIT_MARKER = ".softmax-distribution-commit"
 UPDATE_FAILED_MARKER = ".softmax-update-failed"
@@ -68,7 +67,7 @@ def build(
         "distribution": _distribution(ctx.hermes_home, warnings),
         "paused": is_paused(ledger),
         "pause_reasons": _pause_reasons(ledger),
-        "coach_hold": (ledger / COACH_HOLD_FILE).exists(),
+        "coach_hold": is_held(ledger),
         "autonomy": mode,
         "started": autonomy.is_started(ctx.canonical),
         "spend": _spend(ctx, env, now, warnings),

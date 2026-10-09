@@ -187,6 +187,12 @@ FIXTURES = {
     ],
     "agent_paused": [{"reasons": "identity: wrong player", "paused_at": SINCE}],
     "agent_resumed": [{"count": 2}, {"count": 0, "champion": True}],
+    "research_paused": [{"already": False}, {"already": True}],
+    "research_resumed": [
+        {"was_held": True, "still_paused": False},
+        {"was_held": True, "still_paused": True},
+        {"was_held": False, "still_paused": False},
+    ],
     "staged_not_published": [
         {"message_id": MESSAGE, "staged_title": title, "problems": ["kind: bad"]}
         for title in ("Towers matter", None)

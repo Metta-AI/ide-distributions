@@ -47,7 +47,9 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 9. Route inbound (C11), before admission so new requests carry their inbound. With
     ``AUTORESEARCH_AUTONOMY=on-request``, the first coach task routing accepted then starts
     the agent (``runtime.autonomy``; step ``autonomy_start``, distinct from the setting check's
-    step ``autonomy``).
+    step ``autonomy``). Routing also applies a coach ``control`` pause or resume: the coach
+    hold (``ledger/coach-hold.json``, ``runtime.pause``), which stops admission (step 10) and
+    planning (steps 4 and 11) like a pause, and which this job never clears.
 10. Admission (C3, C10, C11) of every committed create request (merged from cards, or written
     by the runtime) still without a final receipt. Briefings get the card's inbound, the
     planning backlog and open proposals (planning cards), and the latest signals.
@@ -61,7 +63,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
     estimated-cost cap; pause when today's spend reaches the daily budget), blocked cards
     (``blocked.handle_blocked``), the daily re-raise of unanswered proposals, and resume when
     paused, preflight passed, this run's champion check found the league and the loop in
-    agreement, and today's spend is under the daily budget (``spend.may_resume``).
+    agreement, and today's spend is under the daily budget (``spend.may_resume``), unless the
+    coach holds research (lifting the pause would reassign cards the hold keeps back).
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
@@ -135,7 +138,7 @@ from autoresearch.runtime.game_source import PinUpdate, pin_update, record_pin
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of
 from autoresearch.runtime.memory_snapshot import snapshot_memory
 from autoresearch.runtime.merge import find_orphan_done, process_handoffs
-from autoresearch.runtime.pause import is_paused, pause, pause_path, resume
+from autoresearch.runtime.pause import is_held, is_paused, pause, pause_path, resume
 from autoresearch.runtime.planning import planning_request
 from autoresearch.runtime.preflight import (
     PreflightResult,
@@ -198,7 +201,7 @@ class KeeperRun:
     host_problems: list = field(default_factory=list)  # game host requirements workers lack
     signals: list = field(default_factory=list)
     planning: CardSpec | None = None
-    planning_skipped: bool = False  # on-request autonomy and no coach task yet
+    planning_skipped: bool = False  # coach hold, or on-request autonomy and no coach task yet
     orphans: list[str] = field(default_factory=list)
     spend_run: spend.SpendRun | None = None  # None: the spend step failed
     blocked: list = field(default_factory=list)
@@ -806,7 +809,10 @@ def _signals_step(run, ctx, queue, now, cfg, pre, allow_no_remote) -> list:
 def _planning_step(run, ctx, queue, now, signals, autonomy_mode) -> CardSpec | None:
     if not autonomy.may_plan(ctx.canonical, autonomy_mode):
         run.planning_skipped = True
-        _log_once_a_day(ctx, now, "planning waits for the coach's first task (on-request)")
+        if is_held(ledger_of(ctx.canonical)):
+            _log_once_a_day(ctx, now, "planning waits: the coach paused research")
+        else:
+            _log_once_a_day(ctx, now, "planning waits for the coach's first task (on-request)")
         return None
     growth = any(signal.code == QUEUE_GROWTH for signal in signals)
     return planning_request(ctx, queue, now) or (
@@ -948,6 +954,7 @@ def _run_steps(
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
     if (
         is_paused(ledger_of(canonical))
+        and not is_held(ledger_of(canonical))  # lifting the pause would reassign held cards
         and run.champion_checked
         and not run.champion_conflict
         and spend.may_resume(ctx, run.spend_run, now)

@@ -12,7 +12,7 @@ import yaml
 from support.board import ForeignBoard
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
-from autoresearch.comms.inbound import submit_inbound
+from autoresearch.comms.inbound import InboundProblems, submit_inbound
 from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -1239,3 +1239,137 @@ def test_unknown_autonomy_runs_as_always_with_one_help_request(host):
     assert first.planning is not None
     assert "autonomy" in first.failures
     assert len(_help_requests(host, "Autonomy setting")) == 1
+
+
+# --- coach pause and resume (inbound control, D15) ---
+
+
+def _control(host: Host, action: str) -> str:
+    return submit_inbound(host.canonical, "control", {"action": action}, "coach:ply_x")
+
+
+def _replies(host: Host, inbound_id: str) -> list[dict]:
+    return [m for m in host.outbox() if m.get("in_reply_to") == inbound_id]
+
+
+def _held_card(host: Host) -> str:
+    """Tick until a planning card is pending and assigned, then hold research; return it."""
+    host.tick(at(0))
+    host.tick(at(1))
+    [card] = host.queue.list("pending")
+    assert card.assignee == PROFILE
+    _control(host, "pause")
+    host.tick(at(2))
+    return card.task_id
+
+
+def test_a_control_pause_holds_research_while_running_cards_keep_running(host):
+    host.tick(at(0))
+    host.tick(at(1))
+    running = host.claim()  # the planning card
+    pending_request = host.runtime_request(spec=_spec("Pending"))
+    host.tick(at(2))
+    pending = host.receipt(pending_request)["tasks"][-1]["task_id"]
+    assert host.queue.get(pending).assignee == PROFILE
+    control = _control(host, "pause")
+    waiting = host.runtime_request(spec=_spec("Waiting"))
+
+    run = host.tick(at(3))
+
+    hold = host.committed(host.ledger / "coach-hold.json")
+    assert hold["by"] == "coach:ply_x" and hold["held_at"]
+    assert hold["tasks"] == {pending: PROFILE}
+    assert host.queue.get(pending).assignee is None  # never dispatched
+    assert host.queue.get(running.task_id).state == "claimed"  # keeps running
+    assert run.spend_run is not None  # ... under its caps
+    assert host.receipt(waiting) is None  # admission stopped
+    assert run.planning is None and run.planning_skipped and run.failures == {}
+    [note] = _replies(host, control)
+    assert note["from"] == "runtime" and note["kind"] == "note"
+    assert note["title"] == "Research paused at your request."
+    record = host.committed(host.ledger / "inbound" / f"{control}.json")
+    assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
+    assert not (host.ledger / "pause.json").exists()  # independent of the C7 pause
+
+    later = host.tick(at(60 * 24))  # a day later planning would be due: still held
+    assert later.planning is None and later.planning_skipped
+    assert host.receipt(waiting) is None and len(_replies(host, control)) == 1
+    log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
+    assert "planning waits: the coach paused research" in log
+
+
+def test_queue_keeper_never_clears_a_control_hold(host):
+    card = _held_card(host)
+
+    assert not host.tick(at(3)).paused  # preflight passes
+    assert (host.ledger / "coach-hold.json").exists()
+    host.set_faults("player=ply_someone_else")
+    assert host.tick(at(4)).paused
+    host.set_faults("")
+    run = host.tick(at(5))  # preflight passes again: the agent's own pause stays while held
+
+    assert not run.paused and run.resumed is None and run.failures == {}
+    assert (host.ledger / "coach-hold.json").exists() and (host.ledger / "pause.json").exists()
+    assert host.queue.get(card).assignee is None
+    assert not [m for m in host.outbox() if m["title"] == "Agent resumed"]
+
+
+def test_a_control_resume_releases_the_hold_and_one_without_a_hold_says_so(host):
+    card = _held_card(host)
+    resume = _control(host, "resume")
+
+    run = host.tick(at(3))
+
+    assert not (host.ledger / "coach-hold.json").exists()
+    assert host.committed(host.ledger / "coach-hold.json") is None
+    assert host.queue.get(card).assignee == PROFILE
+    [note] = _replies(host, resume)
+    assert note["title"] == "Research resumed." and run.failures == {}
+    assert not run.planning_skipped
+
+    again = _control(host, "resume")
+    host.tick(at(4))
+    [note] = _replies(host, again)
+    assert note["title"] == "Research was not paused"
+    assert "Nothing was paused" in note["body"]
+
+
+def test_a_control_resume_leaves_the_agents_own_pause_in_place(host, monkeypatch):
+    card = _held_card(host)
+    conflict = promotion.ChampionConflict("ar-E-x:v1", "hand-made:v2", "submitted by hand")
+    monkeypatch.setattr(promotion, "champion_conflict", lambda *args: conflict)
+    host.tick(at(3))  # the agent pauses itself too
+    resume = _control(host, "resume")
+
+    host.tick(at(4))
+
+    assert not (host.ledger / "coach-hold.json").exists()
+    pause = host.committed(host.ledger / "pause.json")
+    assert "champion conflict" in pause["reason"] and pause["tasks"] == {card: PROFILE}
+    assert host.queue.get(card).assignee is None  # still paused
+    [note] = _replies(host, resume)
+    assert note["title"] == "Research resumed." and "still paused" in note["body"]
+
+    monkeypatch.undo()
+    host.tick(at(5))  # the conflict clears: the agent resumes by itself
+    assert not (host.ledger / "pause.json").exists()
+    assert host.queue.get(card).assignee == PROFILE
+
+
+def test_a_control_with_an_unknown_action_is_rejected_with_a_note(host):
+    host.tick(at(0))
+    inbound_id = "ply_x:control:bad"
+    write_json(
+        host.canonical / "comms" / "inbox" / f"{inbound_id}.json",
+        {"id": inbound_id, "created": "2026-10-09T20:00:00Z", "author": "coach:ply_x",
+         "kind": "control", "action": "stop"},
+    )  # fmt: skip
+    with pytest.raises(InboundProblems, match="action: must be one of pause, resume"):
+        submit_inbound(host.canonical, "control", {"action": "stop"}, "coach:ply_x")
+
+    run = host.tick(at(1))
+
+    [note] = _replies(host, inbound_id)
+    assert note["about"]["outcome"] == "rejected"
+    assert "action: must be one of pause, resume" in note["body"]
+    assert not (host.ledger / "coach-hold.json").exists() and run.failures == {}

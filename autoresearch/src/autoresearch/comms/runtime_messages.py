@@ -594,6 +594,37 @@ def agent_resumed(count: int, champion: bool = False) -> RuntimeMessage:
     return RuntimeMessage("note", "Agent resumed", body)
 
 
+def research_paused(already: bool) -> RuntimeMessage:
+    """The coach paused research (a ``control`` pause); ``already``: it was paused before."""
+    lead = "Research was already paused at your request." if already else (
+        "No new cards start, pending cards were unassigned, and the agent plans nothing new."
+    )
+    body = (
+        f"{lead} Cards already running finish their work, within their spend limits. Send "
+        "/resume-research to start research again."
+    )
+    return RuntimeMessage("note", "Research paused at your request.", body)
+
+
+def research_resumed(was_held: bool, still_paused: bool) -> RuntimeMessage:
+    """The coach resumed research (a ``control`` resume). ``was_held``: the coach had paused
+    it; ``still_paused``: the runtime's own pause (preflight, budget, champion) still holds."""
+    if not was_held:
+        return RuntimeMessage(
+            "note",
+            "Research was not paused",
+            "Nothing was paused at your request, so there was nothing to resume.",
+        )
+    if still_paused:
+        body = (
+            "Your pause is lifted, but the agent is still paused for another reason, which its "
+            "own message explains. It resumes by itself once that cause clears."
+        )
+    else:
+        body = "Pending cards were assigned again, and the agent plans its research again."
+    return RuntimeMessage("note", "Research resumed.", body)
+
+
 def staged_not_published(
     message_id: str, staged_title: str | None, problems: list[str]
 ) -> RuntimeMessage:

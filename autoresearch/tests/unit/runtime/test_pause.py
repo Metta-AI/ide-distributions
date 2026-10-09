@@ -2,7 +2,7 @@ from pathlib import Path
 
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json
-from autoresearch.runtime.pause import pause, resume
+from autoresearch.runtime.pause import hold, is_held, is_paused, pause, release_hold, resume
 from runtime.workspace import make_spec
 
 
@@ -86,3 +86,46 @@ def test_resume_skips_a_recorded_task_that_is_gone(canonical, queue, tmp_path):
     assert resume(lost_board, ledger) == []
     assert not (ledger / "pause.json").exists()
     assert queue.get(kept).assignee is None
+
+
+# --- the coach hold (control pause and resume, D15) ---
+
+
+def test_hold_unassigns_pending_cards_and_release_restores_them(canonical, queue):
+    ledger = canonical.layout.ledger
+    pending = _create(queue, "autoresearch")
+    claimed = _create(queue, "worker-x")
+    queue.claim_next("worker-x")
+
+    assert hold(queue, ledger, "coach:ply_x") == [pending]
+
+    record = read_json(ledger / "coach-hold.json")
+    assert record["by"] == "coach:ply_x" and record["held_at"]
+    assert record["tasks"] == {pending: "autoresearch"}
+    assert _tracked(canonical, ".supervisor/ledger/coach-hold.json")
+    assert is_held(ledger) and not is_paused(ledger)
+    assert queue.get(pending).assignee is None and queue.get(claimed).assignee == "worker-x"
+    assert hold(queue, ledger, "coach:ply_y") == []  # idempotent: the first hold is kept
+    assert read_json(ledger / "coach-hold.json")["by"] == "coach:ply_x"
+
+    assert release_hold(queue, ledger) == [pending]
+    assert queue.get(pending).assignee == "autoresearch"
+    assert not is_held(ledger) and not _tracked(canonical, ".supervisor/ledger/coach-hold.json")
+    assert release_hold(queue, ledger) == []  # no hold: a no-op
+
+
+def test_releasing_a_hold_under_a_pause_leaves_its_cards_to_the_pause(canonical, queue):
+    ledger = canonical.layout.ledger
+    task = _create(queue, "autoresearch")
+    hold(queue, ledger, "coach:ply_x")
+    assert pause(queue, ledger, "identity failure") == []  # the hold already unassigned it
+
+    assert release_hold(queue, ledger) == []
+
+    assert not is_held(ledger) and is_paused(ledger)
+    assert queue.get(task).assignee is None  # still paused
+    record = read_json(ledger / "pause.json")
+    assert record["tasks"] == {task: "autoresearch"} and record["reason"] == "identity failure"
+    assert not _tracked(canonical, ".supervisor/ledger/coach-hold.json")
+    assert resume(queue, ledger) == [task]
+    assert queue.get(task).assignee == "autoresearch"
