@@ -44,7 +44,9 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
     by the runtime) still without a final receipt. Briefings get the card's inbound, the
     planning backlog and open proposals (planning cards), and the latest signals.
     ``needs_calibration`` asks for the calibration card; ``planning_owned`` moves the request
-    into the planning backlog. Then reprioritize/drop requests (``queue_ops``).
+    into the planning backlog. Then reprioritize/drop requests (``queue_ops``; each op is
+    contained: a failing one is logged and retried, and after 3 failing runs given up with a
+    ``failed`` marker and one runtime ``help_request``).
 11. Signals (with this run's failed steps as input), then the planning request (cadence, or
     queue growth).
 12. Orphaned done cards (C3), spend caps (``spend.enforce``: stop cards over their run or
@@ -568,9 +570,11 @@ def admission_step(
     game_version: str | None,
     profile: str,
     now: datetime.datetime,
+    allow_no_remote: bool = False,
 ) -> None:
     """Admit committed create requests (module docstring, step 10); one failing request does
-    not stop the others."""
+    not stop the others. Then the reprioritize/drop requests, each contained on its own
+    (``queue_ops``: a failing op is retried, then given up with one help_request)."""
     canonical = ctx.canonical
     signal_lines = _read_state(ctx, SIGNAL_LINES_FILE, [])
     needs_calibration = False
@@ -624,7 +628,10 @@ def admission_step(
             )
     if needs_calibration and game_version:
         _step(run, ctx, "calibration", request_calibration, ctx, game_version)
-    run.ops = _step(run, ctx, "ops", apply_ops, ctx, queue) or []
+    run.ops = _step(run, ctx, "ops", apply_ops, ctx, queue, allow_no_remote) or []
+    for outcome in run.ops:
+        if outcome.state in ("retrying", "failed"):
+            _log(ctx, f"ops: {outcome.op} {outcome.request_id} {outcome.state}: {outcome.detail}")
 
 
 def _spend_step(
@@ -809,7 +816,10 @@ def _run_steps(
     _step(run, ctx, "push", push_early, canonical)
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
     _step(run, ctx, "routing", _routing_step, run, ctx, queue, env, allow_no_remote)
-    _step(run, ctx, "admission", admission_step, run, ctx, queue, game, game_version, profile, now)
+    _step(
+        run, ctx, "admission", admission_step,
+        run, ctx, queue, game, game_version, profile, now, allow_no_remote,
+    )  # fmt: skip
     run.signals = (
         _step(
             run,

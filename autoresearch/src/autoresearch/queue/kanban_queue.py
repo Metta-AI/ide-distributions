@@ -384,12 +384,26 @@ class KanbanQueue:
         self._kanban("edit", task_id, "--priority", str(number), "--body", json.dumps(spec))
 
     def drop(self, task_id: str, reason: str) -> None:
-        self._require_pending(task_id, "drop")
-        self._kanban(
-            "complete", task_id,
-            "--summary", f"dropped: {reason}",
-            "--metadata", '{"outcome":"dropped"}',
-        )  # fmt: skip
+        """Close a pending card without doing it. A ``ready`` card is completed with outcome
+        ``dropped`` in its run metadata; Hermes refuses ``complete`` from the other pending
+        statuses (``todo``, ``triage``, ``scheduled``; ``kanban_db.complete_task``) and, for
+        a child, while a parent is unfinished. Those are archived instead, after a comment
+        with the reason: ``archive`` takes any status and ignores parent links, and the
+        dispatcher never claims a card in those statuses, so archiving cannot end a
+        worker's run. Unlinking the parent and then completing would make the card
+        ``ready``, and the dispatcher could start it between the two commands. An archived
+        card reads as ``completed`` with ``board_status`` ``archived`` (``queue_ops``
+        recognises it as dropped on a rerun)."""
+        card = self._require_pending(task_id, "drop")
+        if card.board_status == "ready":
+            self._kanban(
+                "complete", task_id,
+                "--summary", f"dropped: {reason}",
+                "--metadata", '{"outcome":"dropped"}',
+            )  # fmt: skip
+            return
+        self._kanban("comment", task_id, f"dropped: {reason}")
+        self._kanban("archive", task_id)
 
     def requeue(self, task_id: str, reason: str) -> None:
         state = self.get(task_id).state

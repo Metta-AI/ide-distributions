@@ -526,6 +526,45 @@ def test_reprioritize_and_drop_requests(host):
     assert host.queue.list("completed") == [dropped]  # no orphan repair for a dropped card
 
 
+def test_a_failing_op_is_contained_retried_then_given_up_once(host, monkeypatch):
+    """On the box Hermes refused every drop of one card (its parent was blocked), and the
+    whole ops step failed every run. Now that op fails alone: the other ops apply, it is
+    retried, and after 3 failing runs one help_request reports it and it stops."""
+    host.tick(at(0))
+    keep = host.runtime_request(spec=_spec("Keep"))
+    stuck = host.runtime_request(spec=_spec("Stuck child"))
+    host.tick(at(1))
+    stuck_task = host.receipt(stuck)["tasks"][-1]["task_id"]
+
+    def refuse(task_id, reason):
+        raise RuntimeError(
+            f"cannot complete {task_id}: unsatisfied parent dependencies: t_8001dac2 (blocked)"
+        )
+
+    monkeypatch.setattr(host.queue, "drop", refuse)
+    drop = host.runtime_request("drop", target_request=stuck, reason="stale")
+    bump = host.runtime_request("reprioritize", target_request=keep, priority="P0")
+
+    first = host.tick(at(2))
+    assert {o.request_id: o.state for o in first.ops} == {drop: "retrying", bump: "applied"}
+    assert host.tick(at(3)).ops[0].state == "retrying"  # the bump is applied once
+    assert "ops" not in first.failures and "admission" not in first.failures
+    assert host.committed(host.ledger / "ops" / f"{drop}.json") is None
+    assert _help_requests(host, drop) == []
+
+    result = host.tick(at(4))
+    assert [(o.request_id, o.state) for o in result.ops] == [(drop, "failed")]
+    marker = host.committed(host.ledger / "ops" / f"{drop}.json")
+    assert marker["state"] == "failed" and "unsatisfied parent" in marker["detail"]
+    [help_request] = _help_requests(host, drop)
+    assert help_request["about"]["card"] == stuck_task
+    assert "archive" in help_request["body"]
+    assert host.receipt(stuck)["state"] == "admitted"  # nothing was dropped
+
+    assert host.tick(at(5)).ops == []  # given up for good
+    assert len(_help_requests(host, drop)) == 1
+
+
 def test_a_second_planning_request_joins_the_backlog(host):
     host.tick(at(0))  # the cadence planning request
     extra = host.runtime_request(spec=_spec("Plan the jungle", "planning"))

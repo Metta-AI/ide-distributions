@@ -340,6 +340,26 @@ def test_drop_pending(fake, queue):
     ]  # fmt: skip
 
 
+@pytest.mark.parametrize("status", ["todo", "triage", "scheduled"])
+def test_drop_archives_a_pending_card_hermes_will_not_complete(fake, queue, status):
+    """Hermes completes only ready (or running, blocked, review) cards, and never a child
+    while a parent is unfinished (the box: a todo child of a blocked parent). Archive takes
+    any status and the dispatcher never claims these, so the drop archives them."""
+    fake.reply("show", {"task": task_json(status), "runs": []})
+    queue.drop("t_abc", "obsolete")
+    assert fake.argvs()[-2:] == [
+        [*BOARD, "comment", "t_abc", "dropped: obsolete"],
+        [*BOARD, "archive", "t_abc"],
+    ]
+    assert all(argv[3] != "complete" for argv in fake.argvs())
+
+
+def test_an_archived_card_reads_as_completed(fake, queue):
+    fake.reply("show", {"task": task_json("archived"), "runs": []})
+    card = queue.get("t_abc")
+    assert (card.state, card.board_status) == ("completed", "archived")
+
+
 def test_drop_non_pending_raises(fake, queue):
     fake.reply("show", {"task": task_json("done"), "runs": []})
     with pytest.raises(ValueError):

@@ -356,6 +356,42 @@ def foreign_card(
     )
 
 
+def queue_op_failed(
+    op: str,
+    card_title: str | None,
+    tries: int,
+    error: str,
+    request_id: str,
+    task_id: str | None,
+    board: str,
+) -> RuntimeMessage:
+    """A reprioritize or drop request failed several runs in a row; the runtime gave up on it
+    (``runtime.queue_ops``). The other requests and steps went on."""
+    title = plain_ids(card_title) if card_title and card_title.strip() else None
+    named = f"the card “{_line(title, 80)}”" if title else "a card"
+    verb = "drop" if op == "drop" else "change the priority of"
+    if op == "drop":
+        what_now = (
+            "The card stays on the board and may still run. To remove it, archive it with "
+            f"`hermes kanban --board {board} archive <card>`, where <card> is the card named "
+            "in this message's about field."
+        )
+    else:
+        what_now = "The card keeps its old priority. Send a new task if the order matters."
+    body = (
+        f"The agent asked to {verb} {named}, but the runtime could not, in {tries} tries, "
+        f"and has stopped trying. Last error: {plain_ids(error)}. {what_now}"
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title(f"Could not {verb} a card", title),
+        body,
+        [],
+        _about(request=request_id, card=task_id),
+        key=f"queue-op-failed:{request_id}",
+    )
+
+
 # --- spend caps (runtime.spend) ---
 
 

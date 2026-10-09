@@ -14,7 +14,17 @@ moves the target's receipt to ``dropped`` in the same commit, which closes it fo
 
 Crash safety: the queue change comes first, then the commit. A rerun re-applies a
 reprioritize (idempotent), and recognises an already dropped card (completed with outcome
-``dropped``) as applied, so the receipt still becomes ``dropped``.
+``dropped``, or archived: ``KanbanQueue.drop``) as applied, so the receipt still becomes
+``dropped``.
+
+Failure containment: one op that raises never stops the others or fails the queue-keeper
+step. Its failure is counted in ``.supervisor/runtime/op_failures.json``
+(``{request_id: {runs, since, error}}``) and the op is retried next run. After
+``OP_FAILURE_RUNS`` consecutive failing runs the runtime gives up on it: the marker is
+committed with ``state: failed`` (so it is never retried) and one runtime ``help_request``
+(``runtime_key`` ``queue-op-failed:<Q-id>``) says what failed and, for a drop, how a human
+archives the card. On 2026-10-09 on the box, every run failed the whole step on one drop
+that Hermes refused (``complete`` of a child whose parent was blocked).
 """
 
 from dataclasses import dataclass
@@ -22,11 +32,13 @@ from pathlib import Path
 
 import jsonschema
 
-from autoresearch.io.docs import write_json
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import already_published, publish_message
+from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card
 from autoresearch.queue.requests import load_schema, read_requests
-from autoresearch.runctx import RunContext
+from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.admission import receipt_path
 from autoresearch.runtime.ledger import (
     canonical_lock,
@@ -38,6 +50,8 @@ from autoresearch.runtime.ledger import (
 
 OPS = ("reprioritize", "drop")
 OPS_DIR = "ops"
+OP_FAILURES_FILE = "op_failures.json"
+OP_FAILURE_RUNS = 3  # consecutive failing runs before the runtime gives up on an op
 
 
 @dataclass
@@ -45,7 +59,7 @@ class OpOutcome:
     request_id: str
     op: str
     target_request: str
-    state: str  # applied | ignored
+    state: str  # applied | ignored | failed (given up, committed) | retrying (not committed)
     detail: str
 
 
@@ -63,12 +77,13 @@ def _target_card(queue: Queue, receipt: dict | None) -> Card | None:
 
 
 def _already_dropped(card: Card | None) -> bool:
-    return (
-        card is not None
-        and card.state == "completed"
-        and bool(card.runs)
-        and card.runs[-1].outcome == "dropped"
-    )
+    """Completed with outcome ``dropped``, or archived (how ``KanbanQueue.drop`` closes a
+    card Hermes will not complete)."""
+    if card is None or card.state != "completed":
+        return False
+    if card.board_status == "archived":
+        return True
+    return bool(card.runs) and card.runs[-1].outcome == "dropped"
 
 
 def _apply(queue: Queue, request: dict, card: Card | None) -> tuple[str, str]:
@@ -116,22 +131,86 @@ def _record(canonical: Path, request: dict, state: str, detail: str) -> None:
     commit(canonical, paths, f"{request['op']} {request['target_request']} ({request['id']})")
 
 
-def apply_ops(ctx: RunContext, queue: Queue) -> list[OpOutcome]:
-    """Apply every committed reprioritize/drop request with no marker yet (module docstring).
-    The caller must not hold the canonical lock."""
+def _read_failures(ctx: RunContext) -> dict:
+    try:
+        failures = read_json(runtime_dir(ctx) / OP_FAILURES_FILE)
+    except (OSError, ValueError):
+        return {}
+    return failures if isinstance(failures, dict) else {}
+
+
+def _give_up(
+    ctx: RunContext, request: dict, card: Card | None, entry: dict, allow_no_remote: bool
+) -> None:
+    """Commit the ``failed`` marker and publish the one help_request (module docstring)."""
     canonical = ctx.canonical
+    message = runtime_messages.queue_op_failed(
+        request["op"],
+        card.spec.title if card is not None else None,
+        entry["runs"],
+        entry["error"],
+        request["id"],
+        card.task_id if card is not None else None,
+        ctx.hermes_home.name,
+    )
+    with canonical_lock(canonical):
+        if not already_published(canonical, message):
+            publish_message(canonical, message, allow_no_remote)
+        detail = f"gave up after {entry['runs']} failing runs: {entry['error']}"
+        _record(canonical, request, "failed", detail)
+
+
+def _apply_one(
+    ctx: RunContext, queue: Queue, request: dict, failures: dict, allow_no_remote: bool
+) -> OpOutcome:
+    """Apply and record one op; contain and count its failure (module docstring)."""
+    canonical = ctx.canonical
+    target = receipt_path(ledger_of(canonical), request["target_request"])
+
+    def outcome(state: str, detail: str) -> OpOutcome:
+        return OpOutcome(request["id"], request["op"], request["target_request"], state, detail)
+
+    card = None
+    try:
+        card = _target_card(queue, committed_json(canonical, target))
+        state, detail = _apply(queue, request, card)
+        with canonical_lock(canonical):
+            _record(canonical, request, state, detail)
+    except Exception as error:  # noqa: BLE001 - per-op containment (module docstring)
+        previous = failures.get(request["id"]) or {"runs": 0, "since": now_iso()}
+        entry = {**previous, "runs": int(previous["runs"]) + 1}
+        entry["error"] = f"{type(error).__name__}: {error}"
+        failures[request["id"]] = entry
+        if entry["runs"] < OP_FAILURE_RUNS:
+            return outcome("retrying", f"failing run {entry['runs']}: {entry['error']}")
+        try:
+            _give_up(ctx, request, card, entry, allow_no_remote)
+        except Exception as problem:  # noqa: BLE001 - give up again next run
+            return outcome("retrying", f"{entry['error']}; could not give up: {problem}")
+        failures.pop(request["id"])
+        return outcome("failed", entry["error"])
+    failures.pop(request["id"], None)
+    return outcome(state, detail)
+
+
+def apply_ops(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> list[OpOutcome]:
+    """Apply every committed reprioritize/drop request with no marker yet (module docstring).
+    One op's failure is contained and counted; it never raises out of here for a queue or
+    board error. The caller must not hold the canonical lock."""
+    canonical = ctx.canonical
+    failures = _read_failures(ctx)
     outcomes = []
+    pending = []
     for request in read_requests(canonical, "HEAD"):
         if request.get("op") not in OPS:
             continue
         if committed_json(canonical, op_marker_path(canonical, request["id"])) is not None:
             continue
-        target = receipt_path(ledger_of(canonical), request["target_request"])
-        card = _target_card(queue, committed_json(canonical, target))
-        state, detail = _apply(queue, request, card)
-        with canonical_lock(canonical):
-            _record(canonical, request, state, detail)
-        outcomes.append(
-            OpOutcome(request["id"], request["op"], request["target_request"], state, detail)
-        )
+        pending.append(request["id"])
+        outcomes.append(_apply_one(ctx, queue, request, failures, allow_no_remote))
+    # Forget the counts of ops that are settled or gone.
+    failures = {key: value for key, value in failures.items() if key in pending}
+    path = runtime_dir(ctx) / OP_FAILURES_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, failures)
     return outcomes
