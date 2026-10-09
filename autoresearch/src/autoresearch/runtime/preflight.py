@@ -10,7 +10,8 @@ answered ``whoami`` that is not the expected Player fails too (``identity_proble
 other ``whoami`` failure (network error, timeout, 5xx) says nothing about the credential: the
 result is ``skipped`` (queue-keeper does nothing else this run, and does not pause) with a
 warning, and the count of consecutive such failures is kept in
-``.supervisor/runtime/whoami_failures.json`` under canonical. At ``WHOAMI_FAILURE_LIMIT`` in
+``.supervisor/runtime/whoami_failures.json`` under canonical (an unreadable file counts as
+none). At ``WHOAMI_FAILURE_LIMIT`` in
 a row the run fails, with ``pause_key`` naming the streak (``whoami-unavailable:<first
 failure>``) so the pause sends one help request per streak. A ``whoami`` that answers resets
 the count. Mutating calls do not depend on this: they check ``whoami`` themselves and refuse
@@ -159,8 +160,19 @@ def openrouter_problems(
 
 
 def _count_whoami_failure(path: Path, now: datetime) -> tuple[int, str]:
-    """Add one to the consecutive whoami failure count; return (count, first failure time)."""
-    streak = read_json(path) if path.exists() else {"count": 0, "since": now.isoformat()}
+    """Add one to the consecutive whoami failure count; return (count, first failure time).
+    A missing or unreadable file counts as no failures yet."""
+    try:
+        streak = read_json(path)
+    except (OSError, ValueError):
+        streak = None
+    valid = (
+        isinstance(streak, dict)
+        and isinstance(streak.get("count"), int)
+        and isinstance(streak.get("since"), str)
+    )
+    if not valid:
+        streak = {"count": 0, "since": now.isoformat()}
     streak["count"] += 1
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, streak)

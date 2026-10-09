@@ -219,7 +219,7 @@ def test_rejected_credential_is_a_plain_credential_rejected(env, runner, output)
     "output",
     [
         synthetic("softmax_status_503.stderr"),
-        synthetic("softmax_status_connect_error.stderr"),
+        recorded("softmax_status_connect_error.stderr"),
         "Error: Request failed (502) for /whoami: Bad Gateway",
     ],
 )
@@ -231,6 +231,22 @@ def test_unreachable_platform_is_not_a_rejection(env, runner, output):
         whoami(make_cli(env, runner))
     assert not isinstance(raised.value, CredentialRejected)
     assert "whoami failed" in str(raised.value)
+    assert "did not accept" not in str(raised.value)
+
+
+def test_a_traceback_is_never_a_rejection_even_when_its_source_lines_match(env, runner):
+    """softmax-cli prints an uncaught error (here: connection refused, captured offline) as a
+    Rich traceback with source lines, and ``status_cmd``'s frame quotes its own "Not
+    authenticated." message. A shallow traceback puts that frame inside the text we keep, so
+    a traceback must never count as a rejection (review N1)."""
+    lines = recorded("softmax_status_connect_error.stderr").splitlines()
+    frame = next(i for i, line in enumerate(lines) if "Not authenticated" in line)
+    shallow = "\n".join([lines[0], *lines[frame - 3 : frame + 3], lines[-1]])
+    assert "Not authenticated" in shallow
+    runner.on("softmax", "status", response=completed(stderr=shallow, returncode=1))
+    with pytest.raises(IdentityError) as raised:
+        whoami(make_cli(env, runner))
+    assert not isinstance(raised.value, CredentialRejected)
     assert "did not accept" not in str(raised.value)
 
 

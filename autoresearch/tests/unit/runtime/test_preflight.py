@@ -95,6 +95,17 @@ def test_a_good_whoami_resets_the_failure_count(tmp_path):
     assert run(tmp_path, "fail_after=whoami").skipped  # counting starts again
 
 
+def test_unreadable_failure_count_counts_as_zero(tmp_path):
+    """A corrupt ``whoami_failures.json`` (review N2) starts the count again; it does not make
+    preflight raise (which would pause)."""
+    path = tmp_path / ".supervisor" / "runtime" / "whoami_failures.json"
+    path.parent.mkdir(parents=True)
+    for corrupt in ("{trunc", "[]", '{"count": "x"}'):
+        path.write_text(corrupt)
+        result = run(tmp_path, "fail_after=whoami")
+        assert result.skipped and any("1 in a row" in w for w in result.warnings)
+
+
 def test_rejected_credential_pauses_at_once(tmp_path):
     result = run(tmp_path, "identity=rejected")
     assert not result.ok and not result.skipped

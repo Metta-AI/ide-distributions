@@ -11,7 +11,9 @@ session, or a token for another server) makes ``softmax status`` exit 1: ``/whoa
 unknown token as anonymous ("Token is invalid or expired"), and other routes answer 401
 (softmax-cli: "returned HTTP 401"; coworld: "(401)"). That raises ``CredentialRejected``, with a
 plain explanation and without the CLI's own advice ("Run softmax login" is not our recovery).
-Preflight pauses on it at once. Any other failure (network error, 5xx, unreadable output) is
+Preflight pauses on it at once. Output holding a Python traceback is never a rejection: it is an
+uncaught error (connection refused, TLS, read timeout), and softmax-cli's traceback quotes
+source lines, including its own "Not authenticated." message. Any other failure (network error, 5xx, unreadable output) is
 an ordinary ``IdentityError`` ("whoami failed"): it says nothing about the credential, so
 preflight only pauses after several in a row, while mutating calls still refuse (C6).
 """
@@ -40,6 +42,7 @@ _REJECTED = re.compile(
     r"invalid or expired|session expired|Not authenticated|Failed to authenticate"
     r"|\(40[13]\)|HTTP 40[13]\b"
 )
+_TRACEBACK = "Traceback (most recent call last)"
 _CLI_ADVICE = re.compile(r"^(Next|Docs|Request id):.*$|\s*Run [^.\n]*\.?", re.MULTILINE)
 
 
@@ -71,7 +74,8 @@ def whoami(cli: PlatformCli) -> Identity:
     except ToolMissing:
         raise  # an installation problem, not an identity one
     except SoftmaxCliError as error:
-        if _REJECTED.search(str(error)):
+        text = str(error)
+        if _TRACEBACK not in text and _REJECTED.search(text):
             raise CredentialRejected(
                 f"Softmax did not accept the player credential at {cli.server}: it may be "
                 "revoked, the player disabled, a session expired, or the server wrong. Replace "
