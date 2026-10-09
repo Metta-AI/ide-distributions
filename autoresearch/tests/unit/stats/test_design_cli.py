@@ -14,7 +14,7 @@ VERSION = "fake-1"  # FakeSoftmax's default game version
 REQUEST = {
     "baseline_version": "pv-base",
     "seats": [0],
-    "opponents": ["pv-opp"],
+    "opponent_count": 1,  # sampled from the (fake) league per seed (A12)
     "seeds": list(range(40)),
     # fakegame's performance guardrail is score, so the primary metric is errors.
     "primary_metrics": [{"name": "errors", "direction": "down", "min_effect": 1.0}],
@@ -86,6 +86,29 @@ def test_design_freezes_from_noise_and_records_noise_rev(ws, tmp_path, capsys):
     assert meta["evaluation_design"] == frozen
     assert meta["evaluation_design_request"] == REQUEST
     store.set_status(exp, "built")  # the frozen design satisfies the content rule
+    # A12: one sampled line-up per seed, with the league snapshot it came from.
+    assert frozen["opponents"] == [] and set(frozen["lineups"]) == {str(s) for s in range(40)}
+    assert all(len(lineup) == 1 for lineup in frozen["lineups"].values())
+    snapshot = frozen["league_snapshot"]
+    assert snapshot["league_id"] == "fake-league" and snapshot["episodes_read"] == 100
+    assert {e["policy"] for e in snapshot["entries"]} >= set(frozen["lineups"]["0"])
+
+
+def test_a_fixed_opponent_set_needs_a_rationale(ws, tmp_path, capsys):
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
+    fixed = {k: v for k, v in REQUEST.items() if k != "opponent_count"}
+    fixed["opponents"] = ["fake-house:v1"]
+    code, env = design(capsys, ws, tmp_path, exp, request=fixed)
+    assert code == 1 and "opponent_rationale" in env["error"]["message"]
+    both = {**REQUEST, "opponents": ["fake-house:v1"]}
+    code, env = design(capsys, ws, tmp_path, exp, request=both)
+    assert code == 1 and "not both" in env["error"]["message"]
+    reasoned = {**fixed, "opponent_rationale": "does this beat the house policy specifically"}
+    code, env = design(capsys, ws, tmp_path, exp, request=reasoned)
+    assert code == 0, env
+    frozen = env["data"]["evaluation_design"]
+    assert frozen["opponents"] == ["fake-house:v1"] and "lineups" not in frozen
 
 
 def test_planned_pairs_changes_delta(ws, tmp_path, capsys):

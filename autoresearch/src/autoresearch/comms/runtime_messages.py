@@ -26,6 +26,7 @@ Each builder here returns a ``RuntimeMessage``; ``publisher.publish_message`` pu
 id or commit reaches the text, and that runtime code publishes nothing else.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 
@@ -314,6 +315,109 @@ def card_tool_fault(
     )
 
 
+# --- spend caps (runtime.spend) ---
+
+
+# What happened to a card at its spend cap (``card_over_cap``).
+STOPPED = "stopped"  # blocked by the runtime
+TRIAGED = "triaged"  # blocked, but Hermes moved it to triage
+HELD = "held"  # already blocked; kept blocked instead of being requeued
+NOT_STOPPED = "not_stopped"  # the block failed
+_CAP_LEAD = {
+    STOPPED: "The runtime stopped the card “{title}” and blocked it, because {why}.",
+    TRIAGED: (
+        "The runtime stopped the card “{title}”, because {why}. Hermes put it in triage, not "
+        "in blocked, because it had been blocked and unblocked before."
+    ),
+    HELD: "The runtime kept the blocked card “{title}” blocked, because {why}.",
+    NOT_STOPPED: (
+        "The runtime tried to stop the card “{title}”, because {why}. The card may still be "
+        "running: please block it by hand with hermes kanban."
+    ),
+}
+_CAP_NEXT = {
+    STOPPED: "If the work should go on, unblock the card: it then gets {allowance}.",
+    TRIAGED: (
+        "Hermes has no command that moves a triage card back to the queue, so if the work "
+        "should go on, drop the card and send the task again."
+    ),
+    HELD: "If the work should go on, unblock the card: it then gets {allowance}.",
+    NOT_STOPPED: (
+        "The runtime keeps trying to stop it every minute and will report again only after "
+        "a stop works."
+    ),
+}
+
+
+def card_over_cap(
+    card_title: str,
+    why: str,
+    allowance: str,
+    task_id: str,
+    request_id: str,
+    stop: int,
+    refs: list,
+    outcome: str = STOPPED,
+) -> RuntimeMessage:
+    """A card reached its run or estimated-cost cap. ``stop`` counts the card's recorded
+    stops, so a card a human unblocked that reaches the cap again is reported again. For
+    ``NOT_STOPPED`` it counts the stops that worked, so one failure streak (the runtime
+    retries every minute) gets one message."""
+    title = _line(card_title, 80)
+    body = (
+        f"{_CAP_LEAD[outcome].format(title=title, why=why)} It will not be put back in the "
+        f"queue or get a repair card. {_CAP_NEXT[outcome].format(allowance=allowance)} "
+        "Otherwise leave it, or send a smaller task."
+    )
+    lead = "Card not stopped at its spend cap" if outcome == NOT_STOPPED else (
+        "Card stopped at its spend cap"
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title(lead, card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id),
+        key=f"spend-cap:{task_id}:{stop}" + (":not-stopped" if outcome == NOT_STOPPED else ""),
+    )
+
+
+def daily_budget_reached(spent_usd: float, budget_usd: float, day: str) -> RuntimeMessage:
+    """Today's estimated model spend reached the daily budget; queue-keeper paused (one per
+    UTC day)."""
+    body = (
+        f"The agent is paused: today's estimated model spend (UTC day {day}) is "
+        f"${spent_usd:.2f}, at or over the daily budget of ${budget_usd:.2f}. No new cards "
+        "start; cards already running finish under their own caps. The agent resumes by "
+        "itself on the next UTC day. To resume today, raise AUTORESEARCH_DAILY_BUDGET_USD in "
+        "the profile .env (restart the gateway if the next queue-keeper run does not pick it "
+        "up)."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Agent paused: daily spend budget reached",
+        body,
+        key=f"daily-budget:{day}",
+    )
+
+
+def card_models_invalid(value: str, problems: list[str]) -> RuntimeMessage:
+    """Entries of AUTORESEARCH_CARD_MODELS were skipped (one per distinct value)."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    body = (
+        "Some entries of AUTORESEARCH_CARD_MODELS in the profile .env cannot be used: "
+        f"{'; '.join(problems)}. Cards of those modes run on the default model, which costs "
+        "more. Please fix the value; modes are investigation, scouting, experimentation, "
+        "maintenance and planning."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Card model setting has errors",
+        body,
+        key=f"card-models:{digest}",
+    )
+
+
 # --- queue-keeper ---
 
 
@@ -343,8 +447,9 @@ def signal_persists(
     )
 
 
-def agent_paused(reasons: str, paused_at: str) -> RuntimeMessage:
-    """queue-keeper preflight failed and paused the agent (one per pause)."""
+def agent_paused(reasons: str, paused_at: str, key: str | None = None) -> RuntimeMessage:
+    """queue-keeper preflight failed and paused the agent: one per pause, or one per ``key``
+    when given (a streak of unavailable ``whoami`` runs)."""
     body = (
         f"The agent is paused because the preflight check failed: {reasons}. No new cards "
         "start, and pending cards were unassigned. Running cards stop at their next identity "
@@ -355,15 +460,22 @@ def agent_paused(reasons: str, paused_at: str) -> RuntimeMessage:
         "help_request",
         "Agent paused: preflight failed",
         body,
-        key=f"paused:{paused_at}",
-        legacy_title=f"Agent paused at {paused_at}",
+        key=key or f"paused:{paused_at}",
+        legacy_title=None if key else f"Agent paused at {paused_at}",
     )
 
 
-def agent_resumed(count: int) -> RuntimeMessage:
+def agent_resumed(count: int, champion: bool = False) -> RuntimeMessage:
+    """The agent resumed; ``champion``: the pause was a champion conflict (A9)."""
+    why = (
+        "The league and the agent agree on the champion again"
+        if champion
+        else "The cause of the pause has cleared (the preflight check passes and today's spend "
+        "is under the daily budget)"
+    )
     body = (
-        f"The preflight check passes again, so the agent resumed. {count} pending card(s) "
-        "were assigned again. Nothing needs to be done."
+        f"{why}, so the agent resumed. {count} pending card(s) were assigned again. Nothing "
+        "needs to be done."
     )
     return RuntimeMessage("note", "Agent resumed", body)
 
@@ -456,6 +568,109 @@ def promotion_stuck(
         about,
         key=f"promote-recover-help:{promotion_id}",
         legacy_title=f"(promote-recover-help:{promotion_id})",
+    )
+
+
+def champion_conflict(
+    league_id: str, expected: str | None, shown: str | None, waited_out: bool
+) -> RuntimeMessage:
+    """The league's champion differs from what the loop expected (A9); queue-keeper paused
+    the agent. One per (expected, shown) pair."""
+    if waited_out:
+        what = (
+            "The agent submitted a new policy to the league, but the league still shows the "
+            "policy it was meant to replace, well after the submission."
+        )
+    elif expected is None:
+        what = "The league shows a champion for us that a person accepted as none."
+    elif shown is None:
+        what = "The league shows no policy competing for us, but the agent expected one."
+    else:
+        what = (
+            "The league shows a different policy competing for us than the one the agent "
+            "expected (for example a policy submitted by hand)."
+        )
+    body = (
+        f"{what} The league decides the champion, so the agent now compares against what the "
+        "league shows, but it is paused until a person looks: no new cards start. The "
+        "expected and shown policies are in this message's details (`about`). To resolve it, "
+        f"either make the {league_id} league show the expected policy again, or accept what "
+        'it shows by running `"$AUTORESEARCH_CLI" promotion accept-champion` in an operator '
+        "shell (the agent cannot run it). The agent resumes by itself on the first run where "
+        "they agree."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Agent paused: the league shows an unexpected champion",
+        body,
+        about=_about(expected_policy=expected or "none", league_policy=shown or "none"),
+        key=f"champion-conflict:{expected or 'none'}:{shown or 'none'}",
+    )
+
+
+def submission_rejected(
+    league_id: str,
+    promotion_id: str,
+    policy: str,
+    replaced: str | None,
+    detail: str,
+    bootstrap: bool = False,
+) -> RuntimeMessage:
+    """The league did not take a policy the agent submitted (A9): rejected, withdrawn, or its
+    membership disqualified. Published once per promotion. A rejected first champion (the
+    game's starter policy) needs the human; any other rejection does not."""
+    if bootstrap:
+        body = (
+            f"The {league_id} league did not accept the game's starter policy, which the agent "
+            "submitted as its first champion. There is still no champion, so the agent cannot "
+            "evaluate experiments and will not submit the starter policy again by itself. To "
+            "go on, either submit a different starter policy to the league by hand (the agent "
+            'then uses it as the champion), or run `"$AUTORESEARCH_CLI" promotion '
+            "accept-champion` in an operator shell to let the agent submit the starter policy "
+            "again (for example after fixing why it was rejected). The league's status is in "
+            "this message's details (`about`)."
+        )
+        kind, title = "help_request", "The league rejected the first champion"
+    else:
+        body = (
+            f"The {league_id} league did not take a policy the agent submitted. The league "
+            "decides, so that promotion is closed, the agent keeps the champion it had before "
+            "(none, if there was none), and it goes on comparing experiments against what the "
+            "league shows. Nothing needs to be done unless you expected the submission to be "
+            "accepted; then check its league status (in this message's details, `about`)."
+        )
+        kind, title = "note", "The league did not accept a submitted policy"
+    return RuntimeMessage(
+        kind,
+        title,
+        body,
+        about=_about(
+            promotion=promotion_id,
+            submitted_policy=policy,
+            previous_champion=replaced or "none",
+            league_status=detail,
+        ),
+        key=f"submission-rejected:{promotion_id}",
+    )
+
+
+def submission_pending(
+    league_id: str, promotion_id: str, policy: str, detail: str, hours: int
+) -> RuntimeMessage:
+    """A submission the league has not decided on after ``hours`` (A9): one per promotion."""
+    body = (
+        f"A policy the agent submitted to the {league_id} league is still waiting for the "
+        f"league's decision after {hours} hours (it may be held for an operator). The agent "
+        "keeps comparing against the current champion meanwhile and cannot start another "
+        "promotion until the league decides. Please check the submission's league status "
+        "(in this message's details, `about`)."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "A submitted policy is still waiting for the league",
+        body,
+        about=_about(promotion=promotion_id, submitted_policy=policy, league_status=detail),
+        key=f"submission-pending:{promotion_id}",
     )
 
 

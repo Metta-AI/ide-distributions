@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import yaml
 
 from autoresearch.runtime.preflight import preflight
+from autoresearch.softmax_tool.client import SoftmaxClient
 from autoresearch.softmax_tool.fake import FakeSoftmax
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
@@ -43,6 +44,20 @@ def test_expiring_soon_warns(tmp_path):
     assert result.ok and result.warnings
 
 
+def test_agent_token_never_warns_or_fails_on_expiry(tmp_path):
+    """A ``cga_`` agent token has no expiry: no expiry warning, no expiry pause (even with an
+    ``expires_in`` fault, which only a session credential has)."""
+    env = {
+        "AUTORESEARCH_PLAYER_ID": "ply_a",
+        "SOFTMAX_PLAYER_CREDENTIAL": "cga_fake_agent_token",
+        "AUTORESEARCH_FAKE_FAULTS": "expires_in=-60",
+    }
+    sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)
+    result = preflight(env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB))
+    assert result.ok and not result.reasons
+    assert not any("expire" in warning for warning in result.warnings)
+
+
 def test_low_disk_fails(tmp_path):
     result = run(tmp_path, disk=GB // 2)
     assert not result.ok and "MB free" in result.reasons[0]
@@ -53,9 +68,57 @@ def test_zero_credits_warns(tmp_path):
     assert result.ok and result.credits == 0 and result.warnings
 
 
-def test_whoami_exception(tmp_path):
+def test_whoami_blip_skips_the_run_without_pausing(tmp_path):
+    """A whoami failure that is not a rejection (network, 5xx, timeout) is a warning and a
+    skipped run, not a pause, until it repeats (I1)."""
     result = run(tmp_path, "fail_after=whoami")
-    assert not result.ok and "injected fault" in result.reasons[0]
+    assert result.skipped and not result.ok and not result.reasons
+    assert any("injected fault" in w and "1 in a row" in w for w in result.warnings)
+
+
+def test_three_whoami_failures_in_a_row_pause_with_one_key(tmp_path):
+    first = run(tmp_path, "fail_after=whoami")
+    second = run(tmp_path, "fail_after=whoami")
+    third = run(tmp_path, "fail_after=whoami")
+    fourth = run(tmp_path, "fail_after=whoami")
+    assert first.skipped and second.skipped
+    for paused in (third, fourth):
+        assert not paused.ok and not paused.skipped
+    assert "3 times in a row" in third.reasons[0] and "4 times in a row" in fourth.reasons[0]
+    assert third.pause_key == fourth.pause_key == f"whoami-unavailable:{NOW.isoformat()}"
+
+
+def test_a_good_whoami_resets_the_failure_count(tmp_path):
+    run(tmp_path, "fail_after=whoami")
+    run(tmp_path, "fail_after=whoami")
+    assert run(tmp_path).ok
+    assert run(tmp_path, "fail_after=whoami").skipped  # counting starts again
+
+
+def test_unreadable_failure_count_counts_as_zero(tmp_path):
+    """A corrupt ``whoami_failures.json`` (review N2) starts the count again; it does not make
+    preflight raise (which would pause)."""
+    path = tmp_path / ".supervisor" / "runtime" / "whoami_failures.json"
+    path.parent.mkdir(parents=True)
+    for corrupt in ("{trunc", "[]", '{"count": "x"}'):
+        path.write_text(corrupt)
+        result = run(tmp_path, "fail_after=whoami")
+        assert result.skipped and any("1 in a row" in w for w in result.warnings)
+
+
+def test_rejected_credential_pauses_at_once(tmp_path):
+    result = run(tmp_path, "identity=rejected")
+    assert not result.ok and not result.skipped
+    assert "did not accept" in result.reasons[0] and result.pause_key is None
+
+
+def test_malformed_credential_pauses_at_once(tmp_path):
+    """The real client's ``CredentialError`` (bad or missing credential) is not a blip."""
+    env = {"AUTORESEARCH_PLAYER_ID": "ply_a", "HERMES_HOME": str(tmp_path / "home")}
+    sm = SoftmaxClient(env)
+    result = preflight(env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB))
+    assert not result.ok and not result.skipped
+    assert "SOFTMAX_PLAYER_CREDENTIAL is not set" in result.reasons[0]
 
 
 def test_missing_player_id_fails(tmp_path):
@@ -93,6 +156,20 @@ def host_run(tmp_path, root_config: dict | None, profile="autoresearch", **kwarg
 def test_host_config_defaults_pass(tmp_path):
     assert host_run(tmp_path, None).ok
     assert host_run(tmp_path / "b", {"kanban": {"dispatch_profiles": ["autoresearch"]}}).ok
+
+
+def test_a_stale_queue_setting_in_the_env_file_warns(tmp_path):
+    """A13: AUTORESEARCH_QUEUE is no longer an installer setting; worker terminals would
+    still read it from the .env."""
+    home = tmp_path / "root" / "profiles" / "autoresearch"
+    home.mkdir(parents=True)
+    (home / ".env").write_text("AUTORESEARCH_QUEUE=file\n")
+    env = {"AUTORESEARCH_PLAYER_ID": "ply_a"}
+    sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)
+    result = preflight(
+        env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB), hermes_home=home
+    )
+    assert result.ok and any("AUTORESEARCH_QUEUE" in w for w in result.warnings)
 
 
 def test_host_default_assignee_fails(tmp_path):

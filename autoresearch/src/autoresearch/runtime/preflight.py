@@ -1,8 +1,23 @@
 """Start-of-run checks; a failed preflight pauses the agent (C6, amendments A3, A5, A10).
 
 Checks, in order: the credential's identity (C6), free disk under canonical, XP credits
-(unreadable with a Player credential: a warning only, A10), the host dispatcher config (A3)
-and the OpenRouter key's remaining credit (A5).
+(recorded in ``credits``; read as the Player, A10; a failed read or a zero balance is a
+warning only: xp-poll relaunches credit-denied experiments when the balance returns), the host
+dispatcher config (A3), a stale ``AUTORESEARCH_QUEUE`` in the profile ``.env`` (a warning: the
+option was removed, A13), and the OpenRouter key's remaining credit (A5).
+
+Identity. A failed ``whoami`` pauses at once only when Softmax refused the credential
+(``CredentialRejected``) or the credential is missing or malformed (``CredentialError``); an
+answered ``whoami`` that is not the expected Player fails too (``identity_problems``). Any
+other ``whoami`` failure (network error, timeout, 5xx) says nothing about the credential: the
+result is ``skipped`` (queue-keeper does nothing else this run, and does not pause) with a
+warning, and the count of consecutive such failures is kept in
+``.supervisor/runtime/whoami_failures.json`` under canonical (an unreadable file counts as
+none). At ``WHOAMI_FAILURE_LIMIT`` in
+a row the run fails, with ``pause_key`` naming the streak (``whoami-unavailable:<first
+failure>``) so the pause sends one help request per streak. A ``whoami`` that answers resets
+the count. Mutating calls do not depend on this: they check ``whoami`` themselves and refuse
+on any failure (C6).
 
 Host config (A3). One gateway per host runs the Kanban dispatcher with the host root
 profile's ``kanban.*`` config. When the profile home is ``<root>/profiles/<name>``, preflight
@@ -31,7 +46,9 @@ from pathlib import Path
 
 import yaml
 
-from autoresearch.softmax_tool.identity import identity_problems
+from autoresearch.io.docs import read_json, write_json
+from autoresearch.softmax_tool.identity import CredentialRejected, identity_problems
+from autoresearch.softmax_tool.platform_cli import CredentialError
 from autoresearch.softmax_tool.protocol import Softmax
 
 EXPIRY_WARNING = timedelta(hours=2)
@@ -41,6 +58,9 @@ OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
 SKIP_OPENROUTER_ENV = "AUTORESEARCH_SKIP_OPENROUTER_CHECK"
 OPENROUTER_MIN_CREDIT_USD = 10.0
 HTTP_TIMEOUT_S = 15
+STALE_QUEUE_ENV = "AUTORESEARCH_QUEUE"  # removed installer setting (A13), still a test hook
+WHOAMI_FAILURE_LIMIT = 3
+WHOAMI_FAILURES = Path(".supervisor") / "runtime" / "whoami_failures.json"
 
 # (url, headers) -> response body text; raises on failure.
 HttpGet = Callable[[str, dict[str, str]], str]
@@ -51,8 +71,10 @@ class PreflightResult:
     ok: bool
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    credits: int | None = None
+    credits: float | None = None
     identity_problems: list[str] = field(default_factory=list)  # also in reasons (signals)
+    skipped: bool = False  # whoami unavailable this run: do nothing else, do not pause
+    pause_key: str | None = None  # the help request's runtime_key when it is not per pause
 
 
 def _urllib_get(url: str, headers: dict[str, str]) -> str:
@@ -140,6 +162,26 @@ def openrouter_problems(
     return [], []
 
 
+def _count_whoami_failure(path: Path, now: datetime) -> tuple[int, str]:
+    """Add one to the consecutive whoami failure count; return (count, first failure time).
+    A missing or unreadable file counts as no failures yet."""
+    try:
+        streak = read_json(path)
+    except (OSError, ValueError):
+        streak = None
+    valid = (
+        isinstance(streak, dict)
+        and isinstance(streak.get("count"), int)
+        and isinstance(streak.get("since"), str)
+    )
+    if not valid:
+        streak = {"count": 0, "since": now.isoformat()}
+    streak["count"] += 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, streak)
+    return streak["count"], streak["since"]
+
+
 def preflight(
     env: Mapping[str, str],
     sm: Softmax,
@@ -155,17 +197,33 @@ def preflight(
     result = PreflightResult(ok=True)
     expected_player = env.get("AUTORESEARCH_PLAYER_ID", "")
 
+    failures_path = Path(canonical) / WHOAMI_FAILURES
     try:
         identity = sm.whoami()
-    except Exception as error:  # noqa: BLE001 - any failure means the credential cannot be trusted
+    except (CredentialRejected, CredentialError) as error:
+        failures_path.unlink(missing_ok=True)
         result.reasons.append(f"whoami failed: {error}")
         result.ok = False
         return result
+    except Exception as error:  # noqa: BLE001 - not a verdict on the credential (docstring)
+        count, since = _count_whoami_failure(failures_path, now)
+        result.ok = False
+        if count < WHOAMI_FAILURE_LIMIT:
+            result.skipped = True
+            result.warnings.append(
+                f"whoami failed ({count} in a row; pausing at {WHOAMI_FAILURE_LIMIT}): {error}"
+            )
+        else:
+            result.reasons.append(f"whoami failed {count} times in a row since {since}: {error}")
+            result.pause_key = f"whoami-unavailable:{since}"
+        return result
+    failures_path.unlink(missing_ok=True)
 
     result.identity_problems = identity_problems(identity, expected_player, now)
     result.reasons.extend(result.identity_problems)
-    if now < identity.expires_at and identity.expires_at - now < EXPIRY_WARNING:
-        result.warnings.append(f"credential expires at {identity.expires_at.isoformat()}")
+    expires_at = identity.expires_at  # None for a cga_ agent token: nothing to warn about
+    if expires_at is not None and now < expires_at and expires_at - now < EXPIRY_WARNING:
+        result.warnings.append(f"credential expires at {expires_at.isoformat()}")
 
     try:
         free_bytes = disk_free(canonical).free
@@ -182,13 +240,19 @@ def preflight(
     except Exception as error:  # noqa: BLE001 - credit lookup failure is non-fatal
         result.warnings.append(f"credits unavailable: {error}")
     else:
-        if result.credits == 0:
+        if result.credits <= 0:
             result.warnings.append("no credits remaining")
 
     if hermes_home is not None:
         reasons, warnings = host_config_problems(hermes_home)
         result.reasons += reasons
         result.warnings += warnings
+        if env_file_value(Path(hermes_home) / ".env", STALE_QUEUE_ENV):
+            result.warnings.append(
+                f"{STALE_QUEUE_ENV} is set in the profile .env: remove it. It is a test hook "
+                "(A13); worker terminals read the whole .env and would use a file queue while "
+                "queue-keeper uses Kanban"
+            )
     reasons, warnings = openrouter_problems(env, hermes_home, http_get)
     result.reasons += reasons
     result.warnings += warnings

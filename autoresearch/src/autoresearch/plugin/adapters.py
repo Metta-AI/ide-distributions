@@ -26,10 +26,6 @@ PLUGIN_ERRORS_FILE = "plugin_errors.jsonl"
 BRIEFING_MARKER = "<!-- autoresearch-briefing task={task_id} -->"
 SUMMARY_MAX = 500
 
-# Same value as autoresearch.queue.select.ENV_QUEUE (not imported: that module is not
-# stdlib-only). "file" is the serial fallback, which runs one card at a time.
-ENV_QUEUE = "AUTORESEARCH_QUEUE"
-
 # Card metadata cache: path -> ((mtime_ns, size), card).
 _card_cache: dict[Path, tuple[tuple[int, int], dict]] = {}
 
@@ -215,12 +211,15 @@ def on_session_end(
         _log_error(ctx, "on_session_end", error)
 
 
-def pre_llm_call(is_first_turn=False, **kwargs):
+def pre_llm_call(is_first_turn=False, session_id=None, **kwargs):
     """The card briefing, injected into the first user turn of a Kanban card worker, with
     the run id (the journal ``iteration``) and the other cards running now (``peers``; left
     out, and the error logged, when the board cannot be read). It also records the worker identity for the
     worker's subprocesses, which Hermes strips of ``HERMES_KANBAN_TASK``/``_RUN_ID``
-    (``runctx`` module docstring)."""
+    (``runctx`` module docstring), and a ``session_start`` event naming the session that works
+    this card run: the runtime's spend caps price a card from its sessions in ``state.db``
+    (``runtime.spend``). Later sessions of the run (context compression, subagents) carry it
+    as ``parent_session_id``."""
     task = os.environ.get(runctx.ENV_CARD_ID)
     if not is_first_turn or not task:
         return None
@@ -231,6 +230,13 @@ def pre_llm_call(is_first_turn=False, **kwargs):
             runctx.record_worker_identity(ctx)
         except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in
             _log_error(ctx, "pre_llm_call", error)
+        try:
+            _append(ctx, KANBAN_EVENTS_FILE, {
+                "ts": time.time(), "event": "session_start", "task": ctx.card_id,
+                "run": ctx.run_id, "session_id": session_id,
+            })
+        except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in
+            _log_error(ctx, "pre_llm_call", error)
         text = (runctx.runtime_dir(ctx) / "briefings" / f"{task}.md").read_text(encoding="utf-8")
         marker = BRIEFING_MARKER.format(task_id=task)
         text = text if marker in text else f"{marker}\n{text}"
@@ -238,8 +244,6 @@ def pre_llm_call(is_first_turn=False, **kwargs):
     except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
         _log_error(ctx, "pre_llm_call", error)
         return None
-    if os.environ.get(ENV_QUEUE) == "file":
-        return text
     try:
         return f"{text}\n{peers.running_peers_section(ctx)}"
     except Exception as error:  # noqa: BLE001 - logged; the briefing still goes in

@@ -69,9 +69,9 @@ def test_ledger_write_order_is_intent_then_submit_then_submitted(board, monkeypa
 
     real_intent, real_submitted = promotion.record_intent, promotion.record_submitted
 
-    def intent(ctx, current):
+    def intent(ctx, current, replaces=None):
         order.append(("intent",))
-        real_intent(ctx, current)
+        real_intent(ctx, current, replaces=replaces)
 
     def submitted(ctx, current, submission_id):
         order.append(("submitted",))
@@ -158,6 +158,18 @@ def test_refuses_when_champion_unknown(tmp_path):
     board = SubmitBoard(tmp_path, seed_champion=False)  # no leaderboard entry, nothing promoted
     experiment, _ = board.reviewed_experiment()
     assert refusal(board, board.promoter(experiment), experiment).reason == "champion_unknown"
+
+
+def test_refuses_while_paused_for_a_champion_conflict(board):
+    experiment, _ = board.reviewed_experiment()
+    worker = board.promoter(experiment)
+    ledger = board.canonical / ".supervisor" / "ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    (ledger / "pause.json").write_text(
+        json.dumps({"reason": "champion conflict: test", "paused_at": "t", "tasks": {}})
+    )
+    assert refusal(board, worker, experiment).reason == "champion_conflict"
+    assert load(board.canonical) is None
 
 
 @pytest.mark.parametrize("faults", ["identity=user", "player=ply_other", "expires_in=-60"])

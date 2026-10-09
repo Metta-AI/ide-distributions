@@ -315,7 +315,7 @@ def test_kanban_complete_needs_card_finish_first(layout):
     assert tool_policy("kanban_complete", {"summary": "s"}, no_card, None)[0]
 
 
-@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link"])
+@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link", "kanban_schedule"])
 @pytest.mark.parametrize("card", [WORKING, PLANNING, FINISHED, None])
 def test_native_kanban_card_tools_are_blocked_in_every_session(layout, tool, card):
     """A worker-made task skips admission, receipts and pause control (C3, C7). Cards come
@@ -503,6 +503,22 @@ def test_inbound_forgery_is_blocked_in_every_agent_session(layout, command, card
     assert not allowed and "comms/inbox" in reason
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        '"$AUTORESEARCH_CLI" promotion accept-champion',
+        "cd {canon} && python -m autoresearch promotion accept-champion",
+        "{cli} promotion accept-champion",
+    ],
+)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_accepting_the_league_champion_is_blocked_in_every_agent_session(layout, command, card):
+    """A9: a champion conflict pauses the agent until a human resolves it."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed and "human operator" in reason
+    assert _terminal(layout, '"$AUTORESEARCH_CLI" promotion status', card=card)[0]
+
+
 def test_file_tools_and_code_cannot_write_the_inbox(layout):
     ctx = layout.ctx(worker=False)
     target = {"path": str(layout.canonical / "comms" / "inbox" / "x.json"), "content": "{}"}
@@ -529,3 +545,63 @@ def test_file_tools_and_code_cannot_write_the_inbox(layout):
 )
 def test_exit_program_is_the_last_command(command, program):
     assert exit_program(command) == program
+
+
+# Waiting with the model: every foreground check is one more model call on the whole
+# conversation (box spend report 2026-10-08), so these foreground shapes are refused.
+POLL_WAITS = [
+    "sleep 30",
+    "sleep 600",
+    "sleep 1m",
+    "sleep 0.5h",
+    "sleep 20 15",  # sleep adds its operands
+    "sleep infinity",
+    'cd "$W" && sleep 45 && "$AUTORESEARCH_CLI" queue show t_1',
+    "timeout 700 sleep 120",
+    "while pgrep -f games.gota.gates >/dev/null; do sleep 20; done",
+    "until ! pgrep -f gates; do sleep 5; done",
+    "for i in $(seq 1 19); do pgrep -f games.gota.gates || break; sleep 25; done",
+    "while kill -0 4242 2>/dev/null; do sleep 10; done; echo done",
+    "while ps -p 4242 >/dev/null; do sleep 10; done",
+    "bash -c 'while pgrep -f gates; do sleep 10; done'",
+    'while [ -n "$(pgrep -f gates)" ]; do sleep 10; done',
+    "while [ ! -f .scratch/build/E/report.json ]; do sleep 20; done",
+    "until test -s out.log; do sleep 10; done",
+]
+NOT_POLL_WAITS = [
+    "sleep 5",
+    "sleep 29",
+    "sleep 2; curl -sS https://x",
+    "for i in 1 2 3; do curl -sS https://x && break; sleep 5; done",
+    "pgrep -f gates",
+    "while read -r line; do echo $line; done < notes/a",
+    "for f in notes/*; do wc -l $f; done",
+    "kill $P; while kill -0 $P 2>/dev/null; do sleep 0.2; done",  # kill, then wait moments
+    "timeout 30 bash -c 'until ! pgrep x; do sleep 1; done'",
+]
+
+
+@pytest.mark.parametrize("command", POLL_WAITS)
+def test_foreground_waiting_is_refused_with_the_wait_pattern(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert not allowed, command
+    assert "process_manage" in reason and "background" in reason
+
+
+@pytest.mark.parametrize("command", POLL_WAITS)
+def test_the_same_wait_in_a_background_command_is_allowed(layout, command):
+    """A background loop costs no model calls: process_manage wait blocks on it."""
+    args = {"command": _fill(command, layout), "background": True}
+    allowed, reason = tool_policy("terminal", args, layout.ctx(), WORKING)
+    assert allowed, (command, reason)
+
+
+@pytest.mark.parametrize("command", NOT_POLL_WAITS)
+def test_short_sleeps_and_loops_that_do_not_poll_are_allowed(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert allowed, (command, reason)
+
+
+def test_waiting_is_refused_outside_card_sessions_too(layout):
+    allowed, _ = _terminal(layout, "sleep 60", card=None, worker=False)
+    assert not allowed

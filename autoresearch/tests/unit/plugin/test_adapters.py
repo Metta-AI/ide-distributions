@@ -178,12 +178,6 @@ def test_an_unreadable_board_leaves_the_peers_section_out_and_logs(worker_env, l
     assert errors[0]["hook"] == "pre_llm_call" and "does not exist" in errors[0]["error"]
 
 
-def test_the_serial_fallback_gets_no_peers_section(worker_env, monkeypatch):
-    monkeypatch.setenv("AUTORESEARCH_QUEUE", "file")
-    (worker_env / "briefings" / "t_1.md").write_text("# Card\n")
-    text = adapters.pre_llm_call(is_first_turn=True)
-    assert "Other cards running now" not in text
-    assert not (worker_env / "plugin_errors.jsonl").exists()
 
 
 def test_unreadable_briefing_never_raises(worker_env):
@@ -298,3 +292,15 @@ def test_register_registers_five_hooks():
         "pre_llm_call": adapters.pre_llm_call,
         "kanban_task_completed": adapters.kanban_task_completed,
     }
+
+
+def test_first_turn_records_the_session_of_the_card_run(worker_env):
+    """The runtime prices a card from its sessions in state.db (spend caps): the first turn
+    records which session works the card, before anything that can fail."""
+    adapters.pre_llm_call(session_id="20261009_004428_844652", is_first_turn=True)  # no briefing
+    adapters.pre_llm_call(session_id="20261009_004428_844652", is_first_turn=False)
+    [event] = _lines(worker_env / "kanban_events.jsonl")
+    assert event["event"] == "session_start"
+    assert (event["task"], event["run"], event["session_id"]) == (
+        "t_1", "r_1", "20261009_004428_844652",
+    )

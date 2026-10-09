@@ -26,7 +26,7 @@ Which player is measured on Friday is not decided. The checklist assumes Games B
 
 ### 1.2 Prepare the shell
 
-Use the operator shell from the README ("Operator shell"). `AUTORESEARCH_CLI`, `SOFTMAX_PLAYER_CREDENTIAL` and `AUTORESEARCH_PLAYER_ID` must be set, and the credential must not be expired (it lasts about 24 hours; see section 2.4).
+Use the operator shell from the README ("Operator shell"). `AUTORESEARCH_CLI`, `SOFTMAX_PLAYER_CREDENTIAL` and `AUTORESEARCH_PLAYER_ID` must be set, and a Player session credential must not be expired (it lasts about 24 hours; see section 2.4; a `cga_` agent token does not expire).
 
 ```sh
 export PROFILE="${HERMES_HOME:-$HOME/.hermes}/profiles/autoresearch"
@@ -47,7 +47,7 @@ Primary command (read-only, uses the player credential):
 ```
 
 - `standings` prints `{"ok": true, "data": {"league_id", "rows"}}`. Each row has `division_id`, `division_name`, `level`, `rank`, `player_id`, `player_name`, `score`, `rounds_played`. The code reads `coworld results <league>` (divisions) and then `coworld results <division>` (entries). Source: `src/autoresearch/softmax_tool/client.py`, method `standings`.
-- `leaderboard` prints our champion policy version (`leaderboard_champion`) and the ledger champion (`current_champion`, `note`). Use it to record which policy version is measured. On a fresh install the first champion is the shipped strategy (A14, `softmax bootstrap-champion`).
+- `leaderboard` prints our champion: the policy the league shows competing for our player (`leaderboard_champion` = `current_champion`, A9), `note` when there is none, and `conflict` when what the loop expects differs (queue-keeper then pauses the agent). Use it to record which policy version is measured. On a fresh install the first champion is the game's starter policy (A14, `softmax bootstrap-champion`).
 
 Read-only alternative without the autoresearch CLI (project-pinned coworld 0.1.58, not the global one):
 
@@ -139,14 +139,16 @@ Source of truth: `distribution.yaml` (`env_requires`). Details and examples: REA
 | Key | Required | Note |
 |---|---|---|
 | `OPENROUTER_API_KEY` | yes | Key for the research model. Needs credit (see 2.8). |
-| `SOFTMAX_PLAYER_CREDENTIAL` | yes | JSON `{"token": "ply_...", "expires_at": "<ISO 8601>"}`. A bare token is rejected. |
+| `SOFTMAX_PLAYER_CREDENTIAL` | yes | A bare `cga_...` agent token (Softmax hosting; no expiry), or a Player session as JSON `{"token": "ply_...", "expires_at": "<ISO 8601>"}`. A bare `ply_` token is rejected. |
 | `AUTORESEARCH_PLAYER_ID` | yes | The player id that the credential belongs to. |
 | `AUTORESEARCH_WORKSPACE_REMOTE` | yes | Git remote. The repository must exist before the first run. |
 | `OPENROUTER_MODEL` | no | Default `moonshotai/kimi-k3`; fallback `z-ai/glm-5.3`. |
 | `AUTORESEARCH_GAME` | no | Default `gota`. GotA builds also need `GOTA_HERMES_PYTHON`, `GOTA_TIRITH_BIN` and the native helpers ([games/gota/GAME.md](../../../games/gota/GAME.md), "Build and upload"). |
 | `AUTORESEARCH_WORKSPACE` | no | Default `$PROFILE/workspace`. |
-| `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but the serial job that runs its cards is not built (see 2.6). |
 | `AUTORESEARCH_SOFTMAX` | no | Tests only (`fake`). Never set in production. |
+| `COGAMES_API_URL` | no | Softmax API server. Default `https://softmax.com/api`. Passed as `--server` to every `softmax`/`coworld` call. Softmax hosting writes it. |
+| `AUTORESEARCH_MAX_CARD_RUNS`, `AUTORESEARCH_MAX_CARD_USD`, `AUTORESEARCH_DAILY_BUDGET_USD`, `AUTORESEARCH_FALLBACK_PRICES` | no | Spend caps: 4 runs and an estimated $4 per card, $25 per UTC day (README). Set the daily budget to what the OpenRouter key may spend. |
+| `AUTORESEARCH_CARD_MODELS` | no | Model per card mode. Default: `planning`, `scouting` and `maintenance` on `z-ai/glm-5.3`, the other modes on `model.default` (README). |
 
 Bootstrap writes `AUTORESEARCH_CLI` and `HERMES_WRITE_SAFE_ROOT`. Do not set them by hand.
 
@@ -169,7 +171,9 @@ Rohit needs:
 
 ### 2.4 Token refresh owner
 
-Facts (verified, `softmax-client.md` and `player-xp-probe.md`):
+On a Softmax-hosted install this section does not apply: the credential is a `cga_` agent token, which does not expire (`softmax-client.md`, "Credential"). If Softmax stops accepting it (agent revoked, player disabled), preflight pauses the agent and sends a help request; put a current token in `SOFTMAX_PLAYER_CREDENTIAL`. **UNVERIFIED live** (no `cga_` token has been used; see 3.2).
+
+Facts for a Player session credential (verified, `softmax-client.md` and `player-xp-probe.md`):
 
 - A Player session lasts about 24 hours. `/whoami` shows no expiry, so the expiry is stored in the credential JSON (`expires_at`).
 - Preflight warns 2 hours before expiry and pauses the agent at expiry. An expired session makes the CLI fail with "Not authenticated"; it does not fall back to a user identity.
@@ -201,7 +205,7 @@ Full text: `00-overview.md` and `hermes-facts.md`.
 
 | Id | Issue | What to do |
 |---|---|---|
-| A1 | `uv tool install git+...` fails (Hermes `setup.py` refuses wheel builds). | Clone tag `v2026.9.24` and run `uv tool install --python 3.12 -e .`, or use `install.sh`. |
+| A1 | `uv tool install git+...` fails (Hermes `setup.py` refuses wheel builds). | Clone tag `v2026.9.24` and run `uv tool install --python 3.12 -e .`, or use `install.sh`. The EC2 target image runs Hermes v0.21.6; both versions are supported ([image check](hermes-image-compat.md)). |
 | A2 | `kanban init` fails on a new board slug. | Bootstrap uses `hermes kanban boards create`. No action. Board databases are host-wide. |
 | A3 | One gateway dispatcher per host uses the host default profile config. | Set the three host settings (2.2). |
 | A4 | Under the gateway, a cron script gets only the names on `terminal.env_passthrough`. Worker terminals see the whole profile `.env` except provider keys. | The plugin, not env filtering, protects the Softmax credential (see 2.8, risk 1). |
@@ -215,7 +219,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 
 ### 2.8 Open risks
 
-1. **Worker terminal HOME isolation for Softmax credentials: not decided.** Worker terminals see the profile `.env`, including `SOFTMAX_PLAYER_CREDENTIAL` (A4). The softmax tool writes a private `HOME` under `$HERMES_HOME/local/softmax/home` for its own CLI calls, but a model command in a worker terminal can still read the credential from the environment. The only guard is the plugin policy. Decision needed: strip the credential from worker terminals, or run workers with an isolated `HOME`. Until then, a model that finds a way past the plugin can act as the player.
+1. **Worker terminal HOME isolation for Softmax credentials: not decided.** Worker terminals see the profile `.env`, including `SOFTMAX_PLAYER_CREDENTIAL` (A4). The credential is also on disk in two places that any process running as the same user can read: our private credentials file `$HERMES_HOME/local/softmax/home/.softmax/credentials.yaml` (mode 0600, rewritten before every softmax tool call), and, on a Softmax-hosted install, the runtime's own `~/.softmax/credentials.yaml` (`/opt/data/.softmax/credentials.yaml` on EC2; we do not write or read it, and it stays there whatever we do). A model command in a worker terminal can read any of these. The only guard is the plugin policy. With a Player session the exposure ended within about 24 hours, when the session expired. A `cga_` agent token does not expire: a leaked copy works until the agent token is revoked. Recovery: revoke the agent token on Softmax (the player's owner or Softmax hosting does this; the exact route is **UNVERIFIED**), then put the new token Softmax hosting provisions in `SOFTMAX_PLAYER_CREDENTIAL`. Decision needed: strip the credential from worker terminals, or run workers with an isolated `HOME`. Until then, a model that finds a way past the plugin can act as the player.
 2. **Plugin residual risk.** The policy parser is best-effort and stops a model that reaches for a blocked command. It does not stop an adversary. Known unhandled forms (from `src/autoresearch/plugin/policy.py`):
    - a script file written inside the worktree and then run;
    - positional-parameter and array tricks, indirect expansion, and variables set in an earlier tool call;
@@ -223,8 +227,8 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
    - Python code that calls coworld through a library or a built string.
 
    Other layers: the `approvals.deny` globs in `config.yaml` (coarse) and the `whoami` identity check before every platform change (C6).
-3. **OpenRouter credit preflight.** The broker key `openrouter.inference` had about 0.95 USD left on 2026-10-07 (hermes-facts.md, item 11). Preflight pauses the agent when `limit_remaining` is below a threshold (default 10 USD). A Player credential cannot read Softmax credits (HTTP 403); preflight only warns, and XP requests that hit a credit denial (HTTP 402) retry with backoff (A10). The protocol slice and M1 ran on dedicated funded test keys (protocol-slice.md, compiler-task-2.4-m1.md). **UNVERIFIED:** the credit level on the hosted key.
-4. **Credential expiry** every 24 hours (2.4). The agent pauses at expiry.
+3. **OpenRouter credit preflight.** The broker key `openrouter.inference` had about 0.95 USD left on 2026-10-07 (hermes-facts.md, item 11). Preflight pauses the agent when `limit_remaining` is below a threshold (default 10 USD). The Player reads the Softmax XP credit balance (A10, verified 2026-10-09); preflight records it and warns at 0, and an experiment refused for credits (HTTP 402) relaunches when the balance is above 0 again, with the backoff only as a fallback. The protocol slice and M1 ran on dedicated funded test keys (protocol-slice.md, compiler-task-2.4-m1.md). **UNVERIFIED:** the credit level on the hosted key.
+4. **Credential expiry** every 24 hours (2.4) with a Player session credential. The agent pauses at expiry. A `cga_` agent token (Softmax hosting) does not expire.
 5. **GotA qualification is tied to one engine.** `games/gota` and its bindings exist. The compiler passed M1 locally on 2026-10-08 on Coworld 2026.10.7.2 / polyworld `801749e5` ([compiler-task-2.4-m1.md](compiler-task-2.4-m1.md)); M1 G4 showed zero glory for both candidate and reference, so it shows no competitive strength. The build follows the live engine (2026.10.8.1 on 2026-10-08), where only native compatibility and one full mirror match were checked ([gota-live-engine.md](gota-live-engine.md)). **UNVERIFIED:** semantic qualification on the current engine.
 6. **Live platform drift.** The coworld version changed from 2026.10.5.1 to 2026.10.6.1 to 2026.10.7.2 to 2026.10.8.1 within four days. Noise records and designs are tied to a game version (C10); a version change triggers calibration again.
 7. **GotA build inside a real Kanban worker: not run.** The Task 2.5 integration test uses a fake Hermes ([gota-task25-bindings.md](gota-task25-bindings.md)). The compiler's Hermes child gets `OPENROUTER_API_KEY` only from the calling environment, and Hermes strips provider keys from worker terminals (hermes-facts.md, item 7, and A4). **UNVERIFIED:** that a worker's `build` binding call has the key; it probably does not without a change.
@@ -252,10 +256,13 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | KB maintenance, code-citation renewal | `tests/unit/kb` (pytest) |
 | Statistics, noise, calibration, decision rule | `tests/unit/stats` (pytest) |
 | Softmax tool against the fake | `tests/unit/softmax`, `tests/fixtures/softmax` (pytest) |
-| First champion on a fresh install (A14): `softmax bootstrap-champion` promotes the shipped strategy (bootstrap promotion to `published`, league submission), refusals (champion exists, edited STRATEGY, failed build, identity), two bootstrappers, crash retries, A11 recovery with the version record restored in canonical, then an experiment designs and launches against it | `tests/unit/softmax/test_bootstrap_champion.py` (pytest, fake platform and fakegame) |
+| First champion on a fresh install (A14): `softmax bootstrap-champion` promotes the game's starter policy (bootstrap promotion to `published`, league submission), refusals (champion exists, edited STRATEGY, failed build, identity), two bootstrappers, crash retries, A11 recovery with the version record restored in canonical, then an experiment designs and launches against it | `tests/unit/softmax/test_bootstrap_champion.py` (pytest, fake platform and fakegame) |
 | Softmax tool against the live platform, as a Player | `findings/player-xp-probe.md` (create, get, list, episodes, download as Games Bond: PASS) and `findings/softmax-client.md` (read-only probes: PASS; league episodes readable by a Player) |
 | Skills and doctrine consistency | `tests/unit/test_skills.py`, `tests/unit/test_doctrine.py` (pytest) |
 | Models glm-5.3, glm-5.3-flash tool calling in Hermes | `hermes-facts.md` item 11 |
+| Spend caps: card stopped at run 5 or at an estimated $4 (blocked `spend-cap:`, one help request, never requeued or repaired; unblock gives a new allowance); a blocked card at either cap held; caps run while preflight fails; a failed stop is retried every minute, reported once per streak and grants no new allowance; daily budget pauses until the next UTC day | `tests/protocol/test_spend.py`, `tests/unit/runtime/test_spend.py`, `tests/unit/queue/test_kanban_queue.py` (pytest, fake board and a minimal `state.db`). Real Hermes v0.21.5, 2026-10-08, throwaway home: four stop/unblock cycles after an untyped block all landed in `blocked` with the alternating `--kind`; the same kind twice landed in `triage`; `stop` of a `blocked` task refused |
+| Waiting without the model: plugin refuses foreground `sleep` >= 30 s and sleep loops that check a process; `terminal.timeout` 1800 | `tests/unit/plugin/test_policy.py`, `tests/unit/runtime/test_config_migrations.py` (pytest) |
+| Per-mode card model (`AUTORESEARCH_CARD_MODELS`): `kanban create --model --provider` sets the task's `model_override`/`provider_override` | `tests/unit/queue/test_kanban_queue.py` (pytest); real Hermes v0.21.5 in a throwaway home, 2026-10-08 (create, then `show --json`: `model_override: z-ai/glm-5.3`, `provider_override: openrouter`). **UNVERIFIED:** a dispatched worker actually running on glm-5.3 (no paid run). |
 
 ### 3.2 Needs the hosted or live run
 
@@ -267,11 +274,13 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Full research cycle on the fake game, real cheap model, 90 minutes, with `credits=0` injection | Plan 03 Task 6.0 (`tests/integration/test_fake_cycle.py`) | **PASS** (2026-10-08, glm-5.3; runs 1 and 3 passed, about 30 min each; [fake-cycle.md](fake-cycle.md)). The operator steer named the lever (patience) and waived the replay gate; the D-05 first-replay question stays open for Task 6.1. |
 | Real research cycle on GotA (calibration, planning, investigation, experiment, XP, review, promotion) | Plan 03 Task 6.1 | **NOT RUN.** `games/gota` and its build binding exist now; see 2.8, risks 5 and 7. Record in `findings/first-real-cycle.md`. |
 | Compiler M1 baseline (semantic to policy, with goal tracing) | Plan 02 | **PASS locally** (2026-10-08, [compiler-task-2.4-m1.md](compiler-task-2.4-m1.md)) on Coworld 2026.10.7.2. **UNVERIFIED** on the current live engine. |
+| Real player-auth operations with a `cga_` agent token (hosting integration milestone 2): `whoami`, XP create/status/download, upload, submit, on the server in `COGAMES_API_URL` | Hosting integration | **UNVERIFIED.** Covered only by unit tests with recorded and synthetic CLI output (`tests/unit/softmax/test_identity.py`, `test_client.py`); facts read from metta source, not observed live (`softmax-client.md`, "Credential", "Server"). |
 | Upload and submit as a Player | Plan 03 Task 3.x | Documented as working in the coworld-player-swap skill; the submit path was **not re-tested live** (`player-xp-probe.md`). **UNVERIFIED.** |
 | Gateway cron jobs (`queue-keeper`, `xp-poll`, `health`) running for hours on a host | README | **UNVERIFIED.** Only short runs under test. |
 | Token refresh in practice (2.4) | - | **UNVERIFIED.** No owner. |
 | Restore on a second machine from a real remote | README | **UNVERIFIED.** |
-| First champion on the live platform (`softmax bootstrap-champion` of the game's shipped strategy, A14; text pending James's sign-off) | A14 | **NOT RUN.** Only the fake path is tested. Blocked for GotA until `games/gota/GAME.md` has a `## Baseline build` section (Codex). Observe once: how long `coworld memberships --champions-only` takes to list the submission; until it does, after publish the champion reads "unknown" and experiment cards block with a `help_request`. |
+| First champion on the live platform (`softmax bootstrap-champion` of the game's starter policy, A14) | A14 | **NOT RUN.** Only the fake path is tested. For GotA, `games/gota/GAME.md` gets its `## Starter policy` and `## Seats and opponents` sections in Codex's 8fde009 (branch `jboggs/autoresearch-gota-amendments`, merged together with the amendments). Live state 2026-10-09: our GotA player has no `is_champion` membership (v6 disqualified 2026-10-07, v1–v5 benched), so the league shows no champion; with no loop promotion in the box ledger, the first experiment card would bootstrap the starter policy. Observe once: how long the submission stays qualifying and how long after admission `coworld memberships --champions-only` lists it (A9: qualifying is no conflict; admitted-but-not-champion pauses after `AUTORESEARCH_CHAMPION_GRACE_MINUTES`). |
+| Spend caps on a live host: a running worker ends after `hermes kanban block` (dispatcher `reap_terminal_workers`, about 2 minutes), Hermes cost estimates in `state.db` match the plugin's `session_start` sessions, workers use `process_manage` wait instead of polling | Spend controls (2026-10-08) | **UNVERIFIED.** Only unit and fake-board tests, plus a `block` of a `ready` task on real Hermes. |
 | Friday leaderboard measurement (section 1) | - | **NOT RUN.** Needs a real submission in the league first. |
 
 ### 3.3 Go and no-go before handing over
@@ -280,7 +289,7 @@ Hand over to Rohit only when all of these are true. On 2026-10-08 only the Kanba
 
 - [x] Plan 01 Task 5.1 passed, or the serial fallback is built and passed (Kanban go/no-go recorded here with the date and evidence). Done: GO, 2026-10-08 (2.6).
 - [ ] OpenRouter key has enough credit for the model in use, and kimi-k3 tool calling is checked (or the fallback model is chosen on purpose). kimi-k3 checked: PASS 2026-10-08; **UNVERIFIED:** credit on the hosted key.
-- [ ] Token refresh owner and method named (2.4).
+- [ ] Token refresh owner and method named (2.4), or the install uses a `cga_` agent token (no refresh needed).
 - [ ] Decision on worker-terminal credential isolation (2.8, risk 1).
 - [ ] Fake cycle passed (Task 6.0). Real cycle run, with each step ticked and evidence recorded (Task 6.1), or its failure recorded as a finding.
 - [ ] Host config applied and `hermes gateway status` shows the dispatcher on (2.2).

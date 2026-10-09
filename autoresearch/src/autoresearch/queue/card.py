@@ -47,6 +47,9 @@ class Card:
     # heartbeats.
     current_run_id: str | None = None
     last_heartbeat_at: int | None = None
+    # The raw Hermes status (``ready``, ``running``, ``triage``, ...); None for FileQueue. Only
+    # ``running`` and ``ready`` tasks can be blocked (``Queue.stop``).
+    board_status: str | None = None
 
 
 def kanban_priority(priority: Priority, order: int = 0) -> int:

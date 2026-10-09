@@ -54,9 +54,8 @@ Signals and their data sources:
   ``merge_hotspot_window`` handoffs.
 - ``escalation``: see above.
 - ``identity_mismatch``: preflight's identity problems (C6).
-- ``credits_exhausted``: preflight read 0 credits (FakeSoftmax), or an experiment is
-  ``awaiting-credits`` (the real client cannot read credits, A10; a CreditDenied moves the
-  experiment there).
+- ``credits_exhausted``: preflight read a balance of 0 or less (A10), or an experiment is
+  ``awaiting-credits`` (a CreditDenied moves the experiment there).
 - ``keeper_step_failed``: a queue-keeper step raised (``step_failures``, step name -> error);
   queue-keeper contains the failure and passes it here, so a step that keeps failing escalates
   like any other signal.
@@ -441,7 +440,8 @@ def _identity_mismatch(inputs: _Inputs) -> list[_Raw]:
 
 def _credits_exhausted(inputs: _Inputs) -> list[_Raw]:
     waiting = sorted(e["id"] for e in inputs.experiments if e.get("status") == "awaiting-credits")
-    no_credits = inputs.preflight is not None and inputs.preflight.credits == 0
+    credits = inputs.preflight.credits if inputs.preflight is not None else None
+    no_credits = credits is not None and credits <= 0
     if not waiting and not no_credits:
         return []
     parts = ["no XP credits remain"] if no_credits else []

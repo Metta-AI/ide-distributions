@@ -5,9 +5,18 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
 2. ``preflight`` (C6, A3, A5, A10). On failure, including a preflight that raises: pause
-   (C7), one runtime ``help_request`` per pause, and stop (exit 0). No admission while
-   paused.
-3. Abort a stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
+   (C7), one runtime ``help_request`` per pause (per streak for a repeatedly unavailable
+   ``whoami``: ``PreflightResult.pause_key``), and stop (exit 0). No admission while paused.
+   A ``skipped`` preflight (``whoami`` unavailable, fewer than 3 times in a row) stops the run
+   without pausing. Both a failed and a skipped preflight still run the spend step (step 12)
+   before stopping, since running cards keep running.
+3. Champion check (A9): the league's champion for our player against what the loop expects
+   (``promotion.league_check``: our submission's membership state, grace
+   ``AUTORESEARCH_CHAMPION_GRACE_MINUTES``). On a conflict: pause (C7), one runtime
+   ``help_request`` per (expected, shown) pair, and the run goes on (merges and reconcile
+   still settle promotions, spend caps still apply) without resuming. A rejected submission
+   gets one runtime note per promotion. Then abort a
+   stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
 5. ``process_handoffs`` with publication (C3, C5), then the MEMORY.md snapshot
@@ -34,8 +43,11 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
     into the planning backlog. Then reprioritize/drop requests (``queue_ops``).
 11. Signals (with this run's failed steps as input), then the planning request (cadence, or
     queue growth).
-12. Orphaned done cards (C3), blocked cards (``blocked.handle_blocked``), the daily re-raise
-    of unanswered proposals, and resume when paused and preflight passed.
+12. Orphaned done cards (C3), spend caps (``spend.enforce``: stop cards over their run or
+    estimated-cost cap; pause when today's spend reaches the daily budget), blocked cards
+    (``blocked.handle_blocked``), the daily re-raise of unanswered proposals, and resume when
+    paused, preflight passed, this run's champion check found the league and the loop in
+    agreement, and today's spend is under the daily budget (``spend.may_resume``).
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
@@ -90,10 +102,10 @@ from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import read_requests
-from autoresearch.queue.select import queue_from_env
+from autoresearch.queue.select import ENV_CARD_MODELS, parse_card_models, queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import config_migrations, promotion, proposals
+from autoresearch.runtime import config_migrations, promotion, proposals, spend
 from autoresearch.runtime.admission import (
     NEEDS_CALIBRATION,
     PLANNING_OWNED,
@@ -138,8 +150,9 @@ PUSH_REFSPECS = ["HEAD:refs/heads/main", "refs/heads/card/*:refs/heads/card/*"]
 GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
-LATE_STEPS = ("planning", "orphans", "blocked", "proposals", "resume", "push_final")
+LATE_STEPS = ("planning", "orphans", "spend", "blocked", "proposals", "resume", "push_final")
 CRASH_EXIT = 70  # exit code of an injected crash (module docstring)
+CHAMPION_PAUSE = promotion.CHAMPION_PAUSE
 
 
 @dataclass
@@ -151,6 +164,8 @@ class KeeperRun:
     bootstrap: BootstrapResult | None = None
     preflight: PreflightResult | None = None
     paused: bool = False  # preflight failed and this run paused (or kept paused) the agent
+    champion_checked: bool = False  # the A9 champion check ran to the end this run
+    champion_conflict: promotion.ChampionConflict | None = None
     rebuilt: list[CardSpec] = field(default_factory=list)
     handoffs: list = field(default_factory=list)
     published: list[PublishResult] = field(default_factory=list)
@@ -159,6 +174,7 @@ class KeeperRun:
     signals: list = field(default_factory=list)
     planning: CardSpec | None = None
     orphans: list[str] = field(default_factory=list)
+    spend_run: spend.SpendRun | None = None  # None: the spend step failed
     blocked: list = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     reraised: list[str] = field(default_factory=list)
@@ -257,7 +273,7 @@ def pause_for_preflight(
     pause(queue, ledger_of(canonical), f"preflight failed: {reasons}")
     with canonical_lock(canonical):
         paused_at = read_json(pause_path(ledger_of(canonical)))["paused_at"]
-        message = runtime_messages.agent_paused(reasons, paused_at)
+        message = runtime_messages.agent_paused(reasons, paused_at, key=result.pause_key)
         if already_published(canonical, message):
             return
         publish_message(
@@ -265,11 +281,56 @@ def pause_for_preflight(
         )
 
 
+def check_champion(
+    run: KeeperRun,
+    ctx: RunContext,
+    queue: Queue,
+    sm: Softmax,
+    game: Game,
+    now: datetime.datetime,
+    env: Mapping[str, str],
+    allow_no_remote: bool,
+) -> None:
+    """A9: compare the league's champion with what the loop expects
+    (``promotion.league_check``, which also tracks our submission's membership); on a conflict
+    pause and publish one help_request per (expected, shown) pair. When the league did not take
+    our submission (rejected, withdrawn, disqualified), tell the user once per promotion: a
+    real outcome, not a conflict. ``run.champion_checked`` is set only when the check
+    completes, so a failed league read never lets the agent resume."""
+    canonical = ctx.canonical
+    check = promotion.league_check(
+        ctx, sm, game.league_id, now, promotion.champion_grace(env), record=True
+    )
+    conflict = run.champion_conflict = check.conflict
+    if check.submission is not None and check.submission.stage == "unknown":
+        detail = check.submission.detail or "not listed"
+        _log(ctx, f"champion check: our submission's league state is unknown ({detail})")
+    if check.submission is not None and check.submission.stage == "rejected":
+        rejected = promotion.rejection_message(check.basis, game.league_id, check.submission.detail)
+        with canonical_lock(canonical):
+            if not already_published(canonical, rejected):
+                publish_message(canonical, rejected, allow_no_remote, priority="P1")
+    if conflict is not None:
+        _log(ctx, f"champion conflict: {conflict.detail}")
+        pause(queue, ledger_of(canonical), f"{CHAMPION_PAUSE}: {conflict.detail}")
+        message = runtime_messages.champion_conflict(
+            game.league_id, conflict.expected, conflict.shown, conflict.waited_out
+        )
+        with canonical_lock(canonical):
+            if not already_published(canonical, message):
+                publish_message(
+                    canonical, message, allow_no_remote, priority="P0", expects_response=True
+                )
+    run.champion_checked = True
+
+
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
     canonical = ctx.canonical
+    reason = read_json(pause_path(ledger_of(canonical))).get("reason", "")
     resumed = resume(queue, ledger_of(canonical))
+    message = runtime_messages.agent_resumed(len(resumed), reason.startswith(CHAMPION_PAUSE))
     with canonical_lock(canonical):
-        publish_message(canonical, runtime_messages.agent_resumed(len(resumed)), allow_no_remote)
+        publish_message(canonical, message, allow_no_remote)
     return resumed
 
 
@@ -560,6 +621,69 @@ def admission_step(
     run.ops = _step(run, ctx, "ops", apply_ops, ctx, queue) or []
 
 
+def _spend_step(
+    run: KeeperRun, ctx: RunContext, queue: Queue, config: spend.SpendConfig,
+    now: datetime.datetime, allow_no_remote: bool,
+) -> spend.SpendRun:
+    result = spend.enforce(ctx, queue, config, now, allow_no_remote)
+    for task_id, why in result.stopped:
+        _log(ctx, f"spend: stopped card {task_id}: {why}")
+    for key, error in result.failures.items():
+        if key == spend.DB_FAILURE:
+            run.failures[key] = error
+            _log(ctx, f"spend: cannot read state.db: {error}")
+        else:
+            run.failures[f"spend {key}"] = error
+            _log(ctx, f"spend: {key}: {error}")
+    for task_id, error in result.stop_failures.items():  # retried next run: log only
+        _log(ctx, f"spend: could not stop card {task_id} (retrying next run): {error}")
+    if result.paused:
+        _log(ctx, f"spend: paused, today's estimated spend is ${result.day_usd:.2f}")
+    new = spend.new_unpriced(ctx, result.unpriced)
+    if new:
+        _log(
+            ctx,
+            f"spend: warning: Hermes has no cost estimate for session(s) {', '.join(new)}; "
+            f"priced from token counts with {spend.ENV_FALLBACK_PRICES}",
+        )
+    return result
+
+
+def _spend_steps(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str],
+    now: datetime.datetime, allow_no_remote: bool,
+) -> spend.SpendConfig | None:
+    """The spend step (``spend.enforce``); returns its config for the blocked step, or None
+    when the config is invalid (the step failure is recorded)."""
+    config = _step(run, ctx, "spend", spend.SpendConfig.from_env, env)
+    if config is not None:
+        run.spend_run = _step(
+            run, ctx, "spend", _spend_step, run, ctx, queue, config, now, allow_no_remote
+        )
+    return config
+
+
+def _card_models_check(
+    run: KeeperRun, ctx: RunContext, env: Mapping[str, str], allow_no_remote: bool
+) -> None:
+    """Report entries of ``AUTORESEARCH_CARD_MODELS`` that were skipped (the queue uses the
+    default model for them): a log line every run, the step failure ``card_models`` (so it
+    escalates and shows as a signal), and one help_request per distinct value."""
+    raw = env.get(ENV_CARD_MODELS) or ""
+    _models, problems = parse_card_models(raw)
+    if not problems:
+        return
+    text = "; ".join(problems)
+    run.failures["card_models"] = text
+    _log(ctx, f"{ENV_CARD_MODELS}: {text}; those modes use the default model")
+    if not (ctx.canonical / ".git").exists():
+        return
+    message = runtime_messages.card_models_invalid(raw, problems)
+    with canonical_lock(ctx.canonical):
+        if not already_published(ctx.canonical, message):
+            publish_message(ctx.canonical, message, allow_no_remote, expects_response=True)
+
+
 def _rebuild_step(ctx, queue, sm, game_version, now, allow_no_remote) -> list[CardSpec]:
     if not needs_rebuild(ctx, queue):
         return []
@@ -619,16 +743,29 @@ def _run_steps(
         run.preflight = PreflightResult(ok=False, reasons=[reason])
     for warning in run.preflight.warnings:
         _log(ctx, f"preflight warning: {warning}")
+    _card_models_check(run, ctx, env, allow_no_remote)
+    if run.preflight.skipped:
+        _log(ctx, "preflight skipped this run: whoami unavailable")
+        # The spend caps read only the local state.db and the board, not Softmax: cards keep
+        # running through a whoami blip, so their caps (and the daily budget) still apply.
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
+        return
     if not run.preflight.ok:
         run.paused = True
         _log(ctx, f"preflight failed: {run.preflight.reasons}")
         _step(run, ctx, "pause", pause_for_preflight, ctx, queue, run.preflight, allow_no_remote)
+        # Running cards keep running while paused (low credit, expired credential): the caps
+        # still apply to them.
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
         return
 
+    _step(
+        run, ctx, "champion", check_champion, run, ctx, queue, sm, game, now, env, allow_no_remote
+    )
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
     game_version = _step(run, ctx, "game_version", sm.game_version, game.league_id)
     game_version = str(game_version).strip() if game_version is not None else None
-    _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm)
+    _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm, game.league_id)
     run.rebuilt = (
         _step(
             run, ctx, "rebuild", _rebuild_step, ctx, queue, sm, game_version, now, allow_no_remote
@@ -671,9 +808,18 @@ def _run_steps(
     )
     run.planning = _step(run, ctx, "planning", _planning_step, ctx, queue, now, run.signals)
     run.orphans = _step(run, ctx, "orphans", find_orphan_done, queue, ledger_of(canonical)) or []
-    run.blocked = _step(run, ctx, "blocked", handle_blocked, ctx, queue, allow_no_remote) or []
+    spend_config = _spend_steps(run, ctx, queue, env, now, allow_no_remote)
+    run.blocked = (
+        _step(run, ctx, "blocked", handle_blocked, ctx, queue, allow_no_remote, spend_config)
+        or []
+    )
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
-    if is_paused(ledger_of(canonical)):
+    if (
+        is_paused(ledger_of(canonical))
+        and run.champion_checked
+        and not run.champion_conflict
+        and spend.may_resume(ctx, run.spend_run, now)
+    ):
         run.resumed = _step(run, ctx, "resume", resume_after_preflight, ctx, queue, allow_no_remote)
     run.pushed = _step(run, ctx, "push_final", push_step, ctx, allow_no_remote)
 

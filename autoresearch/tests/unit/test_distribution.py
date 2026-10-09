@@ -40,7 +40,11 @@ def test_config():
     assert set(c["terminal"]["env_passthrough"]) == {
         "SOFTMAX_PLAYER_CREDENTIAL", "AUTORESEARCH_PLAYER_ID", "AUTORESEARCH_WORKSPACE",
         "AUTORESEARCH_WORKSPACE_REMOTE", "AUTORESEARCH_GAME", "AUTORESEARCH_SOFTMAX",
-        "AUTORESEARCH_CLI", "AUTORESEARCH_QUEUE", "OPENROUTER_MODEL", "AUTORESEARCH_INBOX_WRITERS",
+        "AUTORESEARCH_CLI", "OPENROUTER_MODEL", "AUTORESEARCH_INBOX_WRITERS",
+        "AUTORESEARCH_CHAMPION_GRACE_MINUTES", "COGAMES_API_URL",
+        "AUTORESEARCH_CARD_MODELS", "AUTORESEARCH_MAX_CARD_RUNS", "AUTORESEARCH_MAX_CARD_USD",
+        "AUTORESEARCH_DAILY_BUDGET_USD", "AUTORESEARCH_FALLBACK_PRICES",
+        "AUTORESEARCH_RELAUNCH_MIN_CREDITS",
     }
 
 
@@ -127,6 +131,9 @@ def _is_denied(command: str) -> bool:
         ("git push origin main", False),
         ("hermes kanban create x --assignee autoresearch", True),
         ("hermes kanban --board autoresearch link t_1 t_2", True),
+        ('"$AUTORESEARCH_CLI" promotion accept-champion', True),
+        ("cd /x && autoresearch promotion accept-champion --help", True),
+        ('git commit -m "do not run promotion accept-champion"', False),
         ("cd /tmp && hermes kanban create x", True),
         ("hermes kanban show t_1 --json", False),
         ('git commit -m "no hermes kanban create here"', False),

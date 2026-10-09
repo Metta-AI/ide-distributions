@@ -25,9 +25,11 @@ platform (`AUTORESEARCH_SOFTMAX=fake`), never on a real league.
 
 ## Seats and opponents
 
-Two seats per episode. Our policy plays seat 0. The league opponent is the house policy
-`fake-house:v1` in seat 1. An evaluation design uses `"seats": [0]` and
-`"opponents": ["fake-house:v1"]` (pairing `seed_and_opponents`).
+Two seats per episode, no teams. Our policy plays seat 0 and one opponent plays seat 1, so an
+evaluation design uses `"seats": [0]` and `"opponent_count": 1`: `stats design` samples each
+seed's opponent from the fake league (the house policy `fake-house:v1` and the
+`fake-alpha`/`fake-beta`/`fake-gamma` policies of its episodes; pairing `seed_and_opponents`).
+The fake platform's results do not depend on the opponent.
 
 ## Mechanics
 
@@ -63,10 +65,10 @@ Run each binding from `"$AR_HOME"` with absolute paths.
 - `replay_inspect`: `python3 games/fakegame/tools/fake_eval.py --replay --policy <id> --seed
   <n> --json` prints a per-tick summary. Fake XP requests store no replay files.
 
-## Baseline build
+## Starter policy
 
-The baseline is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.md` (the seed
-strategy). Build it with the `build` binding:
-`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/baseline --json`,
+The starter policy is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.md` (the
+seed strategy). Build it with the `build` binding:
+`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/starter --json`,
 check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
-then promote it as the first champion with `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <worktree>/.scratch/build/baseline`.
+then submit it as the first champion with `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <worktree>/.scratch/build/starter`.

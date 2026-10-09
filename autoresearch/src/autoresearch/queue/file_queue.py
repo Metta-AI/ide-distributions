@@ -1,4 +1,6 @@
-"""File-backed Queue: the test backend and the serial-fallback backend.
+"""File-backed Queue: the test double for the Kanban backend (protocol tests, and CLI tests
+that run the real entry point select it with ``AUTORESEARCH_QUEUE=file``, see
+``queue.select``). No shipped job runs its cards (amendment A13).
 
 One JSON file per card under ``<directory>/cards/`` plus ``index.json`` (idempotency keys
 and a creation counter). Every mutation runs under ``<directory>/queue.lock``.
@@ -125,6 +127,20 @@ class FileQueue:
                     run["outcome"] = f"requeued: {reason}"
             record["state"] = "pending"
             self._save_record(record)
+
+    def stop(self, task_id: str, reason: str) -> str:
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            if record["state"] not in ("pending", "claimed"):
+                raise ValueError(f"cannot stop a {record['state']} card")
+            run = next((r for r in record["runs"] if not r["terminal"]), None)
+            if run is None:  # never claimed: a zero-length run carries the block, as in Hermes
+                run = asdict(RunInfo(f"r-{ULID()}", False, None))
+                record["runs"].append(run)
+            run.update(terminal=True, outcome="blocked", summary=reason)
+            record.update(state="blocked", block_reason=reason, block_run_id=run["run_id"])
+            self._save_record(record)
+        return "blocked"
 
     # -- board (C12: "board missing" is a missing queue directory) --
 

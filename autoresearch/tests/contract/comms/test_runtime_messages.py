@@ -111,6 +111,23 @@ FIXTURES = {
             "refs": [],
         }
     ],
+    "card_over_cap": [
+        {
+            "card_title": "Build and upload the baseline",
+            "why": "it started run 5, and the cap is 4 runs per card",
+            "allowance": "4 more runs and an estimated $4.00 of model spend",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "stop": 1,
+            "refs": [],
+            "outcome": outcome,
+        }
+        for outcome in (rm.STOPPED, rm.TRIAGED, rm.HELD, rm.NOT_STOPPED)
+    ],
+    "card_models_invalid": [
+        {"value": "planing=z-ai/glm-5.3", "problems": ["unknown card mode 'planing' (skipped)"]}
+    ],
+    "daily_budget_reached": [{"spent_usd": 25.31, "budget_usd": 25.0, "day": "2026-10-08"}],
     "signal_persists": [
         {
             "code": "stale_card",
@@ -128,7 +145,7 @@ FIXTURES = {
         },
     ],
     "agent_paused": [{"reasons": "identity: wrong player", "paused_at": SINCE}],
-    "agent_resumed": [{"count": 2}],
+    "agent_resumed": [{"count": 2}, {"count": 0, "champion": True}],
     "staged_not_published": [
         {"message_id": MESSAGE, "staged_title": title, "problems": ["kind: bad"]}
         for title in ("Towers matter", None)
@@ -155,6 +172,34 @@ FIXTURES = {
             "candidate_ref": f"card/{REQUEST}",
             "candidate_sha": SHA,
             "refs": [{"uri": "ar://experiment/E-01M4EJ9RQMHVH6XK3N4T760MNG"}],
+        }
+    ],
+    "champion_conflict": [
+        {"league_id": "league_x", "expected": exp, "shown": shown, "waited_out": waited}
+        for exp, shown, waited in (
+            ("ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1", "hand-made:v2", False),
+            ("ar-bootstrap-0123456789ab:v1", None, True),
+            (None, "hand-made:v2", False),
+        )
+    ],
+    "submission_rejected": [
+        {
+            "league_id": "league_x",
+            "promotion_id": PROMOTION,
+            "policy": "ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1",
+            "replaced": replaced,
+            "detail": "membership disqualified (inactive)",
+            "bootstrap": bootstrap,
+        }
+        for replaced, bootstrap in (("hand-made:v2", False), (None, True))
+    ],
+    "submission_pending": [
+        {
+            "league_id": "league_x",
+            "promotion_id": PROMOTION,
+            "policy": "ar-bootstrap-0123456789ab:v1",
+            "detail": "membership qualifying (held)",
+            "hours": 24,
         }
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],

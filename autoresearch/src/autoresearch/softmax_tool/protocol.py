@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 class Identity:
     subject_type: str  # "player" or "user"; only "player" credentials are allowed (C6)
     player_id: str
-    expires_at: datetime
+    expires_at: datetime | None  # None: the credential does not expire (a cga_ agent token)
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,26 @@ class XpHandle:
 @dataclass(frozen=True)
 class CreditDenied:
     reason: str
+
+
+@dataclass(frozen=True)
+class SubmissionState:
+    """Where one of our submissions stands in a league (A9), read from our own league
+    memberships, else our submissions list:
+
+    - ``pending``: submitted and not yet admitted (submission ``pending``/``processing``, or a
+      membership ``submitted``/``qualifying``, including substatus ``held``);
+    - ``competing``: admitted; ``is_champion`` says whether it is our champion (an admitted
+      membership becomes champion by default and earlier ones are ``benched``);
+    - ``rejected``: the submission was rejected or withdrawn, or the membership disqualified;
+    - ``unknown``: neither list names it, or it has a status we do not know (logged by
+      queue-keeper; the grace from the submit then applies).
+
+    ``detail`` is the platform's status and substatus, for messages and logs."""
+
+    stage: Literal["pending", "competing", "rejected", "unknown"]
+    is_champion: bool = False
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,7 +80,16 @@ class Refused(RuntimeError):
 
 class Softmax(Protocol):
     def whoami(self) -> Identity: ...
-    def credits(self) -> int: ...
+    def credits(self) -> float:
+        """The XP credit balance the Player spends (the owning account's). Raises when it
+        cannot be read."""
+        ...
+
+    def episode_cost(self) -> float | None:
+        """Credits one XP episode has cost lately (our recent requests), or None when there
+        is nothing to go by. Raises when it cannot be read."""
+        ...
+
     def game_version(self, league_id: str) -> str:
         """The league's current game version (a dotted number such as ``2026.10.7.2``),
         stripped of surrounding whitespace. Every implementation normalizes it here."""
@@ -88,6 +117,12 @@ class Softmax(Protocol):
     def submit(self, policy_version_id: str, league_id: str) -> str: ...
     def submissions(self, player_id: str) -> list[dict]: ...
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None: ...
+    def submission_state(
+        self, player_id: str, league_id: str, policy_version_id: str
+    ) -> SubmissionState:
+        """Where our submission of ``policy_version_id`` stands in the league (read-only)."""
+        ...
+
     def league_episodes(self, league_id: str, limit: int) -> Iterable[dict]:
         """Up to ``limit`` completed league episodes, read-only, in listing order (the real
         client yields them as they arrive). Each is a dict::
@@ -107,6 +142,15 @@ class Softmax(Protocol):
          rounds_played}
         """
         ...
+
+
+def read_credits(sm: Softmax) -> float | None:
+    """``sm.credits()``, or None when the balance cannot be read (A10: callers then fall back
+    to the credit-denial backoff)."""
+    try:
+        return sm.credits()
+    except Exception:  # noqa: BLE001 - any read failure only means "unknown"
+        return None
 
 
 def from_env(env: Mapping[str, str], canonical: Path) -> Softmax:

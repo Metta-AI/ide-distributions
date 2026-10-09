@@ -30,7 +30,7 @@ tool_loop_guardrails:
 
 agent:
   max_turns: 150
-  run_budget_seconds: 2700
+  run_budget_seconds: 5400
 
 approvals:
   mode: "off"
@@ -51,8 +51,13 @@ approvals:
     - "hermes kanban link*"
     - "hermes kanban --board * create*"
     - "hermes kanban --board * link*"
+    - "*promotion accept-champion"
+    - "*promotion accept-champion *"
 
 terminal:
+  # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground
+  # timeout. Skills wait on long commands with one wait instead of polling (queue skill).
+  timeout: 1800
   env_passthrough:
     - SOFTMAX_PLAYER_CREDENTIAL
     - AUTORESEARCH_PLAYER_ID
@@ -61,9 +66,16 @@ terminal:
     - AUTORESEARCH_GAME
     - AUTORESEARCH_SOFTMAX
     - AUTORESEARCH_CLI
-    - AUTORESEARCH_QUEUE
     - OPENROUTER_MODEL
     - AUTORESEARCH_INBOX_WRITERS
+    - AUTORESEARCH_CHAMPION_GRACE_MINUTES
+    - COGAMES_API_URL
+    - AUTORESEARCH_CARD_MODELS
+    - AUTORESEARCH_MAX_CARD_RUNS
+    - AUTORESEARCH_MAX_CARD_USD
+    - AUTORESEARCH_DAILY_BUDGET_USD
+    - AUTORESEARCH_FALLBACK_PRICES
+    - AUTORESEARCH_RELAUNCH_MIN_CREDITS
 
 plugins:
   enabled:

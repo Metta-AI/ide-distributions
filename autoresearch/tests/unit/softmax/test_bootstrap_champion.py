@@ -1,7 +1,7 @@
 """First champion on a fresh install (amendment A14): ``softmax bootstrap-champion``.
 
 With no champion (no published promotion and no leaderboard entry for our player, A9), a card
-builds the game's shipped strategy, uploads it, and promotes it through the normal C8
+builds the game's starter policy, uploads it, and promotes it through the normal C8
 promotion (acquire -> intent -> submit -> recorded -> published) as a ``bootstrap`` promotion:
 no experiment, no evaluation outcome, no decision. Experiments then compare against it.
 """
@@ -61,7 +61,7 @@ def started(board, mode="maintenance"):
 
 
 def shipped_build(board, worker, name="champion"):
-    """The fakegame baseline build: the shipped STRATEGY of the worktree (GAME.md)."""
+    """The fakegame starter policy build: the shipped STRATEGY of the worktree (GAME.md)."""
     out = board.tmp_path / name
     fake_build(worker.worktree / "strategy", out)
     return out
@@ -106,7 +106,7 @@ def publish(board, worker) -> None:
 def test_fresh_install_bootstraps_the_champion_then_an_experiment_designs_against_it(fresh):
     _, board = softmax(base_env(fresh), "leaderboard")
     assert board["data"]["current_champion"] is None
-    assert board["data"]["note"].startswith("no champion known")
+    assert board["data"]["note"].startswith("no champion:")
 
     worker = started(fresh)
     code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
@@ -180,7 +180,7 @@ def test_fresh_install_bootstraps_the_champion_then_an_experiment_designs_agains
     request = {
         "baseline_version": champion,
         "seats": [0],
-        "opponents": ["fake-house:v1"],
+        "opponent_count": 1,  # fakegame: two seats, one opponent (A12)
         "seeds": list(range(1, 21)),
         "primary_metrics": [{"name": "errors", "direction": "down", "min_effect": 2.0}],
         "guardrails": [],
@@ -216,6 +216,76 @@ def test_refused_when_a_leaderboard_champion_exists(tmp_path):
     assert "autoresearch-fake:v0" in data["error"]["message"]
     assert uploads(board) == {} and worker.store.find("version") == []
     assert load(board.canonical) is None
+
+
+def test_a_lost_champion_is_not_a_fresh_install(fresh, capsys, monkeypatch):
+    """A9 x A14: once a loop promotion reached the league, "no champion" means it was lost;
+    a bootstrap is refused until a human accepts "no champion" (``accept-champion``)."""
+    worker = started(fresh)
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 0, data
+    publish(fresh, worker)
+    state_path = fresh.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["submissions"] = []  # the league dropped our champion
+    state_path.write_text(json.dumps(state))
+
+    again = started(fresh)
+    code, refused = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again"))
+    assert code == 1 and refused["error"]["reason"] == "champion_conflict"
+    assert "lost" in refused["error"]["message"]
+
+    record = promotion.accept_champion(fresh.ctx(), fresh.sm, LEAGUE)
+    assert record["policy_version_id"] is None
+    assert promotion.bootstrap_blocker(fresh.canonical) is None
+
+
+def test_a_rejected_starter_policy_waits_for_a_human(fresh):
+    """N1: the league rejects the bootstrap: the promotion is settled ``rejected`` (the slot is
+    free), one help_request tells the human what to run, and a new bootstrap waits for
+    ``accept-champion``."""
+    worker = started(fresh)
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 0, data
+    starter = data["data"]["platform_policy_version_id"]
+    worker.end_run("crashed")
+    state_path = fresh.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["memberships"] = {starter: {"stage": "rejected"}}
+    state["submissions"] = []
+    state_path.write_text(json.dumps(state))
+
+    [action] = promotion.reconcile(fresh.ctx(), fresh.queue, fresh.sm, LEAGUE)
+    assert action.kind == "rejected" and load(fresh.canonical).stage == "rejected"
+    outbox = [
+        json.loads(path.read_text())
+        for path in sorted((fresh.canonical / "comms" / "outbox").glob("*.json"))
+    ]
+    [help_request] = [m for m in outbox if m["title"] == "The league rejected the first champion"]
+    assert help_request["kind"] == "help_request"
+    assert "promotion accept-champion" in help_request["body"]
+
+    again = started(fresh)
+    code, refused = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again"))
+    assert code == 1 and refused["error"]["reason"] == "champion_conflict"
+    assert "rejected the starter policy" in refused["error"]["message"]
+
+    record = promotion.accept_champion(fresh.ctx(), fresh.sm, LEAGUE)
+    assert record["after_rejected"] == load(fresh.canonical).id
+    code, data = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again2"))
+    assert code == 0, data  # the human let it try again
+
+
+def test_refused_while_paused_for_a_champion_conflict(fresh):
+    ledger = fresh.canonical / ".supervisor" / "ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    (ledger / "pause.json").write_text(
+        json.dumps({"reason": "champion conflict: test", "paused_at": "t", "tasks": {}})
+    )
+    worker = started(fresh)
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 1 and data["error"]["reason"] == "champion_conflict"
+    assert uploads(fresh) == {}
 
 
 def test_refused_unless_the_strategy_is_the_shipped_one(fresh):

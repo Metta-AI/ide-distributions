@@ -34,7 +34,8 @@ Doctrine upheld: D-04, D-09.
    evaluate binding):
    `"$AUTORESEARCH_CLI" softmax league-episodes --league <league_id> --limit 200 --out .scratch/league-rows.jsonl`
    Run it in the foreground with a terminal `timeout` of 600. 200 episodes take a few
-   minutes; a progress line goes to stderr every 10 episodes. Read `data.rows` and
+   minutes; a progress line goes to stderr every 10 episodes. For `--limit 400`, start it in
+   the background and wait on it ("Long commands" in the `queue` skill). Read `data.rows` and
    `data.game_versions`. The file is written only when the read is complete.
 4. Add completed XP rows of the same version, if any:
    `cat .scratch/league-rows.jsonl evidence/xp/*/*/rows.jsonl > .scratch/noise-rows.jsonl`

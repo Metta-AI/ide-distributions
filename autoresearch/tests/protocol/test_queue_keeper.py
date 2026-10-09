@@ -5,6 +5,7 @@ fakegame, with scripted card workers (``tests/support/keeper_host.py``)."""
 import dataclasses
 import datetime
 import re
+import types
 
 import pytest
 import yaml
@@ -14,11 +15,12 @@ from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import proposals, queue_keeper, xp_poll
+from autoresearch.runtime import promotion, proposals, queue_keeper, xp_poll
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
 from autoresearch.runtime.signals import KEEPER_STEP_FAILED
+from autoresearch.softmax_tool.protocol import SubmissionState
 
 T0 = datetime.datetime.now(datetime.UTC).replace(minute=5, second=0, microsecond=0)
 
@@ -48,6 +50,42 @@ def _subsequence(patterns: list[str], subjects: list[str]) -> bool:
 
 
 # --- identity failure on the first tick (C6, C7) ---
+
+
+def test_whoami_blips_skip_runs_then_pause_once_per_streak(tmp_path):
+    """I1: a whoami failure that is not a rejection skips the run (no pause, no help request,
+    no admission); the third in a row pauses with one help request for the whole streak; a
+    good whoami resumes."""
+    host = Host(tmp_path)
+    host.tick(at(0))  # bootstrap + a planning request
+    host.set_faults("fail_after=whoami")
+    for minute in (1, 2):
+        blip = host.tick(at(minute))
+        assert blip.preflight.skipped and not blip.paused and blip.failures == {}
+        assert not (host.ledger / "pause.json").exists()
+        assert host.queue.list() == []  # nothing admitted while whoami is unavailable
+    assert _help_requests(host) == []
+
+    third = host.tick(at(3))
+    assert third.paused and (host.ledger / "pause.json").exists()
+    [help_request] = _help_requests(host, "Agent paused")
+    assert "3 times in a row" in help_request["body"]
+    assert help_request["runtime_key"].startswith("whoami-unavailable:")
+    for minute in (4, 5):
+        assert host.tick(at(minute)).paused
+    assert len(_help_requests(host, "Agent paused")) == 1  # one per streak
+
+    host.set_faults("")
+    assert not host.tick(at(6)).paused
+    assert not (host.ledger / "pause.json").exists()
+
+
+def test_rejected_credential_pauses_on_the_first_tick(tmp_path):
+    host = Host(tmp_path, faults="identity=rejected")
+    first = host.tick(at(0))
+    assert first.paused and not first.preflight.skipped
+    [help_request] = _help_requests(host, "Agent paused")
+    assert "did not accept" in help_request["body"]
 
 
 def test_identity_failure_on_the_first_tick_pauses_and_asks_for_help(tmp_path):
@@ -253,6 +291,72 @@ def test_a_raising_preflight_pauses_and_asks_for_help(host, monkeypatch):
     ]
     assert result.admitted == []  # nothing is admitted while paused
     assert len(_help_requests(host, "Agent paused")) == 1
+
+
+# --- champion conflict (A9) ---
+
+
+def test_a_champion_conflict_pauses_tells_the_user_once_and_waits_for_agreement(
+    host, monkeypatch
+):
+    host.tick(at(0))
+    conflict = promotion.ChampionConflict(
+        "ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1", "hand-made:v2", "submitted by hand"
+    )
+    monkeypatch.setattr(promotion, "champion_conflict", lambda *args: conflict)
+
+    first = host.tick(at(1))
+    assert first.champion_conflict == conflict and first.resumed is None
+    assert "champion conflict" in host.committed(host.ledger / "pause.json")["reason"]
+    [message] = _help_requests(host, "unexpected champion")
+    assert message["about"]["league_policy"] == "hand-made:v2"
+    assert message["priority"] == "P0"
+    assert first.failures == {}  # the rest of the run went on
+
+    second = host.tick(at(2))  # still in conflict: still paused, no second message
+    assert second.resumed is None and (host.ledger / "pause.json").exists()
+    assert len(_help_requests(host, "unexpected champion")) == 1
+
+    def league_unreadable(*args):
+        raise RuntimeError("league read failed")
+
+    monkeypatch.setattr(promotion, "current_champion", league_unreadable)
+    third = host.tick(at(3))  # an unfinished check never resumes
+    assert "champion" in third.failures and (host.ledger / "pause.json").exists()
+
+    monkeypatch.undo()
+    fourth = host.tick(at(4))  # the league and the loop agree again
+    assert fourth.champion_checked and fourth.champion_conflict is None
+    assert not (host.ledger / "pause.json").exists()
+    resumed = [m for m in host.outbox() if m["title"] == "Agent resumed"][-1]
+    assert "agree on the champion" in resumed["body"]
+
+
+def test_a_rejected_submission_is_told_once_and_does_not_pause(host, monkeypatch):
+    host.tick(at(0))
+    basis = types.SimpleNamespace(
+        id="P-01M4EJ9RQMHVH6XK3N4T760MNG",
+        platform_policy_version_id="ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1",
+        replaces="fake-house:v1",
+        kind="experiment",
+    )
+    rejected = SubmissionState("rejected", detail="membership disqualified (inactive)")
+    check = promotion.LeagueCheck("fake-house:v1", basis, rejected, None)
+    monkeypatch.setattr(promotion, "league_check", lambda *args, **kwargs: check)
+    first = host.tick(at(1))
+    second = host.tick(at(2))
+    assert first.champion_conflict is None and second.champion_checked
+    assert not (host.ledger / "pause.json").exists()
+    notes = [m for m in host.outbox() if m["title"] == "The league did not accept a submitted policy"]
+    assert len(notes) == 1 and notes[0]["kind"] == "note"
+    assert notes[0]["about"]["league_status"] == "membership disqualified (inactive)"
+
+
+def test_grace_minutes_must_be_positive():
+    assert promotion.champion_grace({}) == promotion.DEFAULT_CHAMPION_GRACE
+    assert promotion.champion_grace({promotion.GRACE_ENV: "5"}) == datetime.timedelta(minutes=5)
+    with pytest.raises(ValueError, match="positive"):
+        promotion.champion_grace({promotion.GRACE_ENV: "0"})
 
 
 def test_a_step_failing_every_run_escalates_once_per_episode(host, monkeypatch):

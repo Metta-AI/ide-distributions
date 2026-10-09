@@ -150,3 +150,18 @@ def test_current_run_is_the_claimed_run(queue, tmp_path):
     assert (card.current_run_id, card.last_heartbeat_at) == (run_id, None)
     queue.finish(task_id, run_id, "done")
     assert queue.get(task_id).current_run_id is None
+
+
+def test_stop_ends_the_open_run_of_a_claimed_card(tmp_path):
+    from autoresearch.queue.card import CardSpec
+    from autoresearch.queue.file_queue import FileQueue
+
+    queue = FileQueue(tmp_path / "fq")
+    spec = CardSpec("Q-1", "t", "investigation", "w", [], "x", "P2")
+    task_id = queue.create_unassigned(spec, "card/Q-1", tmp_path)
+    queue.assign(task_id, "w")
+    run_id = queue.claim_next("w").runs[-1].run_id
+    queue.stop(task_id, "spend-cap: $4")
+    card = queue.get(task_id)
+    assert card.state == "blocked" and card.block_run_id == run_id and len(card.runs) == 1
+    assert card.current_run_id is None

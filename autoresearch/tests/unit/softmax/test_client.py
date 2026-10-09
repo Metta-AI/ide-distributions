@@ -1,14 +1,25 @@
 import json
+import urllib.error
 from pathlib import Path
 
 import pytest
 
-from autoresearch.softmax_tool.client import CreditsUnavailable, SoftmaxClient
+from autoresearch.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from autoresearch.softmax_tool.fake import FakeSoftmax
 from autoresearch.softmax_tool.identity import IdentityError
+from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, SERVER_ENV, SoftmaxCliError
 from autoresearch.softmax_tool.protocol import from_env
 
-from .conftest import FIXTURES, LEAGUE_ID, PLAYER_ID, completed, recorded, synthetic
+from .conftest import (
+    AGENT_TOKEN,
+    FIXTURES,
+    LEAGUE_ID,
+    PLAYER_ID,
+    FakeRunner,
+    completed,
+    recorded,
+    synthetic,
+)
 
 LABEL = "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA:v1"
 SPEC = {"league_id": LEAGUE_ID, "num_episodes": 4, "roster": [{"player": {"random": True}}] * 10}
@@ -183,10 +194,74 @@ def test_game_version_resolves_league_coworld(env, runner, tmp_path):
     ]
 
 
-def test_credits_are_unavailable_to_a_player_credential(env, runner, tmp_path):
-    with pytest.raises(CreditsUnavailable):
-        make(env, runner, tmp_path).credits()
+CREDITS_BODY = {
+    "status": {"balance_credits": 11872.6, "max_balance_credits": 20000.0, "enforced": True},
+    "recent_requests": [],
+}
+
+
+def test_credits_reads_the_balance_as_the_player(env, runner):
+    """A10: ``GET /observatory/usage/me/credits`` with the Player token (no CLI command in
+    coworld 0.1.58), with a User-Agent because Cloudflare blocks urllib's default one."""
+    seen = []
+
+    def http_get(url, headers):
+        seen.append((url, headers))
+        return json.dumps(CREDITS_BODY)
+
+    assert SoftmaxClient(env, run=runner, http_get=http_get).credits() == 11872.6
+    [(url, headers)] = seen
+    assert url == f"{DEFAULT_SERVER}{CREDITS_PATH}"
+    assert headers["Authorization"] == f"Bearer {json.loads(env['SOFTMAX_PLAYER_CREDENTIAL'])['token']}"
+    assert headers["User-Agent"]
     assert runner.calls == []
+
+
+def test_episode_cost_is_the_recent_mean(env, runner):
+    body = {
+        "status": CREDITS_BODY["status"],
+        "recent_requests": [
+            {"episodes": 2, "compute_cost_credits": 3.0},
+            {"episodes": 4, "compute_cost_credits": 9.0},
+        ],
+    }
+    client = SoftmaxClient(env, run=runner, http_get=lambda url, headers: json.dumps(body))
+    assert client.episode_cost() == 2.0
+    empty = SoftmaxClient(env, run=runner, http_get=lambda url, headers: json.dumps(CREDITS_BODY))
+    assert empty.episode_cost() is None
+
+
+def test_credits_use_the_configured_server(env, runner):
+    """The token goes only to the configured server (COGAMES_API_URL), never a constant."""
+    seen = []
+
+    def http_get(url, headers):
+        seen.append(url)
+        return json.dumps(CREDITS_BODY)
+
+    env = {**env, SERVER_ENV: "https://other.example/api/"}
+    SoftmaxClient(env, run=runner, http_get=http_get).credits()
+    assert seen == [f"https://other.example/api{CREDITS_PATH}"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        urllib.error.HTTPError(CREDITS_PATH, 403, "Forbidden", {}, None),
+        urllib.error.URLError("no route"),
+        "not json",
+        json.dumps({"status": {}}),
+    ],
+)
+def test_credits_read_failures_are_cli_errors_without_the_token(env, runner, failure):
+    def http_get(url, headers):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    with pytest.raises(SoftmaxCliError) as caught:
+        SoftmaxClient(env, run=runner, http_get=http_get).credits()
+    assert json.loads(env["SOFTMAX_PLAYER_CREDENTIAL"])["token"] not in str(caught.value)
 
 
 def test_cli_failure_message_carries_stderr(env, runner, tmp_path):
@@ -239,3 +314,80 @@ def test_game_version_is_stripped(env, runner, tmp_path):
     runner.on("coworld", "leagues", response=completed(recorded("leagues_get.json")))
     runner.on("coworld", "show", response=completed(json.dumps({**shown, "version": " 7.1\n"})))
     assert make(env, runner, tmp_path).game_version(LEAGUE_ID) == "7.1"
+
+
+def test_agent_token_on_a_local_server_runs_the_whole_cycle(env, tmp_path):
+    """A ``cga_`` agent token with ``COGAMES_API_URL`` set (the hosting runtime's setup): every
+    mutating call still checks whoami first, and every call (``FakeRunner`` asserts it) passes
+    the configured server as ``--server``."""
+    env["SOFTMAX_PLAYER_CREDENTIAL"] = AGENT_TOKEN
+    env["COGAMES_API_URL"] = "http://127.0.0.1:8000/api"
+    runner = FakeRunner(server="http://127.0.0.1:8000/api")
+    runner.on("softmax", "status", response=completed(recorded("softmax_status.txt")))
+    with_mutations(runner).on(
+        "coworld", "submissions", response=completed(recorded("submissions_league.json"))
+    )
+    sm = make(env, runner, tmp_path)
+    assert sm.whoami().expires_at is None
+    sm.upload(tmp_path / "policy.bas", "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA")
+    sm.submit(LABEL, LEAGUE_ID)
+    sm.xp_create("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", 9, 1, SPEC)
+    sm.submissions(PLAYER_ID)
+    tools = [argv[:2] for argv in runner.argvs()]
+    assert tools == [
+        ["softmax", "status"],
+        ["softmax", "status"],
+        ["coworld", "upload-policy"],
+        ["softmax", "status"],
+        ["coworld", "submit"],
+        ["coworld", "xp-request"],
+        ["softmax", "status"],
+        ["coworld", "xp-request"],
+        ["coworld", "submissions"],
+    ]
+
+
+# --- submission state (A9): fixtures shaped like the live rows of 2026-10-09 ---
+
+GOTA = "league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
+
+
+@pytest.mark.parametrize(
+    "fixture, label, expected",
+    [
+        ("memberships_policy_champion.json", "games-bond-gota:v7", ("competing", True)),
+        ("memberships_policy_benched.json", "games-bond-gota:v5", ("competing", False)),
+        ("memberships_policy_disqualified.json", "games-bond-gota:v6", ("rejected", False)),
+        ("memberships_policy_qualifying.json", "games-bond-gota:v8", ("pending", False)),
+    ],
+)
+def test_submission_state_reads_our_membership(env, runner, fixture, label, expected):
+    runner.on("coworld", "memberships", response=completed(synthetic(fixture)))
+    state = make(env, runner, None).submission_state(PLAYER_ID, GOTA, label)
+    assert (state.stage, state.is_champion) == expected and "membership" in state.detail
+    assert runner.argvs() == [
+        ["coworld", "memberships", "--league", GOTA, "--player", PLAYER_ID, "--policy", label,
+         "--json"],
+    ]  # fmt: skip
+
+
+def test_submission_state_falls_back_to_the_submission(env, runner):
+    """No membership yet: the submission's own status decides (recorded rows are ``placed``,
+    which without a membership is ``unknown``)."""
+    runner.on("coworld", "memberships", response=completed(synthetic("memberships_policy_none.json")))
+    runner.on("coworld", "submissions", response=completed(recorded("submissions_league.json")))
+    client = make(env, runner, None)
+    [row, *_] = client.submissions(PLAYER_ID)
+    assert row["submission_id"] == row["id"] and row["policy_version_id"].count(":v") == 1
+    state = client.submission_state(PLAYER_ID, row["league_id"], row["policy_version_id"])
+    assert state.stage == "unknown" and state.detail == "submission placed"
+    assert client.submission_state(PLAYER_ID, GOTA, "never-submitted:v1").stage == "unknown"
+
+
+def test_an_unknown_membership_status_is_unknown_not_pending(env, runner):
+    """N2: only submitted and qualifying (metta PolicyMembershipStatus) count as pending."""
+    page = json.loads(synthetic("memberships_policy_qualifying.json"))
+    page["entries"][0]["status"] = "retired"
+    runner.on("coworld", "memberships", response=completed(json.dumps(page)))
+    state = make(env, runner, None).submission_state(PLAYER_ID, GOTA, "games-bond-gota:v8")
+    assert state.stage == "unknown" and "retired" in state.detail

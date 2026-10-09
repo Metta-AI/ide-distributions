@@ -4,6 +4,15 @@ Metric names and directions come from ``Game.outcome_metrics``; performance metr
 ``Game.performance_guardrails``. The experiment adds primary metrics and agent guardrails.
 The candidate is not part of the design: it is bound once after upload through
 ``experiment.candidate_binding`` and passed to ``pair()`` / ``evaluate()``.
+
+Opponents (A12). Normally ``lineups`` holds one opponent line-up per seed, sampled from the
+league at design time (``stats.opponents``), with the ``league_snapshot`` it came from; both
+arms of a seed's pair face that line-up, and ``opponents`` is empty. A narrow fixed set in
+``opponents`` (every seed faces it) is allowed only with an ``opponent_rationale``, checked
+when the design is frozen (``stats.freeze``); designs frozen before A12's revision have a fixed
+``opponents`` and no rationale, and still load. ``lineups``, ``league_snapshot`` and
+``opponent_rationale`` are left out of ``to_dict`` when unset, so older designs keep their
+hash (``design_sha256``).
 """
 
 import json
@@ -49,14 +58,27 @@ class EvaluationDesign:
     delta: dict[str, float]
     n_min: int
     noise_rev: str
+    lineups: dict[str, tuple[str, ...]] | None = None  # seed (as a string) -> opponents
+    league_snapshot: dict | None = None  # what the line-ups were sampled from (A12)
+    opponent_rationale: str | None = None  # why a fixed ``opponents`` set (A12)
+
+    def opponents_for(self, seed: int) -> tuple[str, ...]:
+        """The opponents both arms of ``seed``'s pair face: its line-up, else ``opponents``.
+        A seed outside a sampled design has none (``()``); ingest drops its rows as
+        ``wrong_seed``."""
+        if self.lineups is not None:
+            return self.lineups.get(str(seed), ())
+        return self.opponents
 
     @property
     def pairing(self) -> Literal["seed_and_opponents", "seed_only"]:
         """What a candidate/baseline pair shares on the platform (A12). Each pair plays one
         seed (``game_config_overrides.seed``); opponents are identical across the pair only
-        when every entry of ``opponents`` is a fixed policy ref. A selector such as
-        ``"random"`` is sampled per request, so pairing is then seed-only."""
-        if any(entry in OPPONENT_SELECTORS for entry in self.opponents):
+        when every opponent entry is a fixed policy ref. A selector such as ``"random"`` is
+        sampled per request, so pairing is then seed-only."""
+        sampled = [entry for lineup in (self.lineups or {}).values() for entry in lineup]
+        entries = [*self.opponents, *sampled]
+        if any(entry in OPPONENT_SELECTORS for entry in entries):
             return "seed_only"
         return "seed_and_opponents"
 
@@ -83,6 +105,15 @@ class EvaluationDesign:
                 f"{len(set(self.seeds))} unique seeds < n_min {self.n_min}: each seed is one "
                 f"pair, so add seeds"
             )
+        if self.lineups is not None:
+            if self.opponents:
+                problems.append("lineups and a fixed opponents set are exclusive")
+            if set(self.lineups) != {str(seed) for seed in self.seeds}:
+                problems.append("lineups must have exactly one line-up per seed")
+            if len({len(lineup) for lineup in self.lineups.values()}) > 1:
+                problems.append("every line-up must have the same number of opponents")
+            if self.league_snapshot is None:
+                problems.append("sampled lineups need the league_snapshot they came from")
         if problems:
             raise DesignError("; ".join(problems))
 
@@ -93,6 +124,11 @@ class EvaluationDesign:
         for key in ("seats", "opponents", "seeds", "metrics"):
             data[key] = list(data[key])
         data["delta"] = dict(self.delta)
+        for key in ("lineups", "league_snapshot", "opponent_rationale"):
+            if data[key] is None:
+                del data[key]
+        if self.lineups is not None:
+            data["lineups"] = {seed: list(lineup) for seed, lineup in self.lineups.items()}
         try:
             jsonschema.validate(data, _schema())
         except jsonschema.ValidationError as error:
@@ -116,6 +152,13 @@ class EvaluationDesign:
             delta=dict(data["delta"]),
             n_min=data["n_min"],
             noise_rev=data["noise_rev"],
+            lineups=(
+                {seed: tuple(lineup) for seed, lineup in data["lineups"].items()}
+                if "lineups" in data
+                else None
+            ),
+            league_snapshot=data.get("league_snapshot"),
+            opponent_rationale=data.get("opponent_rationale"),
         )
         design.validate()
         return design

@@ -36,6 +36,16 @@ def test_template_has_every_field():
         assert field in body, f"body should explain {field}"
 
 
+def test_starter_policy_section_is_required_and_present():
+    """Every game ships a starter policy, the first champion when the league shows none for
+    our player (A14); ``softmax bootstrap-champion`` follows its ``## Starter policy``."""
+    _, template = read_doc(REPO_ROOT / "games" / "_template" / "GAME.md")
+    _, fakegame = read_doc(REPO_ROOT / "games" / "fakegame" / "GAME.md")
+    assert "`## Starter policy` section" in template
+    assert "\n## Starter policy\n" in fakegame
+    assert "Baseline build" not in template + fakegame
+
+
 def test_fakegame_loads():
     game = load_game(REPO_ROOT, "fakegame")
     assert isinstance(game, Game)

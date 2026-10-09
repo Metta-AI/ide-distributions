@@ -29,6 +29,21 @@
     "k": {"type": "number", "exclusiveMinimum": 0},
     "delta": {"type": "object", "additionalProperties": {"type": "number"}},
     "n_min": {"type": "integer", "minimum": 1},
-    "noise_rev": {"type": "string", "minLength": 1}
+    "noise_rev": {"type": "string", "minLength": 1},
+    "lineups": {
+      "type": "object",
+      "description": "A12: seed (as a string) -> the opponent line-up both arms of that seed face, sampled from the league",
+      "additionalProperties": {"type": "array", "items": {"type": "string"}}
+    },
+    "league_snapshot": {
+      "type": "object",
+      "description": "A12: the league the lineups were sampled from (stats.opponents.league_snapshot)",
+      "required": ["league_id", "taken_at", "basis", "entries"]
+    },
+    "opponent_rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A12: why the design uses a narrow fixed opponents set instead of sampled lineups"
+    }
   }
 }

@@ -46,5 +46,4 @@ def layout(tmp_path, monkeypatch) -> Layout:
     monkeypatch.delenv("HERMES_KANBAN_WORKSPACE", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
     monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
-    monkeypatch.delenv("AUTORESEARCH_QUEUE", raising=False)
     return Layout(home, hermes_home, canonical, worker, sibling, cli)
