@@ -133,7 +133,7 @@ def test_a_blocked_card_under_the_cap_is_still_requeued(host):
 
 def test_daily_budget_pauses_until_the_next_utc_day(host):
     task_id = _card(host).task_id
-    add_session(host.home, "today", 26.0, started_at=at(1).timestamp())
+    add_session(host.home, "today", spend.DEFAULT_DAILY_USD + 1, started_at=at(1).timestamp())
     first = host.tick(at(2))
     assert first.spend_run.over_budget and first.spend_run.paused
     assert is_paused(host.ledger) and host.queue.get(task_id).assignee is None
@@ -151,7 +151,7 @@ def test_daily_budget_pauses_until_the_next_utc_day(host):
 
 
 def test_a_budget_pause_is_kept_when_the_spend_cannot_be_read(host):
-    add_session(host.home, "today", 26.0, started_at=at(1).timestamp())
+    add_session(host.home, "today", spend.DEFAULT_DAILY_USD + 1, started_at=at(1).timestamp())
     host.tick(at(2))
     host.env["AUTORESEARCH_MAX_CARD_RUNS"] = "bad"  # the spend step fails
     result = host.tick(at(3))
@@ -162,7 +162,7 @@ def test_a_preflight_pause_is_not_resumed_while_over_budget(host):
     path = host.ledger / "pause.json"
     host.tick(at(2))
     write_json(path, {"reason": "preflight failed: x", "paused_at": "t", "tasks": {}})
-    add_session(host.home, "today", 30.0, started_at=at(1).timestamp())
+    add_session(host.home, "today", spend.DEFAULT_DAILY_USD + 5, started_at=at(1).timestamp())
     result = host.tick(at(3))
     assert result.resumed is None and read_json(path)["reason"] == "preflight failed: x"
 
@@ -283,7 +283,7 @@ def test_a_budget_reached_today_holds_the_pause_when_state_db_is_unreadable(host
     path = host.ledger / "pause.json"
     host.tick(at(2))
     write_json(path, {"reason": "preflight failed: x", "paused_at": "t", "tasks": {}})
-    add_session(host.home, "today", 30.0, started_at=at(1).timestamp())
+    add_session(host.home, "today", spend.DEFAULT_DAILY_USD + 5, started_at=at(1).timestamp())
     host.tick(at(3))  # over budget: hold recorded; preflight reason kept
     (host.home / "state.db").write_bytes(b"not a database")
     result = host.tick(at(4))

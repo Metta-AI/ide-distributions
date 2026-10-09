@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autoresearch on Softmax Hosting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Merriweather+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============ Ink & Print tokens ============ */
+  :root {
+    --bg: #fffdf4;            /* cream paper */
+    --surface: #fffaf0;
+    --surface-alt: #f8f6ef;
+    --fg: #111827;            /* warm near-black — never pure #000 */
+    --fg-subtle: #555555;
+    --fg-muted: #999999;
+    --ink-navy: #1a3875;
+    --ink-sage: #6e8050;
+    --ink-terracotta: #b36e4e;
+    --ink-gold: #d4a853;
+    --accent: #859ebe;
+    --accent-soft: #eef2f7;
+    --cta: #0e2758;
+    --cta-foreground: #fffdf4;
+    --border: #e4dac8;
+    --border-strong: #d4c9b5;
+    --border-subtle: #f0ebe1;
+    --serif: 'Merriweather', Georgia, serif;
+    --sans: 'Merriweather Sans', 'Helvetica Neue', sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ============ Page grid: reading column + comment rail ============ */
+  .dc-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 0;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  article#doc {
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+    min-width: 0;
+  }
+
+  /* ============ Typography ============ */
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+  }
+  header.masthead { border-bottom: 2px solid var(--border-strong); padding-bottom: 20px; margin-bottom: 32px; }
+  header.masthead h1 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 8px 0 10px;
+  }
+  header.masthead .context { color: var(--fg-subtle); font-size: 13.5px; margin: 0; }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-navy);
+    margin: 48px 0 12px;
+  }
+  h3 { font-family: var(--serif); font-weight: 700; font-size: 16.5px; margin: 32px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--ink-navy); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--cta); }
+  strong { font-weight: 700; }
+  ul, ol { padding-left: 24px; margin: 0 0 14px; }
+  li { margin-bottom: 4px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* Key-points opener: every section starts with scannable bullets */
+  .key-points {
+    list-style: none;
+    padding: 0 0 0 2px;
+    margin: 0 0 18px;
+  }
+  .key-points li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+  .key-points li::before { content: '—'; position: absolute; left: 0; color: var(--ink-gold); font-weight: 700; }
+
+  /* ============ TOC ============ */
+  nav.toc { margin: 28px 0 8px; }
+  nav.toc ol { list-style: none; padding: 0; column-count: 2; column-gap: 40px; margin: 10px 0 0; }
+  nav.toc li { margin-bottom: 5px; break-inside: avoid; }
+  nav.toc a { text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
+  nav.toc .toc-num { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); margin-right: 8px; }
+
+  /* ============ Tables ============ */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 18px 0 22px;
+    font-size: 13.5px;
+  }
+  th {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    text-align: left;
+    padding: 6px 12px 6px 0;
+    border-bottom: 2px solid var(--border-strong);
+  }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; font-feature-settings: 'tnum' 1; }
+
+  /* ============ Figures ============ */
+  figure { margin: 24px 0 28px; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+  figcaption .fig-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    color: var(--ink-navy);
+    margin-right: 8px;
+  }
+
+  /* ============ Code & citations ============ */
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 16px 0 20px;
+  }
+  pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+  .cite {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg-subtle);
+    background: var(--surface-alt);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  /* Superscript source references — body prose never carries raw file paths.
+     Full citation lives in the title (hover) and in the numbered Sources list. */
+  sup.ref { line-height: 0; }
+  sup.ref a {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-navy);
+    text-decoration: none;
+    padding: 0 1px;
+  }
+  sup.ref a:hover { text-decoration: underline; }
+  ol.sources { margin: 12px 0; padding-left: 30px; }
+  ol.sources li {
+    font-size: 13px;
+    padding: 2px 0;
+  }
+  ol.sources li::marker {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--ink-navy);
+  }
+  ol.sources li:target { background: var(--accent-soft); }
+
+  /* ============ Callouts ============ */
+  .callout { padding: 12px 16px; margin: 18px 0; font-size: 13.5px; border-radius: 3px; }
+  .callout .callout-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .callout-info { background: var(--accent-soft); }
+  .callout-info .callout-label { color: var(--ink-navy); }
+  .callout-warn { background: rgba(179, 110, 78, 0.08); border-left: 3px solid var(--ink-terracotta); }
+  .callout-warn .callout-label { color: var(--ink-terracotta); }
+  .callout-open { background: rgba(212, 168, 83, 0.10); }
+  .callout-open .callout-label { color: #8a6a1f; }
+
+  /* Decision record */
+  .decision { border-top: 1px solid var(--border); padding: 14px 0 4px; margin: 14px 0; }
+  .decision .decision-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-sage); }
+  .decision p { margin-top: 6px; }
+
+  @media (max-width: 1100px) {
+    .dc-page { grid-template-columns: 1fr; }
+  }
+  @media print {
+    #dc-sidebar, #dc-fab, #dc-toggle { display: none !important; }
+    .dc-page { grid-template-columns: 1fr; }
+  }
+
+  /* Checklist (M0) */
+  ul.checklist { list-style: none; padding-left: 2px; }
+  ul.checklist li { padding-left: 24px; position: relative; margin-bottom: 6px; }
+  ul.checklist li::before {
+    content: ''; position: absolute; left: 0; top: 6px;
+    width: 11px; height: 11px; border: 1.5px solid var(--border-strong); border-radius: 2px; background: var(--surface);
+  }
+  #sources .cite { white-space: normal; overflow-wrap: anywhere; }
+  td code, td { overflow-wrap: anywhere; }
+  @media (max-width: 640px) {
+    article#doc { padding: 32px 16px 80px; }
+    nav.toc ol { column-count: 1; }
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout p { margin-bottom: 8px; }
+  /* replies rendered under a comment (from the comment's `replies` array) */
+  .dc-replies { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
+  .dc-reply-author { font-family: var(--sans); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-navy); }
+  .dc-reply-text { font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; margin-top: 2px; }
+  .dc-reply-text a { color: var(--ink-navy); word-break: break-all; }
+
+  /* ================================================================
+     DC-COMMENTS BEGIN — styles (copy verbatim; do not modify)
+     ================================================================ */
+  ::highlight(dc-hl) { background: rgba(212, 168, 83, 0.28); }
+  ::highlight(dc-hl-active) { background: rgba(212, 168, 83, 0.6); }
+
+  #dc-fab {
+    position: absolute;
+    z-index: 40;
+    display: none;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--cta-foreground);
+    background: var(--cta);
+    border: 1px solid #0a1c42;
+    border-radius: 3px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #dc-fab:hover { background: var(--ink-navy); }
+
+  #dc-sidebar {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    padding: 24px 20px 60px;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  #dc-sidebar h2.dc-title {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+    margin: 0 0 4px;
+  }
+  .dc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 18px; }
+  .dc-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .dc-btn:hover { background: var(--surface-alt); }
+  .dc-btn:focus-visible, #dc-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dc-empty { color: var(--fg-muted); font-style: italic; }
+  .dc-item { border-top: 1px solid var(--border-subtle); padding: 12px 0; cursor: pointer; }
+  .dc-item.dc-resolved { opacity: 0.5; }
+  .dc-quote {
+    border-left: 2px solid var(--ink-gold);
+    padding-left: 8px;
+    color: var(--fg-subtle);
+    font-style: italic;
+    font-size: 12px;
+    margin-bottom: 6px;
+    overflow-wrap: break-word;
+  }
+  .dc-orphan-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-terracotta);
+    background: rgba(179, 110, 78, 0.12);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .dc-text { white-space: pre-wrap; overflow-wrap: break-word; }
+  .dc-item textarea {
+    width: 100%;
+    min-height: 64px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 6px 8px;
+    resize: vertical;
+  }
+  .dc-item textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dc-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--fg-muted); }
+  .dc-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .dc-meta .dc-del { margin-left: auto; color: var(--ink-terracotta); background: none; border: none; font-size: 11px; cursor: pointer; padding: 0; }
+  .dc-meta .dc-del:hover { text-decoration: underline; }
+  #dc-status { font-size: 11px; color: var(--ink-sage); min-height: 16px; margin-top: 8px; }
+
+  #dc-toggle { display: none; }
+  @media (max-width: 1100px) {
+    #dc-sidebar {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 320px;
+      max-width: 90vw;
+      transform: translateX(100%);
+      transition: transform 200ms ease-out;
+      z-index: 50;
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+    }
+    #dc-sidebar.dc-open { transform: translateX(0); }
+    #dc-toggle {
+      display: block;
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 51;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--cta-foreground);
+      background: var(--cta);
+      border: 1px solid #0a1c42;
+      border-radius: 999px;
+      padding: 9px 15px;
+      cursor: pointer;
+    }
+  }
+  /* ============ DC-COMMENTS END — styles ============ */
+</style>
+</head>
+<body>
+<div class="dc-page">
+<article id="doc">
+
+  <header class="masthead">
+    <span class="eyebrow">Integration plan · 2026-10-09 · Status: all decided, M0 and M1 started</span>
+    <h1>Autoresearch on Softmax Hosting</h1>
+    <p class="context">This plan puts the autoresearch agent into Rohit's hosted Hermes fleet. As a result, a coach who clicks Start Hermes in the Softmax IDE gets autoresearch. We wrote it for James from plan revision 5 and Rohit's update of 2026-10-09. We checked the metta facts against <code>main</code> at <code>0c0752ed3f</code>.</p>
+  </header>
+
+  <section id="summary">
+    <h2>Executive Summary</h2>
+    <p>Today a coach who clicks <strong>Start Hermes</strong> in the Softmax IDE gets Rohit's <code>optimizer</code> profile. We want that coach to get the autoresearch agent in a hosted workspace that is always on. In that workspace, the agent does its research loop, answers in IDE chat, and takes work from the IDE research buttons. The coach can also pause and resume it. Autoresearch already works on our own EC2 test box, and it submitted its first league champion there. Rohit made and deployed the hosted system. It is a shared EC2 fleet, and each player gets a Hermes sandbox that connects to the IDE. Today the fleet operates his <code>rohit-optimizer</code> profile on one small host with <code>$10</code> inference keys. Rohit is away for the next few days, thus <strong>we own his code and the deployment for now</strong>. Our agents write and land the metta changes. Aaron, Alex and Richard review them, and James operates the infrastructure.</p>
+    <p>The plan has six milestones. M0 is prerequisites. M1 is a full local run on a Lima VM. M2 is the first hosted deploy with Gods of the Arena (GotA). M3 is GotA research with the compiler. M4 lets us update the profile without a host replacement, and M5 adds more hosts. One fact controls the whole plan: <strong>every deploy replaces the host and erases the workspace files</strong>. The files stay only if an operator copies them to the new host first. Also, the new sandbox size leaves <strong>two slots for all of softmax.com</strong> until M5. Status: we made the decisions, and Tasks 1 and 2 are done and in review as PR #21 (<code>jboggs/autoresearch-hosted-m1a</code>). We have not built anything else. M0 and M1 are next.</p>
+  </section>
+
+  <nav class="toc">
+    <span class="eyebrow">Contents</span>
+    <ol>
+      <li><span class="toc-num">1</span><a href="#rohit-system">Rohit's system in 10 minutes</a></li>
+      <li><span class="toc-num">2</span><a href="#changes">What changes to run autoresearch there</a></li>
+      <li><span class="toc-num">3</span><a href="#milestones">Milestones</a></li>
+      <li><span class="toc-num">4</span><a href="#people">Who does what</a></li>
+      <li><span class="toc-num">5</span><a href="#decisions">Decisions</a></li>
+      <li><span class="toc-num">6</span><a href="#risks">Risks and unknowns</a></li>
+      <li><span class="toc-num">7</span><a href="#alternatives">Alternatives considered</a></li>
+      <li><span class="toc-num">8</span><a href="#open-questions">Open questions</a></li>
+      <li><span class="toc-num">9</span><a href="#sources">Sources</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ 1 ============ -->
+  <section id="rohit-system">
+    <h2>1 · Rohit's system in 10 minutes</h2>
+    <ul class="key-points">
+      <li>The IDE asks the Softmax API for a workspace. The API writes an encrypted record to S3. Then a controller on one EC2 host reads S3 and starts one gVisor sandbox for each player.</li>
+      <li>One host is live: <code>hermes-rohit-validation</code>. It is an <code>m7i.2xlarge</code> with room for a maximum of 8 workspaces of 2 CPU / 2 GiB / 10 GiB each. All of them operate <code>rohit-optimizer</code>.</li>
+      <li>A change to the image, the controller or the sizes replaces the host. The records stay, but the workspace files do not, unless an operator moves the disks.</li>
+      <li>Rohit made sure that the simple path for one user works. He did not test a new signup, two users on one host, or the recovery of a host.</li>
+    </ul>
+
+    <p>This section is for a reader who starts with no background. It shows how the click of a coach becomes a live agent. It also shows what is deployed today, how a deploy works, and where the evidence is weak. A glossary at the end gives the meaning of the terms that the rest of the document uses.</p>
+
+    <h3>The request flow</h3>
+
+    <figure>
+      <svg viewBox="0 0 680 720" role="img" aria-label="Architecture: the IDE calls the Softmax API, which writes workspace records to S3; a host controller on the EC2 host reads S3 and runs one gVisor sandbox per player containing the Hermes gateway, the bridge, our profile with queue-keeper and Kanban workers, and the workspace volume; the sandbox calls out to the Softmax API and OpenRouter.">
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8" fill="none" stroke="#859ebe" stroke-width="1.2"/>
+          </marker>
+        </defs>
+        <g font-family="Merriweather Sans, Helvetica Neue, sans-serif">
+          <!-- IDE -->
+          <rect x="220" y="14" width="240" height="50" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="340" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">Coach's browser · Softmax IDE</text>
+          <text x="340" y="53" text-anchor="middle" font-size="11" fill="#555555">clicks "Start Hermes"</text>
+          <line x1="340" y1="64" x2="340" y2="96" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- API -->
+          <rect x="170" y="98" width="340" height="74" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+          <text x="340" y="119" text-anchor="middle" font-size="13" font-weight="700" fill="#1a3875">Softmax API (observatory-api, production)</text>
+          <text x="340" y="137" text-anchor="middle" font-size="11" fill="#111827">routes: start · status · bridge report (no delete)</text>
+          <text x="340" y="153" text-anchor="middle" font-size="11" fill="#111827">one hosted player per user (second gets HTTP 409)</text>
+          <text x="340" y="166" text-anchor="middle" font-size="11" fill="#555555">mints a cga_ token and a $10 / 30-day OpenRouter key</text>
+          <line x1="340" y1="172" x2="340" y2="204" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+          <text x="348" y="193" font-size="10.5" fill="#555555">writes encrypted record</text>
+
+          <!-- S3 -->
+          <rect x="200" y="206" width="280" height="50" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="340" y="227" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">S3 fleet bucket</text>
+          <text x="340" y="245" text-anchor="middle" font-size="11" fill="#555555">workspaces/ · credentials/ · status/ &lt;id&gt;.json</text>
+
+          <!-- Host -->
+          <rect x="16" y="282" width="648" height="356" rx="4" fill="#f8f6ef" stroke="#d4c9b5"/>
+          <text x="30" y="302" font-size="11" font-weight="700" fill="#555555" letter-spacing="1">EC2 HOST · hermes-rohit-validation</text>
+          <text x="650" y="302" text-anchor="end" font-size="10.5" fill="#555555">m7i.2xlarge today → m7i.4xlarge after M2</text>
+
+          <!-- controller -->
+          <rect x="230" y="314" width="220" height="46" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="340" y="333" text-anchor="middle" font-size="12.5" font-weight="700" fill="#111827">Host controller · fleet.py</text>
+          <text x="340" y="350" text-anchor="middle" font-size="11" fill="#555555">systemd service; restarts exited sandboxes</text>
+          <line x1="340" y1="314" x2="340" y2="258" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+          <text x="348" y="276" font-size="10.5" fill="#555555">reads records every 15 s</text>
+          <line x1="340" y1="360" x2="340" y2="386" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+          <text x="348" y="378" font-size="10.5" fill="#555555">one container per workspace</text>
+
+          <!-- sandbox -->
+          <rect x="32" y="388" width="616" height="234" rx="3" fill="#fffdf4" stroke="#1a3875" stroke-dasharray="5 3"/>
+          <text x="46" y="406" font-size="11" font-weight="700" fill="#1a3875" letter-spacing="1">gVISOR SANDBOX · one per player · uid 10000 · no Docker inside</text>
+
+          <!-- gateway -->
+          <rect x="48" y="418" width="182" height="82" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+          <text x="139" y="440" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1a3875">Hermes gateway</text>
+          <text x="139" y="458" text-anchor="middle" font-size="10.5" fill="#111827">one process for all profiles</text>
+          <text x="139" y="474" text-anchor="middle" font-size="10.5" fill="#111827">routes chat to /p/optimizer/</text>
+          <text x="139" y="490" text-anchor="middle" font-size="10.5" fill="#555555">runs cron and Kanban</text>
+
+          <!-- bridge -->
+          <rect x="48" y="514" width="182" height="94" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+          <text x="139" y="536" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1a3875">Bridge · bridge.py</text>
+          <text x="139" y="554" text-anchor="middle" font-size="10.5" fill="#111827">IDE chat ↔ Hermes runs</text>
+          <text x="139" y="570" text-anchor="middle" font-size="10.5" fill="#111827">IDE tasks ↔ comms/ files</text>
+          <text x="139" y="590" text-anchor="middle" font-size="10.5" fill="#b36e4e">task relay off today; on after M2</text>
+          <line x1="139" y1="514" x2="139" y2="502" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- our profile -->
+          <rect x="246" y="418" width="226" height="190" rx="3" fill="#fffaf0" stroke="#d4a853" stroke-width="1.8"/>
+          <text x="359" y="440" text-anchor="middle" font-size="12.5" font-weight="700" fill="#111827">Our profile, installed as "optimizer"</text>
+          <text x="359" y="456" text-anchor="middle" font-size="10.5" fill="#555555">replaces rohit-optimizer (D2)</text>
+          <rect x="262" y="468" width="194" height="56" rx="3" fill="#fffdf4" stroke="#d4c9b5"/>
+          <text x="359" y="490" text-anchor="middle" font-size="12" font-weight="700" fill="#111827">queue-keeper (cron)</text>
+          <text x="359" y="507" text-anchor="middle" font-size="10.5" fill="#555555">bootstraps, adopts coach inbox</text>
+          <rect x="262" y="536" width="194" height="56" rx="3" fill="#fffdf4" stroke="#d4c9b5"/>
+          <text x="359" y="558" text-anchor="middle" font-size="12" font-weight="700" fill="#111827">Kanban workers</text>
+          <text x="359" y="575" text-anchor="middle" font-size="10.5" fill="#555555">run research cards</text>
+          <line x1="230" y1="459" x2="244" y2="459" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- volume -->
+          <rect x="488" y="418" width="144" height="190" rx="3" fill="#f8f6ef" stroke="#d4c9b5"/>
+          <text x="560" y="440" text-anchor="middle" font-size="12.5" font-weight="700" fill="#111827">Workspace volume</text>
+          <text x="560" y="458" text-anchor="middle" font-size="11" fill="#111827">/opt/data</text>
+          <text x="560" y="482" text-anchor="middle" font-size="10.5" fill="#555555">profile, workspace,</text>
+          <text x="560" y="497" text-anchor="middle" font-size="10.5" fill="#555555">board, chat history</text>
+          <text x="560" y="528" text-anchor="middle" font-size="10.5" fill="#111827">10 GiB today</text>
+          <text x="560" y="544" text-anchor="middle" font-size="10.5" fill="#111827">100 GiB after M2</text>
+          <text x="560" y="576" text-anchor="middle" font-size="10.5" fill="#b36e4e">lost on host replace</text>
+          <text x="560" y="591" text-anchor="middle" font-size="10.5" fill="#b36e4e">unless moved</text>
+          <line x1="472" y1="513" x2="486" y2="513" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- outbound -->
+          <line x1="200" y1="622" x2="200" y2="664" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+          <line x1="480" y1="622" x2="480" y2="664" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arr)"/>
+          <text x="340" y="652" text-anchor="middle" font-size="10.5" fill="#555555">outbound only</text>
+          <rect x="60" y="666" width="280" height="46" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="200" y="686" text-anchor="middle" font-size="12" font-weight="700" fill="#111827">Softmax API</text>
+          <text x="200" y="703" text-anchor="middle" font-size="10.5" fill="#555555">bridge reports · league, XP, uploads (cga_)</text>
+          <rect x="360" y="666" width="260" height="46" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="490" y="686" text-anchor="middle" font-size="12" font-weight="700" fill="#111827">OpenRouter</text>
+          <text x="490" y="703" text-anchor="middle" font-size="10.5" fill="#555555">model calls on the workspace key</text>
+        </g>
+      </svg>
+      <figcaption><span class="fig-label">Figure 1</span>The hosted system with our profile in its place (gold outline). Secrets go from the API to S3 to the host, and never through the browser. All items in the dashed sandbox operate as one user. That is why D9 (inbox trust) is important. Terracotta notes show what changes or breaks during a deploy.</figcaption>
+    </figure>
+
+    <p>When a coach clicks Start Hermes, these events occur in this sequence:</p>
+    <ol>
+      <li><strong>The IDE calls the API.</strong> The Hermes routes of the API are start, status and bridge report only. No route erases a workspace<sup class="ref"><a href="#src-1" title="packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/router.py">1</a></sup>. A user can have only one hosted player, and the API refuses a second allocation with HTTP 409<sup class="ref"><a href="#src-2" title="packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/service.py:166-167">2</a></sup>.</li>
+      <li><strong>The API makes a workspace.</strong> It makes a new <code>cga_</code> player token<sup class="ref"><a href="#src-3" title="packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:33">3</a></sup> and an OpenRouter key from a global budget of <code>$10</code> for 30 days<sup class="ref"><a href="#src-4" title="packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:69-87; packages/observatory-core/src/observatory_core/hermes/models.py:21-25">4</a></sup>. The token is a new agent credential for the player that the coach selected in the IDE. The API does not make a new player. Then it writes the workspace record, which holds those secrets, to S3 and not to the host<sup class="ref"><a href="#src-5" title="packages/observatory-core/src/observatory_core/hermes/store.py:43-94">5</a></sup>.</li>
+      <li><strong>The host controller finds the record.</strong> The controller is <code>fleet.py</code>, a systemd service on the EC2 host. It reads S3 each 15 seconds. For each record of its host, it makes the disk if the disk is absent. Then it writes <code>runtime.json</code> (the settings of the bridge), pins the container image, and starts the sandbox<sup class="ref"><a href="#src-6" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:118-131,139-163">6</a></sup>. When there are more records than <code>max_workspaces</code>, the oldest records operate. The others stop and show "Waiting for host capacity"<sup class="ref"><a href="#src-7" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:251-259">7</a></sup>.</li>
+      <li><strong>The sandbox starts Hermes.</strong> In the sandbox, <code>runtime.py</code> installs the profile. Then it starts one Hermes gateway and the bridge<sup class="ref"><a href="#src-8" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:21,38-66">8</a></sup><sup class="ref"><a href="#src-9" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:123-138,146">9</a></sup>. The bridge must report to the API in 3 minutes or less<sup class="ref"><a href="#src-10" title="packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/service.py:32,133">10</a></sup>.</li>
+      <li><strong>The bridge connects the IDE to Hermes.</strong> It sends IDE chat to Hermes runs. It can also send IDE research tasks into <code>workspace/comms/</code> files, and it can send the notes of the agent back as task updates. But <strong>that relay is off today</strong><sup class="ref"><a href="#src-11" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:149,156">11</a></sup>.</li>
+    </ol>
+
+    <h3>What is deployed</h3>
+    <ul>
+      <li><strong>One host:</strong> <code>hermes-rohit-validation</code>, instance <code><ec2-instance-id></code> in AWS account <code><aws-account-id></code>. It is an <code>m7i.2xlarge</code> with 8 vCPU, 32 GiB RAM and a 200 GiB gp3 root disk<sup class="ref"><a href="#src-12" title="devops/app-manifests/values.yaml:536-542">12</a></sup><sup class="ref"><a href="#src-13" title="devops/tf/hermes-fleet/main.tf:181,191-196">13</a></sup>.</li>
+      <li><strong>Host configuration:</strong> Terraform gives only <code>image</code> and <code>softmax_server</code>, thus the defaults in the code apply. These are a maximum of 8 workspaces, each with 2 CPU, 2 GiB RAM and a 10 GiB disk. The chat model is <code>openai/gpt-6-luna</code><sup class="ref"><a href="#src-14" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:26-35">14</a></sup><sup class="ref"><a href="#src-15" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:167-204">15</a></sup>.</li>
+      <li><strong>Profile:</strong> each workspace installs <code>rohit-optimizer</code> as the Hermes profile with the name <code>optimizer</code>. The image pins it at commit <code>f6508fb</code>, and the research relay is off<sup class="ref"><a href="#src-16" title="packages/observatory-hosted-worker/Dockerfile">16</a></sup><sup class="ref"><a href="#src-8" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:21,38-66">8</a></sup><sup class="ref"><a href="#src-11" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:149,156">11</a></sup>.</li>
+    </ul>
+
+    <h3>How a deploy works, and why it erases workspaces</h3>
+    <ol>
+      <li>Make the runtime image and push it to ECR (the container registry of AWS). Make the host bundle and upload it to S3 with a new key. Nobody overwrites that key<sup class="ref"><a href="#src-17" title="devops/hermes-fleet/README.md">17</a></sup>.</li>
+      <li>Set <code>runtime_image</code>, <code>bundle_key</code> and <code>bundle_sha256</code> in Spacelift (the hosted service that operates our Terraform). Then apply.</li>
+      <li>Terraform sets <code>user_data_replace_on_change</code>. As a result, <strong>a change to the image, the controller or the sandbox sizes replaces the full host</strong>. The host also has <code>prevent_destroy</code>, which is there to stop that replacement<sup class="ref"><a href="#src-18" title="devops/tf/hermes-fleet/main.tf:186,206,210">18</a></sup>. Rohit's #27146 replaced the host "with explicit approval". Nobody wrote down how that replacement got past <code>prevent_destroy</code><sup class="ref"><a href="#src-19" title="autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Deployment">19</a></sup>.</li>
+      <li>The new host reads each S3 record for its host id. When the disk of a record is absent, the record gets a <strong>new, empty disk</strong> and the current image of the host<sup class="ref"><a href="#src-6" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:118-131,139-163">6</a></sup>. Thus the records stay after a replacement, but <strong>the workspace files do not</strong>. The files stay only if an operator copies the disks to the new host first. That copy is the "move" procedure. It does not exist yet, and we will write it.</li>
+      <li>The runtime never updates a profile after it installs it<sup class="ref"><a href="#src-20" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:47-48">20</a></sup>. Also, the controller pins the image of each workspace at its first start<sup class="ref"><a href="#src-21" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:137-163">21</a></sup>. Thus a live workspace gets new code only through a host replacement or a move.</li>
+    </ol>
+    <div class="callout callout-warn">
+      <span class="callout-label">Why this controls the whole plan</span>
+      Each deploy in M2 thru M4 is a host replacement. Each one is an outage that users can see, and it empties each disk that we do not move. When the sandboxes get larger, the host also goes from 8 slots to 2. M4 is there so that a profile update does not need a replacement.
+    </div>
+
+    <h3>What Rohit verified, and what he did not</h3>
+    <p>The left column is the report of Rohit. We did not check any of it again<sup class="ref"><a href="#src-22" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 1">22</a></sup>.</p>
+    <table>
+      <thead><tr><th>Verified (his claim)</th><th>Not tested</th></tr></thead>
+      <tbody>
+        <tr><td>Start Hermes makes an EC2 workspace and connects the bridge</td><td>A new signup, then a new player, then the allocation</td></tr>
+        <tr><td>Real chat through OpenRouter on a <code>$10</code> / 30-day key</td><td>Two users on one host, and the isolation between them</td></tr>
+        <tr><td>Hermes used rohit-optimizer to make and upload a policy</td><td>Host replacement or recovery, and backup restore</td></tr>
+        <tr><td>That policy completed a hosted GotA smoke episode (it operated, but nobody judged its quality)</td><td>Load over a long time, and fleet capacity</td></tr>
+        <tr><td>A restart keeps the files, the session and the chat history</td><td>Promotion and league submission (not tested, on purpose)</td></tr>
+        <tr><td>The API refuses a second allocation for the same user</td><td></td></tr>
+        <tr><td>gVisor, a user that is not root, limits and a persistent disk. The host network and the metadata network are blocked.</td><td></td></tr>
+      </tbody>
+    </table>
+    <p>Rohit gave these conditions for each team that connects to the system:</p>
+    <ul>
+      <li>One workspace for each player.</li>
+      <li>EC2 is the default provider (Nous is an alternative code path).</li>
+      <li>Workspaces are always on.</li>
+      <li>Use the current mapping from player to workspace, and use the bridge.</li>
+      <li>Add no new OpenRouter secret.</li>
+    </ul>
+
+    <h3>Glossary</h3>
+    <table>
+      <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Workspace</td><td>The hosted Hermes environment of one player. It is an S3 record plus a disk and a container on a host. Each player has one workspace, and each user has one hosted player.</td></tr>
+        <tr><td>Sandbox</td><td>The container for a workspace. It uses the gVisor runtime (<code>runsc</code>) as uid 10000, with a read-only root and no Linux capabilities. It has no Docker. The limits today are 2 CPU, 2 GiB RAM, 512 processes, a 256 MiB <code>/tmp</code> and a 10 GiB data disk<sup class="ref"><a href="#src-15" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:167-204">15</a></sup>.</td></tr>
+        <tr><td>gVisor</td><td>A container runtime with a kernel in user space. That kernel stops system calls before they get to the host kernel. Thus gVisor isolates containers more than usual Docker does.</td></tr>
+        <tr><td>Host controller</td><td><code>fleet.py</code>. It compares the S3 records with the containers on its host and makes them agree. It starts again each container that stops<sup class="ref"><a href="#src-23" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:177,205-206,294">23</a></sup>.</td></tr>
+        <tr><td>Bridge</td><td><code>bridge.py</code>. It operates in the sandbox and connects IDE chat and IDE tasks to Hermes and to the <code>comms/</code> files.</td></tr>
+        <tr><td><code>cga_</code> token</td><td>The "cogent agent" credential. It is the player credential of the workspace, and it never expires. When an operator revokes its <code>CogentAgent</code> row, the controller stops the sandbox<sup class="ref"><a href="#src-24" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:84-95">24</a></sup>.</td></tr>
+        <tr><td>OpenRouter key of the workspace</td><td>The API makes this key one time for each workspace record, from one global budget (<code>HERMES_INFERENCE_BUDGET_USD</code>, now <code>10</code>). A reconnect never renews it. A change to the budget applies only to records that the API makes after the change<sup class="ref"><a href="#src-25" title="packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:72-73">25</a></sup>.</td></tr>
+        <tr><td>Permits / Controls</td><td>The IDE Controls of the coach: the league choice, an <code>askBefore</code> list (actions that need approval) and <code>dailyCredits</code>. The server applies them to <code>cga_</code> XP requests and submissions<sup class="ref"><a href="#src-26" title="packages/observatory-api/src/observatory_api/v2/experience_requests.py:465-508; packages/observatory-api/src/observatory_api/routes/app/v2/league_submissions/service.py:152-169; packages/observatory-core/src/observatory_core/cogents/permits.py:1-14">26</a></sup>. But it applies them <strong>only after the coach sets up the player</strong>. Before that, the token is the same as the token of any player, with no league choice and no daily limit<sup class="ref"><a href="#src-27" title="packages/observatory-core/src/observatory_core/cogents/permits.py:13-14,445-450">27</a></sup>.</td></tr>
+        <tr><td>Spacelift</td><td>The hosted service that operates our Terraform/OpenTofu. The stack for the fleet host is <code>hermes-fleet-sandbox</code>.</td></tr>
+        <tr><td>ECR</td><td>The container registry of AWS. The runtime image goes to the repository <code>hermes-runtime</code>, pinned by digest.</td></tr>
+        <tr><td>Lima VM</td><td>A Linux virtual machine on a Mac (<code>limactl</code>). The fleet README uses one as a local fleet host for tests before production<sup class="ref"><a href="#src-17" title="devops/hermes-fleet/README.md">17</a></sup>.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Where things live in metta</h3>
+    <p>The Sources list has the full paths. This plan changes these parts.</p>
+    <table>
+      <thead><tr><th>Component</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>fleet.py</code></td><td>Host controller: sandbox flags, sizes (<code>HostConfig</code>), the <code>/p/optimizer/</code> route, the relay switch<sup class="ref"><a href="#src-14" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:26-35">14</a></sup></td></tr>
+        <tr><td><code>runtime.py</code></td><td>Sandbox start: installs the profile, writes <code>.env</code>, starts the gateway<sup class="ref"><a href="#src-8" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:21,38-66">8</a></sup></td></tr>
+        <tr><td><code>bridge.py</code></td><td>The bridge: chat, task relay, task status updates<sup class="ref"><a href="#src-28" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:172-175,524">28</a></sup></td></tr>
+        <tr><td>Hosted-worker <code>Dockerfile</code></td><td>Runtime image. Today it clones <code>rohit-optimizer@f6508fb</code><sup class="ref"><a href="#src-16" title="packages/observatory-hosted-worker/Dockerfile">16</a></sup></td></tr>
+        <tr><td>API <code>ec2.py</code></td><td>API side: credentials, key creation, workspace records<sup class="ref"><a href="#src-4" title="packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:69-87; packages/observatory-core/src/observatory_core/hermes/models.py:21-25">4</a></sup></td></tr>
+        <tr><td><code>devops/hermes-fleet/</code></td><td>Host bundle, local Lima check, operator notes<sup class="ref"><a href="#src-17" title="devops/hermes-fleet/README.md">17</a></sup></td></tr>
+        <tr><td>Fleet <code>main.tf</code></td><td>EC2 host Terraform: instance type, root disk, <code>host_config</code><sup class="ref"><a href="#src-18" title="devops/tf/hermes-fleet/main.tf:186,206,210">18</a></sup></td></tr>
+        <tr><td><code>values.yaml</code> (Hermes block)</td><td>Production API settings: bucket, host id, KMS key, <code>HERMES_INFERENCE_BUDGET_USD: "10"</code><sup class="ref"><a href="#src-12" title="devops/app-manifests/values.yaml:536-542">12</a></sup></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section id="changes">
+    <h2>2 · What changes to run autoresearch there</h2>
+    <ul class="key-points">
+      <li>We put our profile into the runtime image as a pinned archive that the build checks. The reason is that the sandbox must never hold a GitHub credential.</li>
+      <li>The profile installs with the name of Rohit's profile, <code>optimizer</code>, thus no route changes. When an update fails, the runtime keeps the old profile and does not restart in a loop.</li>
+      <li>We set the task relay of the bridge to on. The bridge also learns to report failed and blocked work correctly.</li>
+      <li>Sandboxes grow to 8 CPU / 16 GiB / 100 GiB, with two on each host. Each key grows from <code>$10</code> to <code>$500</code> each week, with a weekly reset.</li>
+    </ul>
+
+    <p>Each change in the table is small. Together, the changes turn Rohit's general runtime into one that operates our research loop safely and without a stop. The "Why" column gives the reason that we cannot omit each change.</p>
+
+    <table>
+      <thead><tr><th>Change</th><th>What</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Packaging</strong></td><td>A metta script makes a <code>git archive</code> of the ide-mvp <code>autoresearch/</code> directory at one commit. A lock file records the commit and its git tree id. The Dockerfile unpacks the archive to <code>/opt/autoresearch</code> and calculates the tree id again. If the two ids are different, the build fails<sup class="ref"><a href="#src-29" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 3.1">29</a></sup>.</td><td>ide-mvp is private, and the runtime must never hold a GitHub credential.</td></tr>
+        <tr><td><strong>Install as <code>optimizer</code></strong> (D2)</td><td><code>runtime.py</code> installs our profile with the name <code>optimizer</code> and keeps the <code>/p/optimizer/</code> route. It moves an installed rohit-optimizer profile to a different location. If an update fails, the runtime <strong>keeps the old profile in service</strong>.</td><td>No route changes in metta. An exception before the gateway starts causes a restart loop with no chat<sup class="ref"><a href="#src-23" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:177,205-206,294">23</a></sup>.</td></tr>
+        <tr><td><strong>Profile that works with any name</strong> (Task 27)</td><td>ide-mvp gets the profile name from its home directory. The board slug stays <code>autoresearch</code>.</td><td>Some parts of our code think that the name is <code>autoresearch</code>.</td></tr>
+        <tr><td><strong>Environment and credentials</strong></td><td>The runtime writes our keys into the <code>.env</code> file of the profile (mode 0600). These are <code>SOFTMAX_PLAYER_CREDENTIAL</code> (the <code>cga_</code> token), <code>AUTORESEARCH_PLAYER_ID</code>, <code>AUTORESEARCH_WORKSPACE_REMOTE</code> (a local bare git repository on <code>/opt/data</code>) and the GotA settings. The runtime writes no model names or spend-limit names, and it does no <code>config set</code> on our profile.</td><td>Our cron jobs need these names. Today the runtime overwrites <code>terminal.env_passthrough</code><sup class="ref"><a href="#src-30" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:61">30</a></sup>. Our shipped models and limits must apply with no change.</td></tr>
+        <tr><td><strong>Relay on</strong></td><td><code>fleet.py</code> sets the relay workspace to <code>/opt/data/profiles/optimizer/workspace</code>.</td><td>Without this setting, the IDE research buttons do nothing<sup class="ref"><a href="#src-11" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:149,156">11</a></sup>.</td></tr>
+        <tr><td><strong>Outcome mapping</strong> (Task 10)</td><td>The bridge reads <code>about.outcome</code> on our acknowledgement notes. <code>done</code> and <code>partial</code> close the task as kept. <code>dropped</code> closes it as dropped, and <code>failed</code> or <code>rejected</code> close it as failed. <code>blocked</code> sets it to active/paused. A note with no outcome goes only to chat. ide-mvp sends one more acknowledgement when a blocked card is complete (Task 10b).</td><td>Today each reply closes the IDE task as done/kept<sup class="ref"><a href="#src-28" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:172-175,524">28</a></sup>, and that is wrong for failed or blocked work. Today ide-mvp sends only one acknowledgement for each task<sup class="ref"><a href="#src-31" title="autoresearch/src/autoresearch/comms/publisher.py:503-505,404-419">31</a></sup>, and the bridge accepts a second one<sup class="ref"><a href="#src-32" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:487-490">32</a></sup>.</td></tr>
+        <tr><td><strong>Coach chat</strong> (D7, D8)</td><td>A persona for chat only, on <code>glm-5.3</code>. It has read tools only (status, cards, messages, records, baseline report), and no terminal, file or code tools. To send work, the model makes a proposal. Then plugin code shows the proposal and sends it only when the coach types <code>confirm P-xxxx</code>. <code>/pause-research</code> and <code>/resume-research</code> are commands that must match the full line. The chat limit is <code>$3</code> each day<sup class="ref"><a href="#src-33" title="autoresearch/docs/designs/coach-chat-role.md">33</a></sup>.</td><td>The chat must not become a second research agent that nobody reviews. Also, the model must not be able to give an incorrect description of what it sends. Plugin code adds the proposal text through a Hermes output hook<sup class="ref"><a href="#src-34" title="Hermes v0.21.6 agent/turn_finalizer.py:480-519">34</a></sup>.</td></tr>
+        <tr><td><strong>Start on request</strong> (D3)</td><td>The agent does its bootstrap and accepts the work that comes in. But it does not plan its own work until the first task of the coach comes in.</td><td>It must not spend money before a coach asks. This is a convenience and not a security control.</td></tr>
+        <tr><td><strong>Permit handling</strong> (Task 15)</td><td>A 403 <code>permit_required</code> or a refusal because of the league choice puts the experiment in <code>awaiting-permit</code>. The agent sends one help request. After approval, it tries the same request again.</td><td>A coach can add asks at any time. Today we handle only HTTP 402<sup class="ref"><a href="#src-35" title="autoresearch/src/autoresearch/softmax_tool/xp.py:47">35</a></sup>.</td></tr>
+        <tr><td><strong>GotA without Docker</strong> (D5)</td><td>A native G2 gate, plus Nim 2.2.10 and a C compiler in the image.</td><td>The sandbox has no Docker, and our G2 gate calls <code>coworld run-episode</code><sup class="ref"><a href="#src-36" title="autoresearch/games/gota/gates/g2_episode.py:64-67">36</a></sup>.</td></tr>
+        <tr><td><strong>Sandbox size</strong> (D12)</td><td>8 CPU, 16 GiB RAM, 100 GiB disk, 2 GiB <code>/tmp</code>, 2048 processes. Before, the values were 2 CPU / 2 GiB / 10 GiB / 256 MiB / 512. Two sandboxes go on each <code>m7i.4xlarge</code> (16 vCPU, 64 GiB) with a 300 GiB root<sup class="ref"><a href="#src-37" title="autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Host sizing; packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:57-66">37</a></sup>.</td><td>GotA operates 4 native match workers plus a compiler child, and James wants a prototype that works first. The cost: <strong>2 slots for all of softmax.com</strong> until M5, down from 8.</td></tr>
+        <tr><td><strong>Budget</strong> (D1/D3)</td><td>The global key budget goes up from <code>$10</code> for 30 days to <code>$500</code> each week. OpenRouter resets the key limit each Monday at 00:00 UTC (<code>limit_reset: "weekly"</code>), and the key still expires after 30 days. The key request has no reset field today, thus Task 11 adds one. Our daily limit goes up from <code>$25</code> to <code>$100</code>. Our other limits stay: <code>$4</code> for each card, and a credit floor of <code>$10</code>. The operator increases the current <code>$10</code> keys with the hash of each key<sup class="ref"><a href="#src-38" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 3.5; § 2 (D1/D3)">38</a></sup>.</td><td>At the full rate of <code>$100</code> each day, a workspace spends the <code>$500</code> of a week in 5 days. Then the credit floor pauses research until the reset on Monday. Task 24 measures the real rate.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="milestones">
+    <h2>3 · Milestones</h2>
+    <ul class="key-points">
+      <li>M0 and M1 change nothing in production. M0 is inventory and access. M1 is the full integration on a local Lima VM with a fake game.</li>
+      <li>M2 is the first hosted deploy, directly to GotA. M3 adds research with the compiler. Each one is a host replacement.</li>
+      <li>M4 changes a profile update from a host replacement into an S3 upload. M5 adds hosts, for more than two slots.</li>
+      <li>"Us" means the agents of James. The metta tasks are PRs in one Graphite stack, and they merge only when James says so.</li>
+    </ul>
+
+    <p>The plan has the full steps, tests and file lists<sup class="ref"><a href="#src-39" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M0">39</a></sup>. Each milestone here has a goal and a list of tasks, each with its owner and repository. Each milestone also has a gate (the condition that shows it is done) and a rollback.</p>
+
+    <figure>
+      <svg viewBox="0 0 720 330" role="img" aria-label="Milestone sequence M0 to M5, each with its gate. M0 and M1 make no production change; M2, M3 and M4 each replace the host; M5 adds hosts.">
+        <g font-family="Merriweather Sans, Helvetica Neue, sans-serif">
+          <!-- band labels -->
+          <text x="8" y="22" font-size="10" font-weight="700" fill="#999999" letter-spacing="1">NO PRODUCTION CHANGE</text>
+          <text x="248" y="22" font-size="10" font-weight="700" fill="#b36e4e" letter-spacing="1">EACH REPLACES THE HOST (WITH MOVES)</text>
+          <text x="608" y="22" font-size="10" font-weight="700" fill="#6e8050" letter-spacing="1">NEW HOSTS</text>
+          <line x1="8" y1="30" x2="230" y2="30" stroke="#d4c9b5" stroke-width="1"/>
+          <line x1="248" y1="30" x2="590" y2="30" stroke="#b36e4e" stroke-width="1"/>
+          <line x1="608" y1="30" x2="712" y2="30" stroke="#6e8050" stroke-width="1"/>
+
+          <!-- spine -->
+          <line x1="60" y1="70" x2="660" y2="70" stroke="#d4c9b5" stroke-width="2"/>
+          <!-- nodes -->
+          <circle cx="60" cy="70" r="13" fill="#1a3875"/>
+          <text x="60" y="74.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fffdf4">M0</text>
+          <circle cx="180" cy="70" r="13" fill="#fffdf4" stroke="#1a3875" stroke-width="1.8"/>
+          <text x="180" y="74.5" text-anchor="middle" font-size="11" font-weight="700" fill="#1a3875">M1</text>
+          <circle cx="300" cy="70" r="13" fill="#fffdf4" stroke="#b36e4e" stroke-width="1.8"/>
+          <text x="300" y="74.5" text-anchor="middle" font-size="11" font-weight="700" fill="#b36e4e">M2</text>
+          <circle cx="420" cy="70" r="13" fill="#fffdf4" stroke="#b36e4e" stroke-width="1.8"/>
+          <text x="420" y="74.5" text-anchor="middle" font-size="11" font-weight="700" fill="#b36e4e">M3</text>
+          <circle cx="540" cy="70" r="13" fill="#fffdf4" stroke="#b36e4e" stroke-width="1.8"/>
+          <text x="540" y="74.5" text-anchor="middle" font-size="11" font-weight="700" fill="#b36e4e">M4</text>
+          <circle cx="660" cy="70" r="13" fill="#fffdf4" stroke="#6e8050" stroke-width="1.8"/>
+          <text x="660" y="74.5" text-anchor="middle" font-size="11" font-weight="700" fill="#6e8050">M5</text>
+
+          <!-- titles -->
+          <g font-size="11.5" font-weight="700" fill="#111827" text-anchor="middle">
+            <text x="60" y="106">Prerequisites</text>
+            <text x="180" y="106">Fakegame on</text><text x="180" y="121">local Lima VM</text>
+            <text x="300" y="106">First hosted</text><text x="300" y="121">deploy: GotA</text>
+            <text x="420" y="106">GotA research</text><text x="420" y="121">with compiler</text>
+            <text x="540" y="106">Profile updates</text><text x="540" y="121">without replace</text>
+            <text x="660" y="106">More hosts</text>
+          </g>
+          <g font-size="10" fill="#555555" text-anchor="middle">
+            <text x="60" y="138">next</text>
+            <text x="180" y="138">Tasks 1–2 done</text>
+          </g>
+
+          <!-- gate label -->
+          <text x="8" y="166" font-size="10" font-weight="700" fill="#1a3875" letter-spacing="1">GATE</text>
+          <line x1="8" y1="172" x2="712" y2="172" stroke="#f0ebe1" stroke-width="1"/>
+
+          <g font-size="10.5" fill="#111827" text-anchor="middle">
+            <text x="60" y="192">Inventory of</text><text x="60" y="207">S3 records</text><text x="60" y="222">recorded; access</text><text x="60" y="237">confirmed; host</text><text x="60" y="252">replacement</text><text x="60" y="267">written down</text>
+
+            <text x="180" y="192">Task 12 passes</text><text x="180" y="207">under gVisor at</text><text x="180" y="222">production limits:</text><text x="180" y="237">chat, relay, pause,</text><text x="180" y="252">restart, update</text><text x="180" y="267">and fallback</text>
+
+            <text x="300" y="192">Status "ready";</text><text x="300" y="207">key limit ≈ $500;</text><text x="300" y="222">starter is our</text><text x="300" y="237">champion; ask on</text><text x="300" y="252">submit honoured;</text><text x="300" y="267">24-hour baseline</text>
+
+            <text x="420" y="192">One full</text><text x="420" y="207">research cycle</text><text x="420" y="222">hosted; results</text><text x="420" y="237">and baseline</text><text x="420" y="252">recorded</text>
+
+            <text x="540" y="192">A profile</text><text x="540" y="207">update is an</text><text x="540" y="222">S3 upload; the</text><text x="540" y="237">last replacement</text><text x="540" y="252">for a profile</text><text x="540" y="267">change</text>
+
+            <text x="660" y="192">More than 2</text><text x="660" y="207">hosted</text><text x="660" y="222">workspaces;</text><text x="660" y="237">planned after</text><text x="660" y="252">M4</text>
+          </g>
+
+          <!-- cost row -->
+          <text x="8" y="298" font-size="10" font-weight="700" fill="#1a3875" letter-spacing="1">SPEND</text>
+          <line x1="8" y1="304" x2="712" y2="304" stroke="#f0ebe1" stroke-width="1"/>
+          <g font-size="10.5" fill="#555555" text-anchor="middle">
+            <text x="60" y="322">none</text>
+            <text x="180" y="322">about $5–15</text>
+            <text x="300" y="322">≤ $100/day of key</text>
+            <text x="420" y="322">≤ $100/day of key</text>
+            <text x="540" y="322">one more replace</text>
+            <text x="660" y="322">to be planned</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption><span class="fig-label">Figure 2</span>The sequence of milestones. Each milestone starts only after the gate of the previous milestone passes. The terracotta band shows the three deploys that replace the host. These deploys need the move procedure. M4 is the last deploy that replaces the host for a profile change.</figcaption>
+    </figure>
+
+    <h3>M0 · Prerequisites</h3>
+    <p><strong>Goal:</strong> find out what is on the host, get access, and decide the cleanup<sup class="ref"><a href="#src-39" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M0">39</a></sup>.</p>
+    <table>
+      <thead><tr><th>Task</th><th>Owner</th></tr></thead>
+      <tbody>
+        <tr><td>Make sure that the metta fleet paths are current. None changed after the survey, and the last fleet commit is #27146.</td><td>us</td></tr>
+        <tr><td>Make a read-only inventory of the S3 workspace records, with only the fields that are not secret. The records contain the player token, the service key and the inference key<sup class="ref"><a href="#src-5" title="packages/observatory-core/src/observatory_core/hermes/store.py:43-94">5</a></sup>.</td><td>James</td></tr>
+        <tr><td>Decide to keep or erase each record. Write the procedure to erase a record, because no procedure exists<sup class="ref"><a href="#src-1" title="packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/router.py">1</a></sup>.</td><td>James + us</td></tr>
+        <tr><td>Set up the research player of James in Controls: GotA league, <code>askBefore: []</code>, a finite <code>dailyCredits</code>.</td><td>James (IDE)</td></tr>
+        <tr><td>Make sure of access to ECR, Spacelift, SSM, the bucket KMS key, the production DB and the OpenRouter management key. Find out how #27146 got past <code>prevent_destroy</code>.</td><td>James</td></tr>
+        <tr><td>Post the gist reply to Rohit. Tell users about the replacement window.</td><td>us + James</td></tr>
+      </tbody>
+    </table>
+    <p><strong>M0 checklist</strong></p>
+    <ul class="checklist">
+      <li>Metta is pulled. The fleet paths are the same as at <code>62ab977a58</code> (checked at <code>0c0752ed3f</code>).</li>
+      <li>The inventory table, with no secrets, is in findings.md, in the sequence of creation time.</li>
+      <li>We decided to keep or erase each record, and the procedure to erase a record has a draft.</li>
+      <li>The research player of James is set up in Controls (league, <code>askBefore: []</code>, a finite <code>dailyCredits</code>).</li>
+      <li>Access is correct for ECR, Spacelift, SSM, the bucket KMS key, the production DB and the OpenRouter management key.</li>
+      <li>The <code>prevent_destroy</code> mechanism is written down, with a time estimate for each replacement.</li>
+      <li>The gist reply to Rohit is posted, and the hosted users know the replacement window.</li>
+    </ul>
+    <p><strong>Done when:</strong> the inventory table is in findings.md, the access is correct, and the replacement mechanism is written down with a time estimate.</p>
+    <div class="callout callout-warn">
+      <span class="callout-label">Risk</span>
+      It is possible that <code>prevent_destroy</code> needs one PR to remove it and a second PR to put it back. In that case, each deploy and each rollback costs hours and a reviewer.
+    </div>
+    <p><strong>Rollback:</strong> not necessary. M0 reads and decides. It changes nothing in production.</p>
+
+    <h3>M1 · Fake game from start to end on a local Lima VM</h3>
+    <p><strong>Goal:</strong> the full integration works under gVisor at production limits, with no change to production<sup class="ref"><a href="#src-40" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M1, Task 12">40</a></sup>.</p>
+    <table>
+      <thead><tr><th>Task</th><th>Owner</th><th>Repo</th></tr></thead>
+      <tbody>
+        <tr><td>1 Credit floor that you can configure (<strong>done</strong>, PR #21). Today the <code>$10</code> floor is in the code as a fixed value<sup class="ref"><a href="#src-41" title="autoresearch/src/autoresearch/runtime/preflight.py:63,245">41</a></sup>.</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>2 Inbox files that arrive early are accepted, and the seed commit does not include them (<strong>done</strong>, PR #21)<sup class="ref"><a href="#src-42" title="autoresearch/src/autoresearch/runtime/bootstrap.py:195-211">42</a></sup><sup class="ref"><a href="#src-43" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:413-422">43</a></sup></td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>3 Start on request</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>4 <code>status</code> read command</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>24 Baseline report</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>25 Coach pause and resume</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>27 Profile works with any install name</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>5 Coach chat, full design</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>6 Hosting documents and settings</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>10b One more acknowledgement after <code>blocked</code></td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>7 Pinned distribution artifact in the image</td><td>us</td><td>metta</td></tr>
+        <tr><td>8 Runtime install and update with a fallback, <code>.env</code>, host Kanban, bare remote</td><td>us</td><td>metta</td></tr>
+        <tr><td>9 Relay on, and chat model <code>glm-5.3</code></td><td>us</td><td>metta</td></tr>
+        <tr><td>9b Larger sandboxes on <code>m7i.4xlarge</code></td><td>us</td><td>metta</td></tr>
+        <tr><td>10 Outcome mapping in the bridge</td><td>us</td><td>metta</td></tr>
+        <tr><td>11 <code>$500</code> weekly global key budget (a weekly-reset field on the key request, plus <code>values.yaml</code>), and the procedure to increase keys</td><td>us (PR), James (increases)</td><td>metta</td></tr>
+        <tr><td>12 Local run from start to end on the Lima VM, after James says go (approximately <code>$5–15</code> of model spend)</td><td>us</td><td>both</td></tr>
+        <tr><td>26 Spike: can the bridge operate as a different user under gVisor? (not on the critical path)</td><td>us</td><td>metta</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Done when (Task 12):</strong> the items that follow are all true:</p>
+    <ul>
+      <li>Start Hermes connects in less than the 3-minute limit.</li>
+      <li>Chat answers status questions, refuses terminal use, and sends a confirmed proposal one time only.</li>
+      <li>Analyze replay makes a card and a done task.</li>
+      <li>Pause and resume work.</li>
+      <li>A blocked task shows paused, then done.</li>
+      <li>A restart keeps the state.</li>
+      <li>An image update applies one time and moves a rohit-optimizer profile to a different location. When the update fails, the fallback is clean.</li>
+      <li>We record the use of memory, CPU and disk.</li>
+    </ul>
+    <p><strong>What can go wrong:</strong> it is possible that plugin hooks do not operate for multiplexed runs (one gateway process that serves many profiles). In that case, chat loses its tools, and the fallback is to put the commands in the bridge. Also, it is possible that memory or disk use is more than the new sizes.</p>
+    <p><strong>Rollback:</strong> not necessary. Nothing goes to production.</p>
+
+    <h3>M2 · First hosted deploy: GotA starter</h3>
+    <p><strong>Goal:</strong> a new <code>m7i.4xlarge</code> host operates our image. The workspace of James makes the prebuilt GotA starter, submits it, and does one small paired XP check<sup class="ref"><a href="#src-44" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M2, Tasks 13 and 14+19, Rollback">44</a></sup>.</p>
+    <table>
+      <thead><tr><th>Task</th><th>Owner</th><th>Repo</th></tr></thead>
+      <tbody>
+        <tr><td>15 Handle 403 <code>permit_required</code> and league refusals</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>16 Native G2 without Docker</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>17 Nim and a C compiler in the image</td><td>us</td><td>metta</td></tr>
+        <tr><td>18 GotA starter on the Lima VM at real limits, with measurements</td><td>us</td><td>—</td></tr>
+        <tr><td>13 Merge, make the image, push, clean up the records, replace the host, move the workspaces, check over SSM</td><td>us (merges when James says so), James (operates)</td><td>both</td></tr>
+        <tr><td>14 + 19 Browser check: status, persona, starter submitted, permit ask obeyed, restart, <code>cga_</code> operation matrix, 24-hour baseline</td><td>James</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Done when:</strong> the items that follow are all true:</p>
+    <ul>
+      <li>The status objects of the host show <code>ready</code>.</li>
+      <li>The chat of James shows a key limit of approximately <code>$500</code>.</li>
+      <li>The starter shows as our champion.</li>
+      <li>A test ask on <code>submit</code> waits and then completes.</li>
+      <li>The baseline is collected after 24 hours.</li>
+    </ul>
+    <p><strong>What can go wrong:</strong> the host replacement brings back each old record with an empty disk, and only the two oldest records get slots<sup class="ref"><a href="#src-7" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:251-259">7</a></sup>. That is why the record cleanup comes first. Other users lose their files from the optimizer period, unless they ask for a move.</p>
+    <p><strong>Rollback:</strong> the first response needs no deploy. The coach withdraws a submission, adds asks, or types <code>/pause-research</code>. For one broken workspace, Reconnect makes its container again and does not touch its disk. A full image rollback is one more host replacement with the image digest and bundle key that we kept. It costs as much as the deploy. Moved workspaces keep our profile, because the old runtime never updates an installed profile<sup class="ref"><a href="#src-20" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:47-48">20</a></sup>. But they lose the research buttons. A key that we increased to <code>$500</code> each week stays at that value.</p>
+
+    <h3>M3 · GotA research with the compiler</h3>
+    <p><strong>Goal:</strong> a full research cycle on the hosted system<sup class="ref"><a href="#src-45" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M3">45</a></sup>.</p>
+    <table>
+      <thead><tr><th>Task</th><th>Owner</th><th>Repo</th></tr></thead>
+      <tbody>
+        <tr><td>20 Measure one compiler build on the VM</td><td>us</td><td>—</td></tr>
+        <tr><td>21 Size overrides for each workspace (only if necessary)</td><td>us</td><td>metta</td></tr>
+        <tr><td>22 Count the spend of the compiler child in the daily budget</td><td>us</td><td>ide-mvp</td></tr>
+        <tr><td>23 One full research cycle on the hosted system, deployed with moves</td><td>us + James</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Done when:</strong> we record the results of the cycle and the baseline.</p>
+    <p><strong>What can go wrong:</strong> the compiler gets to a limit. The plan tells us to increase the sizes and not to make the build smaller. That is one more host replacement.</p>
+    <p><strong>Rollback:</strong> the same as M2, with the move procedure, so that the workspace of James keeps its state.</p>
+
+    <h3>M4 · Profile updates without host replacement</h3>
+    <p><strong>Goal:</strong> a new autoresearch commit gets to the live workspaces with one container restart and no loss of state<sup class="ref"><a href="#src-46" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M4">46</a></sup>.</p>
+    <p><strong>Shape:</strong> a pin with a KMS signature, plus a tar file, in an S3 prefix that only the operator can write. The controller checks the signature, unpacks the tar safely, and checks the tree id. Then it changes a symlink and restarts each container at a quiet time. The current update path of the runtime applies the new profile.</p>
+    <p><strong>Done when:</strong> a profile update is an S3 upload.</p>
+    <p><strong>Cost and rollback:</strong> M4 needs one more host replacement to ship, because it changes the controller and the permissions of the host. If the check fails, the old profile stays current. This milestone is the repair for D6.</p>
+
+    <h3>M5 · More hosts</h3>
+    <p><strong>Goal:</strong> more than two hosted workspaces. Today the API sends each workspace to one host id<sup class="ref"><a href="#src-47" title="packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:43-55">47</a></sup>, and a host controls only its own records<sup class="ref"><a href="#src-48" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:291">48</a></sup>. M5 needs a host list in the API, placement by free slots, record migration between hosts, and capacity reports in the IDE. We will plan it after M4<sup class="ref"><a href="#src-49" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M5">49</a></sup>.</p>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section id="people">
+    <h2>4 · Who does what</h2>
+    <ul class="key-points">
+      <li>While Rohit is away, the agents of James write each change. This includes the changes to the runtime, fleet, bridge and Terraform of Rohit.</li>
+      <li>James decides and approves each paid call and each hosted step. He merges each metta PR when he says so, and he operates the infrastructure.</li>
+      <li>Aaron reviews the metta stack, and Alex and Richard possibly review it too. We never approve our own PRs.</li>
+    </ul>
+
+    <p>The ownership rule is simple. We write the code, and James operates production. Approval of our metta work comes from a human reviewer who did not write it<sup class="ref"><a href="#src-50" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 4">50</a></sup>.</p>
+    <table>
+      <thead><tr><th>Who</th><th>What</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Us (the agents of James)</strong></td><td>All ide-mvp work. We also write all metta changes to the code of Rohit: runtime, fleet, bridge, Dockerfile, distribution lock, Terraform sizes, the <code>values.yaml</code> budget, the fleet README procedures (inventory, erase, move, replace, rollback), and M4. We do the local VM tests and write the findings and baselines.</td></tr>
+        <tr><td><strong>James</strong></td><td>Decides. Says go for paid calls and hosted steps. Merges each metta PR when he says so. Operates the infrastructure: inventory, record cleanup (production DB), key increases (OpenRouter management), ECR push, Spacelift apply, SSM checks and workspace moves. Sets Controls for his research player. Does the browser check.</td></tr>
+        <tr><td><strong>Aaron (and possibly Alex and Richard)</strong></td><td>Review the metta Graphite stack. We never approve our own PRs or apply "blessed".</td></tr>
+        <tr><td><strong>Rohit (away)</strong></td><td>Gets a gist notice now. It lists what we change in his runtime and why. He also gets a summary after M2, and he reviews when he comes back. We do not change rohit-optimizer, because the Nous path still uses it.</td></tr>
+        <tr><td><strong>Other hosted users</strong></td><td>Get a notice of the replacement window. We move their workspaces only if they ask.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section id="decisions">
+    <h2>5 · Decisions</h2>
+    <ul class="key-points">
+      <li>James decided D1 thru D15 on 2026-10-09. The decisions prefer a prototype that works and gives real baseline data to a prototype that is cheap.</li>
+      <li>James also accepted D9 alternative (a) and approved A15 (commit provenance) as detection.</li>
+      <li>The next step for D9 is coach requests through the API.</li>
+    </ul>
+
+    <p>Most of these decisions come from one direction from James. For now, do not make the work smaller. Increase the workspace budget and the sandbox size, and get a prototype that works. Get baseline data on performance and cost before you make anything cheaper<sup class="ref"><a href="#src-51" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 2">51</a></sup>.</p>
+
+    <h3>Decided</h3>
+    <div class="decision"><span class="decision-label">D1 / D3 · Budget</span><p><strong>Each hosted workspace gets a key of <code>$500</code> each week</strong> through the global setting, up from <code>$10</code> for 30 days. The key limit resets each week, and the key expires after 30 days. James changed this value from <code>$150</code> for 30 days on 2026-10-09. The operator increases the current keys, because the API makes a key only one time for each record<sup class="ref"><a href="#src-25" title="packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:72-73">25</a></sup>.</p></div>
+    <div class="decision"><span class="decision-label">D2 · Profile name</span><p><strong>Our profile installs as <code>optimizer</code></strong> and replaces rohit-optimizer. The <code>/p/optimizer/</code> route does not change. We identify our installed profile by our commit marker or by its recorded install source. We never identify it by its manifest name, because Hermes changes that name during the install<sup class="ref"><a href="#src-52" title="Hermes v0.21.6 hermes_cli/profile_distribution.py:326,332-333">52</a></sup>.</p></div>
+    <div class="decision"><span class="decision-label">D3 · Activation</span><p><strong>Start on request.</strong> The agent waits for the first task of the coach before it plans its own work.</p></div>
+    <div class="decision"><span class="decision-label">D4 · Player operations</span><p><strong>Let the agent do league submissions, uploads and XP without asks</strong> (<code>askBefore: []</code>). It is still important to set up the player, because before setup the server applies no league choice and no daily limit<sup class="ref"><a href="#src-27" title="packages/observatory-core/src/observatory_core/cogents/permits.py:13-14,445-450">27</a></sup>.</p></div>
+    <div class="decision"><span class="decision-label">D5 · GotA in the sandbox</span><p><strong>Native G2, Nim, a C compiler and tirith</strong> in the sandbox, because it has no Docker.</p></div>
+    <div class="decision"><span class="decision-label">D6 · Deploy of a new image</span><p><strong>For now, replace the host in its position, after a notice.</strong> M4 removes this need for profile changes.</p></div>
+    <div class="decision"><span class="decision-label">D7 · Coach chat</span><p><strong>Full coach chat with a typed <code>confirm P-xxxx</code></strong> before the chat sends anything.</p></div>
+    <div class="decision"><span class="decision-label">D8 · Chat model</span><p><strong><code>z-ai/glm-5.3</code>.</strong></p></div>
+    <div class="decision"><span class="decision-label">D10 · Operations</span><p><strong>James operates the infrastructure.</strong></p></div>
+    <div class="decision"><span class="decision-label">D11 · Reviewers</span><p><strong>Aaron, Alex and Richard</strong> review the metta stack.</p></div>
+    <div class="decision"><span class="decision-label">D12 · Sandbox and host size</span><p><strong>Sandboxes of 8 CPU / 16 GiB / 100 GiB / 2 GiB <code>/tmp</code>, with two on each <code>m7i.4xlarge</code></strong>. More hosts come later (M5). The fit is RAM 33 of 64 GiB and disk 205 of approximately 290 GiB free. The 16 CPU limits fit the 16 vCPU with no oversubscription<sup class="ref"><a href="#src-37" title="autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Host sizing; packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:57-66">37</a></sup>.</p></div>
+    <div class="decision"><span class="decision-label">D13 · Moves</span><p><strong>Move the workspaces at each host replacement.</strong> At the first deploy, move a workspace only on request, because the state from the optimizer period has no value to autoresearch.</p></div>
+    <div class="decision"><span class="decision-label">D14 · First deploy</span><p><strong>M1 stays local, and the first hosted deploy has the GotA settings.</strong> Users go from optimizer directly to an autoresearch that works.</p></div>
+    <div class="decision"><span class="decision-label">D15 · Pause and resume</span><p><strong><code>/pause-research</code> and <code>/resume-research</code></strong>. Plugin code matches them as full lines. If plugin hooks do not operate, the bridge is the fallback.</p></div>
+
+    <h3>Open</h3>
+    <div class="callout callout-open">
+      <span class="callout-label">Decided · D9 Inbox trust (alternative a accepted)</span>
+      <p><strong>Question.</strong> Each process in a sandbox operates as uid 10000. This includes the gateway, the bridge, the chat and the research workers<sup class="ref"><a href="#src-15" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:167-204">15</a></sup>. Thus any research code can write the inbox of the coach, commit to the canonical workspace, or start <code>comms inbound</code>. It can do all of these with the authority of the coach. Users stay isolated from other users. The only question is this: can research code in one workspace act as the coach of that workspace?</p>
+      <p><strong>Recommendation.</strong> <strong>Accept the risk for the first hosted deploy</strong>, and write it in the hosting documents. <strong>Next step: send coach requests through the API</strong> (alternative d). Then queue-keeper reads the task records that the coach wrote from the Softmax API. It trusts the <code>author_role</code> that the server records on the revision that made each record<sup class="ref"><a href="#src-53" title="packages/observatory-core/src/observatory_core/models/cogents.py:72-76,144,159; packages/observatory-api/src/observatory_api/routes/app/v2/cogents/permits/service.py:35">53</a></sup>. Later revisions can be updates that the bridge makes as the cogent<sup class="ref"><a href="#src-54" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:493-495">54</a></sup>. With this change, a worker that holds the <code>cga_</code> token can write only as the cogent. Thus it cannot make false coach requests.</p>
+      <p>Alternative (b) puts only the bridge under a different user. We think that it is not worth the work, because it gives little protection, and it is possible that it does not work under gVisor. Sandboxes with many users (alternative c) are the boundary for the long term.</p>
+      <p><strong>What it blocks.</strong> Nothing in M2. Until alternative (d) ships, it blocks trust in the research results and a larger rollout. The spike of Task 26 gives data for this decision. We must also find out if the player API shows <code>author_role</code>.</p>
+    </div>
+    <div class="callout callout-open">
+      <span class="callout-label">Decided · A15 Commit provenance (approved as detection)</span>
+      <p><strong>Question.</strong> Do you approve the commit-provenance check (branch <code>jboggs/autoresearch-provenance</code>)? James approved it on 2026-10-09. It finds commits to the canonical workspace that the runtime did not make. Then it pauses and sends one help request.</p>
+      <p><strong>Recommendation.</strong> Approve it as <strong>detection</strong> while D9 stays at alternative (a). It finds false commits, but it does not prevent them.</p>
+      <p><strong>What it blocks.</strong> Nothing on the critical path. It is the main mitigation in the plan for D9 alternative (a).</p>
+    </div>
+  </section>
+
+  <!-- ============ 6 ============ -->
+  <section id="risks">
+    <h2>6 · Risks and unknowns</h2>
+    <ul class="key-points">
+      <li>The largest operational risk is the host replacement. Disks become empty, and 8 slots become 2. Thus, without a cleanup first, it is possible that the workspace of James gets no slot.</li>
+      <li>The largest security risk is the single uid. Research code can act as the coach and read the credential. The persona, the pause and the proposals are not security controls.</li>
+      <li>Each key has a money limit of <code>$500</code> each week, and our cap is <code>$100</code> each day. But the <code>cga_</code> token never expires, and the key does not limit credits or submissions.</li>
+      <li>Each of the seven unknowns has a task that checks it.</li>
+    </ul>
+
+    <h3>Risks</h3>
+    <p>The plan has a mitigation for each risk in this list<sup class="ref"><a href="#src-55" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 6">55</a></sup>.</p>
+    <ul>
+      <li><strong>Host replacement and slots.</strong> Each deploy is a host replacement. The records come back with empty disks, and the change from 8 slots to 2 stops the newer workspaces<sup class="ref"><a href="#src-7" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:251-259">7</a></sup>. It is possible that the workspace of James gets no slot, unless we clean up the older records first.</li>
+      <li><strong>Slow deploys and rollbacks</strong>, if <code>prevent_destroy</code> needs one PR to remove it and a second PR to put it back.</li>
+      <li><strong>Two slots for all users</strong> on softmax.com until M5.</li>
+      <li><strong>The <code>cga_</code> token never expires.</strong> Also, the players of other users have no limits until their coach sets Controls<sup class="ref"><a href="#src-27" title="packages/observatory-core/src/observatory_core/cogents/permits.py:13-14,445-450">27</a></sup>. The <code>$500</code> weekly key limits only model spend, and not credits or submissions.</li>
+      <li><strong>One uid (D9 alternative a).</strong> Research code can act as the coach, read the <code>.env</code> file (credential and key), and control the local chat API. Start on request, pause, proposals and the persona are not security controls.</li>
+      <li><strong>The chat configuration fails open.</strong> If it does not load, chat gets the default tools of Hermes. But the tool allowlist of the plugin still blocks them.</li>
+      <li><strong>Money.</strong> A key can spend a maximum of <code>$500</code> each week, thus approximately <code>$2,140</code> in its 30 days. One host with two keys can spend a maximum of <code>$1,000</code> each week. At our cap of <code>$100</code> each day, a workspace can spend the full <code>$500</code> in 5 days. The key expires after 30 days, and nothing makes a new one. Each erase and new creation of a record adds one more key.</li>
+      <li><strong>D4.</strong> Starters that nobody reviewed can go into the league. Also, the agent can spend credits up to <code>dailyCredits</code>.</li>
+    </ul>
+
+    <h3>Unknowns the tasks check</h3>
+    <table>
+      <thead><tr><th>Unknown</th><th>Why it is important</th><th>Checked by</th></tr></thead>
+      <tbody>
+        <tr><td>Do plugin hooks operate for multiplexed runs?</td><td>It decides if the chat persona and the pause work. The bridge is the fallback.</td><td>Task 5</td></tr>
+        <tr><td>Memory and disk use under gVisor at the new sizes</td><td>Too much use means larger sizes and one more host replacement</td><td>Tasks 12, 18, 20</td></tr>
+        <tr><td>Can a cogent set an IDE task to active/paused through the real API?</td><td>A 4xx stops the bridge at each restart</td><td>Task 12 Step 8</td></tr>
+        <tr><td>Does <code>hermes profile update</code> leave cron jobs paused? Does <code>hermes config unset</code> fail on an absent key?</td><td>Each of these can stop research after an update, with no message</td><td>Task 12</td></tr>
+        <tr><td>The <code>prevent_destroy</code> mechanism</td><td>It sets the cost of each deploy and rollback</td><td>M0</td></tr>
+        <tr><td>gVisor network and file permissions between users</td><td>It decides if a different bridge user is possible</td><td>Task 26 spike</td></tr>
+        <tr><td>New signup, two users on one host, real host recovery</td><td>Rohit did not test these</td><td>Before a larger rollout</td></tr>
+      </tbody>
+    </table>
+    <p>The findings file has the full list of facts that nobody checked, with their evidence<sup class="ref"><a href="#src-56" title="autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Unverified">56</a></sup>.</p>
+
+    <div class="callout callout-info">
+      <span class="callout-label">Note · two old statements in plan.md</span>
+      This note is for the next person who edits the plan. The paragraph about the direction of James, near the top, still says "4 CPU, 8 GiB, 50 GiB". D12 replaced these values with 8 / 16 / 100. Self-review note 1 still says that D9 means "Task 26 in the first hosted deploy". Revision 4 reversed this, and now Task 26 is not on the critical path<sup class="ref"><a href="#src-57" title="autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md header and § 7">57</a></sup>.
+    </div>
+  </section>
+
+  <!-- ============ 7 ============ -->
+  <section id="alternatives">
+    <h2>7 · Alternatives considered</h2>
+    <ul class="key-points">
+      <li>Most of the alternatives that we did not use changed more of the code of Rohit for no gain. Others spent money or broke users that work before a coach asked.</li>
+      <li>We did not refuse two alternatives, but we put them off until later. These are a second host stack for deploys that erase nothing, and research workers with their own uid.</li>
+    </ul>
+
+    <h3>D2 · Profile name</h3>
+    <p>One alternative was to install as <code>autoresearch</code> with a <code>/p/autoresearch/</code> route. James refused it, because three metta route constants change and we get nothing. When we install as <code>optimizer</code>, the routes of Rohit and the IDE do not change. The cost of this decision is that our profile must not think that it knows its own name (Task 27).</p>
+
+    <h3>D3 · Activation</h3>
+    <p>Our current behavior is to start research immediately after the install. We refused this alternative, because any softmax.com user can click Start Hermes. Thus a loop that is always on spends money before a coach asks. Decision: start on request.</p>
+
+    <h3>Budget</h3>
+    <p>One alternative was to keep <code>$10</code> for 30 days and make the agent smaller, with cheaper models and lower limits. James refused it, because a cheap prototype that does not work gives no baseline. A second alternative was an override for research players only, with a small API change. James then decided on a global <code>$150</code> for all users, and that decision replaced the override. Later on 2026-10-09, James increased the global key to <code>$500</code> each week.</p>
+    <p>For the weekly budget, one alternative was a <code>$500</code> key that expires after 7 days (<code>HERMES_INFERENCE_KEY_DAYS</code> set to 7). We refused it, because nothing makes a new key after a key expires. Thus each workspace stops after one week. Decision: a weekly reset on a 30-day key.</p>
+
+    <h3>D6 · Deploy of a new image</h3>
+    <p>For now, we replace the host in its position, and the state is lost unless we move it. A second host stack, with the API then set to it, erases nothing. But it costs 3–4 infrastructure PRs, and one of them changes the production Observatory stack. Thus we put it off until later. We refused an in-place <code>docker pull</code> over SSM, because it does not agree with the model of the fleet README. The repair for the long term is M4. In M4, the host gets profile archives from S3 and applies them in position at a restart, with no host replacement.</p>
+
+    <h3>D7 · Chat</h3>
+    <p>One alternative for v1 was a smaller chat that can only read. In it, coaches send work only through the IDE buttons. James refused it, because the chat is the main interface of the coach. Also, the typed confirm design already makes it safe to send work. Decision: full coach chat.</p>
+
+    <h3>D9 · Inbox trust</h3>
+    <p>We looked at four alternatives:</p>
+    <ul>
+      <li><strong>(a) Accept the risk for the prototype.</strong> We chose this for the first hosted deploy.</li>
+      <li><strong>(b) The bridge as a different OS user, with <code>AUTORESEARCH_INBOX_WRITERS</code>.</strong> We refused it as not worth the work. A worker with the same uid can still make false requests through a git commit or <code>comms inbound</code>. Also, under gVisor it needs a second sandbox or the ability to change users. It is possible that a second sandbox cannot get to the gateway. A change of user does not agree with the dropped capabilities and <code>no-new-privileges</code> of the sandbox<sup class="ref"><a href="#src-15" title="packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:167-204">15</a></sup>.</li>
+      <li><strong>(c) Research workers under a different uid.</strong> This is the real boundary for the long term, but it is a large change to both runtimes.</li>
+      <li><strong>(d) The API sends coach requests, and we trust the <code>author_role</code> that the server records</strong><sup class="ref"><a href="#src-53" title="packages/observatory-core/src/observatory_core/models/cogents.py:72-76,144,159; packages/observatory-api/src/observatory_api/routes/app/v2/cogents/permits/service.py:35">53</a></sup>. This is the next step that we recommend.</li>
+    </ul>
+
+    <h3>D12 · Host size</h3>
+    <p>One alternative was to keep the <code>m7i.2xlarge</code> with three sandboxes of 4 CPU / 8 GiB / 50 GiB. James asked for larger sandboxes, and that request replaced this alternative. Two sandboxes on an <code>m7i.2xlarge</code> are too small for 8 / 16 / 100. Decision: an <code>m7i.4xlarge</code> with two sandboxes of 8 CPU / 16 GiB / 100 GiB.</p>
+
+    <h3>D14 · First deploy</h3>
+    <p>One alternative was to deploy M1 (the fake game) to the fleet. We refused it, because it changes the optimizer agent of each hosted user into a fake-game agent until M2. Decision: M1 stays local, and the first hosted deploy has the GotA settings.</p>
+
+    <h3>Packaging</h3>
+    <p>One alternative was to clone ide-mvp when the runtime starts. We refused it, because it needs a GitHub credential in the sandbox. Decision: a pinned <code>git archive</code> in the image, which the build checks against a lock file.</p>
+
+    <h3>How we identify our installed profile</h3>
+    <p>One alternative was to identify it by the <code>name</code> in <code>distribution.yaml</code>. We refused it, because Hermes changes <code>name</code> to the install name during each install and update<sup class="ref"><a href="#src-52" title="Hermes v0.21.6 hermes_cli/profile_distribution.py:326,332-333">52</a></sup>. As a result, both profiles show <code>optimizer</code>. Decision: our commit marker, or the recorded install <code>source:</code> path.</p>
+  </section>
+
+  <!-- ============ 8 ============ -->
+  <section id="open-questions">
+    <h2>8 · Open questions</h2>
+    <ul class="key-points">
+      <li>James approved A15 and accepted D9 alternative (a). M0 and the tasks will find the answers to the other questions.</li>
+    </ul>
+    <div class="callout callout-open">
+      <span class="callout-label">Decided · A15 and D9</span>
+      James approved A15 as detection and accepted D9 alternative (a) for the first hosted deploy. D9 alternative (d) must ship before we trust research results or give hosting to more users.
+    </div>
+    <div class="callout callout-open">
+      <span class="callout-label">Open · how did #27146 get past <code>prevent_destroy</code>?</span>
+      James finds the answer in M0, from the PR thread or its Spacelift run. The answer sets the cost of each deploy and rollback in M2 thru M4.
+    </div>
+    <div class="callout callout-open">
+      <span class="callout-label">Open · which records to keep</span>
+      In M0, after the inventory exists, James and we decide to keep or erase each S3 record. With 2 slots, a maximum of one record can be older than the record of James.
+    </div>
+    <div class="callout callout-open">
+      <span class="callout-label">Open · does the player API show <code>author_role</code>?</span>
+      The server stores it<sup class="ref"><a href="#src-53" title="packages/observatory-core/src/observatory_core/models/cogents.py:72-76,144,159; packages/observatory-api/src/observatory_api/routes/app/v2/cogents/permits/service.py:35">53</a></sup>, but nobody checked if a player can read it. D9 alternative (d) needs it.
+    </div>
+    <div class="callout callout-open">
+      <span class="callout-label">Open · will other hosted users want moves?</span>
+      They get a notice of the replacement window. We move a workspace only if its owner asks.
+    </div>
+  </section>
+
+  <!-- ============ 9 ============ -->
+  <section id="sources">
+    <h2>9 · Sources</h2>
+    <p>Metta paths are at <code>main</code> <code>0c0752ed3f</code>. The hosted fleet did not change after survey commit <code>62ab977a58</code>. ide-mvp paths are in <code>autoresearch/</code>. Hermes paths are at v0.21.6 (<code>818c13be</code>). The citations come from the evidence file of the plan and from the plan.</p>
+    <ol class="sources">
+      <li id="src-1"><span class="cite">packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/router.py</span> — metta: Hermes API routes are start, status and bridge report only; no delete route.</li>
+      <li id="src-2"><span class="cite">packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/service.py:166-167</span> — metta: one hosted player per owner; a second allocation gets HTTP 409.</li>
+      <li id="src-3"><span class="cite">packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:33</span> — metta: the workspace&#x27;s player credential is a freshly minted cga_ token.</li>
+      <li id="src-4"><span class="cite">packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:69-87; packages/observatory-core/src/observatory_core/hermes/models.py:21-25</span> — metta: the OpenRouter key is issued once per workspace from one global budget ($10, 30 days).</li>
+      <li id="src-5"><span class="cite">packages/observatory-core/src/observatory_core/hermes/store.py:43-94</span> — metta: workspace, status and credential records live in S3, not on the host; records hold the player token, service key and inference key (:68-76) and sort by (created_at, id) (:94).</li>
+      <li id="src-6"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:118-131,139-163</span> — metta: a record whose disk, runtime.json and image are missing gets a new empty disk and the host&#x27;s current image.</li>
+      <li id="src-7"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:251-259</span> — metta: records past max_workspaces are stopped and report &quot;Waiting for host capacity&quot;.</li>
+      <li id="src-8"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:21,38-66</span> — metta: the runtime installs rohit-optimizer as profile optimizer.</li>
+      <li id="src-9"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:123-138,146</span> — metta: one hermes -p default gateway run, whose environment has no profile HERMES_HOME or player credential.</li>
+      <li id="src-10"><span class="cite">packages/observatory-api/src/observatory_api/routes/app/v2/cogents/hermes/service.py:32,133</span> — metta: the bridge must report within 3 minutes of release.</li>
+      <li id="src-11"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:149,156</span> — metta: chat route /p/optimizer/ (:149); research relay off, workspace=None (:156).</li>
+      <li id="src-12"><span class="cite">devops/app-manifests/values.yaml:536-542</span> — metta: production API Hermes settings: bucket, host id hermes-rohit-validation, KMS key, HERMES_INFERENCE_BUDGET_USD &quot;10&quot;.</li>
+      <li id="src-13"><span class="cite">devops/tf/hermes-fleet/main.tf:181,191-196</span> — metta: instance type m7i.2xlarge and the 200 GiB gp3 root, retained on termination.</li>
+      <li id="src-14"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:26-35</span> — metta: HostConfig, the sizing defaults used when Terraform passes no sizing.</li>
+      <li id="src-15"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:167-204</span> — metta: sandbox flags: runsc as uid 10000, read-only root, --cap-drop=ALL and no-new-privileges (:179-182), CPU/RAM/pids/tmp limits, 10 GiB ext4 volume.</li>
+      <li id="src-16"><span class="cite">packages/observatory-hosted-worker/Dockerfile</span> — metta: runtime image; today it clones rohit-optimizer@f6508fb.</li>
+      <li id="src-17"><span class="cite">devops/hermes-fleet/README.md</span> — metta: deploy steps, host bundle, local Lima verification, icc: false.</li>
+      <li id="src-18"><span class="cite">devops/tf/hermes-fleet/main.tf:186,206,210</span> — metta: user_data_replace_on_change (:186), host_config (:206), prevent_destroy (:210).</li>
+      <li id="src-19"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Deployment</span> — ide-mvp: #27146 replaced the host &quot;with explicit approval&quot;; the procedure is not written down.</li>
+      <li id="src-20"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:47-48</span> — metta: the runtime never updates an installed profile.</li>
+      <li id="src-21"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:137-163</span> — metta: runtime.json rewritten only on a bundle change or when missing; image pinned per workspace at first start (:161-162).</li>
+      <li id="src-22"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 1</span> — ide-mvp: state of Rohit&#x27;s system: what is observed, what is claimed in his update, what is not tested.</li>
+      <li id="src-23"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:177,205-206,294</span> — metta: containers run with --restart=no and the controller restarts them on its next 15-second pass, so a deterministic startup failure is a restart loop.</li>
+      <li id="src-24"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:84-95</span> — metta: a revoked CogentAgent makes the controller stop the sandbox and report revoked.</li>
+      <li id="src-25"><span class="cite">packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:72-73</span> — metta: configure returns early when a record already has a key, so a budget change applies only to new records.</li>
+      <li id="src-26"><span class="cite">packages/observatory-api/src/observatory_api/v2/experience_requests.py:465-508; packages/observatory-api/src/observatory_api/routes/app/v2/league_submissions/service.py:152-169; packages/observatory-core/src/observatory_core/cogents/permits.py:1-14</span> — metta: cga_ XP requests and league submissions must pass the coach&#x27;s league choice and a permit check.</li>
+      <li id="src-27"><span class="cite">packages/observatory-core/src/observatory_core/cogents/permits.py:13-14,445-450</span> — metta: the gates apply only once the coach has set the player up; before that, no league choice and no daily credit cap.</li>
+      <li id="src-28"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:172-175,524</span> — metta: every replying note closes the IDE task as done/kept; about.outcome is not read.</li>
+      <li id="src-29"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 3.1</span> — ide-mvp: packaging as a pinned git archive, lock by commit and tree id, verified in the Dockerfile.</li>
+      <li id="src-30"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/runtime.py:61</span> — metta: the runtime overwrites terminal.env_passthrough.</li>
+      <li id="src-31"><span class="cite">autoresearch/src/autoresearch/comms/publisher.py:503-505,404-419</span> — ide-mvp: one acknowledgement per inbound task today (find_reply at :404-419).</li>
+      <li id="src-32"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:487-490</span> — metta: the bridge acknowledges each note with an idempotency key from its outbox seq and the task revision, so a second note applies.</li>
+      <li id="src-33"><span class="cite">autoresearch/docs/designs/coach-chat-role.md</span> — ide-mvp: coach chat persona design (read tools, typed confirmation, chat cap).</li>
+      <li id="src-34"><span class="cite">Hermes v0.21.6 agent/turn_finalizer.py:480-519</span> — Hermes: transform_llm_output plugin hook, fired once per turn; the first non-empty string replaces the reply.</li>
+      <li id="src-35"><span class="cite">autoresearch/src/autoresearch/softmax_tool/xp.py:47</span> — ide-mvp: our Softmax tool handles HTTP 402 only.</li>
+      <li id="src-36"><span class="cite">autoresearch/games/gota/gates/g2_episode.py:64-67</span> — ide-mvp: the G2 gate calls coworld run-episode, which needs Docker.</li>
+      <li id="src-37"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Host sizing; packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:57-66</span> — ide-mvp and metta: D12 fit on m7i.4xlarge (RAM 33 of 64 GiB, disk 205 of about 290 GiB); check_host checks RAM and disk, not CPU.</li>
+      <li id="src-38"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 3.5; § 2 (D1/D3)</span> — ide-mvp: budget ceiling and the caps under it; the daily cap applies before the weekly key limit.</li>
+      <li id="src-39"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M0</span> — ide-mvp: M0 steps: freshness, inventory, cleanup and delete procedure, Controls, access and replacement mechanism, gist and notice.</li>
+      <li id="src-40"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M1, Task 12</span> — ide-mvp: M1 tasks and the Task 12 local end-to-end verification.</li>
+      <li id="src-41"><span class="cite">autoresearch/src/autoresearch/runtime/preflight.py:63,245</span> — ide-mvp: credit floor hard-coded at $10; the check is remaining &lt; floor.</li>
+      <li id="src-42"><span class="cite">autoresearch/src/autoresearch/runtime/bootstrap.py:195-211</span> — ide-mvp: _seed copies into the existing directory and commits everything, sweeping in early inbox files.</li>
+      <li id="src-43"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:413-422</span> — metta: deliver writes .&lt;id&gt;.tmp then renames it, creating comms/inbox before our bootstrap runs.</li>
+      <li id="src-44"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M2, Tasks 13 and 14+19, Rollback</span> — ide-mvp: first hosted deploy, verification, and per-deploy rollback with its real cost.</li>
+      <li id="src-45"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M3</span> — ide-mvp: Tasks 20-23.</li>
+      <li id="src-46"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M4</span> — ide-mvp: signed pin, safe extraction, symlink switch, quiet-moment restarts.</li>
+      <li id="src-47"><span class="cite">packages/observatory-api/src/observatory_api/clients/hermes/ec2.py:43-55</span> — metta: the API sends every new workspace to one host id (HERMES_FLEET_HOST_ID).</li>
+      <li id="src-48"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/fleet.py:291</span> — metta: a host reconciles only its own records.</li>
+      <li id="src-49"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § M5</span> — ide-mvp: host list, placement by free slots, record migration, capacity reporting.</li>
+      <li id="src-50"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 4</span> — ide-mvp: ownership table.</li>
+      <li id="src-51"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 2</span> — ide-mvp: decisions D1-D15 and James&#x27;s direction of 2026-10-09.</li>
+      <li id="src-52"><span class="cite">Hermes v0.21.6 hermes_cli/profile_distribution.py:326,332-333</span> — Hermes: install and update rewrite the manifest name to the install name and record the install path as source.</li>
+      <li id="src-53"><span class="cite">packages/observatory-core/src/observatory_core/models/cogents.py:72-76,144,159; packages/observatory-api/src/observatory_api/routes/app/v2/cogents/permits/service.py:35</span> — metta: cogent records store author_role (coach, cogent, visitor); the permit route branches on it.</li>
+      <li id="src-54"><span class="cite">packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py:493-495</span> — metta: the bridge&#x27;s own PATCHes to task records, made as the cogent.</li>
+      <li id="src-55"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md § 6</span> — ide-mvp: risk table with effects and mitigations.</li>
+      <li id="src-56"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md § Unverified</span> — ide-mvp: facts the plan tasks check.</li>
+      <li id="src-57"><span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md header and § 7</span> — ide-mvp: the stale sizing paragraph and self-review note 1.</li>
+    </ol>
+
+    <h3>Related material</h3>
+    <ul>
+      <li>Plan (revision 5): <span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/plan.md</span></li>
+      <li>Evidence with file:line citations: <span class="cite">autoresearch/docs/plans/2026-10-09-softmax-integration/findings.md</span></li>
+      <li>Chat persona design: <span class="cite">autoresearch/docs/designs/coach-chat-role.md</span></li>
+      <li>Gap table: <span class="cite">autoresearch/docs/integrations/rohit-architecture-integration.md</span></li>
+      <li>Questions for Rohit: <span class="cite">autoresearch/docs/integrations/questions-for-rohit.md</span></li>
+      <li>Branch for Tasks 1 and 2: <span class="cite">jboggs/autoresearch-hosted-m1a</span> (worktree <span class="cite">~/coding/ide-mvp-m1a</span>, report <span class="cite">scratchpad/m1a-report.md</span>)</li>
+      <li>A15 branch: <span class="cite">jboggs/autoresearch-provenance</span> (worktree <span class="cite">~/coding/ide-mvp-prov</span>)</li>
+      <li>The gist thread of Rohit, <span class="cite">823149ec…</span> (our reply draft <span class="cite">scratchpad/gist-reply-draft.md</span>, his reply <span class="cite">scratchpad/rohit-reply-1.md</span>), and his update of 2026-10-09 (<span class="cite">scratchpad/rohit-update-2026-10-09.md</span>)</li>
+      <li>PRs of Rohit: #27077, #27078, #27079, #27081, #27082, #27110 (local VM notes), #27113, #27114, #27146 (production host). Open: #27023 (readiness checks).</li>
+      <li>Metta work occurs in a worktree in <span class="cite">~/coding/metta-wt/</span> on <span class="cite">jboggs/hosted-autoresearch-*</span> branches. <span class="cite">~/coding/metta</span> is read-only.</li>
+      <li><span class="cite">scratchpad/</span> is <span class="cite">/private/tmp/claude-501/-Users-jamesboggs-coding-ide-mvp/6aae3ea3-a7f8-4bf4-91dd-21f859a3f445/scratchpad/</span></li>
+    </ul>
+  </section>
+
+</article>
+
+<!-- ================================================================
+     DC-COMMENTS BEGIN — markup + script (copy verbatim; do not modify)
+     ================================================================ -->
+<aside id="dc-sidebar" aria-label="Comments">
+  <h2 class="dc-title">Comments <span id="dc-count"></span></h2>
+  <div class="dc-actions">
+    <button class="dc-btn" id="dc-export">Export JSON</button>
+    <button class="dc-btn" id="dc-copy">Copy JSON</button>
+    <button class="dc-btn" id="dc-import">Import…</button>
+    <input type="file" id="dc-file" accept=".json,application/json" hidden>
+  </div>
+  <div id="dc-status" role="status"></div>
+  <div id="dc-list"><p class="dc-empty">No comments yet. Select text in the document to add one.</p></div>
+</aside>
+<button id="dc-fab" type="button">+ Comment</button>
+<button id="dc-toggle" type="button">Comments</button>
+<!-- Preload slot: a renderer may put a dc-comments/1 `comments` array here (each comment optionally carrying `replies`). Merged by id into the stored comments on load. Leave empty otherwise. -->
+<script id="dc-preload" type="application/json">[{"id": "cmv1bpriw0", "text": "Which of the User's Player profiles does it use? Or does it create a new one?", "created": "2026-10-09T18:53:26.552Z", "resolved": false, "exact": "It makes a new cga_ player token3", "prefix": "     The API makes a workspace. ", "suffix": " and an OpenRouter key from a gl", "replies": [{"author": "Claude", "text": "It uses an existing player and makes no new one. The IDE calls POST /cogents/{cogent_id}/hermes for the player the coach picked, and the API checks that the signed-in user owns it (service.py start, load_owned_cogent). The cga_ token is a new agent credential (a CogentAgent row) for that same player. A user can host only one of their players: starting Hermes on a second one returns HTTP 409. So in M0, pick which of your players becomes the research player before you click Start. I added a sentence saying this to the doc.", "created": "2026-10-09T19:30:00.000Z"}]}, {"id": "cmv1bqcuh1", "text": "Give the key a $500 for a week instead.", "created": "2026-10-09T18:53:54.185Z", "resolved": false, "exact": "an OpenRouter key from a global budget of $10 for 30 days4", "prefix": "es a new cga_ player token3 and ", "suffix": ". Then it writes the workspace r", "replies": [{"author": "Claude", "text": "Done, as $500 with a weekly reset (OpenRouter limit_reset \"weekly\", which resets Monday 00:00 UTC = Sunday 5 PM PDT), keeping the 30-day expiry. This sentence describes what's deployed today, so it still says $10; the change is in section 2, D1/D3, Task 11 and the risks. A one-time key with KEY_DAYS=7 would be a config-only change, but nothing re-mints an expired key, so every workspace would go dead after a week. The weekly reset needs a small metta code change, because the key request model has no limit_reset field today. plan.md is now revision 6.", "created": "2026-10-09T19:30:00.000Z"}]}, {"id": "cmv1btxu92", "text": "Bump to $500 for a week.", "created": "2026-10-09T18:56:41.361Z", "resolved": false, "exact": "500 each week, with a weekly reset", "prefix": "Each key grows from $10 to $", "suffix": ".\n    \n\n    Each change in the t", "replies": [{"author": "Claude", "text": "Done (same change as above). You then raised our daily cap from $25 to $100, so at full rate a workspace uses the week's $500 in 5 days and then pauses at the credit floor until the Monday reset. Worst-case exposure is $1,000/week per host (two keys), about $2,140 per key over its 30-day life.", "created": "2026-10-09T19:30:00.000Z"}]}]</script>
+
+<script>
+(() => {
+  'use strict';
+  const FORMAT = 'dc-comments/1';
+  const CTX = 32; // prefix/suffix context length, chars
+  const doc = document.getElementById('doc');
+  const fab = document.getElementById('dc-fab');
+  const listEl = document.getElementById('dc-list');
+  const countEl = document.getElementById('dc-count');
+  const statusEl = document.getElementById('dc-status');
+  const sidebar = document.getElementById('dc-sidebar');
+  const storeKey = 'dc:' + document.title;
+
+  let comments = []; // {id, exact, prefix, suffix, text, created, resolved}
+  let ranges = new Map(); // id -> Range (null if orphaned)
+  let seq = 0;
+
+  // ---- text indexing: one global string over #doc's text nodes ----
+  function docText() {
+    const r = document.createRange();
+    r.selectNodeContents(doc);
+    return r.toString();
+  }
+  function globalOffset(container, offset) {
+    const r = document.createRange();
+    r.setStart(doc, 0);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  }
+  function offsetsToRange(start, end) {
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    let pos = 0, range = document.createRange(), haveStart = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode, len = node.data.length;
+      if (!haveStart && pos + len >= start) {
+        range.setStart(node, start - pos);
+        haveStart = true;
+      }
+      if (haveStart && pos + len >= end) {
+        range.setEnd(node, end - pos);
+        return range;
+      }
+      pos += len;
+    }
+    return null;
+  }
+
+  // ---- anchoring: TextQuoteSelector-style exact + prefix/suffix ----
+  function selectorFromRange(range) {
+    const text = docText();
+    const start = globalOffset(range.startContainer, range.startOffset);
+    const end = globalOffset(range.endContainer, range.endOffset);
+    return {
+      exact: text.slice(start, end),
+      prefix: text.slice(Math.max(0, start - CTX), start),
+      suffix: text.slice(end, end + CTX),
+    };
+  }
+  function locate(c) {
+    const text = docText();
+    let i = text.indexOf(c.prefix + c.exact + c.suffix);
+    if (i >= 0) return offsetsToRange(i + c.prefix.length, i + c.prefix.length + c.exact.length);
+    i = text.indexOf(c.exact);
+    if (i >= 0) return offsetsToRange(i, i + c.exact.length);
+    return null;
+  }
+  function reanchorAll() {
+    ranges = new Map(comments.map(c => [c.id, locate(c)]));
+    paint();
+  }
+
+  // ---- painting via CSS Custom Highlight API ----
+  const hl = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  const hlActive = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  if (hl) { CSS.highlights.set('dc-hl', hl); CSS.highlights.set('dc-hl-active', hlActive); }
+  function paint(activeId) {
+    if (!hl) return;
+    hl.clear(); hlActive.clear();
+    for (const [id, r] of ranges) {
+      if (!r) continue;
+      (id === activeId ? hlActive : hl).add(r);
+    }
+  }
+
+  // ---- persistence (best-effort; file:// storage varies by browser) ----
+  function save() {
+    try { localStorage.setItem(storeKey, JSON.stringify(comments)); } catch (e) { /* unavailable on some file:// setups */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      if (raw) comments = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- sidebar rendering ----
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ''; }, 2500);
+  }
+  function sortedComments() {
+    const pos = c => {
+      const r = ranges.get(c.id);
+      return r ? globalOffset(r.startContainer, r.startOffset) : Infinity; // orphans last
+    };
+    return [...comments].sort((a, b) => pos(a) - pos(b));
+  }
+  function render(editingId) {
+    countEl.textContent = comments.length ? '(' + comments.length + ')' : '';
+    listEl.textContent = '';
+    if (!comments.length) {
+      const p = document.createElement('p');
+      p.className = 'dc-empty';
+      p.textContent = 'No comments yet. Select text in the document to add one.';
+      listEl.appendChild(p);
+      return;
+    }
+    for (const c of sortedComments()) {
+      const item = document.createElement('div');
+      item.className = 'dc-item' + (c.resolved ? ' dc-resolved' : '');
+      item.dataset.id = c.id;
+
+      const quote = document.createElement('div');
+      quote.className = 'dc-quote';
+      quote.textContent = c.exact.length > 90 ? c.exact.slice(0, 90) + '…' : c.exact;
+      if (!ranges.get(c.id)) {
+        const tag = document.createElement('span');
+        tag.className = 'dc-orphan-tag';
+        tag.textContent = 'orphaned';
+        quote.appendChild(tag);
+      }
+      item.appendChild(quote);
+
+      if (c.id === editingId) {
+        const ta = document.createElement('textarea');
+        ta.value = c.text;
+        ta.placeholder = 'Write a comment… (⌘/Ctrl+Enter to save, Esc to cancel)';
+        ta.addEventListener('keydown', e => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
+          if (e.key === 'Escape') cancel();
+        });
+        ta.addEventListener('click', e => e.stopPropagation());
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'dc-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.style.marginTop = '6px';
+        saveBtn.addEventListener('click', e => { e.stopPropagation(); commit(); });
+        function commit() {
+          c.text = ta.value.trim();
+          if (!c.text) return cancel();
+          save(); render();
+        }
+        function cancel() {
+          if (!c.text) { comments = comments.filter(x => x.id !== c.id); ranges.delete(c.id); paint(); }
+          save(); render();
+        }
+        item.appendChild(ta);
+        item.appendChild(saveBtn);
+        listEl.appendChild(item);
+        requestAnimationFrame(() => ta.focus());
+        continue;
+      }
+
+      const text = document.createElement('div');
+      text.className = 'dc-text';
+      text.textContent = c.text;
+      item.appendChild(text);
+
+      if (Array.isArray(c.replies) && c.replies.length) {
+        const box = document.createElement('div');
+        box.className = 'dc-replies';
+        for (const r of c.replies) {
+          const who = document.createElement('div');
+          who.className = 'dc-reply-author';
+          who.textContent = 'Reply from ' + (r.author || 'agent') + (r.created ? ' · ' + String(r.created).slice(0, 10) : '');
+          const body = document.createElement('div');
+          body.className = 'dc-reply-text';
+          for (const part of String(r.text || '').split(/(https?:\/\/[^\s)]+)/g)) {
+            if (/^https?:\/\//.test(part)) {
+              const a = document.createElement('a');
+              a.href = part; a.target = '_blank'; a.rel = 'noopener';
+              a.textContent = part;
+              a.addEventListener('click', e => e.stopPropagation());
+              body.appendChild(a);
+            } else body.appendChild(document.createTextNode(part));
+          }
+          box.append(who, body);
+        }
+        item.appendChild(box);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'dc-meta';
+      const when = document.createElement('span');
+      when.textContent = c.created.slice(0, 10);
+      const resolved = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!c.resolved;
+      cb.addEventListener('click', e => e.stopPropagation());
+      cb.addEventListener('change', () => { c.resolved = cb.checked; save(); render(); });
+      resolved.append(cb, 'resolved');
+      const del = document.createElement('button');
+      del.className = 'dc-del';
+      del.textContent = 'delete';
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        comments = comments.filter(x => x.id !== c.id);
+        ranges.delete(c.id);
+        paint(); save(); render();
+      });
+      meta.append(when, resolved, del);
+      item.appendChild(meta);
+
+      item.addEventListener('click', () => {
+        const r = ranges.get(c.id);
+        if (!r) return flash('Anchor not found in this version of the document.');
+        const rect = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + rect.top - 160, behavior: 'smooth' });
+        paint(c.id);
+        setTimeout(() => paint(), 2000);
+      });
+      // double-click text to edit
+      text.addEventListener('dblclick', e => { e.stopPropagation(); render(c.id); });
+      listEl.appendChild(item);
+    }
+  }
+
+  // ---- selection -> floating Comment button ----
+  document.addEventListener('mouseup', e => {
+    if (fab.contains(e.target)) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { fab.style.display = 'none'; return; }
+      const range = sel.getRangeAt(0);
+      if (!doc.contains(range.commonAncestorContainer) || !range.toString().trim()) {
+        fab.style.display = 'none';
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      fab.style.display = 'block';
+      fab.style.left = Math.min(rect.right + 8 + window.scrollX, window.scrollX + document.documentElement.clientWidth - 120) + 'px';
+      fab.style.top = (rect.top + window.scrollY - 4) + 'px';
+      fab.dataset.pending = '1';
+    }, 0);
+  });
+  fab.addEventListener('click', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const c = Object.assign({ id: 'c' + Date.now().toString(36) + (seq++), text: '', created: new Date().toISOString(), resolved: false }, selectorFromRange(range));
+    comments.push(c);
+    ranges.set(c.id, range.cloneRange());
+    paint(c.id);
+    sel.removeAllRanges();
+    fab.style.display = 'none';
+    sidebar.classList.add('dc-open');
+    render(c.id);
+  });
+
+  // ---- export / import ----
+  function payload() {
+    return JSON.stringify({
+      format: FORMAT,
+      doc: document.title,
+      exported: new Date().toISOString(),
+      comments: comments,
+    }, null, 2);
+  }
+  document.getElementById('dc-export').addEventListener('click', () => {
+    const blob = new Blob([payload()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (document.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'doc') + '.comments.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash('Downloaded.');
+  });
+  document.getElementById('dc-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(payload()); flash('Copied to clipboard.'); }
+    catch (e) { flash('Clipboard blocked — use Export instead.'); }
+  });
+  document.getElementById('dc-import').addEventListener('click', () => document.getElementById('dc-file').click());
+  document.getElementById('dc-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(raw => {
+      const data = JSON.parse(raw);
+      if (data.format !== FORMAT || !Array.isArray(data.comments)) { flash('Not a dc-comments file.'); return; }
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of data.comments) byId.set(c.id, c);
+      comments = [...byId.values()];
+      reanchorAll(); save(); render();
+      flash('Imported ' + data.comments.length + ' comment(s).');
+    }).catch(() => flash('Could not parse that file.'));
+    e.target.value = '';
+  });
+
+  document.getElementById('dc-toggle').addEventListener('click', () => sidebar.classList.toggle('dc-open'));
+
+  // ---- init ----
+  load();
+  // Merge the renderer's preloaded comments (with replies) by id: a stored
+  // comment keeps its own text/resolved state and takes the preloaded replies.
+  try {
+    const pre = document.getElementById('dc-preload');
+    const preloaded = pre && pre.textContent.trim() ? JSON.parse(pre.textContent) : [];
+    if (Array.isArray(preloaded) && preloaded.length) {
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of preloaded) {
+        const existing = byId.get(c.id);
+        if (existing) { if (c.replies) existing.replies = c.replies; }
+        else byId.set(c.id, c);
+      }
+      comments = [...byId.values()];
+      save();
+    }
+  } catch (e) { /* malformed preload: ignore */ }
+  reanchorAll();
+  render();
+})();
+</script>
+<!-- ============ DC-COMMENTS END ============ -->
+</div>
+</body>
+</html>

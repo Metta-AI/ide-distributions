@@ -23,6 +23,8 @@ def test_manifest():
         assert env[k]["required"] is True
     assert env["OPENROUTER_MODEL"]["default"] == "moonshotai/kimi-k3"
     assert env["AUTORESEARCH_GAME"]["default"] == "gota"
+    floor = env["AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD"]
+    assert floor["required"] is False and floor["default"] == "10"
 
 
 def test_config():
@@ -48,7 +50,7 @@ def test_config():
         "AUTORESEARCH_CHAMPION_GRACE_MINUTES", "COGAMES_API_URL",
         "AUTORESEARCH_CARD_MODELS", "AUTORESEARCH_MAX_CARD_RUNS", "AUTORESEARCH_MAX_CARD_USD",
         "AUTORESEARCH_DAILY_BUDGET_USD", "AUTORESEARCH_FALLBACK_PRICES",
-        "AUTORESEARCH_RELAUNCH_MIN_CREDITS",
+        "AUTORESEARCH_RELAUNCH_MIN_CREDITS", "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",
     }
 
 

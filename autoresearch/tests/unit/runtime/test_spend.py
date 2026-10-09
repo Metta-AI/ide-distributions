@@ -13,7 +13,7 @@ PRICES = spend.DEFAULT_FALLBACK_PRICES
 
 
 def test_defaults_and_env_overrides():
-    assert spend.SpendConfig.from_env({}) == spend.SpendConfig(4, 4.0, 25.0, PRICES)
+    assert spend.SpendConfig.from_env({}) == spend.SpendConfig(4, 4.0, 100.0, PRICES)
     config = spend.SpendConfig.from_env({
         "AUTORESEARCH_MAX_CARD_RUNS": "2",
         "AUTORESEARCH_MAX_CARD_USD": "1.5",
