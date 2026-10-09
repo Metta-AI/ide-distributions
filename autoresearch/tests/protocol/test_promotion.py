@@ -751,14 +751,20 @@ def test_stage_champion_git_failure_is_a_json_error(board, capsys, monkeypatch):
     assert code == 1 and "GitError" in env["error"]["message"]
 
 
-def test_accept_champion_through_the_promotion_cli(board, capsys, monkeypatch):
+def test_accept_champion_through_the_promotion_cli(board, capsys, monkeypatch, tmp_path):
     """The operator command reads the game's league (fakegame's ``fake-league``, where this
-    board's fake player has no champion) and records what it shows."""
+    board's fake player has no champion) and records what it shows. A card cannot run it."""
     worker = board.admit(mode="maintenance")
     worker.start()
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
     code, env = _cli(capsys, monkeypatch, worker, "accept-champion")
+    assert code == 1 and "human operator" in env["error"]["message"]
+    assert not (board.ledger / "champion_accepted.json").exists()
+
+    for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
+        monkeypatch.delenv(name)  # an operator shell
+    code, env = main(["promotion", "accept-champion"]), json.loads(capsys.readouterr().out)
     assert code == 0, env
     assert env["data"]["policy_version_id"] is None
     assert env["data"]["league_id"] == "fake-league"

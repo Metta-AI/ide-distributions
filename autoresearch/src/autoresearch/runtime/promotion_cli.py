@@ -5,7 +5,8 @@
   promotion (writes the ledger under the canonical lock).
 - ``promotion stage-champion <P-id>``: copy the candidate STRATEGY at ``candidate_sha`` to
   the champion path in this card's worktree; the holder task only (adopt first).
-- ``promotion accept-champion``: operator only. Resolve a champion conflict (A9) by accepting
+- ``promotion accept-champion``: operator only (refused in a card context, and blocked for
+  agents by the plugin policy and the approvals deny list). Resolve a champion conflict (A9) by accepting
   the policy the league shows now (possibly none) as what the loop expects
   (``promotion.accept_champion``; the game from ``AUTORESEARCH_GAME``, the Softmax backend from
   ``AUTORESEARCH_SOFTMAX``). queue-keeper resumes the agent on its next clean check.
@@ -79,6 +80,11 @@ def _stage_champion(ctx, args) -> dict:
 
 
 def _accept_champion(ctx, args) -> dict:
+    if ctx.card_id or ctx.worker or os.environ.get(runctx.ENV_WORKER):
+        raise PromotionError(
+            "accept-champion is for a human operator, not a card: a champion conflict pauses "
+            "the agent until a person resolves it (A9)"
+        )
     game = load_game(REPO_ROOT, os.environ.get("AUTORESEARCH_GAME") or "gota")
     sm = softmax_from_env(os.environ, ctx.canonical)
     return accept_champion(ctx, sm, game.league_id)

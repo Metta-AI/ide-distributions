@@ -484,8 +484,9 @@ def champion_conflict(
         "league shows, but it is paused until a person looks: no new cards start. The "
         "expected and shown policies are in this message's details (`about`). To resolve it, "
         f"either make the {league_id} league show the expected policy again, or accept what "
-        'it shows with `"$AUTORESEARCH_CLI" promotion accept-champion`. The agent resumes by '
-        "itself on the first run where they agree."
+        'it shows by running `"$AUTORESEARCH_CLI" promotion accept-champion` in an operator '
+        "shell (the agent cannot run it). The agent resumes by itself on the first run where "
+        "they agree."
     )
     return RuntimeMessage(
         "help_request",

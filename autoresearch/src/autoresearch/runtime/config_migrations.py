@@ -64,6 +64,10 @@ APPROVAL_DENY = [
     "hermes kanban link*",
     "hermes kanban --board * create*",
     "hermes kanban --board * link*",
+    # A human resolves a champion conflict (A9). Anchored at the end, so a commit message or
+    # journal text that merely mentions the command is not denied.
+    "*promotion accept-champion",
+    "*promotion accept-champion *",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 

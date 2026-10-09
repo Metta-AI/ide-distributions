@@ -51,6 +51,8 @@ approvals:
     - "hermes kanban link*"
     - "hermes kanban --board * create*"
     - "hermes kanban --board * link*"
+    - "*promotion accept-champion"
+    - "*promotion accept-champion *"
 
 terminal:
   env_passthrough:
