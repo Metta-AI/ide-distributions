@@ -129,6 +129,18 @@ FIXTURES = {
             "outcome": outcome,
         }
         for outcome in (rm.STOPPED, rm.TRIAGED, rm.HELD, rm.NOT_STOPPED)
+    ]
+    + [
+        # A foreign card's title is worker-written and can name ids: they are made plain.
+        {
+            "card_title": f"Design a tune (baseline {REQUEST} exists)",
+            "why": "it started run 5, and the cap is 4 runs per card",
+            "allowance": "4 more runs and an estimated $4.00 of model spend",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "stop": 1,
+            "refs": [],
+        }
     ],
     "card_models_invalid": [
         {"value": "planing=z-ai/glm-5.3", "problems": ["unknown card mode 'planing' (skipped)"]}

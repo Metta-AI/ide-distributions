@@ -403,7 +403,9 @@ def card_over_cap(
     """A card reached its run or estimated-cost cap. ``stop`` counts the card's recorded
     stops, so a card a human unblocked that reaches the cap again is reported again. For
     ``NOT_STOPPED`` it counts the stops that worked, so one failure streak (the runtime
-    retries every minute) gets one message."""
+    retries every minute) gets one message. A foreign card's title is worker-written, so ids
+    in it are made plain."""
+    card_title = plain_ids(card_title)
     title = _line(card_title, 80)
     body = (
         f"{_CAP_LEAD[outcome].format(title=title, why=why)} It will not be put back in the "
