@@ -581,6 +581,19 @@ CANONICAL_CODE_WRITES = [
         "python3 - <<'EOF'\nimport subprocess\n"
         "subprocess.run(['git', '-C', '{canon}', 'branch', '-f', 'main', 'HEAD~1'])\nEOF"
     ),
+    # codex review of PR #24 round 2, M3: io.open, os.open with write flags, Path.replace
+    "python3 -c \"import io; io.open('{canon}/plan.md', 'w').write('x')\"",
+    "python3 -c \"import os; os.open('{canon}/plan.md', os.O_WRONLY | os.O_CREAT)\"",
+    (
+        "python3 -c \"from pathlib import Path; "
+        "Path('{canon}/plan.md').replace('{worker}/notes/plan.md')\""
+    ),
+    "python3 -c \"from pathlib import Path; Path('notes/x.md').replace('{canon}/plan.md')\"",
+    # round 2, L1: -C resolves against the shell's directory, here canonical
+    (
+        "cd {canon} && python3 -c \"import subprocess; t = open('{canon}/plan.md').read(); "
+        "subprocess.run(['git', '-C', '.', 'commit'])\""
+    ),
 ]
 
 
@@ -623,6 +636,15 @@ def test_execute_code_that_writes_canonical_is_refused(layout):
         (
             "import subprocess\nout = subprocess.run(['git', '-C', '{canon}', 'show', "
             "'HEAD:plan.md'], capture_output=True).stdout\nresults = {{'branch': 'candidate'}}"
+        ),
+        # round 2, M3: reads through io.open / os.open, and str.replace on canonical text
+        "import io\nprint(io.open('{canon}/plan.md').read())",
+        "import os\nfd = os.open('{canon}/plan.md', os.O_RDONLY)",
+        "print(open('{canon}/plan.md').read().replace('a', 'b'))",
+        # round 2, L1: a worktree commit with a relative -C after reading canonical
+        (
+            "import subprocess\ntext = open('{canon}/plan.md').read()\n"
+            "subprocess.run(['git', '-C', '.', 'commit', '-am', 'notes'])"
         ),
     ],
 )

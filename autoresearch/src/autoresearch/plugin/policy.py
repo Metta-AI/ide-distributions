@@ -57,11 +57,14 @@
   that names the canonical workspace (its path, not under `.worktrees/`, or
   `AUTORESEARCH_WORKSPACE` / `HERMES_WRITE_SAFE_ROOT`), `.supervisor/ledger` or
   `canonical.lock`, and writes it (``_Guard.writes_canonical``, on the parsed code): a
-  write-shaped call whose destination names canonical (`open` with a write mode,
-  `write_text`/`write_bytes` and other `Path` writes on a canonical receiver, `os` writes,
+  write-shaped call whose destination names canonical (`open`/`io.open`/`codecs.open` with
+  a write mode, `os.open` with write flags, `write_text`/`write_bytes` and other `Path` writes
+  on a canonical receiver, `Path.rename`/`Path.replace` from or to canonical, `os` writes,
   `shutil.copy*` to canonical, `shutil.move`/`rmtree`; ``_write_destinations``), a git argv
   (a list starting with `git`, or a `git ...` string) whose subcommand writes and that is
-  aimed elsewhere than the worktree (``-C``, ``cwd=``, ``chdir``) or names canonical, or
+  aimed elsewhere than the worktree (a literal `-C` directory is resolved against the
+  command's working directory, so `git -C . commit` in the worktree passes; ``cwd=``,
+  ``chdir``) or names canonical, or
   `flock`/`lockf` with `canonical.lock`. Canonical as the source only (`shutil.copyfile`
   from canonical into the worktree, `git -C <canonical> show`) passes, as do writes to the
   worktree; the refusal says to read the worktree copy. Text that does not parse as Python
@@ -351,6 +354,8 @@ MODULE_WRITES = {
     },
 }
 WRITE_MODE = re.compile(r"[wax+]")
+OPEN_MODULES = {"io", "codecs"}  # ``io.open`` / ``codecs.open`` take ``open``'s arguments
+WRITE_FLAGS = re.compile(r"\bO_(?:WRONLY|RDWR|CREAT|APPEND|TRUNC)\b")
 LOCK_CALLS = re.compile(r"\b(?:flock|lockf)\b")
 ACCEPT_COMMITS_TEXT = re.compile(r"accept-commits")
 PROVENANCE_TEXT = re.compile(
@@ -489,7 +494,7 @@ class _Guard:
                 return True
         return False
 
-    def check_code(self, code: str) -> None:
+    def check_code(self, code: str, cwd: Path | None = None) -> None:
         """Raise `_Blocked` for interpreter code (`python -c`, stdin Python, `execute_code`)
         that names a blocked command or a protected file and looks like it acts on it."""
         _refuse_text(code)
@@ -501,10 +506,10 @@ class _Guard:
             raise _Blocked(IDENTITY_FILES)
         if _code_writes_inbox(code):
             raise _Blocked(INBOX_WRITE)
-        if self.writes_canonical(code):
+        if self.writes_canonical(code, cwd or self.base):
             raise _Blocked(CANONICAL_WRITE)
 
-    def writes_canonical(self, code: str) -> bool:
+    def writes_canonical(self, code: str, cwd: Path) -> bool:
         """Literal heuristic (module docstring), for code that names canonical: a lock call
         when the code names canonical.lock; a write-shaped call whose destination names
         canonical (``_write_destinations``: reading canonical to write elsewhere passes); a
@@ -543,54 +548,68 @@ class _Guard:
                 return (
                     constant[0]
                     and _is_git(argv[0])
-                    and self.git_argv_writes(argv, constant, line_of(node), code_elsewhere)
+                    and self.git_argv_writes(argv, constant, line_of(node), code_elsewhere, cwd)
                 )
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 return bool(re.search(r"\bgit\b", node.value)) and self._git_string_writes(
-                    node.value, line_of(node), code_elsewhere
+                    node.value, line_of(node), code_elsewhere, cwd
                 )
             return False
 
         return any(writes(node) for node in ast.walk(tree))
 
-    def _git_string_writes(self, command: str, line: str, code_elsewhere: bool) -> bool:
+    def _git_string_writes(
+        self, command: str, line: str, code_elsewhere: bool, cwd: Path
+    ) -> bool:
         """A ``git ...`` command in a string (``os.system``, ``shell=True``)."""
         try:
             words = shlex.split(command)
         except ValueError:
             words = command.split()
         return any(
-            self.git_argv_writes(words[index:], [True] * (len(words) - index), line, code_elsewhere)
+            self.git_argv_writes(
+                words[index:], [True] * (len(words) - index), line, code_elsewhere, cwd
+            )
             for index, word in enumerate(words)
             if _is_git(word)
         )
 
     def git_argv_writes(
-        self, argv: list[str], constant: list[bool], line: str, code_elsewhere: bool
+        self, argv: list[str], constant: list[bool], line: str, code_elsewhere: bool, cwd: Path
     ) -> bool:
         """``argv`` (``git`` first; ``constant`` marks the literal elements) runs a git write
         subcommand (or one taken from a variable) on canonical: ``-C``/``--git-dir``/
         ``--work-tree`` names a directory other than the worker's worktree, the argv names
         canonical, or the code sets ``cwd=``/``chdir`` and the line does not name the
-        worktree."""
+        worktree. A literal directory is resolved against ``cwd`` (``git -C . commit`` in the
+        worktree is the worktree); one from a variable must name the worktree's path."""
         targets, index = [], 1
         while index < len(argv) and constant[index] and argv[index].startswith("-"):
             option, _, value = argv[index].partition("=")
+            literal = True
             if option in GIT_TARGET_OPTIONS | GIT_VALUE_OPTIONS and not value:
                 index += 1
                 value = argv[index] if index < len(argv) else ""
+                literal = index < len(argv) and constant[index]
             if option in GIT_TARGET_OPTIONS:
-                targets.append(value)
+                targets.append((value, literal))
             index += 1
         if index >= len(argv):
             return False  # `git --version`
         if constant[index] and argv[index] not in CODE_GIT_WRITES:
             return False
-        if any(not self._names_worker(target) for target in targets):
+        if any(not self._is_worker_dir(target, literal, cwd) for target, literal in targets):
             return True
         if self.names_canonical(" ".join(argv)):
             return True
         return not targets and code_elsewhere and not self._names_worker(line)
+
+    def _is_worker_dir(self, target: str, literal: bool, cwd: Path) -> bool:
+        if self._names_worker(target):
+            return True
+        if not literal or self.worker is None:
+            return False
+        return _within(_real(Path(cwd) / os.path.expanduser(target)), self.worker)
 
     def _writes_canonical_by_line(self, code: str) -> bool:
         """The line heuristic for text that is not Python: a line with a write-shaped call
@@ -860,14 +879,14 @@ class _Guard:
                     return [words[module_at].split(".")[0], *words[module_at + 1:]]
                 if "-c" in rest:
                     code_at = index + 1 + rest.index("-c") + 1
-                    self.check_code(words[code_at] if code_at < len(words) else "")
+                    self.check_code(words[code_at] if code_at < len(words) else "", cwd)
                 elif _reads_script_from_stdin(rest):
                     # `python3 - <<'EOF'`, `python3 <<< "..."`, `... | python3`: the script
                     # is the here-document, here-string or (piped) the whole line.
                     for text in line.bodies + line.herestrings:
-                        self.check_code(text)
+                        self.check_code(text, cwd)
                     if line.piped:
-                        self.check_code(line.raw)
+                        self.check_code(line.raw, cwd)
                 return words[index:]
             elif name in SHELLS:
                 mode, script_at = _shell_mode(words, index + 1)
@@ -955,17 +974,29 @@ def _is_git(word: str) -> bool:
 
 def _write_destinations(call: ast.Call) -> list[ast.expr]:
     """The expressions a write-shaped call writes or removes (``RECEIVER_WRITES``,
-    ``MODULE_WRITES``, ``open`` and ``Path.open``/``rename`` with a literal write mode); []
+    ``MODULE_WRITES``, ``open``/``io.open``/``codecs.open``/``Path.open`` with a literal write
+    mode, ``os.open`` with write flags, ``Path.rename``/``Path.replace`` source and target); []
     for any other call. A source that is only read (``shutil.copy`` from canonical,
     ``Path(...).read_text()`` as an argument) is not a destination."""
     func = call.func
-    if isinstance(func, ast.Name) and func.id == "open":
+    module = (
+        func.value.id
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+        else None
+    )
+    if (isinstance(func, ast.Name) and func.id == "open") or (
+        module in OPEN_MODULES and func.attr == "open"
+    ):
         mode = call.args[1] if len(call.args) > 1 else _keyword(call, "mode")
         target = call.args[0] if call.args else _keyword(call, "file")
         return [target] if target is not None and _write_mode(mode) else []
     if not isinstance(func, ast.Attribute):
         return []
-    module = func.value.id if isinstance(func.value, ast.Name) else None
+    if module == "os" and func.attr == "open":
+        flags = call.args[1] if len(call.args) > 1 else _keyword(call, "flags")
+        target = call.args[0] if call.args else _keyword(call, "path")
+        writes = flags is not None and WRITE_FLAGS.search(ast.unparse(flags))
+        return [target] if target is not None and writes else []
     if module in MODULE_WRITES:
         positions = MODULE_WRITES[module].get(func.attr, ())
         keywords = {name for i in positions for name in (("src", "path"), ("dst",))[i]}
@@ -974,7 +1005,10 @@ def _write_destinations(call: ast.Call) -> list[ast.expr]:
         ]
     if func.attr in RECEIVER_WRITES:
         return [func.value]
-    if func.attr == "rename":
+    if func.attr == "rename" or (
+        # ``Path.replace(target)``: one argument (``str.replace`` takes two or more)
+        func.attr == "replace" and len(call.args) == 1 and not call.keywords
+    ):
         return [func.value, *call.args]
     if func.attr == "open":
         mode = call.args[0] if call.args else _keyword(call, "mode")
