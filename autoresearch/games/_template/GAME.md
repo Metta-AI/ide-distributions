@@ -59,8 +59,12 @@ silent fallback. Core code never names a game.
   Without `source`, claims only go stale on a game-version change.
 
 The body must have a `## Baseline build` section: how to build the game's baseline policy
-with the `build` binding (arguments, input, output directory) so `softmax upload-baseline` can
-upload it on a fresh install that has no champion (amendment A14). The build writes the same
-`version.json` as any build; every non-advisory gate must pass.
+with the `build` binding (arguments, input, output directory) so `softmax bootstrap-champion`
+can promote it as the first champion on a fresh install (amendment A14). The build writes the same
+`version.json` as any build; every non-advisory gate must pass. A build compiled from a
+`STRATEGY.md` should name it in `source_hashes` (the bootstrap refuses one whose hash is not
+the shipped `strategy/STRATEGY.md`'s). For an artifact core cannot tie to that file (a
+prebuilt policy), this section and the build's provenance must say why it is the shipped
+strategy.
 
 Describe the game here: its rules, primitives, limits, and host data for the STRATEGY.md layers.

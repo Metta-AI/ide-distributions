@@ -16,7 +16,7 @@ D-04. **The live field is the only oracle.** Local runs are for debugging, not f
 
 D-05. **Pass the replay-analysis gate before you change strategy.** The gate needs a completed replay with hash and mechanics version verified. A committed tool decodes it. Actions map to stable player IDs. A concrete “before” metric and a named cause are recorded. If the replay cannot show the cause, add instrumentation first.
 
-D-06. **Only completed, inspected XP counts as evidence for promotion.** Pending rows, local wins, and “the version exists” do not count. A promotion also needs N completed episodes and every guardrail satisfied against the current champion.
+D-06. **Only completed, inspected XP counts as evidence for promotion.** Pending rows, local wins, and “the version exists” do not count. A promotion also needs N completed episodes and every guardrail satisfied against the current champion. The one exception is the first champion: while no champion exists (nothing promoted and nothing on our leaderboard), the game's shipped strategy is promoted once without evidence (A14). That promotion claims nothing and is evidence for nothing.
 
 D-07. **No claim without a citation.** The linter grades the evidence. A claim with only D or E evidence stays a belief, with confidence and “revise if”.
 

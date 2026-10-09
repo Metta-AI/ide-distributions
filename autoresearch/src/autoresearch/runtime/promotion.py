@@ -54,6 +54,13 @@ Locking. ``acquire``, ``record_intent``, ``record_submitted``, ``adopt``, ``reco
 ``on_published`` and the merge hooks run while the caller holds it. Network calls (git push,
 Softmax) run outside the lock.
 
+Kinds. An ``experiment`` promotion submits an evaluated candidate (``submit_promotion``: the
+champion must be the experiment's baseline). A ``bootstrap`` promotion (amendment A14,
+``bootstrap_promotion``) makes the first champion on a fresh install: the game's shipped
+strategy, with no experiment (``experiment`` is None), allowed only while no promotion is
+published and our leaderboard has no entry. Both go through the same stages, merge hooks,
+reconcile and recovery.
+
 The champion is the candidate STRATEGY at ``CHAMPION_PATH``. A ``candidate_ref`` is stored as
 ``<branch>:<path>`` (git's ``rev:path``): the holder's card branch and the candidate STRATEGY
 path in it, normally ``strategy/candidates/<E-id>/STRATEGY.md``.
@@ -86,7 +93,6 @@ from autoresearch.runtime.ledger import (
     now_iso,
 )
 from autoresearch.softmax_tool.protocol import Softmax
-from autoresearch.softmax_tool.versions import current_baseline
 
 CHAMPION_PATH = "strategy/STRATEGY.md"
 PROMOTION_FILE_REL = ".supervisor/ledger/promotion.json"
@@ -112,7 +118,7 @@ class Promotion:
     holder_task: str
     run_id: str
     board_epoch: str
-    experiment: str
+    experiment: str | None  # None for a ``bootstrap`` promotion
     version: str
     platform_policy_version_id: str
     candidate_ref: str
@@ -125,6 +131,10 @@ class Promotion:
     former_holders: list[str] = field(default_factory=list)  # holder tasks before adoptions
     help_requested: bool = False  # recovery attempts exhausted; an operator must act
     history: list[dict] = field(default_factory=list)
+    # ``experiment``: an evaluated candidate (``submit_promotion``). ``bootstrap``: the first
+    # champion on a fresh install, the game's shipped strategy, with no experiment (A14,
+    # ``bootstrap_promotion``). Records written before kinds existed are ``experiment``.
+    kind: str = "experiment"
 
     @property
     def recovery_request(self) -> str | None:
@@ -165,6 +175,7 @@ class SubmitOutcome:
     submission_id: str | None = None
     reason: str = ""
     request_id: str | None = None  # the re-evaluation request written on a champion mismatch
+    code: str = ""  # a machine-readable refusal reason, when the caller should see one
 
 
 # --- storage ---
@@ -316,8 +327,10 @@ def _write_runtime_request(
     return Layout(canonical).card_requests / f"{request_id}.json"
 
 
-def _refs(experiment: str, version: str) -> list[str]:
-    return [f"ar://experiment/{experiment}", f"ar://version/{version}"]
+def _refs(experiment: str | None, version: str) -> list[str]:
+    """The experiment (none for a bootstrap promotion) and version refs."""
+    refs = [f"ar://experiment/{experiment}"] if experiment else []
+    return [*refs, f"ar://version/{version}"]
 
 
 # --- champion ---
@@ -340,10 +353,6 @@ def champion_status(ctx: RunContext, sm: Softmax, league_id: str) -> tuple[str |
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     if not published:
         if on_board is None:
-            # A14: before any league entry, the bootstrap baseline is the comparison champion.
-            baseline = current_baseline(RecordStore(Layout(ctx.canonical)))
-            if baseline is not None and baseline.platform_policy_version_id is not None:
-                return baseline.platform_policy_version_id, ""
             return None, f"no champion known: nothing promoted and no {league_id} leaderboard entry"
         return on_board, ""
     latest = published[-1].platform_policy_version_id
@@ -360,18 +369,37 @@ def champion_status(ctx: RunContext, sm: Softmax, league_id: str) -> tuple[str |
 def current_champion(ctx: RunContext, sm: Softmax, league_id: str) -> str | None:
     """The champion's platform policy version id: the latest ``published`` promotion,
     confirmed against the Softmax leaderboard for our player. Before any promotion is
-    published the leaderboard champion is taken as is (amendment A9), and with no leaderboard
-    entry either, the current baseline version uploaded by ``softmax upload-baseline``
-    (amendment A14: it is the comparison champion, never a promotion). None when no champion
+    published the leaderboard champion is taken as is (amendment A9). None when no champion
     is known, or when the ledger and the leaderboard disagree (logged; callers must refuse
     to submit)."""
     return champion_status(ctx, sm, league_id)[0]
 
 
+def version_dir(version: str) -> str:
+    """The repo-relative directory of version record ``version`` (record and events)."""
+    return (Layout(Path()).versions / version).as_posix()
+
+
+def _restore_version(ctx: RunContext, promotion: Promotion) -> None:
+    """Copy a bootstrap promotion's version record and events from ``candidate_sha`` into
+    the worker's worktree. The bootstrap card committed them on its branch before intent;
+    only that branch has them, so a recovery card must carry them over (A11)."""
+    directory = version_dir(promotion.version)
+    listing = gitops.git(
+        ctx.canonical, "ls-tree", "-r", "--name-only", promotion.candidate_sha, "--", directory
+    )
+    for rel in listing.splitlines():
+        target = ctx.worker / rel
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(gitops.show(ctx.canonical, promotion.candidate_sha, rel))
+
+
 def stage_champion(ctx: RunContext, promotion: Promotion) -> Path:
     """Copy the candidate STRATEGY at ``candidate_sha`` to the champion path in the worker's
-    worktree (the worker's ``card finish`` commits it). Fetches the pushed candidate branch
-    when the commit is not local (a rebuilt host)."""
+    worktree (the worker's ``card finish`` commits it); for a bootstrap promotion also restore
+    its version record from that commit (``_restore_version``). Fetches the pushed candidate
+    branch when the commit is not local (a rebuilt host)."""
     if ctx.worker is None or promotion.candidate_sha is None:
         raise PromotionError("staging the champion needs a worker worktree and a candidate_sha")
     content = gitops.show(ctx.canonical, promotion.candidate_sha, promotion.candidate_path)
@@ -385,6 +413,8 @@ def stage_champion(ctx: RunContext, promotion: Promotion) -> Path:
     target = ctx.worker / CHAMPION_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
+    if promotion.kind == "bootstrap":
+        _restore_version(ctx, promotion)
     return target
 
 
@@ -405,10 +435,23 @@ def acquire(
 
     True if this run now holds a promotion in ``acquired`` (also when it already did, for
     the same experiment and version). False while another promotion holds the lock."""
+    platform_id = _platform_id(ctx.canonical, experiment, version)
+    return _take_lock(ctx, queue, "experiment", experiment, version, platform_id, candidate_ref)
+
+
+def _take_lock(
+    ctx: RunContext,
+    queue: Queue,
+    kind: str,
+    experiment: str | None,
+    version: str,
+    platform_id: str,
+    candidate_ref: str,
+) -> bool:
+    """``acquire`` for a promotion of ``kind`` (see ``acquire``)."""
     task_id, run_id = _worker_identity(ctx)
     canonical = ctx.canonical
     branch = f"card/{queue.get(task_id).spec.request_id}"
-    platform_id = _platform_id(canonical, experiment, version)
     with canonical_lock(canonical):
         current = load(canonical)
         own = current is not None and _is_holder(current, task_id, run_id)
@@ -439,6 +482,7 @@ def acquire(
             stage="acquired",
             updated_at=at,
             history=[{"stage": "acquired", "at": at}],
+            kind=kind,
         )
         _save(canonical, promotion, f"promotion {promotion.id}: acquired", extra)
     return True
@@ -758,16 +802,30 @@ def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
     canonical = ctx.canonical
     attempt = len(promotion.recovery_requests) + 1
     key = f"promote-recover:{promotion.id}:{attempt}"
+    if promotion.kind == "bootstrap":
+        carry_over = (
+            f"stage-champion also restores the champion's version record "
+            f"{version_dir(promotion.version)} from that commit (if it is missing after "
+            f"stage-champion, run git checkout {promotion.candidate_sha} -- "
+            f"{version_dir(promotion.version)}). Compare branch {promotion.candidate_branch} "
+            f"with main and redo any other change it made. If the holder card was an "
+            f"experiment card, request that experiment again (queue request create, with the "
+            f"hypothesis ref)."
+        )
+    else:
+        carry_over = (
+            f"Also carry over the non-champion changes the promotion card made on branch "
+            f"{promotion.candidate_branch} (for example experiment record updates): compare "
+            f"it with main and redo them."
+        )
     why = (
         f"Promotion {promotion.id} submitted {promotion.platform_policy_version_id} "
         f"(submission {promotion.submission_id}) but its holder {promotion.holder_task} ended "
         f"without a usable handoff (recovery attempt {attempt}). Run "
         f'"$AUTORESEARCH_CLI" promotion adopt {promotion.id}, then "$AUTORESEARCH_CLI" '
         f"promotion stage-champion {promotion.id} (copies {CHAMPION_PATH} from "
-        f"{promotion.candidate_ref} at {promotion.candidate_sha}). Also carry over the "
-        f"non-champion changes the promotion card made on branch "
-        f"{promotion.candidate_branch} (for example experiment record updates): compare it "
-        f"with main and redo them. Write the journal and finish. Do not submit again."
+        f"{promotion.candidate_ref} at {promotion.candidate_sha}). {carry_over} Write the "
+        f"journal and finish. Do not submit again."
     )
     request = _write_runtime_request(
         canonical,
@@ -798,7 +856,7 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
         policy_version_id=promotion.platform_policy_version_id,
         candidate_ref=promotion.candidate_ref,
         candidate_sha=promotion.candidate_sha,
-        refs=[{"uri": f"ar://experiment/{promotion.experiment}"}],
+        refs=[{"uri": _refs(promotion.experiment, promotion.version)[0]}],
     )
     if not already_published(canonical, message):
         publish_message(canonical, message, allow_no_remote=True)
@@ -900,7 +958,7 @@ def stage_champion_for(ctx: RunContext, promotion_id: str) -> Path:
 
 
 def _refuse(
-    ctx: RunContext, promotion: Promotion, reason: str, request_key: str = ""
+    ctx: RunContext, promotion: Promotion, reason: str, request_key: str = "", code: str = ""
 ) -> SubmitOutcome:
     """Abort the acquired promotion (and, with ``request_key``, write a re-evaluation request
     in the same commit)."""
@@ -925,7 +983,7 @@ def _refuse(
             )
             extra, request_id = (request,), request.stem
         _move(canonical, current, "aborted", reason, extra)
-    return SubmitOutcome(False, promotion.id, reason=reason, request_id=request_id)
+    return SubmitOutcome(False, promotion.id, reason=reason, request_id=request_id, code=code)
 
 
 def submit_promotion(
@@ -956,6 +1014,14 @@ def submit_promotion(
     if champion != baseline:
         reason = f"the champion {champion} is not the experiment baseline {baseline}"
         return _refuse(ctx, promotion, reason, f"reevaluate:{experiment}:{champion}")
+    return _submit_acquired(ctx, sm, promotion, league_id)
+
+
+def _submit_acquired(
+    ctx: RunContext, sm: Softmax, promotion: Promotion, league_id: str
+) -> SubmitOutcome:
+    """The rest of the single submit path for an acquired promotion: identity ->
+    record_intent -> submit -> record_submitted -> stage the champion."""
     identity = sm.whoami()
     if identity.subject_type != "player":
         return _refuse(ctx, promotion, f"credential is a {identity.subject_type}, not a player")
@@ -968,3 +1034,46 @@ def submit_promotion(
     record_submitted(ctx, promotion, submission_id)
     stage_champion(ctx, load(ctx.canonical))
     return SubmitOutcome(True, promotion.id, submission_id=submission_id)
+
+
+def bootstrap_promotion(
+    ctx: RunContext,
+    queue: Queue,
+    sm: Softmax,
+    version: str,
+    platform_id: str,
+    league_id: str,
+) -> SubmitOutcome:
+    """Promote the game's shipped strategy as the first champion (amendment A14): the same
+    C8 path as ``submit_promotion`` (acquire -> intent -> submit -> submitted -> stage; the
+    merge records and publishes it; A11 recovery applies), as a ``bootstrap`` promotion with
+    no experiment, evaluation outcome or decision. ``version`` is the uploaded build's version
+    record (in the caller's worktree) and ``platform_id`` its platform id. The candidate is
+    the champion STRATEGY at ``CHAMPION_PATH`` on the card's branch, so the merge leaves the
+    champion path as it is.
+
+    Allowed only while there is no champion and only for the shipped strategy: after taking
+    the lock (one promotion in flight, so two bootstrapping cards cannot both submit), it is
+    refused (aborted, ``code``) once any promotion is published or our leaderboard has an
+    entry (A9; ``champion_exists``), and unless ``CHAMPION_PATH`` on the card's branch is
+    byte-identical to canonical HEAD's (``not_shipped_strategy``: the one unevaluated
+    promotion must not carry an edit). The caller must not hold the lock."""
+    if not _take_lock(ctx, queue, "bootstrap", None, version, platform_id, CHAMPION_PATH):
+        return SubmitOutcome(False, reason="another promotion holds the promotion lock")
+    promotion = load(ctx.canonical)
+    if has_published(ctx.canonical):
+        reason = "a promotion is published, so the champion exists"
+        return _refuse(ctx, promotion, reason, code="champion_exists")
+    on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
+    if on_board is not None:
+        reason = f"our {league_id} leaderboard champion {on_board} is the champion (A9)"
+        return _refuse(ctx, promotion, reason, code="champion_exists")
+    shipped = gitops.show(ctx.canonical, "HEAD", CHAMPION_PATH)
+    branch = f"refs/heads/{promotion.candidate_branch}"
+    if gitops.show(ctx.canonical, branch, CHAMPION_PATH) != shipped:
+        reason = (
+            f"{CHAMPION_PATH} on {promotion.candidate_branch} differs from the shipped one at "
+            "canonical HEAD; a bootstrap promotes only the unchanged shipped strategy"
+        )
+        return _refuse(ctx, promotion, reason, code="not_shipped_strategy")
+    return _submit_acquired(ctx, sm, promotion, league_id)
