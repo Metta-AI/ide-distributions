@@ -209,6 +209,7 @@ def test_shared_gate_order_and_advisory_screen(mocked_native_verification, tmp_p
     result = gota_gates.verify('abcdef12-1', context=GateContext(tmp_path))
     assert result['G1']['outcome'] == 'errored'
     assert 'different native build' in result['G1']['summary']['error']['message']
+    assert result['G1']['seconds'] >= 0  # an errored gate records its time too
 
 
 def test_source_inventory_includes_backend_and_shared_gate_closure(tmp_path):

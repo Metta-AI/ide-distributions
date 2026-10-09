@@ -91,7 +91,9 @@ in `version.json` records `seconds` (wall time), and a completed build records
 compiler build copies its compiler child's Hermes `state.db` (passed, failed, or
 raised) to `$HERMES_HOME/gota-compiler/<build id>-<scratch suffix>/state.db`, so
 the baseline report can count compiler spend after the build's scratch directory
-is deleted; a copy that fails is a warning on stderr, never a build failure. A local check
+is deleted; a copy that fails is a warning on stderr, never a build failure. The
+copies are not pruned yet: disk use grows by one full `state.db` (transcripts
+included) per compiler build, and `report baseline` scans them all. A local check
 writes `OUTPUT/gates.json`, `engine_identity.json`, `coworld_manifest.json` and
 hashed native measurement JSON files containing `native_build` receipts.
 Follow G2's `summary.episode_dir` to the episode results and logs; build locators

@@ -92,14 +92,15 @@ def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path
                     raise ValueError('gate used a different native build from verification provenance')
         except Exception as error:  # noqa: BLE001 - persist arbitrary tool faults; never repair them.
             result = GateResult.errored(error)
+        seconds = round(time.monotonic() - gate_started, 3)
         gates[name] = {"outcome": result.outcome, "passed": result.ok, "summary": result.details,
-                       "advisory": name in ("G4", "G5")}
+                       "advisory": name in ("G4", "G5"), "seconds": seconds}
         if result.outcome == 'errored':
             break
         if name == "G1" and errors:
             gates[name] = {"outcome": "failed", "passed": False,
-                           "summary": {"lint": errors, "compile": result.details}}
-        gates[name]["seconds"] = round(time.monotonic() - gate_started, 3)
+                           "summary": {"lint": errors, "compile": result.details},
+                           "seconds": seconds}
         if not gates[name]["passed"] and name in ("G1", "G2"):
             break
     builds.dump(context.work_dir / "gates.json", gates)

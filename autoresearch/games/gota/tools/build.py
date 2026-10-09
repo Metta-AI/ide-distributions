@@ -60,17 +60,19 @@ def keep_compiler_sessions(home, scratch, profile_home):
     if not profile_home:
         print('warning: HERMES_HOME is not set; compiler sessions not kept', file=sys.stderr)
         return
-    claims = scratch / 'staging' / '.claims'
-    build_ids = sorted(path.name for path in claims.iterdir()) if claims.is_dir() else []
-    name = f"{build_ids[0] if build_ids else 'no-build-id'}-{scratch.name.removeprefix('.gota-build-')}"
-    target = Path(profile_home) / COMPILER_SESSIONS_DIR / name / 'state.db'
     try:
+        claims = scratch / 'staging' / '.claims'
+        build_ids = sorted(path.name for path in claims.iterdir()) if claims.is_dir() else []
+        name = f"{build_ids[0] if build_ids else 'no-build-id'}-{scratch.name.removeprefix('.gota-build-')}"
+        target = Path(profile_home) / COMPILER_SESSIONS_DIR / name / 'state.db'
         target.parent.mkdir(parents=True, exist_ok=True)
-        # The backup API gives a consistent copy that includes any WAL content.
+        # The backup API gives a consistent copy that includes any WAL content. The copy then
+        # leaves WAL mode, so read-only readers create no -wal/-shm files beside it.
         with contextlib.closing(sqlite3.connect(source)) as src, \
                 contextlib.closing(sqlite3.connect(target)) as dst:
             src.backup(dst)
-    except (OSError, sqlite3.Error) as error:
+            dst.execute('PRAGMA journal_mode=DELETE')
+    except Exception as error:  # noqa: BLE001 - never fail the build or mask its own error
         print(f'warning: compiler sessions not kept ({type(error).__name__}: {error})', file=sys.stderr)
 
 
