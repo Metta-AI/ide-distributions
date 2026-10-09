@@ -44,9 +44,13 @@
   (``adapters.register``), its terminals and code inherit it, and the CLI checks it, so a
   command word assembled from variables is refused at run time;
 - the provenance journal and key (``runtime.provenance``): any tool call (terminal, file
-  tools, code, ...) whose arguments name `.git/autoresearch`, `provenance.key`,
-  `provenance.jsonl`, the module (`runtime.provenance`, `runtime import ... provenance`) or
-  ``AUTORESEARCH_AGENT_SESSION`` (``PROVENANCE_TEXT``). The OS cannot hide the key from
+  tools, code, ...) whose arguments name `.git/autor...` (also a glob, or `.git` and
+  `autor...` later on the line), canonical's `.git` directory itself (`find`, `grep -r`,
+  `search_files` there), `provenance.key`, `provenance.jsonl`, the module
+  (`runtime.provenance`, `ledger.provenance`, `runtime import ... provenance`) or
+  ``AUTORESEARCH_AGENT_SESSION`` (``PROVENANCE_TEXT``, ``_Guard.names_canonical_git``). A
+  module name built from pieces (`import_module('...prov' + 'enance')`) and canonical writes
+  split across lines pass. The OS cannot hide the key from
   workers (same user, and `card finish` writes the journal); this refusal is policy;
 - canonical writes from interpreter code (C1, D-27; best effort): `python -c`, a Python
   script read from stdin (`python3 - <<EOF`, a here-string, a pipe) and `execute_code` text
@@ -322,7 +326,9 @@ GIT_ELSEWHERE = re.compile(r"""['"]-C['"]|\s-C\s|\bcwd\s*=|\bchdir\b|--git-dir|-
 LOCK_CALLS = re.compile(r"\b(?:flock|lockf)\b")
 ACCEPT_COMMITS_TEXT = re.compile(r"accept-commits")
 PROVENANCE_TEXT = re.compile(
-    r"\.git/autoresearch|provenance\.(?:key|jsonl)|runtime\.provenance\b"
+    r"\.git/autor"  # the journal directory, also as a glob (`.git/autor*`)
+    r"|\.git\b[^\n]*\bautor"  # `cd .../.git && cat autoresearch/*`
+    r"|provenance\.(?:key|jsonl)|runtime\.provenance\b|ledger\.provenance\b"
     r"|runtime\s+import\s[^\n]*\bprovenance\b|AUTORESEARCH_AGENT_SESSION"
 )
 
@@ -364,7 +370,7 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
     args = args if isinstance(args, dict) else {}
     guard = _Guard(ctx, card)
     texts = _strings(args)
-    if any(PROVENANCE_TEXT.search(text) for text in texts):
+    if any(PROVENANCE_TEXT.search(text) or guard.names_canonical_git(text) for text in texts):
         return _block(PROVENANCE_FILES)
     if tool_name in ("terminal", "execute_code") and any(
         ACCEPT_COMMITS_TEXT.search(text) for text in texts
@@ -444,6 +450,15 @@ class _Guard:
             for match in re.finditer(re.escape(root.rstrip("/")) + r"(?![\w.-])", text):
                 if not text.startswith("/.worktrees/", match.end()):
                     return True
+        return False
+
+    def names_canonical_git(self, text: str) -> bool:
+        """``text`` names canonical's ``.git`` directory (``<canon>/.git`` followed by a path
+        separator, a glob, a quote or the end), which holds the provenance journal: `find`,
+        `grep -r`, `search_files` or a glob there could reach the key without naming it."""
+        for root in {str(self.ctx.canonical), str(_real(self.ctx.canonical))}:
+            if re.search(re.escape(root.rstrip("/") + "/.git") + r"(?![\w.-])", text):
+                return True
         return False
 
     def check_code(self, code: str) -> None:

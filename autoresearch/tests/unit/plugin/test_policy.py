@@ -627,6 +627,14 @@ PROVENANCE_ACCESS = [
                       "p.accept(os.getcwd().split('/.worktrees')[0], 'HEAD')"}),
     ("execute_code", {"code": "import autoresearch.runtime.provenance as p; p.record('.', 'x', 'y')"}),
     ("terminal", {"command": "python3 -c 'from autoresearch.runtime import ledger, provenance'"}),
+    # review R2-M3: globs, cd + relative, searches under canonical's .git, the ledger route
+    ("terminal", {"command": "cat {canon}/.git/autor*/prov*.key"}),
+    ("terminal", {"command": "cd {canon}/.git && cat autoresearch/*"}),
+    ("terminal", {"command": "find {canon}/.git -name '*.key' -exec cat {{}} \\;"}),
+    ("terminal", {"command": "grep -r . {canon}/.git"}),
+    ("search_files", {"pattern": "mac", "path": "{canon}/.git"}),
+    ("execute_code", {"code": "from autoresearch.runtime import ledger\n"
+                      "ledger.provenance.accept('.', 'HEAD')"}),
 ]
 
 
@@ -636,6 +644,20 @@ def test_the_provenance_journal_key_and_module_are_refused_to_any_tool(layout, t
     """Review I-3: the OS cannot hide the key from workers; the policy refuses model access."""
     allowed, reason = tool_policy(tool, _fill(args, layout), layout.ctx(worker=card is not None), card)
     assert not allowed and "provenance journal" in reason and "D-27" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat .gitignore",
+        "git -C {canon} log -1",
+        "cat {worker}/.git",  # the worktree's gitdir pointer file
+        "git status && cat {canon}/.gitignore",
+    ],
+)
+def test_git_use_outside_the_journal_is_allowed(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert allowed, (command, reason)
 
 
 @pytest.mark.parametrize(
