@@ -510,3 +510,55 @@ def test_a_replayed_anchor_does_not_hide_a_reset(host):
     assert run.provenance_violation is not None
     assert run.provenance_violation.kind == provenance.REWRITTEN
     assert provenance.invalid_lines(host.canonical) == 1
+
+
+def test_a_violation_is_never_pushed_until_it_is_accepted(host, monkeypatch, capsys):
+    """Codex review of PR #24 round 2, H3: publishing the violation warning (or anything
+    else) must not push the unrecorded commit to origin. The warning still lands in the
+    local outbox, which the bridge reads. accept-commits lets the next push through."""
+    host.tick(at(1))
+    pushed = host.remote_head()
+    assert pushed == host.head()
+    forged = _forge(host)
+
+    assert host.tick(at(2)).paused
+    assert host.remote_head() == pushed
+    [warning] = _provenance_messages(host)  # in the local outbox
+    assert warning["kind"] == "help_request"
+    assert provenance.push_hold(host.canonical) is not None
+    assert not provenance.push_main(host.canonical, "origin", ["HEAD:refs/heads/main"])
+    assert host.remote_head() == pushed
+
+    code, _ = _cli(monkeypatch, capsys, host, "accept-commits", forged)
+    assert code == 0
+    host.tick(at(3))
+    assert host.remote_head() == host.head()
+    assert gitops.git(host.canonical, "merge-base", "--is-ancestor", forged, "HEAD") == ""
+
+
+def _pushes_main(call: ast.Call) -> bool:
+    """``gitops.push`` / ``push_with_rejections`` with a refspec that can name main."""
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr in {"push", "push_with_rejections"}
+            and isinstance(func.value, ast.Name) and func.value.id == "gitops"):  # fmt: skip
+        return False
+    refspecs = ast.unparse(call.args[2]) if len(call.args) > 2 else ""
+    return any(word in refspecs for word in ("main", "MAIN", "BRANCH", "HEAD"))
+
+
+def test_every_push_of_main_goes_through_the_provenance_gate():
+    """H3: a new push of main that skips ``provenance.push_main`` would publish unaccepted
+    commits."""
+    found = []
+    for path in SRC.rglob("*.py"):
+        relative = path.relative_to(SRC).as_posix()
+        if relative in {"io/gitops.py", "runtime/provenance.py"}:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        found += [
+            (relative, node.lineno)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and _pushes_main(node)
+        ]
+    assert found == []
+

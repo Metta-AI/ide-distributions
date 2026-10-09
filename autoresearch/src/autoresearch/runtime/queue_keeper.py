@@ -496,7 +496,7 @@ def _remote_main(canonical: Path) -> str | None:
 def _push_main_and_cards(canonical: Path) -> list[str]:
     """Push main, then the card branches separately so a card refusal never touches main's
     result. Returns the card refs origin rejected."""
-    gitops.push(canonical, REMOTE, [MAIN_REFSPEC])
+    provenance.push_main(canonical, REMOTE, [MAIN_REFSPEC])
     _, rejected = gitops.push_with_rejections(canonical, REMOTE, [CARD_REFSPEC])
     return rejected
 

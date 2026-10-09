@@ -331,6 +331,11 @@ def _base(entries: list[dict]) -> int | None:
 # --- bootstrap, check, accept ---
 
 
+def _ever_marked(canonical: Path) -> bool:
+    """The committed marker is, or ever was, in HEAD's history: the journal was initialized."""
+    return bool(gitops.git(canonical, "log", "-1", "--format=%H", "--", MARKER_RELATIVE))
+
+
 def initialize(canonical: Path, fresh: bool) -> str | None:
     """Bootstrap, under the canonical lock: trust the current HEAD once when the journal has
     no valid anchor and either the workspace is ``fresh`` (seeded or cloned by this run) or
@@ -341,8 +346,7 @@ def initialize(canonical: Path, fresh: bool) -> str | None:
     if _base(entries) is not None:
         return None
     has_marker = gitops.show(canonical, "HEAD", MARKER_RELATIVE) is not None
-    ever_marked = bool(gitops.git(canonical, "log", "-1", "--format=%H", "--", MARKER_RELATIVE))
-    if ever_marked and not fresh:
+    if _ever_marked(canonical) and not fresh:
         return None  # check reports journal_lost, also when the marker was deleted since
     head = gitops.head(canonical)
     _anchor(canonical, head, "bootstrap" if fresh else "bootstrap: existing workspace")
@@ -463,3 +467,30 @@ def accept(canonical: Path, sha: str) -> dict:
             "check-commits shows invalid lines) and run accept-commits again"
         )
     return {"accepted": full, "head": head}
+
+
+# --- pushing main ---
+
+
+def push_hold(canonical: Path) -> str | None:
+    """Why canonical ``main`` must not be pushed now, or None. While a violation is
+    unresolved (or the check cannot run) the commits nobody recorded stay local: pushing
+    would publish them to the remote before a person accepted them. Messages still reach
+    the coach: the bridge reads ``comms/outbox/`` from the local workspace. A workspace the
+    journal was never initialized on (no marker ever committed: bootstrap's first push of a
+    seeded workspace, which ``initialize`` then trusts) is not held."""
+    try:
+        violation = check(canonical, advance=False)
+        if violation is not None and violation.kind == JOURNAL_LOST and not _ever_marked(canonical):
+            return None  # never initialized (bootstrap's seed push, before ``initialize``)
+    except Exception as error:  # noqa: BLE001 - a check that cannot run holds the push
+        return f"the provenance check cannot run: {type(error).__name__}: {error}"
+    return None if violation is None else violation.summary()
+
+
+def push_main(canonical: Path, remote: str, refspecs: list[str]) -> bool:
+    """Every push of canonical ``main`` goes through here (``push_hold``). Returns False
+    when the push is held or fails; the next push retries."""
+    if push_hold(canonical) is not None:
+        return False
+    return gitops.push(canonical, remote, refspecs)

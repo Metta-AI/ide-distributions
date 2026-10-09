@@ -94,6 +94,7 @@ from autoresearch.queue.card import CardSpec
 from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
+from autoresearch.runtime import provenance
 from autoresearch.runtime.admission import board_epoch, receipt_path
 from autoresearch.runtime.handoff import handoff_path, write_handoff
 from autoresearch.runtime.ledger import (
@@ -817,7 +818,7 @@ def record_intent(ctx: RunContext, promotion: Promotion, replaces: str | None = 
     with canonical_lock(canonical):
         current = _require(load(canonical), promotion.id, "acquired")
         intent = _move(canonical, current, "intent", candidate_sha=sha, replaces=replaces)
-    if gitops.push(canonical, REMOTE, [MAIN_REFSPEC]):
+    if provenance.push_main(canonical, REMOTE, [MAIN_REFSPEC]):
         return
     with canonical_lock(canonical):
         current = load(canonical)
@@ -833,7 +834,7 @@ def record_submitted(ctx: RunContext, promotion: Promotion, submission_id: str) 
     with canonical_lock(canonical):
         current = _require(load(canonical), promotion.id, "intent")
         _move(canonical, current, "submitted", submission_id=submission_id)
-    if not gitops.push(canonical, REMOTE, [MAIN_REFSPEC]):
+    if not provenance.push_main(canonical, REMOTE, [MAIN_REFSPEC]):
         log.warning("promotion %s submitted but the ledger push failed", promotion.id)
 
 

@@ -312,7 +312,11 @@ first-parent history of `main` since the last checked commit. A commit nobody re
 example one a card worker made itself, working around the plugin), a rewritten history
 (reset, rebase, amend), or a missing or unverifiable journal pauses the agent and sends one
 help request; that run then only applies the spend caps, and nothing is merged, published or
-admitted until a person checks. In an operator shell:
+admitted until a person checks. While the violation stands, no job pushes `main` to
+`AUTORESEARCH_WORKSPACE_REMOTE` (`provenance.push_main` runs the check before every push of
+`main`), so the unrecorded commits stay on the host; the help request still reaches the coach
+because the bridge reads `comms/outbox/` from the local workspace. Pushing resumes after
+`accept-commits`. In an operator shell:
 
 ```sh
 "$AUTORESEARCH_CLI" runtime check-commits

@@ -87,6 +87,7 @@ from autoresearch.paths import Layout
 from autoresearch.queue.card import CardSpec
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
+from autoresearch.runtime import provenance
 from autoresearch.runtime.bootstrap import REPO_ROOT
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
 from autoresearch.runtime.markers import next_launch_attempt, relaunch_marker, review_marker
@@ -583,7 +584,7 @@ def run(
                 _log(ctx, f"warning: {warning}")
             if REMOTE in gitops.git(ctx.canonical, "remote").split():
                 with canonical_lock(ctx.canonical):
-                    if not gitops.push(ctx.canonical, REMOTE, ["HEAD:refs/heads/main"]):
+                    if not provenance.push_main(ctx.canonical, REMOTE, ["HEAD:refs/heads/main"]):
                         _log(ctx, "push of main failed; queue-keeper retries it")
     except LockTimeout:
         result.skipped = True
