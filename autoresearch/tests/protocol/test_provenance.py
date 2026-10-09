@@ -448,7 +448,9 @@ def test_an_accept_that_does_not_read_back_fails_loudly(host, monkeypatch, capsy
     """F3: accept-commits verifies its anchor reads back before it reports success."""
     forged = _forge(host)
     real = provenance._entries
-    monkeypatch.setattr(provenance, "_entries", lambda canonical: (real(canonical)[0][:-1], 1))
+    monkeypatch.setattr(
+        provenance, "_entries", lambda canonical, **kw: (real(canonical, **kw)[0][:-1], 1)
+    )
     code, envelope = _cli(monkeypatch, capsys, host, "accept-commits", forged)
     assert code == 1 and "does not read back" in envelope["error"]["message"]
 
@@ -784,3 +786,19 @@ def test_a_journal_failure_in_a_later_step_fails_closed(host, monkeypatch):
     assert [card.assignee for card in host.queue.list("pending")] == [None]
     pause = json.loads((host.ledger / "pause.json").read_text())
     assert pause["reason"].startswith(provenance.PAUSE_REASON)
+
+
+def test_appends_reuse_the_verified_journal_instead_of_rereading_it(host, monkeypatch):
+    """Round 3, low: each append re-verified every earlier line (quadratic). With the
+    snapshot, N appends verify each line once plus sign N entries."""
+    lines = len(provenance.journal_path(host.canonical).read_bytes().splitlines())
+    calls = []
+    real_mac = provenance._mac
+    monkeypatch.setattr(provenance, "_mac", lambda key, entry: calls.append(1) or real_mac(key, entry))
+    provenance._SNAPSHOTS.clear()
+    appends = 20
+    for number in range(appends):
+        provenance._append(host.canonical, {"kind": "verified", "sha": host.head(), "at": str(number)})
+    assert len(calls) <= lines + 2 * appends
+    entries, invalid = provenance._entries(host.canonical, fresh=True)
+    assert invalid == 0 and [e["at"] for e in entries[-appends:]] == [str(n) for n in range(appends)]

@@ -194,7 +194,8 @@ def _append(canonical: Path, entry: dict) -> dict:
     this entry. A short write is continued until the whole line is written."""
     try:
         key = _key(canonical, create=True)
-        entry = entry | {"seq": _last_seq(_entries(canonical)[0]) + 1}
+        before, invalid = _entries(canonical)
+        entry = entry | {"seq": _last_seq(before) + 1}
         signed = entry | {"mac": _mac(key, entry)}
         data = (json.dumps(signed, sort_keys=True) + "\n").encode()
         path = journal_path(canonical)
@@ -210,6 +211,8 @@ def _append(canonical: Path, entry: dict) -> dict:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+        # Under the lock only this append changed the journal: extend the snapshot.
+        _SNAPSHOTS[path] = (_signature(canonical), [*before, signed], invalid)
     except OSError as error:
         raise JournalError(f"cannot write the provenance journal: {error}") from error
     return signed
@@ -243,13 +246,36 @@ def _last_seq(entries: list[dict]) -> int:
     return max((entry["seq"] for entry in entries if "seq" in entry), default=0)
 
 
-def _entries(canonical: Path) -> tuple[list[dict], int]:
+# The last verified journal per path: (signature, valid entries, invalid count). Reused while
+# the journal and key files are unchanged (inode, size, mtime, mode), and extended by this
+# process's own appends, so a run does not re-verify the whole journal for every entry.
+_SNAPSHOTS: dict[Path, tuple[tuple, list[dict], int]] = {}
+
+
+def _signature(canonical: Path) -> tuple:
+    stats = []
+    for path in (journal_path(canonical), journal_dir(canonical) / KEY_FILE):
+        try:
+            stat = os.stat(path)
+        except FileNotFoundError:
+            stats.append(None)
+        else:
+            stats.append((stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_mode))
+    return tuple(stats)
+
+
+def _entries(canonical: Path, fresh: bool = False) -> tuple[list[dict], int]:
     """The valid entries in file order, and the number of lines that did not verify. An entry
     is valid when its MAC verifies and its ``seq`` is greater than every valid entry's before
     it, so a signed entry copied to the end again (a replay) is invalid. An entry without
-    ``seq`` (written before sequence numbers) counts only before the first one that has it."""
+    ``seq`` (written before sequence numbers) counts only before the first one that has it.
+    Served from the snapshot while the files are unchanged, unless ``fresh``."""
     path = journal_path(canonical)
     try:
+        signature = _signature(canonical)
+        cached = _SNAPSHOTS.get(path)
+        if not fresh and cached is not None and cached[0] == signature:
+            return list(cached[1]), cached[2]
         if not path.exists():
             return [], 0
         key = _key(canonical, create=False)
@@ -275,7 +301,8 @@ def _entries(canonical: Path) -> tuple[list[dict], int]:
             last = entry.get("seq", last)
         else:
             invalid += 1
-    return valid, invalid
+    _SNAPSHOTS[path] = (signature, valid, invalid)
+    return list(valid), invalid
 
 
 def _first_parent(canonical: Path, sha: str) -> str | None:
@@ -554,7 +581,7 @@ def accept(canonical: Path, sha: str) -> dict:
     if not _is_ancestor(canonical, full, head):
         raise ProvenanceError(f"{full} is not in the history of canonical HEAD {head}")
     written = _anchor(canonical, full, ACCEPTED_REASON)
-    entries, _ = _entries(canonical)
+    entries, _ = _entries(canonical, fresh=True)  # read the file back, not the snapshot
     if not entries or entries[-1] != written:  # under the lock nothing else appended
         raise ProvenanceError(
             f"the accept of {full} was written but does not read back from the journal "
