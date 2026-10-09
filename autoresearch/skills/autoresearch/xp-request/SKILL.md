@@ -28,8 +28,8 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
    Check the running peers too (D-21): `"$AUTORESEARCH_CLI" queue list --state claimed`. If
    another card names this experiment, do not launch it as well: record that in the journal
    and finish `partial`. `last_heartbeat_at` is in epoch seconds.
-3. Optionally read credits. A Player credential normally cannot read them
-   (`available: false`); that is not an error:
+3. Optionally read credits (the account's XP credit balance; `available: false` means the
+   read failed, which is not an error):
    `"$AUTORESEARCH_CLI" softmax credits`
 4. Create the requests. Each seed of the design gets one candidate and one baseline request
    with one episode, so the pair plays the same seed:
@@ -44,7 +44,8 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
    - `credit_denied: true`: stop here. The tool already set `awaiting-credits` and
      `lifecycle.next_launch_after` (the backoff). Requests already created stay recorded;
      `missing` lists the rest. Finish the card `partial`. The XP poller makes a new launch
-     card after the backoff. Do not create a launch card yourself.
+     card when the credit balance is above 0 again (or after the backoff, when the balance
+     cannot be read). Do not create a launch card yourself.
 6. Never wait for XP in the card (D-11). The runtime makes the review card when every
    request is terminal. Results count as evidence only when completed and inspected (D-06).
 

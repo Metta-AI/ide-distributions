@@ -1,11 +1,13 @@
 import json
+import urllib.error
 from pathlib import Path
 
 import pytest
 
-from autoresearch.softmax_tool.client import CreditsUnavailable, SoftmaxClient
+from autoresearch.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from autoresearch.softmax_tool.fake import FakeSoftmax
 from autoresearch.softmax_tool.identity import IdentityError
+from autoresearch.softmax_tool.platform_cli import SERVER, SoftmaxCliError
 from autoresearch.softmax_tool.protocol import from_env
 
 from .conftest import FIXTURES, LEAGUE_ID, PLAYER_ID, completed, recorded, synthetic
@@ -183,10 +185,47 @@ def test_game_version_resolves_league_coworld(env, runner, tmp_path):
     ]
 
 
-def test_credits_are_unavailable_to_a_player_credential(env, runner, tmp_path):
-    with pytest.raises(CreditsUnavailable):
-        make(env, runner, tmp_path).credits()
+CREDITS_BODY = {
+    "status": {"balance_credits": 11872.6, "max_balance_credits": 20000.0, "enforced": True},
+    "recent_requests": [],
+}
+
+
+def test_credits_reads_the_balance_as_the_player(env, runner):
+    """A10: ``GET /observatory/usage/me/credits`` with the Player token (no CLI command in
+    coworld 0.1.58), with a User-Agent because Cloudflare blocks urllib's default one."""
+    seen = []
+
+    def http_get(url, headers):
+        seen.append((url, headers))
+        return json.dumps(CREDITS_BODY)
+
+    assert SoftmaxClient(env, run=runner, http_get=http_get).credits() == 11872.6
+    [(url, headers)] = seen
+    assert url == f"{SERVER}{CREDITS_PATH}"
+    assert headers["Authorization"] == f"Bearer {json.loads(env['SOFTMAX_PLAYER_CREDENTIAL'])['token']}"
+    assert headers["User-Agent"]
     assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        urllib.error.HTTPError(CREDITS_PATH, 403, "Forbidden", {}, None),
+        urllib.error.URLError("no route"),
+        "not json",
+        json.dumps({"status": {}}),
+    ],
+)
+def test_credits_read_failures_are_cli_errors_without_the_token(env, runner, failure):
+    def http_get(url, headers):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    with pytest.raises(SoftmaxCliError) as caught:
+        SoftmaxClient(env, run=runner, http_get=http_get).credits()
+    assert json.loads(env["SOFTMAX_PLAYER_CREDENTIAL"])["token"] not in str(caught.value)
 
 
 def test_cli_failure_message_carries_stderr(env, runner, tmp_path):

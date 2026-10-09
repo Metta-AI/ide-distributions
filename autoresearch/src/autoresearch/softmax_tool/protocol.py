@@ -60,7 +60,11 @@ class Refused(RuntimeError):
 
 class Softmax(Protocol):
     def whoami(self) -> Identity: ...
-    def credits(self) -> int: ...
+    def credits(self) -> float:
+        """The XP credit balance the Player spends (the owning account's). Raises when it
+        cannot be read."""
+        ...
+
     def game_version(self, league_id: str) -> str:
         """The league's current game version (a dotted number such as ``2026.10.7.2``),
         stripped of surrounding whitespace. Every implementation normalizes it here."""
@@ -107,6 +111,15 @@ class Softmax(Protocol):
          rounds_played}
         """
         ...
+
+
+def read_credits(sm: Softmax) -> float | None:
+    """``sm.credits()``, or None when the balance cannot be read (A10: callers then fall back
+    to the credit-denial backoff)."""
+    try:
+        return sm.credits()
+    except Exception:  # noqa: BLE001 - any read failure only means "unknown"
+        return None
 
 
 def from_env(env: Mapping[str, str], canonical: Path) -> Softmax:

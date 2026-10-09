@@ -43,10 +43,14 @@ experiment, its hypothesis and the hypothesis's Topics, ``rebuild.review_refs``,
 review may update them under D-23) is committed, unless an open request already covers the
 experiment.
 
-``awaiting-credits``: relaunch (A10). When ``lifecycle.next_launch_after`` has passed (the
-softmax tool sets it on a credit denial: 30 minutes, doubling, capped at 8 hours), the credit
-balance is not known to be 0 (only FakeSoftmax can read it; a Player credential cannot), and
-no open request covers the experiment, one runtime launch request with marker
+``awaiting-credits``: relaunch (A10). The Player can read the credit balance
+(``Softmax.credits``). When it reads above 0, relaunch at once, unless the denial itself came
+with a positive balance (``lifecycle.credits_at_denial`` > 0: the batch needs more than was
+left), when only the backoff applies. When the balance cannot be read, the backoff is the
+fallback: relaunch once ``lifecycle.next_launch_after`` has passed (the softmax tool sets it on
+a credit denial: 30 minutes, doubling, capped at 8 hours). A balance read as 0 never
+relaunches. In every case no open request may cover the experiment. One runtime launch
+request with marker
 ``launch:<E>:<attempt>:after:<next_launch_after>`` (``markers.relaunch_marker``: one relaunch
 per denial). The card runs
 ``xp recover`` and then ``xp create`` with the same attempt, which creates only the requests
@@ -83,7 +87,7 @@ from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
 from autoresearch.runtime.markers import next_launch_attempt, relaunch_marker, review_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request
 from autoresearch.runtime.rebuild import launch_step, open_experiment_refs, review_refs
-from autoresearch.softmax_tool.protocol import Softmax, XpHandle, XpStatus
+from autoresearch.softmax_tool.protocol import Softmax, XpHandle, XpStatus, read_credits
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.xp import ArtifactsIncomplete
 from autoresearch.stats.design import EvaluationDesign
@@ -385,26 +389,37 @@ def _request_review(
         return commit_runtime_request(canonical, review_marker(experiment), spec)
 
 
-def _credits_known_zero(sm: Softmax) -> bool:
-    try:
-        return sm.credits() == 0
-    except Exception:  # noqa: BLE001 - a Player credential cannot read credits (A10)
+def relaunch_due(lifecycle: dict, credits: float | None, now: datetime.datetime) -> bool:
+    """Whether an ``awaiting-credits`` experiment should relaunch now (A10, module docstring):
+    a readable balance above 0 decides at once, except after a denial that came with a
+    positive balance; an unreadable balance falls back to the backoff."""
+    after = _parse_time(lifecycle.get("next_launch_after"))
+    if after is None:  # the softmax tool sets it with every denial
+        raise ValueError("awaiting-credits without next_launch_after")
+    if credits is not None and credits <= 0:
         return False
+    at_denial = lifecycle.get("credits_at_denial")
+    if credits is not None and not (at_denial is not None and at_denial > 0):
+        return True
+    return now >= after
 
 
 def _request_relaunch(
     canonical: Path, sm: Softmax, experiment: dict, now: datetime.datetime
 ) -> CardSpec | None:
     lifecycle = experiment.get("lifecycle") or {}
-    after = _parse_time(lifecycle.get("next_launch_after"))
-    if after is None:  # the softmax tool sets it with every denial
-        raise ValueError(f"{experiment['id']} is awaiting-credits without next_launch_after")
-    if now < after or _credits_known_zero(sm):
+    credits = read_credits(sm)
+    try:
+        due = relaunch_due(lifecycle, credits, now)
+    except ValueError as error:
+        raise ValueError(f"{experiment['id']}: {error}") from None
+    if not due:
         return None
     denials = int(lifecycle.get("credit_denials", 0))
     attempt = next_launch_attempt(experiment)
     marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
-    reason = f"relaunch after credit denial {denials}; the backoff has passed"
+    when = "the backoff has passed" if credits is None else f"{credits:g} credits available"
+    reason = f"relaunch after credit denial {denials}; {when}"
     marker, title, why, mode = launch_step(experiment, reason, marker)
     spec = CardSpec("", title, mode, why, _experiment_refs(experiment), RUNTIME, CARD_PRIORITY)
     with canonical_lock(canonical):

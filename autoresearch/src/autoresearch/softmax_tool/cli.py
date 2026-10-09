@@ -5,8 +5,8 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 
 - ``whoami``: the credential's identity; exit 1 (``identity``) unless it is the expected
   (``AUTORESEARCH_PLAYER_ID``) unexpired Player.
-- ``credits``: ``{available: true, credits}``, or ``{available: false, reason}`` when the
-  balance cannot be read (always, for a Player credential: amendment A10).
+- ``credits``: ``{available: true, credits}`` (the account's XP credit balance, readable with
+  the Player credential, amendment A10), or ``{available: false, reason}`` when the read fails.
 - ``xp create <E> --batch N --attempt N [--batches K]``: launch batch N of a paired evaluation:
   one seeded XP request per (seed, arm) in the batch's slice of ``design.seeds`` (see
   ``xp_specs`` for the mapping, A12). It recovers once, backfills any recovered request missing
@@ -21,7 +21,10 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   the worker's environment, read before any request is created; it is read in worker terminals
   only, which see the whole profile ``.env``, so it is deliberately not on
   ``terminal.env_passthrough``: a cron job would not get it); ``lifecycle.credit_denials``
-  counts consecutive denials. Rerunning the same ``--batch``/``--attempt`` later creates only
+  counts consecutive denials and ``lifecycle.credits_at_denial`` is the balance read right
+  after the denial (null when unreadable). xp-poll relaunches as soon as the balance is above
+  0, unless the denial came with a positive balance (the batch needs more than is left), in
+  which case only the backoff relaunches it. Rerunning the same ``--batch``/``--attempt`` later creates only
   the missing requests. A new attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
   the next number (``bad_attempt``), the batch's latest attempt has every request
@@ -108,11 +111,10 @@ from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.preflight import env_file_value
 from autoresearch.runtime.promotion import PromotionError, champion_status
-from autoresearch.softmax_tool.client import CreditsUnavailable
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
 from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
-from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle
+from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle, read_credits
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.submit import bootstrap_champion, submit
 from autoresearch.softmax_tool.upload import upload, worker_store
@@ -384,11 +386,13 @@ def _whoami(ctx, sm, args) -> dict:
 def _credits(ctx, sm, args) -> dict:
     try:
         return {"available": True, "credits": sm.credits()}
-    except CreditsUnavailable as error:
+    except SoftmaxCliError as error:
         return {"available": False, "reason": str(error)}
 
 
-def _credit_denied(store, experiment: str, meta: dict, reason: str, base: timedelta) -> dict:
+def _credit_denied(
+    store, experiment: str, meta: dict, reason: str, base: timedelta, credits: float | None
+) -> dict:
     lifecycle = dict(meta.get("lifecycle") or {})
     denials = int(lifecycle.get("credit_denials", 0)) + 1
     after = datetime.now(UTC) + credit_backoff(denials, base)
@@ -398,6 +402,7 @@ def _credit_denied(store, experiment: str, meta: dict, reason: str, base: timede
             **lifecycle,
             "credit_denials": denials,
             "next_launch_after": next_launch_after,
+            "credits_at_denial": credits,
         }
     }
     if meta["status"] in ("uploaded", "evaluating"):
@@ -528,14 +533,20 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     }
     meta, _ = store.load(experiment)
     if denial is not None:
-        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base)}
+        credits = read_credits(sm)
+        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}
 
     patch: dict = {}
     if meta["status"] in ("uploaded", "awaiting-credits"):
         patch["status"] = "evaluating"
     lifecycle = meta.get("lifecycle") or {}
     if lifecycle.get("credit_denials") or lifecycle.get("next_launch_after"):
-        patch["lifecycle"] = {**lifecycle, "credit_denials": 0, "next_launch_after": None}
+        patch["lifecycle"] = {
+            **lifecycle,
+            "credit_denials": 0,
+            "next_launch_after": None,
+            "credits_at_denial": None,
+        }
     if patch:
         store.update(experiment, patch)
     return {**report, "credit_denied": False}

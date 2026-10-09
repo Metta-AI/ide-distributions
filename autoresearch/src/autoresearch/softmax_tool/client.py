@@ -45,7 +45,7 @@ from pathlib import Path
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.identity import require_player, whoami
-from autoresearch.softmax_tool.platform_cli import PlatformCli, Runner, SoftmaxCliError
+from autoresearch.softmax_tool.platform_cli import HttpGet, PlatformCli, Runner, SoftmaxCliError
 from autoresearch.softmax_tool.protocol import CreditDenied, Identity, XpHandle, XpStatus
 
 UPLOAD_TIMEOUT_S = 600
@@ -55,8 +55,7 @@ EPISODE_PAGE_LIMIT = 100  # coworld episodes --limit max
 LEAGUE_FETCH_WORKERS = 4  # concurrent episode fetches (each one runs two coworld processes)
 
 
-class CreditsUnavailable(SoftmaxCliError):
-    """The credit balance cannot be read with a Player credential."""
+CREDITS_PATH = "/observatory/usage/me/credits"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
@@ -73,8 +72,9 @@ class SoftmaxClient:
         run: Runner = subprocess.run,
         bin_dir: Path | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        http_get: HttpGet | None = None,
     ):
-        self._cli = PlatformCli(env, run=run, bin_dir=bin_dir)
+        self._cli = PlatformCli(env, run=run, bin_dir=bin_dir, http_get=http_get)
         self._expected_player = env.get("AUTORESEARCH_PLAYER_ID", "")
         self._clock = clock
 
@@ -86,10 +86,15 @@ class SoftmaxClient:
     def whoami(self) -> Identity:
         return whoami(self._cli)
 
-    def credits(self) -> int:
-        # /usage/me/credits answers 403 "Player credentials are not authorized for this route"
-        # (verified 2026-10-07), and neither CLI exposes it. Callers treat this as unknown.
-        raise CreditsUnavailable("credit balance is not readable with a Player credential")
+    def credits(self) -> float:
+        """The owning account's XP credit balance (``status.balance_credits``), read as the
+        Player (A10; verified live 2026-10-09). Raises ``SoftmaxCliError`` when it cannot be
+        read; callers then fall back to the credit-denial backoff."""
+        payload = self._cli.api_get_json(CREDITS_PATH)
+        try:
+            return float(payload["status"]["balance_credits"])
+        except (KeyError, TypeError, ValueError):
+            raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
 
     def _league_coworld(self, league_id: str) -> dict:
         league = self._cli.run_json("coworld", ["leagues", league_id])

@@ -86,7 +86,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_SOFTMAX` | no | `fake` in tests: use the fake Softmax tool. Do not set it in production. |
 | `AUTORESEARCH_QUEUE` | no | Leave unset. `file` selects the file queue, but no shipped job runs its cards (see below). |
 | `AUTORESEARCH_INBOX_WRITERS` | no | Comma-separated uids or user names allowed to write `comms/inbox/` directly (for example the Softmax IDE bridge's own user). When set, queue-keeper adopts only inbox files they own and rejects the rest. An unknown user name stops adoption (not routing) and fails the step `inbox_writers`; a valid but wrong user gets every direct write rejected for good. When unset, it adopts any valid file and logs that direct writes are unauthenticated: any process running as the workspace user could then send inbound messages, which carry the human's authority. Set it whenever an external agent writes the inbox. |
-| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched (doubles per refusal, at most 8 hours). Default 30. |
+| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them
@@ -297,8 +297,11 @@ automatic update; `updates.check` is set to false so it does not even check.
   are safe because the curator only manages skills with an agent-created record, and
   `curator.prune_builtins` is set to false. Do not run `hermes curator adopt` on a shipped
   skill.
-- **Credits.** A Player credential cannot read credits (HTTP 403). Preflight only warns,
-  and experiments that wait for credits are retried with backoff (A10).
+- **Credits.** The Player reads the XP credit balance over HTTP
+  (`GET /observatory/usage/me/credits`), because coworld 0.1.58 has no `credits` command yet.
+  Preflight records it and warns at 0. Experiments refused for credits relaunch when the
+  balance is above 0 again; the backoff applies only when the read fails or the refusal came
+  with a positive balance (A10).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
 
 ## Integrations

@@ -1,7 +1,9 @@
 """Start-of-run checks; a failed preflight pauses the agent (C6, amendments A3, A5, A10).
 
 Checks, in order: the credential's identity (C6), free disk under canonical, XP credits
-(unreadable with a Player credential: a warning only, A10), the host dispatcher config (A3)
+(recorded in ``credits``; read as the Player, A10; a failed read or a zero balance is a
+warning only: xp-poll relaunches credit-denied experiments when the balance returns), the host
+dispatcher config (A3)
 and the OpenRouter key's remaining credit (A5).
 
 Host config (A3). One gateway per host runs the Kanban dispatcher with the host root
@@ -51,7 +53,7 @@ class PreflightResult:
     ok: bool
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    credits: int | None = None
+    credits: float | None = None
     identity_problems: list[str] = field(default_factory=list)  # also in reasons (signals)
 
 
@@ -182,7 +184,7 @@ def preflight(
     except Exception as error:  # noqa: BLE001 - credit lookup failure is non-fatal
         result.warnings.append(f"credits unavailable: {error}")
     else:
-        if result.credits == 0:
+        if result.credits <= 0:
             result.warnings.append("no credits remaining")
 
     if hermes_home is not None:

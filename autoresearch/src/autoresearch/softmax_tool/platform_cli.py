@@ -17,12 +17,21 @@ Credential handling (C6, A4):
   and ``submit`` from writing AGENTS.md guidance into the working directory.
 - The executables are the ones installed next to the running interpreter (the profile venv), never
   a global binary.
+
+``api_get_json`` is the one read that does not go through a CLI: the XP credit balance
+(``GET /observatory/usage/me/credits``, readable with a Player credential since metta #27052,
+2026-10-08) has no command in coworld 0.1.58 (``coworld credits`` is merged in metta but not
+released). It sends the same Player token as a bearer header, with a User-Agent (Cloudflare
+answers 403 "error code: 1010" to urllib's default one). Replace it with ``coworld credits
+--json`` once a coworld release ships that command.
 """
 
 import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -37,8 +46,18 @@ CREDENTIAL_ENV = "SOFTMAX_PLAYER_CREDENTIAL"
 SESSION_KEY = "autoresearch"  # the active-session key in the file; whoami reports the real player
 DEFAULT_TIMEOUT_S = 120
 PAGE_LIMIT = 200
+HTTP_TIMEOUT_S = 30
+USER_AGENT = "autoresearch"
 
 Runner = Callable[..., subprocess.CompletedProcess]
+# (url, headers) -> response body text; raises urllib.error.URLError (HTTPError) on failure.
+HttpGet = Callable[[str, dict[str, str]], str]
+
+
+def urllib_get(url: str, headers: dict[str, str]) -> str:
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_S) as response:
+        return response.read().decode("utf-8")
 
 
 class SoftmaxCliError(RuntimeError):
@@ -89,12 +108,17 @@ class PlatformCli:
     """One credential, one isolated home, one injected runner (``subprocess.run`` by default)."""
 
     def __init__(
-        self, env: Mapping[str, str], run: Runner = subprocess.run, bin_dir: Path | None = None
+        self,
+        env: Mapping[str, str],
+        run: Runner = subprocess.run,
+        bin_dir: Path | None = None,
+        http_get: HttpGet | None = None,
     ):
         if not env.get("HERMES_HOME"):
             raise SoftmaxCliError("HERMES_HOME is not set; the softmax tool needs the profile home")
         self._credential_value = env.get(CREDENTIAL_ENV)
         self._run = run
+        self._http_get = http_get or urllib_get
         self._bin_dir = bin_dir or Path(sys.executable).parent
         self.home = Path(env["HERMES_HOME"]) / "local" / "softmax" / "home"
 
@@ -163,6 +187,22 @@ class PlatformCli:
             raise SoftmaxCliError(
                 f"{tool} {' '.join(args)} printed non-JSON output: {error}"
             ) from None
+
+    def api_get_json(self, path: str):
+        """``GET <SERVER><path>`` as the Player (module docstring); the parsed JSON body.
+        Errors never include the token."""
+        credential = parse_credential(self._credential_value)
+        headers = {"Authorization": f"Bearer {credential.token}", "User-Agent": USER_AGENT}
+        try:
+            body = self._http_get(f"{SERVER}{path}", headers)
+        except urllib.error.HTTPError as error:
+            raise SoftmaxCliError(f"GET {path} answered HTTP {error.code}") from None
+        except (urllib.error.URLError, OSError) as error:
+            raise SoftmaxCliError(f"GET {path} failed: {error}") from None
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as error:
+            raise SoftmaxCliError(f"GET {path} returned non-JSON: {error}") from None
 
     def run_json_pages(self, tool: str, args: Sequence[str]) -> list[dict]:
         """Every ``entries`` row of a cursor-paginated ``--json`` listing."""

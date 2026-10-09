@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -105,12 +106,20 @@ def test_credits_fake(board):
     assert code == 0 and env["data"] == {"available": True, "credits": 100}
 
 
-def test_credits_real_client_is_unavailable(board):
-    env = base_env(board)
-    del env["AUTORESEARCH_SOFTMAX"]
-    code, data = softmax(env, "credits")
-    assert code == 0 and data["data"]["available"] is False
-    assert "Player" in data["data"]["reason"]
+def test_credits_read_failure_is_unavailable_not_an_error(tmp_path):
+    from autoresearch.softmax_tool.client import SoftmaxClient
+
+    def http_get(url, headers):
+        raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
+
+    env = {
+        "HERMES_HOME": str(tmp_path),
+        "SOFTMAX_PLAYER_CREDENTIAL": json.dumps(
+            {"token": "ply_x", "expires_at": "2099-01-01T00:00:00+00:00"}
+        ),
+    }
+    data = softmax_cli._credits(None, SoftmaxClient(env, http_get=http_get), None)
+    assert data["available"] is False and "HTTP 503" in data["reason"]
 
 
 def test_missing_tool_is_exit_3(board, monkeypatch, capsys, tmp_path):
@@ -122,8 +131,8 @@ def test_missing_tool_is_exit_3(board, monkeypatch, capsys, tmp_path):
     )
     real_init = PlatformCli.__init__
 
-    def empty_bin(self, env, run=subprocess.run, bin_dir=None):
-        real_init(self, env, run=run, bin_dir=tmp_path / "empty-bin")
+    def empty_bin(self, env, run=subprocess.run, bin_dir=None, http_get=None):
+        real_init(self, env, run=run, bin_dir=tmp_path / "empty-bin", http_get=http_get)
 
     monkeypatch.setattr(PlatformCli, "__init__", empty_bin)
     code = main(["softmax", "whoami"])
