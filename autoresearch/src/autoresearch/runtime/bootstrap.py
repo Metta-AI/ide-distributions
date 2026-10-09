@@ -19,7 +19,12 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    it has none. Seeded, cloned and existing workspaces get ``AGENTS.md`` re-seeded (one
    canonical commit) when ``doctrine/VERSION`` differs from the version in its header.
    Every run also makes sure ``comms/inbox/`` and ``comms/outbox/`` exist (empty
-   directories, untracked) for external agents.
+   directories, untracked) for external agents. An external agent may write
+   ``comms/inbox/`` before the first bootstrap (the Softmax IDE bridge's ``deliver`` creates
+   the directory when a coach clicks a research button early). Seed commits only the paths
+   it wrote, so those files stay untracked; clone holds them next to the workspace
+   directory during checkout and puts them back (a held file a crash left behind is put
+   back on the next run). queue-keeper's routing then adopts them like any direct write.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -28,7 +33,8 @@ A failure is returned in ``BootstrapResult.error``; queue-keeper then stops with
 
 import re
 import shutil
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +66,7 @@ AGENTS_PLACEHOLDER = (
     "it here. Until then, follow the card briefing and the skills.\n"
 )
 COMMITTER = ("autoresearch", "autoresearch@localhost")
+INBOX = Path("comms") / "inbox"
 
 
 class BootstrapError(RuntimeError):
@@ -144,15 +151,82 @@ def _ensure_committer(canonical: Path) -> None:
             gitops.git(canonical, "config", key, value)
 
 
+def _holding_dirs(canonical: Path) -> tuple[Path, Path]:
+    """Where clone keeps early inbox files, and where clashing ones end up: fixed names next
+    to ``canonical`` (same filesystem, so a move is a rename; a fixed name lets the next run
+    find what a crash left behind)."""
+    return (
+        canonical.parent / f".{canonical.name}-early-inbox",
+        canonical.parent / f".{canonical.name}-early-inbox-clashed",
+    )
+
+
+def _restore_early_inbox(canonical: Path, result: BootstrapResult) -> None:
+    """Move held early inbox files back into ``comms/inbox/`` (names and mtimes kept),
+    untracked, for routing to adopt. A name a clone already tracks is never overwritten:
+    that file moves to the clashed directory, with one warning."""
+    holding, clashed = _holding_dirs(canonical)
+    if not holding.is_dir():
+        return
+    inbox = canonical / INBOX
+    inbox.mkdir(parents=True, exist_ok=True)
+    kept, clashes = 0, []
+    for entry in sorted(holding.iterdir()):
+        if (inbox / entry.name).exists():
+            clashed.mkdir(exist_ok=True)
+            if not (clashed / entry.name).exists():
+                shutil.move(entry, clashed / entry.name)
+                clashes.append(entry.name)
+        else:
+            shutil.move(entry, inbox / entry.name)
+            kept += 1
+    if kept:
+        result.actions.append(f"kept {kept} inbox files written before bootstrap for adoption")
+    if clashes:
+        result.warnings.append(
+            f"inbox files {clashes} written before bootstrap clash with tracked files; "
+            f"moved to {clashed}"
+        )
+    if not any(holding.iterdir()):
+        holding.rmdir()
+
+
+@contextmanager
+def _early_inbox_set_aside(canonical: Path, result: BootstrapResult) -> Iterator[None]:
+    """Hold what an external agent wrote to ``comms/inbox/`` before the first bootstrap
+    outside ``canonical`` while it is cloned (``git checkout`` refuses to overwrite an
+    untracked file the remote tracks), then put it back (``_restore_early_inbox``).
+    Dotfiles stay: the bridge writes ``.<id>.json.tmp`` and then renames it, and adoption
+    never commits a dotfile, so no checkout can collide with one. A restore that fails is a
+    warning, never masking the clone's own error; the next bootstrap retries it."""
+    inbox = canonical / INBOX
+    entries = [e for e in sorted(inbox.iterdir()) if not e.name.startswith(".")] if inbox.is_dir() else []
+    holding, _ = _holding_dirs(canonical)
+    if entries:
+        holding.mkdir(exist_ok=True)
+        for entry in entries:
+            shutil.move(entry, holding / entry.name)
+    try:
+        yield
+    finally:
+        try:
+            _restore_early_inbox(canonical, result)
+        except OSError as error:
+            result.warnings.append(
+                f"could not put back inbox files from {holding}: {error}; the next run retries"
+            )
+
+
 def _clone(canonical: Path, remote: str, result: BootstrapResult) -> None:
     """Fetch an existing workspace into ``canonical`` (which may already hold runtime files)."""
-    canonical.mkdir(parents=True, exist_ok=True)
-    gitops.git(canonical, "init", "-b", BRANCH)
-    gitops.git(canonical, "remote", "add", REMOTE, remote)
-    gitops.git(canonical, "fetch", REMOTE)
-    gitops.git(canonical, "checkout", "-B", BRANCH, f"{REMOTE}/{BRANCH}")
-    gitops.git(canonical, "branch", f"--set-upstream-to={REMOTE}/{BRANCH}", BRANCH)
-    _ensure_committer(canonical)
+    with _early_inbox_set_aside(canonical, result):
+        canonical.mkdir(parents=True, exist_ok=True)
+        gitops.git(canonical, "init", "-b", BRANCH)
+        gitops.git(canonical, "remote", "add", REMOTE, remote)
+        gitops.git(canonical, "fetch", REMOTE)
+        gitops.git(canonical, "checkout", "-B", BRANCH, f"{REMOTE}/{BRANCH}")
+        gitops.git(canonical, "branch", f"--set-upstream-to={REMOTE}/{BRANCH}", BRANCH)
+        _ensure_committer(canonical)
     result.actions.append(f"cloned canonical from {remote}")
 
 
@@ -202,10 +276,18 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     shutil.copytree(seed, canonical, dirs_exist_ok=True)
     write_text(canonical / "AGENTS.md", _agents_md(repo_root))
     write_text(canonical / ".gitignore", "".join(f"{line}\n" for line in GITIGNORE_LINES))
-    (ledger_of(canonical) / ".gitkeep").parent.mkdir(parents=True, exist_ok=True)
-    (ledger_of(canonical) / ".gitkeep").touch()
+    gitkeep = ledger_of(canonical) / ".gitkeep"
+    gitkeep.parent.mkdir(parents=True, exist_ok=True)
+    gitkeep.touch()
     gitops.git(canonical, "remote", "add", REMOTE, remote)
-    gitops.commit_all(canonical, f"bootstrap: seed workspace from games/{game}/seed")
+    # Exactly what seeding wrote: anything else already in the directory (an inbox file an
+    # external agent wrote before this first bootstrap) stays untracked, for routing to adopt.
+    paths = [p.relative_to(seed).as_posix() for p in sorted(seed.rglob("*")) if p.is_file()]
+    paths += ["AGENTS.md", ".gitignore", gitkeep.relative_to(canonical).as_posix()]
+    gitops.commit_paths(canonical, paths, f"bootstrap: seed workspace from games/{game}/seed")
+    early = sorted((canonical / INBOX).iterdir()) if (canonical / INBOX).is_dir() else []
+    if early:
+        result.actions.append(f"kept {len(early)} inbox files written before bootstrap for adoption")
     result.actions.append(f"seeded canonical from games/{game}/seed")
     if not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
         result.warnings.append(f"initial push to {remote} failed; queue-keeper retries it")
@@ -238,6 +320,7 @@ def _ensure_workspace(
     ctx: RunContext, env: Mapping[str, str], repo_root: Path, result: BootstrapResult
 ) -> None:
     canonical = ctx.canonical
+    _restore_early_inbox(canonical, result)  # what a clone that crashed left held
     remote = env.get(REMOTE_ENV) or None
     if remote:
         remote = resolve_remote(remote, ctx.hermes_home)

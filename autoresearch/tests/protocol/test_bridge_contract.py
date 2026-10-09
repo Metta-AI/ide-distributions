@@ -194,6 +194,7 @@ def test_a_partial_or_misnamed_write_is_not_adopted(board):
     inbox.mkdir(parents=True, exist_ok=True)
     (inbox / f"{TASK_ID}.json").write_text('{"id": "')  # not JSON yet: skipped this run
     (inbox / f".{STOP_ID}.json.tmp").write_text("{}")  # the bridge's temp file
+    (inbox / f".{STOP_ID}.json").write_text(json.dumps(bridge_stop()))  # hidden: never an id
 
     assert _route(board) == []
     assert gitops.git(board.canonical, "ls-files", "comms/inbox") == ""

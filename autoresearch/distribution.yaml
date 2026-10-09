@@ -69,6 +69,13 @@ env_requires:
       Estimated model spend per UTC day of all sessions of this profile. At the budget
       queue-keeper pauses dispatch with a help_request; it resumes the next UTC day. 0 turns
       it off.
+  - name: AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD
+    required: false
+    default: "10"
+    description: >-
+      OpenRouter key credit (USD, the key's limit_remaining) below which preflight pauses
+      the agent with a help_request. Set it lower when the key itself is small. A value that
+      is not a non-negative number uses the default.
   - name: AUTORESEARCH_FALLBACK_PRICES
     required: false
     default: input=3,output=12,cache_read=0.75,cache_write=3
