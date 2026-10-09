@@ -270,11 +270,14 @@ while the agent is paused and on a skipped run, because running cards keep runni
 
 Workers wait on long commands without model calls: a build or local check runs with the
 terminal tool's `background: true` and one `process_manage` wait of up to 1800 s
-(`terminal.timeout` in the profile config, which caps a wait). The run budget
+(`terminal.timeout` in the profile config, which caps a wait). Hermes also ends any single
+tool call after 420 s, which would cut that wait, so the profile sets
+`timeouts.tools.sequential_call` and `timeouts.tools.concurrent_batch` to 1900 (the wait plus
+margin). The run budget
 (`agent.run_budget_seconds`, 5400 s) is long enough for a build card to wait out its gates;
-bootstrap raises the earlier shipped defaults (2700 s, and Hermes' 180 s for
-`terminal.timeout`) to these values and keeps any other value you set. The raise is one-way:
-if you want exactly 2700 or 180, set a nearby value (2701, 181), or bootstrap raises it again. The plugin refuses foreground
+bootstrap raises the earlier shipped defaults (2700 s, Hermes' 180 s for
+`terminal.timeout`, Hermes' 420 s for the two tool timeouts) to these values and keeps any other value you set. The raise is one-way:
+if you want exactly 2700, 180 or 420, set a nearby value (2701, 181, 421), or bootstrap raises it again. The plugin refuses foreground
 `sleep` of 30 s or more and loops that sleep while checking a process.
 
 The champion is whatever policy the Softmax league shows competing for our player

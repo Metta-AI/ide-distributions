@@ -37,6 +37,10 @@ def test_config():
     assert c["memory"] == {
         "memory_enabled": True, "user_profile_enabled": False, "write_approval": False,
     }
+    # A process_manage wait (terminal.timeout) must fit inside one tool call.
+    assert c["terminal"]["timeout"] == 1800
+    assert c["timeouts"]["tools"] == {"sequential_call": 1900, "concurrent_batch": 1900}
+    assert c["agent"]["run_budget_seconds"] == 5400
     assert set(c["terminal"]["env_passthrough"]) == {
         "SOFTMAX_PLAYER_CREDENTIAL", "AUTORESEARCH_PLAYER_ID", "AUTORESEARCH_WORKSPACE",
         "AUTORESEARCH_WORKSPACE_REMOTE", "AUTORESEARCH_GAME", "AUTORESEARCH_SOFTMAX",

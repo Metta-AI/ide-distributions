@@ -49,7 +49,7 @@ Waiting is free only inside one call. Use this pattern for every command that ca
    `timeout` (at most 600). The call returns as soon as the command ends.
 2. Otherwise start it with the terminal tool's `background: true`, keep the `session_id`,
    and call the native `process_manage` tool once: action `wait`, that `session_id`,
-   `timeout` 1800 (the longest wait this profile allows). It returns when the process exits,
+   `timeout` 1800 (the longest wait this profile allows; Hermes' per-tool-call limit is set above it). It returns when the process exits,
    with its exit code and the end of its output. Only if it returns `status: "timeout"`,
    call `wait` again. Do nothing else in between.
 3. To wait for a process you did not start (a holder that another of your commands left
