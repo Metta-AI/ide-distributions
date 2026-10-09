@@ -96,10 +96,21 @@ generation, import or harness exceptions stop immediately with build status
 `errored`. Reports retain their type, message and traceback summary; they never
 enter the model's `repair_errors`. Later gates are omitted when not run.
 G4/G5 failures are advisory warnings and never trigger model repair.
+The standalone compiler accepts optional `--agent-budget SECONDS` to share one
+cumulative generation allowance across all rounds. Each generation receives the
+smaller of `--agent-timeout` and the remaining allowance. Generation time is measured
+with a monotonic clock, separately from assembly and gates. Budget exhaustion is an
+`errored` tool outcome and stops before subsequent generation, assembly or gates.
+Without `--agent-budget`, only the per-round timeout applies; the standalone default
+per-round timeout remains 900 seconds.
 Provider requests/retries and tokens are not a hard spend cap. The 3600-second
-operational allowance is informed by the primary lab's observed 3–25 minute
+example allowance is informed by the primary lab's observed 3–25 minute
 28-unit generations and 2–4 minute gates; this two-unit source has no promised
-latency. Local fake fixtures do not predict model reliability or cost.
+latency. It is not the autoresearch build binding's default or a card budget.
+For that binding's `--agent-timeout` flag, optional `GOTA_AGENT_TIMEOUT_S` host
+setting, precedence and gate budget constraints, see
+[Build and upload](../../GAME.md#build-and-upload). Local fake fixtures do not
+predict model reliability or cost.
 
 Inputs must be committed. Source hashes cover the strategy, reference baseline,
 compiler context/host/runtime/config, all compiler and gate Python, GotA Python

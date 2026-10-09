@@ -133,6 +133,43 @@ never becomes `repair_errors`. Startup faults retain an error report under the
 requested output directory; they may have no artifact or provenance. Failed and
 errored builds are refused by the shared upload reader.
 
+Set the compiler agent's timeout with `--agent-timeout SECONDS`, or set the optional
+`GOTA_AGENT_TIMEOUT_S` in the command environment or the worker profile's `.env`.
+The flag overrides the environment; with neither set, the timeout is 1800 seconds.
+The value must be a positive integer number of seconds. Invalid settings stop before
+manifest lookup or model execution. This limit applies separately to each generation
+round, with up to three rounds per build. All rounds also share a fixed 1800-second
+generation budget: each subprocess gets the smaller of the requested per-round limit
+and the remaining generation allowance. The compiler measures generation with a
+monotonic clock; assembly and gate time do not consume this allowance. Increasing
+the flag or environment value to 3600 does not increase the cumulative allowance.
+Native preparation and gates have their own timing and are outside this budget.
+An agent timeout stops the build as `errored`, retains `agent.log` and the partial
+`hermes-stream-*.jsonl` under the output directory, and reports the configured duration
+and evidence filenames. Exhausting the generation budget also stops as `errored`
+before any later generation, assembly or gate work. Neither condition requests a
+policy repair round. Prebuilt builds ignore this setting because they run no compiler
+agent.
+
+Keep generation, gates and worker overhead within the card's configured run budget
+(currently 5400 seconds). The documented G3/G4 workload alone takes about 3300 seconds
+on the test box. The 1800-second generation allowance plus that gate estimate totals
+5100 seconds, leaving about 300 seconds for other work. This is planning headroom,
+not an enforced total build deadline: setup overhead, host speed and repeated gate
+work during repairs can increase the total.
+
+The timeout choice is informed by timings measured on the EC2 test box, 2026-10-09.
+Passed builds had stream-file creation-to-last-write intervals of 691 and 185 seconds
+for one two-round build, and 210 and 533 seconds for two one-round builds. These are
+lower bounds on generation wall time, not exact process runtimes. A 777-second stream
+interval belonged to a build that timed out after 900 seconds; another timed-out
+stream stopped writing after 20 seconds. The 1377-second interval belonged to an
+errored build whose report said the compiler exited 1. Neither is evidence of a
+successful slow round. The 1800-second allowance provides headroom over the observed
+successful intervals while reserving estimated gate time. A separate idle timeout
+is deferred: these timestamps do not establish a safe maximum quiet interval, and
+reliable idle detection would require supervising the process and its output.
+
 The host must install the locked Python dependencies, Nim 2.2.10 and the native
 helpers using [native preparation](tools/native_build.py), and install Hermes
 v0.21.5. Set `GOTA_HERMES_PYTHON` to that Hermes installation's Python executable,

@@ -82,7 +82,12 @@ def test_archive_distribution_and_candidate_committed_inputs(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize('status,security', [('passed', 'ready'), ('failed', 'ready'), ('errored', 'ready'), ('passed', 'empty')])
-def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, monkeypatch, status, security):
+@pytest.mark.parametrize('timeout,environment,expected', [
+    (None, None, None), (None, '1234', 1234), (1400, '1234', 1400),
+    (3600, 'invalid', 3600),
+])
+def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
+        tmp_path, monkeypatch, status, security, timeout, environment, expected):
     import hashlib
     import shutil
     import types
@@ -94,6 +99,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
         'installed_gota_build', installed / 'games/gota/tools/build.py')
     module = importlib.util.module_from_spec(installed_spec)
     installed_spec.loader.exec_module(module)
+    if environment is None:
+        monkeypatch.delenv('GOTA_AGENT_TIMEOUT_S', raising=False)
+    else:
+        monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', environment)
     repository = tmp_path / 'repository'
     subprocess.run(['git', 'init', str(repository)], check=True, capture_output=True)
     subprocess.run(['git', '-C', str(repository), '-c', 'user.name=Test',
@@ -125,6 +134,9 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
     monkeypatch.setitem(sys.modules, 'strategy_build', compiler)
     def compile_fake(args, report, *, engine_identity=None):
         import os
+        assert int(args[args.index('--agent-timeout') + 1]) == (
+            module.DEFAULT_AGENT_TIMEOUT_S if expected is None else expected)
+        assert int(args[args.index('--agent-budget') + 1]) == 1800
         analysis = Path(os.environ['GOTA_ANALYSIS_DIR'])
         assert analysis.is_relative_to(tmp_path)
         analysis.mkdir(parents=True)
@@ -146,10 +158,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
     monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
     if security == 'empty':
         with pytest.raises(SystemExit, match='empty output') as error:
-            module.build(candidate, out, manifest, offline=True)
+            module.build(candidate, out, manifest, offline=True, timeout=timeout)
         assert error.value.exit_code == 3
         return
-    result = module.build(candidate, out, manifest, offline=True)
+    result = module.build(candidate, out, manifest, offline=True, timeout=timeout)
     if status != 'passed':
         assert not result['ok']
         assert result['status'] == status
@@ -167,7 +179,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
     assert json.loads((out / 'coworld_manifest.json').read_text()) == json.loads(manifest.read_text())
     assert version['engine']['mode'] == 'offline'
     with pytest.raises(ValueError, match='immutable'):
-        module.build(candidate, out, manifest, offline=True)
+        module.build(candidate, out, manifest, offline=True, timeout=timeout)
 
 
 def test_upload_delegates_only_to_shared_cli(monkeypatch):
@@ -205,12 +217,86 @@ def test_main_defaults_online_without_manifest(tmp_path, monkeypatch):
     spec.loader.exec_module(module)
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'), '--json'])
     monkeypatch.setenv('GOTA_MANIFEST', '/stale/historical-manifest.json')
-    def fake_build(candidate, out, manifest, *, offline):
+    def fake_build(candidate, out, manifest, *, offline, timeout):
         assert manifest is None
         assert offline is False
+        assert timeout is None
         return {'ok': True}
     monkeypatch.setattr(module, 'build', fake_build)
     assert module.main() == 0
+
+
+def test_main_forwards_explicit_agent_timeout(tmp_path, monkeypatch):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', 'invalid')
+    monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'),
+                                     '--agent-timeout', '1400', '--json'])
+    def fake_build(candidate, out, manifest, *, offline, timeout):
+        assert timeout == 1400
+        return {'ok': True}
+    monkeypatch.setattr(module, 'build', fake_build)
+    assert module.main() == 0
+
+
+@pytest.mark.parametrize('timeout', ['0', '-1', 'abc', '1.5'])
+def test_invalid_agent_timeout_flag_stops_before_manifest(tmp_path, monkeypatch, capsys, timeout):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'validate_manifest',
+                        lambda *a, **kw: pytest.fail('invalid timeout reached manifest lookup'))
+    monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'),
+                                     '--agent-timeout', timeout])
+    if timeout in ('abc', '1.5'):
+        with pytest.raises(SystemExit) as error:
+            module.main()
+        assert error.value.code == 2
+        assert not (tmp_path / 'out').exists()
+    else:
+        assert module.main() == 2
+        result = json.loads(capsys.readouterr().out)
+        assert result['status'] == 'errored'
+        assert '--agent-timeout' in result['error']['message']
+
+
+@pytest.mark.parametrize('environment', ['', '0', '-1', 'abc', '1.5'])
+def test_invalid_agent_timeout_env_retains_error_before_manifest(
+        tmp_path, monkeypatch, capsys, environment):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', environment)
+    monkeypatch.setattr(module, 'validate_manifest',
+                        lambda *a, **kw: pytest.fail('invalid timeout reached manifest lookup'))
+    monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out')])
+    assert module.main() == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'errored'
+    assert 'GOTA_AGENT_TIMEOUT_S' in result['error']['message']
+    assert 'positive integer' in result['error']['message']
+    assert json.loads((tmp_path / 'out/report.json').read_text()) == result
+
+
+@pytest.mark.parametrize('timeout', [0, -1, True, 1.5])
+def test_invalid_explicit_agent_timeout_stops_before_manifest(tmp_path, monkeypatch, timeout):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'validate_manifest',
+                        lambda *a, **kw: pytest.fail('invalid timeout reached manifest lookup'))
+    with pytest.raises(ValueError, match='positive integer'):
+        module.build(tmp_path, tmp_path / 'out', timeout=timeout)
+
+
+def test_prebuilt_ignores_agent_timeout_env(tmp_path, monkeypatch):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', 'invalid')
+    monkeypatch.setattr(module, 'validate_manifest', lambda *a, **kw: {'identity': 'fixture'})
+    from games.gota.tools import prebuilt
+    def fake_build(candidate, out, artifact, identity):
+        assert identity == {'identity': 'fixture'}
+        return {'ok': True}
+    monkeypatch.setattr(prebuilt, 'build', fake_build)
+    assert module.build(tmp_path, tmp_path / 'out', prebuilt=tmp_path / 'policy.bas')['ok']
 
 
 def test_installed_compiler_gate_import_with_separate_worker_and_output(tmp_path):

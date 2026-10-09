@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pw_cli
@@ -31,6 +32,8 @@ def parser():
         child.add_argument('--from', dest='previous', help='explicit previous passed build ID')
         if action == 'compile':
             child.add_argument('--agent-timeout', type=int, default=900)
+            child.add_argument('--agent-budget', type=int, metavar='SECONDS',
+                               help='optional cumulative generation budget across all repair rounds')
             child.add_argument('--manifest', type=Path, required=True, help='downloaded live Coworld manifest for G2')
     for action in ('assemble', 'verify', 'trace'):
         child = commands.add_parser(action)
@@ -78,6 +81,8 @@ def run(args, report, *, engine_identity=None):
             raise pw_cli.UsageError(f'strategy does not exist: {args.source}')
         if args.action == 'compile' and args.agent_timeout < 1:
             raise pw_cli.UsageError('--agent-timeout must be positive')
+        if args.action == 'compile' and args.agent_budget is not None and args.agent_budget < 1:
+            raise pw_cli.UsageError('--agent-budget must be positive')
         order = builds.prepare(args.source.resolve(), agent=args.agent, model=args.model,
                                full=args.full, milestone=args.milestone, previous=args.previous,
                                engine_identity=engine_identity)
@@ -87,10 +92,26 @@ def run(args, report, *, engine_identity=None):
             report.suggest(f'run the compiler agent for {order["build_id"]}, then strategy assemble {order["build_id"]}')
             return order
         gates, errors, failure, tool_error = {}, [], None, None
+        generation_elapsed = 0.0
+        budget_message = (f'compiler agent generation budget of {args.agent_budget}s exhausted; '
+                          'see agent.log and hermes-stream-*.jsonl in the retained build directory')
         for attempt in range(1, 4):
             try:
                 print(f'{order["build_id"]}: generation/gates round {attempt}/3', flush=True)
-                builds.generate(order, errors=errors, timeout=args.agent_timeout)
+                timeout = args.agent_timeout
+                if args.agent_budget is not None:
+                    remaining = args.agent_budget - generation_elapsed
+                    if remaining <= 0:
+                        raise RuntimeError(budget_message)
+                    timeout = min(timeout, remaining)
+                    generation_started = time.monotonic()
+                try:
+                    builds.generate(order, errors=errors, timeout=timeout)
+                finally:
+                    if args.agent_budget is not None:
+                        generation_elapsed += time.monotonic() - generation_started
+                        if generation_elapsed >= args.agent_budget:
+                            raise RuntimeError(budget_message) from None
                 builds.assemble_build(order['build_id'])
                 from gota_gates import verify
                 gates = verify(order['build_id'], manifest=args.manifest)

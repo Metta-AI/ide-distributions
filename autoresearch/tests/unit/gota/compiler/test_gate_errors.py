@@ -48,7 +48,7 @@ def staged(tmp_path, monkeypatch):
 
 
 def compile_args(source):
-    return SimpleNamespace(action='compile', source=source, agent_timeout=1,
+    return SimpleNamespace(action='compile', source=source, agent_timeout=1, agent_budget=None,
                            agent='hermes', model=None, full=False, milestone=None,
                            previous=None, manifest=source)
 
@@ -142,6 +142,100 @@ def test_policy_failure_can_feed_repair_and_pass(staged, monkeypatch):
     assert generations[0] == []
     assert [row['gate'] for row in generations[1]] == ['G3']
     assert all(row['outcome'] == 'failed' for row in generations[1])
+
+
+def test_generation_budget_shortens_repairs_and_excludes_gates(staged, monkeypatch):
+    _order, _stage, source = staged
+    now, timeouts = [0.0], []
+    durations = iter([800, 500, 100])
+    monkeypatch.setattr(pw_strategy.time, 'monotonic', lambda: now[0])
+    def generate(order, *, errors, timeout):
+        timeouts.append(timeout)
+        now[0] += next(durations)
+    monkeypatch.setattr(builds, 'generate', generate)
+    def verify(*a, **kw):
+        now[0] += 3300
+        return {f'G{i}': {'outcome': 'failed' if i == 1 and len(timeouts) < 3 else 'passed',
+                          'passed': not (i == 1 and len(timeouts) < 3), 'summary': {}}
+                for i in range(1, 6)}
+    monkeypatch.setattr(gota_gates, 'verify', verify)
+    args = compile_args(source)
+    args.agent_timeout, args.agent_budget = 1200, 1800
+    result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+    assert result['status'] == 'passed'
+    assert timeouts == [1200, 1000, 500]
+
+
+@pytest.mark.parametrize('durations', [[1800], [1000, 800]])
+def test_generation_budget_exhaustion_stops_before_gates(staged, monkeypatch, durations):
+    _order, _stage, source = staged
+    now, timeouts, gates = [0.0], [], []
+    elapsed = iter(durations)
+    monkeypatch.setattr(pw_strategy.time, 'monotonic', lambda: now[0])
+    def generate(order, *, errors, timeout):
+        timeouts.append(timeout)
+        now[0] += next(elapsed)
+    monkeypatch.setattr(builds, 'generate', generate)
+    def verify(*a, **kw):
+        gates.append(True)
+        return {'G1': {'outcome': 'failed', 'passed': False, 'summary': {}}}
+    monkeypatch.setattr(gota_gates, 'verify', verify)
+    args = compile_args(source)
+    args.agent_timeout, args.agent_budget = 3600, 1800
+    result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+    assert timeouts == ([1800] if len(durations) == 1 else [1800, 800])
+    assert len(gates) == len(durations) - 1
+    assert result['status'] == 'errored'
+    assert 'generation budget of 1800s exhausted' in result['error']['message']
+    target = Path(result['build'])
+    assert builds.read(target / 'version.json')['status'] == 'errored'
+    assert 'generation budget of 1800s exhausted' in (target / 'report.md').read_text()
+
+
+@pytest.mark.parametrize('durations', [[1800], [600, 600, 600]])
+def test_structural_generation_error_cannot_repair_after_budget_exhaustion(
+        staged, monkeypatch, durations):
+    from strategy_basic import BuildError
+    from strategy_format import Diagnostic
+
+    _order, _stage, source = staged
+    now, timeouts = [0.0], []
+    elapsed = iter(durations)
+    monkeypatch.setattr(pw_strategy.time, 'monotonic', lambda: now[0])
+    def generate(order, *, errors, timeout):
+        timeouts.append(timeout)
+        now[0] += next(elapsed)
+        raise BuildError([Diagnostic('error', 'missing_unit', 'unit missing', 'C.idle')])
+    monkeypatch.setattr(builds, 'generate', generate)
+    monkeypatch.setattr(builds, 'assemble_build',
+                        lambda *a: pytest.fail('exhausted generation reached assembly'))
+    monkeypatch.setattr(gota_gates, 'verify',
+                        lambda *a, **kw: pytest.fail('exhausted generation reached gates'))
+    args = compile_args(source)
+    args.agent_timeout, args.agent_budget = 3600, 1800
+    result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+    assert timeouts == ([1800] if len(durations) == 1 else [1800, 1200, 600])
+    assert result['status'] == 'errored'
+    assert result['error']['type'] == 'RuntimeError'
+    assert 'generation budget of 1800s exhausted' in result['error']['message']
+    assert result['gates'] == {}
+
+
+@pytest.mark.parametrize('budget', [0, -1])
+def test_invalid_generation_budget_stops_before_prepare(staged, monkeypatch, budget):
+    _order, _stage, source = staged
+    monkeypatch.setattr(builds, 'prepare', lambda *a, **kw: pytest.fail('invalid budget prepared'))
+    args = compile_args(source)
+    args.agent_budget = budget
+    with pytest.raises(pw_cli.UsageError, match='--agent-budget must be positive'):
+        pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+
+
+def test_standalone_generation_budget_is_optional():
+    args = pw_strategy.parser().parse_args(['compile', '--agent-timeout', '3600',
+                                          '--manifest', '/fake/manifest'])
+    assert args.agent_timeout == 3600
+    assert args.agent_budget is None
 
 
 def test_import_time_fault_retains_build_cli_report(tmp_path, monkeypatch, capsys):

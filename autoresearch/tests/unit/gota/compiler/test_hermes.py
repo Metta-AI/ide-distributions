@@ -91,6 +91,52 @@ def test_fake_hermes_outputs_and_usage(generation):
     assert json.loads(next(stage.glob('hermes-usage-*.json')).read_text())['input_tokens'] == 123
 
 
+def test_generation_timeout_retains_errored_build_without_repairs(generation, monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    import gota_gates
+    import pw_cli
+    import pw_strategy
+
+    order, stage = generation
+    order.update(source_commit='abcdef12', engine={}, created='now', intent='behavior_change')
+    monkeypatch.setattr(sb, 'BUILDS', stage.parent.parent / 'builds')
+    sb.BUILDS.mkdir()
+    monkeypatch.setattr(sb, 'prepare', lambda *a, **kw: order)
+    monkeypatch.setattr(sb, 'assemble_build',
+                        lambda *a: pytest.fail('timeout reached assembly'))
+    monkeypatch.setattr(gota_gates, 'verify',
+                        lambda *a, **kw: pytest.fail('timeout reached gates'))
+    run = sb.subprocess.run
+    generations = []
+    def expire(command, **kwargs):
+        if command[0] == 'hermes':
+            generations.append(kwargs['timeout'])
+            kwargs['stdout'].write('{"type":"system","subtype":"init"}\n')
+            kwargs['stderr'].write('fake timeout diagnostic\n')
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+        return run(command, **kwargs)
+    monkeypatch.setattr(sb.subprocess, 'run', expire)
+    args = SimpleNamespace(action='compile', source=sb.REPO / order['source_path'],
+                           agent_timeout=1234, agent_budget=1800, agent='hermes', model=None, full=False,
+                           milestone=None, previous=None, manifest=stage / 'manifest.json')
+    result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+    target = Path(result['build'])
+    assert generations == [1234]
+    assert result['status'] == 'errored'
+    assert result['error']['type'] == 'RuntimeError'
+    assert 'compiler agent timed out after 1234s' in result['error']['message']
+    assert 'agent.log' in result['error']['message']
+    assert 'hermes-stream-' in result['error']['message']
+    assert result['gates'] == {}
+    assert sb.read(target / 'version.json')['status'] == 'errored'
+    assert 'compiler agent timed out after 1234s' in (target / 'report.md').read_text()
+    assert (target / 'agent.log').read_text() == 'fake timeout diagnostic\n'
+    assert len(list(target.glob('hermes-stream-*.jsonl'))) == 1
+    assert not list(target.glob('hermes-usage-*.json'))
+
+
 @pytest.mark.parametrize('mode,match', [('prohibited','write-scope'), ('prompt','write-scope'),
     ('extra','write-scope'), ('probe','write-scope'), ('spec','write-scope'), ('index','write-scope'), ('refs','write-scope'),
     ('symlink','regular output'), ('missing','regular output'),
