@@ -40,8 +40,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   leaderboard entry), upload the game's shipped strategy build and promote it through the C8
   promotion as a ``bootstrap`` promotion (no experiment). Prints ``{version_id,
   platform_policy_version_id, promotion_id, submission_id, champion_path}``. Refusals:
-  ``champion_exists``, ``promotion_in_flight``, ``promotion_refused``, ``identity`` and the
-  build reader's ``gates_failed``/``bad_build``/``artifact_mismatch``.
+  ``champion_exists``, ``promotion_in_flight``, ``not_shipped_strategy``,
+  ``promotion_refused``, ``identity`` and the build reader's
+  ``gates_failed``/``bad_build``/``artifact_mismatch``.
 - ``leaderboard``: our leaderboard champion and the confirmed current champion (A9).
 - ``game-version``: ``{league_id, game_version}``, the league's current game version
   (``Softmax.game_version``; the version noise records and designs must match, C10).

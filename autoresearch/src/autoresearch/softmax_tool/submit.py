@@ -35,9 +35,13 @@ experiment, outcome or decision). Its guards, in order, before anything is uploa
 4. no champion exists: no published promotion and no leaderboard entry for our player
    (``champion_exists``).
 
-Then ``upload.upload_bootstrap`` (idempotent) and ``bootstrap_promotion``, whose refusals
-become ``promotion_refused`` (another card took the lock first, or a champion appeared). On
-success the version gets a ``submitted`` event in the worktree.
+Then ``upload.upload_bootstrap`` (idempotent within the card's view of the records), a commit
+of the version record and its ``uploaded`` event on the card branch (so ``record_intent``
+pushes the champion's provenance with the branch), and ``bootstrap_promotion``. Its refusals
+keep their code (``champion_exists`` when a champion appeared, ``not_shipped_strategy`` when
+the branch's ``strategy/STRATEGY.md`` is not the shipped one) or become ``promotion_refused``
+(another card took the lock first, or a push failed). On success the version gets a
+``submitted`` event in the worktree.
 
 The outcome, rows and experiment are read from the worker's worktree (a checkout of canonical
 taken when the card started); ``submit_promotion`` reads the binding and baseline from canonical.
@@ -47,6 +51,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from autoresearch.io import gitops
 from autoresearch.io.docs import read_json
 from autoresearch.queue.base import Queue
 from autoresearch.runctx import RunContext
@@ -198,10 +203,16 @@ def bootstrap_champion(
         raise Refused("identity", "; ".join(problems))
     _refuse_if_champion(ctx, sm, league_id)
     version_id, platform_id = upload_bootstrap(ctx, sm, Path(build_dir), player_id)
+    # Commit the version record (and its upload event) on the card branch before intent, so
+    # the pushed branch carries the champion's provenance even if this card dies after submit
+    # (A11 recovery restores it from the branch).
+    version_dir = store.path_of(version_id).parent.relative_to(ctx.worker).as_posix()
+    gitops.commit_paths(ctx.worker, [version_dir], f"bootstrap champion version {version_id}")
     result = promotion.bootstrap_promotion(ctx, queue, sm, version_id, platform_id, league_id)
     if not result.ok:
         details = {"promotion_id": result.promotion_id}
-        raise Refused("promotion_refused", result.reason or "promotion refused", details)
+        reason = result.code or "promotion_refused"
+        raise Refused(reason, result.reason or "promotion refused", details)
     store.add_event(
         version_id,
         "submitted",

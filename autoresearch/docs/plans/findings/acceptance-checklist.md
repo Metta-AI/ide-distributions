@@ -252,7 +252,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | KB maintenance, code-citation renewal | `tests/unit/kb` (pytest) |
 | Statistics, noise, calibration, decision rule | `tests/unit/stats` (pytest) |
 | Softmax tool against the fake | `tests/unit/softmax`, `tests/fixtures/softmax` (pytest) |
-| First champion on a fresh install (A14): `softmax bootstrap-champion` promotes the shipped strategy (bootstrap promotion to `published`, league submission), refusals, two bootstrappers, crash retries, A11 recovery, then an experiment designs and launches against it | `tests/unit/softmax/test_bootstrap_champion.py` (pytest, fake platform and fakegame) |
+| First champion on a fresh install (A14): `softmax bootstrap-champion` promotes the shipped strategy (bootstrap promotion to `published`, league submission), refusals (champion exists, edited STRATEGY, failed build, identity), two bootstrappers, crash retries, A11 recovery with the version record restored in canonical, then an experiment designs and launches against it | `tests/unit/softmax/test_bootstrap_champion.py` (pytest, fake platform and fakegame) |
 | Softmax tool against the live platform, as a Player | `findings/player-xp-probe.md` (create, get, list, episodes, download as Games Bond: PASS) and `findings/softmax-client.md` (read-only probes: PASS; league episodes readable by a Player) |
 | Skills and doctrine consistency | `tests/unit/test_skills.py`, `tests/unit/test_doctrine.py` (pytest) |
 | Models glm-5.3, glm-5.3-flash tool calling in Hermes | `hermes-facts.md` item 11 |
@@ -271,7 +271,7 @@ Also **UNVERIFIED** (hermes-facts.md, item 2): that plugin hooks fire in a gatew
 | Gateway cron jobs (`queue-keeper`, `xp-poll`, `health`) running for hours on a host | README | **UNVERIFIED.** Only short runs under test. |
 | Token refresh in practice (2.4) | - | **UNVERIFIED.** No owner. |
 | Restore on a second machine from a real remote | README | **UNVERIFIED.** |
-| First champion on the live platform (`softmax bootstrap-champion` of the game's shipped strategy, A14; text pending James's sign-off) | A14 | **NOT RUN.** Only the fake path is tested. |
+| First champion on the live platform (`softmax bootstrap-champion` of the game's shipped strategy, A14; text pending James's sign-off) | A14 | **NOT RUN.** Only the fake path is tested. Blocked for GotA until `games/gota/GAME.md` has a `## Baseline build` section (Codex). Observe once: how long `coworld memberships --champions-only` takes to list the submission; until it does, after publish the champion reads "unknown" and experiment cards block with a `help_request`. |
 | Friday leaderboard measurement (section 1) | - | **NOT RUN.** Needs a real submission in the league first. |
 
 ### 3.3 Go and no-go before handing over

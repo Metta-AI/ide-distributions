@@ -13,7 +13,11 @@ import sys
 import pytest
 from support.promotion_board import LEAGUE, PLAYER, SubmitBoard
 
+from autoresearch.comms.resolver import resolve
+from autoresearch.io import gitops
+from autoresearch.paths import Layout
 from autoresearch.queue.select import FILE_QUEUE_RELATIVE
+from autoresearch.records.store import RecordStore
 from autoresearch.runtime import promotion
 from autoresearch.runtime.promotion import (
     CHAMPION_PATH,
@@ -214,6 +218,28 @@ def test_refused_when_a_leaderboard_champion_exists(tmp_path):
     assert load(board.canonical) is None
 
 
+def test_refused_unless_the_strategy_is_the_shipped_one(fresh):
+    worker = started(fresh)
+    strategy = worker.worktree / CHAMPION_PATH
+    strategy.write_text(strategy.read_text() + "\n- aggression: 9\n")
+    gitops.commit_all(worker.worktree, "edit the champion strategy")
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 1 and data["error"]["reason"] == "not_shipped_strategy"
+    assert load(fresh.canonical).stage == "aborted" and submissions(fresh) == []
+
+
+def test_post_lock_check_refuses_a_leaderboard_champion(tmp_path):
+    board = board_at(tmp_path, seed_champion=True)
+    worker = started(board)
+    version, platform_id = upload_bootstrap(worker.ctx(), board.sm, shipped_build(board, worker))
+    outcome = promotion.bootstrap_promotion(
+        worker.ctx(), board.queue, board.sm, version, platform_id, LEAGUE
+    )
+    assert outcome.ok is False and outcome.code == "champion_exists"
+    assert load(board.canonical).stage == "aborted"
+    assert [s["policy_version_id"] for s in submissions(board)] == ["autoresearch-fake:v0"]
+
+
 @pytest.mark.parametrize(
     "version_json",
     [
@@ -336,11 +362,24 @@ def test_bootstrap_holder_died_after_submit_recovery_card_publishes(fresh):
     spec = fresh.follow_up(action.request_id)["spec"]
     assert spec["refs"] == [f"ar://version/{data['data']['version_id']}"]
 
+    version_id = data["data"]["version_id"]
+    assert "versions/" + version_id in spec["why"]  # how to restore the record
+    # The version record and its upload event were committed on the holder's branch before
+    # intent, so the pushed candidate commit carries them.
+    sha = load(fresh.canonical).candidate_sha
+    assert gitops.show(fresh.canonical, sha, f"versions/{version_id}/version.json")
+
     rescuer = fresh.admit_follow_up(action.request_id)
     rescuer.start()
     adopted = adopt(rescuer.ctx(), pid)
     stage_champion(rescuer.ctx(), adopted)
+    gitops.git(rescuer.worktree, "checkout", sha, "--", f"versions/{version_id}")
     publish(fresh, rescuer)
+
+    canonical = RecordStore(Layout(fresh.canonical))
+    assert canonical.load(version_id)[0]["policy_name"].startswith("ar-bootstrap-")
+    assert canonical.find("version_event", version=version_id, kind="uploaded")
+    resolve(fresh.canonical, f"ar://version/{version_id}")  # the refs resolve
 
     assert load(fresh.canonical).stage == "published"
     assert (fresh.canonical / CHAMPION_PATH).read_text() == "# Champion v0\n"

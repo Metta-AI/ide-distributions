@@ -23,7 +23,9 @@ same name; the binding still names exactly one.)
 ``submit.bootstrap_champion``, which checks the identity and that no champion exists first):
 the same build reader, version provenance and retry safety, with ``experiment: null`` and the
 policy name ``policy_name("bootstrap", artifact hash)``. The same build again finds its
-version by that name and does not upload again.
+version by that name and does not upload again, within what the card's worktree sees (its own
+records plus canonical's): a card that died unmerged leaves its record invisible to a later
+card, which uploads again under the same name (a second platform version; harmless).
 
 ``version.json`` contract (every build binding writes it; ``games/fakegame`` and the GotA
 build both follow it):

@@ -175,6 +175,7 @@ class SubmitOutcome:
     submission_id: str | None = None
     reason: str = ""
     request_id: str | None = None  # the re-evaluation request written on a champion mismatch
+    code: str = ""  # a machine-readable refusal reason, when the caller should see one
 
 
 # --- storage ---
@@ -778,16 +779,28 @@ def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
     canonical = ctx.canonical
     attempt = len(promotion.recovery_requests) + 1
     key = f"promote-recover:{promotion.id}:{attempt}"
+    if promotion.kind == "bootstrap":
+        carry_over = (
+            f"Also restore the champion's version record, committed on branch "
+            f"{promotion.candidate_branch}: run git checkout {promotion.candidate_sha} -- "
+            f"versions/{promotion.version} in your worktree. Compare the branch with main and "
+            f"redo any other change it made. If the holder card was an experiment card, "
+            f"request that experiment again (queue request create, with the hypothesis ref)."
+        )
+    else:
+        carry_over = (
+            f"Also carry over the non-champion changes the promotion card made on branch "
+            f"{promotion.candidate_branch} (for example experiment record updates): compare "
+            f"it with main and redo them."
+        )
     why = (
         f"Promotion {promotion.id} submitted {promotion.platform_policy_version_id} "
         f"(submission {promotion.submission_id}) but its holder {promotion.holder_task} ended "
         f"without a usable handoff (recovery attempt {attempt}). Run "
         f'"$AUTORESEARCH_CLI" promotion adopt {promotion.id}, then "$AUTORESEARCH_CLI" '
         f"promotion stage-champion {promotion.id} (copies {CHAMPION_PATH} from "
-        f"{promotion.candidate_ref} at {promotion.candidate_sha}). Also carry over the "
-        f"non-champion changes the promotion card made on branch "
-        f"{promotion.candidate_branch} (for example experiment record updates): compare it "
-        f"with main and redo them. Write the journal and finish. Do not submit again."
+        f"{promotion.candidate_ref} at {promotion.candidate_sha}). {carry_over} Write the "
+        f"journal and finish. Do not submit again."
     )
     request = _write_runtime_request(
         canonical,
@@ -920,7 +933,7 @@ def stage_champion_for(ctx: RunContext, promotion_id: str) -> Path:
 
 
 def _refuse(
-    ctx: RunContext, promotion: Promotion, reason: str, request_key: str = ""
+    ctx: RunContext, promotion: Promotion, reason: str, request_key: str = "", code: str = ""
 ) -> SubmitOutcome:
     """Abort the acquired promotion (and, with ``request_key``, write a re-evaluation request
     in the same commit)."""
@@ -945,7 +958,7 @@ def _refuse(
             )
             extra, request_id = (request,), request.stem
         _move(canonical, current, "aborted", reason, extra)
-    return SubmitOutcome(False, promotion.id, reason=reason, request_id=request_id)
+    return SubmitOutcome(False, promotion.id, reason=reason, request_id=request_id, code=code)
 
 
 def submit_promotion(
@@ -1014,17 +1027,28 @@ def bootstrap_promotion(
     the champion STRATEGY at ``CHAMPION_PATH`` on the card's branch, so the merge leaves the
     champion path as it is.
 
-    Allowed only while there is no champion: after taking the lock (one promotion in flight,
-    so two bootstrapping cards cannot both submit), it is refused (aborted) once any
-    promotion is published or our leaderboard has an entry (A9). The caller must not hold
-    the lock."""
+    Allowed only while there is no champion and only for the shipped strategy: after taking
+    the lock (one promotion in flight, so two bootstrapping cards cannot both submit), it is
+    refused (aborted, ``code``) once any promotion is published or our leaderboard has an
+    entry (A9; ``champion_exists``), and unless ``CHAMPION_PATH`` on the card's branch is
+    byte-identical to canonical HEAD's (``not_shipped_strategy``: the one unevaluated
+    promotion must not carry an edit). The caller must not hold the lock."""
     if not _take_lock(ctx, queue, "bootstrap", None, version, platform_id, CHAMPION_PATH):
         return SubmitOutcome(False, reason="another promotion holds the promotion lock")
     promotion = load(ctx.canonical)
     if has_published(ctx.canonical):
-        return _refuse(ctx, promotion, "a promotion is published, so the champion exists")
+        reason = "a promotion is published, so the champion exists"
+        return _refuse(ctx, promotion, reason, code="champion_exists")
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     if on_board is not None:
         reason = f"our {league_id} leaderboard champion {on_board} is the champion (A9)"
-        return _refuse(ctx, promotion, reason)
+        return _refuse(ctx, promotion, reason, code="champion_exists")
+    shipped = gitops.show(ctx.canonical, "HEAD", CHAMPION_PATH)
+    branch = f"refs/heads/{promotion.candidate_branch}"
+    if gitops.show(ctx.canonical, branch, CHAMPION_PATH) != shipped:
+        reason = (
+            f"{CHAMPION_PATH} on {promotion.candidate_branch} differs from the shipped one at "
+            "canonical HEAD; a bootstrap promotes only the unchanged shipped strategy"
+        )
+        return _refuse(ctx, promotion, reason, code="not_shipped_strategy")
     return _submit_acquired(ctx, sm, promotion, league_id)
