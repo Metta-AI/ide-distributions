@@ -140,7 +140,7 @@ hermes -p autoresearch cron list
 
 | Job | Runs | Does |
 |---|---|---|
-| `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. |
+| `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. A card on the board that the runtime did not create (no card body, for example one a model added with `kanban_create`) is never merged: it gets one help request that says how to archive it, and the marker `.supervisor/ledger/foreign/<task>.json`. One card that fails (foreign, unreadable, or a blocked card the board will not requeue) does not stop the other cards in the same step. |
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
 | `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
@@ -354,6 +354,13 @@ automatic update; `updates.check` is set to false so it does not even check.
 - **Pause timing.** A budget pause, like a preflight pause, unassigns pending cards on the
   next queue-keeper run; a card Hermes itself returns to `ready` (a crash retry keeps its
   assignee) can start again in the minute before that.
+- **A card worker can still write the canonical workspace through interpreter code.** The
+  plugin refuses shell and file-tool writes outside the worktree, but not a `python3 - <<EOF`
+  script that writes files and runs `git` itself (a residual risk listed in
+  `plugin/policy.py`). On 2026-10-09 a worker used this to commit its own receipt to canonical
+  `main` (`admit Q-... (manual admission repair ...)`), so `card finish` took the handoff of a
+  card that skipped admission. queue-keeper now refuses to merge such a card's work (above),
+  but the single-writer rule (C1) is enforced only by the workers' cooperation, not by the OS.
 - **A board rebuild (C12) gives re-admitted cards new task ids,** so their run and cost
   counts start again from zero.
 - `runtime/kanban_events.jsonl` is read in full on each queue-keeper run, and the daily sum
