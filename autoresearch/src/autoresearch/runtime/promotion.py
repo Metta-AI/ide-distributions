@@ -375,10 +375,31 @@ def current_champion(ctx: RunContext, sm: Softmax, league_id: str) -> str | None
     return champion_status(ctx, sm, league_id)[0]
 
 
+def version_dir(version: str) -> str:
+    """The repo-relative directory of version record ``version`` (record and events)."""
+    return (Layout(Path()).versions / version).as_posix()
+
+
+def _restore_version(ctx: RunContext, promotion: Promotion) -> None:
+    """Copy a bootstrap promotion's version record and events from ``candidate_sha`` into
+    the worker's worktree. The bootstrap card committed them on its branch before intent;
+    only that branch has them, so a recovery card must carry them over (A11)."""
+    directory = version_dir(promotion.version)
+    listing = gitops.git(
+        ctx.canonical, "ls-tree", "-r", "--name-only", promotion.candidate_sha, "--", directory
+    )
+    for rel in listing.splitlines():
+        target = ctx.worker / rel
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(gitops.show(ctx.canonical, promotion.candidate_sha, rel))
+
+
 def stage_champion(ctx: RunContext, promotion: Promotion) -> Path:
     """Copy the candidate STRATEGY at ``candidate_sha`` to the champion path in the worker's
-    worktree (the worker's ``card finish`` commits it). Fetches the pushed candidate branch
-    when the commit is not local (a rebuilt host)."""
+    worktree (the worker's ``card finish`` commits it); for a bootstrap promotion also restore
+    its version record from that commit (``_restore_version``). Fetches the pushed candidate
+    branch when the commit is not local (a rebuilt host)."""
     if ctx.worker is None or promotion.candidate_sha is None:
         raise PromotionError("staging the champion needs a worker worktree and a candidate_sha")
     content = gitops.show(ctx.canonical, promotion.candidate_sha, promotion.candidate_path)
@@ -392,6 +413,8 @@ def stage_champion(ctx: RunContext, promotion: Promotion) -> Path:
     target = ctx.worker / CHAMPION_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
+    if promotion.kind == "bootstrap":
+        _restore_version(ctx, promotion)
     return target
 
 
@@ -781,11 +804,13 @@ def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
     key = f"promote-recover:{promotion.id}:{attempt}"
     if promotion.kind == "bootstrap":
         carry_over = (
-            f"Also restore the champion's version record, committed on branch "
-            f"{promotion.candidate_branch}: run git checkout {promotion.candidate_sha} -- "
-            f"versions/{promotion.version} in your worktree. Compare the branch with main and "
-            f"redo any other change it made. If the holder card was an experiment card, "
-            f"request that experiment again (queue request create, with the hypothesis ref)."
+            f"stage-champion also restores the champion's version record "
+            f"{version_dir(promotion.version)} from that commit (if it is missing after "
+            f"stage-champion, run git checkout {promotion.candidate_sha} -- "
+            f"{version_dir(promotion.version)}). Compare branch {promotion.candidate_branch} "
+            f"with main and redo any other change it made. If the holder card was an "
+            f"experiment card, request that experiment again (queue request create, with the "
+            f"hypothesis ref)."
         )
     else:
         carry_over = (

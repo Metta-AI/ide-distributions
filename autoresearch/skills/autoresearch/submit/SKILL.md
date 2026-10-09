@@ -88,7 +88,7 @@ Refusals of `softmax bootstrap-champion`, by `error.reason`:
 | --- | --- | --- |
 | `champion_exists` | A promotion is published or our leaderboard has a champion. | Nothing to bootstrap. Finish `done`. |
 | `promotion_in_flight`, `promotion_refused` | Another card is promoting (or took the lock first), or a push failed. | Run `"$AUTORESEARCH_CLI" promotion status`. If this card is the holder at `submitted` (an earlier run of this command succeeded), the bootstrap is done: journal the ids from `promotion status` and finish `done`. Otherwise finish `partial`. |
-| `not_shipped_strategy` | `strategy/STRATEGY.md` on your branch differs from the shipped one. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, and run it again. |
+| `not_shipped_strategy` | `strategy/STRATEGY.md` in your worktree or on your branch differs from the shipped one, or the build compiled another STRATEGY.md. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, rebuild from it as `GAME.md` says, and run it again. |
 | `gates_failed`, `bad_build`, `artifact_mismatch` | The shipped strategy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
 | `platform` | The platform failed. | Run it once more (the same build reuses its upload). After a second failure, finish `partial`. |
@@ -108,9 +108,9 @@ names the promotion id, the candidate commit, and the holder's branch. Never sub
 4. Carry over the other changes the holder card made on its branch (for example the
    version's `submitted` event): compare that branch with `main` (`git diff main <branch>`)
    and redo them in your worktree. Do not copy the branch's journal. For a bootstrap
-   promotion (no experiment), the card's reason says how to restore the champion's version
-   record from the branch, and to request the holder's experiment again when it was an
-   experiment card.
+   promotion (no experiment), `stage-champion` (step 3) already restored the champion's
+   version record from the candidate commit; if the holder was an experiment card, request
+   that experiment again (the card's reason says so).
 5. Finish with `complete-card`, outcome `done`. Its merge moves the promotion to `recorded`
    and then `published`.
 

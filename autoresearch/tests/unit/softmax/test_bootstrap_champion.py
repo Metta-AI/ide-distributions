@@ -223,9 +223,40 @@ def test_refused_unless_the_strategy_is_the_shipped_one(fresh):
     strategy = worker.worktree / CHAMPION_PATH
     strategy.write_text(strategy.read_text() + "\n- aggression: 9\n")
     gitops.commit_all(worker.worktree, "edit the champion strategy")
+    build = shipped_build(fresh, worker)
+    code, data = bootstrap_cli(fresh, worker, build)
+    assert code == 1 and data["error"]["reason"] == "not_shipped_strategy"
+    assert uploads(fresh) == {} and load(fresh.canonical) is None  # refused before upload
+
+    # The check after the lock reads the branch, whatever the caller checked before.
+    version, platform_id = upload_bootstrap(worker.ctx(), fresh.sm, build, PLAYER)
+    outcome = promotion.bootstrap_promotion(
+        worker.ctx(), fresh.queue, fresh.sm, version, platform_id, LEAGUE
+    )
+    assert outcome.ok is False and outcome.code == "not_shipped_strategy"
+    assert load(fresh.canonical).stage == "aborted" and submissions(fresh) == []
+
+
+def test_refused_for_an_uncommitted_edit_built_from_the_worktree(fresh):
+    worker = started(fresh)
+    strategy = worker.worktree / CHAMPION_PATH
+    strategy.write_text(strategy.read_text() + "\n- aggression: 9\n")  # not committed
     code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
     assert code == 1 and data["error"]["reason"] == "not_shipped_strategy"
-    assert load(fresh.canonical).stage == "aborted" and submissions(fresh) == []
+    assert uploads(fresh) == {} and load(fresh.canonical) is None
+
+
+def test_refused_when_the_build_compiled_another_strategy(fresh):
+    worker = started(fresh)
+    other = fresh.tmp_path / "other-strategy"
+    other.mkdir()
+    (other / "STRATEGY.md").write_text("# Not the shipped strategy\n")
+    build = fresh.tmp_path / "other-build"
+    fake_build(other, build)  # records the other STRATEGY.md's hash
+    code, data = bootstrap_cli(fresh, worker, build)
+    assert code == 1 and data["error"]["reason"] == "not_shipped_strategy"
+    assert "sha256" in data["error"]["message"]
+    assert uploads(fresh) == {} and load(fresh.canonical) is None
 
 
 def test_post_lock_check_refuses_a_leaderboard_champion(tmp_path):
@@ -372,8 +403,8 @@ def test_bootstrap_holder_died_after_submit_recovery_card_publishes(fresh):
     rescuer = fresh.admit_follow_up(action.request_id)
     rescuer.start()
     adopted = adopt(rescuer.ctx(), pid)
-    stage_champion(rescuer.ctx(), adopted)
-    gitops.git(rescuer.worktree, "checkout", sha, "--", f"versions/{version_id}")
+    stage_champion(rescuer.ctx(), adopted)  # also restores the version record
+    assert (rescuer.worktree / f"versions/{version_id}/version.json").exists()
     publish(fresh, rescuer)
 
     canonical = RecordStore(Layout(fresh.canonical))

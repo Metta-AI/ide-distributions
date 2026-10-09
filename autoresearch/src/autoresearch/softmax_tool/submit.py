@@ -33,7 +33,13 @@ experiment, outcome or decision). Its guards, in order, before anything is uploa
 3. no promotion is in flight (``promotion_in_flight``; ``acquire`` would refuse it anyway,
    this only saves the upload);
 4. no champion exists: no published promotion and no leaderboard entry for our player
-   (``champion_exists``).
+   (``champion_exists``);
+5. the worktree's ``strategy/STRATEGY.md`` (committed or not) is byte-identical to canonical
+   HEAD's, and every STRATEGY.md source hash the build records (``source_hashes`` entries for
+   a ``STRATEGY.md``, or ``strategy_sha256`` when ``source_path`` is one) equals it
+   (``not_shipped_strategy``). A build that names no STRATEGY.md source (a prebuilt
+   artifact) cannot be tied to it here; the game's ``## Baseline build`` and the build's
+   provenance are responsible for that.
 
 Then ``upload.upload_bootstrap`` (idempotent within the card's view of the records), a commit
 of the version record and its ``uploaded`` event on the card branch (so ``record_intent``
@@ -186,6 +192,41 @@ def _refuse_if_champion(ctx: RunContext, sm: Softmax, league_id: str) -> None:
         )
 
 
+def _strategy_source_hashes(build: dict) -> list[str]:
+    """The STRATEGY.md hashes a build says it compiled: its ``source_hashes`` entries for a
+    ``STRATEGY.md`` file, and ``strategy_sha256`` when ``source_path`` is a ``STRATEGY.md``.
+    Empty when the build names no STRATEGY.md source (a prebuilt artifact)."""
+    hashes = [
+        value
+        for path, value in (build.get("source_hashes") or {}).items()
+        if Path(path).name == "STRATEGY.md"
+    ]
+    if Path(build.get("source_path") or "").name == "STRATEGY.md" and build.get("strategy_sha256"):
+        hashes.append(build["strategy_sha256"])
+    return hashes
+
+
+def _refuse_unless_shipped(ctx: RunContext, build: dict) -> None:
+    """``not_shipped_strategy`` unless the worktree's champion STRATEGY (committed or not) and
+    every STRATEGY.md hash the build records equal canonical HEAD's champion STRATEGY."""
+    shipped = gitops.show(ctx.canonical, "HEAD", promotion.CHAMPION_PATH)
+    worktree = ctx.worker / promotion.CHAMPION_PATH
+    if shipped is None or not worktree.is_file() or worktree.read_bytes() != shipped:
+        raise Refused(
+            "not_shipped_strategy",
+            f"{promotion.CHAMPION_PATH} in this worktree differs from the shipped one at "
+            "canonical HEAD; a bootstrap promotes only the unchanged shipped strategy",
+        )
+    shipped_hash = hashlib.sha256(shipped).hexdigest()
+    built = [value for value in _strategy_source_hashes(build) if value != shipped_hash]
+    if built:
+        raise Refused(
+            "not_shipped_strategy",
+            f"the build compiled a STRATEGY.md with sha256 {built[0]}, not the shipped "
+            f"{promotion.CHAMPION_PATH} ({shipped_hash})",
+        )
+
+
 def bootstrap_champion(
     ctx: RunContext,
     queue: Queue,
@@ -197,16 +238,17 @@ def bootstrap_champion(
     """Run the bootstrap guards (module docstring), upload the shipped strategy build and
     promote it as the first champion. Returns the submission summary."""
     store = worker_store(ctx)
-    checked_build(Path(build_dir))
+    build, _, _ = checked_build(Path(build_dir))
     problems = identity_problems(sm.whoami(), player_id, datetime.now(UTC))
     if problems:
         raise Refused("identity", "; ".join(problems))
     _refuse_if_champion(ctx, sm, league_id)
+    _refuse_unless_shipped(ctx, build)
     version_id, platform_id = upload_bootstrap(ctx, sm, Path(build_dir), player_id)
     # Commit the version record (and its upload event) on the card branch before intent, so
     # the pushed branch carries the champion's provenance even if this card dies after submit
-    # (A11 recovery restores it from the branch).
-    version_dir = store.path_of(version_id).parent.relative_to(ctx.worker).as_posix()
+    # (A11: stage-champion restores it from the branch).
+    version_dir = promotion.version_dir(version_id)
     gitops.commit_paths(ctx.worker, [version_dir], f"bootstrap champion version {version_id}")
     result = promotion.bootstrap_promotion(ctx, queue, sm, version_id, platform_id, league_id)
     if not result.ok:
