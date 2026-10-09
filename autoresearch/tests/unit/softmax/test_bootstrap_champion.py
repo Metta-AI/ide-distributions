@@ -106,7 +106,7 @@ def publish(board, worker) -> None:
 def test_fresh_install_bootstraps_the_champion_then_an_experiment_designs_against_it(fresh):
     _, board = softmax(base_env(fresh), "leaderboard")
     assert board["data"]["current_champion"] is None
-    assert board["data"]["note"].startswith("no champion known")
+    assert board["data"]["note"].startswith("no champion:")
 
     worker = started(fresh)
     code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))

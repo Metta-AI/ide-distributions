@@ -36,6 +36,10 @@ env_requires:
       external agent such as the Softmax IDE bridge, run as its own user). When set, only
       inbox files they own are adopted. When unset, any valid file is adopted and
       queue-keeper logs that direct writes are unauthenticated.
+  - name: AUTORESEARCH_CHAMPION_GRACE_MINUTES
+    required: false
+    default: "30"
+    description: Minutes after a submission during which the league may still show the replaced champion before queue-keeper pauses the agent for a champion conflict.
   - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
     required: false
     default: "30"

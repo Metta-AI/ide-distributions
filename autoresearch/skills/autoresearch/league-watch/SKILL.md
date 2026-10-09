@@ -19,9 +19,9 @@ Doctrine upheld: D-03, D-04, D-07.
 
 1. Read our standing and the current champion:
    `"$AUTORESEARCH_CLI" softmax leaderboard`
-   The data has `league_id`, `player_id`, `leaderboard_champion` (our policy on the
-   leaderboard), `current_champion` (that policy, confirmed against the promotion ledger),
-   and `note`.
+   The data has `league_id`, `player_id`, `leaderboard_champion` and `current_champion`
+   (both the policy the league shows competing for us: the champion, A9), `note` (when there
+   is none), and `conflict` (null, or what the loop expected and what the league shows).
 2. Read the full league standings (every division, every player, with rank, score and
    rounds played):
    `"$AUTORESEARCH_CLI" softmax standings`
@@ -33,10 +33,10 @@ Doctrine upheld: D-03, D-04, D-07.
 4. Compare with the last snapshot
    (`"$AUTORESEARCH_CLI" records find evidence --where kind=leaderboard-snapshot`):
    a changed champion, our rank, new entrants near the top, a player whose score moved by
-   more than its usual round-to-round swing, or a `note` that says the ledger and the
-   leaderboard disagree. A score without its rank and rounds played is not a finding.
-5. When `current_champion` is null and `note` says the ledger and the leaderboard disagree,
-   send a `help_request` (see `communicate`). Submissions refuse until they agree.
+   more than its usual round-to-round swing, or a `conflict`. A score without its rank and
+   rounds played is not a finding.
+5. When `conflict` is set, record it in the journal. Do not send your own `help_request`:
+   queue-keeper already paused the agent and told the user (A9).
 6. Hand the snapshot to `opponent-profile` and `meta-recon` in the same card, or finish with
    `complete-card`.
 

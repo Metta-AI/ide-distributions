@@ -157,6 +157,14 @@ FIXTURES = {
             "refs": [{"uri": "ar://experiment/E-01M4EJ9RQMHVH6XK3N4T760MNG"}],
         }
     ],
+    "champion_conflict": [
+        {"league_id": "league_x", "expected": exp, "shown": shown, "waited_out": waited}
+        for exp, shown, waited in (
+            ("ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1", "hand-made:v2", False),
+            ("ar-bootstrap-0123456789ab:v1", None, True),
+            (None, "hand-made:v2", False),
+        )
+    ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [
         {"name": "replay-diff", "tree_hash": "0123456789ab", "directory": "sp", "rev": SHA}

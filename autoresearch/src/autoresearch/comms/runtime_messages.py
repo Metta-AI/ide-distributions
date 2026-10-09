@@ -459,6 +459,42 @@ def promotion_stuck(
     )
 
 
+def champion_conflict(
+    league_id: str, expected: str | None, shown: str | None, waited_out: bool
+) -> RuntimeMessage:
+    """The league's champion differs from what the loop expected (A9); queue-keeper paused
+    the agent. One per (expected, shown) pair."""
+    if waited_out:
+        what = (
+            "The agent submitted a new policy to the league, but the league still shows the "
+            "policy it was meant to replace, well after the submission."
+        )
+    elif expected is None:
+        what = "The league shows a champion for us that a person accepted as none."
+    elif shown is None:
+        what = "The league shows no policy competing for us, but the agent expected one."
+    else:
+        what = (
+            "The league shows a different policy competing for us than the one the agent "
+            "expected (for example a policy submitted by hand)."
+        )
+    body = (
+        f"{what} The league decides the champion, so the agent now compares against what the "
+        "league shows, but it is paused until a person looks: no new cards start. The "
+        "expected and shown policies are in this message's details (`about`). To resolve it, "
+        f"either make the {league_id} league show the expected policy again, or accept what "
+        'it shows with `"$AUTORESEARCH_CLI" promotion accept-champion`. The agent resumes by '
+        "itself on the first run where they agree."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Agent paused: the league shows an unexpected champion",
+        body,
+        about=_about(expected_policy=expected or "none", league_policy=shown or "none"),
+        key=f"champion-conflict:{expected or 'none'}:{shown or 'none'}",
+    )
+
+
 def request_lost_in_rebuild(request_id: str, mode: str | None) -> RuntimeMessage:
     """An admitted request a board rebuild cannot re-admit (its spec was never committed)."""
     card = f"{mode} card" if mode else "card"

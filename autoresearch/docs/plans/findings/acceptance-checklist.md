@@ -47,7 +47,7 @@ Primary command (read-only, uses the player credential):
 ```
 
 - `standings` prints `{"ok": true, "data": {"league_id", "rows"}}`. Each row has `division_id`, `division_name`, `level`, `rank`, `player_id`, `player_name`, `score`, `rounds_played`. The code reads `coworld results <league>` (divisions) and then `coworld results <division>` (entries). Source: `src/autoresearch/softmax_tool/client.py`, method `standings`.
-- `leaderboard` prints our champion policy version (`leaderboard_champion`) and the ledger champion (`current_champion`, `note`). Use it to record which policy version is measured. On a fresh install the first champion is the shipped strategy (A14, `softmax bootstrap-champion`).
+- `leaderboard` prints our champion: the policy the league shows competing for our player (`leaderboard_champion` = `current_champion`, A9), `note` when there is none, and `conflict` when what the loop expects differs (queue-keeper then pauses the agent). Use it to record which policy version is measured. On a fresh install the first champion is the game's starter policy (A14, `softmax bootstrap-champion`).
 
 Read-only alternative without the autoresearch CLI (project-pinned coworld 0.1.58, not the global one):
 

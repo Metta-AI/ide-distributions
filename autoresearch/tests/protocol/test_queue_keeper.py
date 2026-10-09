@@ -14,7 +14,7 @@ from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import proposals, queue_keeper, xp_poll
+from autoresearch.runtime import promotion, proposals, queue_keeper, xp_poll
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
 from autoresearch.runtime.queue_keeper import report_skipped
@@ -253,6 +253,50 @@ def test_a_raising_preflight_pauses_and_asks_for_help(host, monkeypatch):
     ]
     assert result.admitted == []  # nothing is admitted while paused
     assert len(_help_requests(host, "Agent paused")) == 1
+
+
+# --- champion conflict (A9) ---
+
+
+def test_a_champion_conflict_pauses_tells_the_user_once_and_waits_for_agreement(
+    host, monkeypatch
+):
+    host.tick(at(0))
+    conflict = promotion.ChampionConflict(
+        "ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1", "hand-made:v2", "submitted by hand"
+    )
+    monkeypatch.setattr(promotion, "champion_conflict", lambda *args: conflict)
+
+    first = host.tick(at(1))
+    assert first.champion_conflict == conflict and first.resumed is None
+    assert "champion conflict" in host.committed(host.ledger / "pause.json")["reason"]
+    [message] = _help_requests(host, "unexpected champion")
+    assert message["about"]["league_policy"] == "hand-made:v2"
+    assert message["priority"] == "P0"
+    assert first.failures == {}  # the rest of the run went on
+
+    second = host.tick(at(2))  # still in conflict: still paused, no second message
+    assert second.resumed is None and (host.ledger / "pause.json").exists()
+    assert len(_help_requests(host, "unexpected champion")) == 1
+
+    def league_unreadable(*args):
+        raise RuntimeError("league read failed")
+
+    monkeypatch.setattr(promotion, "current_champion", league_unreadable)
+    third = host.tick(at(3))  # an unfinished check never resumes
+    assert "champion" in third.failures and (host.ledger / "pause.json").exists()
+
+    monkeypatch.undo()
+    fourth = host.tick(at(4))  # the league and the loop agree again
+    assert fourth.champion_checked and fourth.champion_conflict is None
+    assert not (host.ledger / "pause.json").exists()
+
+
+def test_grace_minutes_must_be_positive():
+    assert promotion.champion_grace({}) == promotion.DEFAULT_CHAMPION_GRACE
+    assert promotion.champion_grace({promotion.GRACE_ENV: "5"}) == datetime.timedelta(minutes=5)
+    with pytest.raises(ValueError, match="positive"):
+        promotion.champion_grace({promotion.GRACE_ENV: "0"})
 
 
 def test_a_step_failing_every_run_escalates_once_per_episode(host, monkeypatch):

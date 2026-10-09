@@ -279,8 +279,8 @@ def test_non_numeric_metric_is_failure_envelope(tmp_path):
 
 @pytest.fixture
 def promotion(monkeypatch, tmp_path):
-    """Run inside a profile whose promotion ledger names BASE as champion; returns the
-    league ids ``current_champion`` was asked about."""
+    """Run inside a profile whose league shows BASE as our champion (A9); returns the league
+    ids ``current_champion`` was asked about."""
     asked = []
 
     def champion(ctx, sm, league_id):
@@ -292,7 +292,6 @@ def promotion(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
     monkeypatch.setattr(stats_cli, "current_champion", champion)
-    monkeypatch.setattr(stats_cli, "has_published", lambda canonical: True)
     return asked
 
 
@@ -327,16 +326,15 @@ def _ingested(tmp_path, capsys, experiment):
     return root
 
 
-def test_champion_override_refused_once_the_ledger_owns_it(
+def test_champion_override_needed_when_the_league_shows_none(
     tmp_path, experiment, promotion, capsys, monkeypatch
 ):
     root = _ingested(tmp_path, capsys, experiment)
     monkeypatch.setattr(stats_cli, "current_champion", lambda ctx, sm, league_id: None)
+    code, env = run_in_process(capsys, root, "evaluate", experiment)
+    assert code == 2 and "pass --champion" in env["error"]["message"]
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
-    assert code == 1 and "not accepted" in env["error"]["message"]
-    monkeypatch.setattr(stats_cli, "has_published", lambda canonical: False)
-    code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
-    assert code == 0 and env["data"]["champion"] == BASE  # nothing promoted yet (A9)
+    assert code == 0 and env["data"]["champion"] == BASE
 
 
 def test_softmax_failure_while_confirming_the_champion_is_exit_1(

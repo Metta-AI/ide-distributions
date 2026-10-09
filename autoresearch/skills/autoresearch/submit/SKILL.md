@@ -45,8 +45,8 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | --- | --- | --- |
 | `decision_not_promote`, `no_binding` | The experiment is not a promote. | Finish `failed`. |
 | `no_outcome`, `not_eligible`, `stale_outcome` | The stored outcome is missing, not eligible, or out of date. | Request a review card for the experiment. Finish `failed`. |
-| `champion_unknown` | Ledger and leaderboard disagree. | Send a `help_request`. Finish `blocked`. |
-| `champion_mismatch` | The champion changed since the evaluation. | Request "Re-evaluate E-…" (mode experimentation, refs the experiment and version). Finish `done`. |
+| `champion_unknown` | The league shows no champion for us, though this experiment was evaluated against one. | Send a `help_request`. Finish `blocked`. |
+| `champion_mismatch` | The league's champion changed since the evaluation. | Request "Re-evaluate E-…" (mode experimentation, refs the experiment and version). Finish `done`. |
 | `promotion_refused` | The lock is held, the champion is not the baseline, or a push failed. If `details.request_id` is set, the runtime already requested the re-evaluation card. | Finish `partial`. |
 | `busy` | A process is running `xp create`, `upload` or `submit` for this experiment now (`details.holder`). | `details.own_run: true`: your own earlier submit still runs; wait for it (native `process_manage`, action `wait`, its `session_id`), then read `promotion status`. Otherwise do not submit again; finish `partial`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
@@ -63,7 +63,8 @@ the normal promotion. Its first league submission is unevaluated, on purpose. Ru
 1. Check that there is no champion and no promotion in flight:
    `"$AUTORESEARCH_CLI" softmax leaderboard`
    `"$AUTORESEARCH_CLI" promotion status`
-   Go on only if `current_champion` is null and `note` says "no champion known", and no
+   Go on only if `current_champion` is null (the league shows no policy competing for us;
+   `note` says "no champion"), and no
    promotion is in `intent`, `submitted` or `recorded`. Otherwise record it and finish
    (`done` when a champion exists; `partial` when a promotion is in flight).
 2. Read the `## Starter policy` section of `GAME.md` (see `queue` for its path and
@@ -87,7 +88,7 @@ Refusals of `softmax bootstrap-champion`, by `error.reason`:
 
 | Reason | Meaning | Do |
 | --- | --- | --- |
-| `champion_exists` | A promotion is published or our leaderboard has a champion. | Nothing to bootstrap. Finish `done`. |
+| `champion_exists` | The league shows a policy competing for us: that is the champion. | Nothing to bootstrap. Finish `done`. |
 | `promotion_in_flight`, `promotion_refused` | Another card is promoting (or took the lock first), or a push failed. | Run `"$AUTORESEARCH_CLI" promotion status`. If this card is the holder at `submitted` (an earlier run of this command succeeded), the bootstrap is done: journal the ids from `promotion status` and finish `done`. Otherwise finish `partial`. |
 | `not_shipped_strategy` | `strategy/STRATEGY.md` in your worktree or on your branch differs from the shipped one, or the build compiled another STRATEGY.md. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, rebuild from it as `GAME.md` says, and run it again. |
 | `gates_failed`, `bad_build`, `artifact_mismatch` | The starter policy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
@@ -106,13 +107,20 @@ names the promotion id, the candidate commit, and the holder's branch. Never sub
    `"$AUTORESEARCH_CLI" promotion adopt <P-id>`
 3. Stage the champion from the candidate commit:
    `"$AUTORESEARCH_CLI" promotion stage-champion <P-id>`
-4. Carry over the other changes the holder card made on its branch (for example the
+4. Confirm with the league that the submitted policy is now competing for us:
+   `"$AUTORESEARCH_CLI" softmax leaderboard`
+   `current_champion` must be the promotion's `platform_policy_version_id` (from
+   `promotion status`). If it is not, the league did not take the submission: do not
+   finish the recovery. Record both policies in the journal, send a `help_request` that
+   names the promotion id and both policies, and finish `blocked`. (queue-keeper also pauses
+   the agent when the league disagrees after the grace window, A9.)
+5. Carry over the other changes the holder card made on its branch (for example the
    version's `submitted` event): compare that branch with `main` (`git diff main <branch>`)
    and redo them in your worktree. Do not copy the branch's journal. For a bootstrap
    promotion (no experiment), `stage-champion` (step 3) already restored the champion's
    version record from the candidate commit; if the holder was an experiment card, request
    that experiment again (the card's reason says so).
-5. Finish with `complete-card`, outcome `done`. Its merge moves the promotion to `recorded`
+6. Finish with `complete-card`, outcome `done`. Its merge moves the promotion to `recorded`
    and then `published`.
 
 If `adopt` or `stage-champion` exits 1 (refused), record the message in the journal, send a

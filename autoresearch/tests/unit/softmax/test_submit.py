@@ -69,9 +69,9 @@ def test_ledger_write_order_is_intent_then_submit_then_submitted(board, monkeypa
 
     real_intent, real_submitted = promotion.record_intent, promotion.record_submitted
 
-    def intent(ctx, current):
+    def intent(ctx, current, replaces=None):
         order.append(("intent",))
-        real_intent(ctx, current)
+        real_intent(ctx, current, replaces=replaces)
 
     def submitted(ctx, current, submission_id):
         order.append(("submitted",))

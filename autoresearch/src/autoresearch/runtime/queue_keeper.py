@@ -7,7 +7,11 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 2. ``preflight`` (C6, A3, A5, A10). On failure, including a preflight that raises: pause
    (C7), one runtime ``help_request`` per pause, and stop (exit 0). No admission while
    paused.
-3. Abort a stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
+3. Champion check (A9): the league's champion for our player against what the loop expects
+   (``promotion.champion_conflict``, grace ``AUTORESEARCH_CHAMPION_GRACE_MINUTES``). On a
+   conflict: pause (C7), one runtime ``help_request`` per (expected, shown) pair, and the
+   run goes on (merges and reconcile still settle promotions) without resuming. Then abort a
+   stale ``MERGE_HEAD`` in canonical (a kill mid ``git merge`` would wedge every later
    commit).
 4. ``promotion.reconcile`` (C8, A11), then ``rebuild`` when ``needs_rebuild`` (C12).
 5. ``process_handoffs`` with publication (C3, C5), then the MEMORY.md snapshot
@@ -35,7 +39,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 11. Signals (with this run's failed steps as input), then the planning request (cadence, or
     queue growth).
 12. Orphaned done cards (C3), blocked cards (``blocked.handle_blocked``), the daily re-raise
-    of unanswered proposals, and resume when paused and preflight passed.
+    of unanswered proposals, and resume when paused, preflight passed and this run's champion
+    check found the league and the loop in agreement.
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
@@ -151,6 +156,8 @@ class KeeperRun:
     bootstrap: BootstrapResult | None = None
     preflight: PreflightResult | None = None
     paused: bool = False  # preflight failed and this run paused (or kept paused) the agent
+    champion_checked: bool = False  # the A9 champion check ran to the end this run
+    champion_conflict: promotion.ChampionConflict | None = None
     rebuilt: list[CardSpec] = field(default_factory=list)
     handoffs: list = field(default_factory=list)
     published: list[PublishResult] = field(default_factory=list)
@@ -263,6 +270,37 @@ def pause_for_preflight(
         publish_message(
             canonical, message, allow_no_remote, priority="P0", expects_response=True
         )
+
+
+def check_champion(
+    run: KeeperRun,
+    ctx: RunContext,
+    queue: Queue,
+    sm: Softmax,
+    game: Game,
+    now: datetime.datetime,
+    env: Mapping[str, str],
+    allow_no_remote: bool,
+) -> None:
+    """A9: compare the league's champion with what the loop expects; on a conflict pause and
+    publish one help_request per (expected, shown) pair. ``run.champion_checked`` is set only
+    when the check completes, so a failed league read never lets the agent resume."""
+    canonical = ctx.canonical
+    shown = promotion.current_champion(ctx, sm, game.league_id)
+    conflict = promotion.champion_conflict(canonical, shown, now, promotion.champion_grace(env))
+    run.champion_conflict = conflict
+    if conflict is not None:
+        _log(ctx, f"champion conflict: {conflict.detail}")
+        pause(queue, ledger_of(canonical), f"champion conflict: {conflict.detail}")
+        message = runtime_messages.champion_conflict(
+            game.league_id, conflict.expected, conflict.shown, conflict.waited_out
+        )
+        with canonical_lock(canonical):
+            if not already_published(canonical, message):
+                publish_message(
+                    canonical, message, allow_no_remote, priority="P0", expects_response=True
+                )
+    run.champion_checked = True
 
 
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
@@ -625,6 +663,9 @@ def _run_steps(
         _step(run, ctx, "pause", pause_for_preflight, ctx, queue, run.preflight, allow_no_remote)
         return
 
+    _step(
+        run, ctx, "champion", check_champion, run, ctx, queue, sm, game, now, env, allow_no_remote
+    )
     _step(run, ctx, "merge_head", abort_stale_merge, canonical)
     game_version = _step(run, ctx, "game_version", sm.game_version, game.league_id)
     game_version = str(game_version).strip() if game_version is not None else None
@@ -673,7 +714,7 @@ def _run_steps(
     run.orphans = _step(run, ctx, "orphans", find_orphan_done, queue, ledger_of(canonical)) or []
     run.blocked = _step(run, ctx, "blocked", handle_blocked, ctx, queue, allow_no_remote) or []
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
-    if is_paused(ledger_of(canonical)):
+    if is_paused(ledger_of(canonical)) and run.champion_checked and not run.champion_conflict:
         run.resumed = _step(run, ctx, "resume", resume_after_preflight, ctx, queue, allow_no_remote)
     run.pushed = _step(run, ctx, "push_final", push_step, ctx, allow_no_remote)
 

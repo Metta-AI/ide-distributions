@@ -21,8 +21,10 @@ from autoresearch.runtime.merge import find_orphan_done
 from autoresearch.runtime.promotion import (
     CHAMPION_PATH,
     PromotionError,
+    accept_champion,
     acquire,
     adopt,
+    champion_conflict,
     current_champion,
     load,
     reconcile,
@@ -478,20 +480,70 @@ def test_old_promotion_branch_after_another_published_is_reconciled(board):
 # --- champion ---
 
 
-def test_current_champion_needs_ledger_and_leaderboard_to_agree(board):
+def test_the_league_alone_decides_the_champion(board):
+    """A9: the champion is what the league shows for us, before and after promotions; a
+    policy submitted by hand is the champion too, and a conflict for queue-keeper."""
+    now = datetime.datetime.now(datetime.UTC)
     assert current_champion(board.ctx(), board.sm, LEAGUE) == BASELINE_PV  # nothing promoted
+    assert champion_conflict(board.canonical, BASELINE_PV, now) is None  # no expectation yet
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    assert board.promotion().replaces == BASELINE_PV
+    a.finish()
+    board.process()
+    assert current_champion(board.ctx(), board.sm, LEAGUE) == PV_A
+    assert champion_conflict(board.canonical, PV_A, now) is None
+
+    board.sm.submit("other-policy:v1", LEAGUE)  # submitted by hand: the league moved
+    assert current_champion(board.ctx(), board.sm, LEAGUE) == "other-policy:v1"
+    conflict = champion_conflict(board.canonical, "other-policy:v1", now)
+    assert (conflict.expected, conflict.shown, conflict.waited_out) == (
+        PV_A,
+        "other-policy:v1",
+        False,
+    )
+    # An experiment designed against the old champion no longer matches the league.
+    b = Promoter(board, PV_B, baseline=PV_A)
+    outcome = b.submit()
+    assert outcome.ok is False and "not the experiment baseline" in outcome.reason
+    assert board.submissions_of(PV_B) == []
+
+
+def test_grace_window_while_our_submission_is_in_flight(board):
+    """A9: while our submission is unconfirmed the league may still show the replaced policy;
+    after the grace window that is a conflict. Any third policy is a conflict at once."""
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    submitted_at = datetime.datetime.fromisoformat(board.promotion().history[-1]["at"])
+    grace = datetime.timedelta(minutes=30)
+    soon = submitted_at + datetime.timedelta(minutes=5)
+    late = submitted_at + datetime.timedelta(minutes=31)
+    assert champion_conflict(board.canonical, PV_A, late, grace) is None  # confirmed
+    assert champion_conflict(board.canonical, BASELINE_PV, soon, grace) is None  # not yet
+    waited = champion_conflict(board.canonical, BASELINE_PV, late, grace)
+    assert waited.waited_out and waited.expected == PV_A and waited.shown == BASELINE_PV
+    third = champion_conflict(board.canonical, "other-policy:v1", soon, grace)
+    assert third is not None and not third.waited_out
+
+
+def test_accepting_the_league_champion_resolves_the_conflict(board):
     a = Promoter(board, PV_A)
     assert a.submit().ok
     a.finish()
     board.process()
-    assert current_champion(board.ctx(), board.sm, LEAGUE) == PV_A
-
-    board.sm.submit("other-policy:v1", LEAGUE)  # the leaderboard moved without a promotion
-    assert current_champion(board.ctx(), board.sm, LEAGUE) is None
-    b = Promoter(board, PV_B, baseline=PV_A)
-    outcome = b.submit()
-    assert outcome.ok is False and "unknown" in outcome.reason
-    assert board.submissions_of(PV_B) == []
+    board.sm.submit("other-policy:v1", LEAGUE)
+    now = datetime.datetime.now(datetime.UTC)
+    assert champion_conflict(board.canonical, "other-policy:v1", now) is not None
+    record = accept_champion(board.ctx(), board.sm, LEAGUE)
+    assert record["policy_version_id"] == "other-policy:v1"
+    assert champion_conflict(board.canonical, "other-policy:v1", now) is None
+    # The acceptance holds until the league moves again.
+    assert champion_conflict(board.canonical, PV_A, now).expected == "other-policy:v1"
+    # A newer promotion that reaches the league replaces the acceptance as the expectation.
+    b = Promoter(board, PV_B, baseline="other-policy:v1")
+    assert b.submit().ok
+    assert board.promotion().replaces == "other-policy:v1"
+    assert champion_conflict(board.canonical, PV_B, now) is None
 
 
 def test_adopt_only_by_the_recovery_card(board):
@@ -640,7 +692,7 @@ def test_no_champion_known_refusal_message(board):
     a = Promoter(board, PV_A)
     newcomer = FakeSoftmax(board.canonical, {"AUTORESEARCH_PLAYER_ID": "ply_new"})
     outcome = a.submit(sm=newcomer)
-    assert outcome.ok is False and outcome.reason.startswith("no champion known")
+    assert outcome.ok is False and outcome.reason.startswith("no champion: the")
 
 
 # --- the promotion CLI ---
@@ -697,3 +749,17 @@ def test_stage_champion_git_failure_is_a_json_error(board, capsys, monkeypatch):
     gitops.git(board.canonical, "remote", "set-url", "origin", str(board.tmp_path / "missing"))
     code, env = _cli(capsys, monkeypatch, a.worker, "stage-champion", board.promotion().id)
     assert code == 1 and "GitError" in env["error"]["message"]
+
+
+def test_accept_champion_through_the_promotion_cli(board, capsys, monkeypatch):
+    """The operator command reads the game's league (fakegame's ``fake-league``, where this
+    board's fake player has no champion) and records what it shows."""
+    worker = board.admit(mode="maintenance")
+    worker.start()
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    code, env = _cli(capsys, monkeypatch, worker, "accept-champion")
+    assert code == 0, env
+    assert env["data"]["policy_version_id"] is None
+    assert env["data"]["league_id"] == "fake-league"
+    assert board.committed(board.ledger / "champion_accepted.json") == env["data"]

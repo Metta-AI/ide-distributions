@@ -24,10 +24,9 @@ Files under the workspace root:
   detect a stale outcome by recomputing both hashes.
 
 The champion for ``stats evaluate`` comes from ``runtime.promotion.current_champion`` (the
-latest published promotion confirmed against the Softmax leaderboard of the game's league)
-when the command runs inside a profile (``HERMES_HOME`` and ``AUTORESEARCH_GAME`` set);
-``--champion`` must then agree with it. Outside a profile, or when the champion is unknown,
-``--champion`` is required.
+policy the game's league shows competing for our player, A9) when the command runs inside a
+profile (``HERMES_HOME`` and ``AUTORESEARCH_GAME`` set); ``--champion`` must then agree with
+it. Outside a profile, or when the league shows no champion, ``--champion`` is required.
 """
 
 import argparse
@@ -45,7 +44,7 @@ from autoresearch.io.docs import _atomic_write_text
 from autoresearch.paths import Layout
 from autoresearch.records.cli import BadArguments, _check_id, _ok, _run
 from autoresearch.records.store import RecordStore
-from autoresearch.runtime.promotion import current_champion, has_published
+from autoresearch.runtime.promotion import current_champion
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.stats.decision_rule import evaluate
 from autoresearch.stats.design import DesignError, EvaluationDesign
@@ -265,39 +264,32 @@ def _json_object_file(path: str) -> dict:
     return value
 
 
-def _confirmed_champion() -> tuple[str | None, bool]:
-    """(champion, ledger owns it) inside a profile; (None, False) outside one. The champion
-    is None when unknown; the ledger owns it once any promotion is published, and then
-    ``--champion`` cannot stand in for it."""
+def _confirmed_champion() -> str | None:
+    """The league's champion for our player inside a profile (None when it shows none, A9);
+    None outside a profile."""
     game_name = os.environ.get(GAME_ENV)
     if not game_name:
-        return None, False
+        return None
     try:
         ctx = runctx.from_env()
     except KeyError:
-        return None, False
+        return None
     try:
         game = load_game(_REPO_ROOT, game_name)
     except GameError as error:
         raise BadArguments(str(error)) from None
     try:
         sm = softmax_from_env(os.environ, ctx.canonical)
-        champion = current_champion(ctx, sm, game.league_id)
+        return current_champion(ctx, sm, game.league_id)
     except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
         raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
-    return champion, has_published(ctx.canonical)
 
 
 def _resolve_champion(args) -> str:
-    """The confirmed champion when there is one (``--champion`` must then agree), else
-    ``--champion`` (refused once the promotion ledger owns the champion)."""
-    champion, ledger_owned = _confirmed_champion()
+    """The league's champion when there is one (``--champion`` must then agree), else
+    ``--champion``."""
+    champion = _confirmed_champion()
     if champion is None:
-        if ledger_owned:
-            raise ValueError(
-                "champion unknown: the promotion ledger and the leaderboard disagree; "
-                "--champion is not accepted until they agree"
-            )
         if not args.champion:
             raise BadArguments(CHAMPION_UNKNOWN)
         return args.champion

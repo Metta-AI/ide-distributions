@@ -30,11 +30,9 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    Reopen a refuted lever only with evidence that meets the claim's `revise_if`.
 3. Find the baseline: the current champion.
    `"$AUTORESEARCH_CLI" softmax leaderboard`
-   Use `current_champion` (a platform policy version id) as the baseline. When it is null,
-   read `note`:
-   - "champion unknown" (the promotion ledger and the leaderboard disagree): stop. Send a
-     `help_request` and finish `blocked`.
-   - "no champion known": this is a fresh install. Make the first champion in this card
+   Use `current_champion` (a platform policy version id: the policy the league shows
+   competing for us, A9) as the baseline. When it is null (`note` says "no champion"), this
+   is a fresh install. Make the first champion in this card
      with the `submit` skill, section "Bootstrap card" (A14: the game's starter policy is
      promoted as champion, with no experiment). Then request the experiment again so it
      designs against that champion:
