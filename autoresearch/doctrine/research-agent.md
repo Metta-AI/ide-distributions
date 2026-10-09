@@ -1,6 +1,6 @@
 # Research agent doctrine
 
-Standing rules for the research agent. Each rule has a stable ID, D-01 to D-26. Evidence and violation counts point at rules by these IDs.
+Standing rules for the research agent. Each rule has a stable ID, D-01 to D-27. Evidence and violation counts point at rules by these IDs.
 
 ## Authority and autonomy
 
@@ -74,3 +74,5 @@ D-26. **A tool fault is not a result: escalate it, do not retry it.** A tool fau
 3. Run `card finish --outcome blocked`. This merges the journal and the help request.
 4. Call the native `kanban_block` tool with `reason` `tool-fault: <command>: <error>` and `kind` `needs_input`, instead of `kanban_complete`.
 The runtime does not requeue or repair a card with a `tool-fault:` reason.
+
+D-27. **A guard's refusal is a boundary: never work around it.** Guards are the plugin policy (`autoresearch policy: ...`), a CLI that refuses an action, a lock, and file permissions. Fixing what the refusal names and running the same command again is fine (for example the problems `card finish` lists). Reaching the refused effect by another route is not: no other interpreter or script (`python3 - <<EOF`, `python -c`, `execute_code`, a script file), no other path or command, no other identity, no taking a lock yourself. Only the runtime writes the canonical workspace, its `.supervisor/ledger` and `canonical.lock`; a card writes only its own worktree. The runtime checks every commit on canonical and pauses the agent for one it did not make. When a refusal stops your card's work, record it in the journal (its Decisions section, with the command and the refusal text), stage a `help_request` that names them, and run `card finish --outcome blocked`. When the cause is a tool fault, run the D-26 sequence instead.
