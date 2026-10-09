@@ -204,6 +204,7 @@ class KeeperRun:
     planning: CardSpec | None = None
     orphans: list[str] = field(default_factory=list)
     spend_run: spend.SpendRun | None = None  # None: the spend step failed
+    spend_attempted: bool = False  # the spend step ran (or failed) this run
     blocked: list = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     reraised: list[str] = field(default_factory=list)
@@ -279,15 +280,39 @@ def _routing_step(
     return actions
 
 
+class _JournalFailed(Exception):
+    """A step hit ``provenance.JournalError`` while the run was not yet paused: the run
+    stops there and fails closed (``_journal_fail_closed``)."""
+
+
 def _step(run: KeeperRun, ctx: RunContext, name: str, fn: Callable, *args, **kwargs):
-    """Run one step; contain and record its failure (module docstring)."""
+    """Run one step; contain and record its failure (module docstring). A journal failure
+    (``provenance.JournalError``: no canonical commit can be recorded) is not contained:
+    unless the run is already paused, it ends the run's normal steps (``_JournalFailed``)."""
     try:
         return fn(*args, **kwargs)
-    except Exception as error:  # noqa: BLE001 - containment is the point
+    except Exception as error:  # containment is the point (a journal failure re-raises)
         message = f"{type(error).__name__}: {error}"
         run.failures[name] = message
         _log(ctx, f"step {name} failed: {message}\n{traceback.format_exc()}")
+        if isinstance(error, provenance.JournalError) and not run.paused:
+            raise _JournalFailed(f"step {name}: {message}") from error
         return None
+
+
+def _journal_fail_closed(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str],
+    now: datetime.datetime, allow_no_remote: bool, error: str,
+) -> None:
+    """A journal failure after the provenance step: pause (unassigning pending cards even
+    though the pause commit itself fails) and keep the spend caps, like a check that cannot
+    run."""
+    run.paused = True
+    run.failures.setdefault("provenance", error)
+    reason = f"{provenance.PAUSE_REASON}: the journal cannot be written: {error}"
+    _step(run, ctx, "provenance_pause", pause, queue, ledger_of(ctx.canonical), reason)
+    if not run.spend_attempted:
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
 
 
 # --- pause ---
@@ -361,6 +386,7 @@ def check_provenance(
     ``accept-commits`` anchor gets one note, so an accept (even a forged one) is visible."""
     canonical = ctx.canonical
     with canonical_lock(canonical):
+        provenance.probe(canonical)  # a check that only reads must not pass a read-only journal
         for sha in provenance.recover(canonical):
             _log(ctx, f"provenance: recorded and settled {sha}, left unfinished by a crash")
         violation = run.provenance_violation = provenance.check(canonical)
@@ -735,6 +761,7 @@ def _spend_steps(
 ) -> spend.SpendConfig | None:
     """The spend step (``spend.enforce``); returns its config for the blocked step, or None
     when the config is invalid (the step failure is recorded)."""
+    run.spend_attempted = True
     config = _step(run, ctx, "spend", spend.SpendConfig.from_env, env)
     if config is not None:
         run.spend_run = _step(
@@ -839,14 +866,15 @@ def _run_steps(
         run.failures["provenance"] = f"bootstrap: {run.bootstrap.provenance_error}"
     else:
         _step(run, ctx, "provenance", check_provenance, run, ctx, queue, now, allow_no_remote)
+    if run.provenance_violation is not None or "provenance" in run.failures:
+        run.paused = True
     if "provenance" in run.failures:
         # Fail closed: a check that cannot run is treated like a violation (no merge, publish
         # or admission, and no resume). The step failure escalates like any failing step.
         error = run.failures["provenance"]
         reason = f"{provenance.PAUSE_REASON}: the check could not run: {error}"
         _step(run, ctx, "provenance_pause", pause, queue, ledger_of(canonical), reason)
-    if run.provenance_violation is not None or "provenance" in run.failures:
-        run.paused = True
+    if run.paused:
         # Running cards keep running while paused: the caps still apply to them.
         _spend_steps(run, ctx, queue, env, now, allow_no_remote)
         return
@@ -999,19 +1027,22 @@ def run(
             preflight_kwargs: dict = {"disk_free": disk_free, "hermes_home": ctx.hermes_home}
             if http_get is not None:
                 preflight_kwargs["http_get"] = http_get
-            _run_steps(
-                result,
-                ctx,
-                queue,
-                sm,
-                game,
-                now,
-                env=env,
-                profile=profile or ctx.hermes_home.name,
-                allow_no_remote=allow_no_remote,
-                preflight_kwargs=preflight_kwargs,
-                signal_config=signal_config or SignalConfig(),
-            )
+            try:
+                _run_steps(
+                    result,
+                    ctx,
+                    queue,
+                    sm,
+                    game,
+                    now,
+                    env=env,
+                    profile=profile or ctx.hermes_home.name,
+                    allow_no_remote=allow_no_remote,
+                    preflight_kwargs=preflight_kwargs,
+                    signal_config=signal_config or SignalConfig(),
+                )
+            except _JournalFailed as failure:
+                _journal_fail_closed(result, ctx, queue, env, now, allow_no_remote, str(failure))
             write_json(runtime_dir(ctx) / FAILURES_FILE, result.failures)
             result.escalated = escalate_step_failures(
                 ctx, result.failures, now, allow_no_remote, all_steps_ran=not result.paused

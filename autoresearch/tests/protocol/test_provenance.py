@@ -747,3 +747,40 @@ def test_push_main_pushes_exactly_the_commit_it_checked(host, monkeypatch):
     with file_lock(host.canonical / ".supervisor" / "runtime" / "canonical.lock"):
         assert provenance.push_main(host.canonical, "origin")
     assert host.remote_head() == checked != host.head()
+
+
+def test_a_read_only_journal_fails_closed_even_when_the_check_only_reads(host):
+    """Round 3, item 2: HEAD equals the verified commit, so the check writes nothing; the
+    per-run probe still finds the journal read-only and the run pauses and caps spend."""
+    host.tick(at(1))
+    assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
+    with file_lock(host.canonical / ".supervisor" / "runtime" / "canonical.lock"):
+        assert provenance.check(host.canonical) is None  # HEAD is now the verified commit
+    journal = provenance.journal_path(host.canonical)
+    journal.chmod(0o400)
+    try:
+        run = host.tick(at(2))
+    finally:
+        journal.chmod(0o600)
+    assert "provenance" in run.failures and run.paused and run.spend_run is not None
+    assert run.admitted == [] and run.handoffs == []
+    assert [card.assignee for card in host.queue.list("pending")] == [None]
+
+
+def test_a_journal_failure_in_a_later_step_fails_closed(host, monkeypatch):
+    """Item 2: a JournalError after the provenance step is not an ordinary step failure:
+    the run pauses (pending cards unassigned) and the spend caps still run."""
+    from autoresearch.runtime import queue_keeper
+
+    host.tick(at(1))
+    assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
+
+    def broken(*_args, **_kwargs):
+        raise provenance.JournalError("cannot write the provenance journal: disk full")
+
+    monkeypatch.setattr(queue_keeper, "process_handoffs", broken)
+    run = host.tick(at(2))
+    assert run.paused and "provenance" in run.failures and run.spend_run is not None
+    assert [card.assignee for card in host.queue.list("pending")] == [None]
+    pause = json.loads((host.ledger / "pause.json").read_text())
+    assert pause["reason"].startswith(provenance.PAUSE_REASON)

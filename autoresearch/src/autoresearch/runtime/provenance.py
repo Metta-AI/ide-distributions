@@ -215,6 +215,30 @@ def _append(canonical: Path, entry: dict) -> dict:
     return signed
 
 
+def probe(canonical: Path) -> None:
+    """Raise ``JournalError`` unless the journal can be appended to now, without writing an
+    entry: the key reads, and the journal opens for append (or its directory takes a new
+    file). queue-keeper probes every run, so a read-only journal fails closed even on a
+    run whose check would only read."""
+    try:
+        key = journal_dir(canonical) / KEY_FILE
+        if key.exists():
+            key.read_bytes()
+        path = journal_path(canonical)
+        if path.exists():
+            descriptor = os.open(path, os.O_RDWR | os.O_APPEND)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        else:
+            directory = path.parent if path.parent.exists() else path.parent.parent
+            if not os.access(directory, os.W_OK | os.X_OK):
+                raise PermissionError(f"{directory} is not writable")
+    except OSError as error:
+        raise JournalError(f"the provenance journal cannot be written: {error}") from error
+
+
 def _last_seq(entries: list[dict]) -> int:
     return max((entry["seq"] for entry in entries if "seq" in entry), default=0)
 

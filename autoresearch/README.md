@@ -335,7 +335,9 @@ for agents (best effort: plugin policy, approvals deny list, and the command ref
 card or any agent session; see Known gaps), and every accept is announced: queue-keeper
 publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is
 visible. A check that cannot run (an unreadable journal or key, also when bootstrap or one
-of its own commits finds it so, or a git error) also pauses the agent and still applies the spend caps; a step that
+of its own commits finds it so, or a git error) also pauses the agent and still applies the spend caps.
+Every run first checks that the journal can be written (without writing to it), and a journal
+failure in any later step of the run pauses the same way; a step that
 keeps failing gets its usual help request. The pause unassigns pending cards even when its
 own commit fails (a journal that cannot be written fails every canonical commit, so then the
 help request cannot be published either and is only logged and retried; the uncommitted
