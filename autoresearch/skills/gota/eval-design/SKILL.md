@@ -51,9 +51,11 @@ platform scores (zero for loss/draw/timeout); `win_rate` is team outcome.
 `xp_per_1k_ticks` and `team_xp_lead` describe the subject, not ten independent
 observations. Repeated teammates share an episode and must be aggregated.
 
-Use leaderboard `current_champion` as `baseline_version`. If it is null, run
-the starter-policy bootstrap below in this same card. Finish that bootstrap card
-before designing an experiment in a follow-up card (core `experiment` step 3).
+Use leaderboard `current_champion` as `baseline_version`. Run the starter-policy
+bootstrap below in this same card only when both `current_champion` and `conflict`
+are null. If `conflict` is open, send a `help_request` and finish blocked. Finish
+a successful bootstrap card before designing an experiment in a follow-up card
+(core `experiment` step 3).
 A copied v13 STRATEGY is not proof of policy identity. Freeze full game version,
 champion policy version, subject seats, unique paired seeds, metrics/directions,
 effect thresholds, anti-gaming guardrails and noise revision before results.
