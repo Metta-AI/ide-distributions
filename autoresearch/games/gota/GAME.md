@@ -135,6 +135,8 @@ check immediately before mutation; this wrapper has no alternate upload route.
 
 ## Baseline build
 
+The prebuilt `v13-live.bas` is the shipped strategy's policy by construction: `make_v13_live.py` transforms submitted v13, its adjacent provenance file records that relationship, and equivalence to the seed `STRATEGY.md` is shown only by M1 on engine `801749e5`.
+
 `build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json --prebuilt FILE.bas`
 freezes the exact committed artifact bytes and runs the existing G1–G4 gates.
 It skips Hermes, model generation and scanner setup entirely. Native preparation,
