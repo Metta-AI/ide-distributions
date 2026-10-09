@@ -1373,3 +1373,46 @@ def test_a_control_with_an_unknown_action_is_rejected_with_a_note(host):
     assert note["about"]["outcome"] == "rejected"
     assert "action: must be one of pause, resume" in note["body"]
     assert not (host.ledger / "coach-hold.json").exists() and run.failures == {}
+
+
+def _block(host: Host, task_id: str) -> None:
+    record_path = host.queue.directory / "cards" / f"{task_id}.json"
+    record = read_json(record_path)
+    record["state"] = "blocked"
+    write_json(record_path, record)
+
+
+def test_a_card_blocked_under_a_control_hold_is_not_requeued_until_resume(host):
+    host.tick(at(0))
+    host.tick(at(1))
+    running = host.claim()  # keeps its assignee: the hold unassigns only pending cards
+    _control(host, "pause")
+    host.tick(at(2))
+    _block(host, running.task_id)
+
+    held = host.tick(at(3))
+
+    assert held.blocked == [] and host.queue.get(running.task_id).state == "blocked"
+    _control(host, "resume")
+    resumed = host.tick(at(4))
+    assert [a.action for a in resumed.blocked] == ["requeued"]
+    assert host.queue.get(running.task_id).state == "pending"
+
+
+def test_a_card_blocked_under_a_pause_is_not_requeued_until_resume(host, monkeypatch):
+    host.tick(at(0))
+    host.tick(at(1))
+    running = host.claim()
+    conflict = promotion.ChampionConflict("ar-E-x:v1", "hand-made:v2", "submitted by hand")
+    monkeypatch.setattr(promotion, "champion_conflict", lambda *args: conflict)
+    host.tick(at(2))  # paused
+    _block(host, running.task_id)
+
+    paused = host.tick(at(3))
+
+    assert paused.blocked == [] and host.queue.get(running.task_id).state == "blocked"
+    monkeypatch.undo()
+    resumed = host.tick(at(4))  # resumes (step 12) after the blocked step: requeued next run
+    assert resumed.blocked == [] and not (host.ledger / "pause.json").exists()
+    assert [a.action for a in host.tick(at(5)).blocked] == ["requeued"]
+    assert host.queue.get(running.task_id).state == "pending"

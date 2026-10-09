@@ -27,8 +27,9 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
    - another ``steer`` with a ``proposed_topic`` -> the planning backlog.
    - a ``reply``, or another ``steer``, on a thread with an open card -> that card; else the
      planning backlog.
-   - ``control`` (the coach's ``/pause-research``, ``/resume-research``): applied here, under
-     the lock: ``pause`` sets the coach hold (``runtime.pause.hold``: pending cards
+   - ``control`` (the coach's ``/pause-research``, ``/resume-research``): routed after the
+     other kinds, in the order sent (``created``, else ``received_at``, then id), and applied
+     here, under the lock: ``pause`` sets the coach hold (``runtime.pause.hold``: pending cards
      unassigned, admission and planning stopped), ``resume`` clears it
      (``runtime.pause.release_hold``). Answered by a runtime note in reply ->
      ``acknowledged``; it never reaches a card.
@@ -703,6 +704,27 @@ def _resolve(
     return actions
 
 
+def _sent_at(message: dict) -> datetime.datetime:
+    """When the writer sent it: a direct write's ``created``, else ``received_at``."""
+    return parse_time(message.get("created") or message["received_at"])
+
+
+def _routing_order(records: dict[str, dict], inbox: dict[str, dict]) -> list[dict]:
+    """The ``received`` records to route: every kind but ``control`` in id order, then the
+    ``control`` records in the order they were sent (time, then id). A coach pause and resume
+    handled in one run must apply in the order sent, and a direct write's id says nothing
+    about time."""
+    received = [
+        record
+        for inbound_id, record in records.items()
+        if record["state"] == "received" and inbound_id in inbox
+    ]
+    others = [record for record in received if record["kind"] != "control"]
+    controls = [record for record in received if record["kind"] == "control"]
+    controls.sort(key=lambda record: (_sent_at(inbox[record["id"]]), record["id"]))
+    return others + controls
+
+
 def route_all(
     ctx: RunContext,
     queue: Queue,
@@ -726,9 +748,8 @@ def route_all(
         inbox = delivery.inbox(canonical, skipped)
         actions += [Action("unreadable", path) for path in skipped]
         actions += _receive(canonical, inbox)
-        for inbound_id, record in delivery.records(canonical).items():
-            if record["state"] == "received" and inbound_id in inbox:
-                actions += _route_one(ctx, queue, record, inbox[inbound_id], allow_no_remote)
+        for record in _routing_order(delivery.records(canonical), inbox):
+            actions += _route_one(ctx, queue, record, inbox[record["id"]], allow_no_remote)
         actions += _resolve(ctx, queue, inbox, allow_no_remote)
     return actions
 

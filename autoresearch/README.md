@@ -331,11 +331,11 @@ A coach pauses and resumes research from the IDE chat with the exact lines
 `/pause-research` and `/resume-research`, which send an inbound `control` message
 (`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with
 `"$AUTORESEARCH_CLI" comms inbound control --json '{"action": "pause"}' --author coach:<player id>`.
-queue-keeper applies it on its next run, when it routes inbound. A pause sets the coach hold,
+queue-keeper applies it on its next run, when it routes inbound. Routing runs only after the preflight check passes, so a `control` sent while preflight is failing (for example, the key is out of credit) is applied, and answered with its note, only on the first run whose preflight passes. A pause sets the coach hold,
 `.supervisor/ledger/coach-hold.json` (`{"held_at", "by", "tasks"}`: `by` is the message's
 author, `tasks` the pending cards it unassigned and their assignees): no card is admitted, no
 pending card is dispatched, and the agent plans nothing; running cards finish their work
-under their spend caps. A resume removes the file and assigns those cards again. Each is
+under their spend caps, and a card that blocks meanwhile stays blocked (its one requeue waits for the resume, as it does under the agent's own pause). A resume removes the file and assigns those cards again. Each is
 answered with a runtime note in reply ("Research paused at your request." or "Research
 resumed."; a resume with no hold says nothing was paused). `status --json` shows the hold as
 `coach_hold`. The hold is independent of the agent's own pauses (preflight, daily budget,

@@ -37,6 +37,11 @@ stop can set this up: it blocks with ``needs_input`` when the card's previous bl
 ``capability`` (``KanbanQueue.stop``), so after a human unblocks it, the worker's own D-26
 tool-fault block (also ``needs_input``) lands in ``triage``.
 
+While the agent is paused (``pause.json``) or the coach holds research (``coach-hold.json``),
+a card due for its requeue is left blocked: the requeue keeps the card's assignee, so it would
+be dispatched. The first run after the resume requeues it. Repair requests are still written:
+admission holds them until the resume.
+
 The queue change comes before the commit, so a crash between them at worst requeues a card
 a second time; it never skips straight to a repair.
 """
@@ -54,6 +59,7 @@ from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion, spend
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.markers import repair_blocked_marker
+from autoresearch.runtime.pause import is_held, is_paused
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 
 REQUEUED = "requeued"
@@ -207,6 +213,9 @@ def _handle_one(
         spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
         return BlockedAction(card.task_id, SPEND_CAP)
     if record is None or record["state"] == TOOL_FAULT:
+        ledger = ledger_of(canonical)
+        if is_paused(ledger) or is_held(ledger):
+            return None  # a requeue keeps the assignee, so it would dispatch: wait for resume
         return _requeue(canonical, queue, card)
     if record["state"] == REQUEUED:
         return _repair(canonical, card, record, allow_no_remote)

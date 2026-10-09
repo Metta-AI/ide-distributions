@@ -491,6 +491,82 @@ def test_rerun_after_a_crash_in_task_acknowledgement_makes_no_duplicate_note(boa
     assert len(notes) == 1 and _delivery(board, task)["acknowledged_by"] == notes[0]["id"]
 
 
+def _crash_at_note_then_rerun(board: Board, monkeypatch) -> None:
+    def crash(name: str) -> None:
+        if name == "note_published":
+            raise Crash(name)
+
+    monkeypatch.setattr(routing, "_checkpoint", crash)
+    with pytest.raises(Crash):
+        _route(board)
+    monkeypatch.undo()
+    _route(board)
+    _route(board)
+
+
+def test_rerun_after_a_crash_applies_a_control_pause_once(board, monkeypatch):
+    """The note is published before the hold: a crash there leaves the hold unapplied, and
+    the rerun applies it with the same note."""
+    worker = board.admit()
+    control = _send(board, "control", "coach:ply_x", action="pause")
+
+    _crash_at_note_then_rerun(board, monkeypatch)
+
+    [note] = [m for m in _outbox(board) if m.get("in_reply_to") == control]
+    assert note["title"] == "Research paused at your request."
+    hold = board.committed(board.ledger / "coach-hold.json")
+    assert hold["tasks"] == {worker.task_id: worker.request_id}
+    assert board.queue.get(worker.task_id).assignee is None
+    record = _delivery(board, control)
+    assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
+    holds = gitops.git(board.canonical, "log", "--format=%s", "--grep=^coach hold").splitlines()
+    assert len(holds) == 1
+    _assert_clean(board)
+
+
+def test_rerun_after_a_crash_applies_a_control_resume_once(board, monkeypatch):
+    worker = board.admit()
+    _send(board, "control", "coach:ply_x", action="pause")
+    _route(board)
+    resume = _send(board, "control", "coach:ply_x", action="resume")
+
+    _crash_at_note_then_rerun(board, monkeypatch)
+
+    [note] = [m for m in _outbox(board) if m.get("in_reply_to") == resume]
+    assert note["title"] == "Research resumed."  # built before the release, reused after
+    assert board.committed(board.ledger / "coach-hold.json") is None
+    assert board.queue.get(worker.task_id).assignee == worker.request_id
+    assert _delivery(board, resume)["acknowledged_by"] == note["id"]
+    _assert_clean(board)
+
+
+def test_control_messages_apply_in_the_order_sent_not_id_order(board):
+    """Direct writes whose ids sort opposite to their times: the pause (sent first) applies
+    before the resume, so research ends not held."""
+    worker = board.admit()
+    inbox = board.canonical / "comms" / "inbox"
+    for inbound_id, action, created in (
+        ("ply_x:control:b", "pause", "2026-10-09T20:00:00Z"),
+        ("ply_x:control:a", "resume", "2026-10-09T20:01:00+00:00"),
+    ):
+        write_json(inbox / f"{inbound_id}.json", {
+            "id": inbound_id, "created": created, "author": "coach:ply_x",
+            "kind": "control", "action": action,
+        })  # fmt: skip
+
+    _route(board)
+
+    assert board.committed(board.ledger / "coach-hold.json") is None
+    assert board.queue.get(worker.task_id).assignee == worker.request_id
+    titles = {
+        m["in_reply_to"]: m["title"] for m in _outbox(board) if m.get("in_reply_to")
+    }
+    assert titles == {
+        "ply_x:control:b": "Research paused at your request.",
+        "ply_x:control:a": "Research resumed.",
+    }
+
+
 # --- fix round 1 ---
 
 
