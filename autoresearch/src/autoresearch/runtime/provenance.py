@@ -397,29 +397,39 @@ def initialize(canonical: Path, fresh: bool) -> str | None:
     """Bootstrap, under the canonical lock: trust the current HEAD once when the journal has
     no valid anchor and either the workspace is ``fresh`` (seeded or cloned by this run) or
     it was never initialized (no committed marker). The marker is committed then, so a later
-    loss of the journal is reported (``journal_lost``) instead of trusted again. Returns a
-    line for the bootstrap log, or None when nothing was done."""
+    loss of the journal is reported (``journal_lost``) instead of trusted again. A journal
+    that is anchored but whose marker was never committed (a crash between the two) gets the
+    marker now, with no new anchor. Returns a line for the bootstrap log, or None when
+    nothing was done."""
     entries, _ = _entries(canonical)
-    if _base(entries) is not None:
-        return None
+    base = _base(entries)
+    if base is not None:
+        if _ever_marked(canonical):
+            return None
+        _commit_marker(canonical, entries[base]["sha"])
+        return "provenance marker committed (the journal was already anchored)"
     has_marker = gitops.show(canonical, "HEAD", MARKER_RELATIVE) is not None
     if _ever_marked(canonical) and not fresh:
         return None  # check reports journal_lost, also when the marker was deleted since
     head = gitops.head(canonical)
     _anchor(canonical, head, "bootstrap" if fresh else "bootstrap: existing workspace")
     if not has_marker:
-        marker = Path(canonical) / MARKER_RELATIVE
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            json.dumps({"initialized_at": _now(), "trusted_head": head}, indent=2, sort_keys=True)
-            + "\n",
-            encoding="utf-8",
-        )
-        subject = "provenance: journal initialized"
-        commit_recorded(
-            canonical, subject, lambda: gitops.prepare_paths(canonical, [MARKER_RELATIVE], subject)
-        )
+        _commit_marker(canonical, head)
     return f"provenance journal initialized: trusted HEAD {head}"
+
+
+def _commit_marker(canonical: Path, trusted_head: str) -> None:
+    marker = Path(canonical) / MARKER_RELATIVE
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps({"initialized_at": _now(), "trusted_head": trusted_head}, indent=2,
+                   sort_keys=True) + "\n",
+        encoding="utf-8",
+    )  # fmt: skip
+    subject = "provenance: journal initialized"
+    commit_recorded(
+        canonical, subject, lambda: gitops.prepare_paths(canonical, [MARKER_RELATIVE], subject)
+    )
 
 
 def describe(canonical: Path, sha: str) -> CommitInfo:
@@ -538,12 +548,19 @@ def push_hold(canonical: Path) -> str | None:
     unresolved (or the check cannot run) the commits nobody recorded stay local: pushing
     would publish them to the remote before a person accepted them. Messages still reach
     the coach: the bridge reads ``comms/outbox/`` from the local workspace. A workspace the
-    journal was never initialized on (no marker ever committed: bootstrap's first push of a
-    seeded workspace, which ``initialize`` then trusts) is not held."""
+    journal was never initialized on (no journal file and no marker ever committed:
+    bootstrap's first push of a seeded workspace, which ``initialize`` then trusts) is not
+    held."""
     try:
         violation = check(canonical, advance=False)
-        if violation is not None and violation.kind == JOURNAL_LOST and not _ever_marked(canonical):
-            return None  # never initialized (bootstrap's seed push, before ``initialize``)
+        never_initialized = (
+            violation is not None
+            and violation.kind == JOURNAL_LOST
+            and not journal_path(canonical).exists()
+            and not _ever_marked(canonical)
+        )
+        if never_initialized:
+            return None  # bootstrap's seed push, before ``initialize``
     except Exception as error:  # noqa: BLE001 - a check that cannot run holds the push
         return f"the provenance check cannot run: {type(error).__name__}: {error}"
     return None if violation is None else violation.summary()

@@ -693,3 +693,39 @@ def test_a_late_record_of_an_accepted_ancestor_is_not_a_rewrite(host, monkeypatc
     with file_lock(host.canonical / ".supervisor" / "runtime" / "canonical.lock"):
         provenance.accept(host.canonical, accepted)
     assert host.tick(at(1)).provenance_violation is None
+
+
+def _pre_check_repo(tmp_path) -> Path:
+    repo = tmp_path / "canonical"
+    gitops.git(tmp_path, "init", "-q", "-b", "main", str(repo))
+    gitops.git(repo, "config", "user.name", "x")
+    gitops.git(repo, "config", "user.email", "x@x")
+    gitops.git(repo, "commit", "-q", "--allow-empty", "-m", "an install from before the check")
+    return repo
+
+
+def test_a_crash_between_the_anchor_and_the_marker_is_resumed(tmp_path, monkeypatch):
+    """Round 3, item 5: the marker is committed on the next bootstrap, with no new anchor,
+    and an anchored journal is never treated as never initialized for pushes."""
+    repo = _pre_check_repo(tmp_path)
+
+    def crash(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(provenance, "commit_recorded", crash)
+    with pytest.raises(KeyboardInterrupt):
+        provenance.initialize(repo, fresh=False)
+    monkeypatch.undo()
+    assert gitops.show(repo, "HEAD", provenance.MARKER_RELATIVE) is None
+
+    key = provenance.journal_dir(repo) / provenance.KEY_FILE
+    saved = key.read_bytes()
+    key.unlink()  # the anchor no longer verifies, but the journal exists
+    assert provenance.push_hold(repo) is not None
+    key.write_bytes(saved)
+
+    assert "marker committed" in provenance.initialize(repo, fresh=False)
+    assert gitops.show(repo, "HEAD", provenance.MARKER_RELATIVE) is not None
+    entries, _ = provenance._entries(repo)
+    assert [e["kind"] for e in entries].count(provenance.ANCHOR) == 1
+    assert provenance.check(repo) is None
