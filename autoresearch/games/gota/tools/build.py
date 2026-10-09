@@ -13,6 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / 'games/gota/compiler/tools'
+DEFAULT_AGENT_TIMEOUT_S = 1200
+DEFAULT_AGENT_BUDGET_S = 1800
 
 
 def validate_manifest(path, *, offline=False):
@@ -20,8 +22,29 @@ def validate_manifest(path, *, offline=False):
     return resolve(path, offline=offline)
 
 
-def build(candidate, out, manifest=None, *, timeout=900, offline=False, prebuilt=None):
+def agent_limit(value, flag, environment, default):
+    """Resolve a positive limit; an empty host setting leaves the default in place."""
+    setting = flag if value is not None else environment
+    if value is None:
+        value = os.environ.get(environment) or default
+    try:
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise TypeError
+        seconds = int(value)
+        if seconds < 1:
+            raise ValueError
+        return seconds
+    except (TypeError, ValueError):
+        raise ValueError(f'{setting} must be a positive integer number of seconds') from None
+
+
+def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=False, prebuilt=None):
     """Output is new and immutable; failure retains evidence without an upload envelope."""
+    if prebuilt is None:
+        timeout = agent_limit(timeout, '--agent-timeout', 'GOTA_AGENT_TIMEOUT_S',
+                              DEFAULT_AGENT_TIMEOUT_S)
+        budget = agent_limit(budget, '--agent-budget', 'GOTA_AGENT_BUDGET_S',
+                             DEFAULT_AGENT_BUDGET_S)
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(TOOLS))
     identity = validate_manifest(manifest, offline=offline)
@@ -73,7 +96,8 @@ def build(candidate, out, manifest=None, *, timeout=900, offline=False, prebuilt
     compiler.BUILDS = scratch / 'compiled'
     compiler.STAGING = scratch / 'staging'
     args = pw_strategy.parser().parse_args(['compile', '--source', str(source), '--agent', 'hermes',
-                                           '--manifest', str(manifest), '--agent-timeout', str(timeout)])
+                                           '--manifest', str(manifest), '--agent-timeout', str(timeout),
+                                           '--agent-budget', str(budget)])
     report = pw_cli.Report('gota_build', json_mode=True)
     with contextlib.redirect_stdout(sys.stderr):
         result = pw_strategy.run(args, report, engine_identity=identity)
@@ -106,12 +130,16 @@ def main():
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--prebuilt', type=Path, help='committed BASIC artifact with adjacent .provenance.json; no model compiler')
     parser.add_argument('--manifest', type=Path, default=None)
+    parser.add_argument('--agent-timeout', metavar='SECONDS',
+                        help=f'per-generation compiler timeout; overrides GOTA_AGENT_TIMEOUT_S (default: {DEFAULT_AGENT_TIMEOUT_S}s)')
+    parser.add_argument('--agent-budget', metavar='SECONDS',
+                        help=f'cumulative generation budget; overrides GOTA_AGENT_BUDGET_S (default: {DEFAULT_AGENT_BUDGET_S}s)')
     parser.add_argument('--offline', action='store_true', help='explicit historical pinned engine; no live lookup')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     try:
         manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
-        options = {'offline': args.offline}
+        options = {'offline': args.offline, 'timeout': args.agent_timeout, 'budget': args.agent_budget}
         if args.prebuilt is not None:
             options['prebuilt'] = args.prebuilt.resolve()
         result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, **options)

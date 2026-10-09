@@ -81,8 +81,19 @@ def test_archive_distribution_and_candidate_committed_inputs(tmp_path, monkeypat
         compiler.committed_inputs(source)
 
 
-@pytest.mark.parametrize('status,security', [('passed', 'ready'), ('failed', 'ready'), ('errored', 'ready'), ('passed', 'empty')])
-def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, monkeypatch, status, security):
+@pytest.mark.parametrize('status,security,timeout,environment,expected,budget,budget_env,expected_budget', [
+    ('passed', 'ready', None, None, 1200, None, None, 1800),
+    ('failed', 'ready', None, None, 1200, None, None, 1800),
+    ('errored', 'ready', None, None, 1200, None, None, 1800),
+    ('passed', 'empty', None, None, 1200, None, None, 1800),
+    ('passed', 'ready', None, '1234', 1234, None, '2400', 2400),
+    ('passed', 'ready', 1400, '1234', 1400, 2400, '1800', 2400),
+    ('passed', 'ready', 3600, 'invalid', 3600, 4200, 'invalid', 4200),
+    ('passed', 'ready', None, '', 1200, None, '', 1800),
+])
+def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
+        tmp_path, monkeypatch, status, security, timeout, environment, expected,
+        budget, budget_env, expected_budget):
     import hashlib
     import shutil
     import types
@@ -94,6 +105,14 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
         'installed_gota_build', installed / 'games/gota/tools/build.py')
     module = importlib.util.module_from_spec(installed_spec)
     installed_spec.loader.exec_module(module)
+    if environment is None:
+        monkeypatch.delenv('GOTA_AGENT_TIMEOUT_S', raising=False)
+    else:
+        monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', environment)
+    if budget_env is None:
+        monkeypatch.delenv('GOTA_AGENT_BUDGET_S', raising=False)
+    else:
+        monkeypatch.setenv('GOTA_AGENT_BUDGET_S', budget_env)
     repository = tmp_path / 'repository'
     subprocess.run(['git', 'init', str(repository)], check=True, capture_output=True)
     subprocess.run(['git', '-C', str(repository), '-c', 'user.name=Test',
@@ -125,6 +144,9 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
     monkeypatch.setitem(sys.modules, 'strategy_build', compiler)
     def compile_fake(args, report, *, engine_identity=None):
         import os
+        assert int(args[args.index('--agent-timeout') + 1]) == expected
+        assert int(args[args.index('--agent-budget') + 1]) == expected_budget
+        assert module.DEFAULT_AGENT_TIMEOUT_S < module.DEFAULT_AGENT_BUDGET_S
         analysis = Path(os.environ['GOTA_ANALYSIS_DIR'])
         assert analysis.is_relative_to(tmp_path)
         analysis.mkdir(parents=True)
@@ -146,10 +168,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
     monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
     if security == 'empty':
         with pytest.raises(SystemExit, match='empty output') as error:
-            module.build(candidate, out, manifest, offline=True)
+            module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
         assert error.value.exit_code == 3
         return
-    result = module.build(candidate, out, manifest, offline=True)
+    result = module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
     if status != 'passed':
         assert not result['ok']
         assert result['status'] == status
@@ -167,7 +189,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(tmp_path, m
     assert json.loads((out / 'coworld_manifest.json').read_text()) == json.loads(manifest.read_text())
     assert version['engine']['mode'] == 'offline'
     with pytest.raises(ValueError, match='immutable'):
-        module.build(candidate, out, manifest, offline=True)
+        module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
 
 
 def test_upload_delegates_only_to_shared_cli(monkeypatch):
@@ -205,12 +227,90 @@ def test_main_defaults_online_without_manifest(tmp_path, monkeypatch):
     spec.loader.exec_module(module)
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'), '--json'])
     monkeypatch.setenv('GOTA_MANIFEST', '/stale/historical-manifest.json')
-    def fake_build(candidate, out, manifest, *, offline):
+    def fake_build(candidate, out, manifest, *, offline, timeout, budget):
         assert manifest is None
         assert offline is False
+        assert timeout is None
+        assert budget is None
         return {'ok': True}
     monkeypatch.setattr(module, 'build', fake_build)
     assert module.main() == 0
+
+
+def test_main_forwards_explicit_agent_limits(tmp_path, monkeypatch):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', 'invalid')
+    monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'),
+                                     '--agent-timeout', '1400', '--agent-budget', '2400', '--json'])
+    def fake_build(candidate, out, manifest, *, offline, timeout, budget):
+        assert timeout == '1400'
+        assert budget == '2400'
+        return {'ok': True}
+    monkeypatch.setattr(module, 'build', fake_build)
+    assert module.main() == 0
+
+
+@pytest.mark.parametrize('flag', ['--agent-timeout', '--agent-budget'])
+@pytest.mark.parametrize('value', ['0', '-1', 'abc', '1.5'])
+def test_invalid_agent_limit_flag_retains_json_before_manifest(
+        tmp_path, monkeypatch, capsys, flag, value):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'validate_manifest',
+                        lambda *a, **kw: pytest.fail('invalid timeout reached manifest lookup'))
+    monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'),
+                                     flag, value, '--json'])
+    assert module.main() == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'errored'
+    assert flag in result['error']['message']
+    assert json.loads((tmp_path / 'out/report.json').read_text()) == result
+    assert json.loads((tmp_path / 'out/version.json').read_text()) == result
+
+
+@pytest.mark.parametrize('setting', ['GOTA_AGENT_TIMEOUT_S', 'GOTA_AGENT_BUDGET_S'])
+@pytest.mark.parametrize('environment', ['0', '-1', 'abc', '1.5'])
+def test_invalid_agent_limit_env_retains_error_before_manifest(
+        tmp_path, monkeypatch, capsys, environment, setting):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv(setting, environment)
+    monkeypatch.setattr(module, 'validate_manifest',
+                        lambda *a, **kw: pytest.fail('invalid timeout reached manifest lookup'))
+    monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out')])
+    assert module.main() == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'errored'
+    assert setting in result['error']['message']
+    assert 'positive integer' in result['error']['message']
+    assert json.loads((tmp_path / 'out/report.json').read_text()) == result
+
+
+@pytest.mark.parametrize('setting', ['timeout', 'budget'])
+@pytest.mark.parametrize('value', [0, -1, True, 1.5])
+def test_invalid_explicit_agent_limit_stops_before_manifest(tmp_path, monkeypatch, value, setting):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'validate_manifest',
+                        lambda *a, **kw: pytest.fail('invalid timeout reached manifest lookup'))
+    with pytest.raises(ValueError, match='positive integer'):
+        module.build(tmp_path, tmp_path / 'out', **{setting: value})
+
+
+def test_prebuilt_ignores_agent_timeout_env(tmp_path, monkeypatch):
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', 'invalid')
+    monkeypatch.setenv('GOTA_AGENT_BUDGET_S', 'invalid')
+    monkeypatch.setattr(module, 'validate_manifest', lambda *a, **kw: {'identity': 'fixture'})
+    from games.gota.tools import prebuilt
+    def fake_build(candidate, out, artifact, identity):
+        assert identity == {'identity': 'fixture'}
+        return {'ok': True}
+    monkeypatch.setattr(prebuilt, 'build', fake_build)
+    assert module.build(tmp_path, tmp_path / 'out', prebuilt=tmp_path / 'policy.bas',
+                        timeout='invalid', budget='invalid')['ok']
 
 
 def test_installed_compiler_gate_import_with_separate_worker_and_output(tmp_path):

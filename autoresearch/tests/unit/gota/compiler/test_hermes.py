@@ -91,6 +91,73 @@ def test_fake_hermes_outputs_and_usage(generation):
     assert json.loads(next(stage.glob('hermes-usage-*.json')).read_text())['input_tokens'] == 123
 
 
+@pytest.mark.parametrize('timeout,budget', [(1234, 1800), (1800, 1800)])
+@pytest.mark.parametrize('failure_round', [1, 2])
+def test_generation_timeout_retains_errored_build_without_repairs(
+        generation, monkeypatch, timeout, budget, failure_round):
+    import subprocess
+    from types import SimpleNamespace
+
+    import gota_gates
+    import pw_cli
+    import pw_strategy
+
+    order, stage = generation
+    order.update(source_commit='abcdef12', engine={}, created='now', intent='behavior_change')
+    monkeypatch.setattr(sb, 'BUILDS', stage.parent.parent / 'builds')
+    sb.BUILDS.mkdir()
+    monkeypatch.setattr(sb, 'prepare', lambda *a, **kw: order)
+    assemblies, gate_runs = [], []
+    def assemble(*a):
+        assemblies.append(True)
+        (stage / 'policy.bas').write_text('prior completed policy')
+    def verify(*a, **kw):
+        gate_runs.append(True)
+        return {'G1': {'outcome': 'failed', 'passed': False, 'summary': {}}}
+    monkeypatch.setattr(sb, 'assemble_build', assemble)
+    monkeypatch.setattr(gota_gates, 'verify', verify)
+    run = sb.subprocess.run
+    generations, now = [], [0.0]
+    monkeypatch.setattr(pw_strategy.time, 'monotonic', lambda: now[0])
+    def expire(command, **kwargs):
+        if command[0] == 'hermes':
+            generations.append(kwargs['timeout'])
+            if len(generations) < failure_round:
+                completed = run(command, **kwargs)
+                now[0] += 200
+                return completed
+            now[0] += kwargs['timeout']
+            kwargs['stdout'].write('{"type":"system","subtype":"init"}\n')
+            kwargs['stderr'].write('fake timeout diagnostic\n')
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+        return run(command, **kwargs)
+    monkeypatch.setattr(sb.subprocess, 'run', expire)
+    args = SimpleNamespace(action='compile', source=sb.REPO / order['source_path'],
+                           agent_timeout=timeout, agent_budget=budget, agent='hermes', model=None, full=False,
+                           milestone=None, previous=None, manifest=stage / 'manifest.json')
+    result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
+    target = Path(result['build'])
+    effective = min(timeout, budget - 200) if failure_round == 2 else timeout
+    assert generations == ([timeout] if failure_round == 1 else [timeout, effective])
+    assert result['status'] == 'errored'
+    assert result['error']['type'] == 'RuntimeError'
+    streams = list(target.glob('hermes-stream-*.jsonl'))
+    stream = next(path for path in streams if json.loads(path.read_text().splitlines()[0]).get('model') is None)
+    assert result['error']['message'] == (
+        f'compiler agent timed out after {effective:g}s; '
+        f'see agent.log and {stream.name} in the retained build directory')
+    assert assemblies == gate_runs == [True] * (failure_round - 1)
+    if failure_round == 1:
+        assert result['gates'] == {}
+    else:
+        assert (target / 'policy.bas').read_text() == 'prior completed policy'
+    assert sb.read(target / 'version.json')['status'] == 'errored'
+    assert f'compiler agent timed out after {effective:g}s' in (target / 'report.md').read_text()
+    assert (target / 'agent.log').read_text() == 'fake timeout diagnostic\n'
+    assert len(streams) == failure_round
+    assert len(list(target.glob('hermes-usage-*.json'))) == failure_round - 1
+
+
 @pytest.mark.parametrize('mode,match', [('prohibited','write-scope'), ('prompt','write-scope'),
     ('extra','write-scope'), ('probe','write-scope'), ('spec','write-scope'), ('index','write-scope'), ('refs','write-scope'),
     ('symlink','regular output'), ('missing','regular output'),

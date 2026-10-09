@@ -435,7 +435,9 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
                 completed = subprocess.run(command, input=None if hermes else prompt, cwd=root, text=True, env=environment,
                                            stdout=stream if hermes else log, stderr=log if hermes else subprocess.STDOUT, timeout=timeout)
             except subprocess.TimeoutExpired:
-                raise RuntimeError(f'compiler timed out after {timeout}s; see {stage}/agent.log') from None
+                evidence = f'agent.log and {stream_path.name}' if hermes else 'agent.log'
+                raise RuntimeError(f'compiler agent timed out after {timeout:g}s; '
+                                   f'see {evidence} in the retained build directory') from None
         after = snapshot(root)
         violations = scope_changes(before, after, allowed)
         if git('rev-parse', 'HEAD', root=root) != head or git('show-ref', root=root) != refs:
