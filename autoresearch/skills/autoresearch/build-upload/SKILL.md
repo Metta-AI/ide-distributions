@@ -32,9 +32,12 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 2. Build through the game's `build` binding. Read `GAME.md` (see `queue` for its path and
    `AR_HOME`) for the binding's arguments. Run it from `"$AR_HOME"` with absolute paths to the
    candidate and to the output directory `<worktree>/.scratch/build/<E-id>`. The binding
-   writes `version.json` in the output directory. Every non-advisory gate must pass.
-3. Run the game's `local_check` binding the same way. A local check proves the artifact
-   runs; it is never evidence for a decision (D-04).
+   writes `version.json` in the output directory. Every non-advisory gate must pass. A build
+   can run for an hour: start it in the background and wait on it as the `queue` skill says
+   ("Long commands"). Never poll it.
+3. Run the game's `local_check` binding the same way, also in the background with one
+   wait. A local check proves the artifact runs; it is never evidence for a decision
+   (D-04).
 4. Mark the experiment built:
    `"$AUTORESEARCH_CLI" records status <E-id> built`
 5. Upload. The tool checks the identity, uploads, creates the version record, and binds it
@@ -58,7 +61,8 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
   now; `error.details.holder` names it. This is not a tool fault. If `details.own_run` is
   `true`, it is your own earlier command: wait for it to finish and use its result, do not
   upload again and do not finish `partial`. To wait, call the native `process_manage` tool
-  with action `wait` (or `poll`) and that command's `session_id`, then read the binding with
+  with action `wait`, that command's `session_id` and `timeout` 1800 ("Long commands" in
+  the `queue` skill), then read the binding with
   `"$AUTORESEARCH_CLI" records show <E-id>`. Otherwise another card holds it: do not upload a
   second time, record it in the journal, and finish `partial`.
 - Exit 3 (`tool_missing`): the pinned platform tool is missing. This is a tool fault: follow

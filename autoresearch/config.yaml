@@ -53,6 +53,9 @@ approvals:
     - "hermes kanban --board * link*"
 
 terminal:
+  # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground
+  # timeout. Skills wait on long commands with one wait instead of polling (queue skill).
+  timeout: 1800
   env_passthrough:
     - SOFTMAX_PLAYER_CREDENTIAL
     - AUTORESEARCH_PLAYER_ID

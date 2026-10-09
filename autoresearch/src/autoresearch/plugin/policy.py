@@ -20,6 +20,12 @@
   delegate fence (``HERMES_DELEGATED_CHILD_CONTEXT`` on every worker subprocess) is a second
   layer in card workers; it is cooperative (``env -u`` removes it) and absent in non-card
   sessions, so the policy does not rely on it;
+- waiting with the model in a foreground `terminal` call: `sleep` of 30 seconds or more, and
+  a `while`/`until`/`for` loop that runs `sleep` and checks a process (`pgrep`, `pidof`,
+  `ps`, `kill -0`). Each such check costs one more model call on the whole conversation
+  (the box spend report of 2026-10-08: 15+ polling loops in one $5 build run). The refusal
+  names the pattern: start the work with `background: true`, then one `process_manage`
+  `wait`. The same command with `background: true` is allowed: it costs no model calls;
 - forging inbound messages (C11: inbound carries the human's full authority): the trusted
   `comms inbound` command in any agent session, any write into the canonical workspace's
   `comms/inbox/` (every session, cards or not), and `python -c`/`execute_code` text that names
@@ -201,6 +207,19 @@ CARD_REQUEST = (
     '"$AUTORESEARCH_CLI" queue request create --title "<title>" --mode <mode> '
     '--why "<reason>" --ref <ar://ref>. It is admitted after this card\'s branch merges.'
 )
+POLL_WAIT = (
+    "do not wait with sleep or a polling loop in a foreground command: every check is one "
+    "more model call on the whole conversation. Start long work with terminal "
+    '(background: true) and then call process_manage once (action "wait", its session_id, '
+    'timeout 1800); call wait again only when it returns status "timeout". To wait for a '
+    "process you did not start, run the same loop with background: true and wait on that. "
+    'See the queue skill, "Long commands".'
+)
+SLEEP_LIMIT_SECONDS = 30
+LOOP_WORDS = {"while", "until", "for"}
+PROCESS_PROBES = {"pgrep", "pidof", "ps", "kill -0"}
+SLEEP_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+SLEEP_OPERAND = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)")
 KANBAN_CARD_TOOLS = {"kanban_create", "kanban_link"}
 FINISHED = "this card is finished (`card finish` ran); no further writes."
 SOFTMAX_WRITE = "writes under ~/.softmax switch the player identity."
@@ -251,7 +270,7 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
                 return ALLOW
             workdir = args.get("workdir")
             base = Path(workdir) if isinstance(workdir, str) and workdir else guard.base
-            return guard.shell(command, base)
+            return guard.shell(command, base, foreground=args.get("background") is not True)
         if tool_name in FILE_WRITE_TOOLS:
             for target in _file_tool_targets(args):
                 guard.check_write(target, guard.base)
@@ -306,6 +325,7 @@ class _Guard:
         self.softmax_dir = _real(self.home / ".softmax")
         self.inbox_dir = _real(ctx.canonical / INBOX_DIR_TEXT)
         self.trusted = _trusted_cli_words(ctx)
+        self.foreground = False  # set per terminal call: waiting rules apply only then
 
     def names_identity_files(self, text: str) -> bool:
         """Literal check (module docstring): ``text`` names ``.softmax``, or ``.env`` together
@@ -365,18 +385,21 @@ class _Guard:
 
     # --- shell ---
 
-    def shell(self, command: str, cwd: Path) -> tuple[bool, str]:
+    def shell(self, command: str, cwd: Path, foreground: bool = False) -> tuple[bool, str]:
         notes: list[str] = []
+        self.foreground = foreground
         try:
             self._walk_shell(command, cwd, 0, notes)
         except _Blocked as blocked:
             return _block(str(blocked))
         return (True, "; ".join(notes)) if notes else ALLOW
 
-    def _walk_shell(self, command: str, cwd: Path, depth: int, notes: list[str]) -> None:
+    def _walk_shell(self, command: str, cwd: Path, depth: int, notes: list[str]) -> set[str]:
+        """Check one command line; return the programs it runs (``PROCESS_PROBES`` names
+        included), substitutions too, for the waiting rule."""
         if depth > MAX_NESTING:
             self._unparsed(command, "nested too deeply", notes)
-            return
+            return set()
         text, bodies = _split_heredocs(command)
         for body, quoted in bodies:
             if not quoted:  # an unquoted here-document expands its substitutions
@@ -384,8 +407,9 @@ class _Guard:
                     self._walk_shell(substitution.body, cwd, depth + 1, notes)
         substitutions = _substitutions(text)
         process_bodies = []
+        line_programs: set[str] = set()
         for substitution in substitutions:
-            self._walk_shell(substitution.body, cwd, depth + 1, notes)
+            line_programs |= self._walk_shell(substitution.body, cwd, depth + 1, notes)
             if substitution.process:
                 process_bodies.append(substitution.body)
                 continue
@@ -402,10 +426,13 @@ class _Guard:
             tokens = _tokenize(_replace_substitutions(text, substitutions))
         except ValueError as error:
             self._unparsed(command, str(error), notes)
-            return
+            return line_programs
         line = _Line(raw=command, bodies=[body for body, _ in bodies])
         line.process_bodies = process_bodies
+        line.programs = line_programs
+        looped = False
         for words, targets, piped, herestrings in _simple_commands(tokens):
+            looped = looped or bool(words and words[0] in LOOP_WORDS)
             if words and words[0] in ("cd", "pushd"):
                 cwd = self._cd(words, cwd)
                 continue
@@ -419,6 +446,14 @@ class _Guard:
                 note = self.check_write(target, cwd)
                 if note:
                     notes.append(note)
+        if (
+            self.foreground
+            and looped
+            and "sleep" in line.programs
+            and line.programs & PROCESS_PROBES
+        ):
+            raise _Blocked(POLL_WAIT)
+        return line.programs
 
     def _unparsed(self, command: str, why: str, notes: list[str]) -> None:
         _refuse_text(command)
@@ -455,6 +490,9 @@ class _Guard:
         # `coworld@latest`, `coworld==1.0` (uvx / uv tool run package specs)
         name = VERSION_SUFFIX.sub("", os.path.basename(first))
         operands = [word for word in core[1:] if not word.startswith("-")]
+        line.programs.add("kill -0" if name == "kill" and "-0" in core[1:] else name)
+        if self.foreground and name == "sleep" and _sleep_seconds(operands) >= SLEEP_LIMIT_SECONDS:
+            raise _Blocked(POLL_WAIT)
         if line.via_xargs and name in {"coworld", "softmax"}:
             raise _Blocked(
                 f"running {name} through xargs is blocked: its subcommand would come from input."
@@ -659,6 +697,20 @@ class _Line:
         self.via_xargs = False  # the current simple command runs under xargs
         self.process_bodies: list[str] = []  # bodies of `<(...)` / `>(...)` on the line
         self.variables: dict[str, str] = {}
+        self.programs: set[str] = set()  # programs run on the line, for the waiting rule
+
+
+def _sleep_seconds(operands: list[str]) -> float:
+    """Seconds a `sleep` waits: the sum of its operands (`30`, `1m`, `0.5h`). `infinity` is
+    unbounded; an operand we cannot read (a variable) counts as zero."""
+    total = 0.0
+    for operand in operands:
+        if operand == "infinity":
+            return float("inf")
+        match = SLEEP_OPERAND.fullmatch(operand)
+        if match:
+            total += float(match.group(1)) * SLEEP_UNITS[match.group(2)]
+    return total
 
 
 def _check_push(rest: list[str]) -> None:

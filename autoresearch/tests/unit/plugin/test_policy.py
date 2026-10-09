@@ -529,3 +529,59 @@ def test_file_tools_and_code_cannot_write_the_inbox(layout):
 )
 def test_exit_program_is_the_last_command(command, program):
     assert exit_program(command) == program
+
+
+# Waiting with the model: every foreground check is one more model call on the whole
+# conversation (box spend report 2026-10-08), so these foreground shapes are refused.
+POLL_WAITS = [
+    "sleep 30",
+    "sleep 600",
+    "sleep 1m",
+    "sleep 0.5h",
+    "sleep 20 15",  # sleep adds its operands
+    "sleep infinity",
+    'cd "$W" && sleep 45 && "$AUTORESEARCH_CLI" queue show t_1',
+    "timeout 700 sleep 120",
+    "while pgrep -f games.gota.gates >/dev/null; do sleep 20; done",
+    "until ! pgrep -f gates; do sleep 5; done",
+    "for i in $(seq 1 19); do pgrep -f games.gota.gates || break; sleep 25; done",
+    "while kill -0 4242 2>/dev/null; do sleep 10; done; echo done",
+    "while ps -p 4242 >/dev/null; do sleep 10; done",
+    "bash -c 'while pgrep -f gates; do sleep 10; done'",
+    'while [ -n "$(pgrep -f gates)" ]; do sleep 10; done',
+]
+NOT_POLL_WAITS = [
+    "sleep 5",
+    "sleep 29",
+    "sleep 2; curl -sS https://x",
+    "for i in 1 2 3; do curl -sS https://x && break; sleep 5; done",
+    "pgrep -f gates",
+    "while read -r line; do echo $line; done < notes/a",
+    "for f in notes/*; do wc -l $f; done",
+]
+
+
+@pytest.mark.parametrize("command", POLL_WAITS)
+def test_foreground_waiting_is_refused_with_the_wait_pattern(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert not allowed, command
+    assert "process_manage" in reason and "background" in reason
+
+
+@pytest.mark.parametrize("command", POLL_WAITS)
+def test_the_same_wait_in_a_background_command_is_allowed(layout, command):
+    """A background loop costs no model calls: process_manage wait blocks on it."""
+    args = {"command": _fill(command, layout), "background": True}
+    allowed, reason = tool_policy("terminal", args, layout.ctx(), WORKING)
+    assert allowed, (command, reason)
+
+
+@pytest.mark.parametrize("command", NOT_POLL_WAITS)
+def test_short_sleeps_and_loops_that_do_not_poll_are_allowed(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert allowed, (command, reason)
+
+
+def test_waiting_is_refused_outside_card_sessions_too(layout):
+    allowed, _ = _terminal(layout, "sleep 60", card=None, worker=False)
+    assert not allowed

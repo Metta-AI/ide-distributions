@@ -92,6 +92,10 @@ MISSING_ONLY: dict[str, object] = {
     "tool_loop_guardrails.hard_stop_enabled": True,
     "agent.max_turns": 150,
     "agent.run_budget_seconds": 2700,
+    # Hermes clamps a process_manage wait to terminal.timeout (tools/process_registry.py
+    # ProcessRegistry.wait) and uses it as the default foreground timeout. 1800 lets one wait
+    # cover a long build or local check; the default 180 forced a model call every 3 minutes.
+    "terminal.timeout": 1800,
 }
 UNSET = ("kanban.default_assignee",)
 ENV_OVERRIDES = {"model.default": "OPENROUTER_MODEL"}

@@ -61,8 +61,9 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
   now; `error.details.holder` names its card, run, pid and command. If `details.own_run` is
   `true`, it is your own earlier command (for example one that went to the background): wait
   for it to finish and use its result; do not rerun it and do not finish `partial`. To wait,
-  call the native `process_manage` tool with action `wait` (or `poll`) and that command's
-  `session_id`, then read the result with `"$AUTORESEARCH_CLI" softmax xp recover <E-id>`.
+  call the native `process_manage` tool with action `wait`, that command's `session_id` and
+  `timeout` 1800 ("Long commands" in the `queue` skill), then read the result with
+  `"$AUTORESEARCH_CLI" softmax xp recover <E-id>`.
   Otherwise another card holds it: do not loop, record it in the journal, and finish
   `partial`.
 - Reason `bad_attempt`: the attempt skips a number. Use the attempt the message names.

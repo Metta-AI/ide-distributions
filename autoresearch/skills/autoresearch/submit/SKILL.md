@@ -48,7 +48,7 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | `champion_unknown` | Ledger and leaderboard disagree. | Send a `help_request`. Finish `blocked`. |
 | `champion_mismatch` | The champion changed since the evaluation. | Request "Re-evaluate E-…" (mode experimentation, refs the experiment and version). Finish `done`. |
 | `promotion_refused` | The lock is held, the champion is not the baseline, or a push failed. If `details.request_id` is set, the runtime already requested the re-evaluation card. | Finish `partial`. |
-| `busy` | A process is running `xp create`, `upload` or `submit` for this experiment now (`details.holder`). | `details.own_run: true`: your own earlier submit still runs; wait for it (native `process_manage`, action `wait`, its `session_id`), then read `promotion status`. Otherwise do not submit again; finish `partial`. |
+| `busy` | A process is running `xp create`, `upload` or `submit` for this experiment now (`details.holder`). | `details.own_run: true`: your own earlier submit still runs; wait for it (native `process_manage`, action `wait`, its `session_id`, `timeout` 1800), then read `promotion status`. Otherwise do not submit again; finish `partial`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
 | `platform` | The platform failed. | Finish `partial`. The promotion state stays recoverable. |
 
@@ -69,8 +69,10 @@ the normal promotion. Its first league submission is unevaluated, on purpose. Ru
    `AR_HOME`). If there is no such section, do not invent a build: send a `help_request`
    and finish `blocked`. Build the shipped strategy with the game's `build` binding as it
    says, from `"$AR_HOME"`, into `<worktree>/.scratch/build/champion`. Every non-advisory
-   gate must pass.
-3. Run the game's `local_check` binding on it the same way (D-04: never evidence).
+   gate must pass. Start the build in the background and wait on it with one
+   `process_manage` wait ("Long commands" in the `queue` skill). Never poll it.
+3. Run the game's `local_check` binding on it the same way, also in the background with one
+   wait (D-04: never evidence).
 4. Promote it. The tool checks the build, the identity, that no promotion is in flight and
    that no champion exists, uploads it (the same build is never uploaded twice), takes the
    promotion lock, submits, and records the submission:
