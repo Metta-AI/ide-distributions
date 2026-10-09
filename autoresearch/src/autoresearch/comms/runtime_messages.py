@@ -509,19 +509,35 @@ def submission_rejected(
     policy: str,
     replaced: str | None,
     detail: str,
+    bootstrap: bool = False,
 ) -> RuntimeMessage:
     """The league did not take a policy the agent submitted (A9): rejected, withdrawn, or its
-    membership disqualified. A real outcome, published once per promotion."""
-    body = (
-        f"The {league_id} league did not take a policy the agent submitted. The league decides, "
-        "so the agent now expects the policy that was the champion before (none, if there was "
-        "none) and compares new experiments against what the league shows. Nothing needs to be "
-        "done unless you expected the submission to be accepted. The policies and the "
-        "league's status are in this message's details (`about`)."
-    )
+    membership disqualified. Published once per promotion. A rejected first champion (the
+    game's starter policy) needs the human; any other rejection does not."""
+    if bootstrap:
+        body = (
+            f"The {league_id} league did not accept the game's starter policy, which the agent "
+            "submitted as its first champion. There is still no champion, so the agent cannot "
+            "evaluate experiments and will not submit the starter policy again by itself. To "
+            "go on, either submit a different starter policy to the league by hand (the agent "
+            'then uses it as the champion), or run `"$AUTORESEARCH_CLI" promotion '
+            "accept-champion` in an operator shell to let the agent submit the starter policy "
+            "again (for example after fixing why it was rejected). The league's status is in "
+            "this message's details (`about`)."
+        )
+        kind, title = "help_request", "The league rejected the first champion"
+    else:
+        body = (
+            f"The {league_id} league did not take a policy the agent submitted. The league "
+            "decides, so that promotion is closed, the agent keeps the champion it had before "
+            "(none, if there was none), and it goes on comparing experiments against what the "
+            "league shows. Nothing needs to be done unless you expected the submission to be "
+            "accepted; then check its league status (in this message's details, `about`)."
+        )
+        kind, title = "note", "The league did not accept a submitted policy"
     return RuntimeMessage(
-        "note",
-        "The league did not accept a submitted policy",
+        kind,
+        title,
         body,
         about=_about(
             promotion=promotion_id,
@@ -530,6 +546,26 @@ def submission_rejected(
             league_status=detail,
         ),
         key=f"submission-rejected:{promotion_id}",
+    )
+
+
+def submission_pending(
+    league_id: str, promotion_id: str, policy: str, detail: str, hours: int
+) -> RuntimeMessage:
+    """A submission the league has not decided on after ``hours`` (A9): one per promotion."""
+    body = (
+        f"A policy the agent submitted to the {league_id} league is still waiting for the "
+        f"league's decision after {hours} hours (it may be held for an operator). The agent "
+        "keeps comparing against the current champion meanwhile and cannot start another "
+        "promotion until the league decides. Please check the submission's league status "
+        "(in this message's details, `about`)."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "A submitted policy is still waiting for the league",
+        body,
+        about=_about(promotion=promotion_id, submitted_policy=policy, league_status=detail),
+        key=f"submission-pending:{promotion_id}",
     )
 
 

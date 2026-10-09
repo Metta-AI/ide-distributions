@@ -338,6 +338,7 @@ def test_a_rejected_submission_is_told_once_and_does_not_pause(host, monkeypatch
         id="P-01M4EJ9RQMHVH6XK3N4T760MNG",
         platform_policy_version_id="ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1",
         replaces="fake-house:v1",
+        kind="experiment",
     )
     rejected = SubmissionState("rejected", detail="membership disqualified (inactive)")
     check = promotion.LeagueCheck("fake-house:v1", basis, rejected, None)

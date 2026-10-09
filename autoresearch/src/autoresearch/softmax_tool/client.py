@@ -231,7 +231,9 @@ class SoftmaxClient:
                 return SubmissionState("competing", bool(row.get("is_champion")), detail)
             if status == "disqualified":
                 return SubmissionState("rejected", False, detail)
-            return SubmissionState("pending", False, detail)
+            if status in ("submitted", "qualifying"):  # PolicyMembershipStatus, metta
+                return SubmissionState("pending", False, detail)
+            return SubmissionState("unknown", False, detail)  # a status we do not know
         mine = [
             s
             for s in self.submissions(player_id)

@@ -90,7 +90,7 @@ Refusals of `softmax bootstrap-champion`, by `error.reason`:
 | Reason | Meaning | Do |
 | --- | --- | --- |
 | `champion_exists` | The league shows a policy competing for us: that is the champion. | Nothing to bootstrap. Finish `done`. |
-| `champion_conflict` | A loop promotion already reached the league (so "no champion" means it was lost), or the league and the loop disagree (A9). A human must resolve it. | Record it. Do not send a `help_request`. Finish `blocked`. |
+| `champion_conflict` | A loop promotion already reached the league (so "no champion" means it was lost), the league rejected the starter policy earlier, or the league and the loop disagree (A9). A human must resolve it; the runtime already told the user. | Record it. Do not send a `help_request`. Finish `blocked`. |
 | `promotion_in_flight`, `promotion_refused` | Another card is promoting (or took the lock first), or a push failed. | Run `"$AUTORESEARCH_CLI" promotion status`. If this card is the holder at `submitted` (an earlier run of this command succeeded), the bootstrap is done: journal the ids from `promotion status` and finish `done`. Otherwise finish `partial`. |
 | `not_shipped_strategy` | `strategy/STRATEGY.md` in your worktree or on your branch differs from the shipped one, or the build compiled another STRATEGY.md. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, rebuild from it as `GAME.md` says, and run it again. |
 | `gates_failed`, `bad_build`, `artifact_mismatch` | The starter policy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
@@ -112,6 +112,9 @@ names the promotion id, the candidate commit, and the holder's branch. Never sub
    `"$AUTORESEARCH_CLI" softmax leaderboard`
    - `current_champion` is the promotion's `platform_policy_version_id` (from
      `promotion status`): go on.
+   - `submission.stage` is `rejected`: the league decided against it. Do not stage
+     anything; record it in the journal and finish `blocked`. The runtime closes the
+     promotion (stage `rejected`) and tells the user; do not send your own `help_request`.
    - Otherwise, and `conflict` is null: the league has not decided yet (`submission.stage`
      `pending` while it qualifies, or just admitted). Record it in the journal and finish
      `partial` without staging the champion and without a `help_request`; the runtime asks

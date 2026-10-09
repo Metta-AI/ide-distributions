@@ -148,8 +148,8 @@ GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 # Steps that run after signals: their failures reach signals on the next run.
 LATE_STEPS = ("planning", "orphans", "blocked", "proposals", "resume", "push_final")
-CRASH_EXIT = 70
-CHAMPION_PAUSE = promotion.CHAMPION_PAUSE  # exit code of an injected crash (module docstring)
+CRASH_EXIT = 70  # exit code of an injected crash (module docstring)
+CHAMPION_PAUSE = promotion.CHAMPION_PAUSE
 
 
 @dataclass
@@ -298,14 +298,11 @@ def check_champion(
         ctx, sm, game.league_id, now, promotion.champion_grace(env), record=True
     )
     conflict = run.champion_conflict = check.conflict
+    if check.submission is not None and check.submission.stage == "unknown":
+        detail = check.submission.detail or "not listed"
+        _log(ctx, f"champion check: our submission's league state is unknown ({detail})")
     if check.submission is not None and check.submission.stage == "rejected":
-        rejected = runtime_messages.submission_rejected(
-            game.league_id,
-            check.basis.id,
-            check.basis.platform_policy_version_id,
-            check.basis.replaces,
-            check.submission.detail,
-        )
+        rejected = promotion.rejection_message(check.basis, game.league_id, check.submission.detail)
         with canonical_lock(canonical):
             if not already_published(canonical, rejected):
                 publish_message(canonical, rejected, allow_no_remote, priority="P1")

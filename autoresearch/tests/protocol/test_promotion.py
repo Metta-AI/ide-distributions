@@ -594,6 +594,58 @@ def test_recovery_waits_while_the_league_has_not_decided(board):
     assert action.kind == "recovery_requested"
 
 
+def _league_rejects(board, policy: str) -> None:
+    """The league disqualifies ``policy``'s membership and keeps the old champion."""
+    state_path = board.canonical / ".supervisor/runtime/fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["memberships"] = {policy: {"stage": "rejected"}}
+    state["submissions"] = [s for s in state["submissions"] if s["policy_version_id"] != policy]
+    state_path.write_text(json.dumps(state))
+
+
+def test_a_rejected_submission_frees_the_slot_at_once(board):
+    """N1: holder dead and the league rejects: reconcile settles the promotion as ``rejected``
+    in one run, one message goes out, and a later submit is allowed."""
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    _league_rejects(board, PV_A)
+    [action] = reconcile(board.ctx(), board.queue, board.sm, LEAGUE)
+    assert action.kind == "rejected"
+    rejected = board.promotion()
+    assert rejected.stage == "rejected" and rejected.recovery_requests == []
+    assert "the league rejected it" in rejected.history[-1]["note"]
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []  # settled once
+    outbox = [
+        json.loads(path.read_text())
+        for path in sorted((board.canonical / "comms" / "outbox").glob("*.json"))
+    ]
+    messages = [m for m in outbox if "did not accept" in m["title"]]
+    assert len(messages) == 1 and messages[0]["kind"] == "note"
+    assert champion_conflict(board.canonical, BASELINE_PV, datetime.datetime.now(datetime.UTC)) is None
+
+    b = Promoter(board, PV_B)  # the slot is free; the champion is still the old one
+    assert b.submit().ok
+    assert board.promotion().stage == "submitted" and board.promotion().replaces == BASELINE_PV
+
+
+def test_a_pending_submission_asks_for_help_once_after_the_cap(board, monkeypatch):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.worker.end_run("crashed")
+    state_path = board.canonical / ".supervisor/runtime/fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["memberships"] = {PV_A: {"stage": "pending"}}
+    state["submissions"] = [s for s in state["submissions"] if s["policy_version_id"] != PV_A]
+    state_path.write_text(json.dumps(state))
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []  # waiting, quietly
+    monkeypatch.setattr(promotion, "PENDING_CAP", datetime.timedelta(0))
+    [action] = reconcile(board.ctx(), board.queue, board.sm, LEAGUE)
+    assert action.kind == "help_requested"
+    assert reconcile(board.ctx(), board.queue, board.sm, LEAGUE) == []  # once
+    assert board.promotion().stage == "submitted" and board.promotion().recovery_requests == []
+
+
 def test_accepting_the_league_champion_resolves_the_conflict(board):
     a = Promoter(board, PV_A)
     assert a.submit().ok

@@ -382,3 +382,12 @@ def test_submission_state_falls_back_to_the_submission(env, runner):
     state = client.submission_state(PLAYER_ID, row["league_id"], row["policy_version_id"])
     assert state.stage == "unknown" and state.detail == "submission placed"
     assert client.submission_state(PLAYER_ID, GOTA, "never-submitted:v1").stage == "unknown"
+
+
+def test_an_unknown_membership_status_is_unknown_not_pending(env, runner):
+    """N2: only submitted and qualifying (metta PolicyMembershipStatus) count as pending."""
+    page = json.loads(synthetic("memberships_policy_qualifying.json"))
+    page["entries"][0]["status"] = "retired"
+    runner.on("coworld", "memberships", response=completed(json.dumps(page)))
+    state = make(env, runner, None).submission_state(PLAYER_ID, GOTA, "games-bond-gota:v8")
+    assert state.stage == "unknown" and "retired" in state.detail

@@ -250,8 +250,10 @@ league shows something other than what the agent expects (a policy submitted by 
 retired or disqualified champion, or our own submission admitted but still not champion
 `AUTORESEARCH_CHAMPION_GRACE_MINUTES` after queue-keeper first saw it admitted),
 queue-keeper pauses the agent and sends one help request with both policies in its `about`.
-A submission still qualifying is not a conflict; one the league rejects is reported once as
-a note. While a conflict is open, `softmax submit` and `softmax bootstrap-champion` refuse. It stays paused until they
+A submission still qualifying is not a conflict (one still pending after 24 hours gets a
+help request); one the league rejects closes its promotion (stage `rejected`) and is reported
+once: a note, or for the first champion (the starter policy) a help request that says what to
+run. While a conflict is open, `softmax submit` and `softmax bootstrap-champion` refuse. It stays paused until they
 agree: either make the league show the expected policy again, or accept what it shows with
 `"$AUTORESEARCH_CLI" promotion accept-champion` (in an operator shell, above; agents cannot
 run it). It resumes on the

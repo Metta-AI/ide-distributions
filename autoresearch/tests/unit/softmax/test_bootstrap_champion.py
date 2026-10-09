@@ -240,6 +240,42 @@ def test_a_lost_champion_is_not_a_fresh_install(fresh, capsys, monkeypatch):
     assert promotion.bootstrap_blocker(fresh.canonical) is None
 
 
+def test_a_rejected_starter_policy_waits_for_a_human(fresh):
+    """N1: the league rejects the bootstrap: the promotion is settled ``rejected`` (the slot is
+    free), one help_request tells the human what to run, and a new bootstrap waits for
+    ``accept-champion``."""
+    worker = started(fresh)
+    code, data = bootstrap_cli(fresh, worker, shipped_build(fresh, worker))
+    assert code == 0, data
+    starter = data["data"]["platform_policy_version_id"]
+    worker.end_run("crashed")
+    state_path = fresh.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["memberships"] = {starter: {"stage": "rejected"}}
+    state["submissions"] = []
+    state_path.write_text(json.dumps(state))
+
+    [action] = promotion.reconcile(fresh.ctx(), fresh.queue, fresh.sm, LEAGUE)
+    assert action.kind == "rejected" and load(fresh.canonical).stage == "rejected"
+    outbox = [
+        json.loads(path.read_text())
+        for path in sorted((fresh.canonical / "comms" / "outbox").glob("*.json"))
+    ]
+    [help_request] = [m for m in outbox if m["title"] == "The league rejected the first champion"]
+    assert help_request["kind"] == "help_request"
+    assert "promotion accept-champion" in help_request["body"]
+
+    again = started(fresh)
+    code, refused = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again"))
+    assert code == 1 and refused["error"]["reason"] == "champion_conflict"
+    assert "rejected the starter policy" in refused["error"]["message"]
+
+    record = promotion.accept_champion(fresh.ctx(), fresh.sm, LEAGUE)
+    assert record["after_rejected"] == load(fresh.canonical).id
+    code, data = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again2"))
+    assert code == 0, data  # the human let it try again
+
+
 def test_refused_while_paused_for_a_champion_conflict(fresh):
     ledger = fresh.canonical / ".supervisor" / "ledger"
     ledger.mkdir(parents=True, exist_ok=True)

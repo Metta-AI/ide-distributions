@@ -11,11 +11,12 @@ promotion (C4), both rewritten in the same commit on every transition. Stages:
     intent --reconcile: holder terminal, no submission on Softmax--> aborted
     intent --reconcile: holder terminal, submission found--> submitted
     intent --ledger push failed (record_intent)--> acquired
+    submitted --reconcile: the league rejected the submission (A9)--> rejected
 
 Rules that make a crash at any point safe:
 
-- Only one promotion is in flight. ``acquire`` takes over only a ``published`` or
-  ``aborted`` promotion, or one abandoned in ``acquired`` (its holder run is terminal, or
+- Only one promotion is in flight. ``acquire`` takes over only a ``published``,
+  ``aborted`` or ``rejected`` promotion, or one abandoned in ``acquired`` (its holder run is terminal, or
   its board epoch is earlier). A promotion in ``intent``, ``submitted`` or ``recorded`` is
   advanced only by the runtime (``reconcile``, merge hooks) or by its recovery card.
 - Nothing is submitted before ``intent`` is committed and pushed together with the
@@ -112,8 +113,10 @@ HISTORY_DIR_REL = ".supervisor/ledger/promotions"
 REMOTE = "origin"  # canonical's remote (AUTORESEARCH_WORKSPACE_REMOTE, set up by bootstrap)
 MAIN_REFSPEC = "HEAD:refs/heads/main"
 IN_FLIGHT = ("intent", "submitted", "recorded")
+CLOSED = ("published", "aborted", "rejected")  # terminal stages; the promotion slot is free
 REACHED_SUBMIT = ("intent", "submitted", "recorded", "published")  # may have reached the league
 DEFAULT_CHAMPION_GRACE = datetime.timedelta(minutes=30)
+PENDING_CAP = datetime.timedelta(hours=24)  # a submission pending longer needs a human (A9)
 CHAMPION_PAUSE = "champion conflict"  # the start of pause.json's reason for an A9 pause
 GRACE_ENV = "AUTORESEARCH_CHAMPION_GRACE_MINUTES"
 RUNTIME = "runtime"
@@ -180,7 +183,7 @@ class Promotion:
 @dataclass
 class Action:
     """One thing ``reconcile`` did: ``submitted``, ``aborted``, ``recovery_requested``,
-    ``help_requested`` or ``published``."""
+    ``help_requested``, ``published`` or ``rejected``."""
 
     kind: str
     promotion_id: str
@@ -592,11 +595,22 @@ def bootstrap_blocker(canonical: Path) -> str | None:
     """Why a bootstrap may not run although the league shows no champion (A9, A14), or None.
     A bootstrap is for a fresh install: once a promotion of the loop may have reached the
     league, "no champion" means that champion was lost, which a human must look at, unless a
-    human already accepted "no champion" after it (``promotion accept-champion``)."""
+    human already accepted "no champion" after it (``promotion accept-champion``). After the
+    league rejected a bootstrap, a new bootstrap waits for a human too (it would resubmit
+    the same starter policy), unless the human ran ``accept-champion`` after the rejection."""
+    accepted = committed_json(canonical, accepted_path(canonical))
+    current = load(canonical)
+    rejected_bootstrap = (
+        current is not None and current.stage == "rejected" and current.kind == "bootstrap"
+    )
+    if rejected_bootstrap and (accepted is None or accepted.get("after_rejected") != current.id):
+        return (
+            f"the league rejected the starter policy of promotion {current.id}; a human "
+            "decides what to do (promotion accept-champion lets the agent try again)"
+        )
     basis = latest_reached(canonical)
     if basis is None:
         return None
-    accepted = committed_json(canonical, accepted_path(canonical))
     if (
         accepted is not None
         and accepted.get("after_promotion") == basis.id
@@ -613,15 +627,18 @@ def accept_champion(ctx: RunContext, sm: Softmax, league_id: str) -> dict:
     """Operator resolution of a champion conflict (A9): accept the policy the league shows now
     (possibly none) as what the loop expects, until a newer promotion reaches the league
     (an in-flight promotion keeps it: the acceptance is tied to the latest one that may have
-    reached the league).
+    reached the league). After the league rejected a bootstrap, it also lets a new bootstrap
+    run (``after_rejected``).
     Commits ``champion_accepted.json``; queue-keeper resumes on its next clean check."""
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     canonical = ctx.canonical
     with canonical_lock(canonical):
         basis = latest_reached(canonical)
+        current = load(canonical)
         record = {
             "policy_version_id": on_board,
             "after_promotion": basis.id if basis else None,
+            "after_rejected": current.id if current and current.stage == "rejected" else None,
             "league_id": league_id,
             "accepted_at": now_iso(),
         }
@@ -678,7 +695,7 @@ def stage_champion(ctx: RunContext, promotion: Promotion) -> Path:
 
 
 def _can_take_over(canonical: Path, queue: Queue, current: Promotion | None) -> bool:
-    if current is None or current.stage in ("published", "aborted"):
+    if current is None or current.stage in CLOSED:
         return True
     return current.stage == "acquired" and _holder_terminal(canonical, queue, current)
 
@@ -876,8 +893,11 @@ def _covered_requests(promotion: Promotion) -> list[str]:
     return [original, *promotion.recovery_requests]
 
 
-def _close_covered(canonical: Path, promotion: Promotion) -> list[Path]:
-    """When ``promotion`` publishes: close what it covered so nothing re-admits or redoes it.
+def _close_covered(
+    canonical: Path, promotion: Promotion, outcome: str = "published"
+) -> list[Path]:
+    """When ``promotion`` publishes (or the league rejects it, ``outcome="rejected"``): close
+    what it covered so nothing re-admits or redoes it.
     Its promotion-owned ``repair`` handoffs become ``superseded{by: <recording run>}``; the
     open receipts of covered requests whose tasks are dead become ``superseded{by: P-id}``;
     a recovery request never admitted gets a ``rejected`` receipt. Returns the paths written
@@ -895,7 +915,7 @@ def _close_covered(canonical: Path, promotion: Promotion) -> list[Path]:
                     "request_id": request_id,
                     "state": "rejected",
                     "mode": "maintenance",
-                    "reason": f"promotion {promotion.id} published before admission",
+                    "reason": f"promotion {promotion.id} {outcome} before admission",
                     "history": [{"state": "rejected", "at": at}],
                 }
                 jsonschema.validate(receipt, load_schema("receipt.json"))
@@ -1121,16 +1141,75 @@ def _request_help(ctx: RunContext, promotion: Promotion) -> Action:
     return Action("help_requested", promotion.id, message.title)
 
 
-def _league_undecided(ctx: RunContext, sm: Softmax, league_id: str, promotion: Promotion) -> bool:
-    """True while the league neither shows the promotion's policy nor disagrees with the loop
-    (its submission still qualifying, or within the grace window): a recovery card could do
-    nothing but finish ``partial`` (A9, A11)."""
+def _league_view(
+    ctx: RunContext, sm: Softmax, league_id: str, promotion: Promotion
+) -> tuple[bool, SubmissionState | None]:
+    """(undecided, the submission's state) for a ``submitted`` promotion. Undecided: the
+    league neither shows its policy, nor rejected it, nor disagrees with the loop (still
+    qualifying, or within the grace window), so a recovery card could only finish ``partial``
+    (A9, A11)."""
     try:
         grace = champion_grace(os.environ)
     except ValueError:
         grace = DEFAULT_CHAMPION_GRACE
     check = league_check(ctx, sm, league_id, datetime.datetime.now(datetime.UTC), grace)
-    return check.shown != promotion.platform_policy_version_id and check.conflict is None
+    rejected = check.submission is not None and check.submission.stage == "rejected"
+    undecided = (
+        check.shown != promotion.platform_policy_version_id
+        and check.conflict is None
+        and not rejected
+    )
+    return undecided, check.submission
+
+
+def rejection_message(promotion: Promotion, league_id: str, detail: str):
+    """The one message about a promotion the league did not take (A9)."""
+    return runtime_messages.submission_rejected(
+        league_id,
+        promotion.id,
+        promotion.platform_policy_version_id,
+        promotion.replaces,
+        detail,
+        bootstrap=promotion.kind == "bootstrap",
+    )
+
+
+def _settle_rejected(
+    ctx: RunContext, promotion: Promotion, league_id: str, detail: str
+) -> Action:
+    """The league rejected a ``submitted`` promotion's policy: publish the one message, then
+    move it to ``rejected`` (terminal: the slot is free) with what it covered closed, as on
+    publish. Nothing is resubmitted. Under the lock."""
+    canonical = ctx.canonical
+    message = rejection_message(promotion, league_id, detail)
+    if not already_published(canonical, message):
+        publish_message(canonical, message, allow_no_remote=True)
+    closed = tuple(_close_covered(canonical, promotion, outcome="rejected"))
+    _move(canonical, promotion, "rejected", f"the league rejected it: {detail}", closed)
+    return Action("rejected", promotion.id, detail)
+
+
+def _pending_too_long(
+    ctx: RunContext, promotion: Promotion, league_id: str, submission: SubmissionState | None
+) -> Action | None:
+    """A submission still pending ``PENDING_CAP`` after the submit gets one help_request
+    (the league may be holding it for an operator). Under the lock."""
+    submitted_at = _stage_time(promotion, "submitted")
+    if submission is None or submission.stage != "pending" or submitted_at is None:
+        return None
+    if datetime.datetime.now(datetime.UTC) - submitted_at < PENDING_CAP:
+        return None
+    message = runtime_messages.submission_pending(
+        league_id,
+        promotion.id,
+        promotion.platform_policy_version_id,
+        submission.detail,
+        int(PENDING_CAP.total_seconds() // 3600),
+    )
+    if already_published(ctx.canonical, message):
+        return None
+    publish_message(ctx.canonical, message, allow_no_remote=True)
+    return Action("help_requested", promotion.id, message.title)
 
 
 def reconcile(
@@ -1147,9 +1226,13 @@ def reconcile(
        "needs recovery". Then the next recovery attempt is requested (at most one live);
        after ``MAX_RECOVERY_ATTEMPTS`` one runtime ``help_request`` is published instead.
        With ``league_id`` (queue-keeper passes the game's league), no attempt is requested
-       while the league has not decided (``_league_undecided``: our submission is still
+       while the league has not decided (``_league_view``: our submission is still
        qualifying or the league is within the grace window), so waiting on the league uses
-       up no attempts (A9, A11).
+       up no attempts (A9, A11); a submission pending longer than ``PENDING_CAP`` gets one
+       help_request. When the league rejected the submission (rejected, withdrawn,
+       disqualified), the promotion is settled at once, whatever its holder is doing:
+       ``rejected`` (terminal, the slot is free), covered requests closed as on publish, and
+       one runtime message (``rejection_message``) that says what the human can do.
     3. ``recorded`` whose recording handoff is already ``published``: ``published``."""
     canonical = ctx.canonical
     promotion = load(canonical)
@@ -1163,13 +1246,21 @@ def reconcile(
         if action is None:
             return []
         actions.append(action)
-    undecided = False
+    undecided, submission = False, None
     if league_id is not None and load(canonical).stage == "submitted":
-        undecided = _league_undecided(ctx, sm, league_id, load(canonical))  # outside the lock
+        # Network reads outside the lock.
+        undecided, submission = _league_view(ctx, sm, league_id, load(canonical))
     with canonical_lock(canonical):
         current = load(canonical)
         if current is None or current.id != promotion.id:
             return actions
+        if current.stage == "submitted" and submission is not None:
+            if submission.stage == "rejected":
+                actions.append(_settle_rejected(ctx, current, league_id, submission.detail))
+                return actions
+            pending = _pending_too_long(ctx, current, league_id, submission)
+            if pending is not None:
+                actions.append(pending)
         if current.stage == "submitted":
             live = _task_live(canonical, queue, current.holder_task, current.board_epoch)
             if not live and not undecided and not _recovery_live(canonical, queue, current):

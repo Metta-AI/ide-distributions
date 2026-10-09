@@ -43,7 +43,8 @@ class SubmissionState:
     - ``competing``: admitted; ``is_champion`` says whether it is our champion (an admitted
       membership becomes champion by default and earlier ones are ``benched``);
     - ``rejected``: the submission was rejected or withdrawn, or the membership disqualified;
-    - ``unknown``: neither list names it.
+    - ``unknown``: neither list names it, or it has a status we do not know (logged by
+      queue-keeper; the grace from the submit then applies).
 
     ``detail`` is the platform's status and substatus, for messages and logs."""
 

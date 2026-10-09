@@ -172,8 +172,18 @@ FIXTURES = {
             "policy": "ar-E-01M4EJ9RQMHVH6XK3N4T760MNG:v1",
             "replaced": replaced,
             "detail": "membership disqualified (inactive)",
+            "bootstrap": bootstrap,
         }
-        for replaced in ("hand-made:v2", None)
+        for replaced, bootstrap in (("hand-made:v2", False), (None, True))
+    ],
+    "submission_pending": [
+        {
+            "league_id": "league_x",
+            "promotion_id": PROMOTION,
+            "policy": "ar-bootstrap-0123456789ab:v1",
+            "detail": "membership qualifying (held)",
+            "hours": 24,
+        }
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [
