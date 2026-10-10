@@ -97,18 +97,31 @@ def _load_card(ctx: runctx.RunContext) -> dict | None:
     return card
 
 
-def _chat_tool_directive(tool_name, args) -> dict | None:
-    """The block directive for a chat session's tool call, or None to allow it."""
+def _chat_tool_directive(tool_name, args, session_id, turn_id, api_request_id) -> dict | None:
+    """The block directive for a chat session's tool call, or None to allow it: only coach
+    tools, none when another plugin owns a coach tool name, and at most
+    ``coach.MAX_TOOL_ROUNDS`` model calls with tools per turn."""
     try:
+        foreign = coach.foreign_tool_names()
+        if foreign:
+            return {"action": "block", "message": (
+                f"{policy.PREFIX}coach tools are off: another plugin owns {', '.join(foreign)}."
+            )}
         allowed, reason = policy.chat_tool_policy(tool_name or "", args or {}, coach.TOOL_NAMES)
+        if allowed and coach.over_round_cap(session_id, turn_id, api_request_id):
+            allowed, reason = False, (
+                f"{policy.PREFIX}the chat used its {coach.MAX_TOOL_ROUNDS} tool rounds for this "
+                "turn. Answer the coach now with what you found."
+            )
     except Exception as error:  # noqa: BLE001 - fail closed in the chat
         allowed, reason = False, f"{policy.PREFIX}internal error ({type(error).__name__})"
     return None if allowed else {"action": "block", "message": reason}
 
 
-def pre_tool_call(tool_name=None, args=None, task_id=None, session_id=None, **kwargs):
+def pre_tool_call(tool_name=None, args=None, task_id=None, session_id=None, turn_id=None,
+                  api_request_id=None, **kwargs):
     if coach.is_chat_session(session_id) or coach.session_platform() == coach.CHAT_PLATFORM:
-        return _chat_tool_directive(tool_name, args)
+        return _chat_tool_directive(tool_name, args, session_id, turn_id, api_request_id)
     ctx = None
     try:
         ctx = _run_context()
@@ -320,7 +333,7 @@ def register(ctx) -> None:
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("transform_llm_output", transform_llm_output)
     ctx.register_hook("kanban_task_completed", kanban_task_completed)
-    for name, schema, handler in coach.tool_specs():
+    for name, schema, handler in coach.SPECS:
         ctx.register_tool(
             name=name, toolset=coach.TOOLSET, schema=schema, handler=handler,
             description=schema["description"],

@@ -11,6 +11,8 @@ existing installs is applied here with ``hermes config set`` (verified to write 
   value is the installer's and is kept. One-way: an installer who set exactly the old value
   on purpose (2700 or 180) is raised too, on every bootstrap; pick a nearby value (2701,
   181) to keep it.
+- ``ENSURE_CONTAINS``: a list that must contain some items; missing ones are appended and the
+  installer's (or Hermes's) other items are kept.
 - ``UNSET``: removed with ``hermes config unset`` when present.
 - ``ENV_OVERRIDES``: set from an environment variable when it is set and differs (the
   installer's ``OPENROUTER_MODEL`` in the profile ``.env`` becomes ``model.default``: Hermes
@@ -121,7 +123,6 @@ def always(home: Path) -> dict[str, object]:
         "updates.check": False,
         "curator.prune_builtins": False,
         "platform_toolsets.api_server": [COACH_TOOLSET],
-        "known_plugin_toolsets.cli": [COACH_TOOLSET],
         "skills.platform_disabled.api_server": research_skills(),
     }
 
@@ -152,6 +153,9 @@ UPGRADE_DEFAULTS: dict[str, tuple[object, object]] = {
     "timeouts.tools.sequential_call": (420, 1900),  # the Hermes default
     "timeouts.tools.concurrent_batch": (420, 1900),  # the Hermes default
 }
+# A list that must contain these items; other items (Hermes writes every plugin's toolset to
+# known_plugin_toolsets.<platform> when the user saves `hermes tools`) are kept.
+ENSURE_CONTAINS: dict[str, list[object]] = {"known_plugin_toolsets.cli": [COACH_TOOLSET]}
 UNSET = ("kanban.default_assignee",)
 ENV_OVERRIDES = {"model.default": "OPENROUTER_MODEL"}
 
@@ -204,6 +208,12 @@ def pending(home: Path, env: Mapping[str, str] | None = None) -> list[list[str]]
     for key, (old, new) in UPGRADE_DEFAULTS.items():
         if _lookup(config, key) == old:
             commands.append(["config", "set", key, _cli_value(new)])
+    for key, items in ENSURE_CONTAINS.items():
+        current = _lookup(config, key)
+        current = current if isinstance(current, list) else []
+        missing = [item for item in items if item not in current]
+        if missing:
+            commands.append(["config", "set", key, _cli_value([*current, *missing])])
     for key in UNSET:
         if _lookup(config, key) not in (_ABSENT, None, ""):
             commands.append(["config", "unset", key])

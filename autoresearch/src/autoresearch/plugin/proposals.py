@@ -9,9 +9,13 @@ it when the coach's own next line is exactly ``confirm P-xxxx`` in the same sess
 - **Bound to the session** that made it: ``take`` and ``cancel`` look only in their own
   session's proposals.
 - **Code's words, not the model's.** ``render`` builds the text the coach sees only from the
-  payload that will be sent (every field, strings JSON-quoted on one line), never from the
-  model's ``summary``. ``show`` hands that text to the ``transform_llm_output`` hook, which
-  appends it to the turn's reply, and only then is the proposal confirmable. A turn that ends
+  payload that will be sent, never from the model's ``summary``: the payload as JSON in a
+  fenced code block (a fence longer than any backtick run in it, so no Markdown or HTML in a
+  value renders or hides anything), with control and format characters (bidi overrides,
+  zero-width) shown as ``\\uXXXX`` escapes. ``show`` hands that text to the
+  ``transform_llm_output`` hook, which appends it to the turn's reply, and only then is the
+  proposal confirmable. Every pending proposal is appended again to each later reply, so a
+  model cannot follow it with a fake rendering of the same id. A turn that ends
   with an empty reply never runs that hook (Hermes v0.21.6 ``agent/turn_finalizer.py``), so
   its proposal stays unshown until a later turn's reply carries it.
 - **Taken once**: ``take`` removes the proposal under the lock, so two confirms racing on the
@@ -27,47 +31,51 @@ import json
 import re
 import secrets
 import threading
+import unicodedata
 from dataclasses import dataclass
 
 EXPIRY_SECONDS = 15 * 60
 ID_PATTERN = r"P-[0-9a-f]{4,}"
 _ID_BYTES = 3  # six hex digits
-# Validated enum values (urgency, mode, priority, action) print bare when they look like one.
-_BARE = re.compile(r"[A-Za-z0-9_-]{1,40}")
-# Per kind: the fields rendered in this order, each with its label (None: the value alone).
-_FIELDS = {
-    "steer": (("urgency", "urgency"), ("text", None), ("proposed_topic", "proposed topic")),
-    "task": (
-        ("title", None), ("mode", "mode"), ("priority", "priority"), ("why", "why"),
-        ("refs", "refs"),
-    ),
-    "reply": (("in_reply_to", "to"), ("choice", "choice"), ("text", "text")),
-    "control": (("action", "action"),),
-}
-_ENUMS = {"urgency", "mode", "priority", "action", "in_reply_to"}
+# Characters a Markdown or HTML client could hide or reorder: controls, format characters (bidi
+# overrides, zero-width), private use, surrogates and line/paragraph separators.
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
+_BACKTICKS = re.compile(r"`+")
 
 
-def _value(field: str, value) -> str:
-    if field in _ENUMS and isinstance(value, str) and _BARE.fullmatch(value):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+def visible(text: str) -> str:
+    """``text`` with every hidden character but a newline replaced by its ``\\uXXXX`` escape."""
+    out = []
+    for char in text:
+        if char != "\n" and unicodedata.category(char) in _HIDDEN_CATEGORIES:
+            code = ord(char)
+            out.append(f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def fenced(text: str, info: str = "") -> str:
+    """``text`` in a fenced code block whose fence is longer than any backtick run in it, so
+    nothing in it renders as Markdown or HTML or closes the block early."""
+    longest = max((len(run) for run in _BACKTICKS.findall(text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}{info}\n{text}\n{fence}"
 
 
 def render(kind: str, payload: dict, answers: str | None = None) -> str:
-    """One line naming every field of ``payload``: the known ones in a fixed order, then any
-    other field. ``answers`` is the title of the message a reply answers (plugin-looked-up)."""
-    parts = [kind]
-    known = _FIELDS.get(kind, ())
-    for field, label in known:
-        if field not in payload or payload[field] is None:
-            continue
-        text = _value(field, payload[field])
-        parts.append(f"{label} {text}" if label else text)
-        if field == "in_reply_to" and answers:
-            parts.append(f"answering {json.dumps(answers, ensure_ascii=False)}")
-    names = {field for field, _ in known}
-    parts += [f"{key} {_value(key, payload[key])}" for key in sorted(payload) if key not in names]
-    return ", ".join(parts)
+    """The payload exactly as it will be sent (JSON, hidden characters escaped) in a code block,
+    and for a reply the title of the message it answers (plugin-looked-up), also fenced."""
+    raw = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    parts = [f"{kind}, exactly as it will be sent:", fenced(visible(raw), "json")]
+    hidden = visible(raw) != raw
+    if answers is not None:
+        title = json.dumps(answers, ensure_ascii=False)
+        parts += ["It answers the message titled:", fenced(visible(title))]
+        hidden = hidden or visible(title) != title
+    if hidden:
+        parts.append("Hidden or control characters are shown as \\uXXXX escapes.")
+    return "\n".join(parts)
 
 
 @dataclass
@@ -89,7 +97,10 @@ class Proposal:
         return now - self.created >= EXPIRY_SECONDS
 
     def line(self) -> str:
-        return f"Proposal {self.id}: {self.rendering}. To send exactly this, reply: confirm {self.id}"
+        return (
+            f"Proposal {self.id}: {self.rendering}\n"
+            f"To send exactly this, reply: confirm {self.id}"
+        )
 
 
 class Store:
@@ -154,13 +165,20 @@ class Store:
         with self._lock:
             self._notes.setdefault(session_id, []).append(line)
 
+    def notes(self, session_id: str) -> list[str]:
+        """The queued notes, left queued for ``show``."""
+        with self._lock:
+            return list(self._notes.get(session_id, []))
+
     def show(self, session_id: str, turn_id: str, now: float) -> list[str]:
-        """The lines to append to this turn's reply: queued notes, then each unshown
-        proposal's ``line``, which marks it shown (confirmable) in ``turn_id``."""
+        """The lines to append to this turn's reply: queued notes, then the ``line`` of every
+        pending proposal, shown or not. A first showing marks it shown (confirmable) in
+        ``turn_id``; showing every pending one again keeps the plugin's rendering the last one
+        the coach sees for its id."""
         with self._lock:
             lines = self._notes.pop(session_id, [])
             for proposal in self._drop_expired(session_id, now).values():
                 if not proposal.shown:
                     proposal.shown_turn = turn_id or "unknown"
-                    lines.append(proposal.line())
+                lines.append(proposal.line())
             return lines

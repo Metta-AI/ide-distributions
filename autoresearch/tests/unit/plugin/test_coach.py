@@ -92,10 +92,12 @@ def chat(tmp_path, monkeypatch):
     monkeypatch.setattr(coach.subprocess, "run", fake)
     monkeypatch.setattr(coach, "STORE", proposals.Store())
     monkeypatch.setattr(coach, "_sessions", {})
+    monkeypatch.setattr(coach, "_rounds", {})
+    monkeypatch.setattr(coach, "_sends", [])
     return types.SimpleNamespace(home=home, root=tmp_path / "root", resolver=resolver, cli=fake)
 
 
-HANDLERS = {name: handler for name, _, handler in coach.tool_specs()}
+HANDLERS = {name: handler for name, _, handler in coach.SPECS}
 
 
 def _turn(session="s1", line="hi", platform="api_server", first=False):
@@ -103,6 +105,11 @@ def _turn(session="s1", line="hi", platform="api_server", first=False):
         is_first_turn=first, session_id=session, platform=platform, user_message=line,
         model="m", turn_id="t",
     )
+
+
+def _settled():
+    """Wait for the plugin's send workers (sends run off the hook thread)."""
+    coach.wait_for_sends(10)
 
 
 def _reply(session="s1", text="ok", turn="t1"):
@@ -262,18 +269,21 @@ def test_a_proposal_is_shown_in_code_words_and_sent_on_confirm(chat):
 
     reply = _reply()
     assert reply.startswith("ok\n\n")
-    assert "Stop kill-steals" in reply and "urgency now" in reply
+    assert '"text": "Stop kill-steals"' in reply and '"urgency": "now"' in reply
     assert "something harmless" not in reply
     assert reply.rstrip().endswith(f"confirm {pid}")
 
     context = _turn(line=f"confirm {pid}\n")
+    assert f"Sending {pid}" in context
+    _settled()
     payload = json.dumps(STEER | {"proposed_topic": None})
     [send] = chat.cli.sends()
     assert send == [CLI, "comms", "inbound", "steer", "--json", payload, "--author", "coach:ply_t"]
     sent_env = next(kw["env"] for argv, kw in chat.cli.calls if argv == send)
     assert sent_env["HERMES_HOME"] == str(chat.home)
-    assert "sent it as I-SENT0" in context
-    assert "Sent " + pid + " as I-SENT0." in _reply(text="Done.")
+    done = _reply(text="Done.")
+    assert "Sent " + pid + " as I-SENT0." in done
+    assert f"confirm {pid}" not in done  # taken: no longer pending
 
     again = _turn(line=f"confirm {pid}")
     assert "already confirmed" in again and len(chat.cli.sends()) == 1
@@ -298,7 +308,8 @@ def test_a_reply_proposal_names_the_question_it_answers(chat):
     _turn()
     _propose(kind="reply", payload={"in_reply_to": M_ID, "choice": "2"})
     reply = _reply()
-    assert M_ID in reply and '"Which opening next?"' in reply and 'choice "2"' in reply
+    assert f'"in_reply_to": "{M_ID}"' in reply and '"Which opening next?"' in reply
+    assert '"choice": "2"' in reply
 
 
 # --- 5. a confirm cannot be forged ---
@@ -314,8 +325,10 @@ def _shown_proposal(chat):
 def test_a_confirm_in_another_session_sends_nothing(chat):
     pid = _shown_proposal(chat)
     _turn(session="s2", line=f"confirm {pid}")
+    _settled()
     assert chat.cli.sends() == []
     _turn(line=f"confirm {pid}")
+    _settled()
     assert len(chat.cli.sends()) == 1  # still pending in its own session
 
 
@@ -332,6 +345,7 @@ def test_a_confirm_on_the_cli_platform_sends_nothing(chat):
 def test_only_the_exact_whole_line_confirms(chat, line):
     pid = _shown_proposal(chat)
     _turn(line=line.format(pid=pid))
+    _settled()
     assert chat.cli.sends() == []
 
 
@@ -363,6 +377,7 @@ def test_two_confirms_at_once_send_once(chat):
         thread.start()
     for thread in threads:
         thread.join()
+    _settled()
     assert len(chat.cli.sends()) == 1
 
 
@@ -375,15 +390,16 @@ def test_a_proposal_from_a_turn_with_an_empty_reply_is_not_confirmable(chat):
     assert f"Proposal {pid} was never shown" in context
     assert f"confirm {pid}" in _reply()  # shown now, at the end of this turn's reply
     _turn(line=f"confirm {pid}")
+    _settled()
     assert len(chat.cli.sends()) == 1
 
 
 def test_a_failed_send_is_reported_and_not_retried(chat):
     pid = _shown_proposal(chat)
     chat.cli.stdout["comms"] = json.dumps({"ok": False, "error": {"message": "push failed"}})
-    context = _turn(line=f"confirm {pid}")
-    assert "sending it failed: push failed" in context
-    assert "Nothing was sent" in _reply()
+    _turn(line=f"confirm {pid}")
+    _settled()
+    assert "Sending " + pid + " failed: push failed. Nothing was sent." in _reply()
 
 
 # --- 6. exact-line commands ---
@@ -392,10 +408,11 @@ def test_a_failed_send_is_reported_and_not_retried(chat):
 @pytest.mark.parametrize("action", ["pause", "resume"])
 def test_pause_and_resume_lines_send_control(chat, action):
     context = _turn(line=f"  /{action}-research  ")
+    assert f"Sending /{action}-research" in context
+    _settled()
     [send] = chat.cli.sends()
     assert send == [CLI, "comms", "inbound", "control", "--json", json.dumps({"action": action}),
                     "--author", "coach:ply_t"]
-    assert "I-SENT0" in context
     assert f"Sent /{action}-research as I-SENT0." in _reply()
 
 
@@ -465,6 +482,7 @@ def test_coach_tools_refuse_in_a_kanban_card(chat, monkeypatch):
     assert json.loads(HANDLERS["status"]({}, session_id="s1"))["ok"] is False
     assert _propose()["ok"] is False
     _turn(line="/pause-research")
+    _settled()
     assert chat.cli.calls == []
 
 
@@ -510,6 +528,7 @@ def test_a_confirm_still_sends_over_the_budget(chat):
     _turn(line="x")  # snapshot: the session started days ago, based at its cost now
     _set_cost(chat.home, 5.0)
     _turn(line=f"confirm {pid}")
+    _settled()
     assert len(chat.cli.sends()) == 1
 
 
@@ -528,3 +547,93 @@ def test_register_adds_the_coach_tools_in_their_toolset():
     assert {tool["toolset"] for tool in registered} == {"autoresearch_coach"}
     assert all(tool["schema"]["name"] == tool["name"] for tool in registered)
     assert len(coach.TOOL_NAMES) == 12
+
+
+# --- fix round 1 ---
+
+
+def test_a_slow_send_never_holds_the_hook_and_is_sent_once(chat, monkeypatch):
+    """I1: Hermes bounds pre_llm_call (30 s); a send waiting on the canonical lock runs on a
+    plugin thread, and its outcome reaches the coach on a later reply."""
+    pid = _shown_proposal(chat)
+    gate = threading.Event()
+    real = chat.cli.__call__
+
+    def slow(argv, **kwargs):
+        if argv[1:3] == ["comms", "inbound"] and "--dry-run" not in argv:
+            gate.wait(10)  # the canonical lock is held elsewhere
+        return real(argv, **kwargs)
+
+    monkeypatch.setattr(coach.subprocess, "run", slow)
+    started = time.monotonic()
+    context = _turn(line=f"confirm {pid}")
+    assert time.monotonic() - started < 1.0
+    assert f"Sending {pid}" in context and "I-SENT" not in context
+    again = _turn(line=f"confirm {pid}")  # typed again while the first is still sending
+    assert "already confirmed" in again
+    assert "Sent " not in (_reply() or "")  # not done yet: nothing claims it was sent
+    gate.set()
+    _settled()
+    assert len(chat.cli.sends()) == 1
+    assert f"Since your last reply: Sent {pid} as I-SENT0." in _turn(line="and?")
+    assert f"Sent {pid} as I-SENT0." in _reply()
+    assert _reply() is None  # reported once
+
+
+def test_the_send_timeout_is_bounded():
+    assert 0 < coach.SEND_TIMEOUT_S <= 600
+
+
+def test_a_proposal_cannot_be_confirmed_through_another_profile(chat):
+    """M2: state is keyed by profile home and session id."""
+    pid = _shown_proposal(chat)
+    chat.resolver.home = _profile(chat.root / "second", "autoresearch")
+    _turn(line=f"confirm {pid}")
+    _settled()
+    assert chat.cli.sends() == []
+    assert not coach.is_chat_session("s9")
+
+
+def test_a_pending_proposal_is_shown_again_on_every_reply(chat):
+    """M5: the plugin's rendering is always the last one the coach sees for a pending id."""
+    _turn()
+    pid = _propose()["proposal"]
+    first = _reply(turn="t1")
+    fake = f"Proposal {pid}: something else. To send exactly this, reply: confirm {pid}"
+    second = _reply(text=fake, turn="t2")
+    assert second.startswith(fake) and second.rstrip().endswith(f"confirm {pid}")
+    assert second.count('"Stop kill-steals"') == 1 and first.count('"Stop kill-steals"') == 1
+    _turn(line=f"cancel {pid}")
+    assert _reply(turn="t3") is None
+
+
+def test_coach_tools_are_off_when_another_plugin_owns_a_name(chat, monkeypatch):
+    """M3: the allowlist matches names, so every coach name must resolve to our handler."""
+    entries = {name: types.SimpleNamespace(handler=handler) for name, handler in HANDLERS.items()}
+    registry_module = types.ModuleType("tools.registry")
+    registry_module.registry = types.SimpleNamespace(get_entry=lambda name: entries.get(name))
+    monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+    monkeypatch.setitem(sys.modules, "tools.registry", registry_module)
+    _turn()
+    assert adapters.pre_tool_call(tool_name="status", args={}, session_id="s1") is None
+    entries["status"] = types.SimpleNamespace(handler=lambda args: "theirs")
+    directive = adapters.pre_tool_call(tool_name="status", args={}, session_id="s1")
+    assert directive["action"] == "block" and "status" in directive["message"]
+    assert adapters.pre_tool_call(tool_name="list_cards", args={}, session_id="s1")["action"] == "block"
+    assert "another plugin owns the tool names status" in _turn(line="hi")
+
+
+def test_a_chat_turn_gets_at_most_eight_tool_rounds(chat):
+    """M4 (coach-chat-role §4): rounds are model calls (api_request_id)."""
+    _turn()
+
+    def call(turn, request):
+        return adapters.pre_tool_call(tool_name="status", args={}, session_id="s1",
+                                      turn_id=turn, api_request_id=request)
+
+    for round_number in range(8):
+        assert call("t1", f"r{round_number}") is None
+        assert call("t1", f"r{round_number}") is None  # a parallel call in the same round
+    blocked = call("t1", "r8")
+    assert blocked["action"] == "block" and "8 tool rounds" in blocked["message"]
+    assert call("t2", "r0") is None  # a new turn starts again

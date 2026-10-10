@@ -5,7 +5,11 @@ On Softmax hosting every coach line in the IDE chat becomes one Hermes run on th
 interface, not a second research agent:
 
 - **Tools.** The toolset ``autoresearch_coach``: fixed-argv read commands of the profile CLI
-  (``READ_TOOLS``; output cut to ``OUTPUT_MAX`` characters) and ``propose_inbound``. Config
+  (``READ_TOOLS``; output cut to ``OUTPUT_MAX`` characters) and ``propose_inbound``. The names
+  are the spec's (``status``, ``list_cards``, ...); because they are generic,
+  ``foreign_tool_names`` checks that Hermes's registry maps each to our handler, and any name
+  owned by another plugin turns the coach tools off. A chat turn may make at most
+  ``MAX_TOOL_ROUNDS`` model calls with tools. Config
   gives ``api_server`` only this toolset; ``adapters.pre_tool_call`` also blocks every other
   tool in a chat session, because Hermes's config load fails open to the full default
   toolset. Every tool refuses unless its session was recorded as a chat session by
@@ -16,7 +20,9 @@ interface, not a second research agent:
   with ``comms inbound --dry-run`` and stores it in memory (``proposals``); the
   ``transform_llm_output`` hook appends the plugin's rendering to the reply; ``chat_turn``
   sends it only when the coach's whole stripped line is ``confirm P-xxxx`` in the same
-  session. ``cancel P-xxxx`` drops it. ``/pause-research`` and ``/resume-research`` (whole
+  session (state is keyed by profile home and session id). The send runs on a plugin thread,
+  so the hook returns inside Hermes's 30 s hook timeout; its outcome is a plugin-written line
+  on the next reply. ``cancel P-xxxx`` drops it. ``/pause-research`` and ``/resume-research`` (whole
   line) send a ``control`` inbound with no proposal: the line is the coach's.
 - **Environment (I5).** The tools run in the one multiplexed gateway process, whose
   environment is the runtime's (no ``AUTORESEARCH_CLI``, no profile ``HERMES_HOME``, no
@@ -56,7 +62,8 @@ CHAT_PLATFORM = "api_server"
 OUTPUT_MAX = 12_000
 TRUNCATED = '..." [truncated]'
 READ_TIMEOUT_S = 60
-SEND_TIMEOUT_S = 180  # comms inbound commits and pushes under the canonical lock
+SEND_TIMEOUT_S = 300  # comms inbound waits for the canonical lock, then commits and pushes
+MAX_TOOL_ROUNDS = 8  # model calls with tools per chat turn (coach-chat-role §4, the shim's cap)
 ENV_CHAT_DAILY_USD = "AUTORESEARCH_CHAT_DAILY_USD"
 DEFAULT_CHAT_DAILY_USD = 3.0
 PROPOSABLE_KINDS = ("task", "steer", "reply", "control")
@@ -81,8 +88,10 @@ _WHERE_KEY = re.compile(r"[a-z_][a-z0-9_]{0,63}")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 STORE = proposals.Store()
-_sessions: dict[str, float] = {}  # chat session id -> last turn time
+_sessions: dict[str, float] = {}  # chat key (profile home + session id) -> last turn time
 _sessions_lock = threading.Lock()
+_rounds: dict[str, tuple[str, set[str], int]] = {}  # chat key -> (turn id, api requests, calls)
+_sends: list[threading.Thread] = []  # send workers (tests join them)
 _spend_lock = threading.Lock()
 
 
@@ -98,19 +107,43 @@ class Refused(Exception):
 # --- sessions ---
 
 
+def chat_key(session_id: str | None) -> str:
+    """What chat state is keyed by: the routed profile home and the session id, so a proposal
+    made through one profile can never be confirmed through another. "" without a session."""
+    return f"{_hermes_home() or ''}\n{session_id}" if session_id else ""
+
+
 def record_chat_session(session_id: str | None) -> bool:
-    """Remember ``session_id`` as a chat session; True when this process had not seen it."""
-    if not session_id:
+    """Remember ``session_id`` (in this profile) as a chat session; True when this process had
+    not seen it."""
+    key = chat_key(session_id)
+    if not key:
         return False
     with _sessions_lock:
-        new = session_id not in _sessions
-        _sessions[session_id] = time.time()
+        new = key not in _sessions
+        _sessions[key] = time.time()
         return new
 
 
 def is_chat_session(session_id: str | None) -> bool:
+    key = chat_key(session_id)
     with _sessions_lock:
-        return bool(session_id) and session_id in _sessions
+        return bool(key) and key in _sessions
+
+
+def over_round_cap(session_id: str | None, turn_id: str | None, api_request_id: str | None) -> bool:
+    """Count this tool call against the turn's ``MAX_TOOL_ROUNDS`` model calls (one round per
+    ``api_request_id``; every call counts as a round when Hermes gives none). True once over."""
+    key = chat_key(session_id)
+    with _sessions_lock:
+        turn, requests, calls = _rounds.get(key, ("", set(), 0))
+        if turn != (turn_id or ""):
+            turn, requests, calls = turn_id or "", set(), 0
+        if api_request_id:
+            requests = requests | {api_request_id}
+        calls += 1
+        _rounds[key] = (turn, requests, calls)
+        return (len(requests) if api_request_id else calls) > MAX_TOOL_ROUNDS
 
 
 def session_platform() -> str:
@@ -171,10 +204,11 @@ def _canonical(home: Path, env: dict[str, str]) -> Path:
     return Path(env.get(runctx.ENV_CANONICAL) or home / "workspace")
 
 
-def _log(event: dict) -> None:
-    """Best effort: a chat event in the profile's runtime dir; never raises."""
+def _log(event: dict, where: tuple[Path, dict[str, str]] | None = None) -> None:
+    """Best effort: a chat event in the profile's runtime dir (``where``: the profile_env of
+    this turn, for a worker thread that cannot resolve it); never raises."""
     try:
-        home, env = profile_env()
+        home, env = where or profile_env()
         directory = _canonical(home, env) / ".supervisor" / "runtime"
         directory.mkdir(parents=True, exist_ok=True)
         with (directory / CHAT_EVENTS_FILE).open("a", encoding="utf-8") as handle:
@@ -451,7 +485,7 @@ def propose_inbound(args, session_id=None, **kwargs):
             return _cut(json.dumps(answered, default=str))
         title = (answered.get("data") or {}).get("title")
         answers = title if isinstance(title, str) else None
-    proposal = STORE.propose(session_id, kind, payload, summary, _now(), answers=answers)
+    proposal = STORE.propose(chat_key(session_id), kind, payload, summary, _now(), answers=answers)
     _log({"event": "proposed", "session_id": session_id, "proposal": proposal.id, "kind": kind})
     return json.dumps({
         "ok": True,
@@ -497,7 +531,30 @@ def tool_specs() -> list[tuple[str, dict, object]]:
     return specs
 
 
-TOOL_NAMES = frozenset(name for name, _, _ in tool_specs())
+SPECS = tool_specs()  # registered once; the handlers' identity is how we tell ours apart
+TOOL_NAMES = frozenset(name for name, _, _ in SPECS)
+_HANDLERS = {name: handler for name, _, handler in SPECS}
+
+
+def foreign_tool_names() -> list[str]:
+    """Coach tool names that Hermes's tool registry does not map to our handlers here (another
+    plugin or a built-in registered the name first: Hermes then quietly rejects ours, v0.21.6
+    ``hermes_cli/plugins.py`` ``register_tool``). Any such name turns the coach tools off
+    (``adapters.pre_tool_call``), because the chat allowlist matches by name. Empty outside
+    Hermes."""
+    try:
+        from tools.registry import registry
+    except ImportError:
+        return []
+    foreign = []
+    for name, handler in _HANDLERS.items():
+        try:
+            entry = registry.get_entry(name)
+        except Exception:  # noqa: BLE001 - an unreadable registry is not ours: fail closed
+            entry = None
+        if getattr(entry, "handler", None) is not handler:
+            foreign.append(name)
+    return foreign
 
 
 # --- the chat turn: brief, exact-line commands, notices ---
@@ -510,9 +567,10 @@ def brief() -> str:
         return BRIEF_FALLBACK
 
 
-def send_inbound(kind: str, payload: dict) -> str:
-    """Send one inbound message as the coach; its inbound id. Raises Refused."""
-    _, env = profile_env()
+def send_inbound(where: tuple[Path, dict[str, str]], kind: str, payload: dict) -> str:
+    """Send one inbound message as the coach through the profile ``where`` (its
+    ``profile_env``); its inbound id. Raises Refused."""
+    _, env = where
     author = _author(env)
     sent = run_cli(
         env, ["comms", "inbound", kind, "--json", json.dumps(payload), "--author", author],
@@ -525,83 +583,124 @@ def send_inbound(kind: str, payload: dict) -> str:
     return str((sent.get("data") or {}).get("id"))
 
 
-def _confirm(session_id: str, proposal_id: str, now: float) -> str:
-    proposal = STORE.take(session_id, proposal_id, now)
+def _send_in_background(key: str, where, label: str, kind: str, payload: dict, event: dict):
+    """Run the send on a plugin thread, so ``pre_llm_call`` returns inside Hermes's hook
+    timeout (v0.21.6 ``hermes_cli/plugins_dispatch.py``: 30 s by default, and a callback that
+    times out is skipped for 60 s). The outcome goes out as a note: appended to the next chat
+    reply and named in the next turn's context. The caller already took the proposal, so a
+    second confirm can never send it again."""
+
+    def work():
+        try:
+            inbound_id = send_inbound(where, kind, payload)
+        except Exception as error:  # noqa: BLE001 - every failure is reported to the coach
+            reason = str(error) if isinstance(error, Refused) else type(error).__name__
+            STORE.note(key, f"Sending {label} failed: {reason}. Nothing was sent.")
+            _log({**event, "event": "send_failed"}, where)
+            return
+        STORE.note(key, f"Sent {label} as {inbound_id}.")
+        _log({**event, "event": "sent", "inbound": inbound_id}, where)
+
+    worker = threading.Thread(target=work, name=f"coach-send-{label}", daemon=True)
+    with _sessions_lock:
+        _sends[:] = [thread for thread in _sends if thread.is_alive()]
+        _sends.append(worker)
+    worker.start()
+
+
+def wait_for_sends(timeout: float = 30.0) -> None:
+    """Join the running send workers (tests; a clean shutdown)."""
+    with _sessions_lock:
+        workers = list(_sends)
+    for worker in workers:
+        worker.join(timeout)
+
+
+def _confirm(key: str, proposal_id: str, now: float) -> str:
+    try:
+        where = profile_env()
+    except Refused as refused:
+        return f"The coach typed `confirm {proposal_id}`, but nothing can be sent: {refused}."
+    proposal = STORE.take(key, proposal_id, now)
     if proposal is None:
-        if STORE.was_taken(session_id, proposal_id):
-            return f"{proposal_id} was already confirmed in this chat; nothing more was sent."
+        if STORE.was_taken(key, proposal_id):
+            return f"{proposal_id} was already confirmed in this chat; nothing more is sent."
         return (
             f"The coach typed `confirm {proposal_id}`, but this chat has no confirmable "
             f"proposal {proposal_id}: nothing was sent. It may have expired (15 minutes), "
             "been cancelled, never been shown, or been made in another session. Tell the coach "
             "and propose again if they still want it."
         )
-    try:
-        inbound_id = send_inbound(proposal.kind, proposal.payload)
-    except Refused as refused:
-        STORE.note(session_id, f"Sending {proposal_id} failed: {refused}. Nothing was sent.")
-        _log({"event": "send_failed", "session_id": session_id, "proposal": proposal_id})
-        return (
-            f"The coach confirmed {proposal_id}, but sending it failed: {refused}. Nothing was "
-            "sent. Tell the coach."
-        )
-    STORE.note(session_id, f"Sent {proposal_id} as {inbound_id}.")
-    _log({"event": "sent", "session_id": session_id, "proposal": proposal_id,
-          "kind": proposal.kind, "inbound": inbound_id})
-    return f"The coach confirmed {proposal_id}; the plugin sent it as {inbound_id}. Tell the coach."
+    _send_in_background(key, where, proposal_id, proposal.kind, proposal.payload, {
+        "session_id": key.split("\n")[-1], "proposal": proposal_id, "kind": proposal.kind,
+    })
+    return (
+        f"The coach confirmed {proposal_id}. The plugin is sending it now (Sending "
+        f"{proposal_id}…); it appends the result to a reply. Tell the coach it is being sent; "
+        "do not say it was sent or failed."
+    )
 
 
-def _control(session_id: str, action: str) -> str:
+def _control(key: str, action: str) -> str:
     command = f"/{action}-research"
     try:
-        inbound_id = send_inbound("control", {"action": action})
+        where = profile_env()
     except Refused as refused:
-        STORE.note(session_id, f"Sending {command} failed: {refused}. Nothing was sent.")
-        return f"The coach typed {command}, but sending it failed: {refused}. Tell the coach."
-    STORE.note(session_id, f"Sent {command} as {inbound_id}.")
-    _log({"event": "sent", "session_id": session_id, "kind": "control", "action": action,
-          "inbound": inbound_id})
+        return f"The coach typed {command}, but nothing can be sent: {refused}. Tell the coach."
+    _send_in_background(key, where, command, "control", {"action": action}, {
+        "session_id": key.split("\n")[-1], "kind": "control", "action": action,
+    })
     effect = (
         "research pauses: no new cards start; running cards finish under their caps"
         if action == "pause" else "the coach hold is lifted and research continues"
     )
     return (
-        f"The coach typed {command}; the plugin sent it as {inbound_id}. When the runtime "
-        f"applies it (within about a minute) {effect}. Tell the coach."
+        f"The coach typed {command}. The plugin is sending it now (Sending {command}…); it "
+        f"appends the result to a reply. Once the runtime applies it (within about a minute) "
+        f"{effect}. Tell the coach it is being sent."
     )
 
 
-def _command(session_id: str, line: str, now: float) -> str | None:
+def _command(key: str, line: str, now: float) -> str | None:
     """The result of an exact-line coach command, or None when the line is not one."""
     if match := CONFIRM.fullmatch(line):
-        return _confirm(session_id, match.group(1), now)
+        return _confirm(key, match.group(1), now)
     if match := CANCEL.fullmatch(line):
-        dropped = STORE.cancel(session_id, match.group(1))
+        dropped = STORE.cancel(key, match.group(1))
         return (
             f"The coach cancelled {match.group(1)}; it will not be sent." if dropped
             else f"There is no pending proposal {match.group(1)} in this chat to cancel."
         )
     if match := CONTROL.fullmatch(line):
-        return _control(session_id, match.group(1))
+        return _control(key, match.group(1))
     return None
 
 
 def chat_turn(session_id: str | None, user_message, is_first_turn: bool) -> str:
     """``pre_llm_call`` for a chat turn: the context to inject. Records the session first."""
     new = record_chat_session(session_id)
+    key = chat_key(session_id)
     _log({"event": "chat_turn", "session_id": session_id, "platform": CHAT_PLATFORM,
           "first": bool(is_first_turn or new)})
     # Hermes keeps injected context in the session history (the api_content sidecar), so the
     # brief goes in once per session and process: its first turn here, or after a compression
     # (which starts a new session id).
     parts = [brief()] if (new or is_first_turn) else []
+    foreign = foreign_tool_names()
+    if foreign:
+        parts.append(
+            "[autoresearch plugin] Coach tools are off: another plugin owns the tool names "
+            f"{', '.join(foreign)}. Tell the coach the chat cannot read the research now."
+        )
     now = _now()
+    for line in STORE.notes(key):
+        parts.append(f"[autoresearch plugin] Since your last reply: {line} Tell the coach.")
     line = user_message.strip() if isinstance(user_message, str) else ""
-    if session_id and not os.environ.get(runctx.ENV_CARD_ID):
-        result = _command(session_id, line, now)
+    if key and not os.environ.get(runctx.ENV_CARD_ID):
+        result = _command(key, line, now)
         if result:
             parts.append(f"[autoresearch plugin] {result}")
-    for proposal in STORE.unshown(session_id or "", now):
+    for proposal in STORE.unshown(key, now):
         parts.append(
             f"[autoresearch plugin] Proposal {proposal.id} was never shown to the coach (the "
             "turn that made it ended without a reply), so it cannot be confirmed yet. The "
@@ -619,8 +718,10 @@ def chat_turn(session_id: str | None, user_message, is_first_turn: bool) -> str:
 
 def transform(session_id: str | None, response_text: str, turn_id: str | None) -> str | None:
     """``transform_llm_output`` for a chat turn: the reply with the plugin's lines appended
-    (sent lines, then unshown proposals, now marked shown), or None when there are none."""
-    lines = STORE.show(session_id or "", turn_id or "", _now())
+    (queued notes, then every pending proposal's rendering, which marks it shown), or None
+    when there are none. Every pending proposal is shown again on each reply, so the last
+    rendering of an id the coach sees is always the plugin's."""
+    lines = STORE.show(chat_key(session_id), turn_id or "", _now())
     if not lines:
         return None
     _log({"event": "shown", "session_id": session_id, "turn": turn_id, "lines": len(lines)})

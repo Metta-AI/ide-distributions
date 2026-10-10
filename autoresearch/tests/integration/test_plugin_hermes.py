@@ -183,6 +183,14 @@ def _events(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def _wait_inbound(canonical: Path, kind: str) -> list[dict]:
+    """The committed inbound messages of ``kind``, waiting for the plugin's background send."""
+    deadline = time.monotonic() + 120
+    while not (found := _inbound(canonical, kind)) and time.monotonic() < deadline:
+        time.sleep(2)
+    return found
+
+
 def _inbound(canonical: Path, kind: str) -> list[dict]:
     listed = subprocess.run(
         ["git", "-C", str(canonical), "ls-tree", "--name-only", "HEAD", "comms/inbox/"],
@@ -306,12 +314,12 @@ def test_coach_chat_routes_by_platform(chat_gateway):
 
     # (c) the coach's confirm line sends it, as the coach
     _chat(base, f"confirm {proposal}")
-    [steer] = _inbound(canonical, "steer")
+    [steer] = _wait_inbound(canonical, "steer")
     assert steer["author"] == "coach:ply_fake" and "kill" in steer["text"].lower()
 
     # (d) /pause-research reaches the run and becomes a control inbound
     _chat(base, "/pause-research")
-    [control] = _inbound(canonical, "control")
+    [control] = _wait_inbound(canonical, "control")
     assert control["action"] == "pause" and control["author"] == "coach:ply_fake"
 
     # A Kanban card's worker keeps the research toolset: it can run the terminal.

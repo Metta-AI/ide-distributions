@@ -413,14 +413,18 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
 - **Tools.** Config (C9 rows, re-applied by bootstrap) gives `api_server` only the toolset
   `autoresearch_coach` and none of the shipped skills, and keeps that toolset off for `cli`
   (`platform_toolsets.api_server`, `known_plugin_toolsets.cli`,
-  `skills.platform_disabled.api_server`). The tools are fixed-argv read commands of the
+  `skills.platform_disabled.api_server`; bootstrap adds the coach toolset to
+  `known_plugin_toolsets.cli` and keeps the other entries Hermes wrote there). The tools are fixed-argv read commands of the
   profile CLI, with no shell (`list_messages`, `get_message`, `message_status`,
   `resolve_ref`, `list_cards`, `show_card`, `find_records`, `show_record`,
   `promotion_status`, `status`, `baseline_report`; output cut to 12,000 characters), and
   `propose_inbound`. Because Hermes's config load fails open to the full default toolset, the
   plugin's `pre_tool_call` also blocks every other tool in a chat session (Hermes's
   tool-search bridge passes only as far as it reaches coach tools), and the coach tools refuse
-  outside one or under `HERMES_KANBAN_TASK`.
+  outside one or under `HERMES_KANBAN_TASK`. A chat turn gets at most 8 tool rounds (model
+  calls with tools). The tool names are the design's (`status`, `list_cards`, ...); since they
+  are generic, the plugin checks that Hermes's tool registry maps each to its own handler, and
+  if another plugin owns any of them, every coach tool is refused and the chat says so.
 - **Profile environment.** The tools run inside the one multiplexed gateway process. They
   find the routed profile with Hermes's `get_hermes_home()` at call time, refuse unless it
   carries this plugin (`plugins/autoresearch/plugin.yaml`) and a `.env`, and run
@@ -430,14 +434,21 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
   `propose_inbound(kind, payload, summary)` (`task`, `steer`, `reply` or `control`; only the
   kind's schema fields) validates the payload with `comms inbound --dry-run` and keeps the
   proposal in plugin memory for 15 minutes, bound to the session. The plugin's
-  `transform_llm_output` hook appends its own rendering, built from the payload (never from
-  the model's summary), to the reply: `Proposal P-xxxx: ... To send exactly this, reply:
-  confirm P-xxxx`. Only after that is it confirmable. When the coach's whole line (surrounding
+  `transform_llm_output` hook appends its own rendering to the reply: the payload exactly as
+  it will be sent, as JSON in a fenced code block (so Markdown or HTML in a value shows as
+  text), with control and format characters such as bidi overrides and zero-width spaces shown
+  as `\uXXXX` escapes, never the model's summary, ending `To send exactly this, reply: confirm
+  P-xxxx`. Only after that is it confirmable, and it is appended again to every reply while it
+  is pending, so the plugin's rendering is always the last one shown for that id. When the coach's whole line (surrounding
   whitespace stripped) is `confirm P-xxxx` in that session, the plugin runs `comms inbound
-  <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once, and appends
-  `Sent P-xxxx as I-...`. `cancel P-xxxx` drops it. Any other line, another session, an
-  expired, cancelled or never-shown proposal sends nothing. A gateway restart drops all
-  proposals.
+  <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once. The send runs
+  on a plugin thread (it can wait for the canonical lock longer than Hermes's 30 s hook
+  timeout); the turn says "Sending P-xxxx", and the next reply carries `Sent P-xxxx as I-...`
+  or the failure. `cancel P-xxxx` drops it. Any other line, another session, an
+  expired, cancelled or never-shown proposal sends nothing. State is keyed by profile and
+  session. A gateway restart drops all proposals and any send outcome not yet shown. A context
+  compression inside a turn starts a new session id: the coach tools refuse for the rest of
+  that turn (fails closed) and the next turn records the new id and injects the brief again.
 - **Budget.** `AUTORESEARCH_CHAT_DAILY_USD` (default 3) per UTC day, from the rise of the chat
   sessions' Hermes cost since the day's first snapshot (`$PROFILE/local/chat-spend.json`,
   module `runtime/state_db.py`). Over it, every coach tool but `status` refuses. A spend that
@@ -466,7 +477,8 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
   pinned image (the coach chat, [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md)
   "Verified in Task 5 Step 4"); other gateway paths are not (hermes-facts.md, item 2).
 - **The coach chat's proposal text reaches the coach through the reply.** The plugin appends
-  its rendering, but the model's own words around it could still misdescribe it, and a reply
+  its rendering (again on every reply while pending), but the model's own words above it could
+  still misdescribe it, and a reply
   the bridge replaces ("Stopped at your request.") marks a rendering shown that the coach
   never saw (safe: the coach cannot type an id they did not see). A deterministic bridge-side
   rendering is a later bridge change (coach-chat-role.md §3.1). Everything in the sandbox runs

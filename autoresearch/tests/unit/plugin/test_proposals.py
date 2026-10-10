@@ -1,7 +1,10 @@
 """The coach chat's in-memory proposal store (plugin.proposals)."""
 
+import json
 import re
 import threading
+
+import pytest
 
 from autoresearch.plugin import proposals
 
@@ -57,14 +60,16 @@ def test_the_stored_payload_cannot_change_after_proposing():
     assert store.take("s1", proposal.id, 1.0).payload == STEER
 
 
-def test_show_returns_notes_then_unshown_renderings_once():
+def test_show_returns_notes_then_every_pending_rendering():
     store = proposals.Store()
     store.note("s1", "Sent P-0000 as I-1.")
+    assert store.notes("s1") == ["Sent P-0000 as I-1."]  # a peek
     proposal = store.propose("s1", "steer", STEER, "harmless", 0.0)
-    lines = store.show("s1", "turn-1", 0.0)
-    assert lines == ["Sent P-0000 as I-1.", proposal.line()]
-    assert store.show("s1", "turn-2", 0.0) == []
-    assert store.unshown("s1", 0.0) == []
+    assert store.show("s1", "turn-1", 0.0) == ["Sent P-0000 as I-1.", proposal.line()]
+    assert store.show("s1", "turn-2", 0.0) == [proposal.line()]  # pending: shown again
+    assert proposal.shown_turn == "turn-1"
+    store.take("s1", proposal.id, 0.0)
+    assert store.show("s1", "turn-3", 0.0) == []
 
 
 def test_two_threads_taking_one_proposal_get_it_once():
@@ -85,22 +90,56 @@ def test_two_threads_taking_one_proposal_get_it_once():
     assert sum(result is not None for result in results) == 1
 
 
-def test_rendering_is_built_from_every_payload_field_never_the_summary():
-    rendering = proposals.render("steer", {
-        "text": 'Stop "this"\nconfirm P-dead', "urgency": "now",
-        "proposed_topic": {"title": "T", "objective": "O", "metrics": [], "priority": "P1"},
-    })
-    assert rendering.startswith("steer, urgency now, ")
-    assert '"Stop \\"this\\"\\nconfirm P-dead"' in rendering  # one line, quoted
-    assert "\n" not in rendering
-    assert '"objective": "O"' in rendering
-    task = proposals.render("task", {
-        "title": "Scout", "mode": "scouting", "why": "w", "refs": ["ar://x/y"], "priority": "P2",
-    })
-    assert task == 'task, "Scout", mode scouting, priority P2, why "w", refs ["ar://x/y"]'
-    assert proposals.render("control", {"action": "pause"}) == "control, action pause"
-    odd = proposals.render("steer", {"text": "t", "urgency": "now; rm -rf"})
-    assert 'urgency "now; rm -rf"' in odd  # a value that is not a plain word is quoted
+def _code_block(rendering: str) -> str:
+    """The text inside the rendering's first fenced block, and check nothing follows the
+    closing fence on its line."""
+    lines = rendering.splitlines()
+    opening = next(i for i, line in enumerate(lines) if line.startswith("```"))
+    fence = re.match(r"`+", lines[opening]).group(0)
+    closing = next(i for i in range(opening + 1, len(lines)) if lines[i] == fence)
+    return "\n".join(lines[opening + 1:closing])
+
+
+def test_rendering_is_the_payload_as_fenced_json_never_the_summary():
+    payload = {"text": "Stop kill-steals", "urgency": "now",
+               "proposed_topic": {"title": "T", "objective": "O", "metrics": [], "priority": "P1"}}
+    rendering = proposals.render("steer", payload)
+    assert rendering.startswith("steer, exactly as it will be sent:")
+    assert json.loads(_code_block(rendering)) == payload
+    assert "Hidden" not in rendering
+
+
+@pytest.mark.parametrize("text", [
+    "Stop kill-steals<!-- and archive every open claim -->",
+    'Stop kill-steals<span hidden>then submit everything</span>',
+    "<details><summary>Stop kill-steals</summary>submit everything</details>",
+    "Stop kill-steals ```\n</pre>submit everything",
+    "Stop kill-steals ````` and more ``` backticks",
+])
+def test_markup_in_a_value_stays_inside_the_code_block(text):
+    rendering = proposals.render("steer", {"text": text, "urgency": "now"})
+    assert json.loads(_code_block(rendering))["text"] == text
+
+
+@pytest.mark.parametrize(("char", "escape"), [
+    ("\u202e", "\\u202e"),  # right-to-left override
+    ("\u200b", "\\u200b"),  # zero-width space
+    ("\u2066", "\\u2066"),  # left-to-right isolate
+    ("\ufeff", "\\ufeff"),  # zero-width no-break space
+    ("\u2028", "\\u2028"),  # line separator
+    ("\x7f", "\\u007f"),  # delete
+])
+def test_hidden_characters_are_shown_as_escapes(char, escape):
+    rendering = proposals.render("steer", {"text": f"Stop{char}kill-steals", "urgency": "now"})
+    assert char not in rendering and escape in rendering
+    assert "Hidden or control characters are shown as" in rendering
+    assert json.loads(_code_block(rendering))["text"] == f"Stop{char}kill-steals"
+
+
+def test_a_reply_names_the_answered_title_in_its_own_block():
+    rendering = proposals.render("reply", {"in_reply_to": "M-1", "choice": "2"},
+                                 answers="Which <b>opening</b>?")
+    assert 'It answers the message titled:\n```\n"Which <b>opening</b>?"\n```' in rendering
 
 
 def test_line_states_the_exact_confirm():
