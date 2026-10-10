@@ -550,7 +550,8 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
   whitespace stripped) is `confirm P-xxxx` in that session, the plugin runs `comms inbound
   <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once. The send runs
   on a plugin thread (it can wait for the canonical lock longer than Hermes's 30 s hook
-  timeout); the turn says "Sending P-xxxx", and the next reply carries `Sent P-xxxx as I-...`
+  timeout). Sends to one profile run one at a time, in the order the coach typed them (one
+  queue per profile), so a slow pause can never land after a later resume; the turn says "Sending P-xxxx", and the next reply carries `Sent P-xxxx as I-...`
   or the failure. The send runs in its own process group, killed whole after 300 s; a send that
   timed out or broke unexpectedly is reported as "may or may not have been sent", never as
   "nothing was sent"; only a validation answer or a bad-arguments exit from the CLI is reported

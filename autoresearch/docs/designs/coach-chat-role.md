@@ -16,7 +16,7 @@ shim switch in section 5 are not built. Where the build differs from this text:
   `tool_call` whose calls are all coach tools.
 - Renderings are fenced JSON with hidden and default-ignorable characters escaped (valid JSON
   escapes), shown again on every reply while pending, first in the reply before the model's text
-  (which is HTML-escaped throughout). Sends run on a plugin thread (Hermes bounds hooks at 30 s). State is keyed by
+  (which is HTML-escaped throughout). Sends run on a plugin thread (Hermes bounds hooks at 30 s), one at a time per profile in the order typed. State is keyed by
   profile home and session id. The tool names stay as designed; the plugin checks Hermes's
   registry maps each to its handler and refuses all coach tools otherwise. A turn gets at most
   8 tool rounds.

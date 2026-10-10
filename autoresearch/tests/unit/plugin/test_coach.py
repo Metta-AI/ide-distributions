@@ -96,6 +96,7 @@ def chat(tmp_path, monkeypatch):
     monkeypatch.setattr(coach, "_sessions", {})
     monkeypatch.setattr(coach, "_rounds", {})
     monkeypatch.setattr(coach, "_sends", [])
+    monkeypatch.setattr(coach, "_send_queues", {})
     return types.SimpleNamespace(home=home, root=tmp_path / "root", resolver=resolver, cli=fake)
 
 
@@ -419,6 +420,24 @@ def test_pause_and_resume_lines_send_control(chat, action):
     assert send == [CLI, "comms", "inbound", "control", "--json", json.dumps({"action": action}),
                     "--author", "coach:ply_t"]
     assert f"Sent /{action}-research as I-SENT0." in _reply()
+
+
+def test_sends_go_out_in_the_order_the_coach_typed_them(chat, monkeypatch):
+    """A slow first send must not land after a later one: a final pause would otherwise leave
+    research running. Sends to one profile go through one FIFO worker."""
+    fake = chat.cli
+
+    def slow_pause(argv, env, cwd, timeout):
+        if '{"action": "pause"}' in argv:
+            time.sleep(0.3)
+        return fake(argv, env=env, cwd=cwd, timeout=timeout)
+
+    monkeypatch.setattr(coach, "spawn", slow_pause)
+    _turn(line="/pause-research")
+    _turn(line="/resume-research")
+    _settled()
+    actions = [json.loads(argv[argv.index("--json") + 1])["action"] for argv in fake.sends()]
+    assert actions == ["pause", "resume"]
 
 
 def test_a_control_line_does_not_promise_a_minute_while_a_pause_skips_routing(chat):

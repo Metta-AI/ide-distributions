@@ -45,7 +45,9 @@ text).
 
 import datetime
 import json
+import logging
 import os
+import queue
 import re
 import signal
 import subprocess
@@ -93,7 +95,10 @@ STORE = proposals.Store()
 _sessions: dict[str, float] = {}  # chat key (profile home + session id) -> last turn time
 _sessions_lock = threading.Lock()
 _rounds: dict[str, tuple[str, set[str], int]] = {}  # chat key -> (turn id, api requests, calls)
-_sends: list[threading.Thread] = []  # send workers (tests join them)
+_sends: list[threading.Event] = []  # one per queued send, set when it is done (tests wait)
+# Profile home -> the FIFO of its sends. One daemon worker drains each, so sends to a profile
+# go out in the order the coach typed them (``_send_in_background``).
+_send_queues: dict[Path, queue.Queue] = {}
 _spend_lock = threading.Lock()
 
 
@@ -629,12 +634,28 @@ def _note(key: str, text: str) -> None:
     STORE.note(key, text.replace("&", "&amp;").replace("<", "&lt;").replace("[", "\\["))
 
 
+def _drain(sends: queue.Queue) -> None:
+    """The send worker of one profile: run its sends one at a time, in the order queued. A
+    send that breaks does not stop the worker (``work`` reports every outcome)."""
+    while True:
+        work, done = sends.get()
+        try:
+            work()
+        except Exception:  # keep draining: a later send must still go out
+            logging.getLogger(__name__).exception("coach send worker: a send broke")
+        finally:
+            done.set()
+
+
 def _send_in_background(key: str, where, label: str, kind: str, payload: dict, event: dict):
-    """Run the send on a plugin thread, so ``pre_llm_call`` returns inside Hermes's hook
-    timeout (v0.21.6 ``hermes_cli/plugins_dispatch.py``: 30 s by default, and a callback that
-    times out is skipped for 60 s). The outcome goes out as a note: shown in the plugin block
-    of the next chat reply and named in the next turn's context. The caller already took the proposal, so a
-    second confirm can never send it again."""
+    """Queue the send for its profile's worker thread, so ``pre_llm_call`` returns inside
+    Hermes's hook timeout (v0.21.6 ``hermes_cli/plugins_dispatch.py``: 30 s by default, and a
+    callback that times out is skipped for 60 s). The send is queued here, in the order the
+    coach typed the lines, and one FIFO worker per profile home runs them in that order: the
+    inbound id and time are made inside the CLI, so two concurrent sends could land reversed
+    (a pause, then a resume, applied as resume, pause). The outcome goes out as a note: shown
+    in the plugin block of the next chat reply and named in the next turn's context. The
+    caller already took the proposal, so a second confirm can never send it again."""
 
     def work():
         try:
@@ -655,19 +676,26 @@ def _send_in_background(key: str, where, label: str, kind: str, payload: dict, e
         _note(key, f"Sent {label} as {inbound_id}.")
         _log({**event, "event": "sent", "inbound": inbound_id}, where)
 
-    worker = threading.Thread(target=work, name=f"coach-send-{label}", daemon=True)
+    home, _ = where
+    done = threading.Event()
     with _sessions_lock:
-        _sends[:] = [thread for thread in _sends if thread.is_alive()]
-        _sends.append(worker)
-    worker.start()
+        _sends[:] = [pending for pending in _sends if not pending.is_set()]
+        _sends.append(done)
+        sends = _send_queues.get(home)
+        if sends is None:
+            sends = _send_queues[home] = queue.Queue()
+            threading.Thread(
+                target=_drain, args=(sends,), name=f"coach-send-{Path(home).name}", daemon=True
+            ).start()
+        sends.put((work, done))
 
 
 def wait_for_sends(timeout: float = 30.0) -> None:
-    """Join the running send workers (tests; a clean shutdown)."""
+    """Wait for the queued sends to finish (tests; a clean shutdown)."""
     with _sessions_lock:
-        workers = list(_sends)
-    for worker in workers:
-        worker.join(timeout)
+        pending = list(_sends)
+    for done in pending:
+        done.wait(timeout)
 
 
 def _confirm(key: str, proposal_id: str, now: float) -> str:
