@@ -47,6 +47,20 @@ What each kind means is its schema's `x-autoresearch.summary` and `title`.
 | `steer` | inbound | `inbound/steer.json` |
 | `task` | inbound | `inbound/task.json` |
 
+## Runtime messages about the coach's IDE Controls
+
+On Softmax hosting, the runtime publishes these when Softmax refuses what the agent asked for
+until the coach acts (all `from: runtime`; builders in `autoresearch.comms.runtime_messages`;
+`about` holds the ids, `runtime_key` makes each one publish once). No new kind: they are
+`help_request` or `note`. The behavior behind them is in `README.md`, "Operate".
+
+| Title | Kind | `runtime_key` | `about` |
+| --- | --- | --- | --- |
+| Waiting for your approval in the IDE Controls (and "Still waiting ..." once, 24 hours later) | `help_request` | `permit-needed:<subject>:<ask set>` (`:reminder`) | `experiment_batch` or `promotion`, `asks`, `league` |
+| Choose the agent's league in the IDE Controls | `help_request` | `league-not-chosen:<league>:<none or elsewhere>` | `league`, `server_reason` |
+| XP requests could not be sent: relaunches keep failing | `help_request` | `relaunch-stuck:<relaunch marker>` | `experiment`, `relaunch` |
+| Experiment stopped / Promotion dropped / No first champion (the coach said no) | `note` | `coach-declined:<subject>` | `experiment_batch` or `promotion` |
+
 ## Validating with these schemas
 
 With `jsonschema` 4.18 or later, in Python. Run it from the `autoresearch/` directory of an

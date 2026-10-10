@@ -21,7 +21,8 @@ path (Plan 03 Task 3.3, Overview C6/C8, amendment A9).
 Then ``promotion.submit_promotion`` does the C8 steps: acquire, champion == baseline, intent
 (committed and pushed with the candidate branch), Softmax submit, submitted, and stages the
 candidate STRATEGY at the champion path in the worker's worktree. Its refusals become
-``promotion_refused``, except the coach's: ``permit_required`` (the IDE Controls ask before
+``promotion_refused``, except ``coach_declined`` (the coach declined an earlier promotion of
+this experiment or version: nothing is sent and no new ask is filed) and the coach's: ``permit_required`` (the IDE Controls ask before
 league submissions) and ``league_not_chosen`` (the coach chose no league, or another one). Then
 the promotion stays at ``intent`` and the runtime asks the coach and retries the same submit
 (``promotion``, "Waiting for the coach"); the card does not submit again. On success the

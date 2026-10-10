@@ -96,7 +96,7 @@ so each refused request goes again with the same body and idempotency key and th
 grants it against its yes. ``xp create`` refuses any other batch while the asks are open.
 
 Every open ask is read again on every run (``permit_answers``): the coach can change a yes or a
-no until the act uses it, so only ``used`` is final and kept in ``runtime/permit_answers.json``
+no until the act uses it, so only ``used`` is final and kept in ``.supervisor/runtime/permit_answers.json``
 (a later no to a cached yes would otherwise go unseen). New asks on a relaunch (a yes the price outgrew) are a new
 set, so they get their own help request; asks that only drop out as their requests are created
 do not.

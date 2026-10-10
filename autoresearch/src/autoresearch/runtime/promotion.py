@@ -12,6 +12,8 @@ promotion (C4), both rewritten in the same commit on every transition. Stages:
     intent --reconcile: holder terminal, submission found--> submitted
     intent (waiting for the coach) --reconcile: the retried submit succeeds, or the
         submission is found on Softmax--> submitted
+    intent (waiting for the coach) --reconcile: the coach answered no--> aborted
+        (DECLINED_NOTE; never promoted again)
     intent --ledger push failed (record_intent)--> acquired
     submitted --reconcile: the league rejected the submission (A9)--> rejected
 

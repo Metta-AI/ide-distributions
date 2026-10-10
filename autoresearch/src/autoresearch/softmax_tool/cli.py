@@ -20,10 +20,11 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   ``champion_conflict``, ``champion_unknown``, ``baseline_not_champion``, and nothing is
   created): an experiment whose baseline is not the champion can never promote. It prints
   ``{created, existing, missing, pairing, credit_denied, permit_required,
-  league_not_chosen}``. A credit denial stops the batch
+  league_not_chosen}``, plus ``permit_declined``, ``permit_asks`` and ``credits_short`` on a
+  refusal of the coach's. A credit denial stops the batch
   with exit 0 and ``credit_denied: true``: requests already created stay (and are
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
-  ``awaiting-credits`` (from ``uploaded|evaluating``) and ``lifecycle.next_launch_after`` is set
+  ``awaiting-credits`` (from ``uploaded|evaluating|awaiting-permit``) and ``lifecycle.next_launch_after`` is set
   by ``credit_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
   the worker's environment, read before any request is created; it is read in worker terminals
   only, which see the whole profile ``.env``, so it is deliberately not on
@@ -76,6 +77,8 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   experiment's candidate. The coach's refusals are ``permit_required`` and
   ``league_not_chosen`` (exit 1): the promotion stays at ``intent`` and the runtime asks the
   coach and retries the same submit (``runtime.promotion``, "Waiting for the coach").
+  ``coach_declined`` (exit 1) refuses an experiment or version whose promotion the coach
+  already declined, before anything is acquired or sent.
 - ``bootstrap-champion --build-dir D``: ``softmax_tool.submit.bootstrap_champion``, the
   first champion on a fresh install (A14): with no champion (the league shows no policy
   competing for our player, A9), upload the game's starter policy build and promote it through the C8
@@ -127,7 +130,7 @@ preflight pauses the agent), every command fails with ``identity``. The ``.env``
 source of identity, because a worker could write it.
 
 Prints one JSON envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false, "error": {"reason",
-"message", "details"?}}``. Exit codes: 0 done (including a credit denial), 1 refused or failed
+"message", "details"?}}``. Exit codes: 0 done (including a credit denial or a refusal by the coach), 1 refused or failed
 (``identity``, a guard's reason, ``platform``, ...), 2 bad arguments or no profile context,
 3 the pinned softmax/coworld executable is missing.
 """

@@ -157,7 +157,7 @@ hermes -p autoresearch cron list
 | Job | Runs | Does |
 |---|---|---|
 | `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. A card the runtime did not create is never merged, in any board epoch: a board task with no card body (for example one a model added with `kanban_create`), or a handoff whose request has no committed `cards/requests/<Q-id>.json` (a receipt its worker wrote). It gets one help request that says how to archive it, and the marker `.supervisor/ledger/foreign/<task>.json`; the spend caps still apply to it while it runs. Its card branch is still pushed to `origin` with the others (`refs/heads/card/*`), unmerged. `main` is pushed on its own and never forced; card branches are force-pushed (a retried card rebuilds its branch, so origin's copy is stale), and a card ref origin still refuses is logged once in `keeper.log`. One card that fails (unreadable on the board, or a blocked card the board will not requeue) does not stop the other cards in the same step; the step is still logged as failed. A merge or publication that fails and leaves canonical unchanged is handled the same way; one that leaves it changed stops the step, and the next run repairs it. If the board cannot list its foreign cards, the spend caps still apply to the other cards. A Hermes status the runtime does not know reads as claimed. |
-| `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
+| `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. It also relaunches an experiment that waits for credits (`awaiting-credits`) or for the coach (`awaiting-permit`, see the IDE Controls paragraphs in Operate), reads the coach's answers, and stops an experiment the coach declined. Log: `.supervisor/runtime/xp_poll.log`. |
 | `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
 To start a `queue-keeper` run now instead of waiting for the schedule:
@@ -243,6 +243,7 @@ Where things live:
 | Commit provenance journal and its key (not committed) | `$PROFILE/workspace/.git/autoresearch/provenance.jsonl`, `provenance.key` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
+| Permit asks whose yes was already used (xp-poll's cache; disposable, one small entry per ask) | `$PROFILE/workspace/.supervisor/runtime/permit_answers.json` |
 | Hermes logs, cron output | `$PROFILE/logs/`, `$PROFILE/cron/` |
 | Card worktrees | `$PROFILE/workspace/.worktrees/` |
 | venv and CLI shim | `$PROFILE/local/venv/`, `$PROFILE/bin/autoresearch` |
@@ -309,8 +310,9 @@ govern it. Two of their settings can make Softmax refuse what the agent asks (HT
 the agent then waits for the coach instead of failing:
 
 - **Ask before** (`askBefore`) for spending credits (XP requests) or league submissions.
-  Softmax files a permit ask for each request and holds it; until the coach saves rules for
-  the agent, Softmax asks before every action. The agent tries every request of an XP batch
+  Softmax files a permit ask for each request and holds it. Once the coach has set the agent
+  up (chosen a league or saved rules), Softmax asks before every action until the coach saves
+  rules. The agent tries every request of an XP batch
   in one run, so all of the batch's asks appear at once, and the coach gets one help request
   per batch, "Waiting for your approval in the IDE Controls", with the number of asks. The
   coach approves them there. To stop the asking per request, remove `spend` from Ask before
@@ -325,11 +327,12 @@ The runtime reads the coach's answers itself, every run, with the agent token
 (`GET /v2/cogents/<player>/c/asks/<key>`), so waiting costs no model calls:
 
 - An XP batch the coach refused leaves its experiment `awaiting-permit` (with
-  `lifecycle.permit_wait`). When every ask of the batch is approved, xp-poll requests one
+  `lifecycle.permit_wait`; `awaiting-credits` is the same wait for a credit refusal, and
+  `stopped` is where a no ends it, below). When every ask of the batch is approved, xp-poll requests one
   relaunch card at once; it sends each refused request again with the same body and
   idempotency key (the card names the exact `--batch`, `--attempt` and `--batches`, and
-  `xp create` refuses any other batch while the asks wait, and refuses with
-  `permit_league_changed` if the game's league configuration changed meanwhile), so Softmax
+  `xp create` refuses any other batch while the asks wait with `permit_batch_mismatch`, and
+  refuses with `permit_league_changed` if the game's league configuration changed meanwhile), so Softmax
   grants it against its yes and creates nothing twice. Every ask stays tracked until its
   request is created: each refusal is saved before the next request is sent, a rerun that
   stops early (credits ran out, or a no) keeps the asks it did not reach, and a new ask
@@ -346,8 +349,8 @@ The runtime reads the coach's answers itself, every run, with the agent token
   (`"$AUTORESEARCH_CLI" promotion status` shows it). After the yes, queue-keeper's reconcile
   submits the same policy version once; no other promotion starts meanwhile.
 - **A no ends it.** An experiment with a declined ask goes `stopped` (its results so far are
-  kept, unreviewed, and `softmax xp create` refuses it; the batch stops at the first refusal
-  that reports the no); a declined submission drops its
+  kept, unreviewed, and `softmax xp create` refuses it with `experiment_closed`; the batch
+  stops at the first refusal that reports the no); a declined submission drops its
   promotion (`aborted`, the slot is free; no repair card is made for its holder, and
   `softmax submit` refuses that experiment or version again with `coach_declined`). Either way the coach gets one note, and nothing is
   asked or retried again for it. A declined first champion (the starter policy) leaves no
