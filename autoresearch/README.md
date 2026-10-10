@@ -550,8 +550,8 @@ new image, which is a host replacement with workspace moves. Two things to know:
 - **A failed update keeps serving.** The runtime logs it, leaves a `.softmax-update-failed` marker and carries on with the
   installed profile; `status` reports it. `hermes profile update` copies files in steps, so a failed update
   can leave the profile partly updated. That is a known gap until M4.
-- **Replacing the earlier `rohit-optimizer` profile moves its Hermes state aside.** Ours is installed fresh
-  into a staging directory first. Only when that install succeeds is the old profile moved to
+- **Replacing the earlier `rohit-optimizer` profile moves its Hermes state aside.** This is the behavior in the
+  hosting runtime PRs (Metta-AI/metta #27216), not yet deployed. Ours is installed fresh into a staging directory first. Only when that install succeeds is the old profile moved to
   `/opt/data/profiles/.optimizer-replaced-<UTC time>` and ours renamed into its place. The agent therefore
   starts without the earlier chat context, while the IDE can still show the old transcript. If the install
   fails, the runtime logs it and the `rohit-optimizer` profile stays in place and keeps serving chat; the next
