@@ -898,11 +898,14 @@ def permit_needed(
     league_id: str | None = None,
     over_cap: bool = False,
     refs: list | None = None,
+    reminder: bool = False,
 ) -> RuntimeMessage:
     """Softmax holds ``count`` acts until the coach answers their permit asks (403
     ``permit_required``: the IDE Controls ask before them). ``act`` is ``xp`` (``subject``:
     ``<E>:b<batch>:a<attempt>``, every refused request of one batch) or ``submit``
-    (``subject``: the promotion id). One per subject, however often it is refused again."""
+    (``subject``: the promotion id). One per subject and set of ``asks``, however often it is
+    refused again: new asks (a yes the price outgrew) are a new message. ``reminder``: the one
+    reminder about the same asks, sent once a day after the first."""
     if act == "xp":
         what = (
             f"The agent asked Softmax for {count} hosted XP request(s) to evaluate one of its "
@@ -915,9 +918,9 @@ def permit_needed(
         )
         if over_cap:
             what += (
-                " Some of them cost more than the credits left today under your daily limit: "
-                "a yes covers them only after the UTC day turns, or once you raise the daily "
-                "credits."
+                " Some of them cost more than the credits left today under your daily limit, "
+                "so the agent waits for the next UTC day before it tries them again, whatever "
+                "you answer before then."
             )
     else:
         what = (
@@ -927,16 +930,19 @@ def permit_needed(
             "every minute and submits once you approve, never twice. If you answer no, the "
             "promotion is dropped and nothing more is asked for it."
         )
-    body = (
-        f"{what} {_STOP_ASKING[act]} The asks are in this message's details (`about`)."
-    )
+    body = f"{what} {_STOP_ASKING[act]} The asks are in this message's details (`about`)."
+    title = "Waiting for your approval in the IDE Controls"
+    if reminder:
+        body = f"A reminder: these asks have waited a day for your answer. {body}"
+        title = "Still waiting for your approval in the IDE Controls"
+    ask_set = hashlib.sha256("|".join(sorted(asks)).encode()).hexdigest()[:12]
     return RuntimeMessage(
         "help_request",
-        "Waiting for your approval in the IDE Controls",
+        title,
         body,
         refs or [],
         about=_subject_about(act, subject, asks=", ".join(asks), league=league_id),
-        key=f"permit-needed:{subject}",
+        key=f"permit-needed:{subject}:{ask_set}" + (":reminder" if reminder else ""),
     )
 
 
@@ -976,8 +982,10 @@ def league_not_chosen(
 def coach_declined(
     act: str, subject: str, done: int = 0, total: int = 0, refs: list | None = None
 ) -> RuntimeMessage:
-    """The coach answered no to a permit ask: the experiment is stopped (``xp``), or the
-    promotion dropped (``submit``). One per subject; nothing is asked again for it."""
+    """The coach answered no to a permit ask: the experiment is stopped (``xp``), the
+    promotion dropped (``submit``), or the first champion's submission dropped
+    (``bootstrap``: the starter policy; research waits for a champion). One per subject;
+    nothing is asked again for it."""
     if act == "xp":
         body = (
             "You answered no to a permit ask for one of the agent's experiments, so the agent "
@@ -986,6 +994,17 @@ def coach_declined(
             "are still open in the IDE Controls can be left unanswered. Nothing needs to be done."
         )
         title = "Experiment stopped: you declined its XP requests"
+    elif act == "bootstrap":
+        body = (
+            "You answered no to the agent's submission of the game's starter policy as its first "
+            "champion. Nothing was submitted, and there is still no champion, so the agent's "
+            "research is paused: it cannot evaluate experiments without one, and it will not ask "
+            "again by itself. To allow a submission, have the operator run "
+            '`"$AUTORESEARCH_CLI" promotion accept-champion` in an operator shell; the agent then '
+            "submits the starter policy again and you get a new ask to approve (or none, if you "
+            "removed “submit” from Ask before in the IDE Controls)."
+        )
+        title = "No first champion: you declined the starter policy's submission"
     else:
         body = (
             "You answered no to the agent's league submission, so that promotion is dropped: "

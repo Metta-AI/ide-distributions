@@ -437,6 +437,18 @@ def test_xp_create_over_todays_cap_waits_for_the_next_utc_day(board, launch):
     assert datetime.fromisoformat(lifecycle["next_launch_after"]) >= not_before
 
 
+def test_xp_create_refuses_a_stopped_experiment(board, launch):
+    """N3: the coach declined it; creating again would only ask the coach again."""
+    worker, experiment = launch
+    worker.store.update(experiment, {"status": "awaiting-permit"})
+    worker.store.update(experiment, {"status": "stopped"})
+    env = base_env(board, worker, **{FAULTS_ENV: "permit=spend"})
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 1 and data["error"]["reason"] == "experiment_closed", data
+    path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    assert not path.exists() or not read_json(path).get("asks")  # nothing was asked
+
+
 def test_xp_create_league_choice_refusal_sets_awaiting_permit(board, launch):
     worker, experiment = launch
     env = base_env(board, worker, **{FAULTS_ENV: "league=league_other"})

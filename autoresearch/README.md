@@ -328,14 +328,20 @@ The runtime reads the coach's answers itself, every run, with the agent token
   `lifecycle.permit_wait`). When every ask of the batch is approved, xp-poll requests one
   relaunch card at once; it sends each refused request again with the same body and
   idempotency key, so Softmax grants it against its yes and creates nothing twice. A request
-  over today's cap waits for the next UTC day (a yes does not cover it before then, unless
-  the daily credits are raised).
+  over today's cap waits for the next UTC day, whatever the coach answers before then. A
+  relaunch whose price moved past an earlier yes gets new asks, and with them a new help
+  request.
 - A refused submission leaves its promotion at `intent` with `waiting` set
   (`"$AUTORESEARCH_CLI" promotion status` shows it). After the yes, queue-keeper's reconcile
   submits the same policy version once; no other promotion starts meanwhile.
 - **A no ends it.** An experiment with a declined ask goes `stopped` (its results so far are
-  kept, unreviewed); a declined submission drops its promotion (`aborted`, the slot is free).
-  Either way the coach gets one note, and nothing is asked or retried again for it.
+  kept, unreviewed, and `softmax xp create` refuses it); a declined submission drops its
+  promotion (`aborted`, the slot is free). Either way the coach gets one note, and nothing is
+  asked or retried again for it. A declined first champion (the starter policy) leaves no
+  champion, so research is paused: no new bootstrap runs until an operator runs
+  `"$AUTORESEARCH_CLI" promotion accept-champion`, as after a rejected one.
+- An ask still unanswered 24 hours after it was first sent gets one reminder help request,
+  never more.
 - Only when an answer cannot be read, and for a league refusal, does the agent fall back to a
   backoff: `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` (default 30) for experiments, 30 minutes for
   submissions, doubling, at most 8 hours. A retried submission that fails waits for the next

@@ -550,7 +550,7 @@ def test_a_permit_refusal_leaves_the_bootstrap_waiting_and_a_later_run_submits_i
     actions = reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=early)
     assert [a.kind for a in actions] == ["help_requested"]
     [asked] = _coach_messages(fresh)
-    assert asked["runtime_key"] == f"permit-needed:{waiting.id}"
+    assert asked["runtime_key"].startswith(f"permit-needed:{waiting.id}:")
     assert "Approve it in the IDE Controls" in asked["body"]
     assert "remove “submit” from Ask before" in asked["body"]
     assert asked["about"]["asks"] == detail["ask"]
@@ -641,3 +641,71 @@ def test_a_league_choice_refusal_of_the_bootstrap_asks_the_coach_to_choose(fresh
     assert asked["title"] == "Choose the agent's league in the IDE Controls"
     assert f"choose the {LEAGUE} league for the agent in the IDE Controls" in asked["body"]
     assert "first 30 minutes after the refusal" in asked["body"]
+
+
+def test_a_declined_bootstrap_blocks_new_bootstraps_until_accept_champion(fresh):
+    """N1: after the coach's no there is still no champion; a new bootstrap would upload again
+    and ask the coach again, so it waits for ``promotion accept-champion``, as after a
+    rejected one."""
+    _refused_bootstrap(fresh)
+    waiting = load(fresh.canonical)
+    _answer(fresh, waiting.waiting_detail["ask"], "no")
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    now = _minutes(waiting.waiting_detail["next_retry_after"], 1)
+    reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=now)
+    [_, note] = _coach_messages(fresh)
+    assert note["title"] == "No first champion: you declined the starter policy's submission"
+    assert "research is paused" in note["body"] and "promotion accept-champion" in note["body"]
+    assert "coach declined" in promotion.bootstrap_blocker(fresh.canonical)
+
+    again = started(fresh)
+    code, refused = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again"))
+    assert code == 1 and refused["error"]["reason"] == "champion_conflict"
+    assert len(uploads(fresh)) == 1  # nothing uploaded, nothing asked
+    record = promotion.accept_champion(fresh.ctx(), fresh.sm, LEAGUE)
+    assert record["after_rejected"] == waiting.id
+    assert promotion.bootstrap_blocker(fresh.canonical) is None
+
+
+def test_a_retry_after_a_yes_that_raises_waits_for_the_next_backoff_step(fresh, monkeypatch):
+    """N2: after the yes, a submit that raises is not repeated every minute."""
+    _refused_bootstrap(fresh)
+    waiting = load(fresh.canonical)
+    _answer(fresh, waiting.waiting_detail["ask"], "yes")
+    approved = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    calls = []
+
+    def broken_submit(policy_version_id, league_id):
+        calls.append(policy_version_id)
+        raise RuntimeError("Request failed (409): league is locked to new policy submissions")
+
+    monkeypatch.setattr(approved, "submit", broken_submit)
+    now = datetime.datetime.now(datetime.UTC)
+    with pytest.raises(RuntimeError, match="locked"):
+        reconcile(fresh.ctx(), fresh.queue, approved, LEAGUE, now=now)
+    for minute in (1, 2, 3):
+        later = now + datetime.timedelta(minutes=minute)
+        assert reconcile(fresh.ctx(), fresh.queue, approved, LEAGUE, now=later) == []
+    assert len(calls) == 1
+    due = datetime.datetime.fromisoformat(load(fresh.canonical).waiting_detail["next_retry_after"])
+    after_due = due + datetime.timedelta(seconds=1)
+    with pytest.raises(RuntimeError, match="locked"):
+        reconcile(fresh.ctx(), fresh.queue, approved, LEAGUE, now=after_due)
+    assert len(calls) == 2
+
+
+def test_a_waiting_submission_gets_one_reminder_after_a_day(fresh):
+    """N6: one reminder about the same ask a day after it was first asked, never more."""
+    _refused_bootstrap(fresh)
+    waiting = load(fresh.canonical)
+    since = datetime.datetime.fromisoformat(waiting.waiting_detail["since"])
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=since)
+    day = since + datetime.timedelta(hours=24, minutes=1)
+    actions = reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=day)
+    assert [a.kind for a in actions] == ["help_requested"]
+    week = since + datetime.timedelta(days=7)
+    assert reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=week) == []
+    _, reminder = _coach_messages(fresh)
+    assert reminder["title"] == "Still waiting for your approval in the IDE Controls"
+    assert load(fresh.canonical).stage == "intent"  # no timeout

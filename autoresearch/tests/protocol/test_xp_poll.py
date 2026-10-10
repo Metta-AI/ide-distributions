@@ -465,7 +465,7 @@ def test_permit_refusal_files_every_ask_asks_the_coach_once_and_relaunches_on_th
     first = _poll(host, at(1))
     assert first.help_requests == [experiment] and first.launches == []
     [asked] = _coach_messages(host)
-    assert asked["runtime_key"] == f"permit-needed:{experiment}:b1:a1"
+    assert asked["runtime_key"].startswith(f"permit-needed:{experiment}:b1:a1:")
     assert asked["kind"] == "help_request" and asked["expects_response"] is True
     assert f"Softmax filed {planned} permit ask(s)" in asked["body"]
     assert "remove “spend”" in asked["body"] and "“spend-over-N”" in asked["body"]
@@ -529,9 +529,82 @@ def test_over_the_cap_waits_for_the_utc_day_even_after_a_yes(host, monkeypatch):
     not_before = datetime.datetime.fromisoformat(wait["not_before"])
     assert _poll(host, not_before - datetime.timedelta(minutes=1)).launches == []
     [asked] = _coach_messages(host)
-    assert "after the UTC day turns" in asked["body"]
+    assert "waits for the next UTC day before it tries them again" in asked["body"]
     [launch] = _poll(host, not_before + datetime.timedelta(minutes=1)).launches
     assert experiment in launch.why
+
+
+def test_one_reminder_after_a_day_and_no_backoff_card_while_an_ask_is_known_to_wait(
+    host, monkeypatch
+):
+    """N6: an ask still waiting a day after the batch was refused gets one reminder, never
+    more; a known waiting ask holds back the backoff relaunch even when others are
+    unreadable."""
+    experiment, _, wait, backoff_end = _awaiting_permit(host, monkeypatch)
+    since = datetime.datetime.fromisoformat(wait["since"])
+    keys = [entry["ask"] for entry in wait["asks"]]
+    real = host.sm.permit_answer
+    monkeypatch.setattr(
+        host.sm, "permit_answer", lambda key: None if key == keys[0] else real(key)
+    )
+    assert _poll(host, backoff_end + datetime.timedelta(minutes=1)).launches == []
+    assert _poll(host, since + datetime.timedelta(hours=23)).help_requests == []
+    reminded = _poll(host, since + datetime.timedelta(hours=24, minutes=1))
+    assert reminded.help_requests == [experiment] and reminded.launches == []
+    assert _poll(host, since + datetime.timedelta(hours=48)).help_requests == []
+    first, reminder = _coach_messages(host)
+    assert reminder["title"] == "Still waiting for your approval in the IDE Controls"
+    assert reminder["runtime_key"] == first["runtime_key"] + ":reminder"
+
+
+def test_only_unanswered_asks_are_read_again(host, monkeypatch):
+    """N7: a yes (or a no) is final, so it is not read again on later runs."""
+    _, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _answer(host, "yes", keys[:-1])
+    reads = []
+    real = host.sm.permit_answer
+    monkeypatch.setattr(host.sm, "permit_answer", lambda key: reads.append(key) or real(key))
+    assert _poll(host, at(1)).launches == []
+    assert sorted(reads) == sorted(keys)
+    reads.clear()
+    assert _poll(host, at(2)).launches == []
+    assert reads == keys[-1:]  # only the one still waiting
+
+
+def test_new_asks_on_a_relaunch_get_a_new_help_request(host, monkeypatch):
+    """N5: a relaunch can be refused again with new asks (the server files ask n+1, as when the
+    price outgrew a yes); the new set is announced, not dropped as already published."""
+    experiment, refusing, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _answer(host, "yes", keys)
+    [launch] = _poll(host, at(1)).launches
+    host.tick(at(2))
+    worker = host.claim("experimentation")
+    assert worker.card.spec.request_id == launch.request_id
+    _answer(host, "used", keys[:1])  # this request's yes no longer covers it: a new ask
+    again = softmax_cli._xp_create(worker.ctx, refusing, _cli_args(experiment))
+    assert again["permit_required"] and [e["ask"] for e in again["permit_asks"]] != keys[:1]
+    worker.finish(outcome="partial")
+    host.tick(at(3))
+    assert host.store.load(experiment)[0]["status"] == "awaiting-permit"
+    assert _poll(host, at(4)).help_requests == [experiment]
+    first, second = _coach_messages(host)
+    assert first["runtime_key"] != second["runtime_key"]
+    assert "Softmax filed 1 permit ask(s)" in second["body"]
+
+
+def test_the_stop_note_counts_each_seed_and_arm_once(host, monkeypatch):
+    """N8: a pair with several attempts counts once, so the note never says more than all."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    entry = {"batch": 1, "seed": 1, "arm": "candidate", "policy": "p", "attempt": 1}
+    requests = [{**entry, "request_id": "xp_a"}, {**entry, "attempt": 2, "request_id": "xp_b"}]
+    host.store.update(experiment, {"xp_requests": requests})
+    host.runtime_commit("two attempts of one pair")
+    _answer(host, "no", [wait["asks"][0]["ask"]])
+    _poll(host, at(1))
+    note = _coach_messages(host)[-1]
+    assert "with 1 of its 4 XP requests run" in note["body"]
 
 
 def test_league_choice_refusal_sends_one_help_request_per_league(host, monkeypatch):

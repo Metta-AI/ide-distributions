@@ -34,7 +34,7 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   (``runtime.xp_poll.relaunch_due``). The coach's refusals (Softmax hosting) end with exit 0
   too, and the experiment goes ``awaiting-permit`` (from ``uploaded|evaluating|awaiting-credits``)
   with ``lifecycle.permit_wait`` = ``{kind, batch, attempt, batches, league_id, reason, asks,
-  refusals, retry_minutes, not_before}``. A permit refusal (the IDE Controls ask before XP
+  refusals, since, retry_minutes, not_before}``. A permit refusal (the IDE Controls ask before XP
   requests, ``permit_required: true``) does not stop the batch: every request is tried, so one
   run files every ask, and ``asks`` lists one ``{request, seed, arm, ask, state, reason}`` per
   refused request (``state``: ``waiting``, ``declined`` or ``over_cap``, from the server's
@@ -44,7 +44,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   sends the same body and idempotency key, so the server decides it against the same ask.
   ``lifecycle.next_launch_after`` is the fallback for when the answers cannot be read (and for
   a league refusal): the credit backoff, counted by ``refusals`` of the same asks only. A
-  credit denial of an ``awaiting-permit`` experiment moves it to ``awaiting-credits``.
+  credit denial of an ``awaiting-permit`` experiment moves it to ``awaiting-credits``. A
+  ``stopped`` experiment (the coach declined it) is refused (``experiment_closed``) before
+  anything is created.
   Rerunning the same ``--batch``/``--attempt`` later creates only the missing requests. A new
   attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
@@ -177,6 +179,8 @@ BACKOFF_BASE = timedelta(minutes=30)
 BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
 BACKOFF_CAP = timedelta(hours=8)
 LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
+# Statuses whose evaluation is over: ``xp create`` refuses them (``experiment_closed``).
+CLOSED_EXPERIMENT = ("stopped",)
 # ``xp create``'s refusal flags when nothing refused the batch.
 NOT_REFUSED = {"credit_denied": False, "permit_required": False, "league_not_chosen": False}
 
@@ -497,6 +501,7 @@ def _awaiting_coach(
     ) == keys
     # The fallback backoff counts the refusals of these asks only (a new wait starts over).
     refusals = int(previous.get("refusals", 0)) + 1 if same else 1
+    since = previous.get("since") if same and previous.get("since") else now.isoformat()
     after = now + credit_backoff(refusals, base)
     wait = {
         "kind": kind,
@@ -507,6 +512,7 @@ def _awaiting_coach(
         "reason": refusal.reason if refusal is not None else None,
         "asks": asks,
         "refusals": refusals,
+        "since": since,  # when the coach was first asked these asks (the reminder clock)
         "retry_minutes": int(base.total_seconds() // 60),
         "not_before": None,
     }
@@ -597,6 +603,12 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     store = worker_store(ctx)
     experiment = args.experiment
     meta, _ = store.load(experiment)
+    if meta.get("status") in CLOSED_EXPERIMENT:
+        # A stopped experiment's ask was declined: creating again would only ask the coach again.
+        raise Refused(
+            "experiment_closed",
+            f"{experiment} is {meta['status']}; its evaluation does not run again",
+        )
     binding = meta.get("candidate_binding")
     if not binding:
         raise Refused("no_binding", f"{experiment} has no candidate_binding; upload first")

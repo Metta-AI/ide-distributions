@@ -299,7 +299,10 @@ FIXTURES = {
         }
         for over_cap in (False, True)
     ]
-    + [{"act": "submit", "subject": PROMOTION, "count": 1, "asks": [ASK], "league_id": "league_x"}],
+    + [
+        {"act": "submit", "subject": PROMOTION, "count": 1, "asks": [ASK], "league_id": "league_x"},
+        {"act": "submit", "subject": PROMOTION, "count": 1, "asks": [ASK], "reminder": True},
+    ],
     "league_not_chosen": [
         {"act": act, "league_id": "league_x", "reason": reason, "retry_minutes": 30}
         for act in ("xp", "submit")
@@ -317,6 +320,7 @@ FIXTURES = {
     "coach_declined": [
         {"act": "xp", "subject": f"{EXPERIMENT}:b1:a1", "done": 2, "total": 40},
         {"act": "submit", "subject": PROMOTION},
+        {"act": "bootstrap", "subject": PROMOTION},
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [

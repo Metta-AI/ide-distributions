@@ -75,6 +75,8 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
   league and the loop disagree (A9). Nothing was launched. Record it and finish `blocked`
   (for a conflict the runtime already told the user; for no champion send a
   `help_request`).
+- Reason `experiment_closed`: the experiment is `stopped` (the coach declined its XP
+  requests). Nothing was created. Do not launch it again; record it and finish `done`.
 - Reason `empty_batch`: `--batches` is larger than the seeds allow. Use fewer batches.
 - Reason `attempt_incomplete`: an earlier attempt of the batch still lacks requests (for
   example after a credit denial). Rerun `xp create` with the attempt the message names. It

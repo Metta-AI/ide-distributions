@@ -70,7 +70,7 @@ submit for the coach: the IDE Controls ask before league submissions (403
 ``permit_required``, ``PermitRequired``), or the coach chose no league or another one
 (``LeagueNotChosen``). Nothing was submitted, and the server says so, so the promotion stays at
 ``intent`` with ``waiting`` (``permit`` or ``league``) and ``waiting_detail`` (``{reason, ask,
-state, league_id, refusals, next_retry_after, last_error?}``); the submit path returns
+state, league_id, refusals, next_retry_after, since, last_error?}``); the submit path returns
 ``code`` ``permit_required`` or ``league_not_chosen``. ``reconcile`` then owns it, whatever its
 holder does:
 
@@ -79,9 +79,13 @@ holder does:
 - every run, the coach's answer to the ask (``Softmax.permit_answer``, no model spend). A no
   (or a refusal the server already called declined) moves it to ``aborted`` with
   ``DECLINED_NOTE`` and one note (``coach_declined``): the slot is free, nothing is submitted
-  or asked again, and a board rebuild does not request its promotion again. A yes makes the
-  retry due at once; while the ask waits, nothing is retried. When the answer cannot be read
-  (and for a league wait) the retry waits for ``next_retry_after`` (30 minutes, doubling per
+  or asked again, and a board rebuild does not request its promotion again. A declined
+  bootstrap also blocks new bootstraps (``bootstrap_blocker``) until an operator runs
+  ``promotion accept-champion``, as after a rejected one. A yes makes the retry due at once
+  (after a failed retry, at ``next_retry_after``); while the ask waits, nothing is retried, and
+  an ask still waiting ``REMINDER_AFTER`` (24 hours) after the coach was first asked
+  (``waiting_detail.since``) gets one reminder help request, never more. When the answer
+  cannot be read (and for a league wait) the retry waits for ``next_retry_after`` (30 minutes, doubling per
   refusal, at most 8 hours, ``PERMIT_RETRY_BASE``/``PERMIT_RETRY_CAP``);
 - the retry, when no champion conflict is open: the submissions list first (a submission
   found settles it: ``submitted``) and else the same submit again (the same policy version and
@@ -166,6 +170,8 @@ MAX_RECOVERY_ATTEMPTS = 3
 # Retry wait of a submit the coach refused (module docstring, "Waiting for the coach").
 PERMIT_RETRY_BASE = datetime.timedelta(minutes=30)
 PERMIT_RETRY_CAP = datetime.timedelta(hours=8)
+# An ask still unanswered this long after the first help request gets one reminder, never more.
+REMINDER_AFTER = datetime.timedelta(hours=24)
 # The history note of a promotion aborted because the coach said no: it is not promoted again.
 DECLINED_NOTE = "the coach declined the submission"
 
@@ -686,16 +692,25 @@ def bootstrap_blocker(canonical: Path) -> str | None:
     league, "no champion" means that champion was lost, which a human must look at, unless a
     human already accepted "no champion" after it (``promotion accept-champion``). After the
     league rejected a bootstrap, a new bootstrap waits for a human too (it would resubmit
-    the same starter policy), unless the human ran ``accept-champion`` after the rejection."""
+    the same starter policy), unless the human ran ``accept-champion`` after the rejection.
+    The same holds after the coach declined a bootstrap's submission (``declined``): a new
+    bootstrap would only ask the coach again."""
     accepted = committed_json(canonical, accepted_path(canonical))
     current = load(canonical)
-    rejected_bootstrap = (
-        current is not None and current.stage == "rejected" and current.kind == "bootstrap"
+    closed_bootstrap = (
+        current is not None
+        and current.kind == "bootstrap"
+        and (current.stage == "rejected" or declined(current.to_dict()))
     )
-    if rejected_bootstrap and (accepted is None or accepted.get("after_rejected") != current.id):
+    if closed_bootstrap and (accepted is None or accepted.get("after_rejected") != current.id):
+        if current.stage == "rejected":
+            return (
+                f"the league rejected the starter policy of promotion {current.id}; a human "
+                "decides what to do (promotion accept-champion lets the agent try again)"
+            )
         return (
-            f"the league rejected the starter policy of promotion {current.id}; a human "
-            "decides what to do (promotion accept-champion lets the agent try again)"
+            f"the coach declined the submission of the starter policy (promotion {current.id}); "
+            "it waits for the coach (promotion accept-champion lets the agent try again)"
         )
     basis = latest_reached(canonical)
     if basis is None:
@@ -716,8 +731,8 @@ def accept_champion(ctx: RunContext, sm: Softmax, league_id: str) -> dict:
     """Operator resolution of a champion conflict (A9): accept the policy the league shows now
     (possibly none) as what the loop expects, until a newer promotion reaches the league
     (an in-flight promotion keeps it: the acceptance is tied to the latest one that may have
-    reached the league). After the league rejected a bootstrap, it also lets a new bootstrap
-    run (``after_rejected``).
+    reached the league). After the league rejected a bootstrap, or the coach declined its
+    submission, it also lets a new bootstrap run (``after_rejected``).
     Commits ``champion_accepted.json``; queue-keeper resumes on its next clean check."""
     on_board = sm.leaderboard_champion(sm.whoami().player_id, league_id)
     canonical = ctx.canonical
@@ -727,7 +742,11 @@ def accept_champion(ctx: RunContext, sm: Softmax, league_id: str) -> dict:
         record = {
             "policy_version_id": on_board,
             "after_promotion": basis.id if basis else None,
-            "after_rejected": current.id if current and current.stage == "rejected" else None,
+            "after_rejected": (
+                current.id
+                if current and (current.stage == "rejected" or declined(current.to_dict()))
+                else None
+            ),
             "league_id": league_id,
             "accepted_at": now_iso(),
         }
@@ -1165,9 +1184,12 @@ def _settle_intent(ctx: RunContext, promotion: Promotion, sm: Softmax) -> Action
         return Action("aborted", promotion.id, "holder ended before submitting")
 
 
-def coach_wait_message(promotion: Promotion) -> runtime_messages.RuntimeMessage:
+def coach_wait_message(
+    promotion: Promotion, reminder: bool = False
+) -> runtime_messages.RuntimeMessage:
     """The one help request about a promotion waiting for the coach: its permit ask (per
-    promotion), or the league choice (per league and cause)."""
+    promotion and ask; ``reminder``: the one reminder, ``REMINDER_AFTER`` after it), or the
+    league choice (per league and cause)."""
     detail = promotion.waiting_detail or {}
     league = detail.get("league_id") or ""
     refs = [{"uri": _refs(promotion.experiment, promotion.version)[0]}]
@@ -1176,12 +1198,14 @@ def coach_wait_message(promotion: Promotion) -> runtime_messages.RuntimeMessage:
         reason = detail.get("reason") or ""
         return runtime_messages.league_not_chosen("submit", league, reason, minutes, refs)
     asks = [detail["ask"]] if detail.get("ask") else []
-    return runtime_messages.permit_needed("submit", promotion.id, 1, asks, league, refs=refs)
+    return runtime_messages.permit_needed(
+        "submit", promotion.id, 1, asks, league, refs=refs, reminder=reminder
+    )
 
 
-def _ask_coach(canonical: Path, promotion: Promotion) -> list[Action]:
+def _ask_coach(canonical: Path, promotion: Promotion, reminder: bool = False) -> list[Action]:
     """Publish ``coach_wait_message`` unless it already was. Takes the lock."""
-    message = coach_wait_message(promotion)
+    message = coach_wait_message(promotion, reminder)
     with canonical_lock(canonical):
         if already_published(canonical, message):
             return []
@@ -1225,7 +1249,9 @@ def _decline(canonical: Path, promotion: Promotion) -> list[Action]:
         waiting_detail=None,
     )
     message = runtime_messages.coach_declined(
-        "submit", promotion.id, refs=[{"uri": _refs(promotion.experiment, promotion.version)[0]}]
+        "bootstrap" if promotion.kind == "bootstrap" else "submit",
+        promotion.id,
+        refs=[{"uri": _refs(promotion.experiment, promotion.version)[0]}],
     )
     if not already_published(canonical, message):
         publish_message(canonical, message, allow_no_remote=True)
@@ -1233,15 +1259,18 @@ def _decline(canonical: Path, promotion: Promotion) -> list[Action]:
 
 
 def _retry_due(sm: Softmax, promotion: Promotion, now: datetime.datetime) -> tuple[bool, str]:
-    """(due, answer): retry the submit now? A yes (or a used yes) is due at once; an ask
-    still waiting never is; an unreadable answer, or a league wait, after ``next_retry_after``."""
+    """(due, answer): retry the submit now? A yes (or a used yes) is due at once, or after
+    ``next_retry_after`` once a retry failed (``last_error``); an ask still waiting never is;
+    an unreadable answer, or a league wait, after ``next_retry_after``."""
+    detail = promotion.waiting_detail or {}
+    after = datetime.datetime.fromisoformat(detail["next_retry_after"])
     answer = _coach_answer(sm, promotion)
     if answer in (ANSWER_YES, ANSWER_USED):
-        return True, answer
+        # At once, unless a retry after the yes failed: then on the backoff it set (I1).
+        return not detail.get("last_error") or now >= after, answer
     if answer in (ANSWER_NO, ANSWER_WAITING):
         return False, answer
-    due = datetime.datetime.fromisoformat((promotion.waiting_detail or {})["next_retry_after"])
-    return now >= due, "unknown"
+    return now >= after, "unknown"
 
 
 def _wait_for_coach(
@@ -1264,6 +1293,8 @@ def _wait_for_coach(
             if current is None or current.id != promotion.id or current.stage != "intent":
                 return actions
             return [*actions, *_decline(canonical, current)]
+    if answer == ANSWER_WAITING and _waited(detail, now):
+        actions += _ask_coach(canonical, promotion, reminder=True)
     if not due:
         return actions
     try:
@@ -1307,6 +1338,12 @@ def _wait_for_coach(
     actions.append(Action("waiting", promotion.id, submitted.reason))
     # The other kind of wait (a permit after the league, or back) is a new help request.
     return [*actions, *_ask_coach(canonical, still)]
+
+
+def _waited(detail: dict, now: datetime.datetime) -> bool:
+    """The ask has waited ``REMINDER_AFTER`` since the coach was first asked."""
+    since = detail.get("since")
+    return bool(since) and now - datetime.datetime.fromisoformat(since) >= REMINDER_AFTER
 
 
 def _record_retry_error(
@@ -1688,7 +1725,12 @@ def _waiting_fields(
 ) -> dict:
     """``waiting`` and ``waiting_detail`` after one more refusal of ``promotion``'s submit."""
     permit = isinstance(refusal, PermitRequired)
-    refusals = int((promotion.waiting_detail or {}).get("refusals", 0)) + 1
+    previous = promotion.waiting_detail or {}
+    refusals = int(previous.get("refusals", 0)) + 1
+    ask = refusal.ask if permit else None
+    # When the coach was first asked this (a new ask starts the reminder clock again).
+    same = previous.get("ask") == ask and promotion.waiting == ("permit" if permit else "league")
+    since = previous.get("since") if same and previous.get("since") else now.isoformat()
     detail = {
         "reason": refusal.reason,
         "ask": refusal.ask if permit else None,
@@ -1696,6 +1738,7 @@ def _waiting_fields(
         "league_id": league_id,
         "refusals": refusals,
         "next_retry_after": (now + _retry_wait(refusals)).isoformat(timespec="seconds"),
+        "since": since,
     }
     return {"waiting": "permit" if permit else "league", "waiting_detail": detail}
 
