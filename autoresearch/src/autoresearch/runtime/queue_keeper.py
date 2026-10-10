@@ -609,7 +609,7 @@ def escalate_step_failures(
     kept = {step: entry for step, entry in state.items() if step in failures}
     if not all_steps_ran:  # unknown whether the steps that did not run would have failed
         kept |= {step: entry for step, entry in state.items() if step != "bootstrap"}
-    escalated = []
+    escalated, journal = [], None
     for step, error in sorted(failures.items()):
         entry = dict(kept.get(step) or {"since": now.isoformat(), "runs": 0, "help_sent": False})
         entry["runs"] = int(entry["runs"]) + 1
@@ -621,12 +621,31 @@ def escalate_step_failures(
                 _publish_step_help(ctx, step, entry, allow_no_remote)
             except Exception as problem:  # noqa: BLE001 - retried on the next run
                 _log(ctx, f"could not report failing step {step}: {problem}")
+                journal = journal or provenance.journal_error(problem)
             else:
                 entry["help_sent"] = True
                 escalated.append(step)
         kept[step] = entry
     write_json(runtime_dir(ctx) / STEP_FAILURES_FILE, kept)
+    if journal is not None:  # typed, so ``run`` fails closed (``_escalate``)
+        raise journal
     return escalated
+
+
+def _escalate(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str],
+    now: datetime.datetime, allow_no_remote: bool, all_steps_ran: bool,
+) -> None:
+    """``escalate_step_failures``; a journal failure while publishing a help_request fails
+    closed like one in a step (``_journal_fail_closed``)."""
+    try:
+        run.escalated = escalate_step_failures(
+            ctx, run.failures, now, allow_no_remote, all_steps_ran=all_steps_ran
+        )
+    except provenance.JournalError as error:
+        message = f"step escalation: {type(error).__name__}: {error}"
+        _journal_fail_closed(run, ctx, queue, env, now, allow_no_remote, message)
+        write_json(runtime_dir(ctx) / FAILURES_FILE, run.failures)
 
 
 def _briefing_inputs(
@@ -1021,9 +1040,7 @@ def run(
                 _log(ctx, f"bootstrap failed: {result.bootstrap.error}")
                 result.exit_code = 1
                 result.failures["bootstrap"] = result.bootstrap.error or "unknown error"
-                result.escalated = escalate_step_failures(
-                    ctx, result.failures, now, allow_no_remote, all_steps_ran=False
-                )
+                _escalate(result, ctx, queue, env, now, allow_no_remote, all_steps_ran=False)
                 return result
             if bootstrap_only:
                 return result
@@ -1047,8 +1064,8 @@ def run(
             except _JournalFailed as failure:
                 _journal_fail_closed(result, ctx, queue, env, now, allow_no_remote, str(failure))
             write_json(runtime_dir(ctx) / FAILURES_FILE, result.failures)
-            result.escalated = escalate_step_failures(
-                ctx, result.failures, now, allow_no_remote, all_steps_ran=not result.paused
+            _escalate(
+                result, ctx, queue, env, now, allow_no_remote, all_steps_ran=not result.paused
             )
     except LockTimeout:
         result.skipped = True

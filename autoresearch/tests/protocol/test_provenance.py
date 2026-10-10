@@ -828,3 +828,27 @@ def test_a_journal_failure_inside_blocked_card_handling_fails_closed(host, monke
     assert {card.assignee for card in host.queue.list("pending")} == {None}
     pause = json.loads((host.ledger / "pause.json").read_text())
     assert pause["reason"].startswith(provenance.PAUSE_REASON)
+
+
+def test_a_journal_failure_publishing_an_escalation_fails_closed(host, monkeypatch):
+    """Codex review of PR #24 round 5: the step-failure help_request is published after
+    the steps; a JournalError there must still pause the run (cards unassigned)."""
+    from autoresearch.runtime import queue_keeper
+
+    host.tick(at(1))
+    assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
+
+    def failing_step(*_args, **_kwargs):
+        raise RuntimeError("a step that keeps failing")
+
+    def broken(*_args, **_kwargs):
+        raise provenance.JournalError("cannot write the provenance journal: disk full")
+
+    monkeypatch.setattr(queue_keeper, "STEP_FAILURE_RUNS", 1)
+    monkeypatch.setattr(queue_keeper, "snapshot_memory", failing_step)
+    monkeypatch.setattr(queue_keeper, "_publish_step_help", broken)
+    run = host.tick(at(2))
+    assert run.paused and "provenance" in run.failures and run.spend_run is not None
+    assert [card.assignee for card in host.queue.list("pending")] == [None]
+    pause = json.loads((host.ledger / "pause.json").read_text())
+    assert pause["reason"].startswith(provenance.PAUSE_REASON)
