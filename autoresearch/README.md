@@ -434,23 +434,28 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
   `propose_inbound(kind, payload, summary)` (`task`, `steer`, `reply` or `control`; only the
   kind's schema fields) validates the payload with `comms inbound --dry-run` and keeps the
   proposal in plugin memory for 15 minutes, bound to the session. The plugin's
-  `transform_llm_output` hook appends its own rendering to the reply: the payload exactly as
+  `transform_llm_output` hook puts its own rendering first in the reply: the payload exactly as
   it will be sent, as JSON in a fenced code block (so Markdown or HTML in a value shows as
   text), with control and format characters such as bidi overrides and zero-width spaces shown
   as `\uXXXX` escapes, never the model's summary, ending `To send exactly this, reply: confirm
   P-xxxx`. Unicode default-ignorable characters (variation selectors, tag characters, Hangul
   fillers) are escaped too, as JSON escapes, so the block parses back to the exact payload.
-  The model's text before the block is neutralized (`&` and `<` escaped outside code, an
-  unclosed code fence closed), so no comment, `<details>` or hidden element it opens can hide
-  the block. Only after that is it confirmable, and it is appended again to every reply while it
-  is pending, so the plugin's rendering is always the last one shown for that id. When the coach's whole line (surrounding
+  The plugin's block comes first in the reply, then a horizontal rule, then the model's text,
+  so nothing the model writes can hide it. All model text in a reply that carries a plugin
+  block is escaped (line endings normalized, `&` and `<` escaped on every line, so inline
+  code shows entities such as `&lt;` literally). Only after that is the proposal
+  confirmable, and it is shown again in every reply while it is pending, so the plugin's
+  rendering is shown first, before the model's text, for that id. When the coach's whole line (surrounding
   whitespace stripped) is `confirm P-xxxx` in that session, the plugin runs `comms inbound
   <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once. The send runs
   on a plugin thread (it can wait for the canonical lock longer than Hermes's 30 s hook
   timeout); the turn says "Sending P-xxxx", and the next reply carries `Sent P-xxxx as I-...`
   or the failure. The send runs in its own process group, killed whole after 300 s; a send that
   timed out or broke unexpectedly is reported as "may or may not have been sent", never as
-  "nothing was sent". `cancel P-xxxx` drops it. Any other line, another session, an
+  "nothing was sent"; only a validation answer or a bad-arguments exit from the CLI is reported
+  as "Nothing was sent". A send killed at the timeout can leave a stale
+  `workspace/.git/index.lock`: if later commits fail with "index.lock exists", check that no
+  `git` process is running in the workspace, then remove the file. `cancel P-xxxx` drops it. Any other line, another session, an
   expired, cancelled or never-shown proposal sends nothing. State is keyed by profile and
   session. A gateway restart drops all proposals and any send outcome not yet shown. A context
   compression inside a turn starts a new session id: the coach tools refuse for the rest of
@@ -482,8 +487,8 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
 - **Gateway turn hooks** of the plugin are verified for multiplexed API-server runs on the
   pinned image (the coach chat, [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md)
   "Verified in Task 5 Step 4"); other gateway paths are not (hermes-facts.md, item 2).
-- **The coach chat's proposal text reaches the coach through the reply.** The plugin appends
-  its rendering (again on every reply while pending), but the model's own words above it could
+- **The coach chat's proposal text reaches the coach through the reply.** The plugin shows
+  its rendering first (again on every reply while pending), but the model's own words below it could
   still misdescribe it, and a reply
   the bridge replaces ("Stopped at your request.") marks a rendering shown that the coach
   never saw (safe: the coach cannot type an id they did not see). A deterministic bridge-side

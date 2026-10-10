@@ -18,7 +18,7 @@ interface, not a second research agent:
 - **Proposals, confirmed by the coach's own line.** No model tool call ever runs ``comms
   inbound`` (the policy and the CLI refuse it). ``propose_inbound`` validates the payload
   with ``comms inbound --dry-run`` and stores it in memory (``proposals``); the
-  ``transform_llm_output`` hook appends the plugin's rendering to the reply; ``chat_turn``
+  ``transform_llm_output`` hook puts the plugin's rendering first in the reply; ``chat_turn``
   sends it only when the coach's whole stripped line is ``confirm P-xxxx`` in the same
   session (state is keyed by profile home and session id). The send runs on a plugin thread,
   so the hook returns inside Hermes's 30 s hook timeout; its outcome is a plugin-written line
@@ -63,6 +63,7 @@ CHAT_PLATFORM = "api_server"
 OUTPUT_MAX = 12_000
 TRUNCATED = '..." [truncated]'
 READ_TIMEOUT_S = 60
+EXIT_BAD_ARGS = 2  # the CLI's exit for bad arguments or a refused context (records.cli)
 SEND_TIMEOUT_S = 300  # comms inbound waits for the canonical lock, then commits and pushes
 MAX_TOOL_ROUNDS = 8  # model calls with tools per chat turn (coach-chat-role §4, the shim's cap)
 ENV_CHAT_DAILY_USD = "AUTORESEARCH_CHAT_DAILY_USD"
@@ -240,12 +241,15 @@ def spawn(argv: list[str], env: dict[str, str], cwd: str, timeout: float):
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException:  # timeout, or anything else while waiting: never leave it running
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        process.communicate()
+        try:
+            process.communicate(timeout=10)
+        except Exception:  # noqa: BLE001, S110 - reaping is best effort; the error below wins
+            pass
         raise
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
@@ -266,9 +270,12 @@ def run_cli(env: dict[str, str], args: list[str], timeout: float) -> dict:
     except ValueError:
         envelope = None
     if isinstance(envelope, dict) and "ok" in envelope:
+        if not envelope.get("ok") and isinstance(envelope.get("error"), dict):
+            envelope["error"].setdefault("exit_code", result.returncode)
         return envelope
     detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["no output"]
-    return {"ok": False, "error": {"message": f"exit {result.returncode}: {detail[0][:300]}"}}
+    return {"ok": False, "error": {"message": f"exit {result.returncode}: {detail[0][:300]}",
+                                   "exit_code": result.returncode}}
 
 
 def _cut(text: str) -> str:
@@ -518,8 +525,8 @@ def propose_inbound(args, session_id=None, **kwargs):
         "proposal": proposal.id,
         "rendering": proposal.line(),
         "next": (
-            "Nothing is sent yet. Reply to the coach in text this turn: the plugin appends "
-            "this rendering to your reply. The coach sends it by typing exactly "
+            "Nothing is sent yet. Reply to the coach in text this turn: the plugin shows "
+            "this rendering at the top of your reply. The coach sends it by typing exactly "
             f"`confirm {proposal.id}` (or drops it with `cancel {proposal.id}`) within 15 "
             "minutes."
         ),
@@ -595,7 +602,8 @@ def brief() -> str:
 
 def send_inbound(where: tuple[Path, dict[str, str]], kind: str, payload: dict) -> str:
     """Send one inbound message as the coach through the profile ``where`` (its
-    ``profile_env``); its inbound id. Raises Refused."""
+    ``profile_env``); its inbound id. Raises Refused when the CLI refused it (nothing was
+    written), SendUnknown when the outcome is unknown."""
     _, env = where
     author = _author(env)
     sent = run_cli(
@@ -604,10 +612,14 @@ def send_inbound(where: tuple[Path, dict[str, str]], kind: str, payload: dict) -
     )
     if not sent.get("ok"):
         error = sent.get("error") or {}
-        if error.get("timed_out"):
-            raise SendUnknown(str(error.get("message")))
+        message = str(error.get("message") or "the send failed")
         problems = "; ".join(str(p) for p in error.get("problems") or [])
-        raise Refused(problems or str(error.get("message") or "the send failed"))
+        # Only a validation answer (problems) or a bad-arguments exit is a refusal before
+        # anything was written. Any other failure (a traceback, a git or OS error, a kill, a
+        # timeout) may have come after the commit.
+        if problems or error.get("exit_code") == EXIT_BAD_ARGS:
+            raise Refused(problems or message)
+        raise SendUnknown(message)
     return str((sent.get("data") or {}).get("id"))
 
 
@@ -672,7 +684,7 @@ def _confirm(key: str, proposal_id: str, now: float) -> str:
     })
     return (
         f"The coach confirmed {proposal_id}. The plugin is sending it now (Sending "
-        f"{proposal_id}…); it appends the result to a reply. Tell the coach it is being sent; "
+        f"{proposal_id}…); it shows the result with a reply. Tell the coach it is being sent; "
         "do not say it was sent or failed."
     )
 
@@ -692,7 +704,7 @@ def _control(key: str, action: str) -> str:
     )
     return (
         f"The coach typed {command}. The plugin is sending it now (Sending {command}…); it "
-        f"appends the result to a reply. Once the runtime applies it (within about a minute) "
+        f"shows the result with a reply. Once the runtime applies it (within about a minute) "
         f"{effect}. Tell the coach it is being sent."
     )
 
@@ -753,38 +765,25 @@ def chat_turn(session_id: str | None, user_message, is_first_turn: bool) -> str:
 
 
 def transform(session_id: str | None, response_text: str, turn_id: str | None) -> str | None:
-    """``transform_llm_output`` for a chat turn: the reply with the plugin's lines appended
-    (queued notes, then every pending proposal's rendering, which marks it shown), or None
-    when there are none. Every pending proposal is shown again on each reply, so the last
-    rendering of an id the coach sees is always the plugin's."""
+    """``transform_llm_output`` for a chat turn, or None when the plugin has nothing to show.
+
+    The reply becomes the plugin's block first (queued notes, then every pending proposal's
+    rendering, which marks it shown), then a horizontal rule, then the model's text,
+    neutralized. Model text placed after the block cannot hide it, whatever Markdown or HTML it
+    opens, and every pending proposal is shown again on each reply, so the first rendering of
+    an id the coach sees is always the plugin's."""
     lines = STORE.show(chat_key(session_id), turn_id or "", _now())
     if not lines:
         return None
     _log({"event": "shown", "session_id": session_id, "turn": turn_id, "lines": len(lines)})
-    return f"{neutralize(response_text).rstrip()}\n\n" + "\n\n".join(lines)
-
-
-_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
+    block = "\n\n".join(lines)
+    model = neutralize(response_text).strip()
+    return f"{block}\n\n---\n\n{model}" if model else block
 
 
 def neutralize(text: str) -> str:
-    """The model's reply made unable to swallow what follows it: outside fenced code, ``&`` and
-    ``<`` are HTML-escaped (no comment, ``<details>`` or hidden element can open), and a fence
-    left open is closed. Used whenever the plugin appends its own block after model text."""
-    out, fence = [], None  # fence: the open fence's character and length
-    for line in text.split("\n"):
-        match = _FENCE.match(line)
-        if fence is None:
-            if match and not (match.group(1)[0] == "`" and "`" in line[match.end():]):
-                fence = (match.group(1)[0], len(match.group(1)))
-                out.append(line)
-                continue
-            out.append(line.replace("&", "&amp;").replace("<", "&lt;"))
-            continue
-        out.append(line)
-        if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= fence[1] \
-                and not line[match.end():].strip():
-            fence = None
-    if fence is not None:
-        out.append(fence[0] * fence[1])
-    return "\n".join(out)
+    """All model text in a reply that carries a plugin block: line endings normalized to
+    ``\\n`` (CommonMark also ends a line at a lone CR), and ``&`` and ``<`` HTML-escaped on
+    every line, inside code too (code then shows ``&lt;`` literally), so no HTML can open."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("&", "&amp;").replace("<", "&lt;")

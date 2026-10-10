@@ -144,7 +144,7 @@ BRIDGE_INSTRUCTIONS = (  # what the Softmax bridge sends with every run (metta b
     "This IDE session acts as Softmax player ply_fake. Use --server on softmax and coworld "
     "commands. Never print credentials or request them in chat."
 )
-CONFIRM_LINE = re.compile(r"To send exactly this, reply: confirm (P-[0-9a-f]{4,})\s*$")
+CONFIRM_LINE = re.compile(r"To send exactly this, reply: confirm (P-[0-9a-f]{4,})\n")
 
 
 def _free_port() -> int:
@@ -310,7 +310,8 @@ def test_coach_chat_routes_by_platform(chat_gateway):
     found = CONFIRM_LINE.search(output)
     assert found, output
     proposal = found.group(1)
-    assert "kill" in output.split(f"Proposal {proposal}:")[-1].lower()
+    block = output.partition("\n\n---\n\n")[0]  # the plugin's block comes first
+    assert block.startswith(f"Proposal {proposal}:") and "kill" in block.lower()
 
     # (c) the coach's confirm line sends it, as the coach
     _chat(base, f"confirm {proposal}")

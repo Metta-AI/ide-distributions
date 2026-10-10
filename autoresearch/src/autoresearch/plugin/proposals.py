@@ -13,9 +13,10 @@ it when the coach's own next line is exactly ``confirm P-xxxx`` in the same sess
   fenced code block (a fence longer than any backtick run in it, so no Markdown or HTML in a
   value renders or hides anything), with control and format characters (bidi overrides,
   zero-width) shown as ``\\uXXXX`` escapes. ``show`` hands that text to the
-  ``transform_llm_output`` hook, which appends it to the turn's reply, and only then is the
-  proposal confirmable. Every pending proposal is appended again to each later reply, so a
-  model cannot follow it with a fake rendering of the same id. A turn that ends
+  ``transform_llm_output`` hook, which puts it in the turn's reply, and only then is the
+  proposal confirmable. The hook puts the plugin's lines first in the reply, before the
+  model's (escaped) text, and every pending proposal is shown again on each later reply, so a
+  model can neither hide the rendering nor show a fake one of the same id before it. A turn that ends
   with an empty reply never runs that hook (Hermes v0.21.6 ``agent/turn_finalizer.py``), so
   its proposal stays unshown until a later turn's reply carries it.
 - **Taken once**: ``take`` removes the proposal under the lock, so two confirms racing on the
@@ -38,11 +39,11 @@ EXPIRY_SECONDS = 15 * 60
 ID_PATTERN = r"P-[0-9a-f]{4,}"
 _ID_BYTES = 3  # six hex digits
 # Characters a Markdown or HTML client could hide or reorder: controls, format characters (bidi
-# overrides, zero-width), private use, surrogates and line/paragraph separators, plus Unicode's
+# overrides, zero-width), unassigned code points, private use, surrogates and line/paragraph separators, plus Unicode's
 # Default_Ignorable_Code_Point ranges outside those categories (Python does not expose the
 # property): the combining grapheme joiner, Hangul fillers, Mongolian variation selectors,
 # variation selectors (the "variation-selector smuggling" channel) and the tag block.
-_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cn", "Co", "Cs", "Zl", "Zp"})
 _IGNORABLE_RANGES = (
     (0x034F, 0x034F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x3164, 0x3164),
     (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xE0000, 0xE0FFF),

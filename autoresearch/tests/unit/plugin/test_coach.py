@@ -269,10 +269,11 @@ def test_a_proposal_is_shown_in_code_words_and_sent_on_confirm(chat):
     assert "nothing was sent" in early and chat.cli.sends() == []
 
     reply = _reply()
-    assert reply.startswith("ok\n\n")
+    assert reply.startswith(f"Proposal {pid}: steer, exactly as it will be sent:")
+    assert reply.endswith("\n\n---\n\nok")  # the model's text comes after the block
     assert '"text": "Stop kill-steals"' in reply and '"urgency": "now"' in reply
     assert "something harmless" not in reply
-    assert reply.rstrip().endswith(f"confirm {pid}")
+    assert f"To send exactly this, reply: confirm {pid}\n\n---" in reply
 
     context = _turn(line=f"confirm {pid}\n")
     assert f"Sending {pid}" in context
@@ -397,10 +398,12 @@ def test_a_proposal_from_a_turn_with_an_empty_reply_is_not_confirmable(chat):
 
 def test_a_failed_send_is_reported_and_not_retried(chat):
     pid = _shown_proposal(chat)
-    chat.cli.stdout["comms"] = json.dumps({"ok": False, "error": {"message": "push failed"}})
+    chat.cli.stdout["comms"] = json.dumps({"ok": False, "error": {
+        "message": "invalid inbound message", "problems": ["urgency: must be one of now"]}})
     _turn(line=f"confirm {pid}")
     _settled()
-    assert "Sending " + pid + " failed: push failed. Nothing was sent." in _reply()
+    assert ("Sending " + pid + " failed: urgency: must be one of now. Nothing was sent."
+            in _reply())
 
 
 # --- 6. exact-line commands ---
@@ -602,7 +605,8 @@ def test_a_pending_proposal_is_shown_again_on_every_reply(chat):
     first = _reply(turn="t1")
     fake = f"Proposal {pid}: something else. To send exactly this, reply: confirm {pid}"
     second = _reply(text=fake, turn="t2")
-    assert second.startswith(fake) and second.rstrip().endswith(f"confirm {pid}")
+    assert second.startswith(f"Proposal {pid}: steer, exactly as it will be sent:")
+    assert second.endswith(fake)  # the fake comes after the real rendering
     assert second.count('"Stop kill-steals"') == 1 and first.count('"Stop kill-steals"') == 1
     _turn(line=f"cancel {pid}")
     assert _reply(turn="t3") is None
@@ -646,25 +650,33 @@ def test_a_chat_turn_gets_at_most_eight_tool_rounds(chat):
 @pytest.mark.parametrize("tail", [
     "All set. <!-- ", "Here it is:\n<details><summary>more</summary>", "<div hidden>",
     "Look:\n```\nunclosed code", "~~~~\nunclosed tilde fence", "<span style='display:none'>",
+    "- item\n  ```\n<!--",  # a list-item fence the renderer closes before the comment
+    "```\nx\n```\r<!--",  # a lone CR ends a line in CommonMark
+    "~~~\r~~~\r<!--",
+    "a\r\n<!--\r\nb",  # CRLF
 ])
 def test_model_text_cannot_swallow_the_plugin_block(chat, tail):
-    """N1: whatever the model writes before it, the plugin's rendering stays visible."""
+    """N1: the plugin's block comes first; the model's text after it is escaped."""
     _turn()
     pid = _propose()["proposal"]
     fake = f"Proposal {pid}: steer, harmless. To send exactly this, reply: confirm {pid}\n"
     reply = _reply(text=fake + tail)
-    block_start = reply.index(f"Proposal {pid}: steer, exactly as it will be sent:")
-    before = reply[:block_start]
-    assert "<" not in before.replace("&lt;", "")  # no raw HTML can open before the block
-    fences = [line for line in before.splitlines() if line.lstrip().startswith(("```", "~~~"))]
-    assert len(fences) % 2 == 0  # every fence the model opened is closed before the block
-    assert '"text": "Stop kill-steals"' in reply[block_start:]
-    assert reply.rstrip().endswith(f"confirm {pid}")
+    block, rule, model = reply.partition("\n\n---\n\n")
+    assert rule and block.startswith(f"Proposal {pid}: steer, exactly as it will be sent:")
+    assert '"text": "Stop kill-steals"' in block
+    assert block.endswith(f"To send exactly this, reply: confirm {pid}")
+    assert "<" not in model and "\r" not in model  # no HTML can open in the model's text
+    assert model.startswith(f"Proposal {pid}: steer, harmless")
 
 
-def test_neutralize_leaves_code_and_plain_text_readable():
-    text = "a < b & c\n```python\nif a < b:\n```\ndone"
-    assert coach.neutralize(text) == "a &lt; b &amp; c\n```python\nif a < b:\n```\ndone"
+def test_neutralize_escapes_every_line_and_normalizes_line_ends():
+    text = "a < b & c\r\n```python\rif a < b:\n```"
+    assert coach.neutralize(text) == "a &lt; b &amp; c\n```python\nif a &lt; b:\n```"
+
+
+def test_a_reply_with_no_plugin_lines_is_left_alone(chat):
+    _turn()
+    assert _reply(text="a <b>bold</b> answer") is None
 
 
 def test_a_send_that_breaks_unexpectedly_is_reported_as_unknown(chat, monkeypatch):
@@ -717,3 +729,38 @@ def test_spawn_kills_the_whole_process_group_on_timeout(tmp_path):
     while _alive(child):
         assert time.monotonic() < deadline, "the grandchild survived the timeout"
         time.sleep(0.1)
+
+
+def _cli_script(tmp_path, body: str) -> dict[str, str]:
+    """A profile env whose AUTORESEARCH_CLI is a script file running ``body``."""
+    cli = tmp_path / "cli.py"
+    cli.write_text(f"import sys\n{body}\n")
+    shim = tmp_path / "autoresearch"
+    shim.write_text(f"#!{sys.executable}\nimport runpy\nrunpy.run_path({str(cli)!r})\n")
+    shim.chmod(0o755)
+    return {"AUTORESEARCH_CLI": str(shim), "HERMES_HOME": str(tmp_path),
+            "PATH": "/bin:/usr/bin", "AUTORESEARCH_PLAYER_ID": "ply_t"}
+
+
+def test_a_cli_traceback_after_writing_is_reported_as_unknown(tmp_path):
+    """N4a: only problems or a bad-arguments exit mean nothing was written."""
+    inbox = tmp_path / "inbox.json"
+    env = _cli_script(tmp_path, f"open({str(inbox)!r}, 'w').write('{{}}')\nraise RuntimeError('push')")
+    with pytest.raises(coach.SendUnknown):
+        coach.send_inbound((tmp_path, env), "steer", STEER)
+    assert inbox.exists()
+
+
+@pytest.mark.parametrize(("body", "error"), [
+    (('print(\'{"ok": false, "error": {"message": "invalid", "problems": ["urgency: bad"]}}\')'
+      '\nsys.exit(1)'), coach.Refused),
+    ('print(\'{"ok": false, "error": {"message": "a card worker cannot send"}}\')\nsys.exit(2)',
+     coach.Refused),
+    ('print(\'{"ok": false, "error": {"message": "git push failed"}}\')\nsys.exit(1)',
+     coach.SendUnknown),
+    ("import os, signal\nos.kill(os.getpid(), signal.SIGKILL)", coach.SendUnknown),
+])
+def test_only_a_refusal_means_nothing_was_sent(tmp_path, body, error):
+    env = _cli_script(tmp_path, body)
+    with pytest.raises(error):
+        coach.send_inbound((tmp_path, env), "steer", STEER)

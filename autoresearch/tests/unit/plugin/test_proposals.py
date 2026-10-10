@@ -157,6 +157,7 @@ def test_line_states_the_exact_confirm():
     "\u180b", "\u180f",  # Mongolian variation selectors and vowel separator
     "\u17b4",  # Khmer inherent vowel
     "\U000f0000",  # private use (astral)
+    "\u0378",  # unassigned (Cn)
 ])
 def test_ignorable_and_astral_characters_are_escaped_as_valid_json(char):
     """N2, N3: every invisible character is escaped, and the block still parses back exactly."""
