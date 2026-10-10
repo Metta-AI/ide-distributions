@@ -105,6 +105,15 @@ G2 receipt names the runner. The native runner reports a tool error (`errored`) 
 the manifest's `game_config` differs from the one the binary was built with. The
 evidence each runner reads back is in the [gate reference](gates/README.md#evidence-and-limits).
 
+The native runner runs `gota_match` with `COGAME_LLM=off` and kills it, with its
+process group, after the gate timeout (default 600 seconds); a timeout is a tool
+error (`errored`). It writes the episode under the build's `episode/` directory,
+including the recording `replay.bin` (the file size grows with the recorded actions).
+The native match binary's receipt covers `tools/gota_match.nim`, so a build order
+that was already in flight when this change deployed finds its cached binary stale
+and reports `errored` ("stale or modified native build") once, until the binary is
+rebuilt offline with `tools/build_gota_match.sh`.
+
 Native G2 does not prove:
 
 - that the published container image (`game.runnable.image` in the manifest) starts,
