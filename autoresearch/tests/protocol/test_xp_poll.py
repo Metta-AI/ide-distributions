@@ -557,11 +557,13 @@ def test_one_reminder_after_a_day_and_no_backoff_card_while_an_ask_is_known_to_w
     assert reminder["runtime_key"] == first["runtime_key"] + ":reminder"
 
 
-def test_only_unanswered_asks_are_read_again(host, monkeypatch):
-    """N7: a yes (or a no) is final, so it is not read again on later runs."""
+def test_only_used_asks_are_not_read_again(host, monkeypatch):
+    """N7, narrowed by Codex round 4: the coach can change a yes or a no until it is used, so
+    those are read every run; only a used yes is final and skipped."""
     _, _, wait, _ = _awaiting_permit(host, monkeypatch)
     keys = [entry["ask"] for entry in wait["asks"]]
-    _answer(host, "yes", keys[:-1])
+    _answer(host, "yes", keys[1:-1])
+    _answer(host, "used", keys[:1])
     reads = []
     real = host.sm.permit_answer
     monkeypatch.setattr(host.sm, "permit_answer", lambda key: reads.append(key) or real(key))
@@ -569,7 +571,38 @@ def test_only_unanswered_asks_are_read_again(host, monkeypatch):
     assert sorted(reads) == sorted(keys)
     reads.clear()
     assert _poll(host, at(2)).launches == []
-    assert reads == keys[-1:]  # only the one still waiting
+    assert reads == keys[1:]  # every ask but the used one
+
+
+def test_a_yes_changed_to_no_stops_the_experiment(host, monkeypatch):
+    """Codex round 4 (1): a yes read on an earlier run is not trusted later; the coach changes
+    it to no and the experiment stops, with no relaunch."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _answer(host, "yes", keys[:-1])
+    assert _poll(host, at(1)).launches == []  # the last ask still waits
+    _answer(host, "no", keys[:1])
+    _answer(host, "yes", keys[-1:])
+    after = _poll(host, at(2))
+    assert after.stopped == [experiment] and after.launches == []
+    assert host.store.load(experiment)[0]["status"] == "stopped"
+
+
+def test_a_known_credit_shortfall_waits_past_the_backoff(host, monkeypatch):
+    """Codex round 4 (2): every ask approved, but a readable balance of 1 against requests that
+    cost 100 each: no card on any poll, also long after the backoff; a higher balance gives
+    one card."""
+    experiment, _, keys, _ = _short_of_credits(host, monkeypatch)
+    _answer(host, "yes", [keys[0], keys[2], keys[3]])
+    monkeypatch.setattr(host.sm, "episode_cost", lambda: 100.0)
+    _set_fake_state(host, credits=1)
+    short = host.store.load(experiment)[0]["lifecycle"]["permit_wait"]["credits_short"]
+    backoff_end = datetime.datetime.fromisoformat(short["next_launch_after"])
+    for hours in (0, 1, 9, 30):
+        assert _poll(host, backoff_end + datetime.timedelta(hours=hours)).launches == []
+    _set_fake_state(host, credits=300)  # three requests left, 100 each
+    [launch] = _poll(host, backoff_end + datetime.timedelta(hours=31)).launches
+    assert "300 credits available, about 300 needed" in launch.why
 
 
 def test_new_asks_on_a_relaunch_get_a_new_help_request(host, monkeypatch):
@@ -845,7 +878,8 @@ def test_a_bad_answers_cache_is_ignored_and_the_asks_read_again(host, monkeypatc
     _answer(host, "yes", keys)
     [launch] = _poll(host, at(1)).launches  # every ask read again, all yes
     assert launch is not None
-    assert read_json(path) == {key: "yes" for key in keys}
+    cached = read_json(path)  # no used answer: nothing new is cached as final
+    assert not isinstance(cached, dict) or "yes" not in cached.values()
 
 
 def test_league_choice_refusal_sends_one_help_request_per_league(host, monkeypatch):

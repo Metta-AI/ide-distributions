@@ -77,7 +77,7 @@ credential, no model spend):
   (terminal, committed here) with ``lifecycle.stopped``, and one note
   (``runtime_messages.coach_declined``). Nothing is asked or launched for it again.
 - over today's cap (``permit_wait.not_before``, the next UTC day): nothing until then.
-- every ask yes (or a yes already used): the relaunch is due at once.
+- every ask yes on this run's read (or a yes already used): the relaunch is due at once.
 - an answer that cannot be read: the relaunch is due once ``lifecycle.next_launch_after`` (the
   credit backoff, counted per set of asks) has passed.
 - otherwise the asks still wait: nothing, and no card. A known waiting ask also holds back
@@ -86,14 +86,18 @@ credential, no model spend):
   never more.
 
 A due relaunch with ``credits_short`` also waits until the credits cover it, decided as for
-``awaiting-credits`` (``credits_cover`` over ``credits_short``). Then one relaunch request with
+``awaiting-credits`` (``credits_cover`` over ``credits_short``), except that a readable balance
+that does not cover the remaining requests always keeps it waiting: the timed backoff applies
+only when the balance cannot be read (the asks are approved, so a card at a known shortfall
+would only be denied again). Then one relaunch request with
 the same marker and card as a credit relaunch: the card reruns ``xp create`` with exactly the
 batch of the asks (``permit_wait.batch``, ``attempt``, ``batches``; ``rebuild.launch_step``),
 so each refused request goes again with the same body and idempotency key and the server
 grants it against its yes. ``xp create`` refuses any other batch while the asks are open.
 
-Only asks without a final answer are read again (``permit_answers``; final answers are kept in
-``runtime/permit_answers.json``). New asks on a relaunch (a yes the price outgrew) are a new
+Every open ask is read again on every run (``permit_answers``): the coach can change a yes or a
+no until the act uses it, so only ``used`` is final and kept in ``runtime/permit_answers.json``
+(a later no to a cached yes would otherwise go unseen). New asks on a relaunch (a yes the price outgrew) are a new
 set, so they get their own help request; asks that only drop out as their requests are created
 do not.
 
@@ -519,14 +523,21 @@ def min_relaunch_credits(env: Mapping[str, str]) -> float:
 
 
 def credits_cover(
-    credits_view: CreditView, experiment: dict, denial: dict, now: datetime.datetime
+    credits_view: CreditView,
+    experiment: dict,
+    denial: dict,
+    now: datetime.datetime,
+    known_short_waits: bool = False,
 ) -> str | None:
     """Why the credits now allow a relaunch after ``denial`` (``credit_denials``,
     ``credits_at_denial``, ``next_launch_after``: the lifecycle of an ``awaiting-credits``
     experiment, or ``permit_wait.credits_short``), or None while they do not
-    (``relaunch_due``)."""
+    (``relaunch_due``). ``known_short_waits``: a readable balance below the need never
+    relaunches, also after the backoff (``credits_short``, module docstring)."""
     credits = credits_view.balance()
     need = relaunch_need(experiment, credits_view.episode_cost(), credits_view.min_credits)
+    if known_short_waits and credits is not None and credits < need:
+        return None
     try:
         due = relaunch_due(denial, credits, now, need)
     except ValueError as error:
@@ -602,23 +613,24 @@ def coach_wait_message(
 
 
 def _answers_path(ctx: RunContext) -> Path:
-    """Disposable runtime state: the final answers (yes, used, no) read so far, by ask key."""
+    """Disposable runtime state: the asks whose yes was already used (the one final answer)."""
     return runtime_dir(ctx) / ANSWERS_FILE
 
 
 def permit_answers(ctx: RunContext, sm: Softmax, wait: dict) -> list[str | None]:
     """The coach's answer to each ask of ``wait`` (``Softmax.permit_answer``; None when it
-    cannot be read). A refusal the server already called declined counts as a no. Only asks
-    without a final answer are read again: a yes, a used yes and a no are kept in
-    ``_answers_path`` (an answer is given once). The cache is never pruned: one small entry per
-    answered ask."""
+    cannot be read). A refusal the server already called declined counts as a no. The coach
+    can change a yes or a no until the act uses it (the server's permit-ask guard), so every
+    ask is read again each run; only ``used`` is final, kept in ``_answers_path``. The cache is
+    never pruned: one small entry per used ask."""
     path = _answers_path(ctx)
     try:
         cached = read_json(path) if path.exists() else {}
     except ValueError:
         cached = {}
-    # Only final answers count; anything else (a hand edit, a torn or foreign file) is read again.
-    final = (ANSWER_YES, ANSWER_USED, ANSWER_NO)
+    # Only the final answer counts; anything else (a yes or no, a hand edit, a torn or foreign
+    # file) is read again.
+    final = (ANSWER_USED,)
     known = (
         {key: value for key, value in cached.items() if isinstance(key, str) and value in final}
         if isinstance(cached, dict)
@@ -637,7 +649,7 @@ def permit_answers(ctx: RunContext, sm: Softmax, wait: dict) -> list[str | None]
             answer = sm.permit_answer(key) if key else None
         except Exception:  # noqa: BLE001 - an unreadable answer only means "unknown"
             answer = None
-        if answer in (ANSWER_YES, ANSWER_USED, ANSWER_NO):
+        if answer in final:
             learned[key] = answer
         answers.append(answer)
     if learned:
@@ -736,7 +748,7 @@ def _wait_for_coach(
     short = wait.get("credits_short")
     if short:
         # Credits ran out in the same batch: no card until they cover it too.
-        credit_reason = credits_cover(credits_view, experiment, short, now)
+        credit_reason = credits_cover(credits_view, experiment, short, now, known_short_waits=True)
         if credit_reason is None:
             return
         reason = f"{reason}; {credit_reason}"
