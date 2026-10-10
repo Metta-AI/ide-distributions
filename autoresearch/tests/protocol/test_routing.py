@@ -21,7 +21,12 @@ from autoresearch.runtime import blocked, routing
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
 from autoresearch.runtime.handoff import card_spec
 from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.routing import inbound_for_briefing, planning_backlog, route_all
+from autoresearch.runtime.routing import (
+    _routing_order,
+    inbound_for_briefing,
+    planning_backlog,
+    route_all,
+)
 
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
 TOPIC = {"title": "Towers", "objective": "Stop dying to towers.", "metrics": [], "priority": "P2"}
@@ -842,6 +847,42 @@ def test_control_messages_apply_in_the_order_sent_not_id_order(board):
         "ply_x:control:b": "Research paused at your request.",
         "ply_x:control:a": "Research resumed.",
     }
+
+
+def test_a_control_whose_created_does_not_parse_does_not_stall_routing(board):
+    """Validation accepts a direct write by its ``received_at`` even when ``created`` is not a
+    time. Ordering must not raise on it: every inbound would stall. It sorts by the time that
+    parses; a pause sent before it still applies first."""
+    worker = board.admit()
+    inbox = board.canonical / "comms" / "inbox"
+    write_json(inbox / "ply_x:control:a.json", {
+        "id": "ply_x:control:a", "created": "2026-10-09T20:00:00Z", "author": "coach:ply_x",
+        "kind": "control", "action": "pause",
+    })  # fmt: skip
+    write_json(inbox / "ply_x:control:0.json", {
+        "id": "ply_x:control:0", "created": "yesterday", "received_at": "2026-10-09T20:01:00Z",
+        "author": "coach:ply_x", "kind": "control", "action": "resume",
+    })  # fmt: skip
+    task = _send(board, "task", "ide", title="T", mode="scouting", why="W", refs=[], priority="P1")
+
+    _route(board)
+
+    assert _delivery(board, task)["state"] != "received"
+    assert _delivery(board, "ply_x:control:a")["state"] == "acknowledged"
+    assert _delivery(board, "ply_x:control:0")["state"] == "acknowledged"
+    assert board.committed(board.ledger / "coach-hold.json") is None
+    assert board.queue.get(worker.task_id).assignee == worker.request_id
+
+
+def test_routing_order_sorts_a_record_with_no_parsable_time_last():
+    records = {
+        name: {"id": name, "state": "received", "kind": "control"} for name in ("c:0", "c:1")
+    }
+    inbox = {
+        "c:0": {"id": "c:0", "created": "bad", "received_at": "also bad"},
+        "c:1": {"id": "c:1", "created": "2026-10-09T20:00:00Z"},
+    }
+    assert [record["id"] for record in _routing_order(records, inbox)] == ["c:1", "c:0"]
 
 
 # --- fix round 1 ---

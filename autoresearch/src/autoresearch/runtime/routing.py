@@ -28,7 +28,8 @@ System Design 7 Inbound). Runtime only (``queue-keeper``, each run).
    - a ``reply``, or another ``steer``, on a thread with an open card -> that card; else the
      planning backlog.
    - ``control`` (the coach's ``/pause-research``, ``/resume-research``): routed after the
-     other kinds, in the order sent (``created``, else ``received_at``, then id), and applied
+     other kinds, in the order sent (``created``, else ``received_at``, then id; one whose
+     time does not parse comes last), and applied
      here, under the lock: ``pause`` sets the coach hold (``runtime.pause.hold``: pending cards
      unassigned, admission and planning stopped), ``resume`` clears it
      (``runtime.pause.release_hold``). Answered by a runtime note in reply ->
@@ -704,9 +705,25 @@ def _resolve(
     return actions
 
 
-def _sent_at(message: dict) -> datetime.datetime:
-    """When the writer sent it: a direct write's ``created``, else ``received_at``."""
-    return parse_time(message.get("created") or message["received_at"])
+def _sent_at(message: dict) -> datetime.datetime | None:
+    """When the writer sent it: a direct write's ``created``, else ``received_at``, whichever
+    parses first; None when neither does. ``created`` comes first because adoption stamps a
+    direct write's ``received_at`` with the adoption time (to the second), which says nothing
+    about the order sent. Validation (``comms.inbound``) accepts a direct write whose
+    ``received_at`` parses even when ``created`` does not, so this must not raise: one bad
+    record would stall all routing."""
+    for value in (message.get("created"), message.get("received_at")):
+        try:
+            return parse_time(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _control_order(record: dict, message: dict) -> tuple:
+    """Sort key: time sent, then id; a record with no time that parses sorts last."""
+    sent = _sent_at(message)
+    return (sent is None, sent or datetime.datetime.min.replace(tzinfo=datetime.UTC), record["id"])
 
 
 def _routing_order(records: dict[str, dict], inbox: dict[str, dict]) -> list[dict]:
@@ -721,7 +738,7 @@ def _routing_order(records: dict[str, dict], inbox: dict[str, dict]) -> list[dic
     ]
     others = [record for record in received if record["kind"] != "control"]
     controls = [record for record in received if record["kind"] == "control"]
-    controls.sort(key=lambda record: (_sent_at(inbox[record["id"]]), record["id"]))
+    controls.sort(key=lambda record: _control_order(record, inbox[record["id"]]))
     return others + controls
 
 
