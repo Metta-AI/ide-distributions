@@ -22,6 +22,7 @@ from autoresearch.runtime.promotion import CHAMPION_PATH, load
 from autoresearch.softmax_tool import cli as softmax_cli
 from autoresearch.softmax_tool.fake import FAULTS_ENV
 from autoresearch.softmax_tool.platform_cli import PlatformCli, ToolMissing
+from autoresearch.softmax_tool.protocol import retry_backoff
 from autoresearch.softmax_tool.xp import parse_tag
 
 REPO = Path(__file__).resolve().parents[3]
@@ -269,7 +270,7 @@ def test_design_pairing_is_seed_only_with_selector_opponents():
 
 
 def test_credit_backoff_doubles_and_caps():
-    minutes = [softmax_cli.credit_backoff(n).total_seconds() / 60 for n in range(1, 8)]
+    minutes = [retry_backoff(n).total_seconds() / 60 for n in range(1, 8)]
     assert minutes == [30, 60, 120, 240, 480, 480, 480]
 
 

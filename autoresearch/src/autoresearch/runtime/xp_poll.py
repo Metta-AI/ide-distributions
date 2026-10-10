@@ -164,6 +164,7 @@ from autoresearch.softmax_tool.protocol import (
     ANSWER_YES,
     PERMIT_DECLINED,
     PERMIT_OVER_CAP,
+    REMINDER_AFTER,
     Softmax,
     XpHandle,
     XpStatus,
@@ -184,8 +185,6 @@ REMOTE = "origin"
 GAME_ENV = "AUTORESEARCH_GAME"
 DEFAULT_GAME = "gota"
 ANSWERS_FILE = "permit_answers.json"
-# An ask still unanswered this long after it was first refused gets one reminder, never more.
-REMINDER_AFTER = datetime.timedelta(hours=24)
 # Tries of one wait's relaunch whose cards end without a new refusal, then one help request.
 RELAUNCH_GENERATIONS = 3
 MIN_CREDITS_ENV = "AUTORESEARCH_RELAUNCH_MIN_CREDITS"
@@ -572,13 +571,6 @@ def credits_cover(
     return f"relaunch after credit denial {denials}; {when}"
 
 
-def _request_relaunch(
-    canonical: Path, credits_view: CreditView, experiment: dict, now: datetime.datetime
-) -> CardSpec | None:
-    reason = credits_cover(credits_view, experiment, experiment.get("lifecycle") or {}, now)
-    return None if reason is None else _commit_relaunch(canonical, experiment, reason)
-
-
 def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec | None:
     """The relaunch request of a waiting experiment (marker ``markers.relaunch_marker``), unless
     an open request covers the experiment.
@@ -639,7 +631,7 @@ def coach_wait_message(
     refs = [{"uri": f"ar://experiment/{experiment['id']}"}]
     league = wait.get("league_id") or ""
     if wait.get("kind") == "league":
-        minutes = int(wait.get("retry_minutes") or 30)
+        minutes = int(wait["retry_minutes"])  # the worker's configured base (xp create)
         reason = wait.get("reason") or ""
         return runtime_messages.league_not_chosen("xp", league, reason, minutes, refs)
     asks = wait.get("asks") or []
@@ -900,7 +892,9 @@ def poll_experiment(
         evidence_failure = error
     status = experiment.get("status")
     if status == "awaiting-credits" and not result.launches:
-        launch = _request_relaunch(ctx.canonical, credits_view, experiment, now)
+        lifecycle = experiment.get("lifecycle") or {}
+        reason = credits_cover(credits_view, experiment, lifecycle, now)
+        launch = None if reason is None else _commit_relaunch(ctx.canonical, experiment, reason)
         if launch is not None:
             result.launches.append(launch)
     elif status == "awaiting-permit":

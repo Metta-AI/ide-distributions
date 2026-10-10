@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 
 from autoresearch.ids import ENTITY_PREFIXES
+from autoresearch.softmax_tool.protocol import BACKOFF_CAP
 
 TITLE_LIMIT = 120
 # A help_request is always urgent and wants an answer, whoever publishes it: the first
@@ -968,9 +969,9 @@ def league_not_chosen(
         f"{league_id} league for the agent in the IDE Controls. (The agent's league is set in "
         "its game's configuration; if it should play another league, ask the operator to change "
         "that instead.) The agent retries by itself: first "
-        f"{retry_minutes} minutes after the refusal, then twice as long each time (at most 8 "
-        "hours), so it can take that long to go on after you choose. Softmax's words are in this "
-        "message's details (`about`)."
+        f"{retry_minutes} minutes after the refusal, then twice as long each time (at most "
+        f"{BACKOFF_CAP.total_seconds() / 3600:g} hours), so it can take that long to go on "
+        "after you choose. Softmax's words are in this message's details (`about`)."
     )
     return RuntimeMessage(
         "help_request",

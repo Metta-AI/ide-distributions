@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -40,6 +40,19 @@ class CreditDenied:
 PERMIT_WAITING, PERMIT_DECLINED, PERMIT_OVER_CAP = "waiting", "declined", "over_cap"
 # ``Softmax.permit_answer``: the coach's answer to one ask.
 ANSWER_YES, ANSWER_NO, ANSWER_USED, ANSWER_WAITING = "yes", "no", "used", "waiting"
+# The retry timing shared by XP relaunches (credit denials, the coach's refusals) and promotion
+# submits the coach refused (A10): ``BACKOFF_BASE`` first (XP: or the worker's configured base),
+# doubling per refusal, at most ``BACKOFF_CAP`` (``retry_backoff``).
+BACKOFF_BASE = timedelta(minutes=30)
+BACKOFF_CAP = timedelta(hours=8)
+# An ask still unanswered this long after the coach was first asked gets one reminder, never more.
+REMINDER_AFTER = timedelta(hours=24)
+
+
+def retry_backoff(count: int, base: timedelta = BACKOFF_BASE) -> timedelta:
+    """The wait after the ``count``-th consecutive refusal or denial: ``base``, doubling,
+    at most ``BACKOFF_CAP``."""
+    return min(base * 2 ** (count - 1), BACKOFF_CAP)
 
 
 @dataclass(frozen=True)

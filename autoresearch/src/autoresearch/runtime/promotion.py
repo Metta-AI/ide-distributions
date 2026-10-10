@@ -88,7 +88,7 @@ holder does:
   an ask still waiting ``REMINDER_AFTER`` (24 hours) after the coach was first asked
   (``waiting_detail.since``) gets one reminder help request, never more. When the answer
   cannot be read (and for a league wait) the retry waits for ``next_retry_after`` (30 minutes, doubling per
-  refusal, at most 8 hours, ``PERMIT_RETRY_BASE``/``PERMIT_RETRY_CAP``);
+  refusal, at most 8 hours, ``protocol.retry_backoff``);
 - the retry, when no champion conflict is open: the submissions list first (a submission
   found settles it: ``submitted``) and else the same submit again (the same policy version and
   league, so the server grants it against the same ask). A retry that raises records
@@ -148,11 +148,14 @@ from autoresearch.softmax_tool.protocol import (
     ANSWER_USED,
     ANSWER_WAITING,
     ANSWER_YES,
+    BACKOFF_BASE,
     PERMIT_DECLINED,
+    REMINDER_AFTER,
     LeagueNotChosen,
     PermitRequired,
     Softmax,
     SubmissionState,
+    retry_backoff,
 )
 
 CHAMPION_PATH = "strategy/STRATEGY.md"
@@ -169,11 +172,6 @@ CHAMPION_PAUSE = "champion conflict"  # the start of pause.json's reason for an 
 GRACE_ENV = "AUTORESEARCH_CHAMPION_GRACE_MINUTES"
 RUNTIME = "runtime"
 MAX_RECOVERY_ATTEMPTS = 3
-# Retry wait of a submit the coach refused (module docstring, "Waiting for the coach").
-PERMIT_RETRY_BASE = datetime.timedelta(minutes=30)
-PERMIT_RETRY_CAP = datetime.timedelta(hours=8)
-# An ask still unanswered this long after the first help request gets one reminder, never more.
-REMINDER_AFTER = datetime.timedelta(hours=24)
 # The history note of a promotion aborted because the coach said no: it is not promoted again.
 DECLINED_NOTE = "the coach declined the submission"
 
@@ -1197,7 +1195,7 @@ def coach_wait_message(
     league = detail.get("league_id") or ""
     refs = [{"uri": _refs(promotion.experiment, promotion.version)[0]}]
     if promotion.waiting == "league":
-        minutes = int(PERMIT_RETRY_BASE.total_seconds() // 60)
+        minutes = int(BACKOFF_BASE.total_seconds() // 60)
         reason = detail.get("reason") or ""
         return runtime_messages.league_not_chosen("submit", league, reason, minutes, refs)
     asks = [detail["ask"]] if detail.get("ask") else []
@@ -1363,7 +1361,7 @@ def _record_retry_error(
         refusals = int(detail.get("refusals", 0)) + 1
         detail.update(
             refusals=refusals,
-            next_retry_after=(now + _retry_wait(refusals)).isoformat(timespec="seconds"),
+            next_retry_after=(now + retry_backoff(refusals)).isoformat(timespec="seconds"),
             last_error=f"{type(error).__name__}: {error}"[-500:],
         )
         updated = replace(current, updated_at=now_iso(), waiting_detail=detail)
@@ -1729,10 +1727,6 @@ def _submit_acquired(
     return SubmitOutcome(True, promotion.id, submission_id=submitted)
 
 
-def _retry_wait(refusals: int) -> datetime.timedelta:
-    return min(PERMIT_RETRY_BASE * 2 ** (refusals - 1), PERMIT_RETRY_CAP)
-
-
 def _waiting_fields(
     promotion: Promotion,
     refusal: PermitRequired | LeagueNotChosen,
@@ -1753,7 +1747,7 @@ def _waiting_fields(
         "state": refusal.state if permit else None,
         "league_id": league_id,
         "refusals": refusals,
-        "next_retry_after": (now + _retry_wait(refusals)).isoformat(timespec="seconds"),
+        "next_retry_after": (now + retry_backoff(refusals)).isoformat(timespec="seconds"),
         "since": since,
     }
     return {"waiting": "permit" if permit else "league", "waiting_detail": detail}

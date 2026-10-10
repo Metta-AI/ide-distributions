@@ -25,7 +25,7 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   with exit 0 and ``credit_denied: true``: requests already created stay (and are
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating|awaiting-permit``) and ``lifecycle.next_launch_after`` is set
-  by ``credit_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
+  by ``protocol.retry_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
   the worker's environment, read before any request is created; it is read in worker terminals
   only, which see the whole profile ``.env``, so it is deliberately not on
   ``terminal.env_passthrough``: a cron job would not get it); ``lifecycle.credit_denials``
@@ -177,6 +177,7 @@ from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
 from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
 from autoresearch.softmax_tool.protocol import (
+    BACKOFF_BASE,
     PERMIT_DECLINED,
     PERMIT_OVER_CAP,
     CreditDenied,
@@ -185,6 +186,7 @@ from autoresearch.softmax_tool.protocol import (
     Refused,
     XpHandle,
     read_credits,
+    retry_backoff,
 )
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.submit import bootstrap_champion, submit
@@ -197,9 +199,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project 
 GAME_ENV = "AUTORESEARCH_GAME"
 PLAYER_ENV = "AUTORESEARCH_PLAYER_ID"
 IDENTITY_ENV = ("SOFTMAX_PLAYER_CREDENTIAL", PLAYER_ENV)
-BACKOFF_BASE = timedelta(minutes=30)
 BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
-BACKOFF_CAP = timedelta(hours=8)
 LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
 # Statuses whose evaluation is over: ``xp create`` refuses them (``experiment_closed``).
 CLOSED_EXPERIMENT = ("stopped", "reviewed")
@@ -356,12 +356,6 @@ def _league_id() -> str:
 # --- XP mapping (pure) ---
 
 
-def credit_backoff(denials: int, base: timedelta = BACKOFF_BASE) -> timedelta:
-    """Wait before relaunching after the ``denials``-th consecutive credit denial (A10):
-    ``base`` (30 min), doubling, capped at 8 h."""
-    return min(base * 2 ** (denials - 1), BACKOFF_CAP)
-
-
 def backoff_base(env) -> timedelta:
     """The first backoff: ``BACKOFF_ENV`` minutes (a positive finite number) when set, else 30.
     Worker terminals only; not on ``terminal.env_passthrough`` (module docstring)."""
@@ -474,7 +468,7 @@ def _credit_shortfall(
     """The facts of a credit denial (A10): the consecutive ``credit_denials``, the balance read
     right after it (``credits_at_denial``, null when unreadable) and the backoff's end."""
     denials = int(lifecycle.get("credit_denials", 0)) + 1
-    after = now + credit_backoff(denials, base)
+    after = now + retry_backoff(denials, base)
     return {
         "credit_denials": denials,
         "credits_at_denial": credits,
@@ -545,7 +539,7 @@ def _permit_wait(
     # The fallback backoff counts the refusals of these asks only (a new wait starts over).
     refusals = int(previous.get("refusals", 0)) + 1 if same else 1
     since = previous.get("since") if same and previous.get("since") else now.isoformat()
-    after = now + credit_backoff(refusals, base)
+    after = now + retry_backoff(refusals, base)
     wait = {
         "kind": kind,
         "batch": args.batch,
