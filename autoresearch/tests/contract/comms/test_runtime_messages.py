@@ -28,6 +28,8 @@ MESSAGE = "M-01M4EJ9RQMHVH6XK3N4T760MND"
 PROMOTION = "P-01M4EJ9RQMHVH6XK3N4T760MNE"
 SHA = "f5e50b4909eb1c45d6a113fa930a7a37c14a2564"
 OTHER_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+EXPERIMENT = "E-01M4EJ9RQMHVH6XK3N4T760MNG"
+ASK = "permit-spend-0123456789abcdef-1"
 IDS = (INBOUND, BRIDGE_TASK, REQUEST, CARD, FILE_CARD, MESSAGE, PROMOTION, SHA, OTHER_SHA)
 # Runtime ids (inbound, request, message, file-queue card, promotion), Kanban task ids, and
 # commits, full or short (7-40 hex with a digit and a letter). Record ids (H-, E-, C-, ...) may
@@ -308,6 +310,50 @@ FIXTURES = {
             "policy": "ar-bootstrap-0123456789ab:v1",
             "detail": "membership qualifying (held)",
             "hours": 24,
+        }
+    ],
+    # Ask keys and the server's words name refs and ids: they go to ``about`` only.
+    "permit_needed": [
+        {
+            "act": "xp",
+            "subject": f"{EXPERIMENT}:b1:a1",
+            "count": 4,
+            "asks": [ASK, ASK.replace("-1", "-2")],
+            "league_id": "league_x",
+            "over_cap": over_cap,
+            "refs": [{"uri": f"ar://experiment/{EXPERIMENT}"}],
+        }
+        for over_cap in (False, True)
+    ]
+    + [
+        {"act": "submit", "subject": PROMOTION, "count": 1, "asks": [ASK], "league_id": "league_x"},
+        {"act": "submit", "subject": PROMOTION, "count": 1, "asks": [ASK], "reminder": True},
+    ],
+    "league_not_chosen": [
+        {"act": act, "league_id": "league_x", "reason": reason, "retry_minutes": 30}
+        for act in ("xp", "submit")
+        for reason in (
+            (
+                "Your coach has not chosen a league for this cogent yet; ask them to pick one "
+                "in the IDE."
+            ),
+            (
+                "This cogent plays league_y; your coach chose it, and a submission to league_x "
+                "is refused."
+            ),
+        )
+    ],
+    "coach_declined": [
+        {"act": "xp", "subject": f"{EXPERIMENT}:b1:a1", "done": 2, "total": 40},
+        {"act": "submit", "subject": PROMOTION},
+        {"act": "bootstrap", "subject": PROMOTION},
+    ],
+    "relaunch_stuck": [
+        {
+            "experiment": EXPERIMENT,
+            "marker": f"launch:{EXPERIMENT}:1:after:2026-10-09T12:00:00+00:00",
+            "generations": 3,
+            "refs": [{"uri": f"ar://experiment/{EXPERIMENT}"}],
         }
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],

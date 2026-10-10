@@ -21,7 +21,12 @@ path (Plan 03 Task 3.3, Overview C6/C8, amendment A9).
 Then ``promotion.submit_promotion`` does the C8 steps: acquire, champion == baseline, intent
 (committed and pushed with the candidate branch), Softmax submit, submitted, and stages the
 candidate STRATEGY at the champion path in the worker's worktree. Its refusals become
-``promotion_refused``. On success the version gets a ``submitted`` event in the worktree.
+``promotion_refused``, except ``coach_declined`` (the coach declined an earlier promotion of
+this experiment or version: nothing is sent and no new ask is filed) and the coach's: ``permit_required`` (the IDE Controls ask before
+league submissions) and ``league_not_chosen`` (the coach chose no league, or another one). Then
+the promotion stays at ``intent`` and the runtime asks the coach and retries the same submit
+(``promotion``, "Waiting for the coach"); the card does not submit again. On success the
+version gets a ``submitted`` event in the worktree.
 
 ``bootstrap_champion`` is the other guarded path (amendment A14): on a fresh install with no
 champion, it uploads the game's starter policy build and promotes it as the first champion
@@ -48,9 +53,10 @@ Then ``upload.upload_bootstrap`` (idempotent within the card's view of the recor
 of the version record and its ``uploaded`` event on the card branch (so ``record_intent``
 pushes the champion's provenance with the branch), and ``bootstrap_promotion``. Its refusals
 keep their code (``champion_exists`` when a champion appeared, ``not_shipped_strategy`` when
-the branch's ``strategy/STRATEGY.md`` is not the shipped one) or become ``promotion_refused``
-(another card took the lock first, or a push failed). On success the version gets a
-``submitted`` event in the worktree.
+the branch's ``strategy/STRATEGY.md`` is not the shipped one, ``permit_required`` and
+``league_not_chosen`` as for ``submit``: the upload stands and is not repeated) or become
+``promotion_refused`` (another card took the lock first, or a push failed). On success the
+version gets a ``submitted`` event in the worktree.
 
 The outcome, rows and experiment are read from the worker's worktree (a checkout of canonical
 taken when the card started); ``submit_promotion`` reads the binding and baseline from canonical.
@@ -159,7 +165,8 @@ def submit(
     )
     if not result.ok:
         details = {"promotion_id": result.promotion_id, "request_id": result.request_id}
-        raise Refused("promotion_refused", result.reason or "promotion refused", details)
+        reason = result.code or "promotion_refused"
+        raise Refused(reason, result.reason or "promotion refused", details)
     store.add_event(
         version_id,
         "submitted",

@@ -6,6 +6,7 @@ promotion (acquire -> intent -> submit -> recorded -> published) as a ``bootstra
 no experiment, no evaluation outcome, no decision. Experiments then compare against it.
 """
 
+import datetime
 import json
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from autoresearch.runtime.promotion import (
     reconcile,
     stage_champion,
 )
-from autoresearch.softmax_tool.fake import FAULTS_ENV
+from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
 from autoresearch.softmax_tool.submit import bootstrap_champion
 from autoresearch.softmax_tool.upload import policy_name, upload_bootstrap
 from softmax.test_softmax_cli import REPO, base_env, softmax
@@ -487,3 +488,224 @@ def test_bootstrap_holder_died_after_submit_recovery_card_publishes(fresh):
     assert len(submissions(fresh)) == 1
     champion = data["data"]["platform_policy_version_id"]
     assert champion_status(fresh.ctx(), fresh.sm, LEAGUE)[0] == champion
+
+
+# --- the coach's IDE Controls (Softmax hosting) ---
+
+
+def _coach_messages(board) -> list[dict]:
+    outbox = sorted((board.canonical / "comms" / "outbox").glob("*.json"))
+    keys = ("permit-needed:", "league-not-chosen:", "coach-declined:")
+    messages = [json.loads(path.read_text()) for path in outbox]
+    return [m for m in messages if str(m.get("runtime_key", "")).startswith(keys)]
+
+
+def _minutes(moment: str, minutes: float) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(moment) + datetime.timedelta(minutes=minutes)
+
+
+def _fake_state_path(board):
+    return board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+
+
+def _answer(board, key: str, answer: str) -> None:
+    state = json.loads(_fake_state_path(board).read_text())
+    state.setdefault("answers", {})[key] = answer
+    _fake_state_path(board).write_text(json.dumps(state))
+
+
+def _refused_bootstrap(board, faults="permit=submit"):
+    worker = started(board)
+    build = shipped_build(board, worker)
+    code, data = bootstrap_cli(board, worker, build, **{FAULTS_ENV: faults})
+    return worker, code, data
+
+
+def test_a_permit_refusal_leaves_the_bootstrap_waiting_and_a_later_run_submits_it(fresh):
+    """The IDE Controls ask before league submissions: the submit is refused (403
+    permit_required) after the upload and the intent. The promotion stays at ``intent``
+    waiting for the coach; reconcile asks the coach once and reads the answer every run,
+    retrying nothing while the ask waits; after the yes it submits the same policy version
+    at once, without a second upload, and the holder's handoff that waited merges."""
+    worker, code, data = _refused_bootstrap(fresh)
+    assert code == 1 and data["error"]["reason"] == "permit_required", data
+    waiting = load(fresh.canonical)
+    assert waiting.id == data["error"]["details"]["promotion_id"]
+    assert waiting.stage == "intent" and waiting.waiting == "permit"
+    detail = waiting.waiting_detail
+    assert detail["refusals"] == 1 and detail["ask"] and detail["league_id"] == LEAGUE
+    assert detail["state"] == "waiting"
+    assert "waiting: permit" in waiting.history[-1]["note"]
+    assert len(uploads(fresh)) == 1 and submissions(fresh) == []
+
+    # The card ends; its handoff waits while the promotion is at intent.
+    worker.write_journal()
+    worker.finish(outcome="partial")
+    [handled] = fresh.process()
+    assert handled.state == "validated"
+
+    # Reconcile: one help request; while the ask waits, no retry, even past the backoff.
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    early = _minutes(detail["next_retry_after"], -1)
+    actions = reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=early)
+    assert [a.kind for a in actions] == ["help_requested"]
+    [asked] = _coach_messages(fresh)
+    assert asked["runtime_key"].startswith(f"permit-needed:{waiting.id}:")
+    assert "Approve it in the IDE Controls" in asked["body"]
+    assert "remove “submit” from Ask before" in asked["body"]
+    assert asked["about"]["asks"] == detail["ask"]
+    late = _minutes(detail["next_retry_after"], 600)
+    assert reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=late) == []
+    assert load(fresh.canonical).waiting_detail == detail  # not even retried
+    assert submissions(fresh) == []
+
+    # The coach says yes: the next run submits at once (the fault stays: the yes grants it).
+    _answer(fresh, detail["ask"], "yes")
+    actions = reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=early)
+    assert "submitted" in [a.kind for a in actions]
+    submitted = load(fresh.canonical)
+    assert submitted.stage == "submitted" and submitted.waiting is None
+    assert [s["policy_version_id"] for s in submissions(fresh)] == [
+        waiting.platform_policy_version_id
+    ]
+    assert len(uploads(fresh)) == 1  # never uploaded again
+
+    [handled] = fresh.process()
+    assert handled.state == "published"
+    assert load(fresh.canonical).stage == "published"
+    assert champion_status(fresh.ctx(), fresh.sm, LEAGUE) == (
+        waiting.platform_policy_version_id,
+        "",
+    )
+    assert len(_coach_messages(fresh)) == 1
+
+
+def test_a_coach_no_drops_the_waiting_promotion_and_frees_the_slot(fresh):
+    """C2: a no aborts the waiting intent (nothing was submitted), with one note; nothing is
+    retried or asked again, and the slot is free for another promotion."""
+    _, _, data = _refused_bootstrap(fresh)
+    assert data["error"]["reason"] == "permit_required"
+    waiting = load(fresh.canonical)
+    _answer(fresh, waiting.waiting_detail["ask"], "no")
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    now = _minutes(waiting.waiting_detail["next_retry_after"], 1)
+    actions = reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=now)
+    assert [a.kind for a in actions] == ["help_requested", "aborted"]
+    dropped = load(fresh.canonical)
+    assert dropped.stage == "aborted" and dropped.history[-1]["note"] == promotion.DECLINED_NOTE
+    assert promotion.declined(dropped.to_dict())
+    assert submissions(fresh) == []
+    [_, note] = _coach_messages(fresh)
+    assert note["kind"] == "note" and note["runtime_key"] == f"coach-declined:{waiting.id}"
+    assert reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=now) == []
+    state = json.loads(_fake_state_path(fresh).read_text())
+    assert list(state["asks"].values()) == [waiting.waiting_detail["ask"]]  # no new ask
+
+
+def test_a_retry_that_raises_waits_for_the_next_backoff_step(fresh, monkeypatch):
+    """I1: when the answer cannot be read the backoff decides; a retried submit that raises
+    is recorded and moves the retry time on, so it is not repeated every minute."""
+    _refused_bootstrap(fresh, "permit=submit;asks_read=fail")
+    waiting = load(fresh.canonical)
+    unreadable = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit;asks_read=fail"})
+    calls = []
+
+    def broken_submit(policy_version_id, league_id):
+        calls.append(policy_version_id)
+        raise RuntimeError("Request failed (409): league is locked to new policy submissions")
+
+    monkeypatch.setattr(unreadable, "submit", broken_submit)
+    now = _minutes(waiting.waiting_detail["next_retry_after"], 1)
+    with pytest.raises(RuntimeError, match="locked"):
+        reconcile(fresh.ctx(), fresh.queue, unreadable, LEAGUE, now=now)
+    after = load(fresh.canonical).waiting_detail
+    assert "locked" in after["last_error"] and after["refusals"] == 2
+    assert datetime.datetime.fromisoformat(after["next_retry_after"]) > now
+    assert reconcile(fresh.ctx(), fresh.queue, unreadable, LEAGUE, now=now) == []
+    assert len(calls) == 1  # the next minute's run did not submit again
+
+
+def test_a_league_choice_refusal_of_the_bootstrap_asks_the_coach_to_choose(fresh):
+    _, code, data = _refused_bootstrap(fresh, "league=none")
+    assert code == 1 and data["error"]["reason"] == "league_not_chosen", data
+    waiting = load(fresh.canonical)
+    assert waiting.stage == "intent" and waiting.waiting == "league"
+
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "league=none"})
+    early = _minutes(waiting.waiting_detail["next_retry_after"], -1)
+    assert [a.kind for a in reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=early)] == [
+        "help_requested"
+    ]
+    [asked] = _coach_messages(fresh)
+    assert asked["runtime_key"] == f"league-not-chosen:{LEAGUE}:none"
+    assert asked["title"] == "Choose the agent's league in the IDE Controls"
+    assert f"choose the {LEAGUE} league for the agent in the IDE Controls" in asked["body"]
+    assert "first 30 minutes after the refusal" in asked["body"]
+
+
+def test_a_declined_bootstrap_blocks_new_bootstraps_until_accept_champion(fresh):
+    """N1: after the coach's no there is still no champion; a new bootstrap would upload again
+    and ask the coach again, so it waits for ``promotion accept-champion``, as after a
+    rejected one."""
+    _refused_bootstrap(fresh)
+    waiting = load(fresh.canonical)
+    _answer(fresh, waiting.waiting_detail["ask"], "no")
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    now = _minutes(waiting.waiting_detail["next_retry_after"], 1)
+    reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=now)
+    [_, note] = _coach_messages(fresh)
+    assert note["title"] == "No first champion: you declined the starter policy's submission"
+    assert "research is paused" in note["body"] and "promotion accept-champion" in note["body"]
+    assert "coach declined" in promotion.bootstrap_blocker(fresh.canonical)
+
+    again = started(fresh)
+    code, refused = bootstrap_cli(fresh, again, shipped_build(fresh, again, "again"))
+    assert code == 1 and refused["error"]["reason"] == "champion_conflict"
+    assert len(uploads(fresh)) == 1  # nothing uploaded, nothing asked
+    record = promotion.accept_champion(fresh.ctx(), fresh.sm, LEAGUE)
+    assert record["after_rejected"] == waiting.id
+    assert promotion.bootstrap_blocker(fresh.canonical) is None
+
+
+def test_a_retry_after_a_yes_that_raises_waits_for_the_next_backoff_step(fresh, monkeypatch):
+    """N2: after the yes, a submit that raises is not repeated every minute."""
+    _refused_bootstrap(fresh)
+    waiting = load(fresh.canonical)
+    _answer(fresh, waiting.waiting_detail["ask"], "yes")
+    approved = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    calls = []
+
+    def broken_submit(policy_version_id, league_id):
+        calls.append(policy_version_id)
+        raise RuntimeError("Request failed (409): league is locked to new policy submissions")
+
+    monkeypatch.setattr(approved, "submit", broken_submit)
+    now = datetime.datetime.now(datetime.UTC)
+    with pytest.raises(RuntimeError, match="locked"):
+        reconcile(fresh.ctx(), fresh.queue, approved, LEAGUE, now=now)
+    for minute in (1, 2, 3):
+        later = now + datetime.timedelta(minutes=minute)
+        assert reconcile(fresh.ctx(), fresh.queue, approved, LEAGUE, now=later) == []
+    assert len(calls) == 1
+    due = datetime.datetime.fromisoformat(load(fresh.canonical).waiting_detail["next_retry_after"])
+    after_due = due + datetime.timedelta(seconds=1)
+    with pytest.raises(RuntimeError, match="locked"):
+        reconcile(fresh.ctx(), fresh.queue, approved, LEAGUE, now=after_due)
+    assert len(calls) == 2
+
+
+def test_a_waiting_submission_gets_one_reminder_after_a_day(fresh):
+    """N6: one reminder about the same ask a day after it was first asked, never more."""
+    _refused_bootstrap(fresh)
+    waiting = load(fresh.canonical)
+    since = datetime.datetime.fromisoformat(waiting.waiting_detail["since"])
+    refusing = FakeSoftmax(fresh.canonical, {FAULTS_ENV: "permit=submit"})
+    reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=since)
+    day = since + datetime.timedelta(hours=24, minutes=1)
+    actions = reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=day)
+    assert [a.kind for a in actions] == ["help_requested"]
+    week = since + datetime.timedelta(days=7)
+    assert reconcile(fresh.ctx(), fresh.queue, refusing, LEAGUE, now=week) == []
+    _, reminder = _coach_messages(fresh)
+    assert reminder["title"] == "Still waiting for your approval in the IDE Controls"
+    assert load(fresh.canonical).stage == "intent"  # no timeout

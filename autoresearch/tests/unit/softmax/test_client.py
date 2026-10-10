@@ -8,7 +8,7 @@ from autoresearch.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from autoresearch.softmax_tool.fake import FakeSoftmax
 from autoresearch.softmax_tool.identity import IdentityError
 from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, SERVER_ENV, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import from_env
+from autoresearch.softmax_tool.protocol import LeagueNotChosen, PermitRequired, from_env
 
 from .conftest import (
     AGENT_TOKEN,
@@ -134,6 +134,35 @@ def test_submit_names_the_player_and_returns_submission_id(env, runner, tmp_path
             "--no-open-browser",
         ],
     ]
+
+
+def _submit_fails_with(runner, fixture: str):
+    return runner.on(
+        "coworld", "submit", response=completed(stderr=synthetic(fixture), returncode=1)
+    )
+
+
+def test_submit_permit_refusal_returns_permit_required(env, runner, tmp_path):
+    """The coach's IDE Controls ask before league submissions (403 permit_required)."""
+    _submit_fails_with(runner, "submit_403_permit.stderr")
+    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    assert isinstance(result, PermitRequired)
+    assert result.ask == "permit-submit-dc43b411e9401d8b-1"
+    assert result.reason.startswith(f"submit on league:{LEAGUE_ID}:")
+
+
+def test_submit_league_choice_refusal_returns_league_not_chosen(env, runner, tmp_path):
+    _submit_fails_with(runner, "submit_403_league_elsewhere.stderr")
+    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    assert isinstance(result, LeagueNotChosen)
+    assert result.reason.startswith("This cogent plays league_0b1c2d3e")
+    assert result.reason.endswith(f"a submission to {LEAGUE_ID} is refused.")
+
+
+def test_submit_other_403_still_raises(env, runner, tmp_path):
+    _submit_fails_with(runner, "submit_403_other.stderr")
+    with pytest.raises(SoftmaxCliError, match="does not belong to you"):
+        make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
 
 
 def test_every_mutation_rechecks_identity(env, runner, tmp_path):
@@ -391,3 +420,41 @@ def test_an_unknown_membership_status_is_unknown_not_pending(env, runner):
     runner.on("coworld", "memberships", response=completed(json.dumps(page)))
     state = make(env, runner, None).submission_state(PLAYER_ID, GOTA, "games-bond-gota:v8")
     assert state.stage == "unknown" and "retired" in state.detail
+
+
+# --- the coach's answer to a permit ask (GET /v2/cogents/{player}/c/asks/{key}) ---
+
+ASK = "permit-spend-8c5edbef63cc84a1-1"
+
+
+@pytest.mark.parametrize(
+    "fixture, answer",
+    [
+        ("cogent_ask_waiting.json", "waiting"),
+        ("cogent_ask_yes.json", "yes"),
+        ("cogent_ask_no.json", "no"),
+        ("cogent_ask_used.json", "used"),
+    ],
+)
+def test_permit_answer_reads_our_cogents_ask_record(env, runner, fixture, answer):
+    seen = []
+
+    def http_get(url, headers):
+        seen.append((url, headers))
+        return synthetic(fixture)
+
+    client = SoftmaxClient(env, run=runner, http_get=http_get)
+    assert client.permit_answer(ASK) == answer
+    [(url, headers)] = seen
+    assert url == f"{DEFAULT_SERVER}/v2/cogents/{PLAYER_ID}/c/asks/{ASK}"
+    assert headers["Authorization"].startswith("Bearer ")
+    assert runner.calls == []  # no CLI call: the read costs nothing but one GET
+
+
+def test_permit_answer_is_none_when_it_cannot_be_read(env, runner):
+    def missing(url, headers):
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    assert SoftmaxClient(env, run=runner, http_get=missing).permit_answer(ASK) is None
+    not_an_ask = SoftmaxClient(env, run=runner, http_get=lambda url, headers: '{"body": {}}')
+    assert not_an_ask.permit_answer(ASK) is None

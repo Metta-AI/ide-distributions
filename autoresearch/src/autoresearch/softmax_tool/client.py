@@ -37,6 +37,7 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
 import json
 import re
 import subprocess
+import urllib.parse
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -45,10 +46,23 @@ from pathlib import Path
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.identity import require_player, whoami
-from autoresearch.softmax_tool.platform_cli import HttpGet, PlatformCli, Runner, SoftmaxCliError
+from autoresearch.softmax_tool.platform_cli import (
+    HttpGet,
+    PlatformCli,
+    Runner,
+    SoftmaxCliError,
+    coach_refusal,
+    describe_failure,
+)
 from autoresearch.softmax_tool.protocol import (
+    ANSWER_NO,
+    ANSWER_USED,
+    ANSWER_WAITING,
+    ANSWER_YES,
     CreditDenied,
     Identity,
+    LeagueNotChosen,
+    PermitRequired,
     SubmissionState,
     XpHandle,
     XpStatus,
@@ -62,6 +76,11 @@ LEAGUE_FETCH_WORKERS = 4  # concurrent episode fetches (each one runs two coworl
 
 
 CREDITS_PATH = "/observatory/usage/me/credits"
+# Our cogent's record ``asks/<key>`` (metta observatory-api routes/app/v2/cogents/records,
+# ``cogent_get``): a player credential reads its own cogent (``cogents/queries._owned``). The
+# body is a ``PermitAsk``: ``{kind, action, ref, why, at, amount?, answer?: {yes, at},
+# used?: {at}}``.
+ASK_PATH = "/v2/cogents/{player}/c/asks/{key}"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
@@ -101,6 +120,29 @@ class SoftmaxClient:
             return float(payload["status"]["balance_credits"])
         except (KeyError, TypeError, ValueError):
             raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
+
+    def permit_answer(self, ask: str) -> str | None:
+        """The coach's answer to permit ask ``ask`` (``Softmax.permit_answer``), read as the
+        Player over HTTP (``ASK_PATH``); None when the read fails or the body is not an ask."""
+        path = ASK_PATH.format(
+            player=urllib.parse.quote(self._expected_player, safe=""),
+            key=urllib.parse.quote(ask, safe=""),
+        )
+        try:
+            record = self._cli.api_get_json(path)
+        except SoftmaxCliError:
+            return None
+        body = record.get("body") if isinstance(record, dict) else None
+        if not isinstance(body, dict) or body.get("kind") != "permit":
+            return None
+        answer = body.get("answer")
+        if answer is None:
+            return ANSWER_WAITING
+        if not isinstance(answer, dict) or not isinstance(answer.get("yes"), bool):
+            return None
+        if not answer["yes"]:
+            return ANSWER_NO
+        return ANSWER_USED if body.get("used") else ANSWER_YES
 
     def episode_cost(self) -> float | None:
         """Mean credits per episode over the account's recent XP requests (the same route's
@@ -142,7 +184,7 @@ class SoftmaxClient:
         seed: int | None = None,
         arm: str | None = None,
         known: list[XpHandle] | None = None,
-    ) -> XpHandle | CreditDenied:
+    ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen:
         """Reuse an existing request for (experiment, batch, attempt, seed, arm); else check
         identity, create.
 
@@ -186,12 +228,20 @@ class SoftmaxClient:
             raise SoftmaxCliError(f"upload-policy printed no 'Upload complete:' line for {name}")
         return label
 
-    def submit(self, policy_version_id: str, league_id: str) -> str:
-        """Submit ``<name>:v<N>`` as the expected player; return the submission id."""
+    def submit(
+        self, policy_version_id: str, league_id: str
+    ) -> str | PermitRequired | LeagueNotChosen:
+        """Submit ``<name>:v<N>`` as the expected player; return the submission id, or the
+        coach's refusal (``platform_cli.coach_refusal``: nothing was submitted)."""
         self._require_player()
         args = ["submit", policy_version_id, "--league", league_id]
         args += ["--player", self._expected_player, "--no-open-browser"]
-        result = self._cli.run("coworld", args)
+        result = self._cli.run("coworld", args, ok_codes=(0, 1))
+        if result.returncode != 0:
+            refusal = coach_refusal(result.stderr or "")
+            if refusal is not None:
+                return refusal
+            raise SoftmaxCliError(describe_failure("coworld", args, result))
         submission_id = _line_value(result.stdout, "Submission:")
         if submission_id is None:
             raise SoftmaxCliError(f"submit printed no 'Submission:' line for {policy_version_id}")

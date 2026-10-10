@@ -9,11 +9,15 @@ Every runtime job builds markers here, never by hand.
   ``lifecycle.launch_attempts + 1`` (C12). The card runs ``xp recover`` first, so a repeated
   launch never duplicates an XP request.
 - ``launch:<E>:<attempt>:after:<next_launch_after>``: xp-poll's relaunch of an
-  ``awaiting-credits`` experiment (A10). A denial does not count as a launch, so the relaunch
+  ``awaiting-credits`` experiment (A10), or of an ``awaiting-permit`` one (the coach's IDE
+  Controls refused it). A denial does not count as a launch, so the relaunch
   reuses the attempt (creating only the missing requests). The key is the denial itself:
   ``lifecycle.next_launch_after`` is set anew by every denial, so each denial gets exactly one
   relaunch. (``credit_denials`` would not do: it resets after a successful batch, so a later
-  denial would repeat an old marker and never be relaunched.)
+  denial would repeat an old marker and never be relaunched.) A relaunch card that ends
+  without creating the requests and without a new denial leaves the same wait: its next try
+  is ``<that marker>:g<n>`` (``relaunch_generation``, n = 2, 3; xp-poll stops after
+  ``xp_poll.RELAUNCH_GENERATIONS`` and asks for help).
 - ``review:<E>:n<count>``: review a completed evaluation; ``count`` is the number of entries
   in the experiment's ``xp_requests``, so a later batch gets its own review. The open-request
   coverage check still prevents a second card while one is open.
@@ -38,6 +42,11 @@ def launch_marker(experiment: str, next_attempt: int) -> str:
 
 def relaunch_marker(experiment: str, attempt: int, next_launch_after: str) -> str:
     return f"launch:{experiment}:{attempt}:after:{next_launch_after}"
+
+
+def relaunch_generation(marker: str, generation: int) -> str:
+    """The ``generation``-th try of the relaunch ``marker`` (the first is the marker itself)."""
+    return marker if generation == 1 else f"{marker}:g{generation}"
 
 
 def next_launch_attempt(experiment: dict) -> int:

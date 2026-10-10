@@ -56,7 +56,7 @@ CITING_ENTITIES = ("claim", "hub", "topic", "hypothesis", "experiment")
 _CLOSED_STATES = {
     "topic": {"achieved", "closed"},
     "hypothesis": {"supported", "falsified", "abandoned"},
-    "experiment": {"reviewed"},
+    "experiment": {"reviewed", "stopped"},
 }
 
 _WIKI_LINK = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")

@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field
 
 from autoresearch.ids import ENTITY_PREFIXES
+from autoresearch.softmax_tool.protocol import BACKOFF_CAP
 
 TITLE_LIMIT = 120
 # A help_request is always urgent and wants an answer, whoever publishes it: the first
@@ -969,6 +970,180 @@ def submission_pending(
         body,
         about=_about(promotion=promotion_id, submitted_policy=policy, league_status=detail),
         key=f"submission-pending:{promotion_id}",
+    )
+
+
+# --- the coach's IDE Controls (Softmax hosting) ---
+
+_STOP_ASKING = {
+    "xp": (
+        "To stop being asked for each request, change Ask before in the IDE Controls: remove "
+        "“spend” to let the agent spend up to your daily credits without asking, or replace "
+        "it with “spend-over-N” to be asked only for a spend of more than N credits. Without "
+        "saved rules, Softmax asks before every action."
+    ),
+    "submit": (
+        "To stop being asked before each league submission, remove “submit” from Ask before in "
+        "the IDE Controls. Without saved rules, Softmax asks before every action."
+    ),
+}
+
+
+def _subject_about(act: str, subject: str, **ids) -> dict[str, str]:
+    return _about(**{"experiment_batch" if act == "xp" else "promotion": subject}, **ids)
+
+
+def permit_needed(
+    act: str,
+    subject: str,
+    count: int,
+    asks: list[str],
+    league_id: str | None = None,
+    over_cap: bool = False,
+    refs: list | None = None,
+    reminder: bool = False,
+    key_asks: list[str] | None = None,
+) -> RuntimeMessage:
+    """Softmax holds ``count`` acts until the coach answers their permit asks (403
+    ``permit_required``: the IDE Controls ask before them). ``act`` is ``xp`` (``subject``:
+    ``<E>:b<batch>:a<attempt>``, every refused request of one batch) or ``submit``
+    (``subject``: the promotion id). One per subject and set of ``asks``, however often it is
+    refused again: new asks (a yes the price outgrew) are a new message. ``key_asks`` (default
+    ``asks``) is the set the key is made from, so it can stay the same while ``asks`` shrinks
+    (asks drop out as their requests are created). ``reminder``: the one reminder about the
+    same asks, sent once a day after the first."""
+    if act == "xp":
+        what = (
+            f"The agent asked Softmax for {count} hosted XP request(s) to evaluate one of its "
+            "experiments (each plays one seed, for the candidate or for the champion). Your IDE "
+            f"Controls ask before each spend of credits, so Softmax filed {count} permit ask(s) "
+            "and holds the requests. Approve them in the IDE Controls. The agent reads your "
+            "answers every few minutes and goes on once all are approved; nothing is created "
+            "twice. If you answer no to any of them, the agent stops this experiment and asks "
+            "nothing more for it."
+        )
+        if over_cap:
+            what += (
+                " Some of them cost more than the credits left today under your daily limit, "
+                "so the agent waits for the next UTC day before it tries them again, whatever "
+                "you answer before then."
+            )
+    else:
+        what = (
+            f"The agent is ready to submit a policy to the {league_id} league, and your IDE "
+            "Controls ask before league submissions, so Softmax filed a permit ask and holds "
+            "the submission. Approve it in the IDE Controls. The runtime reads your answer "
+            "every minute and submits once you approve, never twice. If you answer no, the "
+            "promotion is dropped and nothing more is asked for it."
+        )
+    body = f"{what} {_STOP_ASKING[act]} The asks are in this message's details (`about`)."
+    title = "Waiting for your approval in the IDE Controls"
+    if reminder:
+        body = f"A reminder: these asks have waited a day for your answer. {body}"
+        title = "Still waiting for your approval in the IDE Controls"
+    ask_set = hashlib.sha256("|".join(sorted(key_asks or asks)).encode()).hexdigest()[:12]
+    return RuntimeMessage(
+        "help_request",
+        title,
+        body,
+        refs or [],
+        about=_subject_about(act, subject, asks=", ".join(asks), league=league_id),
+        key=f"permit-needed:{subject}:{ask_set}" + (":reminder" if reminder else ""),
+    )
+
+
+def league_not_chosen(
+    act: str, league_id: str, reason: str, retry_minutes: int, refs: list | None = None
+) -> RuntimeMessage:
+    """Softmax refused a league-scoped act (``act``: ``xp`` or ``submit``) because the coach
+    chose no league for the agent, or another one. One per league and cause, whatever acts
+    and experiments it holds up."""
+    chosen_none = reason.startswith("Your coach has not chosen")
+    why = (
+        "no league is chosen for the agent yet"
+        if chosen_none
+        else "the IDE Controls choose a different league for the agent"
+    )
+    asked = "to run hosted games" if act == "xp" else "to submit a policy"
+    body = (
+        f"The agent asked Softmax {asked} in the {league_id} league, and Softmax refused because "
+        f"{why}: the agent plays only the one league its coach chooses. To go on, choose the "
+        f"{league_id} league for the agent in the IDE Controls. (The agent's league is set in "
+        "its game's configuration; if it should play another league, ask the operator to change "
+        "that instead.) The agent retries by itself: first "
+        f"{retry_minutes} minutes after the refusal, then twice as long each time (at most "
+        f"{BACKOFF_CAP.total_seconds() / 3600:g} hours), so it can take that long to go on "
+        "after you choose. Softmax's words are in this message's details (`about`)."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Choose the agent's league in the IDE Controls",
+        body,
+        refs or [],
+        about=_about(league=league_id, server_reason=reason),
+        key=f"league-not-chosen:{league_id}:{'none' if chosen_none else 'elsewhere'}",
+    )
+
+
+def coach_declined(
+    act: str, subject: str, done: int = 0, total: int = 0, refs: list | None = None
+) -> RuntimeMessage:
+    """The coach answered no to a permit ask: the experiment is stopped (``xp``), the
+    promotion dropped (``submit``), or the first champion's submission dropped
+    (``bootstrap``: the starter policy; research waits for a champion). One per subject;
+    nothing is asked again for it."""
+    if act == "xp":
+        body = (
+            "You answered no to a permit ask for one of the agent's experiments, so the agent "
+            f"stopped that experiment with {done} of its {total} XP requests run. It asks nothing "
+            "more for it, and its results so far are kept but not reviewed. Its other asks that "
+            "are still open in the IDE Controls can be left unanswered. Nothing needs to be done."
+        )
+        title = "Experiment stopped: you declined its XP requests"
+    elif act == "bootstrap":
+        body = (
+            "You answered no to the agent's submission of the game's starter policy as its first "
+            "champion. Nothing was submitted, and there is still no champion, so the agent's "
+            "research is paused: it cannot evaluate experiments without one, and it will not ask "
+            "again by itself. To allow a submission, have the operator run "
+            '`"$AUTORESEARCH_CLI" promotion accept-champion` in an operator shell; the agent then '
+            "submits the starter policy again and you get a new ask to approve (or none, if you "
+            "removed “submit” from Ask before in the IDE Controls)."
+        )
+        title = "No first champion: you declined the starter policy's submission"
+    else:
+        body = (
+            "You answered no to the agent's league submission, so that promotion is dropped: "
+            "nothing was submitted, the champion stays as it is, and the agent may promote "
+            "another policy later. Nothing needs to be done."
+        )
+        title = "Promotion dropped: you declined its submission"
+    about = _subject_about(act, subject)
+    return RuntimeMessage("note", title, body, refs or [], about, key=f"coach-declined:{subject}")
+
+
+def relaunch_stuck(
+    experiment: str, marker: str, generations: int, refs: list | None = None
+) -> RuntimeMessage:
+    """The relaunch of an experiment's waiting XP batch failed ``generations`` times without a
+    new refusal (each card ended without creating the requests), so the runtime stops
+    relaunching it. One per wait: ``marker`` is the wait's relaunch marker
+    (``markers.relaunch_marker``), which every new refusal or denial changes."""
+    body = (
+        f"The agent tried {generations} times to send an experiment's waiting XP requests again "
+        "after they were cleared to run, and each try ended without creating them and without "
+        "a new refusal from Softmax (for example a platform error). It has stopped retrying so "
+        "it does not keep spending model calls. The requests and their approvals are kept. "
+        "Ask the operator to look at the experiment's last launch cards; a new launch card for "
+        "the same batch sends the same requests again."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "XP requests could not be sent: relaunches keep failing",
+        body,
+        refs or [],
+        about=_about(experiment=experiment, relaunch=marker),
+        key=f"relaunch-stuck:{marker}",
     )
 
 

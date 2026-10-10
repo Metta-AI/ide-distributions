@@ -118,7 +118,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_FALLBACK_PRICES` | no | USD per million tokens for a session Hermes could not price (its estimate missing, for example when OpenRouter pricing was unreachable), as `kind=price` pairs. Default `input=3,output=12,cache_read=0.75,cache_write=3`, above kimi-k3's observed rate on purpose. queue-keeper logs each session priced this way once. |
 | `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long the league may take to make our admitted submission the champion (or, when its membership cannot be found, how long after the submit) before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
 | `AUTORESEARCH_RELAUNCH_MIN_CREDITS` | no | Credits an experiment refused for credits needs before xp-poll relaunches it, when the cost per XP episode cannot be estimated from recent requests (A10). Default 100. |
-| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
+| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. The same wait applies to an experiment the coach's IDE Controls refused (`awaiting-permit`) when the coach's answers cannot be read or the league choice refused it; a refused promotion submit then always waits 30 minutes first. |
 | `GOTA_G2_RUNNER` | no | GotA G2 gate episode runner. Default `native`: the pinned native match binary, no Docker needed. `docker` runs pinned `coworld run-episode` instead, which needs Docker. See `games/gota/GAME.md`, "G2 episode runner". |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
@@ -175,7 +175,7 @@ hermes -p "$PROFILE_NAME" cron list
 | Job | Runs | Does |
 |---|---|---|
 | `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. A card the runtime did not create is never merged, in any board epoch: a board task with no card body (for example one a model added with `kanban_create`), or a handoff whose request has no committed `cards/requests/<Q-id>.json` (a receipt its worker wrote). It gets one help request that says how to archive it, and the marker `.supervisor/ledger/foreign/<task>.json`; the spend caps still apply to it while it runs. Its card branch is still pushed to `origin` with the others (`refs/heads/card/*`), unmerged. `main` is pushed on its own and never forced; card branches are force-pushed (a retried card rebuilds its branch, so origin's copy is stale), and a card ref origin still refuses is logged once in `keeper.log`. One card that fails (unreadable on the board, or a blocked card the board will not requeue) does not stop the other cards in the same step; the step is still logged as failed. A merge or publication that fails and leaves canonical unchanged is handled the same way; one that leaves it changed stops the step, and the next run repairs it. If the board cannot list its foreign cards, the spend caps still apply to the other cards. A Hermes status the runtime does not know reads as claimed. |
-| `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. |
+| `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. It also relaunches an experiment that waits for credits (`awaiting-credits`) or for the coach (`awaiting-permit`, see the IDE Controls paragraphs in Operate), reads the coach's answers, and stops an experiment the coach declined. Log: `.supervisor/runtime/xp_poll.log`. |
 | `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card whose handoff is already published cannot hand off again, so it is never requeued: when that handoff was `blocked` it is repaired at once, at most 2 repairs deep (then one help request), and a rerun a human starts by unblocking it is closed, after its repair card is opened when the handoff was `blocked`; a rerun that completes before the check sees it is not repaired; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
 To start a `queue-keeper` run now instead of waiting for the schedule:
@@ -243,8 +243,10 @@ Read state with the CLI:
 and commit (and a failed update, from the profile's `.softmax-update-failed` JSON
 `{"commit", "error"}`), pause state and reasons, coach hold, `AUTORESEARCH_AUTONOMY` and
 whether the agent started, today's estimated spend against the daily budget, the OpenRouter
-key's limit, usage and remaining credit, running cards, open questions, the champion and any
-conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
+key's limit, usage and remaining credit, running cards, open questions, the permit asks the
+agent waits on (`permit_asks_open`: the recorded asks of `awaiting-permit` experiments, plus
+one for a promotion whose submit waits on an ask; whether the coach already answered is not
+read here), the champion and any conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
 `warnings` entry. It never prints a credential.
 
 `report baseline --since <YYYY-MM-DD> --json` reports performance and cost from that UTC
@@ -292,6 +294,7 @@ Where things live:
 | Commit provenance journal and its key (not committed) | `$PROFILE/workspace/.git/autoresearch/provenance.jsonl`, `provenance.key` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
+| Permit asks whose yes was already used (xp-poll's cache; disposable, one small entry per ask) | `$PROFILE/workspace/.supervisor/runtime/permit_answers.json` |
 | Hermes logs, cron output | `$PROFILE/logs/`, `$PROFILE/cron/` |
 | Card worktrees | `$PROFILE/workspace/.worktrees/` |
 | venv and CLI shim | `$PROFILE/local/venv/`, `$PROFILE/bin/autoresearch` |
@@ -353,6 +356,64 @@ agree: either make the league show the expected policy again, or accept what it 
 run it). It resumes on the
 next queue-keeper run after that.
 
+On Softmax hosting the agent acts with a `cga_` agent token, and the coach's IDE Controls
+govern it. Two of their settings can make Softmax refuse what the agent asks (HTTP 403), and
+the agent then waits for the coach instead of failing:
+
+- **Ask before** (`askBefore`) for spending credits (XP requests) or league submissions.
+  Softmax files a permit ask for each request and holds it. Once the coach has set the agent
+  up (chosen a league or saved rules), Softmax asks before every action until the coach saves
+  rules. The agent tries every request of an XP batch
+  in one run, so all of the batch's asks appear at once, and the coach gets one help request
+  per batch, "Waiting for your approval in the IDE Controls", with the number of asks. The
+  coach approves them there. To stop the asking per request, remove `spend` from Ask before
+  (spends are then allowed up to the daily credits) or replace it with `spend-over-N` (asks
+  only for a spend of more than N credits); for submissions, remove `submit`.
+- **The league choice.** The agent plays only the league its coach chose. With no league
+  chosen, or another one, the coach gets one help request per league and cause, "Choose the
+  agent's league in the IDE Controls", naming the league to choose (the game's league; to play
+  another one, change the game's configuration instead).
+
+The runtime reads the coach's answers itself, every run, with the agent token
+(`GET /v2/cogents/<player>/c/asks/<key>`), so waiting costs no model calls:
+
+- An XP batch the coach refused leaves its experiment `awaiting-permit` (with
+  `lifecycle.permit_wait`; `awaiting-credits` is the same wait for a credit refusal, and
+  `stopped` is where a no ends it, below). When every ask of the batch is approved, xp-poll requests one
+  relaunch card at once; it sends each refused request again with the same body and
+  idempotency key (the card names the exact `--batch`, `--attempt` and `--batches`, and
+  `xp create` refuses any other batch while the asks wait with `permit_batch_mismatch`, and
+  refuses with `permit_league_changed` if the game's league configuration changed meanwhile), so Softmax
+  grants it against its yes and creates nothing twice. Every ask stays tracked until its
+  request is created: each refusal is saved before the next request is sent, a rerun that
+  stops early (credits ran out, or a no) keeps the asks it did not reach, and a new ask
+  the server files for a request replaces that request's old one. An experiment with any ask
+  open is always `awaiting-permit`: when credits also ran out in the batch, that is recorded in
+  the wait (`credits_short`), and the relaunch waits for every yes and then for the credits,
+  never for the credits alone (a known balance too low for the rest keeps it waiting). A
+  request over today's cap waits for the next UTC day, whatever the coach answers before
+  then. A relaunch whose price moved past an earlier yes gets new asks, and with them a new
+  help request. A relaunch card that ends without creating the requests and without a new
+  refusal is tried again for the same batch, at most 3 times in all; then the coach gets one
+  help request and no more cards are made for that wait.
+- A refused submission leaves its promotion at `intent` with `waiting` set
+  (`"$AUTORESEARCH_CLI" promotion status` shows it). After the yes, queue-keeper's reconcile
+  submits the same policy version once; no other promotion starts meanwhile.
+- **A no ends it.** An experiment with a declined ask goes `stopped` (its results so far are
+  kept, unreviewed, and `softmax xp create` refuses it with `experiment_closed`; the batch
+  stops at the first refusal that reports the no); a declined submission drops its
+  promotion (`aborted`, the slot is free; no repair card is made for its holder, and
+  `softmax submit` refuses that experiment or version again with `coach_declined`). Either way the coach gets one note, and nothing is
+  asked or retried again for it. A declined first champion (the starter policy) leaves no
+  champion, so research is paused: no new bootstrap runs until an operator runs
+  `"$AUTORESEARCH_CLI" promotion accept-champion`, as after a rejected one.
+- An ask still unanswered 24 hours after it was first sent gets one reminder help request,
+  never more.
+- Only when an answer cannot be read, and for a league refusal, does the agent fall back to a
+  backoff: `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` (default 30) for experiments, 30 minutes for
+  submissions, doubling, at most 8 hours. A retried submission that fails waits for the next
+  step too.
+
 A coach pauses and resumes research from the IDE chat with the exact lines
 `/pause-research` and `/resume-research`, for which the plugin sends an inbound `control` message
 (`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with
@@ -369,6 +430,11 @@ champion conflict, `pause.json`): queue-keeper never clears the hold, and it doe
 own pause while the hold is set. A resume clears only the hold: if the agent is also paused
 for its own reason, it stays paused (the note says so), the cards the hold unassigned wait in
 `pause.json`, and it resumes by itself once that cause clears.
+While the hold is set, or before the coach's first task starts an agent with
+`AUTORESEARCH_AUTONOMY=on-request`, xp-poll makes no relaunch card (for credits or for the
+coach's permit asks); everything that spends nothing goes on: evidence and review requests,
+the help requests and the reminder, reading the coach's answers, and stopping an experiment
+on a no. A relaunch that is due is made on the first xp-poll run after the hold is lifted.
 
 Only the runtime commits on the canonical workspace's `main` (C1): queue-keeper, xp-poll,
 health, bootstrap, `card finish` (the handoff commit), and `comms inbound` (also the IDE coach
@@ -702,6 +768,9 @@ OpenRouter key stops model calls the same way the credit floor does.
   balance covers its remaining requests (the recent cost per episode, or
   `AUTORESEARCH_RELAUNCH_MIN_CREDITS`), at most one experiment per xp-poll run; otherwise the
   backoff decides (A10).
+- **The league choice is not read.** The runtime reads the coach's answers to permit asks,
+  but not the league choice, so after a league refusal it retries on the backoff (see the IDE
+  Controls paragraphs in Operate).
 - **Gateway turn hooks** of the plugin are verified for multiplexed API-server runs on the
   pinned image (the coach chat, [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md)
   "Verified in Task 5 Step 4"); other gateway paths are not (hermes-facts.md, item 2).

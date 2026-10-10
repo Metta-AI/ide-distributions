@@ -453,7 +453,8 @@ READ_TOOLS = {
     "status": (
         (
             "The agent now: paused or running and why, coach hold, today's research spend "
-            "against its budget, the key's credit, running cards, open questions, the champion. "
+            "against its budget, the key's credit, running cards, open questions, permit asks "
+            "waiting for the coach, the champion. "
             "Works even when the chat budget is spent."
         ),
         {}, [], lambda a, e: ["status", "--json"],

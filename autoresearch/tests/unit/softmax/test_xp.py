@@ -6,8 +6,22 @@ import pytest
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.client import SoftmaxClient
-from autoresearch.softmax_tool.platform_cli import PlatformCli, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import CreditDenied, XpHandle, XpStatus
+from autoresearch.softmax_tool.platform_cli import (
+    PlatformCli,
+    SoftmaxCliError,
+    coach_refusal,
+    permit_state,
+)
+from autoresearch.softmax_tool.protocol import (
+    PERMIT_DECLINED,
+    PERMIT_OVER_CAP,
+    PERMIT_WAITING,
+    CreditDenied,
+    LeagueNotChosen,
+    PermitRequired,
+    XpHandle,
+    XpStatus,
+)
 
 from .conftest import LEAGUE_ID, RECORDED, completed, recorded, synthetic
 
@@ -85,6 +99,78 @@ def test_credit_denial_becomes_credit_denied(env, runner):
     result = xp.create(cli(env, runner), E, 1, 1, SPEC)
     assert isinstance(result, CreditDenied)
     assert "credit allowance" in result.reason
+
+
+# The coach's refusals (Softmax hosting). The fixtures are what coworld 0.1.58 prints for the
+# server's 403s (metta observatory-api v2/experience_requests.py: league_refusal, then
+# permit_checks.refused, whose detail permits.refusal_detail builds).
+PERMIT_ASK = "permit-spend-8c5edbef63cc84a1-1"
+
+
+def _create_fails_with(runner, fixture: str):
+    runner.on(
+        "coworld",
+        "xp-request",
+        "create",
+        response=completed(stderr=synthetic(fixture), returncode=1),
+    )
+
+
+def test_permit_denial_becomes_permit_required(env, runner):
+    _create_fails_with(runner, "xp_request_create_403_permit.stderr")
+    result = xp.create(cli(env, runner), E, 1, 1, SPEC)
+    assert isinstance(result, PermitRequired)
+    assert result.ask == PERMIT_ASK
+    assert result.reason.startswith("spend on spend:")
+    assert result.reason.endswith(f"the ask waits for the coach (ask asks/{PERMIT_ASK})")
+
+
+def test_permit_retry_sends_the_identical_body_and_idempotency_key(env, runner):
+    """After the coach's yes the same create goes again: the server decides it against the
+    same ask only if the body (and so its ref) and the idempotency key are the same."""
+    _create_fails_with(runner, "xp_request_create_403_permit.stderr")
+    assert isinstance(xp.create(cli(env, runner), E, 1, 1, SPEC), PermitRequired)
+    runner.on(
+        "coworld", "xp-request", "create", response=completed(synthetic("xp_request_create.json"))
+    )
+    assert xp.create(cli(env, runner), E, 1, 1, SPEC) == XpHandle(CREATED_ID, E, 1, 1)
+    refused, retried = (kwargs["input"] for _, kwargs in runner.calls)
+    assert refused == retried
+    assert json.loads(retried)["idempotency_key"] == f"ar:{E}:b1:a1"
+
+
+def test_league_choice_refusal_becomes_league_not_chosen(env, runner):
+    _create_fails_with(runner, "xp_request_create_403_league_not_chosen.stderr")
+    result = xp.create(cli(env, runner), E, 1, 1, SPEC)
+    assert result == LeagueNotChosen(
+        "Your coach has not chosen a league for this cogent yet; ask them to pick one in the IDE."
+    )
+
+
+def test_permit_refusal_states_come_from_the_servers_reason(env, runner):
+    """M1: ``detail.reason`` tells a waiting ask from a no and from today's cap."""
+    _create_fails_with(runner, "xp_request_create_403_permit.stderr")
+    assert xp.create(cli(env, runner), E, 1, 1, SPEC).state == PERMIT_WAITING
+    _create_fails_with(runner, "xp_request_create_403_permit_declined.stderr")
+    declined = xp.create(cli(env, runner), E, 1, 1, SPEC)
+    assert declined.state == PERMIT_DECLINED
+    assert declined.ask == "permit-spend-8c5edbef63cc84a1-2"  # the server's new ask
+    _create_fails_with(runner, "xp_request_create_403_permit_over_cap.stderr")
+    assert xp.create(cli(env, runner), E, 1, 1, SPEC).state == PERMIT_OVER_CAP
+    assert permit_state("40 credits is more than the 10 left today") == PERMIT_OVER_CAP
+    assert permit_state("the last yes was used; a new ask waits") == PERMIT_WAITING
+
+
+def test_permit_detail_without_a_readable_body_still_names_the_refusal():
+    stderr = "Error: Access denied (403) for /v2/experience-requests. permit_required {\n"
+    refusal = coach_refusal(stderr)
+    assert isinstance(refusal, PermitRequired) and refusal.ask is None
+    assert refusal.reason.startswith("Access denied (403)")
+
+
+def test_another_403_is_no_coach_refusal():
+    assert coach_refusal(synthetic("submit_403_other.stderr")) is None
+    assert coach_refusal(synthetic("xp_request_create_402.stderr")) is None
 
 
 def test_other_create_failure_raises(env, runner):

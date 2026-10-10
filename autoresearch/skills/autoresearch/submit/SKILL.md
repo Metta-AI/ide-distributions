@@ -48,9 +48,11 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | `champion_unknown` | The league shows no champion for us, though this experiment was evaluated against one. | Send a `help_request`. Finish `blocked`. |
 | `champion_conflict` | The league and the loop disagree on the champion, or the agent is paused for that (A9). | Record it. Do not send a `help_request` (the runtime told the user). Finish `blocked`. |
 | `champion_mismatch` | The league's champion changed since the evaluation. | Request "Re-evaluate E-…" (mode experimentation, refs the experiment and version). Finish `done`. |
+| `coach_declined` | The coach declined an earlier promotion of this experiment or version (`details.promotion_id`). Nothing was sent, and no new ask was filed. | Record it. Do not submit again or send a `help_request` (the coach already got a note). Finish `done`. |
 | `promotion_refused` | The lock is held, the champion is not the baseline, or a push failed. If `details.request_id` is set, the runtime already requested the re-evaluation card. | Finish `partial`. |
 | `busy` | A process is running `xp create`, `upload` or `submit` for this experiment now (`details.holder`). | `details.own_run: true`: your own earlier submit still runs; wait for it (native `process_manage`, action `wait`, its `session_id`, `timeout` 1800), then read `promotion status`. Otherwise do not submit again; finish `partial`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
+| `permit_required`, `league_not_chosen` | The coach's IDE Controls refused the submission: they ask before league submissions, or no league or another league is chosen. Nothing was submitted; the promotion waits at `intent`. | Record it in the journal. Do not submit again and do not send a `help_request`: the runtime asks the coach and retries the same submission itself. Finish `partial`. |
 | `platform` | The platform failed. | Finish `partial`. The promotion state stays recoverable. |
 
 ## Bootstrap card (first champion, A14)
@@ -92,11 +94,12 @@ Refusals of `softmax bootstrap-champion`, by `error.reason`:
 | Reason | Meaning | Do |
 | --- | --- | --- |
 | `champion_exists` | The league shows a policy competing for us: that is the champion. | Nothing to bootstrap. Finish `done`. |
-| `champion_conflict` | A loop promotion already reached the league (so "no champion" means it was lost), the league rejected the starter policy earlier, or the league and the loop disagree (A9). A human must resolve it; the runtime already told the user. | Record it. Do not send a `help_request`. Finish `blocked`. |
+| `champion_conflict` | A loop promotion already reached the league (so "no champion" means it was lost), the league rejected the starter policy earlier (or the coach declined its submission), or the league and the loop disagree (A9). A human must resolve it; the runtime already told the user. | Record it. Do not send a `help_request`. Finish `blocked`. |
 | `promotion_in_flight`, `promotion_refused` | Another card is promoting (or took the lock first), or a push failed. | Run `"$AUTORESEARCH_CLI" promotion status`. If this card is the holder at `submitted` (an earlier run of this command succeeded), the bootstrap is done: journal the ids from `promotion status` and finish `done`. Otherwise finish `partial`. |
 | `not_shipped_strategy` | `strategy/STRATEGY.md` in your worktree or on your branch differs from the shipped one, or the build compiled another STRATEGY.md. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, rebuild from it as `GAME.md` says, and run it again. |
 | `gates_failed`, `bad_build`, `artifact_mismatch` | The starter policy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
+| `permit_required`, `league_not_chosen` | The coach's IDE Controls refused the submission (as for a promotion card). The upload stands; the promotion waits at `intent`. | Record it in the journal. Do not run it again and do not send a `help_request`: the runtime asks the coach and retries the same submission itself. Finish `partial`. |
 | `platform` | The platform failed. | Run it once more (the same build reuses its upload). After a second failure, finish `partial`. |
 
 ## Promotion-recovery card

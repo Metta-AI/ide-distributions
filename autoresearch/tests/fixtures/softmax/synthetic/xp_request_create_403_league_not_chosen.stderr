@@ -1,0 +1,5 @@
+Error: Access denied (403): Your coach has not chosen a league for this cogent yet; ask them to pick one in the IDE.
+Softmax team members can request team access by rerunning as `coworld --elevated <command> ...`.
+Next: this identity is not allowed here. Check `uv run softmax status` and the active player (`uv run softmax player list`).
+Request id: 00000000-0000-4000-8000-000000000423
+Docs: https://softmax.com/docs/guides/authentication

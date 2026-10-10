@@ -45,7 +45,20 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
      `lifecycle.next_launch_after` (the backoff). Requests already created stay recorded;
      `missing` lists the rest. Finish the card `partial`. The XP poller makes a new launch
      card when the credit balance is above 0 again (or after the backoff, when the balance
-     cannot be read). Do not create a launch card yourself.
+     cannot be read). Do not create a launch card yourself. If `permit_required` is also
+     true, permit asks are still open: the tool set `awaiting-permit` instead (the shortfall
+     is in `credits_short`), and the next case applies.
+   - `permit_required: true` or `league_not_chosen: true`: the coach's IDE Controls refused
+     the batch (they ask before spending credits, or no league or another league is chosen).
+     For a permit, the tool already tried every request, so all of the batch's asks are
+     filed (`permit_asks`). Stop here. The tool already set `awaiting-permit` and
+     `lifecycle.permit_wait`. `permit_declined: true` means the coach said no: the tool
+     stopped at once and the runtime stops the experiment. Do not send a `help_request`: the
+     runtime sends one per batch
+     and tells the coach what to do. Finish the card `partial`. The XP poller reads the
+     coach's answers and makes a new launch card once all are approved (or stops the
+     experiment on a no); it sends the same requests again. Do not create a launch card
+     yourself, and do not change the requests to get past the refusal (D-27).
 6. Never wait for XP in the card (D-11). The runtime makes the review card when every
    request is terminal. Results count as evidence only when completed and inspected (D-06).
 
@@ -66,6 +79,18 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
   league and the loop disagree (A9). Nothing was launched. Record it and finish `blocked`
   (for a conflict the runtime already told the user; for no champion send a
   `help_request`).
+- Reason `experiment_closed`: the experiment is `stopped` or `reviewed`, or the coach declined
+  one of its XP requests. Nothing more is sent. If it stopped partway through a batch, the
+  requests created before the stop stay recorded in the experiment (`xp_requests`). Do not
+  launch it again; record it and finish `done`.
+- Reason `permit_batch_mismatch`: the experiment waits on the coach's permit asks for one
+  exact batch (`error.details`: `batch`, `attempt`, `batches`). Run `xp create` with exactly
+  those values (the launch card names them), so the approved requests replay under the same
+  keys.
+- Reason `permit_league_changed`: the game's league configuration changed while the coach's
+  permit asks are open (`error.details`: `saved_league`, `configured_league`). Nothing was
+  sent. Do not work around it: record it, send a `help_request` asking the operator to
+  restore the league or to stop the experiment, and finish `blocked`.
 - Reason `empty_batch`: `--batches` is larger than the seeds allow. Use fewer batches.
 - Reason `attempt_incomplete`: an earlier attempt of the batch still lacks requests (for
   example after a credit denial). Rerun `xp create` with the attempt the message names. It
