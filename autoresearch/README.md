@@ -362,6 +362,31 @@ under a different user than the owner of canonical, or coach requests by API (D9
 or (d) in `docs/plans/2026-10-09-softmax-integration/plan.md`); for the first hosted deploy
 James accepted D9 option (a), detection only.
 
+Known gaps of the provenance check:
+
+- **A deliberate same-uid writer defeats it** (above): it can sign commits through the
+  runtime's own code or the key, and truncate the journal. Fixing this needs D9 option (c) or (d).
+- **The plugin's refusals are best effort.** Paths built at run time, variables, script files
+  and other interpreters get past the interpreter-write and journal checks; the provenance
+  check is what catches a commit.
+- **No help request while the journal cannot be written.** Publishing is a canonical commit,
+  and every canonical commit needs the journal. The run still pauses and unassigns pending
+  cards, but the help request is only logged (`keeper.log`) and retried. Check `keeper.log`
+  for `provenance` failures when the agent is paused with no message.
+- **A board epoch can be left uncommitted.** If the journal fails exactly when bootstrap
+  creates the board, `board.json` gets the new epoch on disk but not in a commit.
+- **Seeding fails on a journal error.** A brand new workspace whose first (seed) commit
+  cannot be recorded fails bootstrap; there are no cards to pause yet, and the next run
+  retries.
+- **A crash during a restore gives a false journal-loss pause.** If bootstrap clones a
+  workspace from `AUTORESEARCH_WORKSPACE_REMOTE` and dies before the journal is
+  initialized, the next run finds the committed marker but no local anchor. It reports
+  `journal_lost`, pauses and holds pushes. This fails safe. Remedy, in an operator shell:
+  check that the workspace is exactly the remote's `main`
+  (`git -C "$PROFILE/workspace" rev-parse HEAD` against
+  `git -C "$PROFILE/workspace" ls-remote origin refs/heads/main`), then run
+  `"$AUTORESEARCH_CLI" runtime accept-commits <that commit>`.
+
 ## Restore on a new host
 
 Privacy note: the memory snapshot is committed to the workspace and pushed to
