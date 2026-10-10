@@ -59,7 +59,9 @@ receipt's ``handed_off`` run):
   Hermes (not a ``tool-fault:`` block, not at a cap) gets the repair request
   (``repair-blocked:<task-id>``) and stays blocked.
 - ``done``, ``partial``, ``dropped`` or ``failed`` (the work is over): no repair and no message;
-  a blocked card is left blocked, and a rerun is closed (below).
+  a blocked card is left blocked, and a rerun is closed (below). ``unknown`` (the receipt names
+  a handoff that cannot be read: a corrupt ledger) is treated the same, and a blocked card in
+  that state gets one warning log line per run, no help request.
 
 A ``tool-fault:`` block stays blocked until a human acts, as above (D-26). When the human
 unblocks it, the card is ``pending`` (Hermes ``kanban unblock``: ``ready``) and soon ``claimed``
@@ -84,6 +86,7 @@ The repair card redoes the work, and its handoff completes the coach's task
 (``publisher.acknowledge_inbound``: the follow-up acknowledgement of a ``blocked`` task).
 """
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,6 +120,8 @@ TOOL_FAULT_PREFIX = "tool-fault:"
 REPAIR_PRIORITY = "P1"
 # The reason a card rerun after its published handoff is stopped with (``_close_rerun``).
 RERUN_AFTER_PUBLISH = "handoff already published: a repair card redoes its work"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -373,6 +378,13 @@ def _handle_one(
         )
         return None if reported else _tool_fault(canonical, card, reason, allow_no_remote)
     outcome = _published_outcome(canonical, card)
+    if outcome == "unknown":
+        log.warning(
+            "blocked card %s: its request %s is published but the handoff it names cannot be "
+            "read (outcome unknown); left blocked, nothing redone",
+            card.task_id,
+            card.spec.request_id,
+        )
     if outcome not in (None, "blocked"):
         return None  # its work is over and published: nothing to redo, and a rerun is refused
     if (

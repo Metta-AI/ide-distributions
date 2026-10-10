@@ -1203,3 +1203,20 @@ def test_a_malformed_blocked_marker_does_not_break_repairs_or_follow_ups(board):
 
     [_, follow_up] = _replies(board, task)
     assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_published_receipt_with_an_unreadable_handoff_is_logged_not_repaired(board, caplog):
+    """Task 10b N8: the outcome is ``unknown`` (a corrupt ledger). Nothing is redone, and it
+    is not silent: one log line per run, no help request."""
+    _task, worker, _first = _blocked_task(board)
+    gitops.git(board.canonical, "rm", "-q", worker.handoff_path().as_posix())
+    gitops.git(board.canonical, "commit", "-q", "-m", "lose the handoff")
+    outbox_before = len(_outbox(board))
+
+    with caplog.at_level("WARNING", logger="autoresearch.runtime.blocked"):
+        assert _handle_blocked(board) == []
+
+    [line] = [r.getMessage() for r in caplog.records if worker.task_id in r.getMessage()]
+    assert "unknown" in line
+    assert len(_outbox(board)) == outbox_before
+    assert board.queue.get(worker.task_id).state == "blocked"
