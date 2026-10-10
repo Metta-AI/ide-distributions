@@ -62,6 +62,7 @@ from autoresearch.queue.kanban_queue import STOPPABLE_STATUSES
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.pause import is_paused, pause, pause_path
+from autoresearch.runtime.provenance import JournalError, journal_error
 
 ENV_MAX_RUNS = "AUTORESEARCH_MAX_CARD_RUNS"
 ENV_MAX_CARD_USD = "AUTORESEARCH_MAX_CARD_USD"
@@ -69,7 +70,7 @@ ENV_DAILY_USD = "AUTORESEARCH_DAILY_BUDGET_USD"
 ENV_FALLBACK_PRICES = "AUTORESEARCH_FALLBACK_PRICES"
 DEFAULT_MAX_RUNS = 4
 DEFAULT_MAX_CARD_USD = 4.0
-DEFAULT_DAILY_USD = 25.0
+DEFAULT_DAILY_USD = 100.0
 # USD per million tokens, for sessions Hermes could not price. Above the rate the box showed
 # for kimi-k3 (about $36.5 for 4.6M input, 0.39M output, 59.2M cache-read tokens).
 DEFAULT_FALLBACK_PRICES = {"input": 3.0, "output": 12.0, "cache_read": 0.75, "cache_write": 3.0}
@@ -378,6 +379,9 @@ class SpendRun:
     unpriced: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)  # "spend_db" -> error
     stop_failures: dict[str, str] = field(default_factory=dict)  # task id -> error (retried)
+    # A stop's record could not be committed (the provenance journal): the caller fails
+    # closed once every card was capped and the budget checked.
+    journal_error: JournalError | None = None
 
 
 def _stop(
@@ -440,7 +444,14 @@ def enforce_cards(
         why = _over_cap(card, counted_runs(card) - runs, cost.usd - usd, config)
         if why is None:
             continue
-        problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        try:
+            problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        except Exception as error:  # noqa: BLE001 - recording failed; keep capping the others
+            # ``_stop`` blocks before it records, and its recording is a canonical commit,
+            # which a broken provenance journal fails: the other cards must still be stopped.
+            result.failures[f"record {card.task_id}"] = f"{type(error).__name__}: {error}"
+            result.journal_error = result.journal_error or journal_error(error)
+            continue
         if problem is None:
             result.stopped.append((card.task_id, why))
         else:

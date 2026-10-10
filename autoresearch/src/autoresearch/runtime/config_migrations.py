@@ -62,6 +62,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_DAILY_BUDGET_USD",
     "AUTORESEARCH_FALLBACK_PRICES",
     "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
+    "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",  # queue-keeper preflight's credit floor (A5)
     "GOTA_G2_RUNNER",  # GotA G2 episode runner in worker builds: native (default) or docker
 ]
 APPROVAL_DENY = [
@@ -81,6 +82,9 @@ APPROVAL_DENY = [
     # journal text that merely mentions the command is not denied.
     "*promotion accept-champion",
     "*promotion accept-champion *",
+    # A human clears a commit provenance pause (C1), anchored the same way.
+    "*runtime accept-commits",
+    "*runtime accept-commits *",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 

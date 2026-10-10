@@ -1,17 +1,20 @@
 """Bootstrap (Overview C1 with A2, A6, A7; C9 config migrations)."""
 
 import os
+import shutil
 import stat
 from pathlib import Path
 
 import yaml
 
+from autoresearch.comms.inbound import adopt_direct_writes
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json
 from autoresearch.queue.file_queue import FileQueue
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import config_migrations
 from autoresearch.runtime.bootstrap import bootstrap
+from autoresearch.runtime.ledger import canonical_lock
 from runtime.workspace import AUTORESEARCH_DIR
 
 GAME = "fakegame"
@@ -173,6 +176,234 @@ def test_bootstrap_clones_an_existing_remote(tmp_path):
     assert result.ok and result.board_created
     assert gitops.git(new_ctx.canonical, "rev-parse", "HEAD~1") == head  # + new epoch commit
     assert read_json(new_ctx.canonical / ".supervisor" / "ledger" / "board.json")["epoch"] == "e2"
+
+
+EARLY_TASK = AUTORESEARCH_DIR / "schemas/comms/examples/inbound/task/ide-bridge-task.json"
+
+
+def write_early_inbox(canonical: Path) -> str:
+    """What the Softmax IDE bridge's ``deliver`` does when a coach clicks a research button
+    before the first bootstrap: ``mkdir -p comms/inbox`` and write the message there."""
+    data = EARLY_TASK.read_bytes()
+    relative = f"comms/inbox/{yaml.safe_load(data)['id']}.json"
+    (canonical / relative).parent.mkdir(parents=True, exist_ok=True)
+    (canonical / relative).write_bytes(data)
+    return relative
+
+
+def assert_left_for_adoption(canonical: Path, relative: str, head_before_adoption: str):
+    assert gitops.git(canonical, "ls-files", "comms/inbox") == ""  # not swept into a commit
+    assert (canonical / relative).read_bytes() == EARLY_TASK.read_bytes()
+    with canonical_lock(canonical):
+        adoption = adopt_direct_writes(canonical)
+    assert adoption.adopted and not adoption.rejected
+    assert gitops.git(canonical, "ls-files", "comms/inbox") == relative
+    assert gitops.git(canonical, "rev-parse", "HEAD~1") == head_before_adoption
+    assert "inbound: adopted 1 direct writes" in gitops.git(canonical, "log", "-1", "--format=%s")
+
+
+def test_early_inbox_file_is_adopted_not_seeded(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    relative = write_early_inbox(ctx.canonical)
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert "kept 1 inbox files written before bootstrap for adoption" in result.actions
+    assert_left_for_adoption(ctx.canonical, relative, gitops.head(ctx.canonical))
+    assert not list(tmp_path.glob("profiles/autoresearch/.workspace-early-inbox*"))
+
+
+def test_bridge_temp_file_is_never_committed(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    write_early_inbox(ctx.canonical)
+    temp = ctx.canonical / "comms" / "inbox" / ".ply_x:task:g-2.json.tmp"
+    temp.write_text('{"id": "')  # the bridge renames it to <id>.json when the write is done
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert "kept 2 inbox files written before bootstrap for adoption" in result.actions
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == ""
+    assert temp.read_text() == '{"id": "'
+
+
+def test_inbox_file_arriving_during_seed_is_not_committed(tmp_path, monkeypatch):
+    """The bridge can write between the first set-aside and the seed commit."""
+    ctx, env, _, queue = setup(tmp_path)
+    copytree = shutil.copytree
+    late = ctx.canonical / "comms" / "inbox" / "ply_x:task:late.json"
+
+    def copytree_then_bridge_writes(*args, **kwargs):
+        copied = copytree(*args, **kwargs)
+        late.parent.mkdir(parents=True, exist_ok=True)
+        late.write_text("{}")
+        return copied
+
+    monkeypatch.setattr(shutil, "copytree", copytree_then_bridge_writes)
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == ""
+    assert gitops.git(ctx.canonical, "status", "--porcelain") == "?? comms/"
+    assert late.read_text() == "{}"
+    assert "kept 1 inbox files written before bootstrap for adoption" in result.actions
+
+
+def test_early_inbox_file_survives_a_clone(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    run(ctx, env, queue)
+    new_home = tmp_path / "profiles2" / "autoresearch"
+    new_home.mkdir(parents=True)
+    new_ctx = RunContext(new_home, new_home / "workspace", None, None, None)
+    relative = write_early_inbox(new_ctx.canonical)
+
+    result = run(new_ctx, env | {"HERMES_HOME": str(new_home)}, FileQueue(new_home / "board"))
+
+    assert result.ok, result.error
+    assert "kept 1 inbox files written before bootstrap for adoption" in result.actions
+    assert_left_for_adoption(new_ctx.canonical, relative, gitops.head(new_ctx.canonical))
+
+
+def test_early_inbox_file_never_overwrites_a_tracked_one_after_a_clone(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    run(ctx, env, queue)
+    relative = write_early_inbox(ctx.canonical)
+    with canonical_lock(ctx.canonical):
+        assert adopt_direct_writes(ctx.canonical).adopted  # committed and pushed
+    new_home = tmp_path / "profiles2" / "autoresearch"
+    new_home.mkdir(parents=True)
+    new_ctx = RunContext(new_home, new_home / "workspace", None, None, None)
+    (new_ctx.canonical / relative).parent.mkdir(parents=True)
+    (new_ctx.canonical / relative).write_text("a different body")
+
+    result = run(new_ctx, env | {"HERMES_HOME": str(new_home)}, FileQueue(new_home / "board"))
+
+    assert result.ok, result.error
+    assert (new_ctx.canonical / relative).read_bytes() == EARLY_TASK.read_bytes()
+    assert gitops.git(new_ctx.canonical, "status", "--porcelain") == ""
+    (held,) = new_home.glob(".workspace-early-inbox-clashed/*")
+    assert held.read_text() == "a different body"
+    assert not (new_home / ".workspace-early-inbox").exists()
+    assert any("clash with tracked files" in w for w in result.warnings)
+    again = run(new_ctx, env | {"HERMES_HOME": str(new_home)}, FileQueue(new_home / "board"))
+    assert not any("clash" in w for w in again.warnings)  # warned once, not every run
+
+
+def clone_setup(tmp_path):
+    """A remote with a seeded main, and a new host whose workspace does not exist yet."""
+    ctx, env, _, queue = setup(tmp_path)
+    run(ctx, env, queue)
+    home = tmp_path / "profiles2" / "autoresearch"
+    home.mkdir(parents=True)
+    new_ctx = RunContext(home, home / "workspace", None, None, None)
+    return new_ctx, env | {"HERMES_HOME": str(home)}, FileQueue(home / "board")
+
+
+def test_bridge_temp_file_stays_in_place_during_a_clone(tmp_path, monkeypatch):
+    """The bridge may rename its temp file at any moment: clone never moves it."""
+    ctx, env, queue = clone_setup(tmp_path)
+    temp = ctx.canonical / "comms" / "inbox" / ".ply_x:task:g-2.json.tmp"
+    temp.parent.mkdir(parents=True)
+    temp.write_text('{"id": "')
+    git = gitops.git
+
+    def git_checking_the_temp_file(repo, *args):
+        if args[:1] == ("checkout",):
+            assert temp.exists()
+        return git(repo, *args)
+
+    monkeypatch.setattr(gitops, "git", git_checking_the_temp_file)
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert temp.read_text() == '{"id": "'
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == ""
+
+
+def test_a_failed_clone_puts_early_inbox_files_back(tmp_path, monkeypatch):
+    ctx, env, queue = clone_setup(tmp_path)
+    relative = write_early_inbox(ctx.canonical)
+    git = gitops.git
+
+    def git_failing_checkout(repo, *args):
+        if args[:1] == ("checkout",):
+            raise RuntimeError("checkout failed")
+        return git(repo, *args)
+
+    monkeypatch.setattr(gitops, "git", git_failing_checkout)
+
+    result = run(ctx, env, queue)
+
+    assert not result.ok and "checkout failed" in result.error
+    assert (ctx.canonical / relative).read_bytes() == EARLY_TASK.read_bytes()
+    assert not (ctx.hermes_home / ".workspace-early-inbox").exists()
+
+
+def test_a_failed_restore_does_not_hide_the_clone_error(tmp_path, monkeypatch):
+    ctx, env, queue = clone_setup(tmp_path)
+    write_early_inbox(ctx.canonical)
+    git, move = gitops.git, shutil.move
+
+    def git_failing_checkout(repo, *args):
+        if args[:1] == ("checkout",):
+            raise RuntimeError("checkout failed")
+        return git(repo, *args)
+
+    def move_failing_back_into_the_inbox(source, target):
+        if Path(target).parent.name == "inbox":
+            raise OSError("disk gone")
+        return move(source, target)
+
+    monkeypatch.setattr(gitops, "git", git_failing_checkout)
+    monkeypatch.setattr(shutil, "move", move_failing_back_into_the_inbox)
+
+    result = run(ctx, env, queue)
+
+    assert not result.ok and "checkout failed" in result.error
+    assert any("disk gone" in w and "next run retries" in w for w in result.warnings)
+
+
+def test_files_a_crashed_clone_left_held_are_put_back(tmp_path):
+    """A hard crash (SIGKILL, power loss) skips the restore: the next run does it."""
+    ctx, env, _, queue = setup(tmp_path)
+    run(ctx, env, queue)
+    holding = ctx.hermes_home / ".workspace-early-inbox"
+    holding.mkdir()
+    (holding / EARLY_TASK.name).write_bytes(EARLY_TASK.read_bytes())
+    (holding / "ply_x:task:clash.json").write_text("held")
+    (ctx.canonical / "comms" / "inbox" / "ply_x:task:clash.json").write_text("newer")
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert "kept 1 inbox files written before bootstrap for adoption" in result.actions
+    restored = ctx.canonical / "comms" / "inbox" / EARLY_TASK.name
+    assert restored.read_bytes() == EARLY_TASK.read_bytes()
+    assert (ctx.canonical / "comms" / "inbox" / "ply_x:task:clash.json").read_text() == "newer"
+    assert (ctx.hermes_home / ".workspace-early-inbox-clashed" / "ply_x:task:clash.json").exists()
+    assert not holding.exists()
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == ""
+
+
+def test_rebootstrap_leaves_committed_inbox_files_alone(tmp_path):
+    ctx, env, _, queue = setup(tmp_path)
+    run(ctx, env, queue)
+    relative = write_early_inbox(ctx.canonical)
+    with canonical_lock(ctx.canonical):
+        adopt_direct_writes(ctx.canonical)
+    head = gitops.head(ctx.canonical)
+
+    result = run(ctx, env, queue)
+
+    assert result.ok, result.error
+    assert gitops.head(ctx.canonical) == head
+    assert gitops.git(ctx.canonical, "ls-files", "comms/inbox") == relative
+    assert gitops.git(ctx.canonical, "status", "--porcelain") == ""
+    assert not list(ctx.hermes_home.glob(".workspace-early-inbox*"))
+    assert not any("inbox" in action for action in result.actions)
 
 
 def test_bootstrap_without_a_remote_fails_on_a_fresh_workspace(tmp_path):

@@ -1,6 +1,7 @@
 """Hermes hook adapters: directive shapes, briefing injection, event logs, never raising."""
 
 import json
+import os
 
 import pytest
 
@@ -277,7 +278,8 @@ def test_session_end_and_task_completed_append_kanban_events(worker_env):
     assert events[1]["board"] == "ar"
 
 
-def test_register_registers_five_hooks():
+def test_register_registers_five_hooks_and_marks_the_agent_session(monkeypatch):
+    monkeypatch.setenv("AUTORESEARCH_AGENT_SESSION", "")  # restored after the test
     hooks = {}
 
     class FakeCtx:
@@ -292,6 +294,8 @@ def test_register_registers_five_hooks():
         "pre_llm_call": adapters.pre_llm_call,
         "kanban_task_completed": adapters.kanban_task_completed,
     }
+    # Terminals and code of this process inherit it; operator-only commands refuse then.
+    assert os.environ["AUTORESEARCH_AGENT_SESSION"] == "1"
 
 
 def test_first_turn_records_the_session_of_the_card_run(worker_env):

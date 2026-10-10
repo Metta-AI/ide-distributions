@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -55,28 +56,111 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> str | None:
     return head(repo)
 
 
-def commit_blobs(repo: Path, blobs: dict[str, bytes], paths: list[str], message: str) -> str:
-    """Commit ``blobs`` (repo-relative path -> exact bytes, as regular files, whatever the
-    working tree holds now) plus the working-tree content of ``paths``, on top of HEAD.
+@dataclass(frozen=True)
+class PreparedCommit:
+    """A commit object that no branch points at yet (``prepare_*``). ``land`` moves HEAD to
+    it; ``settle`` then brings the real index in line. Building the commit before moving the
+    branch lets a caller record its exact sha first (``runtime.provenance``)."""
+
+    sha: str
+    parent: str | None  # HEAD when it was prepared; None in an empty repository
+    message: str
+    paths: tuple[str, ...] = ()  # real-index entries ``settle`` sets to the new commit
+    merge: bool = False  # built from a ``merge --no-commit`` in progress (``prepare_merge``)
+
+
+def _head_or_none(repo: Path) -> str | None:
+    result = _run(repo, "rev-parse", "-q", "--verify", "HEAD", check=False)
+    return result.stdout.decode().strip() if result.returncode == 0 else None
+
+
+def prepare_blobs(
+    repo: Path, blobs: dict[str, bytes], paths: list[str], message: str
+) -> PreparedCommit | None:
+    """Build, without moving any branch, a commit of ``blobs`` (repo-relative path -> exact
+    bytes, as regular files, whatever the working tree holds now) plus the working-tree
+    content of ``paths`` (additions, changes and deletions), on top of HEAD. None when that
+    changes nothing.
 
     The commit is built in a temporary index, so whatever the real index holds (a leftover
     staged by a crashed writer) neither blocks it nor rides along, and a failure leaves
-    nothing staged. Afterwards the real index entries of exactly these paths are set to the
-    new HEAD; every other entry is left as it was."""
-    parent = head(repo)
+    nothing staged. ``settle`` later sets the real index entries of exactly these paths."""
+    parent = _head_or_none(repo)
     with tempfile.TemporaryDirectory(prefix="ar-index-") as directory:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(directory) / "index")}
-        _run(repo, "read-tree", parent, env=env)
+        if parent is not None:
+            _run(repo, "read-tree", parent, env=env)
         for path, data in blobs.items():
             blob = _run(repo, "hash-object", "-w", "--stdin", input=data).stdout.decode().strip()
             _run(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}", env=env)
         if paths:
             _run(repo, "add", "-A", "--", *paths, env=env)
         tree = _run(repo, "write-tree", env=env).stdout.decode().strip()
-    commit = git(repo, "commit-tree", tree, "-p", parent, "-m", message)
-    git(repo, "update-ref", "-m", f"commit: {message}", "HEAD", commit, parent)
-    git(repo, "reset", "-q", commit, "--", *blobs, *paths)
-    return commit
+    if parent is not None and tree == git(repo, "rev-parse", f"{parent}^{{tree}}"):
+        return None
+    commit = git(repo, "commit-tree", tree, *(["-p", parent] if parent else []), "-m", message)
+    return PreparedCommit(commit, parent, message, (*blobs, *paths))
+
+
+def prepare_paths(repo: Path, paths: list[str], message: str) -> PreparedCommit | None:
+    """``prepare_blobs`` of only ``paths``: like ``commit_paths``, without moving HEAD."""
+    return prepare_blobs(repo, {}, paths, message)
+
+
+def prepare_merge(repo: Path, sha: str, message: str) -> tuple[PreparedCommit | None, list[str]]:
+    """Merge ``sha`` into HEAD (``--no-ff``) into the index and working tree, and build the
+    merge commit without moving HEAD. On a conflict, abort the merge and return (None, the
+    conflicting files). Any other failure raises GitError. ``land`` aborts the merge if it
+    cannot move HEAD; ``settle`` ends it."""
+    parent = head(repo)
+    result = _run(repo, "merge", "--no-ff", "--no-commit", sha, check=False)
+    merging = _run(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False)
+    if result.returncode != 0:
+        if merging.returncode != 0:
+            # No merge in progress: this was not a conflict (bad sha, dirty tree, ...).
+            raise GitError(("merge", sha), result.stderr.decode(errors="replace"))
+        conflicts = sorted(git(repo, "diff", "--name-only", "--diff-filter=U").splitlines())
+        git(repo, "merge", "--abort")
+        return None, conflicts
+    if merging.returncode != 0:
+        raise GitError(("merge", sha), "nothing to merge: HEAD already contains it")
+    try:
+        tree = git(repo, "write-tree")
+        theirs = merging.stdout.decode().strip()
+        commit = git(repo, "commit-tree", tree, "-p", parent, "-p", theirs, "-m", message)
+    except GitError:
+        _run(repo, "merge", "--abort", check=False)
+        raise
+    return PreparedCommit(commit, parent, message, merge=True), []
+
+
+def land(repo: Path, prepared: PreparedCommit) -> None:
+    """Move HEAD's branch to ``prepared`` if it still points at its parent. ``update-ref``
+    is all or nothing: when this raises, HEAD did not move (and a prepared merge is
+    aborted)."""
+    try:
+        git(repo, "update-ref", "-m", f"commit: {prepared.message.splitlines()[0]}", "HEAD",
+            prepared.sha, prepared.parent or "")  # fmt: skip
+    except GitError:
+        discard(repo, prepared)
+        raise
+
+
+def discard(repo: Path, prepared: PreparedCommit) -> None:
+    """Drop a prepared commit that will not land: abort a prepared merge (best effort; the
+    commit object itself is unreachable garbage)."""
+    if prepared.merge:
+        _run(repo, "merge", "--abort", check=False)
+
+
+def settle(repo: Path, prepared: PreparedCommit) -> None:
+    """After ``land``: end a prepared merge (its index already matches), or set the real
+    index entries of the prepared paths to the new commit; every other entry is left as
+    it was."""
+    if prepared.merge:
+        git(repo, "merge", "--quit")
+    elif prepared.paths:
+        git(repo, "reset", "-q", prepared.sha, "--", *prepared.paths)
 
 
 def diff_paths(repo: Path, a: str, b: str) -> list[str]:
@@ -93,18 +177,6 @@ def diff_status(repo: Path, a: str, b: str) -> list[tuple[str, str]]:
 def show(repo: Path, sha: str, path: str) -> bytes | None:
     result = _run(repo, "show", f"{sha}:{path}", check=False)
     return result.stdout if result.returncode == 0 else None
-
-
-def merge_no_ff(repo: Path, sha: str, message: str) -> tuple[bool, list[str]]:
-    result = _run(repo, "merge", "--no-ff", "-m", message, sha, check=False)
-    if result.returncode == 0:
-        return True, []
-    if _run(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode != 0:
-        # No merge in progress: this was not a conflict (bad sha, dirty tree, ...).
-        raise GitError(("merge", sha), result.stderr.decode(errors="replace"))
-    conflicts = sorted(git(repo, "diff", "--name-only", "--diff-filter=U").splitlines())
-    git(repo, "merge", "--abort")
-    return False, conflicts
 
 
 def contains(repo: Path, sha: str) -> bool:

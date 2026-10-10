@@ -16,7 +16,7 @@ from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import promotion, proposals, queue_keeper, xp_poll
+from autoresearch.runtime import promotion, proposals, provenance, queue_keeper, xp_poll
 from autoresearch.runtime.foreign import report_foreign_cards
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.markers import review_marker
@@ -413,7 +413,7 @@ def test_stale_merge_head_is_aborted(host):
     gitops.commit_all(canonical, "side")
     gitops.git(canonical, "checkout", "-q", "main")
     (canonical / "plan.md").write_text("main\n")
-    gitops.commit_all(canonical, "main change")
+    host.runtime_commit("main change")
     with pytest.raises(gitops.GitError):
         gitops.git(canonical, "merge", "side")  # conflict: MERGE_HEAD left behind
     assert (canonical / ".git" / "MERGE_HEAD").exists()
@@ -831,7 +831,19 @@ def test_foreign_cards_are_reported_once_and_never_merged_while_others_merge(hos
     normal_record = normal.finish()
     host.queue = ForeignBoard(host.queue, forged.task_id, running.task_id, title="Hand-made")
 
-    run = host.tick(at(2))
+    # First protection: the forged receipt was committed on canonical outside the runtime,
+    # so the provenance check pauses before anything merges (C1).
+    stopped = host.tick(at(2))
+    violation = stopped.provenance_violation
+    assert violation.kind == provenance.UNKNOWN_COMMITS and stopped.handoffs == []
+    [forged_commit] = violation.commits
+    assert forged_commit.subject.startswith("admit ")
+    assert len([m for m in host.outbox() if m.get("runtime_key", "").startswith("provenance")]) == 1
+    with canonical_lock(host.canonical):  # what the operator's runtime accept-commits does
+        provenance.accept(host.canonical, forged_commit.sha)
+
+    # Second protection: once accepted, the foreign cards are still never merged.
+    run = host.tick(at(2.5))
 
     assert {"foreign", "handoffs"}.isdisjoint(run.failures)
     assert sorted(run.foreign) == sorted([forged.task_id, running.task_id])
@@ -980,7 +992,7 @@ def _claim(host: Host, checked: str, evidence: list | None = None) -> str:
         },
         "Damage is 10.",
     )
-    gitops.commit_all(host.canonical, f"claim {claim}")
+    host.runtime_commit(f"claim {claim}")
     return claim
 
 
@@ -1106,7 +1118,7 @@ def test_a_renewal_failure_keeps_the_pin_and_still_runs_the_kb_step(host, tmp_pa
     claim = _claim(host, GAME_VERSION)
     ledger = host.canonical / ".supervisor" / "ledger" / "game_source.json"
     write_json(ledger, {"pin": "a" * 40, "repo": "r", "updated_at": "t"})
-    gitops.commit_all(host.canonical, "pin a")
+    host.runtime_commit("pin a")
     layout = Layout(host.canonical)
     partial = layout.card_requests / "Q-partial.json"
 

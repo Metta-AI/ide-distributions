@@ -8,7 +8,7 @@ description: Use when ending a card, to journal, ack, and finish.
 This skill implements System Design §5.8 (card completion). Use it at the end of every
 card, also when the work stopped early.
 
-Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
+Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24, D-27.
 
 ## Reads and writes
 
@@ -77,7 +77,7 @@ Doctrine upheld: D-01, D-02, D-12, D-22, D-23, D-24.
    | `partial` | The unit stopped at a safe point and the rest has a follow-up, for example an experiment that waits as `awaiting-credits`. |
    | `dropped` | The unit is not worth doing any more (it is obsolete or another card covers it). The journal says why. |
    | `failed` | The unit could not be done. The journal says why. |
-   | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. For a tool fault, see "Tool fault" below. |
+   | `blocked` | Work cannot go on without a human or the runtime, for example an identity refusal. Send a `help_request` first. For a tool fault, see "Tool fault" below. A plugin or permission refusal that stops the work, with no other outcome in your skill, also ends here. Never work around a refusal to get the refused effect (D-27). |
 
    Set the outcome only right before `card finish`: after it the journal is frozen. To drop a
    different card that has not started, a planning card uses `queue request drop` (see

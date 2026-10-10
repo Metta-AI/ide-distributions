@@ -19,7 +19,6 @@ from support.keeper_host import (
     launch_all,
 )
 
-from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import xp_poll
@@ -73,7 +72,7 @@ def _experiment(host: Host, status: str) -> str:
     noise = host.canonical / "stats" / "metric-noise.yaml"
     noise.parent.mkdir(exist_ok=True)
     noise.write_text(f"game_version: '{GAME_VERSION}'\nmetrics: {{}}\n")
-    gitops.commit_all(host.canonical, f"experiment {experiment} {status}")
+    host.runtime_commit(f"experiment {experiment} {status}")
     return experiment
 
 
@@ -279,7 +278,7 @@ def test_credit_denial_relaunches_after_backoff_without_duplicate_xp(host, monke
     launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
     denied = softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))
     assert denied["credit_denied"] and len(denied["created"]) == 2
-    gitops.commit_all(host.canonical, "launch: credit denied")
+    host.runtime_commit("launch: credit denied")
     meta, _ = host.store.load(experiment)
     assert meta["status"] == "awaiting-credits"
     assert meta["lifecycle"]["credits_at_denial"] == 0  # read right after the denial (A10)
@@ -325,7 +324,7 @@ def test_relaunch_happens_when_credits_return_before_the_backoff(host, monkeypat
     _set_fake_state(host, credits=0)
     launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
     assert softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))["credit_denied"]
-    gitops.commit_all(host.canonical, "launch: credit denied")
+    host.runtime_commit("launch: credit denied")
     meta, _ = host.store.load(experiment)
     backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
 
@@ -345,7 +344,7 @@ def test_at_most_one_relaunch_per_poll(host, monkeypatch):
         _champion_is_the_baseline(host)
         _set_fake_state(host, credits=0)
         assert softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))["credit_denied"]
-        gitops.commit_all(host.canonical, "launch: credit denied")
+        host.runtime_commit("launch: credit denied")
         waiting.append(experiment)
     meta, _ = host.store.load(waiting[0])
     early = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
@@ -441,7 +440,7 @@ def test_each_denial_gets_its_own_relaunch_and_each_batch_its_own_review(host, m
         _set_fake_state(host, credits=1)
         args = argparse.Namespace(experiment=experiment, batch=batch, attempt=1, batches=2)
         assert softmax_cli._xp_create(launcher, host.sm, args)["credit_denied"]
-        gitops.commit_all(host.canonical, f"launch batch {batch}: credit denied")
+        host.runtime_commit(f"launch batch {batch}: credit denied")
         meta, _ = host.store.load(experiment)
         assert meta["status"] == "awaiting-credits"
         assert meta["lifecycle"]["credit_denials"] == 1  # reset by the success in between
