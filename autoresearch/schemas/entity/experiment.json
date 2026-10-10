@@ -140,6 +140,7 @@
         "uploaded",
         "evaluating",
         "awaiting-credits",
+        "awaiting-permit",
         "reviewed"
       ]
     },

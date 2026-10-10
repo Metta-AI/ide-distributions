@@ -43,10 +43,12 @@ HYPOTHESIS_TRANSITIONS: dict[str, frozenset[str]] = {
 EXPERIMENT_TRANSITIONS: dict[str, frozenset[str]] = {
     "designed": frozenset({"built"}),
     "built": frozenset({"uploaded"}),
-    # A credit refusal pauses an evaluation; partial batches resume under the same design.
-    "uploaded": frozenset({"evaluating", "awaiting-credits"}),
-    "evaluating": frozenset({"reviewed", "awaiting-credits"}),
-    "awaiting-credits": frozenset({"evaluating"}),
+    # A credit refusal, or the coach's (a permit ask or the league choice, Softmax hosting),
+    # pauses an evaluation; partial batches resume under the same design.
+    "uploaded": frozenset({"evaluating", "awaiting-credits", "awaiting-permit"}),
+    "evaluating": frozenset({"reviewed", "awaiting-credits", "awaiting-permit"}),
+    "awaiting-credits": frozenset({"evaluating", "awaiting-permit"}),
+    "awaiting-permit": frozenset({"evaluating", "awaiting-credits"}),
     "reviewed": frozenset(),
 }
 

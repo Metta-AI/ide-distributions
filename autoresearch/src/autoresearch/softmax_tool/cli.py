@@ -13,12 +13,14 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   ``xp_specs`` for the mapping, A12). It recovers once, backfills any recovered request missing
   from ``experiment.xp_requests``, creates only the missing requests, and appends
   ``{batch, attempt, seed, arm, request_id, policy}`` for each one as soon as it is created (so
-  a platform error or crash mid-batch loses no record), then moves ``uploaded|awaiting-credits`` to ``evaluating``.
+  a platform error or crash mid-batch loses no record), then moves
+  ``uploaded|awaiting-credits|awaiting-permit`` to ``evaluating``.
   Before it creates any request it checks the identity and that ``design.baseline_version``
   is still the current champion (``promotion.baseline_problem``; refusals
   ``champion_conflict``, ``champion_unknown``, ``baseline_not_champion``, and nothing is
   created): an experiment whose baseline is not the champion can never promote. It prints
-  ``{created, existing, missing, pairing, credit_denied}``. A credit denial stops the batch
+  ``{created, existing, missing, pairing, credit_denied, permit_required,
+  league_not_chosen}``. A credit denial stops the batch
   with exit 0 and ``credit_denied: true``: requests already created stay (and are
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating``) and ``lifecycle.next_launch_after`` is set
@@ -29,8 +31,18 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   counts consecutive denials and ``lifecycle.credits_at_denial`` is the balance read right
   after the denial (null when unreadable). xp-poll relaunches when the balance covers the
   remaining requests and is above that value, else after the backoff
-  (``runtime.xp_poll.relaunch_due``). Rerunning the same ``--batch``/``--attempt`` later creates only
-  the missing requests. A new attempt (one with no request yet in the batch) is a retry, and
+  (``runtime.xp_poll.relaunch_due``). The coach's refusal (Softmax hosting: the IDE Controls ask
+  before XP requests, ``permit_required: true``, or no league or another league is chosen,
+  ``league_not_chosen: true``) stops the batch the same way, with exit 0: the experiment goes
+  ``awaiting-permit`` (from ``uploaded|evaluating|awaiting-credits``),
+  ``lifecycle.permit_refusals`` counts consecutive refusals, ``lifecycle.next_launch_after`` is
+  set by the same backoff, and ``lifecycle.permit_wait`` is ``{kind: permit|league, request,
+  reason, ask, league_id}`` (``request``: the refused request's tag). xp-poll publishes one help
+  request per refused request and relaunches after the backoff; the relaunch sends the same
+  body and idempotency key, so the server decides it against the same ask. A credit denial of
+  an ``awaiting-permit`` experiment moves it to ``awaiting-credits`` and keeps ``permit_wait``.
+  Rerunning the same ``--batch``/``--attempt`` later creates only the missing requests. A new
+  attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
   the next number (``bad_attempt``), the batch's latest attempt has every request
   (``attempt_incomplete``: rerun that attempt), and at least one of those requests is
@@ -42,14 +54,17 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
 - ``submit <E>``: ``softmax_tool.submit``, the only path to a real league submission of an
-  experiment's candidate.
+  experiment's candidate. The coach's refusals are ``permit_required`` and
+  ``league_not_chosen`` (exit 1): the promotion stays at ``intent`` and the runtime asks the
+  coach and retries the same submit (``runtime.promotion``, "Waiting for the coach").
 - ``bootstrap-champion --build-dir D``: ``softmax_tool.submit.bootstrap_champion``, the
   first champion on a fresh install (A14): with no champion (the league shows no policy
   competing for our player, A9), upload the game's starter policy build and promote it through the C8
   promotion as a ``bootstrap`` promotion (no experiment). Prints ``{version_id,
   platform_policy_version_id, promotion_id, submission_id, champion_path}``. Refusals:
   ``champion_exists``, ``champion_conflict``, ``promotion_in_flight``, ``not_shipped_strategy``,
-  ``promotion_refused``, ``identity`` and the build reader's
+  ``promotion_refused``, ``permit_required``, ``league_not_chosen`` (as for ``submit``; the
+  upload stands), ``identity`` and the build reader's
   ``gates_failed``/``bad_build``/``artifact_mismatch``.
 - ``leaderboard``: ``{league_id, player_id, leaderboard_champion, current_champion, note,
   conflict}``. The champion is the policy the league shows competing for our player (A9);
@@ -133,11 +148,18 @@ from autoresearch.runtime.promotion import (
 from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
 from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
-from autoresearch.softmax_tool.protocol import CreditDenied, Refused, XpHandle, read_credits
+from autoresearch.softmax_tool.protocol import (
+    CreditDenied,
+    LeagueNotChosen,
+    PermitRequired,
+    Refused,
+    XpHandle,
+    read_credits,
+)
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.submit import bootstrap_champion, submit
 from autoresearch.softmax_tool.upload import upload, worker_store
-from autoresearch.softmax_tool.xp import ARMS, ArtifactsIncomplete
+from autoresearch.softmax_tool.xp import ARMS, ArtifactsIncomplete, tag
 from autoresearch.stats.design import DesignError, EvaluationDesign
 
 EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS, EXIT_TOOL_MISSING = 0, 1, 2, 3
@@ -149,6 +171,8 @@ BACKOFF_BASE = timedelta(minutes=30)
 BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
 BACKOFF_CAP = timedelta(hours=8)
 LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
+# ``xp create``'s refusal flags when nothing refused the batch.
+NOT_REFUSED = {"credit_denied": False, "permit_required": False, "league_not_chosen": False}
 
 
 class BadArguments(ValueError):
@@ -427,12 +451,58 @@ def _credit_denied(
             "credits_at_denial": credits,
         }
     }
-    if meta["status"] in ("uploaded", "evaluating"):
+    if meta["status"] in ("uploaded", "evaluating", "awaiting-permit"):
         patch["status"] = "awaiting-credits"
     store.update(experiment, patch)
     return {
+        **NOT_REFUSED,
         "credit_denied": True,
         "reason": reason,
+        "next_launch_after": next_launch_after,
+        "status": patch.get("status", meta["status"]),
+    }
+
+
+def _awaiting_coach(
+    store,
+    experiment: str,
+    meta: dict,
+    refusal: PermitRequired | LeagueNotChosen,
+    request: str,
+    league_id: str,
+    base: timedelta,
+) -> dict:
+    """The coach refused ``request`` (its tag): ``awaiting-permit`` with the wait recorded
+    (module docstring, ``xp create``)."""
+    lifecycle = dict(meta.get("lifecycle") or {})
+    refusals = int(lifecycle.get("permit_refusals", 0)) + 1
+    after = datetime.now(UTC) + credit_backoff(refusals, base)
+    next_launch_after = after.isoformat(timespec="seconds")
+    permit = isinstance(refusal, PermitRequired)
+    kind = "permit" if permit else "league"
+    wait = {
+        "kind": kind,
+        "request": request,
+        "reason": refusal.reason,
+        "ask": refusal.ask if permit else None,
+        "league_id": league_id,
+    }
+    patch: dict = {
+        "lifecycle": {
+            **lifecycle,
+            "permit_refusals": refusals,
+            "next_launch_after": next_launch_after,
+            "permit_wait": wait,
+        }
+    }
+    if meta["status"] in ("uploaded", "evaluating", "awaiting-credits"):
+        patch["status"] = "awaiting-permit"
+    store.update(experiment, patch)
+    return {
+        **NOT_REFUSED,
+        "permit_required": kind == "permit",
+        "league_not_chosen": kind == "league",
+        "reason": refusal.reason,
         "next_launch_after": next_launch_after,
         "status": patch.get("status", meta["status"]),
     }
@@ -534,15 +604,16 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         if problem is not None:
             raise Refused(*problem)
     created: list[dict] = []
-    denial: CreditDenied | None = None
+    denial: CreditDenied | PermitRequired | LeagueNotChosen | None = None
+    denied_request = ""
     for seed, arm, spec in planned:
         if (seed, arm) in existing:
             continue
         result = sm.xp_create(
             experiment, args.batch, args.attempt, spec, seed=seed, arm=arm, known=recovered
         )
-        if isinstance(result, CreditDenied):
-            denial = result
+        if isinstance(result, CreditDenied | PermitRequired | LeagueNotChosen):
+            denial, denied_request = result, tag(experiment, args.batch, args.attempt, seed, arm)
             break
         entry = _xp_entry(result, policies[arm])
         # Record at once, so a later failure in this batch cannot lose it.
@@ -564,24 +635,36 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         "missing": missing,
     }
     meta, _ = store.load(experiment)
-    if denial is not None:
+    if isinstance(denial, CreditDenied):
         credits = read_credits(sm)
         return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}
+    if denial is not None:
+        waiting = _awaiting_coach(
+            store, experiment, meta, denial, denied_request, _league_id(), base
+        )
+        return {**report, **waiting}
 
     patch: dict = {}
-    if meta["status"] in ("uploaded", "awaiting-credits"):
+    if meta["status"] in ("uploaded", "awaiting-credits", "awaiting-permit"):
         patch["status"] = "evaluating"
     lifecycle = meta.get("lifecycle") or {}
-    if lifecycle.get("credit_denials") or lifecycle.get("next_launch_after"):
+    if (
+        lifecycle.get("credit_denials")
+        or lifecycle.get("next_launch_after")
+        or lifecycle.get("permit_refusals")
+        or lifecycle.get("permit_wait")
+    ):
         patch["lifecycle"] = {
             **lifecycle,
             "credit_denials": 0,
             "next_launch_after": None,
             "credits_at_denial": None,
+            "permit_refusals": 0,
+            "permit_wait": None,
         }
     if patch:
         store.update(experiment, patch)
-    return {**report, "credit_denied": False}
+    return {**report, **NOT_REFUSED}
 
 
 def _handle_dict(handle: XpHandle) -> dict:

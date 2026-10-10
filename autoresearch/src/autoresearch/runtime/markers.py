@@ -9,7 +9,8 @@ Every runtime job builds markers here, never by hand.
   ``lifecycle.launch_attempts + 1`` (C12). The card runs ``xp recover`` first, so a repeated
   launch never duplicates an XP request.
 - ``launch:<E>:<attempt>:after:<next_launch_after>``: xp-poll's relaunch of an
-  ``awaiting-credits`` experiment (A10). A denial does not count as a launch, so the relaunch
+  ``awaiting-credits`` experiment (A10), or of an ``awaiting-permit`` one (the coach's IDE
+  Controls refused it). A denial does not count as a launch, so the relaunch
   reuses the attempt (creating only the missing requests). The key is the denial itself:
   ``lifecycle.next_launch_after`` is set anew by every denial, so each denial gets exactly one
   relaunch. (``credit_denials`` would not do: it resets after a successful batch, so a later

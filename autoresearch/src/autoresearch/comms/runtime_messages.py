@@ -870,6 +870,93 @@ def submission_pending(
     )
 
 
+# --- the coach's IDE Controls (Softmax hosting) ---
+
+# What the agent asked Softmax to do, by ``act``: an XP request (hosted games) or a submission.
+_COACH_ACTS = {
+    "xp": "to run hosted games that evaluate one of its experiments",
+    "submit": "to submit a policy to the league",
+}
+_COACH_RETRY = {
+    "xp": (
+        "The agent retries the same request by itself, so it is never created twice: the first "
+        "retry is 30 minutes after the refusal, and each later one waits twice as long (at "
+        "most 8 hours), so it can take that long to go on after you answer."
+    ),
+    "submit": (
+        "The runtime retries the same submission by itself, so it is never submitted twice: "
+        "the first retry is 30 minutes after the refusal, and each later one waits twice as "
+        "long (at most 8 hours), so it can take that long to go on after you answer. No other "
+        "promotion starts meanwhile."
+    ),
+}
+
+
+def _coach_about(subject_name: str, subject: str, reason: str, **ids) -> dict[str, str]:
+    return _about(**{subject_name: subject}, server_reason=reason, **ids)
+
+
+def permit_needed(
+    act: str,
+    subject: str,
+    reason: str,
+    ask: str | None,
+    league_id: str | None = None,
+    refs: list | None = None,
+) -> RuntimeMessage:
+    """Softmax refused an act until the coach answers its permit ask (403 ``permit_required``:
+    the IDE Controls ask before it). ``act`` is ``xp`` (``subject``: the XP request's tag) or
+    ``submit`` (``subject``: the promotion id). One per subject: a retry refused again names
+    the same subject and publishes nothing."""
+    what = "an XP request" if act == "xp" else "a league submission"
+    body = (
+        f"The agent asked Softmax {_COACH_ACTS[act]}, and your IDE Controls ask before "
+        f"{what} like this one. Softmax filed it as a permit ask and holds it until you "
+        "answer. To let it go on, approve the ask in the IDE Controls. "
+        f"{_COACH_RETRY[act]} If you answer no, it stays waiting and asks again at its next "
+        "retry; to stop it for good, send the agent a task that says so. This is the only help "
+        "request about it. Softmax's words and the ask are in this message's details (`about`)."
+    )
+    subject_name = "xp_request" if act == "xp" else "promotion"
+    return RuntimeMessage(
+        "help_request",
+        "Waiting for your approval in the IDE Controls",
+        body,
+        refs or [],
+        about=_coach_about(subject_name, subject, reason, ask=ask, league=league_id),
+        key=f"permit-needed:{subject}",
+    )
+
+
+def league_not_chosen(
+    act: str, subject: str, reason: str, league_id: str, refs: list | None = None
+) -> RuntimeMessage:
+    """Softmax refused a league-scoped act because the coach chose no league for the agent,
+    or another one (the league choice in the IDE Controls). ``act`` and ``subject`` as for
+    ``permit_needed``; one per subject."""
+    if reason.startswith("Your coach has not chosen"):
+        why = "no league is chosen for the agent yet"
+    else:
+        why = "the IDE Controls choose a different league for the agent"
+    body = (
+        f"The agent asked Softmax {_COACH_ACTS[act]} in the {league_id} league, and Softmax "
+        f"refused because {why}: the agent plays only the one league its coach chooses. To "
+        f"go on, choose the {league_id} league for the agent in the IDE Controls. (The "
+        "agent's league is set in its game's configuration; if it should play another league, "
+        f"ask the operator to change that instead.) {_COACH_RETRY[act]} This is the only help "
+        "request about it. Softmax's words are in this message's details (`about`)."
+    )
+    subject_name = "xp_request" if act == "xp" else "promotion"
+    return RuntimeMessage(
+        "help_request",
+        "Choose the agent's league in the IDE Controls",
+        body,
+        refs or [],
+        about=_coach_about(subject_name, subject, reason, league=league_id),
+        key=f"league-not-chosen:{subject}",
+    )
+
+
 def request_lost_in_rebuild(request_id: str, mode: str | None) -> RuntimeMessage:
     """An admitted request a board rebuild cannot re-admit (its spec was never committed)."""
     card = f"{mode} card" if mode else "card"

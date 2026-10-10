@@ -46,6 +46,14 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
      `missing` lists the rest. Finish the card `partial`. The XP poller makes a new launch
      card when the credit balance is above 0 again (or after the backoff, when the balance
      cannot be read). Do not create a launch card yourself.
+   - `permit_required: true` or `league_not_chosen: true`: the coach's IDE Controls refused
+     the request (they ask before XP requests, or no league or another league is chosen).
+     Stop here. The tool already set `awaiting-permit`, `lifecycle.permit_wait` and
+     `lifecycle.next_launch_after`. Do not send a `help_request`: the runtime sends one per
+     refused request and tells the coach what to do. Finish the card `partial`. The XP poller
+     makes a new launch card after the backoff; it sends the same request again. Do not
+     create a launch card yourself, and do not change the request to get past the refusal
+     (D-27).
 6. Never wait for XP in the card (D-11). The runtime makes the review card when every
    request is terminal. Results count as evidence only when completed and inspected (D-06).
 

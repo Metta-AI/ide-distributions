@@ -12,6 +12,14 @@ Credit denial: the server answers 402 when the owning account's credit allowance
 request; the CLI prints ``Error: Request failed (402) for /v2/experience-requests: <detail>`` on
 stderr and exits 1. That becomes ``CreditDenied``.
 
+The coach's refusals (Softmax hosting, a ``cga_`` agent token): the server answers 403 when the
+coach's IDE Controls ask before XP requests (a permit ask, ``PermitRequired``) or when the
+request's league is not the one the coach chose (``LeagueNotChosen``); see
+``platform_cli.coach_refusal`` for what the CLI prints. The server checks credits (402) first,
+then the league choice, then the permit. The request is not created. Retrying the same
+(experiment, batch, attempt, seed, arm) sends the same body and idempotency key, so the server
+decides it against the same permit ask instead of filing a new one.
+
 Artifacts: ``xp-request download`` writes each file under ``<dest>/<sha256(artifact:version)>/``
 and appends a receipt per file to ``<dest>/manifest.jsonl`` with ``size`` and ``sha256``. The CLI
 computes ``sha256`` while streaming and checks ``size`` against the server's declared size; the
@@ -35,9 +43,16 @@ from autoresearch.softmax_tool.platform_cli import (
     PAGE_LIMIT,
     PlatformCli,
     SoftmaxCliError,
+    coach_refusal,
     describe_failure,
 )
-from autoresearch.softmax_tool.protocol import CreditDenied, XpHandle, XpStatus
+from autoresearch.softmax_tool.protocol import (
+    CreditDenied,
+    LeagueNotChosen,
+    PermitRequired,
+    XpHandle,
+    XpStatus,
+)
 
 ARMS = ("candidate", "baseline")
 TAG_PATTERN = re.compile(
@@ -156,7 +171,7 @@ def create(
     spec: dict,
     seed: int | None = None,
     arm: str | None = None,
-) -> XpHandle | CreditDenied:
+) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen:
     """Create the request. Callers check identity and run ``recover`` first (see SoftmaxClient).
 
     The tag is also the idempotency key, so the platform never creates a second request for the
@@ -169,6 +184,9 @@ def create(
     if result.returncode != 0:
         if CREDIT_DENIAL.search(result.stderr or ""):
             return CreditDenied(reason=_error_detail(result.stderr))
+        refusal = coach_refusal(result.stderr or "")
+        if refusal is not None:
+            return refusal
         raise SoftmaxCliError(describe_failure("coworld", args, result))
     try:
         request_id = json.loads(result.stdout)["id"]

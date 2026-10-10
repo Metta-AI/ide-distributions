@@ -100,7 +100,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_FALLBACK_PRICES` | no | USD per million tokens for a session Hermes could not price (its estimate missing, for example when OpenRouter pricing was unreachable), as `kind=price` pairs. Default `input=3,output=12,cache_read=0.75,cache_write=3`, above kimi-k3's observed rate on purpose. queue-keeper logs each session priced this way once. |
 | `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long the league may take to make our admitted submission the champion (or, when its membership cannot be found, how long after the submit) before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
 | `AUTORESEARCH_RELAUNCH_MIN_CREDITS` | no | Credits an experiment refused for credits needs before xp-poll relaunches it, when the cost per XP episode cannot be estimated from recent requests (A10). Default 100. |
-| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
+| `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. The same wait applies to an experiment the coach's IDE Controls refused (`awaiting-permit`); a refused promotion submit always waits 30 minutes first. |
 | `GOTA_G2_RUNNER` | no | GotA G2 gate episode runner. Default `native`: the pinned native match binary, no Docker needed. `docker` runs pinned `coworld run-episode` instead, which needs Docker. See `games/gota/GAME.md`, "G2 episode runner". |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
@@ -304,6 +304,32 @@ agree: either make the league show the expected policy again, or accept what it 
 run it). It resumes on the
 next queue-keeper run after that.
 
+On Softmax hosting the agent acts with a `cga_` agent token, and the coach's IDE Controls
+govern it. Two of their settings can make Softmax refuse what the agent asks (HTTP 403), and
+the agent then waits for the coach instead of failing:
+
+- **Ask before** (`askBefore`) for XP requests or league submissions. Softmax files the request
+  as a permit ask and holds it. The coach gets one help request, "Waiting for your approval in
+  the IDE Controls", and approves the ask there. The agent retries the same request, with the
+  same body and idempotency key, so the server decides it against the same ask and creates
+  nothing twice.
+- **The league choice.** The agent plays only the league its coach chose. With no league
+  chosen, or another one, the coach gets one help request, "Choose the agent's league in the
+  IDE Controls", naming the league to choose (the game's league; to play another one, change
+  the game's configuration instead).
+
+An XP request the coach refused leaves its experiment `awaiting-permit` (with
+`lifecycle.permit_wait`); xp-poll sends the help request and relaunches the experiment after the
+same backoff as a credit denial (30 minutes, doubling, at most 8 hours), so after the coach
+answers it can take up to that long to go on. A refused submission leaves its promotion at
+`intent` with `waiting` set (`"$AUTORESEARCH_CLI" promotion status` shows it); queue-keeper's
+reconcile sends the help request and retries the same submission on the same backoff, and no
+other promotion starts meanwhile. There is one help request per refused request or promotion,
+however often it is refused again. Each experiment retry is a launch card, so an ask the coach
+never answers costs one card per backoff step (at most 3 a day after the first day). If the
+coach answers no, Softmax files a new ask at the next retry; to stop the work for good, send the
+agent a task that says so.
+
 Only the runtime commits on the canonical workspace's `main` (C1): queue-keeper, xp-poll,
 health, bootstrap, and `card finish` (the handoff commit). Each of them records every commit
 it makes in a journal outside the work tree (`.git/autoresearch/provenance.jsonl`, entries
@@ -458,6 +484,9 @@ command in an operator shell prints `false`.
   balance covers its remaining requests (the recent cost per episode, or
   `AUTORESEARCH_RELAUNCH_MIN_CREDITS`), at most one experiment per xp-poll run; otherwise the
   backoff decides (A10).
+- **The coach's answers are not read.** The agent cannot read whether the coach has answered
+  a permit ask, so it retries on the backoff instead of right after the answer (see the IDE
+  Controls paragraphs in Operate).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
 - **One OS user, so no guard inside the profile is a security boundary.** Card workers,
   queue-keeper and the other jobs all run as the workspace user. The plugin refuses canonical

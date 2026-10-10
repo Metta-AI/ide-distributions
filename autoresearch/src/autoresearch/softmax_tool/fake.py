@@ -8,7 +8,13 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 ``CredentialRejected``, as for a revoked token), ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
 (creating a new XP request raises once N exist, like the platform's pending-request cap), and
-``crash_after=<label>`` (read by runtime code through :func:`fault`). A request whose state
+``crash_after=<label>`` (read by runtime code through :func:`fault`). The coach's refusals of
+Softmax hosting: ``permit=<acts>`` (comma-separated ``spend``, ``submit``) refuses a new XP
+request (``spend``) or a league submission (``submit``) with ``PermitRequired``, as when the
+coach's IDE Controls ask before it; the same act names the same ask every time (state
+``asks``, as the server keeps one waiting ask per act). ``league=none`` refuses both with
+``LeagueNotChosen`` (no league chosen), ``league=<id>`` likewise (the coach chose that one).
+Dropping the fault is the coach's yes. A request whose state
 entry has ``"failed": true`` (tests set it in the state file) reports status ``failed``.
 
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
@@ -58,8 +64,11 @@ from autoresearch.softmax_tool.identity import (
     identity_problems,
 )
 from autoresearch.softmax_tool.protocol import (
+    CoachRefusal,
     CreditDenied,
     Identity,
+    LeagueNotChosen,
+    PermitRequired,
     SubmissionState,
     XpHandle,
     XpStatus,
@@ -75,6 +84,10 @@ LEAGUE_POLICIES = ("fake-alpha:v1", "fake-beta:v1", "fake-gamma:v1")
 LEAGUE_HOUSE = "fake-house:v1"
 LEAGUE_FIRST_SEED = 1000
 DEFAULT_PARAMETERS = {"aggression": 3, "patience": 5}  # fakegame's seed STRATEGY.md
+# The server's words (metta observatory_core.cogents.league).
+NOT_CHOSEN = (
+    "Your coach has not chosen a league for this cogent yet; ask them to pick one in the IDE."
+)
 
 
 def parse_faults(env: Mapping[str, str]) -> dict[str, str]:
@@ -242,6 +255,27 @@ class FakeSoftmax:
     def _current_credits(self, state: dict) -> int:
         return int(self._faults["credits"]) if "credits" in self._faults else state["credits"]
 
+    def _coach_refusal(
+        self, state: dict, action: str, ref: str, league_id: str
+    ) -> CoachRefusal | None:
+        """The ``permit``/``league`` faults (module docstring): the league choice first, as
+        the server checks it before the permit."""
+        chosen = self._faults.get("league")
+        if chosen is not None:
+            if chosen == "none":
+                return LeagueNotChosen(NOT_CHOSEN)
+            act = "a submission to" if action == "submit" else "a league game in"
+            return LeagueNotChosen(
+                f"This cogent plays {chosen}; your coach chose it, and {act} {league_id} is "
+                "refused."
+            )
+        if action not in self._faults.get("permit", "").split(","):
+            return None
+        asks = state.setdefault("asks", {})
+        ask = asks.setdefault(ref, f"permit-{action}-{_short_hash(action, ref)}-1")
+        reason = f"{action} on {ref}: the ask waits for the coach (ask asks/{ask})"
+        return PermitRequired(reason, ask)
+
     def episode_cost(self) -> float | None:
         return 1.0  # the fake deducts one credit per (one-episode) request
 
@@ -269,7 +303,7 @@ class FakeSoftmax:
         seed: int | None = None,
         arm: str | None = None,
         known: list[XpHandle] | None = None,
-    ) -> XpHandle | CreditDenied:
+    ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen:
         """``known`` is accepted for protocol parity and ignored: the fake's state is the truth."""
         key = (
             (experiment, batch, attempt)
@@ -285,6 +319,11 @@ class FakeSoftmax:
             if request_id not in state["xp"]:
                 if self._current_credits(state) <= 0:
                     return CreditDenied("no credits")
+                tag = ":".join(str(part) for part in key)
+                league = str(spec.get("league_id", "-"))
+                refusal = self._coach_refusal(state, "spend", f"spend:{tag}", league)
+                if refusal is not None:
+                    return refusal
                 if "xp_limit" in self._faults and len(state["xp"]) >= int(self._faults["xp_limit"]):
                     raise RuntimeError("injected fault: pending XP request limit (429)")
                 state["xp"][request_id] = {
@@ -384,10 +423,16 @@ class FakeSoftmax:
 
         return self._operate("upload", action)
 
-    def submit(self, policy_version_id: str, league_id: str) -> str:
+    def submit(
+        self, policy_version_id: str, league_id: str
+    ) -> str | PermitRequired | LeagueNotChosen:
         self._require_player()
 
-        def action(state: dict) -> str:
+        def action(state: dict) -> str | PermitRequired | LeagueNotChosen:
+            ref = f"league:{league_id}:{policy_version_id}"
+            refusal = self._coach_refusal(state, "submit", ref, league_id)
+            if refusal is not None:
+                return refusal
             submission_id = (
                 f"sub_{_short_hash(policy_version_id, league_id, len(state['submissions']))}"
             )

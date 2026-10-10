@@ -377,6 +377,68 @@ def test_xp_create_credit_denied_mid_batch_reports_missing_and_relaunch_fills_th
     assert meta["lifecycle"]["credit_denials"] == 0
 
 
+def test_xp_create_permit_required_sets_awaiting_permit_until_the_coach_says_yes(board, launch):
+    """Softmax hosting: the coach's IDE Controls ask before XP requests (403 permit_required).
+    The batch stops like a credit denial; the same request asked again names the same ask; the
+    run after the coach's yes creates the requests and clears the wait."""
+    worker, experiment = launch
+    refusing = base_env(board, worker, **{FAULTS_ENV: "permit=spend"})
+    code, data = softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0, data
+    assert data["data"]["permit_required"] is True and data["data"]["credit_denied"] is False
+    assert data["data"]["created"] == [] and len(data["data"]["missing"]) == 4
+    meta = worker.store.load(experiment)[0]
+    assert meta["status"] == "awaiting-permit" and data["data"]["status"] == "awaiting-permit"
+    lifecycle = meta["lifecycle"]
+    assert lifecycle["permit_refusals"] == 1
+    assert lifecycle["next_launch_after"] == data["data"]["next_launch_after"]
+    wait = lifecycle["permit_wait"]
+    assert wait["kind"] == "permit" and wait["request"] == f"ar:{experiment}:b1:a1:s1:candidate"
+    assert wait["ask"] and wait["league_id"] == LEAGUE
+
+    code, data = softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["permit_required"] is True
+    meta = worker.store.load(experiment)[0]
+    assert meta["lifecycle"]["permit_refusals"] == 2 and meta["lifecycle"]["permit_wait"] == wait
+    assert meta["lifecycle"]["next_launch_after"] > lifecycle["next_launch_after"]
+
+    approved = base_env(board, worker)
+    code, data = softmax(approved, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["permit_required"] is False
+    assert len(data["data"]["created"]) == 4
+    meta = worker.store.load(experiment)[0]
+    assert meta["status"] == "evaluating"
+    assert meta["lifecycle"]["permit_refusals"] == 0 and meta["lifecycle"]["permit_wait"] is None
+
+
+def test_xp_create_league_choice_refusal_sets_awaiting_permit(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker, **{FAULTS_ENV: "league=league_other"})
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["league_not_chosen"] is True, data
+    assert data["data"]["permit_required"] is False
+    assert data["data"]["reason"].startswith("This cogent plays league_other")
+    meta = worker.store.load(experiment)[0]
+    assert meta["status"] == "awaiting-permit"
+    assert meta["lifecycle"]["permit_wait"]["kind"] == "league"
+
+
+def test_a_credit_denial_of_an_awaiting_permit_experiment_moves_it_to_awaiting_credits(
+    board, launch
+):
+    """The server checks credits before the permit: a denial says nothing about the ask, so
+    the permit wait is kept for when the credits return."""
+    worker, experiment = launch
+    refusing = base_env(board, worker, **{FAULTS_ENV: "permit=spend"})
+    softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    wait = worker.store.load(experiment)[0]["lifecycle"]["permit_wait"]
+    broke = base_env(board, worker, **{FAULTS_ENV: "permit=spend;credits=0"})
+    code, data = softmax(broke, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and data["data"]["credit_denied"] is True
+    meta = worker.store.load(experiment)[0]
+    assert meta["status"] == "awaiting-credits" and meta["lifecycle"]["permit_wait"] == wait
+
+
 def test_xp_create_refuses_a_new_attempt_while_the_last_is_incomplete(board, launch):
     """Fake cycle run 2: after a credit denial the agent relaunched with --attempt 2 and
     repeated every request. A new attempt must wait until the latest one is complete."""

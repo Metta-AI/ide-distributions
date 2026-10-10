@@ -34,6 +34,33 @@ class CreditDenied:
 
 
 @dataclass(frozen=True)
+class PermitRequired:
+    """The server refused the act until the coach answers a permit ask (HTTP 403 with detail
+    ``type: permit_required``): on Softmax hosting the coach's IDE Controls can ask before XP
+    requests and league submissions (``askBefore``). ``reason`` is the server's message;
+    ``ask`` the ask's record key (``asks/<ask>``) when the CLI output carried it. The server
+    files no second ask while one waits: the same act asked again names the same ask (metta
+    ``observatory_core.cogents.permits.check_permit``)."""
+
+    reason: str
+    ask: str | None = None
+
+
+@dataclass(frozen=True)
+class LeagueNotChosen:
+    """The server refused a league-scoped act (an XP request in a league, a league
+    submission) because the coach has chosen no league for this player, or chose another one
+    (HTTP 403 with the league-choice detail, metta ``observatory_core.cogents.league``).
+    ``reason`` is the server's words."""
+
+    reason: str
+
+
+# A refusal the coach resolves in the IDE Controls (approve the ask, or choose the league).
+CoachRefusal = PermitRequired | LeagueNotChosen
+
+
+@dataclass(frozen=True)
 class SubmissionState:
     """Where one of our submissions stands in a league (A9), read from our own league
     memberships, else our submissions list:
@@ -109,12 +136,17 @@ class Softmax(Protocol):
         seed: int | None = None,
         arm: str | None = None,
         known: list[XpHandle] | None = None,
-    ) -> XpHandle | CreditDenied: ...
+    ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen: ...
     def xp_status(self, handle: XpHandle) -> XpStatus: ...
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...
     def xp_recover(self, experiment: str) -> list[XpHandle]: ...
     def upload(self, artifact: Path, name: str) -> str: ...
-    def submit(self, policy_version_id: str, league_id: str) -> str: ...
+    def submit(
+        self, policy_version_id: str, league_id: str
+    ) -> str | PermitRequired | LeagueNotChosen:
+        """The submission id, or the coach's refusal (nothing was submitted)."""
+        ...
+
     def submissions(self, player_id: str) -> list[dict]: ...
     def leaderboard_champion(self, player_id: str, league_id: str) -> str | None: ...
     def submission_state(

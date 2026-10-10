@@ -45,10 +45,19 @@ from pathlib import Path
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.identity import require_player, whoami
-from autoresearch.softmax_tool.platform_cli import HttpGet, PlatformCli, Runner, SoftmaxCliError
+from autoresearch.softmax_tool.platform_cli import (
+    HttpGet,
+    PlatformCli,
+    Runner,
+    SoftmaxCliError,
+    coach_refusal,
+    describe_failure,
+)
 from autoresearch.softmax_tool.protocol import (
     CreditDenied,
     Identity,
+    LeagueNotChosen,
+    PermitRequired,
     SubmissionState,
     XpHandle,
     XpStatus,
@@ -142,7 +151,7 @@ class SoftmaxClient:
         seed: int | None = None,
         arm: str | None = None,
         known: list[XpHandle] | None = None,
-    ) -> XpHandle | CreditDenied:
+    ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen:
         """Reuse an existing request for (experiment, batch, attempt, seed, arm); else check
         identity, create.
 
@@ -186,12 +195,20 @@ class SoftmaxClient:
             raise SoftmaxCliError(f"upload-policy printed no 'Upload complete:' line for {name}")
         return label
 
-    def submit(self, policy_version_id: str, league_id: str) -> str:
-        """Submit ``<name>:v<N>`` as the expected player; return the submission id."""
+    def submit(
+        self, policy_version_id: str, league_id: str
+    ) -> str | PermitRequired | LeagueNotChosen:
+        """Submit ``<name>:v<N>`` as the expected player; return the submission id, or the
+        coach's refusal (``platform_cli.coach_refusal``: nothing was submitted)."""
         self._require_player()
         args = ["submit", policy_version_id, "--league", league_id]
         args += ["--player", self._expected_player, "--no-open-browser"]
-        result = self._cli.run("coworld", args)
+        result = self._cli.run("coworld", args, ok_codes=(0, 1))
+        if result.returncode != 0:
+            refusal = coach_refusal(result.stderr or "")
+            if refusal is not None:
+                return refusal
+            raise SoftmaxCliError(describe_failure("coworld", args, result))
         submission_id = _line_value(result.stdout, "Submission:")
         if submission_id is None:
             raise SoftmaxCliError(f"submit printed no 'Submission:' line for {policy_version_id}")

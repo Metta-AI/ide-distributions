@@ -1,5 +1,6 @@
 """``softmax_tool.submit``: every guard before the single submit path (Plan 03 Task 3.3)."""
 
+import datetime
 import json
 
 import pytest
@@ -245,3 +246,33 @@ def test_outcome_file_written_by_hand_without_hashes_is_stale(board):
     path = worker.worktree / "stats" / "outcomes" / f"{experiment}.json"
     write_json(path, {"promote_eligible": True, "champion": BASELINE_PV})
     assert refusal(board, worker, experiment).reason == "stale_outcome"
+
+
+def test_a_permit_refusal_keeps_the_promotion_at_intent_and_reconcile_submits_it(board):
+    """The coach's IDE Controls ask before league submissions: ``permit_required``, nothing is
+    submitted or staged, and the promotion waits at ``intent``. After the yes, reconcile
+    submits the same policy version; the holder card's handoff (which staged nothing) becomes
+    the promotion's repair, as for any submitted promotion whose holder did not stage it."""
+    experiment, _ = board.reviewed_experiment()
+    worker = board.promoter(experiment)
+    refusing = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
+    refused = refusal(board, worker, experiment, sm=refusing)
+    assert refused.reason == "permit_required"
+    current = load(board.canonical)
+    assert refused.details["promotion_id"] == current.id
+    assert current.stage == "intent" and current.waiting == "permit"
+    assert not (worker.worktree / CHAMPION_PATH).read_text().startswith("# Candidate")
+
+    worker.write_journal()
+    worker.finish(outcome="partial")
+    [handled] = board.process()
+    assert handled.state == "validated"  # waits at intent
+
+    due = datetime.datetime.fromisoformat(current.waiting_detail["next_retry_after"])
+    later = due + datetime.timedelta(minutes=1)
+    actions = promotion.reconcile(board.ctx(), board.queue, board.sm, LEAGUE, now=later)
+    assert [a.kind for a in actions][:2] == ["help_requested", "submitted"]
+    assert load(board.canonical).stage == "submitted"
+    assert len(submissions_of(board, PV_A)) == 1
+    [handled] = board.process()
+    assert handled.state == "repair"

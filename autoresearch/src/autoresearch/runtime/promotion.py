@@ -10,6 +10,8 @@ promotion (C4), both rewritten in the same commit on every transition. Stages:
     acquired --holder run terminal, taken over by a new acquire--> aborted
     intent --reconcile: holder terminal, no submission on Softmax--> aborted
     intent --reconcile: holder terminal, submission found--> submitted
+    intent (waiting for the coach) --reconcile: the retried submit succeeds, or the
+        submission is found on Softmax--> submitted
     intent --ledger push failed (record_intent)--> acquired
     submitted --reconcile: the league rejected the submission (A9)--> rejected
 
@@ -22,8 +24,9 @@ Rules that make a crash at any point safe:
 - Nothing is submitted before ``intent`` is committed and pushed together with the
   candidate branch, so a lost host can always find out what may have been submitted.
 - ``submit_promotion`` is the single submit path. It submits only from ``acquired`` via
-  ``intent``; a promotion at ``intent`` or later is never submitted again. ``reconcile``
-  settles a crashed ``intent`` from the Softmax submissions list, never by resubmitting.
+  ``intent``; a promotion at ``intent`` or later is never submitted again, except one the
+  server refused for the coach ("Waiting for the coach", below). ``reconcile`` settles a
+  crashed ``intent`` from the Softmax submissions list, never by resubmitting.
 Liveness (one rule, in ``reconcile``): a ``submitted`` promotion needs recovery unless a
 live holder-role run exists. The holder role belongs to the holder TASK (a retried run after
 a rate limit or reclaim is accepted; ``on_merge`` rebinds ``run_id``). It is live while the
@@ -61,6 +64,23 @@ champion must be the experiment's baseline). A ``bootstrap`` promotion (amendmen
 strategy, with no experiment (``experiment`` is None), allowed only while the league shows no
 policy competing for our player. Both go through the same stages, merge hooks, reconcile and
 recovery.
+
+Waiting for the coach (Softmax hosting). On a ``cga_`` agent token the server can refuse the
+submit for the coach: the IDE Controls ask before league submissions (403
+``permit_required``, ``PermitRequired``), or the coach chose no league or another one
+(``LeagueNotChosen``). Nothing was submitted, and the server says so, so the promotion stays at
+``intent`` with ``waiting`` (``permit`` or ``league``) and ``waiting_detail`` (``{reason, ask,
+league_id, refusals, next_retry_after}``); the submit path returns ``code``
+``permit_required`` or ``league_not_chosen``. ``reconcile`` then owns it, whatever its holder
+does: one runtime help request (``runtime_messages.permit_needed`` / ``league_not_chosen``,
+``runtime_key`` per promotion), and once ``next_retry_after`` has passed (30 minutes, doubling
+per refusal, at most 8 hours, ``PERMIT_RETRY_BASE``/``PERMIT_RETRY_CAP``) and no champion
+conflict is open, the submissions list first (a submission found settles it: ``submitted``)
+and else the same submit again (the same policy version and league: the server asks about the
+same permit). Success moves it to ``submitted``; the holder's handoff, which waited at
+``intent``, then merges (a bootstrap: its champion path is the shipped one) or becomes a
+``repair`` that a recovery card stages (an experiment: the refused submit staged nothing),
+as for any ``submitted`` promotion. A waiting intent is never aborted for a terminal holder.
 
 Champion authority (amendment A9). The champion is whichever policy the Softmax league has
 registered as competing for our player (``Softmax.leaderboard_champion``: the champion
@@ -105,7 +125,12 @@ from autoresearch.runtime.ledger import (
     now_iso,
 )
 from autoresearch.runtime.pause import pause_path
-from autoresearch.softmax_tool.protocol import Softmax, SubmissionState
+from autoresearch.softmax_tool.protocol import (
+    LeagueNotChosen,
+    PermitRequired,
+    Softmax,
+    SubmissionState,
+)
 
 CHAMPION_PATH = "strategy/STRATEGY.md"
 PROMOTION_FILE_REL = ".supervisor/ledger/promotion.json"
@@ -121,6 +146,9 @@ CHAMPION_PAUSE = "champion conflict"  # the start of pause.json's reason for an 
 GRACE_ENV = "AUTORESEARCH_CHAMPION_GRACE_MINUTES"
 RUNTIME = "runtime"
 MAX_RECOVERY_ATTEMPTS = 3
+# Retry wait of a submit the coach refused (module docstring, "Waiting for the coach").
+PERMIT_RETRY_BASE = datetime.timedelta(minutes=30)
+PERMIT_RETRY_CAP = datetime.timedelta(hours=8)
 
 log = logging.getLogger(__name__)
 
@@ -158,6 +186,10 @@ class Promotion:
     # as for a bootstrap). While the submission is in flight the league may still show it
     # (A9 grace window, ``champion_conflict``). None in records written before A9's revision.
     replaces: str | None = None
+    # ``permit`` or ``league`` while an ``intent`` waits for the coach (module docstring,
+    # "Waiting for the coach"), with ``waiting_detail``; None otherwise.
+    waiting: str | None = None
+    waiting_detail: dict | None = None
 
     @property
     def recovery_request(self) -> str | None:
@@ -183,7 +215,8 @@ class Promotion:
 @dataclass
 class Action:
     """One thing ``reconcile`` did: ``submitted``, ``aborted``, ``recovery_requested``,
-    ``help_requested``, ``published`` or ``rejected``."""
+    ``help_requested``, ``published``, ``rejected`` or ``waiting`` (a retried submit the
+    server refused for the coach again)."""
 
     kind: str
     promotion_id: str
@@ -1113,6 +1146,80 @@ def _settle_intent(ctx: RunContext, promotion: Promotion, sm: Softmax) -> Action
         return Action("aborted", promotion.id, "holder ended before submitting")
 
 
+def coach_wait_message(promotion: Promotion) -> runtime_messages.RuntimeMessage:
+    """The one help request about a promotion waiting for the coach (per promotion and kind:
+    a permit wait and a league wait are different asks)."""
+    detail = promotion.waiting_detail or {}
+    reason, league = detail.get("reason") or "", detail.get("league_id") or ""
+    refs = [{"uri": _refs(promotion.experiment, promotion.version)[0]}]
+    if promotion.waiting == "league":
+        return runtime_messages.league_not_chosen("submit", promotion.id, reason, league, refs)
+    return runtime_messages.permit_needed(
+        "submit", promotion.id, reason, detail.get("ask"), league or None, refs
+    )
+
+
+def _ask_coach(canonical: Path, promotion: Promotion) -> list[Action]:
+    """Publish ``coach_wait_message`` unless it already was. Takes the lock."""
+    message = coach_wait_message(promotion)
+    with canonical_lock(canonical):
+        if already_published(canonical, message):
+            return []
+        publish_message(canonical, message, allow_no_remote=True)
+    return [Action("help_requested", promotion.id, message.title)]
+
+
+def _wait_for_coach(
+    ctx: RunContext, promotion: Promotion, sm: Softmax, now: datetime.datetime
+) -> list[Action]:
+    """An ``intent`` promotion the server refused for the coach (module docstring): one help
+    request; then, once ``next_retry_after`` has passed and no champion conflict is open, the
+    submissions list (a submission found settles it) and else the same submit again. Network
+    calls run outside the lock."""
+    canonical = ctx.canonical
+    actions = _ask_coach(canonical, promotion)
+    detail = promotion.waiting_detail or {}
+    due = datetime.datetime.fromisoformat(detail["next_retry_after"])
+    league_id = detail["league_id"]
+    if now < due or open_conflict(ctx, sm, league_id) is not None:
+        return actions
+    player = sm.whoami().player_id
+    found = [
+        s
+        for s in sm.submissions(player)
+        if s["policy_version_id"] == promotion.platform_policy_version_id
+        and s["league_id"] == league_id
+    ]
+    submitted = (
+        found[-1]["submission_id"]
+        if found
+        else sm.submit(promotion.platform_policy_version_id, league_id)
+    )
+    with canonical_lock(canonical):
+        current = load(canonical)
+        if current is None or current.id != promotion.id or current.stage != "intent":
+            return actions
+        if isinstance(submitted, str):
+            note = "found on Softmax" if found else "submitted after the coach's answer"
+            _move(
+                canonical,
+                current,
+                "submitted",
+                note,
+                submission_id=submitted,
+                waiting=None,
+                waiting_detail=None,
+            )
+            actions.append(Action("submitted", promotion.id, submitted))
+            return actions
+        fields = _waiting_fields(current, submitted, league_id, now)
+        still = replace(current, updated_at=now_iso(), **fields)
+        _save(canonical, still, f"promotion {promotion.id}: still waiting for the coach")
+    actions.append(Action("waiting", promotion.id, submitted.reason))
+    # The other kind of wait (a permit after the league, or back) is a new help request.
+    return [*actions, *_ask_coach(canonical, still)]
+
+
 def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
     """Write the next recovery attempt's request (P0, key ``promote-recover:<P>:<n>``) and
     commit it with the promotion's ``recovery_requests``. Under the lock."""
@@ -1254,12 +1361,19 @@ def _pending_too_long(
 
 
 def reconcile(
-    ctx: RunContext, queue: Queue, sm: Softmax, league_id: str | None = None
+    ctx: RunContext,
+    queue: Queue,
+    sm: Softmax,
+    league_id: str | None = None,
+    now: datetime.datetime | None = None,
 ) -> list[Action]:
     """C8 runtime reconciliation, each queue-keeper run; the caller must not hold the lock.
 
     1. ``intent`` with the holder run terminal (or an earlier board epoch): ``submitted``
-       (submission found on Softmax) or ``aborted``. Never resubmits.
+       (submission found on Softmax) or ``aborted``. Never resubmits. An ``intent`` waiting
+       for the coach is ``_wait_for_coach``'s instead, whatever its holder does (module
+       docstring): the help request, and the retried submit when due (``now``, default the
+       current time).
     2. ``submitted`` needs recovery unless a live holder-role run exists: the holder task
        still has a handoff normal processing will act on, or is pending/claimed (current
        epoch), or the latest recovery card is still live. A holder handoff in ``repair``,
@@ -1280,7 +1394,12 @@ def reconcile(
     if promotion is None or promotion.stage not in IN_FLIGHT:
         return []
     actions = []
-    if promotion.stage == "intent":
+    if promotion.stage == "intent" and promotion.waiting is not None:
+        now = now or datetime.datetime.now(datetime.UTC)
+        actions = _wait_for_coach(ctx, promotion, sm, now)
+        if load(canonical).stage == "intent":
+            return actions
+    elif promotion.stage == "intent":
         if not _holder_terminal(canonical, queue, promotion):
             return []
         action = _settle_intent(ctx, promotion, sm)
@@ -1439,10 +1558,62 @@ def _submit_acquired(
     except PromotionError as error:
         return SubmitOutcome(False, promotion.id, reason=str(error))
     promotion = load(ctx.canonical)
-    submission_id = sm.submit(promotion.platform_policy_version_id, league_id)
-    record_submitted(ctx, promotion, submission_id)
+    submitted = sm.submit(promotion.platform_policy_version_id, league_id)
+    if not isinstance(submitted, str):
+        return _await_coach(ctx, promotion, league_id, submitted)
+    record_submitted(ctx, promotion, submitted)
     stage_champion(ctx, load(ctx.canonical))
-    return SubmitOutcome(True, promotion.id, submission_id=submission_id)
+    return SubmitOutcome(True, promotion.id, submission_id=submitted)
+
+
+def _retry_wait(refusals: int) -> datetime.timedelta:
+    return min(PERMIT_RETRY_BASE * 2 ** (refusals - 1), PERMIT_RETRY_CAP)
+
+
+def _waiting_fields(
+    promotion: Promotion,
+    refusal: PermitRequired | LeagueNotChosen,
+    league_id: str,
+    now: datetime.datetime,
+) -> dict:
+    """``waiting`` and ``waiting_detail`` after one more refusal of ``promotion``'s submit."""
+    permit = isinstance(refusal, PermitRequired)
+    refusals = int((promotion.waiting_detail or {}).get("refusals", 0)) + 1
+    detail = {
+        "reason": refusal.reason,
+        "ask": refusal.ask if permit else None,
+        "league_id": league_id,
+        "refusals": refusals,
+        "next_retry_after": (now + _retry_wait(refusals)).isoformat(timespec="seconds"),
+    }
+    return {"waiting": "permit" if permit else "league", "waiting_detail": detail}
+
+
+def _await_coach(
+    ctx: RunContext,
+    promotion: Promotion,
+    league_id: str,
+    refusal: PermitRequired | LeagueNotChosen,
+) -> SubmitOutcome:
+    """The server refused the submit for the coach: the promotion stays at ``intent``, waiting
+    (module docstring). ``reconcile`` publishes the help request and retries. The ledger push
+    is best effort, as for ``record_submitted``."""
+    canonical = ctx.canonical
+    now = datetime.datetime.now(datetime.UTC)
+    with canonical_lock(canonical):
+        current = _require(load(canonical), promotion.id, "intent")
+        fields = _waiting_fields(current, refusal, league_id, now)
+        entry = {"stage": "intent", "at": now_iso(), "note": f"waiting: {fields['waiting']}"}
+        waiting = replace(
+            current, updated_at=entry["at"], history=[*current.history, entry], **fields
+        )
+        _save(canonical, waiting, f"promotion {promotion.id}: waiting for the coach")
+    with canonical_lock(canonical):
+        if not provenance.push_main(canonical, REMOTE):
+            log.warning("promotion %s waits for the coach; the ledger push failed", promotion.id)
+    code = "permit_required" if isinstance(refusal, PermitRequired) else "league_not_chosen"
+    reason = f"the server refused the submit for the coach: {refusal.reason}"
+    return SubmitOutcome(False, promotion.id, reason=reason, code=code)
 
 
 def bootstrap_promotion(

@@ -51,6 +51,7 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | `promotion_refused` | The lock is held, the champion is not the baseline, or a push failed. If `details.request_id` is set, the runtime already requested the re-evaluation card. | Finish `partial`. |
 | `busy` | A process is running `xp create`, `upload` or `submit` for this experiment now (`details.holder`). | `details.own_run: true`: your own earlier submit still runs; wait for it (native `process_manage`, action `wait`, its `session_id`, `timeout` 1800), then read `promotion status`. Otherwise do not submit again; finish `partial`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
+| `permit_required`, `league_not_chosen` | The coach's IDE Controls refused the submission: they ask before league submissions, or no league or another league is chosen. Nothing was submitted; the promotion waits at `intent`. | Record it in the journal. Do not submit again and do not send a `help_request`: the runtime asks the coach and retries the same submission itself. Finish `partial`. |
 | `platform` | The platform failed. | Finish `partial`. The promotion state stays recoverable. |
 
 ## Bootstrap card (first champion, A14)
@@ -97,6 +98,7 @@ Refusals of `softmax bootstrap-champion`, by `error.reason`:
 | `not_shipped_strategy` | `strategy/STRATEGY.md` in your worktree or on your branch differs from the shipped one, or the build compiled another STRATEGY.md. The bootstrap promotes only the unchanged shipped strategy. | Restore it (`git checkout main -- strategy/STRATEGY.md`), commit, rebuild from it as `GAME.md` says, and run it again. |
 | `gates_failed`, `bad_build`, `artifact_mismatch` | The starter policy does not build. | Do not substitute a candidate. Journal the gate output, send a `help_request`, finish `blocked`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |
+| `permit_required`, `league_not_chosen` | The coach's IDE Controls refused the submission (as for a promotion card). The upload stands; the promotion waits at `intent`. | Record it in the journal. Do not run it again and do not send a `help_request`: the runtime asks the coach and retries the same submission itself. Finish `partial`. |
 | `platform` | The platform failed. | Run it once more (the same build reuses its upload). After a second failure, finish `partial`. |
 
 ## Promotion-recovery card

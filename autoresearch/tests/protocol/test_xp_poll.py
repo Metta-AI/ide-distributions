@@ -1,5 +1,6 @@
 """xp-poll (Plan 01 Task 3.9; A10, A12): evidence from completed XP requests, the review
-card when an evaluation finishes, and relaunch of ``awaiting-credits`` experiments after the
+card when an evaluation finishes, and relaunch of ``awaiting-credits`` (and
+``awaiting-permit``) experiments after the
 credit backoff with no duplicate XP request."""
 
 import argparse
@@ -24,6 +25,7 @@ from autoresearch.runctx import RunContext
 from autoresearch.runtime import xp_poll
 from autoresearch.runtime.markers import relaunch_marker
 from autoresearch.softmax_tool import cli as softmax_cli
+from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.protocol import XpStatus
 from autoresearch.softmax_tool.xp import ArtifactsIncomplete
 from autoresearch.stats.ingest import EpisodeRow, ingest, pair
@@ -388,6 +390,118 @@ def test_relaunch_need_counts_the_remaining_requests():
     assert xp_poll.relaunch_need(experiment, None, 100) == 100
     assert xp_poll.min_relaunch_credits({xp_poll.MIN_CREDITS_ENV: "7"}) == 7
     assert xp_poll.min_relaunch_credits({xp_poll.MIN_CREDITS_ENV: "x"}) == 100
+
+
+# --- awaiting-permit: the coach's IDE Controls refused an XP request (Softmax hosting) ---
+
+
+class _RecordingCreates:
+    """Records every ``xp_create`` call's arguments (the request body is built from them)."""
+
+    def __init__(self, inner):
+        self.inner, self.creates = inner, []
+
+    def xp_create(self, *args, **kwargs):
+        self.creates.append((args, kwargs))
+        return self.inner.xp_create(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+def _body(call) -> dict:
+    (experiment, batch, attempt, spec), kwargs = call
+    return xp.request_body(experiment, batch, attempt, spec, kwargs["seed"], kwargs["arm"])
+
+
+def _coach_messages(host: Host) -> list[dict]:
+    keys = ("permit-needed:", "league-not-chosen:")
+    return [m for m in host.outbox() if str(m.get("runtime_key", "")).startswith(keys)]
+
+
+def _refused_launch(host: Host, sm) -> dict:
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    refused = softmax_cli._xp_create(launcher, sm, _cli_args(host.store.find("experiment")[0]))
+    host.runtime_commit("launch: refused for the coach")
+    return refused
+
+
+def test_permit_refusal_asks_the_coach_once_and_relaunches_the_same_request(host, monkeypatch):
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    experiment = _experiment(host, "uploaded")
+    _champion_is_the_baseline(host)
+    host.set_faults("permit=spend")  # the IDE Controls ask before XP requests
+    refusing = _RecordingCreates(host.sm)
+    refused = _refused_launch(host, refusing)
+    assert refused["permit_required"] and not refused["credit_denied"]
+    assert refused["created"] == []
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "awaiting-permit"
+    wait = meta["lifecycle"]["permit_wait"]
+    assert wait["kind"] == "permit" and wait["request"] == f"ar:{experiment}:b1:a1:s1:candidate"
+    backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+
+    # One help request, before the backoff ends; no relaunch yet.
+    early = _poll(host, backoff_end - datetime.timedelta(minutes=5))
+    assert early.help_requests == [experiment] and early.launches == []
+    [asked] = _coach_messages(host)
+    assert asked["kind"] == "help_request" and asked["expects_response"] is True
+    assert "approve the ask in the IDE Controls" in asked["body"]
+    assert asked["about"]["ask"] == wait["ask"]
+    assert _poll(host, backoff_end - datetime.timedelta(minutes=4)).help_requests == []
+
+    # A second refusal of the same request (the coach has not answered): no second ask.
+    again = _refused_launch(host, refusing)
+    assert again["permit_required"]
+    meta, _ = host.store.load(experiment)
+    assert meta["lifecycle"]["permit_refusals"] == 2
+    assert meta["lifecycle"]["permit_wait"] == wait  # the same request, the same ask
+    backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+    assert _poll(host, backoff_end - datetime.timedelta(minutes=1)).help_requests == []
+    assert len(_coach_messages(host)) == 1
+
+    # After the backoff: one relaunch; the coach said yes meanwhile.
+    [launch] = _poll(host, backoff_end + datetime.timedelta(minutes=1)).launches
+    assert "--attempt 1" in launch.why and "coach's refusal 2" in launch.why
+    host.set_faults("")
+    host.tick(backoff_end + datetime.timedelta(minutes=2))
+    worker = host.claim("experimentation")
+    assert worker.card.spec.request_id == launch.request_id
+    approved = _RecordingCreates(host.sm)
+    relaunched = softmax_cli._xp_create(worker.ctx, approved, _cli_args(experiment))
+    assert not relaunched["permit_required"] and relaunched["missing"] == []
+    # The refused request goes again with the identical body and idempotency key.
+    assert _body(approved.creates[0]) == _body(refusing.creates[0])
+    assert _body(approved.creates[0])["idempotency_key"] == wait["request"]
+    worker.finish()
+    host.tick(backoff_end + datetime.timedelta(minutes=3))
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "evaluating" and meta["lifecycle"]["permit_wait"] is None
+    assert len(_coach_messages(host)) == 1
+
+
+def test_league_choice_refusal_sends_one_help_request_naming_the_ide_control(host, monkeypatch):
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    experiment = _experiment(host, "uploaded")
+    _champion_is_the_baseline(host)
+    host.set_faults("league=none")
+    refused = _refused_launch(host, host.sm)
+    assert refused["league_not_chosen"] and not refused["permit_required"]
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "awaiting-permit"
+    assert meta["lifecycle"]["permit_wait"]["kind"] == "league"
+
+    assert _poll(host, at(1)).help_requests == [experiment]
+    _refused_launch(host, host.sm)
+    assert _poll(host, at(2)).help_requests == []
+    [asked] = _coach_messages(host)
+    assert asked["title"] == "Choose the agent's league in the IDE Controls"
+    assert f"choose the {LEAGUE} league for the agent in the IDE Controls" in asked["body"]
+    assert "no league is chosen" in asked["body"]
+    assert asked["about"]["league"] == LEAGUE
+    assert asked["refs"][0]["uri"] == f"ar://experiment/{experiment}"
 
 
 class _Clock(datetime.datetime):

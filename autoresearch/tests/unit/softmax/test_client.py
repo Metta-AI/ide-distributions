@@ -8,7 +8,7 @@ from autoresearch.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from autoresearch.softmax_tool.fake import FakeSoftmax
 from autoresearch.softmax_tool.identity import IdentityError
 from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, SERVER_ENV, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import from_env
+from autoresearch.softmax_tool.protocol import LeagueNotChosen, PermitRequired, from_env
 
 from .conftest import (
     AGENT_TOKEN,
@@ -134,6 +134,35 @@ def test_submit_names_the_player_and_returns_submission_id(env, runner, tmp_path
             "--no-open-browser",
         ],
     ]
+
+
+def _submit_fails_with(runner, fixture: str):
+    return runner.on(
+        "coworld", "submit", response=completed(stderr=synthetic(fixture), returncode=1)
+    )
+
+
+def test_submit_permit_refusal_returns_permit_required(env, runner, tmp_path):
+    """The coach's IDE Controls ask before league submissions (403 permit_required)."""
+    _submit_fails_with(runner, "submit_403_permit.stderr")
+    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    assert isinstance(result, PermitRequired)
+    assert result.ask == "permit-submit-dc43b411e9401d8b-1"
+    assert result.reason.startswith(f"submit on league:{LEAGUE_ID}:")
+
+
+def test_submit_league_choice_refusal_returns_league_not_chosen(env, runner, tmp_path):
+    _submit_fails_with(runner, "submit_403_league_elsewhere.stderr")
+    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    assert isinstance(result, LeagueNotChosen)
+    assert result.reason.startswith("This cogent plays league_0b1c2d3e")
+    assert result.reason.endswith(f"a submission to {LEAGUE_ID} is refused.")
+
+
+def test_submit_other_403_still_raises(env, runner, tmp_path):
+    _submit_fails_with(runner, "submit_403_other.stderr")
+    with pytest.raises(SoftmaxCliError, match="does not belong to you"):
+        make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
 
 
 def test_every_mutation_rechecks_identity(env, runner, tmp_path):

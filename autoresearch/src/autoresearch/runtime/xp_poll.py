@@ -1,15 +1,17 @@
-"""xp-poll: XP evidence, review cards, and relaunch after credit denials. A Hermes cron
-script job, every 5 minutes (``scripts/xp_poll.py`` -> ``python -m autoresearch.runtime.xp_poll``).
+"""xp-poll: XP evidence, review cards, and relaunch after credit denials and the coach's
+refusals. A Hermes cron script job, every 5 minutes (``scripts/xp_poll.py`` -> ``python -m
+autoresearch.runtime.xp_poll``).
 
 For each experiment in canonical (amendments A10, A12):
 
-``evaluating`` or ``awaiting-credits``: evidence. The experiment's XP requests come from
-``Softmax.xp_recover``; per (batch, seed, arm) only the latest attempt counts. Each request's
-status comes from ``xp_status`` (an unrecognised platform status stays non-terminal: logged,
-polled again). For every completed request without evidence yet, ``xp_artifacts`` downloads
-into ``runtime/xp/<request id>/`` (``ArtifactsIncomplete``: retried on a later run), the
-game's ``evaluate`` binding reads each ``results.json`` (``<evaluate> --results <file>
---json``, see ``games/_template/GAME.md``), and, under the canonical lock, one commit adds:
+``evaluating``, ``awaiting-credits`` or ``awaiting-permit``: evidence. The experiment's XP
+requests come from ``Softmax.xp_recover``; per (batch, seed, arm) only the latest attempt
+counts. Each request's status comes from ``xp_status`` (an unrecognised platform status
+stays non-terminal: logged, polled again). For every completed request without evidence
+yet, ``xp_artifacts`` downloads into ``runtime/xp/<request id>/`` (``ArtifactsIncomplete``:
+retried on a later run), the game's ``evaluate`` binding reads each ``results.json``
+(``<evaluate> --results <file> --json``, see ``games/_template/GAME.md``), and, under the
+canonical lock, one commit adds:
 
 - ``evidence/xp/<E>/<request id>/results.json`` (the platform file) and ``rows.jsonl``: one
   ``EpisodeRow`` per episode (``episode_id`` ``<request id>:<episode>``, or
@@ -61,6 +63,18 @@ per denial). The card runs
 ``xp recover`` and then ``xp create`` with the same attempt, which creates only the requests
 still missing, so a relaunch never duplicates an XP request.
 
+``awaiting-permit``: the coach's IDE Controls refused an XP request (Softmax hosting: a permit
+ask waits for the coach, or no league or another league is chosen; ``lifecycle.permit_wait``,
+written by ``softmax xp create``). First one runtime help request
+(``runtime_messages.permit_needed`` or ``league_not_chosen``, ``runtime_key`` per refused
+request, so a second refusal of the same request publishes nothing): it tells the coach what
+to do in the IDE Controls. Then, once ``lifecycle.next_launch_after`` has passed (the same
+backoff as a credit denial, from ``permit_refusals``), one relaunch request with the same
+marker and card as a credit relaunch: the card reruns ``xp create`` with the same attempt, so
+the refused request goes again with the same body and idempotency key. Relaunches of both
+kinds share the one-per-run limit. The poller cannot read whether the coach has answered, so
+an unanswered ask costs one relaunch card per backoff step.
+
 Each experiment is handled independently: a failure is logged to
 ``.supervisor/runtime/xp_poll.log`` and the others go on. One run at a time
 (``runtime/xp_poll.run.lock``). The run ends with a push of ``main``.
@@ -78,6 +92,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from autoresearch import runctx
+from autoresearch.comms import runtime_messages
+from autoresearch.comms.publisher import already_published, publish_message
 from autoresearch.games.bindings import Evaluate, binding_evaluate
 from autoresearch.games.loader import Game, load_game
 from autoresearch.io import gitops
@@ -103,7 +119,7 @@ LOG_FILE = "xp_poll.log"
 RUN_LOCK = "xp_poll.run.lock"
 EVIDENCE_XP_DIR = "evidence/xp"
 TERMINAL = ("completed", "failed")
-WATCHED = ("evaluating", "awaiting-credits")
+WATCHED = ("evaluating", "awaiting-credits", "awaiting-permit")
 CARD_PRIORITY = "P1"
 REMOTE = "origin"
 GAME_ENV = "AUTORESEARCH_GAME"
@@ -118,6 +134,7 @@ class XpPollRun:
     evidence: list[str] = field(default_factory=list)  # request ids with new evidence
     reviews: list[CardSpec] = field(default_factory=list)
     launches: list[CardSpec] = field(default_factory=list)
+    help_requests: list[str] = field(default_factory=list)  # experiments asked about
     warnings: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)  # experiment -> error
 
@@ -472,19 +489,62 @@ def _request_relaunch(
     if not due:
         return None
     denials = int(lifecycle.get("credit_denials", 0))
-    attempt = next_launch_attempt(experiment)
-    marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
     if credits is not None and credits >= need:
         when = f"{credits:g} credits available, about {need:g} needed"
     else:
         when = "the backoff has passed"
     reason = f"relaunch after credit denial {denials}; {when}"
+    return _commit_relaunch(canonical, experiment, reason)
+
+
+def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec | None:
+    """The relaunch request of a waiting experiment (marker ``markers.relaunch_marker``), unless
+    an open request covers the experiment."""
+    lifecycle = experiment.get("lifecycle") or {}
+    attempt = next_launch_attempt(experiment)
+    marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
     marker, title, why, mode = launch_step(experiment, reason, marker)
     spec = CardSpec("", title, mode, why, _experiment_refs(experiment), RUNTIME, CARD_PRIORITY)
     with canonical_lock(canonical):
         if _covered(canonical, experiment["id"]):
             return None
         return commit_runtime_request(canonical, marker, spec)
+
+
+def coach_wait_message(experiment: dict) -> runtime_messages.RuntimeMessage:
+    """The one help request about an ``awaiting-permit`` experiment's refused request."""
+    wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
+    if not wait.get("request"):
+        raise ValueError(f"{experiment['id']}: awaiting-permit without lifecycle.permit_wait")
+    refs = [{"uri": f"ar://experiment/{experiment['id']}"}]
+    reason, league = wait.get("reason") or "", wait.get("league_id") or ""
+    if wait.get("kind") == "league":
+        return runtime_messages.league_not_chosen("xp", wait["request"], reason, league, refs)
+    return runtime_messages.permit_needed(
+        "xp", wait["request"], reason, wait.get("ask"), league or None, refs
+    )
+
+
+def _wait_for_coach(
+    canonical: Path, experiment: dict, now: datetime.datetime, result: XpPollRun
+) -> None:
+    """``awaiting-permit`` (module docstring): the help request, then the relaunch when due."""
+    message = coach_wait_message(experiment)
+    with canonical_lock(canonical):
+        if not already_published(canonical, message):
+            publish_message(canonical, message, allow_no_remote=True)
+            result.help_requests.append(experiment["id"])
+    lifecycle = experiment.get("lifecycle") or {}
+    after = _parse_time(lifecycle.get("next_launch_after"))
+    if after is None:  # the softmax tool sets it with every refusal
+        raise ValueError(f"{experiment['id']}: awaiting-permit without next_launch_after")
+    if result.launches or now < after:
+        return
+    refusals = int(lifecycle.get("permit_refusals", 0))
+    reason = f"relaunch after the coach's refusal {refusals}; the backoff has passed"
+    launch = _commit_relaunch(canonical, experiment, reason)
+    if launch is not None:
+        result.launches.append(launch)
 
 
 def _statuses(sm: Softmax, handles: list[XpHandle], result: XpPollRun) -> dict[str, XpStatus]:
@@ -507,7 +567,8 @@ def poll_experiment(
     result: XpPollRun,
     credits_view: CreditView | None = None,
 ) -> None:
-    """Evidence, then the review (``evaluating``) or relaunch (``awaiting-credits``)."""
+    """Evidence, then the review (``evaluating``) or relaunch (``awaiting-credits``,
+    ``awaiting-permit``)."""
     canonical, experiment_id = ctx.canonical, experiment["id"]
     credits_view = credits_view or CreditView(sm, DEFAULT_MIN_CREDITS)
     handles = latest_handles(sm.xp_recover(experiment_id))
@@ -542,6 +603,8 @@ def poll_experiment(
         launch = _request_relaunch(canonical, credits_view, experiment, now)
         if launch is not None:
             result.launches.append(launch)
+    elif experiment.get("status") == "awaiting-permit":
+        _wait_for_coach(canonical, experiment, now, result)
 
 
 def run(
@@ -610,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         "evidence": len(result.evidence),
         "reviews": [spec.request_id for spec in result.reviews],
         "launches": [spec.request_id for spec in result.launches],
+        "help_requests": result.help_requests,
         "warnings": result.warnings,
         "failures": result.failures,
     }

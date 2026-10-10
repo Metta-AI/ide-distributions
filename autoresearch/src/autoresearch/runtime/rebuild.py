@@ -41,8 +41,9 @@ next run (the unfinished-rebuild rule above brings it back, in the same epoch):
 4. Experiment lifecycle cards, one per experiment whose next step no open request covers (an
    open request is committed, not closed, and refs ``ar://experiment/<E>``):
    ``designed`` -> build; ``built`` -> upload; ``uploaded`` with a ``candidate_binding`` ->
-   launch; ``awaiting-credits`` -> launch, unless ``lifecycle.next_launch_after`` is still in
-   the future (A10 backoff); ``evaluating`` whose XP requests (``xp_recover``) all completed
+   launch; ``awaiting-credits`` and ``awaiting-permit`` -> launch, unless
+   ``lifecycle.next_launch_after`` is still in the future (A10 backoff); ``evaluating`` whose
+   XP requests (``xp_recover``) all completed
    -> review; ``reviewed`` with decision ``promote`` and no promotion of it -> promote.
    Markers come from ``runtime.markers`` (shared with queue-keeper and xp-poll). Launch is
    ``launch:<E>:<launch_attempts + 1>`` (the attempt about to be made), and the launch card
@@ -413,7 +414,7 @@ def _lifecycle_step(
         return upload_marker(eid, epoch), f"Upload {eid}", why, "experimentation"
     if status == "uploaded" and experiment.get("candidate_binding"):
         return launch_step(experiment, REBUILT)
-    if status == "awaiting-credits":
+    if status in ("awaiting-credits", "awaiting-permit"):
         after = _parse_time((experiment.get("lifecycle") or {}).get("next_launch_after"))
         return None if after is not None and now < after else launch_step(experiment, REBUILT)
     if status == "evaluating" and _xp_completed(sm, eid):

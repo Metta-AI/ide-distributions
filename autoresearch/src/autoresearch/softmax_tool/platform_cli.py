@@ -54,6 +54,7 @@ from pathlib import Path
 import yaml
 
 from autoresearch.io.docs import write_text
+from autoresearch.softmax_tool.protocol import CoachRefusal, LeagueNotChosen, PermitRequired
 
 DEFAULT_SERVER = "https://softmax.com/api"
 SERVER_ENV = "COGAMES_API_URL"
@@ -65,6 +66,13 @@ DEFAULT_TIMEOUT_S = 120
 PAGE_LIMIT = 200
 HTTP_TIMEOUT_S = 30
 USER_AGENT = "autoresearch"
+# The coach's refusals (``coach_refusal``). A ``permit_required`` 403 carries a JSON object as
+# its detail, which coworld's ``_detail`` does not print as one, so it prints the whole body.
+PERMIT_DENIAL = re.compile(r"\(403\).*permit_required", re.DOTALL)
+PERMIT_BODY = re.compile(r'\{\s*"detail"\s*:')
+LEAGUE_REFUSAL = re.compile(
+    r"\(403\): (?P<reason>(?:Your coach has not chosen a league|This cogent plays )[^\n]*)"
+)
 
 Runner = Callable[..., subprocess.CompletedProcess]
 # (url, headers) -> response body text; raises urllib.error.URLError (HTTPError) on failure.
@@ -261,6 +269,45 @@ class PlatformCli:
             cursor = page.get("next_cursor")
             if not cursor:
                 return entries
+
+
+def coach_refusal(stderr: str) -> CoachRefusal | None:
+    """The coach's refusal in a failed ``coworld`` call's stderr, or None for any other failure.
+
+    coworld 0.1.58 (``api_client._raise_for_status``, rendered by softmax-cli's
+    ``AgentFriendlyGroup``) prints a 403 as one of:
+
+    - ``Error: Access denied (403): <detail>``, when the detail is a string. The league choice
+      (metta ``observatory_core.cogents.league``) is ``Your coach has not chosen a league for
+      this cogent yet; ...`` or ``This cogent plays <league>; your coach chose it, and ... is
+      refused.``: ``LeagueNotChosen``.
+    - ``Error: Access denied (403) for <path>. <response body>. <hint>``, when the detail is an
+      object. The permit refusal (``permits.refusal_detail``) is
+      ``{"detail": {"type": "permit_required", "message", "reason", "ask": <record>}, ...}``:
+      ``PermitRequired`` with its ``message`` and the ask's ``key``.
+    """
+    if PERMIT_DENIAL.search(stderr):
+        return _permit_required(stderr)
+    match = LEAGUE_REFUSAL.search(stderr)
+    return None if match is None else LeagueNotChosen(match["reason"].strip())
+
+
+def _permit_required(stderr: str) -> PermitRequired:
+    detail: dict = {}
+    found = PERMIT_BODY.search(stderr)
+    if found is not None:
+        try:
+            body, _ = json.JSONDecoder().raw_decode(stderr, found.start())
+        except ValueError:
+            body = {}
+        if isinstance(body, dict) and isinstance(body.get("detail"), dict):
+            detail = body["detail"]
+    message = detail.get("message")
+    if not isinstance(message, str) or not message.strip():
+        message = next((line for line in stderr.splitlines() if line.strip()), stderr)
+        message = message.removeprefix("Error: ").strip()
+    ask = (detail.get("ask") or {}).get("key") if isinstance(detail.get("ask"), dict) else None
+    return PermitRequired(reason=message.strip(), ask=ask if isinstance(ask, str) else None)
 
 
 def describe_failure(tool: str, args: Sequence[str], result: subprocess.CompletedProcess) -> str:

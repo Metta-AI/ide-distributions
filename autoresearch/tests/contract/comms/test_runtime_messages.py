@@ -28,6 +28,8 @@ MESSAGE = "M-01M4EJ9RQMHVH6XK3N4T760MND"
 PROMOTION = "P-01M4EJ9RQMHVH6XK3N4T760MNE"
 SHA = "f5e50b4909eb1c45d6a113fa930a7a37c14a2564"
 OTHER_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+EXPERIMENT = "E-01M4EJ9RQMHVH6XK3N4T760MNG"
+ASK = "permit-spend-0123456789abcdef-1"
 IDS = (INBOUND, BRIDGE_TASK, REQUEST, CARD, FILE_CARD, MESSAGE, PROMOTION, SHA, OTHER_SHA)
 # Runtime ids (inbound, request, message, file-queue card, promotion), Kanban task ids, and
 # commits, full or short (7-40 hex with a digit and a letter). Record ids (H-, E-, C-, ...) may
@@ -283,6 +285,44 @@ FIXTURES = {
             "detail": "membership qualifying (held)",
             "hours": 24,
         }
+    ],
+    # The server's words name the act's ref and the ask: they go to ``about`` only.
+    "permit_needed": [
+        {
+            "act": "xp",
+            "subject": f"ar:{EXPERIMENT}:b1:a1:s7:candidate",
+            "reason": f"spend on spend:league_x:cow_x:ar%3A{EXPERIMENT}: the ask waits for "
+            f"the coach (ask asks/{ASK})",
+            "ask": ASK,
+            "league_id": "league_x",
+            "refs": [{"uri": f"ar://experiment/{EXPERIMENT}"}],
+        },
+        {
+            "act": "submit",
+            "subject": PROMOTION,
+            "reason": f"submit on league:league_x:{SHA}: the coach said no; a new ask waits "
+            f"(ask asks/{ASK})",
+            "ask": None,
+        },
+    ],
+    "league_not_chosen": [
+        {
+            "act": act,
+            "subject": subject,
+            "reason": reason,
+            "league_id": "league_x",
+        }
+        for act, subject in (("xp", f"ar:{EXPERIMENT}:b1:a1"), ("submit", PROMOTION))
+        for reason in (
+            (
+                "Your coach has not chosen a league for this cogent yet; ask them to pick one "
+                "in the IDE."
+            ),
+            (
+                "This cogent plays league_y; your coach chose it, and a submission to league_x "
+                "is refused."
+            ),
+        )
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [
