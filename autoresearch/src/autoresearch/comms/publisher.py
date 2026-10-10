@@ -34,7 +34,8 @@ Acknowledgement (C11). ``publish_hook`` then moves the inbound the publishing ca
 responsible for (``comms.delivery`` records) to ``acknowledged``: a ``reply``/``steer`` by
 the card's published ``note`` with ``in_reply_to``, a ``task`` by a runtime note published
 here (found again in the outbox on a rerun, so it is published once). That note quotes the
-card's completion summary (``runtime_messages.task_acknowledgement``).
+card's completion summary (``runtime_messages.task_acknowledgement``). A task acknowledged
+``blocked`` gets one follow-up note when its work finishes (``acknowledge_inbound``).
 
 Runtime messages. Runtime code publishes only ``runtime_messages.RuntimeMessage``s, through
 ``publish_message``; ``publish_runtime`` is the free-text primitive under it.
@@ -64,12 +65,19 @@ from autoresearch.comms.envelope import (
 from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
+from autoresearch.kb.requests import has_marker
+from autoresearch.paths import Layout
 from autoresearch.records.registry import entity_of_id
+from autoresearch.runtime.ledger import committed_json
+from autoresearch.runtime.markers import repair_blocked_marker
 
 OUTBOX_DIR = "comms/outbox"
 INBOX_DIR = "comms/inbox"
 SUMMARY_LIMIT = 600  # characters of a card's summary quoted in its task acknowledgement
 REFERENCED_RECORDS = 10  # journal and created records a task acknowledgement refers to
+# Card outcomes that end a task's work; ``blocked`` does not (a task acknowledged blocked gets
+# a follow-up acknowledgement with one of these).
+FINAL_OUTCOMES = ("done", "partial", "dropped", "failed")
 STAGED_DIR = "comms/staged"
 RECEIPTS_DIR = ".supervisor/ledger/published"
 REMOTE = "origin"
@@ -98,7 +106,7 @@ class PublishResult:
 def _checkpoint(step: str) -> None:
     """Test seam: crash-injection tests replace this to stop after ``step``
     (``outbox_written``, ``receipt_written``, ``staged_removed``, ``before_commit``,
-    ``before_push``, ``ack_published``)."""
+    ``before_push``, ``ack_published``, ``final_ack_published``)."""
 
 
 # --- files ---
@@ -419,6 +427,15 @@ def find_reply(
     return None
 
 
+def _message_with_key(canonical: Path, key: str) -> str | None:
+    """Id of the outbox message (on disk) whose ``runtime_key`` is ``key``, if any."""
+    for message_id, (_, path) in _outbox_files(canonical).items():
+        message = read_json(path)
+        if isinstance(message, dict) and message.get("runtime_key") == key:
+            return message_id
+    return None
+
+
 def message_id_of_seq(canonical: Path, seq: int) -> str:
     (message_id,) = [mid for mid, (number, _) in _outbox_files(canonical).items() if number == seq]
     return message_id
@@ -493,7 +510,12 @@ def _task_title(canonical: Path, inbound_id: str) -> str | None:
 
 
 def _task_acknowledgement(
-    canonical: Path, inbound_id: str, handoff: dict, backlog: bool, allow_no_remote: bool
+    canonical: Path,
+    inbound_id: str,
+    handoff: dict,
+    backlog: bool,
+    allow_no_remote: bool,
+    follow_up_of: str | None = None,
 ) -> str:
     """The runtime note acknowledging an inbound ``task`` (published once: a rerun after a
     crash finds the note already in the outbox). Its title is the task as the sender phrased
@@ -502,8 +524,17 @@ def _task_acknowledgement(
     ended with on the board (``run_summary``, from ``process_handoffs``) or the opening of the
     card's journal, whichever names no ids (``runtime_messages.plainest_summary``). For a
     blocked card the journal comes first: its board summary is the ``kanban_block`` reason,
-    which its help request already carries. Ids and commits go into ``refs`` and ``about``."""
-    found = find_reply(canonical, inbound_id, FROM_RUNTIME)
+    which its help request already carries. Ids and commits go into ``refs`` and ``about``.
+
+    ``follow_up_of``: the id of the ``blocked`` note this follow-up completes. The follow-up has
+    ``about.follows`` = that id and its own ``runtime_key``, by which a rerun finds it
+    (``find_reply`` would find the ``blocked`` note)."""
+    key = None
+    if follow_up_of is None:
+        found = find_reply(canonical, inbound_id, FROM_RUNTIME)
+    else:
+        key = runtime_messages.final_acknowledgement_key(inbound_id)
+        found = _message_with_key(canonical, key)
     if found is not None:
         return found
     journal_id, journal_summary = _journal(canonical, handoff)
@@ -526,12 +557,72 @@ def _task_acknowledgement(
             "request": handoff["request_id"],
             "merge_commit": handoff["merge_sha"],
             "outcome": outcome,
+            **({"follows": follow_up_of} if follow_up_of else {}),
         },
+        key=key,
     )
     result = publish_message(
         canonical, message, allow_no_remote=allow_no_remote, in_reply_to=inbound_id
     )
     return message_id_of_seq(canonical, result.seq)
+
+
+def _blocked_note(canonical: Path, record: dict) -> dict | None:
+    """The note that acknowledged ``record`` (a ``task``) with outcome ``blocked``, if no
+    follow-up has been recorded for it yet."""
+    if record["state"] != "acknowledged" or record["kind"] != "task" or record.get("final_ack_by"):
+        return None
+    found = _outbox_files(canonical).get(record["acknowledged_by"])
+    note = read_json(found[1]) if found else None
+    about = note.get("about") if isinstance(note, dict) else None
+    blocked = isinstance(about, dict) and about.get("outcome") == "blocked"
+    return note if blocked else None
+
+
+def _finishes_blocked_work(canonical: Path, record: dict, blocked_card: str, handoff: dict) -> bool:
+    """The handoff is of the card responsible for ``record``, or of the repair card
+    queue-keeper requested for ``blocked_card`` (the ``blocked`` note's ``about.card``) once it
+    blocked twice (``runtime.blocked``: a new card and request, whose ``why`` carries
+    ``repair-blocked:<task id>``). In practice it is the repair card: the blocked card's
+    published handoff closed its request, so a requeued run of the same card cannot hand off
+    again (``card_finish``)."""
+    if _is_responsible(record, handoff):
+        return True
+    request = committed_json(
+        canonical, Layout(canonical).card_requests / f"{handoff['request_id']}.json"
+    )
+    spec = request.get("spec") if isinstance(request, dict) else None
+    return isinstance(spec, dict) and has_marker(spec, repair_blocked_marker(blocked_card))
+
+
+def _final_acknowledgements(canonical: Path, handoff: dict, allow_no_remote: bool) -> list[Path]:
+    """Publish the follow-up of each ``task`` acknowledged ``blocked`` whose work this handoff
+    finishes with a final outcome, and record it as ``final_ack_by``; return the records
+    written (the caller commits them). The note is committed by its own publication, before
+    the record: a rerun after a crash between the two finds the note by its ``runtime_key``
+    and only writes the record."""
+    outcome = handoff.get("outcome")
+    if outcome not in FINAL_OUTCOMES:
+        return []
+    written = []
+    for inbound_id, record in delivery.records(canonical).items():
+        first = _blocked_note(canonical, record)
+        if first is None:
+            continue
+        blocked_card = first["about"]["card"]  # set with outcome (_task_acknowledgement)
+        if not _finishes_blocked_work(canonical, record, blocked_card, handoff):
+            continue
+        # The planning-card lead line is only true when the card that took it finishes it.
+        backlog = record["responsible"]["backlog"] and blocked_card == handoff["card"]
+        message_id = _task_acknowledgement(
+            canonical, inbound_id, handoff, backlog, allow_no_remote, follow_up_of=first["id"]
+        )
+        _checkpoint("final_ack_published")
+        final = delivery.moved(
+            record, "acknowledged", note=f"final outcome {outcome}", final_ack_by=message_id
+        )
+        written.append(delivery.write_record(canonical, final))
+    return written
 
 
 def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = False) -> None:
@@ -541,8 +632,13 @@ def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = 
     ``in_reply_to`` (its ``card`` must be this handoff's card; validation required the note).
     ``runtime`` (``task``): a runtime note published here. ``none``: left as it is. One the
     card did not answer stays ``routed``; routing
-    returns it to the planning backlog once the card's request is closed. Under the lock;
-    idempotent."""
+    returns it to the planning backlog once the card's request is closed.
+
+    Then a ``task`` already acknowledged ``blocked`` gets one follow-up note (``about.outcome``
+    the final outcome, ``about.follows`` the ``blocked`` note, ``runtime_key``
+    ``ack-final:<inbound id>``, recorded as ``final_ack_by``) when this handoff finishes its
+    work with ``done``, ``partial``, ``dropped`` or ``failed`` (``_final_acknowledgements``).
+    The IDE bridge closes the task it showed as paused with it. Under the lock; idempotent."""
     changed = []
     for inbound_id, record in delivery.records(canonical).items():
         if record["state"] != "routed" or not _is_responsible(record, handoff):
@@ -566,6 +662,7 @@ def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = 
             continue
         acknowledged = delivery.moved(record, "acknowledged", acknowledged_by=message_id)
         changed.append(delivery.write_record(canonical, acknowledged))
+    changed += _final_acknowledgements(canonical, handoff, allow_no_remote)
     if changed:
         commit_and_push(canonical, changed, f"inbound acknowledged by {handoff['card']}")
 

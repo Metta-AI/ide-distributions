@@ -22,6 +22,7 @@
       }
     },
     "acknowledged_by": {"description": "The published message (M-id) that acknowledged it; null until then (and for a seen).", "type": ["string", "null"], "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
+    "final_ack_by": {"description": "For a task first acknowledged with outcome blocked: the runtime follow-up note (M-id) that carries its final outcome (runtime_key ack-final:<inbound id>). Absent until then, and for every other record.", "type": "string", "pattern": "^M-[0-9A-HJKMNP-TV-Z]{26}(?!\\n)$"},
     "late": {"description": "A reply that arrived after the expires time of the message it answers.", "type": "boolean"},
     "thread": {"description": "Thread key of the outbound message it answers (its thread, else its id); absent when it answers nothing.", "type": "string"},
     "history": {

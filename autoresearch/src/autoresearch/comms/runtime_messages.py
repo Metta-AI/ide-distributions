@@ -11,7 +11,9 @@ fields (``schemas/comms/envelope.outbound.json``):
 
 - ``about``: name -> id of what the message is about (``card``, ``request``,
   ``merge_commit``, ...), for a reader that needs to look further. A note answering an inbound
-  also has ``outcome``: the card outcome (``done``, ``partial``, ...), or ``rejected``.
+  also has ``outcome``: the card outcome (``done``, ``partial``, ...), or ``rejected``. A task
+  first acknowledged ``blocked`` gets one follow-up note once its work finishes, with the final
+  ``outcome`` and ``follows``: the id of the ``blocked`` note.
 - ``runtime_key``: a stable key the runtime uses to publish a message only once
   (``publisher.already_published``). Messages published before ``runtime_key`` existed
   (2026-10-08) carried their key in the title instead; a builder sets ``legacy_title`` to that
@@ -179,11 +181,13 @@ def task_acknowledgement(
     asked_for_help: bool,
     refs: list,
     about: dict[str, str],
+    key: str | None = None,
 ) -> RuntimeMessage:
     """The note that closes an inbound ``task`` once its card is published (C11). ``summary``
     is the card's own completion summary, if it left one (``plainest_summary``);
     ``sent_titles`` the titles of the messages the card published; ``asked_for_help``
-    whether one of them is a ``help_request``."""
+    whether one of them is a ``help_request``. ``key`` is set only on the follow-up of a task
+    first acknowledged ``blocked`` (``final_acknowledgement_key``)."""
     parts = []
     if backlog:
         parts.append("A planning card that was already open took this task on with its other work.")
@@ -202,7 +206,13 @@ def task_acknowledgement(
         parts.append(f"The agent also sent: {_quoted_list(titles)}.")
     lead = OUTCOME_WORDS.get(outcome, str(outcome).capitalize())
     title = _title(lead, task_title or "your task")
-    return RuntimeMessage("note", title, " ".join(parts), refs, about)
+    return RuntimeMessage("note", title, " ".join(parts), refs, about, key=key)
+
+
+def final_acknowledgement_key(inbound_id: str) -> str:
+    """The ``runtime_key`` of the one follow-up note a task acknowledged ``blocked`` gets when
+    its work finishes (``publisher.acknowledge_inbound``)."""
+    return f"ack-final:{inbound_id}"
 
 
 def task_not_started(task_title: str | None, problems: list[str]) -> RuntimeMessage:

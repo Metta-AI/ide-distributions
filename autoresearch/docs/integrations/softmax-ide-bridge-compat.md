@@ -84,6 +84,13 @@ that contract:
 2. **The acknowledgement covers every card outcome.** It is published when the card's work is
    published, whatever the card's outcome. The title starts with the outcome: `Done:`,
    `Partly done:`, `Dropped:`, `Failed:` or `Blocked:`; `about.outcome` has the raw value.
+   A `blocked` task is not finished: when its work later ends with `done`, `partial`, `dropped` or
+   `failed` (in practice by the repair card queue-keeper requests once the card blocked twice), the
+   runtime publishes exactly one follow-up `note` with the same `in_reply_to`, the final
+   `about.outcome`, `about.follows` set to the `blocked` note's id, and `runtime_key`
+   `ack-final:<task id>`. The delivery record names it in `final_ack_by`. The bridge shows the task
+   paused on the first note and closes it on the follow-up. A task first acknowledged with a final
+   outcome gets no follow-up, and a second block publishes nothing.
 3. **A stop is a request, not a cancel.** The stop `steer` gives the agent a P0 card, and the agent
    decides what to do (for example drop the task's card if it is still pending). If the task's card is
    already running or finished, its acknowledgement can still arrive after the stop. The bridge
