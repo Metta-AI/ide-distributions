@@ -80,8 +80,9 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
   (for a conflict the runtime already told the user; for no champion send a
   `help_request`).
 - Reason `experiment_closed`: the experiment is `stopped` or `reviewed`, or the coach declined
-  one of its XP requests. Nothing was created. Do not launch it again; record it and finish
-  `done`.
+  one of its XP requests. Nothing more is sent. If it stopped partway through a batch, the
+  requests created before the stop stay recorded in the experiment (`xp_requests`). Do not
+  launch it again; record it and finish `done`.
 - Reason `permit_batch_mismatch`: the experiment waits on the coach's permit asks for one
   exact batch (`error.details`: `batch`, `attempt`, `batches`). Run `xp create` with exactly
   those values (the launch card names them), so the approved requests replay under the same
