@@ -985,12 +985,13 @@ def _reached_submit(promotion: Promotion) -> bool:
 
 def covers_task(canonical: Path, task_id: str) -> bool:
     """True if ``task_id`` is a holder, former holder or recovery card of any promotion that
-    reached submission (in flight or closed). The orphan scan leaves such tasks alone: an
-    in-flight promotion's ``reconcile`` owns them, and redoing a closed one's promotion card
-    would only be refused by the baseline check. Promotions aborted before submitting are
-    not covered: redoing their card is a legitimate new attempt."""
+    reached submission (in flight or closed), or that the coach declined. The orphan scan
+    leaves such tasks alone: an in-flight promotion's ``reconcile`` owns them, redoing a closed
+    one's promotion card would only be refused by the baseline check, and redoing a declined
+    one would only ask the coach again. Promotions aborted before submitting for any other
+    reason are not covered: redoing their card is a legitimate new attempt."""
     for promotion in _all_promotions(canonical):
-        if not _reached_submit(promotion):
+        if not (_reached_submit(promotion) or declined(promotion.to_dict())):
             continue
         if task_id == promotion.holder_task or task_id in promotion.former_holders:
             return True
@@ -1678,7 +1679,20 @@ def submit_promotion(
     a mismatch also writes a re-evaluation request); a push failed (stage stays
     ``acquired``). Eligibility (decision, guardrails, N) is checked by the caller (the
     ``softmax submit`` CLI, Plan 03 Task 3.3, which passes ``queue_from_env``). The caller
-    must not hold the lock."""
+    must not hold the lock.
+
+    An experiment or version whose promotion the coach declined is refused before anything
+    else (code ``coach_declined``): submitting it again would only file a new ask for the
+    answer already given."""
+    for earlier in _all_promotions(ctx.canonical):
+        if declined(earlier.to_dict()) and (
+            earlier.experiment == experiment or earlier.version == version
+        ):
+            reason = (
+                f"the coach declined promotion {earlier.id} of {experiment}; it is not "
+                "submitted again"
+            )
+            return SubmitOutcome(False, earlier.id, reason=reason, code="coach_declined")
     if not acquire(ctx, queue, experiment, version, candidate_ref):
         return SubmitOutcome(False, reason="another promotion holds the promotion lock")
     promotion = load(ctx.canonical)

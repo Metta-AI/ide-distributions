@@ -823,6 +823,42 @@ def test_a_changed_league_is_refused_while_asks_are_open(host, monkeypatch):
     assert recording.creates == []
 
 
+def test_a_relaunch_card_that_ends_without_the_requests_is_retried_then_asks_for_help(
+    host, monkeypatch
+):
+    """Codex round 5 (1): an approved batch whose relaunch card ends partial with no new
+    refusal is not stuck. The next poll requests generation 2 of the same relaunch, for the
+    identical batch, then generation 3; after that one help request and no more cards."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    _answer(host, "yes", [entry["ask"] for entry in wait["asks"]])
+    meta, _ = host.store.load(experiment)
+    base = relaunch_marker(experiment, 1, meta["lifecycle"]["next_launch_after"])
+    command = f"xp create {experiment} --batch 1 --attempt 1 --batches 1"
+    minute = 1
+    for generation in (1, 2, 3):
+        [launch] = _poll(host, at(minute)).launches
+        marker = base if generation == 1 else f"{base}:g{generation}"
+        assert f"[{marker}]" in launch.why and command in launch.why
+        assert _poll(host, at(minute + 1)).launches == []  # open: covered
+        host.tick(at(minute + 2))
+        worker = host.claim("experimentation")
+        assert worker.card.spec.request_id == launch.request_id
+        worker.finish(outcome="partial")  # e.g. a platform error; no new refusal
+        host.tick(at(minute + 3))
+        minute += 4
+    stuck = _poll(host, at(minute))
+    assert stuck.launches == []
+    [help_request] = [
+        m for m in host.outbox() if str(m.get("runtime_key", "")).startswith("relaunch-stuck:")
+    ]
+    assert help_request["runtime_key"] == f"relaunch-stuck:{base}"
+    assert help_request["kind"] == "help_request"
+    later = _poll(host, at(minute + 60))
+    assert later.launches == []
+    assert len([m for m in host.outbox() if "relaunch-stuck:" in str(m.get("runtime_key"))]) == 1
+    assert host.store.load(experiment)[0]["status"] == "awaiting-permit"
+
+
 def test_a_declined_refusal_stops_the_batch_at_once(host, monkeypatch):
     """H2: when the server says the coach said no, nothing more of the batch is submitted, the
     wait records the no, ``xp create`` refuses the experiment from then on, and xp-poll stops

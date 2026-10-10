@@ -1019,6 +1019,31 @@ def coach_declined(
     return RuntimeMessage("note", title, body, refs or [], about, key=f"coach-declined:{subject}")
 
 
+def relaunch_stuck(
+    experiment: str, marker: str, generations: int, refs: list | None = None
+) -> RuntimeMessage:
+    """The relaunch of an experiment's waiting XP batch failed ``generations`` times without a
+    new refusal (each card ended without creating the requests), so the runtime stops
+    relaunching it. One per wait: ``marker`` is the wait's relaunch marker
+    (``markers.relaunch_marker``), which every new refusal or denial changes."""
+    body = (
+        f"The agent tried {generations} times to send an experiment's waiting XP requests again "
+        "after they were cleared to run, and each try ended without creating them and without "
+        "a new refusal from Softmax (for example a platform error). It has stopped retrying so "
+        "it does not keep spending model calls. The requests and their approvals are kept. "
+        "Ask the operator to look at the experiment's last launch cards; a new launch card for "
+        "the same batch sends the same requests again."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "XP requests could not be sent: relaunches keep failing",
+        body,
+        refs or [],
+        about=_about(experiment=experiment, relaunch=marker),
+        key=f"relaunch-stuck:{marker}",
+    )
+
+
 def request_lost_in_rebuild(request_id: str, mode: str | None) -> RuntimeMessage:
     """An admitted request a board rebuild cannot re-admit (its spec was never committed)."""
     card = f"{mode} card" if mode else "card"

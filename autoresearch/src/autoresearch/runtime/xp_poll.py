@@ -102,7 +102,11 @@ set, so they get their own help request; asks that only drop out as their reques
 do not.
 
 A league refusal relaunches on that backoff (a no to an ask it still holds stops it as above).
-Relaunches of every kind share the one-per-run limit.
+Relaunches of every kind share the one-per-run limit. A relaunch card that ends without
+creating the requests and without a new refusal or denial leaves the same wait; the next try
+is generation 2, then 3, of the same marker (``markers.relaunch_generation``), for the
+identical batch, and after ``RELAUNCH_GENERATIONS`` (3) one help request
+(``runtime_messages.relaunch_stuck``) and no more cards for that wait.
 
 Each experiment is handled independently: a failure is logged to
 ``.supervisor/runtime/xp_poll.log`` and the others go on. Within one experiment, a failure
@@ -137,8 +141,13 @@ from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime import provenance
 from autoresearch.runtime.bootstrap import REPO_ROOT
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
-from autoresearch.runtime.markers import next_launch_attempt, relaunch_marker, review_marker
-from autoresearch.runtime.planning import RUNTIME, commit_runtime_request
+from autoresearch.runtime.markers import (
+    next_launch_attempt,
+    relaunch_generation,
+    relaunch_marker,
+    review_marker,
+)
+from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 from autoresearch.runtime.rebuild import launch_step, open_experiment_refs, review_refs
 from autoresearch.softmax_tool.protocol import (
     ANSWER_NO,
@@ -169,6 +178,8 @@ DEFAULT_GAME = "gota"
 ANSWERS_FILE = "permit_answers.json"
 # An ask still unanswered this long after it was first refused gets one reminder, never more.
 REMINDER_AFTER = datetime.timedelta(hours=24)
+# Tries of one wait's relaunch whose cards end without a new refusal, then one help request.
+RELAUNCH_GENERATIONS = 3
 MIN_CREDITS_ENV = "AUTORESEARCH_RELAUNCH_MIN_CREDITS"
 DEFAULT_MIN_CREDITS = 100.0
 
@@ -561,7 +572,14 @@ def _request_relaunch(
 
 def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec | None:
     """The relaunch request of a waiting experiment (marker ``markers.relaunch_marker``), unless
-    an open request covers the experiment."""
+    an open request covers the experiment.
+
+    A relaunch card can end (partial or failed) without creating the requests and without a
+    new refusal or denial, so the wait and its marker stay the same. Then the next try is the
+    next generation of the same marker (``markers.relaunch_generation``), for the identical
+    batch, attempt and batches (so the same requests and idempotency keys), up to
+    ``RELAUNCH_GENERATIONS``. After that, one help request (``runtime_messages.relaunch_stuck``)
+    and no more cards for this wait."""
     lifecycle = experiment.get("lifecycle") or {}
     wait = lifecycle.get("permit_wait") or {}
     # A wait with open asks names its batch's attempt (``launch_step`` uses the same).
@@ -570,13 +588,35 @@ def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec
         if wait.get("asks") and wait.get("attempt") is not None
         else next_launch_attempt(experiment)
     )
-    marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
-    marker, title, why, mode = launch_step(experiment, reason, marker)
-    spec = CardSpec("", title, mode, why, _experiment_refs(experiment), RUNTIME, CARD_PRIORITY)
+    base = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
     with canonical_lock(canonical):
         if _covered(canonical, experiment["id"]):
             return None
+        for generation in range(1, RELAUNCH_GENERATIONS + 1):
+            marker = relaunch_generation(base, generation)
+            earlier = marked_request(canonical, marker)
+            if earlier is None or committed_json(canonical, earlier) is None:
+                break  # this generation has not been requested yet
+        else:
+            message = runtime_messages.relaunch_stuck(
+                experiment["id"], base, RELAUNCH_GENERATIONS, _refs_of(experiment)
+            )
+            if not already_published(canonical, message):
+                publish_message(canonical, message, allow_no_remote=True)
+            return None
+        if generation > 1:
+            reason = (
+                f"{reason}; try {generation} of {RELAUNCH_GENERATIONS}: the last relaunch card "
+                "ended without creating the requests"
+            )
+        marker, title, why, mode = launch_step(experiment, reason, marker)
+        refs = _experiment_refs(experiment)
+        spec = CardSpec("", title, mode, why, refs, RUNTIME, CARD_PRIORITY)
         return commit_runtime_request(canonical, marker, spec)
+
+
+def _refs_of(experiment: dict) -> list[dict]:
+    return [{"uri": f"ar://experiment/{experiment['id']}"}]
 
 
 def coach_wait_message(

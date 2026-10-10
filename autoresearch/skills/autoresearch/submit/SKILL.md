@@ -48,6 +48,7 @@ Read `error.reason`, record it in the journal Decisions section (D-01), and fini
 | `champion_unknown` | The league shows no champion for us, though this experiment was evaluated against one. | Send a `help_request`. Finish `blocked`. |
 | `champion_conflict` | The league and the loop disagree on the champion, or the agent is paused for that (A9). | Record it. Do not send a `help_request` (the runtime told the user). Finish `blocked`. |
 | `champion_mismatch` | The league's champion changed since the evaluation. | Request "Re-evaluate E-…" (mode experimentation, refs the experiment and version). Finish `done`. |
+| `coach_declined` | The coach declined an earlier promotion of this experiment or version (`details.promotion_id`). Nothing was sent, and no new ask was filed. | Record it. Do not submit again or send a `help_request` (the coach already got a note). Finish `done`. |
 | `promotion_refused` | The lock is held, the champion is not the baseline, or a push failed. If `details.request_id` is set, the runtime already requested the re-evaluation card. | Finish `partial`. |
 | `busy` | A process is running `xp create`, `upload` or `submit` for this experiment now (`details.holder`). | `details.own_run: true`: your own earlier submit still runs; wait for it (native `process_manage`, action `wait`, its `session_id`, `timeout` 1800), then read `promotion status`. Otherwise do not submit again; finish `partial`. |
 | `identity` | The credential is not our Player (D-03). | Send a `help_request`. Finish `blocked`. |

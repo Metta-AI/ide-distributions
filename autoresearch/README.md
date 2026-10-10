@@ -336,16 +336,20 @@ The runtime reads the coach's answers itself, every run, with the agent token
   the server files for a request replaces that request's old one. An experiment with any ask
   open is always `awaiting-permit`: when credits also ran out in the batch, that is recorded in
   the wait (`credits_short`), and the relaunch waits for every yes and then for the credits,
-  never for the credits alone. A request over today's cap waits for the next UTC day, whatever the coach answers before then. A
-  relaunch whose price moved past an earlier yes gets new asks, and with them a new help
-  request.
+  never for the credits alone (a known balance too low for the rest keeps it waiting). A
+  request over today's cap waits for the next UTC day, whatever the coach answers before
+  then. A relaunch whose price moved past an earlier yes gets new asks, and with them a new
+  help request. A relaunch card that ends without creating the requests and without a new
+  refusal is tried again for the same batch, at most 3 times in all; then the coach gets one
+  help request and no more cards are made for that wait.
 - A refused submission leaves its promotion at `intent` with `waiting` set
   (`"$AUTORESEARCH_CLI" promotion status` shows it). After the yes, queue-keeper's reconcile
   submits the same policy version once; no other promotion starts meanwhile.
 - **A no ends it.** An experiment with a declined ask goes `stopped` (its results so far are
   kept, unreviewed, and `softmax xp create` refuses it; the batch stops at the first refusal
   that reports the no); a declined submission drops its
-  promotion (`aborted`, the slot is free). Either way the coach gets one note, and nothing is
+  promotion (`aborted`, the slot is free; no repair card is made for its holder, and
+  `softmax submit` refuses that experiment or version again with `coach_declined`). Either way the coach gets one note, and nothing is
   asked or retried again for it. A declined first champion (the starter policy) leaves no
   champion, so research is paused: no new bootstrap runs until an operator runs
   `"$AUTORESEARCH_CLI" promotion accept-champion`, as after a rejected one.

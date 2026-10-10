@@ -9,6 +9,7 @@ from support.promotion_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, SubmitBoa
 from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
 from autoresearch.runtime import promotion
+from autoresearch.runtime.merge import find_orphan_done
 from autoresearch.runtime.promotion import CHAMPION_PATH, PROMOTION_FILE_REL, load
 from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
 from autoresearch.softmax_tool.platform_cli import IdentityError
@@ -279,3 +280,31 @@ def test_a_permit_refusal_keeps_the_promotion_at_intent_and_reconcile_submits_it
     assert len(submissions_of(board, PV_A)) == 1
     [handled] = board.process()
     assert handled.state == "repair"
+
+
+def test_a_declined_promotion_is_never_repaired_or_submitted_again(board):
+    """Codex round 5 (2): after the coach's no, a holder that ends without a handoff gets no
+    orphan repair card, and a stray resubmit is refused before anything reaches Softmax, so
+    no new submission and no new ask."""
+    experiment, _ = board.reviewed_experiment()
+    worker = board.promoter(experiment)
+    refusing = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
+    assert refusal(board, worker, experiment, sm=refusing).reason == "permit_required"
+    current = load(board.canonical)
+    state_path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["answers"] = {current.waiting_detail["ask"]: "no"}
+    state_path.write_text(json.dumps(state))
+    now = datetime.datetime.now(datetime.UTC)
+    promotion.reconcile(board.ctx(), board.queue, refusing, LEAGUE, now=now)
+    assert promotion.declined(load(board.canonical).to_dict())
+
+    worker.end_run("done")  # the holder ends without writing a handoff
+    assert find_orphan_done(board.queue, board.ledger) == []
+
+    asks = json.loads(state_path.read_text())["asks"]
+    stray = board.promoter(experiment)
+    refused = refusal(board, stray, experiment, sm=refusing)
+    assert refused.reason == "coach_declined"
+    assert refused.details["promotion_id"] == current.id
+    assert json.loads(state_path.read_text())["asks"] == asks  # no new ask

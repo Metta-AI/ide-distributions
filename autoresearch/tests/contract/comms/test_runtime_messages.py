@@ -322,6 +322,14 @@ FIXTURES = {
         {"act": "submit", "subject": PROMOTION},
         {"act": "bootstrap", "subject": PROMOTION},
     ],
+    "relaunch_stuck": [
+        {
+            "experiment": EXPERIMENT,
+            "marker": f"launch:{EXPERIMENT}:1:after:2026-10-09T12:00:00+00:00",
+            "generations": 3,
+            "refs": [{"uri": f"ar://experiment/{EXPERIMENT}"}],
+        }
+    ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [
         {"name": "replay-diff", "tree_hash": "0123456789ab", "directory": "sp", "rev": SHA}
