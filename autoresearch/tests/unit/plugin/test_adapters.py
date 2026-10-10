@@ -277,12 +277,15 @@ def test_session_end_and_task_completed_append_kanban_events(worker_env):
     assert events[1]["board"] == "ar"
 
 
-def test_register_registers_five_hooks():
+def test_register_registers_six_hooks():
     hooks = {}
 
     class FakeCtx:
         def register_hook(self, name, callback):
             hooks[name] = callback
+
+        def register_tool(self, **kwargs):
+            pass
 
     adapters.register(FakeCtx())
     assert hooks == {
@@ -290,8 +293,13 @@ def test_register_registers_five_hooks():
         "post_tool_call": adapters.post_tool_call,
         "on_session_end": adapters.on_session_end,
         "pre_llm_call": adapters.pre_llm_call,
+        "transform_llm_output": adapters.transform_llm_output,
         "kanban_task_completed": adapters.kanban_task_completed,
     }
+
+
+def test_transform_leaves_non_chat_replies_alone(worker_env):
+    assert adapters.transform_llm_output(response_text="done", session_id="w", platform="cli") is None
 
 
 def test_first_turn_records_the_session_of_the_card_run(worker_env):

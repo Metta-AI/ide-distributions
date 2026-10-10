@@ -1,8 +1,9 @@
 # autoresearch
 
 An autonomous research agent that improves game policies (first game: Gods of the Arena,
-GotA) without human approval, and reports to an external "Preston-role" interface agent
-through a file-based communication interface.
+GotA) without human approval, and reports to a "Preston-role" interface agent through a
+file-based communication interface. In the Softmax IDE that agent is the profile's own coach
+chat ("IDE coach chat" below); elsewhere it is an external agent.
 
 `autoresearch/` is the root of a Hermes Agent profile distribution. Install it with
 `hermes profile install`. This file is the operations guide: install, configure, run,
@@ -23,7 +24,7 @@ Design documents (open the HTML files in a browser):
   plan is [plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), with evidence in
   [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). This is a plan: none of
   the hosted work is built yet. The coach chat it adds is designed in
-  [coach-chat-role.md](docs/designs/coach-chat-role.md).
+  [coach-chat-role.md](docs/designs/coach-chat-role.md) and built ("IDE coach chat" below).
 
 ## Prerequisites
 
@@ -105,7 +106,8 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_CARD_MODELS` | no | Model per card mode, as `mode=model` pairs separated by commas. Default `planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3`: mechanical cards run on the cheaper model, `investigation` and `experimentation` on `model.default`. A mode set to `default` (or the whole value `none`) uses `model.default`. queue-keeper pins the model when it creates the card (`hermes kanban create --model ... --provider openrouter`), so a change applies to new cards only; `hermes kanban --board autoresearch set-model <task> <model>` changes a card already on the board. A bad entry (unknown mode, no model) is skipped, so that mode uses `model.default`; queue-keeper logs it, records the step failure `card_models`, and sends one help request per distinct value. |
 | `AUTORESEARCH_MAX_CARD_RUNS` | no | Runs per card. Default 4. queue-keeper stops a card that would start, or has started, one more run: it blocks it (`hermes kanban block --kind capability`, or `needs_input` when its last block was `capability`, so Hermes' unblock-loop breaker does not send it to triage; reason `spend-cap: ...`) and sends one help request. Only `running` and `ready` cards can be blocked; others are skipped. A stop that fails is retried every minute and reported once per failure streak; it grants no new allowance. A stopped card is never requeued or repaired; unblocking it gives it another full allowance. The blocked-card check (queue-keeper and `health`) also keeps a blocked card blocked, without requeue or repair, once it has reached this cap or the cost cap. The caps also run while preflight fails and the agent is paused. `0` turns the cap off. |
 | `AUTORESEARCH_MAX_CARD_USD` | no | Estimated model spend per card, in USD. Default 4. Same stop as above. The estimate is Hermes' own (`state.db`, `sessions.estimated_cost_usd`), summed over the sessions of the card's runs and their compression and subagent sessions. `0` turns the cap off. |
-| `AUTORESEARCH_DAILY_BUDGET_USD` | no | Estimated model spend per UTC day of every session of this profile. Default 25. At the budget queue-keeper pauses dispatch (the usual pause: pending cards unassigned, no admission) and sends one help request a day; running cards finish under their own caps. It resumes by itself on the next UTC day, or after you raise the value. `0` turns it off. |
+| `AUTORESEARCH_DAILY_BUDGET_USD` | no | Estimated model spend per UTC day of every research session of this profile (all but the IDE coach chat's sessions, Hermes source `api_server`, which have their own cap below). Default 25. At the budget queue-keeper pauses dispatch (the usual pause: pending cards unassigned, no admission) and sends one help request a day; running cards finish under their own caps. It resumes by itself on the next UTC day, or after you raise the value. `0` turns it off. |
+| `AUTORESEARCH_CHAT_DAILY_USD` | no | Estimated model spend per UTC day of the IDE coach chat ("IDE coach chat" below). Default 3. Over it, the chat's tools refuse except `status`, and the chat tells the coach its budget is spent; research is not affected. The plugin reads it from the profile `.env`. `0` turns it off. |
 | `AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD` | no | Credit floor of the OpenRouter key, in USD. Default 10. Preflight reads the key's remaining credit (`limit_remaining` from `GET https://openrouter.ai/api/v1/key`) on every queue-keeper run and pauses the agent with a help request when it is below this floor, because Hermes retries a refused (402) model call forever. A fresh $10 key is not below the default; it pauses after its first spend. Set the floor lower when the key itself is small and should be spent further down. A value that is not a non-negative number uses the default and logs a preflight warning. |
 | `AUTORESEARCH_AUTONOMY` | no | `always` (default) or `on-request`. With `on-request` the agent plans nothing (no scheduled, queue-growth or board-rebuild planning card) until the coach's first task arrives: an inbound `task` whose `author` starts with `coach:` and that routing accepted (a task answered with a rejection note, for example because its refs do not resolve, does not start the agent). That task commits `.supervisor/ledger/started.json` (`{"started_at": ..., "by": "<inbound id>"}`), which is permanent; a coach `steer` (what cancelling a task produces) or a task from anyone else does not start the agent, though tasks are still admitted and run. Until then queue-keeper logs once a day that planning waits. This is a convenience, not a security control: everything in the sandbox runs as one uid, so any process there can write a `coach:` task. An unknown value runs as `always`; queue-keeper logs it, records the step failure `autonomy`, and sends one help request per distinct value. A failed commit of `started.json` is the step failure `autonomy_start`. |
 | `AUTORESEARCH_FALLBACK_PRICES` | no | USD per million tokens for a session Hermes could not price (its estimate missing, for example when OpenRouter pricing was unreachable), as `kind=price` pairs. Default `input=3,output=12,cache_read=0.75,cache_write=3`, above kimi-k3's observed rate on purpose. queue-keeper logs each session priced this way once. |
@@ -338,7 +340,7 @@ run it). It resumes on the
 next queue-keeper run after that.
 
 A coach pauses and resumes research from the IDE chat with the exact lines
-`/pause-research` and `/resume-research`, which send an inbound `control` message
+`/pause-research` and `/resume-research`, for which the plugin sends an inbound `control` message
 (`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with
 `"$AUTORESEARCH_CLI" comms inbound control --json '{"action": "pause"}' --author coach:<player id>`.
 queue-keeper applies it on its next run, when it routes inbound. Routing runs only after the preflight check passes, so a `control` sent while preflight is failing (for example, the key is out of credit) is applied, and answered with its note, only on the first run whose preflight passes. A pause sets the coach hold,
@@ -397,6 +399,52 @@ and keeps `.env`, `config.yaml`, memories, the workspace, and `local/`. The next
 `hermes config set` and re-seeds `AGENTS.md` when `doctrine/VERSION` changed. Hermes has no
 automatic update; `updates.check` is set to false so it does not even check.
 
+### IDE coach chat
+
+On Softmax hosting each coach line in the IDE chat is one Hermes run on the API server
+(platform `api_server`), in this profile. The plugin turns those runs into the coach's
+interface to the research (design: [coach-chat-role.md](docs/designs/coach-chat-role.md);
+code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers (platform
+`cli`) are unchanged.
+
+- **Persona.** For an `api_server` turn the plugin's `pre_llm_call` injects the brief
+  `doctrine/coach-chat.md` (once per session: Hermes keeps injected context in the history).
+  `SOUL.md` names both roles.
+- **Tools.** Config (C9 rows, re-applied by bootstrap) gives `api_server` only the toolset
+  `autoresearch_coach` and none of the shipped skills, and keeps that toolset off for `cli`
+  (`platform_toolsets.api_server`, `known_plugin_toolsets.cli`,
+  `skills.platform_disabled.api_server`). The tools are fixed-argv read commands of the
+  profile CLI, with no shell (`list_messages`, `get_message`, `message_status`,
+  `resolve_ref`, `list_cards`, `show_card`, `find_records`, `show_record`,
+  `promotion_status`, `status`, `baseline_report`; output cut to 12,000 characters), and
+  `propose_inbound`. Because Hermes's config load fails open to the full default toolset, the
+  plugin's `pre_tool_call` also blocks every other tool in a chat session (Hermes's
+  tool-search bridge passes only as far as it reaches coach tools), and the coach tools refuse
+  outside one or under `HERMES_KANBAN_TASK`.
+- **Profile environment.** The tools run inside the one multiplexed gateway process. They
+  find the routed profile with Hermes's `get_hermes_home()` at call time, refuse unless it
+  carries this plugin (`plugins/autoresearch/plugin.yaml`) and a `.env`, and run
+  `AUTORESEARCH_CLI` with the gateway's environment minus `HERMES_*`, `AUTORESEARCH_*` and
+  `SOFTMAX_*` names, plus the profile `.env`, plus `HERMES_HOME=<profile>`.
+- **Sending needs the coach's own line.** No model tool call can run `comms inbound`.
+  `propose_inbound(kind, payload, summary)` (`task`, `steer`, `reply` or `control`; only the
+  kind's schema fields) validates the payload with `comms inbound --dry-run` and keeps the
+  proposal in plugin memory for 15 minutes, bound to the session. The plugin's
+  `transform_llm_output` hook appends its own rendering, built from the payload (never from
+  the model's summary), to the reply: `Proposal P-xxxx: ... To send exactly this, reply:
+  confirm P-xxxx`. Only after that is it confirmable. When the coach's whole line (surrounding
+  whitespace stripped) is `confirm P-xxxx` in that session, the plugin runs `comms inbound
+  <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once, and appends
+  `Sent P-xxxx as I-...`. `cancel P-xxxx` drops it. Any other line, another session, an
+  expired, cancelled or never-shown proposal sends nothing. A gateway restart drops all
+  proposals.
+- **Budget.** `AUTORESEARCH_CHAT_DAILY_USD` (default 3) per UTC day, from the rise of the chat
+  sessions' Hermes cost since the day's first snapshot (`$PROFILE/local/chat-spend.json`,
+  module `runtime/state_db.py`). Over it, every coach tool but `status` refuses. A spend that
+  cannot be read refuses too.
+- **Log.** `workspace/.supervisor/runtime/chat_events.jsonl`: chat turns, read tools (name and `ok`), proposals (id and
+  kind), shown renderings, sends (proposal id and inbound id). Payload text is not logged.
+
 ## Known gaps
 
 - **GotA is bound but not yet proven end to end.** `games/gota` has real `build`,
@@ -414,7 +462,16 @@ automatic update; `updates.check` is set to false so it does not even check.
   balance covers its remaining requests (the recent cost per episode, or
   `AUTORESEARCH_RELAUNCH_MIN_CREDITS`), at most one experiment per xp-poll run; otherwise the
   backoff decides (A10).
-- **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
+- **Gateway turn hooks** of the plugin are verified for multiplexed API-server runs on the
+  pinned image (the coach chat, [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md)
+  "Verified in Task 5 Step 4"); other gateway paths are not (hermes-facts.md, item 2).
+- **The coach chat's proposal text reaches the coach through the reply.** The plugin appends
+  its rendering, but the model's own words around it could still misdescribe it, and a reply
+  the bridge replaces ("Stopped at your request.") marks a rendering shown that the coach
+  never saw (safe: the coach cannot type an id they did not see). A deterministic bridge-side
+  rendering is a later bridge change (coach-chat-role.md §3.1). Everything in the sandbox runs
+  as one uid, so a research process could still write the inbox or call the API server
+  directly; the chat design does not change that (plan D9).
 - **Spend caps see only this profile's sessions.** GotA compiler child runs (their own
   `HERMES_HOME`) and spend outside the profile are not counted. A card's cost needs the
   plugin's `session_start` event for each run, so sessions from before this feature count

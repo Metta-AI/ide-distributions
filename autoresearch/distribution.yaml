@@ -66,7 +66,8 @@ env_requires:
     required: false
     default: "25"
     description: >-
-      Estimated model spend per UTC day of all sessions of this profile. At the budget
+      Estimated model spend per UTC day of the research sessions of this profile (every
+      session but the IDE coach chat's; see AUTORESEARCH_CHAT_DAILY_USD). At the budget
       queue-keeper pauses dispatch with a help_request; it resumes the next UTC day. 0 turns
       it off.
   - name: AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD
@@ -84,6 +85,13 @@ env_requires:
       coach's first task arrives (hosted Softmax, where any user can click Start). A
       convenience, not a security control. An unknown value runs as "always" with a
       help_request.
+  - name: AUTORESEARCH_CHAT_DAILY_USD
+    required: false
+    default: "3"
+    description: >-
+      Estimated model spend (USD per UTC day) of the IDE coach chat. Over it, the chat's
+      tools refuse (except status) and the chat says its budget is spent. Counted apart from
+      the research budget, which never includes chat sessions. 0 turns it off.
   - name: AUTORESEARCH_FALLBACK_PRICES
     required: false
     default: input=3,output=12,cache_read=0.75,cache_write=3

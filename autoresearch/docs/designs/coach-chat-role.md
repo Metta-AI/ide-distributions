@@ -1,6 +1,25 @@
 # Coach chat role in the autoresearch profile
 
-Status: proposed, 2026-10-09. Proposal only; nothing here is built.
+Status: built for sections 1, 2 and 4 (plan Task 5, 2026-10-09; README "IDE coach chat";
+`src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Section 3 (bridge changes) and the
+shim switch in section 5 are not built. Where the build differs from this text:
+
+- The rendering is appended to the reply by plugin code (`transform_llm_output`), not returned
+  for the model to quote, and a proposal is confirmable only after that (plan 3.7).
+- `propose_inbound` validates through the profile CLI (`comms inbound --dry-run`), because the
+  plugin is stdlib-only and the schemas need `jsonschema`. Payload fields outside the kind's
+  schema are refused, so the rendering shows everything that is sent.
+- The brief is injected once per session (Hermes keeps injected context in history), not every
+  turn.
+- `show_card` runs `queue show` only (the shim also read briefing and handoff files).
+- Hermes v0.21.6 tool search: the chat allowlist also passes `tool_search`/`tool_describe` and a
+  `tool_call` whose calls are all coach tools.
+- `status` does not yet report the chat's own spend.
+- Verified on the pinned image: hooks fire for multiplexed `/p/<profile>/` runs, and the API
+  server passes `/pause-research` to the run
+  ([findings.md](../plans/2026-10-09-softmax-integration/findings.md)).
+
+Originally proposed 2026-10-09; the rest of this document is the proposal as written.
 
 ## Why this document exists
 

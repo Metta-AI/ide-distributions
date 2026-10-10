@@ -38,6 +38,13 @@
   operator command `promotion accept-champion` in any agent session (also the approvals deny
   globs `*promotion accept-champion[ *]`; the command itself refuses in a card context).
 
+The IDE coach chat (an ``api_server`` session, ``plugin.coach``) gets a stricter rule before
+any of these: ``chat_tool_policy`` allows only its own toolset, ``autoresearch_coach`` (no
+terminal, file, code or Kanban tools), because Hermes's config load fails open to the
+platform's full default toolset. Hermes's tool-search bridge is let through only as far as it
+reaches coach tools (``tool_search``/``tool_describe`` read the catalog; a ``tool_call`` passes
+only when every tool it names is a coach tool).
+
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
 (`tools/terminal_tool.py`
 `terminal{command, workdir}`, `tools/file_tools.py` `write_file{path}` and
@@ -86,6 +93,7 @@ Allowed calls return `(True, "")`, or `(True, "unparsed ...")` when a shell comm
 not be tokenized and was allowed anyway; the adapter logs that note.
 """
 
+import json
 import os
 import re
 import shlex
@@ -270,6 +278,47 @@ def _refuse_text(text: str) -> None:
         raise _Blocked(CARD_REQUEST)
     if BLOCKED_TEXT.search(text):
         raise _Blocked(RAW_MUTATION)
+
+
+# Hermes v0.21.6 "tool search" (tools/tool_search.py) may replace plugin tools in the model's
+# tool list with three bridge tools. tool_search and tool_describe only read the session's tool
+# catalog; tool_call runs the tools it names (and Hermes re-runs pre_tool_call with each real name).
+TOOL_CATALOG_READS = frozenset({"tool_search", "tool_describe"})
+TOOL_CALL_BRIDGE = "tool_call"
+
+
+def _bridged_names(args: dict) -> list[str]:
+    """The tool names a ``tool_call`` would run (Hermes's ``normalize_tool_call_entries``
+    shapes: ``{"calls": [{"name", ...}]}``, a JSON string of that list, or ``{"name"}``)."""
+    calls = args.get("calls")
+    if calls is None:
+        calls = [{"name": args.get("name")}]
+    if isinstance(calls, str):
+        try:
+            calls = json.loads(calls)
+        except ValueError:
+            return []
+    if isinstance(calls, dict):
+        calls = [calls]
+    if not isinstance(calls, list):
+        return []
+    return [str(call.get("name") or "").strip() if isinstance(call, dict) else "" for call in calls]
+
+
+def chat_tool_policy(tool_name: str, args: dict, coach_tools: frozenset[str]) -> tuple[bool, str]:
+    """Decide one tool call in the IDE coach chat: only ``coach_tools`` pass, plus Hermes's
+    tool-search catalog reads and a ``tool_call`` whose every call is a coach tool."""
+    if tool_name in coach_tools or tool_name in TOOL_CATALOG_READS:
+        return ALLOW
+    if tool_name == TOOL_CALL_BRIDGE:
+        names = _bridged_names(args if isinstance(args, dict) else {})
+        if names and all(name in coach_tools for name in names):
+            return ALLOW
+        tool_name = f"tool_call of {', '.join(names) or 'an unreadable call'}"
+    return _block(
+        f"the coach chat can use only its coach tools ({', '.join(sorted(coach_tools))}); "
+        f"{tool_name or 'this tool'} is for research cards."
+    )
 
 
 def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) -> tuple[bool, str]:

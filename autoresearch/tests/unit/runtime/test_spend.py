@@ -7,7 +7,7 @@ from support.state_db import add_session, record_session_start
 
 from autoresearch.queue.card import Card, CardSpec, RunInfo
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import spend
+from autoresearch.runtime import spend, state_db
 
 PRICES = spend.DEFAULT_FALLBACK_PRICES
 
@@ -79,3 +79,43 @@ def test_day_cost_counts_sessions_started_this_utc_day(tmp_path):
 def test_no_state_db_yet_costs_nothing(tmp_path):
     assert spend.sessions_cost(tmp_path, {"s1"}, PRICES).usd == 0.0
     assert spend.day_cost(tmp_path, datetime.datetime.now(datetime.UTC), PRICES).usd == 0.0
+
+
+def test_the_research_day_leaves_out_coach_chat_sessions(tmp_path):
+    now = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.UTC)
+    midnight = datetime.datetime(2026, 10, 9, tzinfo=datetime.UTC).timestamp()
+    add_session(tmp_path, "card", 2.0, started_at=midnight + 60, source="cli")
+    add_session(tmp_path, "cron", 0.5, started_at=midnight + 60, source="cron")
+    add_session(tmp_path, "chat", 9.0, started_at=midnight + 60, source="api_server")
+    assert spend.day_cost(tmp_path, now, PRICES).usd == pytest.approx(2.5)
+
+
+def _set_cost(home, session_id, usd):
+    import sqlite3
+
+    connection = sqlite3.connect(home / "state.db")
+    connection.execute("UPDATE sessions SET estimated_cost_usd = ? WHERE id = ?", (usd, session_id))
+    connection.commit()
+    connection.close()
+
+
+def test_chat_day_spend_is_the_rise_since_the_days_first_snapshot(tmp_path):
+    snapshot = tmp_path / "local" / "chat-spend.json"
+    day1 = datetime.datetime(2026, 10, 9, 8, 0, tzinfo=datetime.UTC)
+    midnight = datetime.datetime(2026, 10, 9, tzinfo=datetime.UTC).timestamp()
+    add_session(tmp_path, "bridge", 1.0, started_at=midnight - 86400, source="api_server")
+    add_session(tmp_path, "card", 7.0, started_at=midnight + 60, source="cli")
+    assert state_db.chat_day_usd(tmp_path, snapshot, day1, PRICES) == 0.0  # yesterday's
+    _set_cost(tmp_path, "bridge", 4.1)
+    assert state_db.chat_day_usd(tmp_path, snapshot, day1, PRICES) == pytest.approx(3.1)
+    add_session(tmp_path, "bridge-2", 0.25, started_at=midnight + 3600, source="api_server")
+    assert state_db.chat_day_usd(tmp_path, snapshot, day1, PRICES) == pytest.approx(3.35)
+    day2 = day1 + datetime.timedelta(days=1)  # a new UTC day starts from the totals then
+    assert state_db.chat_day_usd(tmp_path, snapshot, day2, PRICES) == 0.0
+    _set_cost(tmp_path, "bridge", 5.0)
+    assert state_db.chat_day_usd(tmp_path, snapshot, day2, PRICES) == pytest.approx(0.9)
+
+
+def test_chat_day_spend_without_a_state_db_is_zero(tmp_path):
+    now = datetime.datetime.now(datetime.UTC)
+    assert state_db.chat_day_usd(tmp_path, tmp_path / "snap.json", now, PRICES) == 0.0

@@ -23,6 +23,7 @@ def test_manifest():
         assert env[k]["required"] is True
     assert env["OPENROUTER_MODEL"]["default"] == "moonshotai/kimi-k3"
     assert env["AUTORESEARCH_GAME"]["default"] == "gota"
+    assert env["AUTORESEARCH_CHAT_DAILY_USD"]["default"] == "3"
     floor = env["AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD"]
     assert floor["required"] is False and floor["default"] == "10"
 
@@ -51,7 +52,7 @@ def test_config():
         "AUTORESEARCH_CARD_MODELS", "AUTORESEARCH_MAX_CARD_RUNS", "AUTORESEARCH_MAX_CARD_USD",
         "AUTORESEARCH_DAILY_BUDGET_USD", "AUTORESEARCH_FALLBACK_PRICES",
         "AUTORESEARCH_RELAUNCH_MIN_CREDITS", "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",
-        "AUTORESEARCH_AUTONOMY",
+        "AUTORESEARCH_AUTONOMY", "AUTORESEARCH_CHAT_DAILY_USD",
     }
 
 
@@ -75,7 +76,7 @@ def test_plugin_import_graph_is_stdlib_only():
     assert r.returncode == 0, r.stderr
 
 
-def test_plugin_stub_registers_five_hooks_and_logs_tool_events(tmp_path, monkeypatch):
+def test_plugin_stub_registers_six_hooks_and_logs_tool_events(tmp_path, monkeypatch):
     from autoresearch.plugin import adapters
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -86,11 +87,18 @@ def test_plugin_stub_registers_five_hooks_and_logs_tool_events(tmp_path, monkeyp
         def register_hook(self, name, callback):
             hooks[name] = callback
 
+        def register_tool(self, **kwargs):
+            tools.append(kwargs["name"])
+
+    tools = []
     adapters.register(FakeCtx())
     assert set(hooks) == {
         "pre_tool_call", "post_tool_call", "on_session_end", "pre_llm_call",
-        "kanban_task_completed",
+        "transform_llm_output", "kanban_task_completed",
     }
+    manifest = yaml.safe_load((ROOT / "plugins/autoresearch/plugin.yaml").read_text())
+    assert set(manifest["provides_hooks"]) == set(hooks)
+    assert manifest["provides_tools"] == tools
     hooks["post_tool_call"](tool_name="terminal", status="ok", surprise_kwarg=1)
     log = tmp_path / "workspace/.supervisor/runtime/tool_events.jsonl"
     assert json.loads(log.read_text())["tool"] == "terminal"

@@ -22,7 +22,9 @@ blocked-card step:
   ``.supervisor/ledger/health/spend/<task-id>.json`` with the card's runs and cost at that
   point. Caps count from the latest stop, so a human who unblocks a stopped card gives it
   another full allowance.
-- **Daily budget**: when the estimated spend of all sessions that started this UTC day
+- **Daily budget**: when the estimated spend of all research sessions (every session
+  but the IDE coach chat's, ``source`` ``api_server``, which has its own day cap,
+  ``AUTORESEARCH_CHAT_DAILY_USD``) that started this UTC day
   reaches ``daily_usd``, queue-keeper pauses dispatch (``pause.pause``, reason starting
   ``daily budget:``) and sends one ``help_request`` per day. It does not resume while over
   budget (``may_resume``; when the spend cannot be read it keeps a budget pause, or any pause
@@ -32,7 +34,8 @@ blocked-card step:
 
 Counted runs are the card's runs except those that did no work (``NO_WORK_OUTCOMES``).
 
-Cost source. Hermes records per-session token usage and its own estimate in the profile's
+Cost source (the ``state.db`` reads and pricing live in ``runtime.state_db``, which the plugin
+also imports). Hermes records per-session token usage and its own estimate in the profile's
 ``state.db`` (``sessions.estimated_cost_usd``, ``actual_cost_usd``; updated after each API
 call, so a running session's cost is current). A card's sessions are the ones the plugin
 recorded at each run's first turn (``session_start`` events in
@@ -62,17 +65,24 @@ from autoresearch.queue.kanban_queue import STOPPABLE_STATUSES
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.pause import is_paused, pause, pause_path
+from autoresearch.runtime.state_db import (  # noqa: F401 - public here too (baseline, tests)
+    CHAT_SOURCE,
+    COLUMNS,
+    DEFAULT_FALLBACK_PRICES,
+    ENV_FALLBACK_PRICES,
+    STATE_DB,
+    parse_prices,
+    session_usd,
+    state_rows,
+    utc_day_start,
+)
 
 ENV_MAX_RUNS = "AUTORESEARCH_MAX_CARD_RUNS"
 ENV_MAX_CARD_USD = "AUTORESEARCH_MAX_CARD_USD"
 ENV_DAILY_USD = "AUTORESEARCH_DAILY_BUDGET_USD"
-ENV_FALLBACK_PRICES = "AUTORESEARCH_FALLBACK_PRICES"
 DEFAULT_MAX_RUNS = 4
 DEFAULT_MAX_CARD_USD = 4.0
 DEFAULT_DAILY_USD = 25.0
-# USD per million tokens, for sessions Hermes could not price. Above the rate the box showed
-# for kimi-k3 (about $36.5 for 4.6M input, 0.39M output, 59.2M cache-read tokens).
-DEFAULT_FALLBACK_PRICES = {"input": 3.0, "output": 12.0, "cache_read": 0.75, "cache_write": 3.0}
 SPEND_CAP_PREFIX = "spend-cap:"
 BUDGET_PAUSE_PREFIX = "daily budget:"
 # Runs that never reached a model call: a spawn failure, a provider rate limit at start.
@@ -81,14 +91,7 @@ EVENTS_FILE = "kanban_events.jsonl"  # written by the plugin (plugin.adapters)
 UNPRICED_FILE = "spend_unpriced.json"
 BUDGET_HOLD_FILE = "budget_hold.json"  # the UTC day the daily budget was last reached
 DB_FAILURE = "spend_db"  # SpendRun.failures key when state.db cannot be read
-STATE_DB = "state.db"
 HELP_PRIORITY = "P1"
-_TOKEN_COLUMNS = {
-    "input": "input_tokens",
-    "output": "output_tokens",
-    "cache_read": "cache_read_tokens",
-    "cache_write": "cache_write_tokens",
-}
 
 
 @dataclass(frozen=True)
@@ -106,7 +109,7 @@ class SpendConfig:
             max_runs=int(_number(env, ENV_MAX_RUNS, DEFAULT_MAX_RUNS)),
             max_card_usd=_number(env, ENV_MAX_CARD_USD, DEFAULT_MAX_CARD_USD),
             daily_usd=_number(env, ENV_DAILY_USD, DEFAULT_DAILY_USD),
-            prices=_prices(env.get(ENV_FALLBACK_PRICES)),
+            prices=parse_prices(env.get(ENV_FALLBACK_PRICES)),
         )
 
     def allowance(self) -> str:
@@ -131,22 +134,6 @@ def _number(env: Mapping[str, str], name: str, default: float) -> float:
     if name == ENV_MAX_RUNS and value != int(value):
         raise ValueError(f"{name}: must be a whole number: {raw!r}")
     return value
-
-
-def _prices(raw: str | None) -> dict[str, float]:
-    """``input=3,output=12,cache_read=0.75,cache_write=3`` over the defaults."""
-    prices = dict(DEFAULT_FALLBACK_PRICES)
-    for entry in (raw or "").split(","):
-        if not entry.strip():
-            continue
-        kind, _, value = (part.strip() for part in entry.partition("="))
-        if kind not in prices:
-            raise ValueError(f"{ENV_FALLBACK_PRICES}: unknown token kind {kind!r}")
-        try:
-            prices[kind] = float(value)
-        except ValueError:
-            raise ValueError(f"{ENV_FALLBACK_PRICES}: {kind}: not a number: {value!r}") from None
-    return prices
 
 
 # --- runs and cost ---
@@ -189,36 +176,6 @@ def card_sessions(ctx: RunContext) -> dict[str, set[str]]:
     return found
 
 
-def session_usd(row: sqlite3.Row, prices: Mapping[str, float]) -> tuple[float, bool]:
-    """(cost, priced from tokens?) of one session row (module docstring)."""
-    actual = row["actual_cost_usd"] or 0.0
-    if actual > 0:
-        return actual, False
-    estimated = row["estimated_cost_usd"] or 0.0
-    if estimated > 0 or row["cost_status"] == "included":
-        return estimated, False
-    tokens = {kind: row[column] or 0 for kind, column in _TOKEN_COLUMNS.items()}
-    if not any(tokens.values()):
-        return 0.0, False
-    return sum(prices[kind] * count for kind, count in tokens.items()) / 1_000_000, True
-
-
-_COLUMNS = "s.id, s.actual_cost_usd, s.estimated_cost_usd, s.cost_status, " + ", ".join(
-    f"s.{column}" for column in _TOKEN_COLUMNS.values()
-)
-
-
-def state_rows(hermes_home: Path, query: str, params: tuple) -> list[sqlite3.Row]:
-    """Rows of a read-only query on the profile ``state.db``; none before the first session."""
-    path = Path(hermes_home) / STATE_DB
-    if not path.exists():
-        return []
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    try:
-        return list(connection.execute(query, params))
-    finally:
-        connection.close()
 
 
 def _total(rows: list[sqlite3.Row], prices: Mapping[str, float]) -> Cost:
@@ -239,16 +196,17 @@ def sessions_cost(hermes_home: Path, roots: set[str], prices: Mapping[str, float
     query = (
         f"WITH RECURSIVE tree(id) AS (SELECT id FROM sessions WHERE id IN ({marks}) "
         "UNION SELECT s.id FROM sessions s JOIN tree t ON s.parent_session_id = t.id) "
-        f"SELECT {_COLUMNS} FROM sessions s JOIN tree USING (id)"
+        f"SELECT {COLUMNS} FROM sessions s JOIN tree USING (id)"
     )
     return _total(state_rows(hermes_home, query, tuple(sorted(roots))), prices)
 
 
 def day_cost(hermes_home: Path, now: datetime.datetime, prices: Mapping[str, float]) -> Cost:
-    """Cost of every session that started on ``now``'s UTC day."""
-    day = now.astimezone(datetime.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    query = f"SELECT {_COLUMNS} FROM sessions s WHERE s.started_at >= ?"
-    return _total(state_rows(hermes_home, query, (day.timestamp(),)), prices)
+    """Cost of every research session that started on ``now``'s UTC day: IDE coach chat
+    sessions (``source`` ``api_server``) are left out; the chat has its own day cap."""
+    day = utc_day_start(now)
+    query = f"SELECT {COLUMNS} FROM sessions s WHERE s.started_at >= ? AND s.source != ?"
+    return _total(state_rows(hermes_home, query, (day.timestamp(), CHAT_SOURCE)), prices)
 
 
 def card_cost(ctx: RunContext, task_id: str, prices: Mapping[str, float]) -> Cost:
