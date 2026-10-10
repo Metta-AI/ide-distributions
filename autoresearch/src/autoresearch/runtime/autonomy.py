@@ -80,7 +80,8 @@ def start_on_first_coach_task(canonical: Path) -> str | None:
 
 def may_plan(canonical: Path, mode: str) -> bool:
     """Whether the agent may plan its own research now. Every condition that stops planning
-    belongs here: a coach hold (``pause.is_held``), and on request, no coach task yet."""
+    belongs here: a coach hold (``pause.is_held``), and on request, no coach task yet.
+    xp-poll uses it for relaunch cards too (``runtime.xp_poll``)."""
     if is_held(ledger_of(canonical)):
         return False
     return mode == ALWAYS or is_started(canonical)

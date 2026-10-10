@@ -428,6 +428,11 @@ champion conflict, `pause.json`): queue-keeper never clears the hold, and it doe
 own pause while the hold is set. A resume clears only the hold: if the agent is also paused
 for its own reason, it stays paused (the note says so), the cards the hold unassigned wait in
 `pause.json`, and it resumes by itself once that cause clears.
+While the hold is set, or before the coach's first task starts an agent with
+`AUTORESEARCH_AUTONOMY=on-request`, xp-poll makes no relaunch card (for credits or for the
+coach's permit asks); everything that spends nothing goes on: evidence and review requests,
+the help requests and the reminder, reading the coach's answers, and stopping an experiment
+on a no. A relaunch that is due is made on the first xp-poll run after the hold is lifted.
 
 Only the runtime commits on the canonical workspace's `main` (C1): queue-keeper, xp-poll,
 health, bootstrap, `card finish` (the handoff commit), and `comms inbound` (also the IDE coach

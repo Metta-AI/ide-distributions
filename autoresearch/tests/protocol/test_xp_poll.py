@@ -497,6 +497,41 @@ def test_permit_refusal_files_every_ask_asks_the_coach_once_and_relaunches_on_th
     assert len(_coach_messages(host)) == 1
 
 
+def test_coach_hold_and_on_request_start_hold_back_the_relaunch_but_not_the_answers(
+    host, monkeypatch
+):
+    """The coach hold, and an on-request agent not started yet, make no relaunch card (as
+    they stop planning); the help request and the coach's answers are still handled, and the
+    relaunch comes on the first run after the hold is lifted."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _answer(host, "yes", keys)
+    hold = host.canonical / ".supervisor" / "ledger" / "coach-hold.json"
+    write_json(hold, {"held_at": "2026-10-09T00:00:00Z", "by": "coach:amy", "tasks": {}})
+
+    held = _poll(host, at(1))
+    assert held.help_requests == [experiment] and held.launches == []
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    hold.unlink()
+    assert _poll(host, at(2)).launches == []  # not started: still no card
+
+    host.env["AUTORESEARCH_AUTONOMY"] = "always"
+    [launch] = _poll(host, at(3)).launches
+    assert launch.title == f"Launch {experiment}"
+
+
+def test_a_no_under_the_coach_hold_still_stops_the_experiment(host, monkeypatch):
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    hold = host.canonical / ".supervisor" / "ledger" / "coach-hold.json"
+    write_json(hold, {"held_at": "2026-10-09T00:00:00Z", "by": "coach:amy", "tasks": {}})
+    _answer(host, "no", [wait["asks"][0]["ask"]])
+
+    stopped = _poll(host, at(1))
+
+    assert stopped.stopped == [experiment] and stopped.launches == []
+    assert host.store.load(experiment)[0]["status"] == "stopped"
+
+
 def test_permit_no_stops_the_experiment_with_one_note_and_never_asks_again(host, monkeypatch):
     experiment, _, wait, backoff_end = _awaiting_permit(host, monkeypatch)
     _poll(host, at(1))

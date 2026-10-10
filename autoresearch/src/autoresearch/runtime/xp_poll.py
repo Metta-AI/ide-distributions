@@ -108,6 +108,14 @@ is generation 2, then 3, of the same marker (``markers.relaunch_generation``), f
 identical batch, and after ``RELAUNCH_GENERATIONS`` (3) one help request
 (``runtime_messages.relaunch_stuck``) and no more cards for that wait.
 
+The coach hold (``ledger/coach-hold.json``) and start on request (``AUTORESEARCH_AUTONOMY``)
+gate relaunches as they gate planning (``autonomy.may_plan``): while the coach holds research,
+or before the coach's first task starts an on-request agent, no relaunch request of either
+kind is made (it would only wait at admission, and a no meanwhile would leave a card that
+can only be refused). Everything that spends nothing still runs: evidence and review
+requests, the help requests and the reminder, reading the coach's answers, and stopping an
+experiment on a no. The relaunch is made on the first run after the hold is lifted.
+
 When the coach's no stops an experiment, its open launch cards (pending or claimed) are stopped
 through the queue (``stop_relaunch_cards``; reason ``coach-stopped:``, which
 ``blocked.handle_blocked`` leaves alone), and ``softmax xp create`` checks canonical before each
@@ -145,7 +153,7 @@ from autoresearch.queue.card import CardSpec
 from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import provenance
+from autoresearch.runtime import autonomy, provenance
 from autoresearch.runtime.blocked import COACH_STOPPED_PREFIX
 from autoresearch.runtime.bootstrap import REPO_ROOT
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
@@ -769,9 +777,11 @@ def _wait_for_coach(
     now: datetime.datetime,
     result: XpPollRun,
     credits_view: CreditView,
+    may_relaunch: bool = True,
 ) -> None:
     """``awaiting-permit`` (module docstring): the one gate. The help request (and the one
-    reminder), then the answers decide, then a credit shortfall of the same batch."""
+    reminder), then the answers decide, then a credit shortfall of the same batch.
+    ``may_relaunch``: False under the coach hold or before an on-request start (no card)."""
     canonical = ctx.canonical
     _publish_once(canonical, coach_wait_message(experiment), result, experiment["id"])
     lifecycle = experiment.get("lifecycle") or {}
@@ -803,7 +813,7 @@ def _wait_for_coach(
             reason = "the coach's answers could not be read; the backoff has passed"
         else:
             return  # the coach has not answered every ask yet
-    if result.launches or not due:
+    if result.launches or not due or not may_relaunch:
         return
     short = wait.get("credits_short")
     if short:
@@ -878,12 +888,13 @@ def poll_experiment(
     league_version: Callable[[], str],
     result: XpPollRun,
     credits_view: CreditView | None = None,
+    may_relaunch: bool = True,
 ) -> None:
     """Evidence, then the review (``evaluating``) or relaunch (``awaiting-credits``,
     ``awaiting-permit``). The relaunch decision and the coach's answers do not depend on the
     evidence: a failure there (artifacts, the evaluate binding, a platform read) is raised
     after them, so it never keeps a no from stopping the experiment or a yes from relaunching
-    it."""
+    it. ``may_relaunch`` False (coach hold, or not started yet): no relaunch request."""
     credits_view = credits_view or CreditView(sm, DEFAULT_MIN_CREDITS)
     evidence_failure: Exception | None = None
     try:
@@ -891,14 +902,14 @@ def poll_experiment(
     except Exception as error:  # noqa: BLE001 - raised below, after the waits are handled
         evidence_failure = error
     status = experiment.get("status")
-    if status == "awaiting-credits" and not result.launches:
+    if status == "awaiting-credits" and not result.launches and may_relaunch:
         lifecycle = experiment.get("lifecycle") or {}
         reason = credits_cover(credits_view, experiment, lifecycle, now)
         launch = None if reason is None else _commit_relaunch(ctx.canonical, experiment, reason)
         if launch is not None:
             result.launches.append(launch)
     elif status == "awaiting-permit":
-        _wait_for_coach(ctx, sm, experiment, now, result, credits_view)
+        _wait_for_coach(ctx, sm, experiment, now, result, credits_view, may_relaunch)
     if evidence_failure is not None:
         raise evidence_failure
 
@@ -930,13 +941,24 @@ def run(
     try:
         with file_lock(runtime_dir(ctx) / RUN_LOCK, timeout_s=0):
             store = RecordStore(Layout(ctx.canonical))
+            # Relaunches wait while the agent may not plan (module docstring); an unknown
+            # autonomy value runs as ``always``, as in queue-keeper (which reports it).
+            may_relaunch = autonomy.may_plan(ctx.canonical, autonomy.autonomy_mode(env)[0])
             for experiment_id in store.find("experiment"):
                 experiment, _ = store.load(experiment_id)
                 if experiment.get("status") not in WATCHED:
                     continue
                 try:
                     poll_experiment(
-                        ctx, sm, experiment, now, evaluate, league_version, result, credits_view
+                        ctx,
+                        sm,
+                        experiment,
+                        now,
+                        evaluate,
+                        league_version,
+                        result,
+                        credits_view,
+                        may_relaunch,
                     )
                 except Exception as error:  # noqa: BLE001 - one experiment never stops the rest
                     result.failures[experiment_id] = f"{type(error).__name__}: {error}"
