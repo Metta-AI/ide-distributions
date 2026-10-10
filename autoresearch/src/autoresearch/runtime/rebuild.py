@@ -395,13 +395,14 @@ def launch_step(
     attempt ``launch_attempts + 1``. ``reason`` says why (in parentheses); ``marker`` defaults
     to ``launch:<E>:<attempt>`` (xp-poll passes its relaunch marker).
 
-    An experiment waiting on permit asks (``lifecycle.permit_wait`` of kind ``permit``) is
-    relaunched with exactly the batch the asks were filed for: its ``--batch``, ``--attempt``
-    and ``--batches``, so the approved requests replay under the same idempotency keys
-    (``softmax xp create`` refuses any other batch while the asks wait)."""
+    An experiment with open permit asks (``lifecycle.permit_wait.asks``; only ever
+    ``awaiting-permit``, which xp-poll alone relaunches) is relaunched with exactly the batch
+    the asks were filed for: its ``--batch``, ``--attempt`` and ``--batches``, so the approved
+    requests replay under the same idempotency keys (``softmax xp create`` refuses any other
+    batch while the asks are open)."""
     eid = experiment["id"]
     wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
-    if wait.get("kind") == "permit" and wait.get("attempt") is not None:
+    if wait.get("asks") and wait.get("attempt") is not None:
         attempt = int(wait["attempt"])
         command = (
             f"--batch {wait['batch']} --attempt {attempt} --batches {wait.get('batches') or 1}"

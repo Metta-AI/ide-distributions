@@ -47,8 +47,10 @@ EXPERIMENT_TRANSITIONS: dict[str, frozenset[str]] = {
     # pauses an evaluation; partial batches resume under the same design.
     "uploaded": frozenset({"evaluating", "awaiting-credits", "awaiting-permit"}),
     "evaluating": frozenset({"reviewed", "awaiting-credits", "awaiting-permit"}),
-    "awaiting-credits": frozenset({"evaluating", "awaiting-permit", "stopped"}),
-    # The coach answered no to a permit ask (xp-poll): the evaluation ends, unreviewed.
+    "awaiting-credits": frozenset({"evaluating", "awaiting-permit"}),
+    # Open permit asks always mean awaiting-permit (a credit shortfall of the same batch is
+    # recorded inside its wait). The coach answered no to one (xp-poll): the evaluation ends,
+    # unreviewed.
     "awaiting-permit": frozenset({"evaluating", "awaiting-credits", "stopped"}),
     "stopped": frozenset(),
     "reviewed": frozenset(),

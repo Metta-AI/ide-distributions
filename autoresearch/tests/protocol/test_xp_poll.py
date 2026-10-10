@@ -22,7 +22,7 @@ from support.keeper_host import (
 
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import xp_poll
+from autoresearch.runtime import rebuild, xp_poll
 from autoresearch.runtime.markers import relaunch_marker
 from autoresearch.softmax_tool import cli as softmax_cli
 from autoresearch.softmax_tool import xp
@@ -607,26 +607,105 @@ def test_the_stop_note_counts_each_seed_and_arm_once(host, monkeypatch):
     assert "with 1 of its 4 XP requests run" in note["body"]
 
 
-def test_a_credit_denial_keeps_the_batchs_asks_and_a_no_still_stops_it(host, monkeypatch):
-    """H1: requests refused for a permit before a credit denial in the same batch keep their
-    asks; xp-poll tells the coach and reads them during the credit wait, and a no stops the
-    experiment before any credit relaunch."""
+def _short_of_credits(host: Host, monkeypatch):
+    """Asks A-D filed for the batch; the coach approves B, and with one credit left the rerun
+    sees A refused again, creates B, and is denied credits at C (D is never reached).
+    ``(experiment, the refusing Softmax, the asks' keys A-D, the rerun's output)``."""
     experiment, refusing, wait, _ = _awaiting_permit(host, monkeypatch)
     keys = [entry["ask"] for entry in wait["asks"]]
-    _answer(host, "yes", keys[1:2])  # the second request may run; one credit for it only
+    assert len(keys) == 4
+    _poll(host, at(1))  # the one help request about A-D
+    _answer(host, "yes", keys[1:2])
     _set_fake_state(host, credits=1)
     rerun = _refused_launch(host, refusing, experiment)
     assert rerun["credit_denied"] and len(rerun["created"]) == 1
-    assert [entry["ask"] for entry in rerun["permit_asks"]] == keys[:1]
-    meta, _ = host.store.load(experiment)
-    assert meta["status"] == "awaiting-credits"
-    assert [entry["ask"] for entry in meta["lifecycle"]["permit_wait"]["asks"]] == keys[:1]
+    return experiment, refusing, keys, rerun
 
-    _answer(host, "no", keys[:1])
-    stopped = _poll(host, at(1))
+
+def test_a_partial_retry_keeps_every_earlier_ask_and_a_no_to_one_not_reached_stops_it(
+    host, monkeypatch
+):
+    """Round 4: the ask set is merged by request, never replaced. A, C and D stay tracked
+    (only B, now created, drops out), the experiment stays awaiting-permit with the credit
+    shortfall inside the wait, and a no to C, which this run never reached, stops it."""
+    experiment, _, keys, rerun = _short_of_credits(host, monkeypatch)
+    expected = [keys[0], keys[2], keys[3]]
+    assert rerun["permit_required"]
+    assert [entry["ask"] for entry in rerun["permit_asks"]] == expected
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "awaiting-permit"
+    wait = meta["lifecycle"]["permit_wait"]
+    assert [entry["ask"] for entry in wait["asks"]] == expected
+    assert wait["credits_short"]["reason"] == "no credits"
+    assert wait["credits_short"]["credits_at_denial"] == 0
+    assert wait["announced"] == sorted(keys)  # no new ask: the same set, the same help request
+    assert _poll(host, at(2)).help_requests == []
+
+    _answer(host, "no", keys[2:3])
+    stopped = _poll(host, at(3))
     assert stopped.stopped == [experiment] and stopped.launches == []
     assert host.store.load(experiment)[0]["status"] == "stopped"
     assert _coach_messages(host)[-1]["runtime_key"].startswith("coach-declined:")
+
+
+def test_a_superseded_ask_replaces_its_request_and_the_new_set_is_announced(host, monkeypatch):
+    """Round 4: when the server files a new ask for a saved request (its yes was used), that
+    request's entry is replaced; the other saved asks stay."""
+    experiment, refusing, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _poll(host, at(1))
+    _answer(host, "used", keys[:1])  # A's yes no longer covers it: the server files A-2
+    _answer(host, "yes", keys[1:2])
+    _set_fake_state(host, credits=1)  # B is created, then credits stop the batch at C
+    rerun = _refused_launch(host, refusing, experiment)
+    asks = [entry["ask"] for entry in rerun["permit_asks"]]
+    assert asks[0] != keys[0] and asks[0].endswith("-2") and asks[1:] == [keys[2], keys[3]]
+    assert _poll(host, at(2)).help_requests == [experiment]  # A-2 is a new ask
+
+
+def test_no_card_while_an_ask_waits_even_when_the_credits_return(host, monkeypatch):
+    """Codex round 2 (medium): a credit shortfall never bypasses the permit gate. With asks
+    open nothing launches when the credits return, nor after the backoff; once all are yes
+    it waits for the credits too; then one card for exactly the saved batch, which creates
+    the rest. A board rebuild leaves the experiment to xp-poll."""
+    experiment, _, keys, _ = _short_of_credits(host, monkeypatch)
+    meta, _ = host.store.load(experiment)
+    late = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+    late += datetime.timedelta(hours=1)
+    _set_fake_state(host, credits=100)
+    assert _poll(host, at(2)).launches == []
+    assert _poll(host, late).launches == []
+    assert rebuild._lifecycle_step(host.canonical, meta, host.sm, "e1", late) is None
+
+    _answer(host, "yes", [keys[0], keys[2], keys[3]])
+    _set_fake_state(host, credits=0)
+    assert _poll(host, at(3)).launches == []  # approved, but still no credits
+    _set_fake_state(host, credits=100)
+    [launch] = _poll(host, at(4)).launches
+    assert "approved all 3 permit ask(s)" in launch.why and "credits available" in launch.why
+    assert f"xp create {experiment} --batch 1 --attempt 1 --batches 1" in launch.why
+    host.tick(at(5))
+    worker = host.claim("experimentation")
+    assert worker.card.spec.request_id == launch.request_id
+    done = softmax_cli._xp_create(worker.ctx, host.sm, _cli_args(experiment))
+    assert len(done["created"]) == 3 and done["missing"] == []
+    worker.finish()
+    host.tick(at(6))
+    assert host.store.load(experiment)[0]["status"] == "evaluating"
+
+
+def test_one_reminder_while_credits_are_short_too(host, monkeypatch):
+    """Codex round 2 (low): the 24 h reminder is sent from the one gate, credit shortfall or
+    not, and only once."""
+    experiment, _, _, _ = _short_of_credits(host, monkeypatch)
+    wait = host.store.load(experiment)[0]["lifecycle"]["permit_wait"]
+    since = datetime.datetime.fromisoformat(wait["since"])
+    reminded = _poll(host, since + datetime.timedelta(hours=24, minutes=1))
+    assert reminded.help_requests == [experiment] and reminded.launches == []
+    assert _poll(host, since + datetime.timedelta(hours=48)).help_requests == []
+    first, reminder = _coach_messages(host)
+    assert reminder["runtime_key"] == first["runtime_key"] + ":reminder"
+    assert "Softmax filed 3 permit ask(s)" in reminder["body"]  # the asks still open
 
 
 def test_a_declined_refusal_stops_the_batch_at_once(host, monkeypatch):
@@ -639,7 +718,9 @@ def test_a_declined_refusal_stops_the_batch_at_once(host, monkeypatch):
     rerun = _refused_launch(host, refusing, experiment)
     assert rerun["permit_declined"] and len(refusing.creates) == 1  # stopped at the first
     meta, _ = host.store.load(experiment)
-    assert [entry["state"] for entry in meta["lifecycle"]["permit_wait"]["asks"]] == ["declined"]
+    # The no replaces its request's ask; the asks the stopped batch never reached stay.
+    states = [entry["state"] for entry in meta["lifecycle"]["permit_wait"]["asks"]]
+    assert states == ["declined", "waiting", "waiting", "waiting"]
     launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
     with pytest.raises(softmax_cli.Refused) as caught:
         softmax_cli._xp_create(launcher, refusing, _cli_args(experiment))

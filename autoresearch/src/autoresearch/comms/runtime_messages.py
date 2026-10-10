@@ -899,13 +899,16 @@ def permit_needed(
     over_cap: bool = False,
     refs: list | None = None,
     reminder: bool = False,
+    key_asks: list[str] | None = None,
 ) -> RuntimeMessage:
     """Softmax holds ``count`` acts until the coach answers their permit asks (403
     ``permit_required``: the IDE Controls ask before them). ``act`` is ``xp`` (``subject``:
     ``<E>:b<batch>:a<attempt>``, every refused request of one batch) or ``submit``
     (``subject``: the promotion id). One per subject and set of ``asks``, however often it is
-    refused again: new asks (a yes the price outgrew) are a new message. ``reminder``: the one
-    reminder about the same asks, sent once a day after the first."""
+    refused again: new asks (a yes the price outgrew) are a new message. ``key_asks`` (default
+    ``asks``) is the set the key is made from, so it can stay the same while ``asks`` shrinks
+    (asks drop out as their requests are created). ``reminder``: the one reminder about the
+    same asks, sent once a day after the first."""
     if act == "xp":
         what = (
             f"The agent asked Softmax for {count} hosted XP request(s) to evaluate one of its "
@@ -935,7 +938,7 @@ def permit_needed(
     if reminder:
         body = f"A reminder: these asks have waited a day for your answer. {body}"
         title = "Still waiting for your approval in the IDE Controls"
-    ask_set = hashlib.sha256("|".join(sorted(asks)).encode()).hexdigest()[:12]
+    ask_set = hashlib.sha256("|".join(sorted(key_asks or asks)).encode()).hexdigest()[:12]
     return RuntimeMessage(
         "help_request",
         title,

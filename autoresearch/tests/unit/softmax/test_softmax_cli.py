@@ -471,11 +471,10 @@ def test_xp_create_league_choice_refusal_sets_awaiting_permit(board, launch):
     assert meta["lifecycle"]["permit_wait"]["kind"] == "league"
 
 
-def test_a_credit_denial_of_an_awaiting_permit_experiment_moves_it_to_awaiting_credits(
-    board, launch
-):
-    """The server checks credits before the permit: a denial says nothing about the ask, so
-    the permit wait is kept for when the credits return."""
+def test_a_credit_denial_with_open_asks_stays_awaiting_permit(board, launch):
+    """The server checks credits before the permit: a denial says nothing about the asks, so
+    they all stay open and the experiment stays ``awaiting-permit``; the shortfall is recorded
+    inside the wait (no mixed state)."""
     worker, experiment = launch
     refusing = base_env(board, worker, **{FAULTS_ENV: "permit=spend"})
     softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
@@ -483,8 +482,12 @@ def test_a_credit_denial_of_an_awaiting_permit_experiment_moves_it_to_awaiting_c
     broke = base_env(board, worker, **{FAULTS_ENV: "permit=spend;credits=0"})
     code, data = softmax(broke, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
     assert code == 0 and data["data"]["credit_denied"] is True
+    assert data["data"]["permit_required"] is True
     meta = worker.store.load(experiment)[0]
-    assert meta["status"] == "awaiting-credits" and meta["lifecycle"]["permit_wait"] == wait
+    assert meta["status"] == "awaiting-permit"
+    kept = meta["lifecycle"]["permit_wait"]
+    assert kept["asks"] == wait["asks"] and kept["since"] == wait["since"]
+    assert kept["credits_short"]["credit_denials"] == 1
 
 
 def test_xp_create_refuses_a_new_attempt_while_the_last_is_incomplete(board, launch):

@@ -45,7 +45,9 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
      `lifecycle.next_launch_after` (the backoff). Requests already created stay recorded;
      `missing` lists the rest. Finish the card `partial`. The XP poller makes a new launch
      card when the credit balance is above 0 again (or after the backoff, when the balance
-     cannot be read). Do not create a launch card yourself.
+     cannot be read). Do not create a launch card yourself. If `permit_required` is also
+     true, permit asks are still open: the tool set `awaiting-permit` instead (the shortfall
+     is in `credits_short`), and the next case applies.
    - `permit_required: true` or `league_not_chosen: true`: the coach's IDE Controls refused
      the batch (they ask before spending credits, or no league or another league is chosen).
      For a permit, the tool already tried every request, so all of the batch's asks are

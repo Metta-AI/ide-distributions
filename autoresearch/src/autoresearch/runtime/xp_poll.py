@@ -64,39 +64,41 @@ per denial). The card runs
 still missing, so a relaunch never duplicates an XP request.
 
 ``awaiting-permit``: the coach's IDE Controls refused the batch (Softmax hosting;
-``lifecycle.permit_wait``, written by ``softmax xp create``). First one runtime help request
-per batch (``runtime_messages.permit_needed``: how many asks, how to approve them and how to
-stop the asking per request), or for a league refusal one per league and cause
-(``league_not_chosen``). Then, for permit asks, every run reads each ask's answer
-(``Softmax.permit_answer``: our cogent's ``asks/<key>`` record, read with the Player
+``lifecycle.permit_wait``, written by ``softmax xp create``). Every experiment with open permit
+asks is here, also when credits ran out in the same batch (``permit_wait.credits_short``);
+there is no mixed credit-and-permit state, and this is the one gate. First one runtime help
+request per ask set (``runtime_messages.permit_needed``, keyed by ``permit_wait.announced``:
+how many asks, how to approve them and how to stop the asking per request), or for a league
+refusal one per league and cause (``league_not_chosen``). Then every run reads each open ask's
+answer (``Softmax.permit_answer``: our cogent's ``asks/<key>`` record, read with the Player
 credential, no model spend):
 
 - any no (or a refusal the server already called declined): the experiment goes ``stopped``
   (terminal, committed here) with ``lifecycle.stopped``, and one note
   (``runtime_messages.coach_declined``). Nothing is asked or launched for it again.
 - over today's cap (``permit_wait.not_before``, the next UTC day): nothing until then.
-- every ask yes (or a yes already used): one relaunch request at once, with the same marker
-  and card as a credit relaunch. The card reruns ``xp create`` with the same attempt, so each
-  refused request goes again with the same body and idempotency key and the server grants it
-  against its yes.
-- an answer that cannot be read: the relaunch waits for ``lifecycle.next_launch_after`` (the
-  credit backoff, counted per set of asks).
+- every ask yes (or a yes already used): the relaunch is due at once.
+- an answer that cannot be read: the relaunch is due once ``lifecycle.next_launch_after`` (the
+  credit backoff, counted per set of asks) has passed.
 - otherwise the asks still wait: nothing, and no card. A known waiting ask also holds back
   the backoff relaunch (such a card would only be refused). When an ask still waits
-  ``REMINDER_AFTER`` (24 hours) after the batch was first refused, one reminder help request,
+  ``REMINDER_AFTER`` (24 hours) after the set was first announced, one reminder help request,
   never more.
+
+A due relaunch with ``credits_short`` also waits until the credits cover it, decided as for
+``awaiting-credits`` (``credits_cover`` over ``credits_short``). Then one relaunch request with
+the same marker and card as a credit relaunch: the card reruns ``xp create`` with exactly the
+batch of the asks (``permit_wait.batch``, ``attempt``, ``batches``; ``rebuild.launch_step``),
+so each refused request goes again with the same body and idempotency key and the server
+grants it against its yes. ``xp create`` refuses any other batch while the asks are open.
 
 Only asks without a final answer are read again (``permit_answers``; final answers are kept in
 ``runtime/permit_answers.json``). New asks on a relaunch (a yes the price outgrew) are a new
-set, so they get their own help request.
+set, so they get their own help request; asks that only drop out as their requests are created
+do not.
 
-A league refusal relaunches on that backoff. Relaunches of every kind share the one-per-run
-limit. A permit relaunch names the exact batch of the asks (``permit_wait.batch``, ``attempt``,
-``batches``; ``rebuild.launch_step``), and ``xp create`` refuses any other batch while they wait.
-
-``awaiting-credits`` with permit asks in ``permit_wait`` (a credit denial later in a batch whose
-earlier requests were refused for a permit): the help request about the asks, and their answers
-read each run; a no stops the experiment as above, before any credit relaunch.
+A league refusal relaunches on that backoff (a no to an ask it still holds stops it as above).
+Relaunches of every kind share the one-per-run limit.
 
 Each experiment is handled independently: a failure is logged to
 ``.supervisor/runtime/xp_poll.log`` and the others go on. One run at a time
@@ -514,25 +516,34 @@ def min_relaunch_credits(env: Mapping[str, str]) -> float:
     return value if value >= 0 else DEFAULT_MIN_CREDITS
 
 
-def _request_relaunch(
-    canonical: Path, credits_view: CreditView, experiment: dict, now: datetime.datetime
-) -> CardSpec | None:
-    lifecycle = experiment.get("lifecycle") or {}
+def credits_cover(
+    credits_view: CreditView, experiment: dict, denial: dict, now: datetime.datetime
+) -> str | None:
+    """Why the credits now allow a relaunch after ``denial`` (``credit_denials``,
+    ``credits_at_denial``, ``next_launch_after``: the lifecycle of an ``awaiting-credits``
+    experiment, or ``permit_wait.credits_short``), or None while they do not
+    (``relaunch_due``)."""
     credits = credits_view.balance()
     need = relaunch_need(experiment, credits_view.episode_cost(), credits_view.min_credits)
     try:
-        due = relaunch_due(lifecycle, credits, now, need)
+        due = relaunch_due(denial, credits, now, need)
     except ValueError as error:
         raise ValueError(f"{experiment['id']}: {error}") from None
     if not due:
         return None
-    denials = int(lifecycle.get("credit_denials", 0))
+    denials = int(denial.get("credit_denials", 0))
     if credits is not None and credits >= need:
         when = f"{credits:g} credits available, about {need:g} needed"
     else:
         when = "the backoff has passed"
-    reason = f"relaunch after credit denial {denials}; {when}"
-    return _commit_relaunch(canonical, experiment, reason)
+    return f"relaunch after credit denial {denials}; {when}"
+
+
+def _request_relaunch(
+    canonical: Path, credits_view: CreditView, experiment: dict, now: datetime.datetime
+) -> CardSpec | None:
+    reason = credits_cover(credits_view, experiment, experiment.get("lifecycle") or {}, now)
+    return None if reason is None else _commit_relaunch(canonical, experiment, reason)
 
 
 def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec | None:
@@ -540,10 +551,10 @@ def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec
     an open request covers the experiment."""
     lifecycle = experiment.get("lifecycle") or {}
     wait = lifecycle.get("permit_wait") or {}
-    # A permit wait names its batch's attempt (``launch_step`` uses the same).
+    # A wait with open asks names its batch's attempt (``launch_step`` uses the same).
     attempt = (
         int(wait["attempt"])
-        if wait.get("kind") == "permit" and wait.get("attempt") is not None
+        if wait.get("asks") and wait.get("attempt") is not None
         else next_launch_attempt(experiment)
     )
     marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
@@ -560,7 +571,8 @@ def coach_wait_message(
 ) -> runtime_messages.RuntimeMessage:
     """The one help request about an ``awaiting-permit`` experiment's batch: its permit asks
     (``reminder``: the one reminder, ``REMINDER_AFTER`` after them), or the league choice (one
-    per league and cause)."""
+    per league and cause). Its key is the ``announced`` set, so asks that drop out as their
+    requests are created do not make a new help request; the text lists the open asks."""
     wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
     refs = [{"uri": f"ar://experiment/{experiment['id']}"}]
     league = wait.get("league_id") or ""
@@ -575,7 +587,15 @@ def coach_wait_message(
     keys = [entry.get("ask") or "?" for entry in asks]
     over_cap = any(entry.get("state") == PERMIT_OVER_CAP for entry in asks)
     return runtime_messages.permit_needed(
-        "xp", subject, len(asks), keys, league, over_cap, refs, reminder=reminder
+        "xp",
+        subject,
+        len(asks),
+        keys,
+        league,
+        over_cap,
+        refs,
+        reminder=reminder,
+        key_asks=wait.get("announced") or keys,
     )
 
 
@@ -634,8 +654,7 @@ def _stop_declined(canonical: Path, experiment: dict, now: datetime.datetime) ->
     with canonical_lock(canonical):
         current, _ = store.load(experiment_id)
         lifecycle = current.get("lifecycle") or {}
-        waiting = current.get("status") in ("awaiting-permit", "awaiting-credits")
-        if not waiting or lifecycle.get("permit_wait") != wait:
+        if current.get("status") != "awaiting-permit" or lifecycle.get("permit_wait") != wait:
             return
         stopped = {"by": "coach", "at": now.isoformat(timespec="seconds"), "wait": wait}
         store.update(
@@ -660,23 +679,6 @@ def _stop_declined(canonical: Path, experiment: dict, now: datetime.datetime) ->
             publish_message(canonical, message, allow_no_remote=True)
 
 
-def _credit_wait_declined(
-    ctx: RunContext, sm: Softmax, experiment: dict, now: datetime.datetime, result: XpPollRun
-) -> bool:
-    """An ``awaiting-credits`` experiment whose batch also has permit asks (H1): the coach is
-    told about them, their answers are read, and a no stops the experiment (True) before any
-    credit relaunch."""
-    wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
-    if wait.get("kind") != "permit" or not wait.get("asks"):
-        return False
-    _publish_once(ctx.canonical, coach_wait_message(experiment), result, experiment["id"])
-    if ANSWER_NO not in permit_answers(ctx, sm, wait):
-        return False
-    _stop_declined(ctx.canonical, experiment, now)
-    result.stopped.append(experiment["id"])
-    return True
-
-
 def _publish_once(
     canonical: Path, message: runtime_messages.RuntimeMessage, result: XpPollRun, eid: str
 ) -> None:
@@ -687,9 +689,15 @@ def _publish_once(
 
 
 def _wait_for_coach(
-    ctx: RunContext, sm: Softmax, experiment: dict, now: datetime.datetime, result: XpPollRun
+    ctx: RunContext,
+    sm: Softmax,
+    experiment: dict,
+    now: datetime.datetime,
+    result: XpPollRun,
+    credits_view: CreditView,
 ) -> None:
-    """``awaiting-permit`` (module docstring): the help request, then the answers decide."""
+    """``awaiting-permit`` (module docstring): the one gate. The help request (and the one
+    reminder), then the answers decide, then a credit shortfall of the same batch."""
     canonical = ctx.canonical
     _publish_once(canonical, coach_wait_message(experiment), result, experiment["id"])
     lifecycle = experiment.get("lifecycle") or {}
@@ -697,18 +705,19 @@ def _wait_for_coach(
     after = _parse_time(lifecycle.get("next_launch_after"))
     if after is None:  # the softmax tool sets it with every refusal
         raise ValueError(f"{experiment['id']}: awaiting-permit without next_launch_after")
-    if wait.get("kind") == "league":
-        due, reason = now >= after, "the league choice refused it; the backoff has passed"
-    else:
-        answers = permit_answers(ctx, sm, wait)
+    answers = permit_answers(ctx, sm, wait)  # none for a league wait without open asks
+    if wait.get("kind") == "permit":
         since = _parse_time(wait.get("since"))
         if ANSWER_WAITING in answers and since is not None and now - since >= REMINDER_AFTER:
             reminder = coach_wait_message(experiment, reminder=True)
             _publish_once(canonical, reminder, result, experiment["id"])
-        if ANSWER_NO in answers:
-            _stop_declined(canonical, experiment, now)
-            result.stopped.append(experiment["id"])
-            return
+    if ANSWER_NO in answers:
+        _stop_declined(canonical, experiment, now)
+        result.stopped.append(experiment["id"])
+        return
+    if wait.get("kind") == "league":
+        due, reason = now >= after, "the league choice refused it; the backoff has passed"
+    else:
         not_before = _parse_time(wait.get("not_before"))
         if not_before is not None and now < not_before:
             return  # over today's cap: no yes covers it before the UTC day turns
@@ -722,6 +731,13 @@ def _wait_for_coach(
             return  # the coach has not answered every ask yet
     if result.launches or not due:
         return
+    short = wait.get("credits_short")
+    if short:
+        # Credits ran out in the same batch: no card until they cover it too.
+        credit_reason = credits_cover(credits_view, experiment, short, now)
+        if credit_reason is None:
+            return
+        reason = f"{reason}; {credit_reason}"
     launch = _commit_relaunch(canonical, experiment, reason)
     if launch is not None:
         result.launches.append(launch)
@@ -779,16 +795,12 @@ def poll_experiment(
             )
             if review is not None:
                 result.reviews.append(review)
-    elif experiment.get("status") == "awaiting-credits" and _credit_wait_declined(
-        ctx, sm, experiment, now, result
-    ):
-        return
     elif experiment.get("status") == "awaiting-credits" and not result.launches:
         launch = _request_relaunch(canonical, credits_view, experiment, now)
         if launch is not None:
             result.launches.append(launch)
     elif experiment.get("status") == "awaiting-permit":
-        _wait_for_coach(ctx, sm, experiment, now, result)
+        _wait_for_coach(ctx, sm, experiment, now, result, credits_view)
 
 
 def run(

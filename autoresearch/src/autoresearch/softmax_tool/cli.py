@@ -34,22 +34,29 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   (``runtime.xp_poll.relaunch_due``). The coach's refusals (Softmax hosting) end with exit 0
   too, and the experiment goes ``awaiting-permit`` (from ``uploaded|evaluating|awaiting-credits``)
   with ``lifecycle.permit_wait`` = ``{kind, batch, attempt, batches, league_id, reason, asks,
-  refusals, since, retry_minutes, not_before}``. A permit refusal (the IDE Controls ask before XP
-  requests, ``permit_required: true``) does not stop the batch: every request is tried, so one
-  run files every ask, and ``asks`` lists one ``{request, seed, arm, ask, state, reason}`` per
-  refused request (``state``: ``waiting``, ``declined`` or ``over_cap``, from the server's
-  reason; ``not_before`` is the next UTC day when one is over today's cap). A league refusal
-  (no league or another league chosen, ``league_not_chosen: true``) stops the batch. xp-poll
-  reads each ask's answer and relaunches once all are yes (``runtime.xp_poll``); the relaunch
-  sends the same body and idempotency key, so the server decides it against the same ask.
-  ``lifecycle.next_launch_after`` is the fallback for when the answers cannot be read (and for
-  a league refusal): the credit backoff, counted by ``refusals`` of the same asks only. A
-  credit denial of an ``awaiting-permit`` experiment moves it to ``awaiting-credits``. A
-  ``stopped`` (the coach declined it) or ``reviewed`` experiment, or one whose wait records a
-  declined ask, is refused (``experiment_closed``) before anything is created. A refusal that
-  says the coach said no ends the batch at once (``permit_declined: true``). While permit asks
-  wait (also during a credit wait, which keeps the batch's asks in ``permit_wait``), only
-  their exact ``--batch``/``--attempt``/``--batches`` may run (``permit_batch_mismatch``).
+  announced, refusals, since, retry_minutes, not_before, credits_short}``. A permit refusal (the
+  IDE Controls ask before XP requests, ``permit_required: true``) does not stop the batch: every
+  request is tried, so one run files every ask, and ``asks`` lists one ``{request, seed, arm,
+  ask, state, reason}`` per refused request (``state``: ``waiting``, ``declined`` or
+  ``over_cap``, from the server's reason; ``not_before`` is the next UTC day when one is over
+  today's cap). A league refusal (no league or another league chosen, ``league_not_chosen:
+  true``) stops the batch. The open asks are merged by request, never replaced: a rerun keeps
+  every saved ask, a request it refuses again replaces its entry (the same ask, or a new one
+  the server filed for it), and only requests now created drop out (``_merge_asks``).
+  ``announced`` is the set the help request is about; it changes only when the server files a
+  new ask. Any open ask keeps the experiment ``awaiting-permit``: a credit denial in the same
+  run (``credit_denied: true`` too) is recorded as ``permit_wait.credits_short`` = ``{reason,
+  credit_denials, credits_at_denial, next_launch_after}`` and does not change the status; only
+  a batch with no open ask goes ``awaiting-credits``. xp-poll reads each ask's answer and
+  relaunches once all are yes and, with ``credits_short``, the credits cover it
+  (``runtime.xp_poll``); the relaunch sends the same body and idempotency key, so the server
+  decides it against the same ask. ``lifecycle.next_launch_after`` is the fallback for when
+  the answers cannot be read (and for a league refusal): the credit backoff, counted by
+  ``refusals`` of the same asks only. A ``stopped`` (the coach declined it) or ``reviewed``
+  experiment, or one whose wait records a declined ask, is refused (``experiment_closed``)
+  before anything is created. A refusal that says the coach said no ends the batch at once
+  (``permit_declined: true``). While permit asks are open, only their exact
+  ``--batch``/``--attempt``/``--batches`` may run (``permit_batch_mismatch``).
   Rerunning the same ``--batch``/``--attempt`` later creates only the missing requests. A new
   attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
@@ -185,8 +192,6 @@ BACKOFF_CAP = timedelta(hours=8)
 LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
 # Statuses whose evaluation is over: ``xp create`` refuses them (``experiment_closed``).
 CLOSED_EXPERIMENT = ("stopped", "reviewed")
-# Statuses in which ``lifecycle.permit_wait`` names the batch that must run next.
-WAITING_FOR_PERMIT = ("awaiting-permit", "awaiting-credits")
 # ``xp create``'s refusal flags when nothing refused the batch.
 NOT_REFUSED = {"credit_denied": False, "permit_required": False, "league_not_chosen": False}
 
@@ -452,36 +457,29 @@ def _credits(ctx, sm, args) -> dict:
         return {"available": False, "reason": str(error)}
 
 
-def _credit_denied(
-    store,
-    experiment: str,
-    meta: dict,
-    reason: str,
-    base: timedelta,
-    credits: float | None,
-    permit: tuple | None = None,
+def _credit_shortfall(
+    lifecycle: dict, credits: float | None, base: timedelta, now: datetime
 ) -> dict:
-    """``awaiting-credits`` with the backoff (A10). ``permit`` is ``(args, asks, league_id)``
-    when requests earlier in the batch were refused for a permit: their asks are kept in
-    ``lifecycle.permit_wait`` too, so xp-poll keeps reading their answers (a no stops the
-    experiment during the credit wait)."""
-    lifecycle = dict(meta.get("lifecycle") or {})
+    """The facts of a credit denial (A10): the consecutive ``credit_denials``, the balance read
+    right after it (``credits_at_denial``, null when unreadable) and the backoff's end."""
     denials = int(lifecycle.get("credit_denials", 0)) + 1
-    now = datetime.now(UTC)
     after = now + credit_backoff(denials, base)
-    next_launch_after = after.isoformat(timespec="seconds")
-    patch: dict = {
-        "lifecycle": {
-            **lifecycle,
-            "credit_denials": denials,
-            "next_launch_after": next_launch_after,
-            "credits_at_denial": credits,
-        }
+    return {
+        "credit_denials": denials,
+        "credits_at_denial": credits,
+        "next_launch_after": after.isoformat(timespec="seconds"),
     }
-    if permit is not None and permit[1]:
-        args, asks, league_id = permit
-        wait, _ = _permit_wait(lifecycle, args, None, asks, league_id, base, now)
-        patch["lifecycle"]["permit_wait"] = wait
+
+
+def _credit_denied(
+    store, experiment: str, meta: dict, reason: str, base: timedelta, credits: float | None
+) -> dict:
+    """``awaiting-credits`` with the backoff (A10). Only when no permit ask of the batch is
+    open: with open asks the experiment stays ``awaiting-permit`` (``_awaiting_coach``)."""
+    lifecycle = dict(meta.get("lifecycle") or {})
+    facts = _credit_shortfall(lifecycle, credits, base, datetime.now(UTC))
+    # A league wait (or one whose asks were all granted) says nothing more once credits stop it.
+    patch: dict = {"lifecycle": {**lifecycle, **facts, "permit_wait": None}}
     if meta["status"] in ("uploaded", "evaluating", "awaiting-permit"):
         patch["status"] = "awaiting-credits"
     store.update(experiment, patch)
@@ -489,7 +487,7 @@ def _credit_denied(
         **NOT_REFUSED,
         "credit_denied": True,
         "reason": reason,
-        "next_launch_after": next_launch_after,
+        "next_launch_after": facts["next_launch_after"],
         "status": patch.get("status", meta["status"]),
     }
 
@@ -499,23 +497,40 @@ def _next_utc_day(now: datetime) -> datetime:
     return datetime.combine(now.astimezone(UTC).date() + timedelta(days=1), dtime.min, UTC)
 
 
+def _merge_asks(saved: list[dict], fresh: list[dict], done: set) -> list[dict]:
+    """The batch's open asks after this run. The saved asks are kept by request (``request``,
+    the request's tag): this run's refusal of a request replaces its saved entry (the same ask
+    again, or a new one the server filed for it), and a request now created (``done``: its
+    (seed, arm)) drops out. An ask is never dropped because this run did not reach its request
+    (a credit denial, a league refusal or a no stopped the batch first)."""
+    by_request = {entry["request"]: entry for entry in saved}
+    for entry in fresh:
+        by_request[entry["request"]] = entry
+    return [entry for entry in by_request.values() if (entry["seed"], entry["arm"]) not in done]
+
+
 def _permit_wait(
     lifecycle: dict,
     args,
     refusal: LeagueNotChosen | None,
     asks: list[dict],
+    over_cap: bool,
     league_id: str,
     base: timedelta,
     now: datetime,
 ) -> tuple[dict, datetime]:
     """``lifecycle.permit_wait`` for the coach's refusal of this batch, and the fallback
-    relaunch time (module docstring, ``xp create``)."""
+    relaunch time (module docstring, ``xp create``). ``asks`` are the merged open asks
+    (``_merge_asks``); ``over_cap``: this run's refusals include one over today's cap."""
     kind = "league" if refusal is not None else "permit"
     previous = lifecycle.get("permit_wait") or {}
     keys = sorted(entry["ask"] or "" for entry in asks)
-    same = previous.get("kind") == kind and sorted(
+    announced = previous.get("announced") or sorted(
         entry.get("ask") or "" for entry in previous.get("asks") or []
-    ) == keys
+    )
+    # The same wait while the server filed no new ask: asks only drop out as requests are
+    # created. A new ask is a new set: its own help request, reminder clock and backoff.
+    same = previous.get("kind") == kind and set(keys) <= set(announced)
     # The fallback backoff counts the refusals of these asks only (a new wait starts over).
     refusals = int(previous.get("refusals", 0)) + 1 if same else 1
     since = previous.get("since") if same and previous.get("since") else now.isoformat()
@@ -528,14 +543,18 @@ def _permit_wait(
         "league_id": league_id,
         "reason": refusal.reason if refusal is not None else None,
         "asks": asks,
+        "announced": announced if same else keys,  # the asks the help request is about
         "refusals": refusals,
         "since": since,  # when the coach was first asked these asks (the reminder clock)
         "retry_minutes": int(base.total_seconds() // 60),
         "not_before": None,
+        "credits_short": None,
     }
-    if any(entry["state"] == PERMIT_OVER_CAP for entry in asks):
+    if over_cap:
         wait["not_before"] = _next_utc_day(now).isoformat(timespec="seconds")
         after = max(after, _next_utc_day(now))
+    elif any(entry["state"] == PERMIT_OVER_CAP for entry in asks):
+        wait["not_before"] = previous.get("not_before")  # not tried again this run
     return wait, after
 
 
@@ -546,31 +565,39 @@ def _awaiting_coach(
     args,
     refusal: LeagueNotChosen | None,
     asks: list[dict],
+    over_cap: bool,
     league_id: str,
     base: timedelta,
+    shortfall: tuple[str, float | None] | None,
 ) -> dict:
-    """The coach refused the batch: the league choice (``refusal``), or one permit ask per
-    refused request (``asks``). ``awaiting-permit`` with the wait recorded (module docstring,
-    ``xp create``)."""
+    """The coach refused the batch: the league choice (``refusal``), or permit asks are open
+    (``asks``, merged). ``awaiting-permit`` with the wait recorded (module docstring, ``xp
+    create``). ``shortfall`` is ``(reason, balance)`` when credits also ran out in this run: it
+    is recorded as ``permit_wait.credits_short`` and the status stays ``awaiting-permit``."""
     lifecycle = dict(meta.get("lifecycle") or {})
-    wait, after = _permit_wait(
-        lifecycle, args, refusal, asks, league_id, base, datetime.now(UTC)
-    )
+    now = datetime.now(UTC)
+    wait, after = _permit_wait(lifecycle, args, refusal, asks, over_cap, league_id, base, now)
     next_launch_after = after.isoformat(timespec="seconds")
-    patch: dict = {
-        "lifecycle": {**lifecycle, "next_launch_after": next_launch_after, "permit_wait": wait}
-    }
+    patched = {**lifecycle, "next_launch_after": next_launch_after, "permit_wait": wait}
+    if shortfall is not None:
+        facts = _credit_shortfall(lifecycle, shortfall[1], base, now)
+        wait["credits_short"] = {"reason": shortfall[0], **facts}
+        patched["credit_denials"] = facts["credit_denials"]
+        patched["credits_at_denial"] = facts["credits_at_denial"]
+    patch: dict = {"lifecycle": patched}
     if meta["status"] in ("uploaded", "evaluating", "awaiting-credits"):
         patch["status"] = "awaiting-permit"
     store.update(experiment, patch)
     kind = wait["kind"]
     return {
         **NOT_REFUSED,
+        "credit_denied": shortfall is not None,
         "permit_required": kind == "permit",
         "league_not_chosen": kind == "league",
         "permit_declined": any(entry["state"] == PERMIT_DECLINED for entry in asks),
         "reason": refusal.reason if refusal is not None else asks[0]["reason"],
         "permit_asks": asks,
+        "credits_short": wait["credits_short"],
         "next_launch_after": next_launch_after,
         "status": patch.get("status", meta["status"]),
     }
@@ -633,13 +660,13 @@ def check_new_attempt(
 
 
 def _check_permit_wait(experiment: str, meta: dict, args) -> None:
-    """While the experiment waits on permit asks (``lifecycle.permit_wait``, also during a
-    credit wait), only the exact batch they were filed for may run: the same ``--batch``,
-    ``--attempt`` and ``--batches`` give the same requests and idempotency keys, so each one
-    replays against its own ask (``permit_batch_mismatch`` otherwise). A wait with a declined
-    ask is final (``experiment_closed``): xp-poll stops the experiment."""
+    """While the experiment waits on open permit asks (``awaiting-permit`` with
+    ``lifecycle.permit_wait.asks``), only the exact batch they were filed for may run: the same
+    ``--batch``, ``--attempt`` and ``--batches`` give the same requests and idempotency keys, so
+    each one replays against its own ask (``permit_batch_mismatch`` otherwise). A wait with a
+    declined ask is final (``experiment_closed``): xp-poll stops the experiment."""
     wait = (meta.get("lifecycle") or {}).get("permit_wait") or {}
-    if wait.get("kind") != "permit" or meta.get("status") not in WAITING_FOR_PERMIT:
+    if not wait.get("asks") or meta.get("status") != "awaiting-permit":
         return
     if any(entry.get("state") == PERMIT_DECLINED for entry in wait.get("asks") or []):
         raise Refused(
@@ -707,7 +734,7 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
             raise Refused(*problem)
     created: list[dict] = []
     denial: CreditDenied | LeagueNotChosen | None = None
-    asks: list[dict] = []  # one per request refused for a permit; the batch goes on
+    fresh: list[dict] = []  # one per request refused for a permit in this run; the batch goes on
     for seed, arm, spec in planned:
         if (seed, arm) in existing:
             continue
@@ -720,7 +747,7 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
             # once (H2): nothing more is submitted, and the wait records it, so xp-poll stops
             # the experiment and ``xp create`` refuses it from now on.
             request = tag(experiment, args.batch, args.attempt, seed, arm)
-            asks.append(
+            fresh.append(
                 {
                     "request": request,
                     "seed": seed,
@@ -756,14 +783,22 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         "missing": missing,
     }
     meta, _ = store.load(experiment)
-    if isinstance(denial, CreditDenied):
-        credits = read_credits(sm)
-        permit = (args, asks, _league_id())
-        denied = _credit_denied(store, experiment, meta, denial.reason, base, credits, permit)
-        return {**report, **denied, "permit_asks": asks}
-    if denial is not None or asks:
-        waiting = _awaiting_coach(store, experiment, meta, args, denial, asks, _league_id(), base)
+    saved = (meta.get("lifecycle") or {}).get("permit_wait") or {}
+    open_asks = (saved.get("asks") or []) if meta["status"] == "awaiting-permit" else []
+    asks = _merge_asks(open_asks, fresh, done)
+    credits_out = isinstance(denial, CreditDenied)
+    if isinstance(denial, LeagueNotChosen) or asks:
+        # Open asks keep the experiment awaiting-permit, also when credits ran out too.
+        shortfall = (denial.reason, read_credits(sm)) if credits_out else None
+        over_cap = any(entry["state"] == PERMIT_OVER_CAP for entry in fresh)
+        league = denial if isinstance(denial, LeagueNotChosen) else None
+        waiting = _awaiting_coach(
+            store, experiment, meta, args, league, asks, over_cap, _league_id(), base, shortfall
+        )
         return {**report, **waiting}
+    if credits_out:
+        credits = read_credits(sm)
+        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}
 
     patch: dict = {}
     if meta["status"] in ("uploaded", "awaiting-credits", "awaiting-permit"):

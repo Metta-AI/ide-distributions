@@ -329,9 +329,12 @@ The runtime reads the coach's answers itself, every run, with the agent token
   relaunch card at once; it sends each refused request again with the same body and
   idempotency key (the card names the exact `--batch`, `--attempt` and `--batches`, and
   `xp create` refuses any other batch while the asks wait), so Softmax grants it against its
-  yes and creates nothing twice. A credit denial later in the same batch keeps the asks: their
-  answers are still read during the credit wait, and a no still stops the experiment. A request
-  over today's cap waits for the next UTC day, whatever the coach answers before then. A
+  yes and creates nothing twice. Every ask stays tracked until its request is created: a rerun
+  that stops early (credits ran out, or a no) keeps the asks it did not reach, and a new ask
+  the server files for a request replaces that request's old one. An experiment with any ask
+  open is always `awaiting-permit`: when credits also ran out in the batch, that is recorded in
+  the wait (`credits_short`), and the relaunch waits for every yes and then for the credits,
+  never for the credits alone. A request over today's cap waits for the next UTC day, whatever the coach answers before then. A
   relaunch whose price moved past an earlier yes gets new asks, and with them a new help
   request.
 - A refused submission leaves its promotion at `intent` with `waiting` set
