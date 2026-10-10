@@ -64,7 +64,7 @@ env_requires:
       queue-keeper stops it. 0 turns it off.
   - name: AUTORESEARCH_DAILY_BUDGET_USD
     required: false
-    default: "25"
+    default: "100"
     description: >-
       Estimated model spend per UTC day of the research sessions of this profile (every
       session but the IDE coach chat's; see AUTORESEARCH_CHAT_DAILY_USD). At the budget

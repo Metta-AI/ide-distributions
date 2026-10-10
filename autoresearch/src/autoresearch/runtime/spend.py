@@ -82,7 +82,7 @@ ENV_MAX_CARD_USD = "AUTORESEARCH_MAX_CARD_USD"
 ENV_DAILY_USD = "AUTORESEARCH_DAILY_BUDGET_USD"
 DEFAULT_MAX_RUNS = 4
 DEFAULT_MAX_CARD_USD = 4.0
-DEFAULT_DAILY_USD = 25.0
+DEFAULT_DAILY_USD = 100.0
 SPEND_CAP_PREFIX = "spend-cap:"
 BUDGET_PAUSE_PREFIX = "daily budget:"
 # Runs that never reached a model call: a spawn failure, a provider rate limit at start.
