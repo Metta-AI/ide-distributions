@@ -70,17 +70,29 @@ submit for the coach: the IDE Controls ask before league submissions (403
 ``permit_required``, ``PermitRequired``), or the coach chose no league or another one
 (``LeagueNotChosen``). Nothing was submitted, and the server says so, so the promotion stays at
 ``intent`` with ``waiting`` (``permit`` or ``league``) and ``waiting_detail`` (``{reason, ask,
-league_id, refusals, next_retry_after}``); the submit path returns ``code``
-``permit_required`` or ``league_not_chosen``. ``reconcile`` then owns it, whatever its holder
-does: one runtime help request (``runtime_messages.permit_needed`` / ``league_not_chosen``,
-``runtime_key`` per promotion), and once ``next_retry_after`` has passed (30 minutes, doubling
-per refusal, at most 8 hours, ``PERMIT_RETRY_BASE``/``PERMIT_RETRY_CAP``) and no champion
-conflict is open, the submissions list first (a submission found settles it: ``submitted``)
-and else the same submit again (the same policy version and league: the server asks about the
-same permit). Success moves it to ``submitted``; the holder's handoff, which waited at
-``intent``, then merges (a bootstrap: its champion path is the shipped one) or becomes a
-``repair`` that a recovery card stages (an experiment: the refused submit staged nothing),
-as for any ``submitted`` promotion. A waiting intent is never aborted for a terminal holder.
+state, league_id, refusals, next_retry_after, last_error?}``); the submit path returns
+``code`` ``permit_required`` or ``league_not_chosen``. ``reconcile`` then owns it, whatever its
+holder does:
+
+- one runtime help request (``runtime_messages.permit_needed``, per promotion; or
+  ``league_not_chosen``, per league and cause);
+- every run, the coach's answer to the ask (``Softmax.permit_answer``, no model spend). A no
+  (or a refusal the server already called declined) moves it to ``aborted`` with
+  ``DECLINED_NOTE`` and one note (``coach_declined``): the slot is free, nothing is submitted
+  or asked again, and a board rebuild does not request its promotion again. A yes makes the
+  retry due at once; while the ask waits, nothing is retried. When the answer cannot be read
+  (and for a league wait) the retry waits for ``next_retry_after`` (30 minutes, doubling per
+  refusal, at most 8 hours, ``PERMIT_RETRY_BASE``/``PERMIT_RETRY_CAP``);
+- the retry, when no champion conflict is open: the submissions list first (a submission
+  found settles it: ``submitted``) and else the same submit again (the same policy version and
+  league, so the server grants it against the same ask). A retry that raises records
+  ``last_error`` and moves ``next_retry_after`` on by the next step, so it is not repeated
+  every run.
+
+Success moves it to ``submitted``; the holder's handoff, which waited at ``intent``, then merges
+(a bootstrap: its champion path is the shipped one) or becomes a ``repair`` that a recovery card
+stages (an experiment: the refused submit staged nothing), as for any ``submitted`` promotion. A
+waiting intent is never aborted for a terminal holder.
 
 Champion authority (amendment A9). The champion is whichever policy the Softmax league has
 registered as competing for our player (``Softmax.leaderboard_champion``: the champion
@@ -126,6 +138,11 @@ from autoresearch.runtime.ledger import (
 )
 from autoresearch.runtime.pause import pause_path
 from autoresearch.softmax_tool.protocol import (
+    ANSWER_NO,
+    ANSWER_USED,
+    ANSWER_WAITING,
+    ANSWER_YES,
+    PERMIT_DECLINED,
     LeagueNotChosen,
     PermitRequired,
     Softmax,
@@ -149,6 +166,8 @@ MAX_RECOVERY_ATTEMPTS = 3
 # Retry wait of a submit the coach refused (module docstring, "Waiting for the coach").
 PERMIT_RETRY_BASE = datetime.timedelta(minutes=30)
 PERMIT_RETRY_CAP = datetime.timedelta(hours=8)
+# The history note of a promotion aborted because the coach said no: it is not promoted again.
+DECLINED_NOTE = "the coach declined the submission"
 
 log = logging.getLogger(__name__)
 
@@ -1147,16 +1166,17 @@ def _settle_intent(ctx: RunContext, promotion: Promotion, sm: Softmax) -> Action
 
 
 def coach_wait_message(promotion: Promotion) -> runtime_messages.RuntimeMessage:
-    """The one help request about a promotion waiting for the coach (per promotion and kind:
-    a permit wait and a league wait are different asks)."""
+    """The one help request about a promotion waiting for the coach: its permit ask (per
+    promotion), or the league choice (per league and cause)."""
     detail = promotion.waiting_detail or {}
-    reason, league = detail.get("reason") or "", detail.get("league_id") or ""
+    league = detail.get("league_id") or ""
     refs = [{"uri": _refs(promotion.experiment, promotion.version)[0]}]
     if promotion.waiting == "league":
-        return runtime_messages.league_not_chosen("submit", promotion.id, reason, league, refs)
-    return runtime_messages.permit_needed(
-        "submit", promotion.id, reason, detail.get("ask"), league or None, refs
-    )
+        minutes = int(PERMIT_RETRY_BASE.total_seconds() // 60)
+        reason = detail.get("reason") or ""
+        return runtime_messages.league_not_chosen("submit", league, reason, minutes, refs)
+    asks = [detail["ask"]] if detail.get("ask") else []
+    return runtime_messages.permit_needed("submit", promotion.id, 1, asks, league, refs=refs)
 
 
 def _ask_coach(canonical: Path, promotion: Promotion) -> list[Action]:
@@ -1169,32 +1189,101 @@ def _ask_coach(canonical: Path, promotion: Promotion) -> list[Action]:
     return [Action("help_requested", promotion.id, message.title)]
 
 
+def _coach_answer(sm: Softmax, promotion: Promotion) -> str | None:
+    """The coach's answer to the waiting promotion's permit ask; None for a league wait or
+    when it cannot be read. A refusal the server already called declined is a no."""
+    detail = promotion.waiting_detail or {}
+    if promotion.waiting != "permit":
+        return None
+    if detail.get("state") == PERMIT_DECLINED:
+        return ANSWER_NO
+    if not detail.get("ask"):
+        return None
+    try:
+        return sm.permit_answer(detail["ask"])
+    except Exception:  # noqa: BLE001 - an unreadable answer only means "unknown"
+        return None
+
+
+def declined(record: dict) -> bool:
+    """A promotion record (as stored) that ended because the coach said no."""
+    history = record.get("history") or []
+    return record.get("stage") == "aborted" and bool(history) and (
+        history[-1].get("note") == DECLINED_NOTE
+    )
+
+
+def _decline(canonical: Path, promotion: Promotion) -> list[Action]:
+    """The coach said no: ``aborted`` (the slot is free; nothing was submitted), one note.
+    Under the lock."""
+    _move(
+        canonical,
+        promotion,
+        "aborted",
+        DECLINED_NOTE,
+        waiting=None,
+        waiting_detail=None,
+    )
+    message = runtime_messages.coach_declined(
+        "submit", promotion.id, refs=[{"uri": _refs(promotion.experiment, promotion.version)[0]}]
+    )
+    if not already_published(canonical, message):
+        publish_message(canonical, message, allow_no_remote=True)
+    return [Action("aborted", promotion.id, DECLINED_NOTE)]
+
+
+def _retry_due(sm: Softmax, promotion: Promotion, now: datetime.datetime) -> tuple[bool, str]:
+    """(due, answer): retry the submit now? A yes (or a used yes) is due at once; an ask
+    still waiting never is; an unreadable answer, or a league wait, after ``next_retry_after``."""
+    answer = _coach_answer(sm, promotion)
+    if answer in (ANSWER_YES, ANSWER_USED):
+        return True, answer
+    if answer in (ANSWER_NO, ANSWER_WAITING):
+        return False, answer
+    due = datetime.datetime.fromisoformat((promotion.waiting_detail or {})["next_retry_after"])
+    return now >= due, "unknown"
+
+
 def _wait_for_coach(
     ctx: RunContext, promotion: Promotion, sm: Softmax, now: datetime.datetime
 ) -> list[Action]:
     """An ``intent`` promotion the server refused for the coach (module docstring): one help
-    request; then, once ``next_retry_after`` has passed and no champion conflict is open, the
-    submissions list (a submission found settles it) and else the same submit again. Network
-    calls run outside the lock."""
+    request; the coach's answer read every run; on a no, ``aborted``; once due (a yes, or the
+    backoff when the answer cannot be read) and no champion conflict is open, the submissions
+    list (a submission found settles it) and else the same submit again. A retry that raises
+    is recorded and moves the retry time on, so it is not repeated every run. Network calls
+    run outside the lock."""
     canonical = ctx.canonical
     actions = _ask_coach(canonical, promotion)
     detail = promotion.waiting_detail or {}
-    due = datetime.datetime.fromisoformat(detail["next_retry_after"])
     league_id = detail["league_id"]
-    if now < due or open_conflict(ctx, sm, league_id) is not None:
+    due, answer = _retry_due(sm, promotion, now)
+    if answer == ANSWER_NO:
+        with canonical_lock(canonical):
+            current = load(canonical)
+            if current is None or current.id != promotion.id or current.stage != "intent":
+                return actions
+            return [*actions, *_decline(canonical, current)]
+    if not due:
         return actions
-    player = sm.whoami().player_id
-    found = [
-        s
-        for s in sm.submissions(player)
-        if s["policy_version_id"] == promotion.platform_policy_version_id
-        and s["league_id"] == league_id
-    ]
-    submitted = (
-        found[-1]["submission_id"]
-        if found
-        else sm.submit(promotion.platform_policy_version_id, league_id)
-    )
+    try:
+        if open_conflict(ctx, sm, league_id) is not None:
+            return actions
+        player = sm.whoami().player_id
+        found = [
+            s
+            for s in sm.submissions(player)
+            if s["policy_version_id"] == promotion.platform_policy_version_id
+            and s["league_id"] == league_id
+        ]
+        submitted = (
+            found[-1]["submission_id"]
+            if found
+            else sm.submit(promotion.platform_policy_version_id, league_id)
+        )
+    except Exception as error:
+        _record_retry_error(canonical, promotion, now, error)
+        raise
     with canonical_lock(canonical):
         current = load(canonical)
         if current is None or current.id != promotion.id or current.stage != "intent":
@@ -1218,6 +1307,27 @@ def _wait_for_coach(
     actions.append(Action("waiting", promotion.id, submitted.reason))
     # The other kind of wait (a permit after the league, or back) is a new help request.
     return [*actions, *_ask_coach(canonical, still)]
+
+
+def _record_retry_error(
+    canonical: Path, promotion: Promotion, now: datetime.datetime, error: Exception
+) -> None:
+    """A retried submit (or its reads) raised: record it and move ``next_retry_after`` on by
+    the next backoff step, so a failure that repeats is retried on the backoff, not every
+    run."""
+    with canonical_lock(canonical):
+        current = load(canonical)
+        if current is None or current.id != promotion.id or current.stage != "intent":
+            return
+        detail = dict(current.waiting_detail or {})
+        refusals = int(detail.get("refusals", 0)) + 1
+        detail.update(
+            refusals=refusals,
+            next_retry_after=(now + _retry_wait(refusals)).isoformat(timespec="seconds"),
+            last_error=f"{type(error).__name__}: {error}"[-500:],
+        )
+        updated = replace(current, updated_at=now_iso(), waiting_detail=detail)
+        _save(canonical, updated, f"promotion {promotion.id}: retry failed, waiting longer")
 
 
 def _request_recovery(ctx: RunContext, promotion: Promotion) -> Action:
@@ -1582,6 +1692,7 @@ def _waiting_fields(
     detail = {
         "reason": refusal.reason,
         "ask": refusal.ask if permit else None,
+        "state": refusal.state if permit else None,
         "league_id": league_id,
         "refusals": refusals,
         "next_retry_after": (now + _retry_wait(refusals)).isoformat(timespec="seconds"),

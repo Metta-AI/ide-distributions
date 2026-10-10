@@ -63,17 +63,28 @@ per denial). The card runs
 ``xp recover`` and then ``xp create`` with the same attempt, which creates only the requests
 still missing, so a relaunch never duplicates an XP request.
 
-``awaiting-permit``: the coach's IDE Controls refused an XP request (Softmax hosting: a permit
-ask waits for the coach, or no league or another league is chosen; ``lifecycle.permit_wait``,
-written by ``softmax xp create``). First one runtime help request
-(``runtime_messages.permit_needed`` or ``league_not_chosen``, ``runtime_key`` per refused
-request, so a second refusal of the same request publishes nothing): it tells the coach what
-to do in the IDE Controls. Then, once ``lifecycle.next_launch_after`` has passed (the same
-backoff as a credit denial, from ``permit_refusals``), one relaunch request with the same
-marker and card as a credit relaunch: the card reruns ``xp create`` with the same attempt, so
-the refused request goes again with the same body and idempotency key. Relaunches of both
-kinds share the one-per-run limit. The poller cannot read whether the coach has answered, so
-an unanswered ask costs one relaunch card per backoff step.
+``awaiting-permit``: the coach's IDE Controls refused the batch (Softmax hosting;
+``lifecycle.permit_wait``, written by ``softmax xp create``). First one runtime help request
+per batch (``runtime_messages.permit_needed``: how many asks, how to approve them and how to
+stop the asking per request), or for a league refusal one per league and cause
+(``league_not_chosen``). Then, for permit asks, every run reads each ask's answer
+(``Softmax.permit_answer``: our cogent's ``asks/<key>`` record, read with the Player
+credential, no model spend):
+
+- any no (or a refusal the server already called declined): the experiment goes ``stopped``
+  (terminal, committed here) with ``lifecycle.stopped``, and one note
+  (``runtime_messages.coach_declined``). Nothing is asked or launched for it again.
+- over today's cap (``permit_wait.not_before``, the next UTC day): nothing until then.
+- every ask yes (or a yes already used): one relaunch request at once, with the same marker
+  and card as a credit relaunch. The card reruns ``xp create`` with the same attempt, so each
+  refused request goes again with the same body and idempotency key and the server grants it
+  against its yes.
+- an answer that cannot be read: the relaunch waits for ``lifecycle.next_launch_after`` (the
+  credit backoff, counted per set of asks).
+- otherwise the asks still wait: nothing, and no card.
+
+A league refusal relaunches on that backoff. Relaunches of every kind share the one-per-run
+limit.
 
 Each experiment is handled independently: a failure is logged to
 ``.supervisor/runtime/xp_poll.log`` and the others go on. One run at a time
@@ -109,7 +120,17 @@ from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
 from autoresearch.runtime.markers import next_launch_attempt, relaunch_marker, review_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request
 from autoresearch.runtime.rebuild import launch_step, open_experiment_refs, review_refs
-from autoresearch.softmax_tool.protocol import Softmax, XpHandle, XpStatus, read_credits
+from autoresearch.softmax_tool.protocol import (
+    ANSWER_NO,
+    ANSWER_USED,
+    ANSWER_YES,
+    PERMIT_DECLINED,
+    PERMIT_OVER_CAP,
+    Softmax,
+    XpHandle,
+    XpStatus,
+    read_credits,
+)
 from autoresearch.softmax_tool.protocol import from_env as softmax_from_env
 from autoresearch.softmax_tool.xp import ArtifactsIncomplete
 from autoresearch.stats.design import EvaluationDesign
@@ -135,6 +156,7 @@ class XpPollRun:
     reviews: list[CardSpec] = field(default_factory=list)
     launches: list[CardSpec] = field(default_factory=list)
     help_requests: list[str] = field(default_factory=list)  # experiments asked about
+    stopped: list[str] = field(default_factory=list)  # experiments the coach declined
     warnings: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)  # experiment -> error
 
@@ -512,36 +534,105 @@ def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec
 
 
 def coach_wait_message(experiment: dict) -> runtime_messages.RuntimeMessage:
-    """The one help request about an ``awaiting-permit`` experiment's refused request."""
+    """The one help request about an ``awaiting-permit`` experiment's batch: its permit asks,
+    or the league choice (one per league and cause)."""
     wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
-    if not wait.get("request"):
-        raise ValueError(f"{experiment['id']}: awaiting-permit without lifecycle.permit_wait")
     refs = [{"uri": f"ar://experiment/{experiment['id']}"}]
-    reason, league = wait.get("reason") or "", wait.get("league_id") or ""
+    league = wait.get("league_id") or ""
     if wait.get("kind") == "league":
-        return runtime_messages.league_not_chosen("xp", wait["request"], reason, league, refs)
-    return runtime_messages.permit_needed(
-        "xp", wait["request"], reason, wait.get("ask"), league or None, refs
-    )
+        minutes = int(wait.get("retry_minutes") or 30)
+        reason = wait.get("reason") or ""
+        return runtime_messages.league_not_chosen("xp", league, reason, minutes, refs)
+    asks = wait.get("asks") or []
+    if not asks:
+        raise ValueError(f"{experiment['id']}: awaiting-permit without lifecycle.permit_wait.asks")
+    subject = f"{experiment['id']}:b{wait.get('batch')}:a{wait.get('attempt')}"
+    keys = [entry.get("ask") or "?" for entry in asks]
+    over_cap = any(entry.get("state") == PERMIT_OVER_CAP for entry in asks)
+    return runtime_messages.permit_needed("xp", subject, len(asks), keys, league, over_cap, refs)
+
+
+def permit_answers(sm: Softmax, wait: dict) -> list[str | None]:
+    """The coach's answer to each ask of ``wait`` (``Softmax.permit_answer``; None when it
+    cannot be read). A refusal the server already called declined counts as a no."""
+    answers = []
+    for entry in wait.get("asks") or []:
+        if entry.get("state") == PERMIT_DECLINED:
+            answers.append(ANSWER_NO)
+            continue
+        try:
+            answers.append(sm.permit_answer(entry["ask"]) if entry.get("ask") else None)
+        except Exception:  # noqa: BLE001 - an unreadable answer only means "unknown"
+            answers.append(None)
+    return answers
+
+
+def _stop_declined(canonical: Path, experiment: dict, now: datetime.datetime) -> None:
+    """The coach said no: ``stopped`` (terminal; nothing is asked or launched again) and one
+    note. Under the lock, only if the experiment still waits on the same asks."""
+    experiment_id = experiment["id"]
+    wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
+    seeds = (experiment.get("evaluation_design") or {}).get("seeds") or []
+    store = RecordStore(Layout(canonical))
+    with canonical_lock(canonical):
+        current, _ = store.load(experiment_id)
+        lifecycle = current.get("lifecycle") or {}
+        if current.get("status") != "awaiting-permit" or lifecycle.get("permit_wait") != wait:
+            return
+        stopped = {"by": "coach", "at": now.isoformat(timespec="seconds"), "wait": wait}
+        store.update(
+            experiment_id, {"status": "stopped", "lifecycle": {**lifecycle, "stopped": stopped}}
+        )
+        commit(
+            canonical,
+            [store.path_of(experiment_id)],
+            f"xp-poll: {experiment_id} stopped: the coach declined its XP requests",
+        )
+        message = runtime_messages.coach_declined(
+            "xp",
+            f"{experiment_id}:b{wait.get('batch')}:a{wait.get('attempt')}",
+            len(current.get("xp_requests") or []),
+            2 * len(seeds),
+            [{"uri": f"ar://experiment/{experiment_id}"}],
+        )
+        if not already_published(canonical, message):
+            publish_message(canonical, message, allow_no_remote=True)
 
 
 def _wait_for_coach(
-    canonical: Path, experiment: dict, now: datetime.datetime, result: XpPollRun
+    canonical: Path, sm: Softmax, experiment: dict, now: datetime.datetime, result: XpPollRun
 ) -> None:
-    """``awaiting-permit`` (module docstring): the help request, then the relaunch when due."""
+    """``awaiting-permit`` (module docstring): the help request, then the answers decide."""
     message = coach_wait_message(experiment)
     with canonical_lock(canonical):
         if not already_published(canonical, message):
             publish_message(canonical, message, allow_no_remote=True)
             result.help_requests.append(experiment["id"])
     lifecycle = experiment.get("lifecycle") or {}
+    wait = lifecycle.get("permit_wait") or {}
     after = _parse_time(lifecycle.get("next_launch_after"))
     if after is None:  # the softmax tool sets it with every refusal
         raise ValueError(f"{experiment['id']}: awaiting-permit without next_launch_after")
-    if result.launches or now < after:
+    if wait.get("kind") == "league":
+        due, reason = now >= after, "the league choice refused it; the backoff has passed"
+    else:
+        answers = permit_answers(sm, wait)
+        if ANSWER_NO in answers:
+            _stop_declined(canonical, experiment, now)
+            result.stopped.append(experiment["id"])
+            return
+        not_before = _parse_time(wait.get("not_before"))
+        if not_before is not None and now < not_before:
+            return  # over today's cap: no yes covers it before the UTC day turns
+        if all(answer in (ANSWER_YES, ANSWER_USED) for answer in answers):
+            due, reason = True, f"the coach approved all {len(answers)} permit ask(s)"
+        elif None in answers:  # an answer could not be read: the backoff decides
+            due = now >= after
+            reason = "the coach's answers could not be read; the backoff has passed"
+        else:
+            return  # the coach has not answered every ask yet
+    if result.launches or not due:
         return
-    refusals = int(lifecycle.get("permit_refusals", 0))
-    reason = f"relaunch after the coach's refusal {refusals}; the backoff has passed"
     launch = _commit_relaunch(canonical, experiment, reason)
     if launch is not None:
         result.launches.append(launch)
@@ -604,7 +695,7 @@ def poll_experiment(
         if launch is not None:
             result.launches.append(launch)
     elif experiment.get("status") == "awaiting-permit":
-        _wait_for_coach(canonical, experiment, now, result)
+        _wait_for_coach(canonical, sm, experiment, now, result)
 
 
 def run(
@@ -674,6 +765,7 @@ def main(argv: list[str] | None = None) -> int:
         "reviews": [spec.request_id for spec in result.reviews],
         "launches": [spec.request_id for spec in result.launches],
         "help_requests": result.help_requests,
+        "stopped": result.stopped,
         "warnings": result.warnings,
         "failures": result.failures,
     }

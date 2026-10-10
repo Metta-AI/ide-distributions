@@ -47,13 +47,14 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
      card when the credit balance is above 0 again (or after the backoff, when the balance
      cannot be read). Do not create a launch card yourself.
    - `permit_required: true` or `league_not_chosen: true`: the coach's IDE Controls refused
-     the request (they ask before XP requests, or no league or another league is chosen).
-     Stop here. The tool already set `awaiting-permit`, `lifecycle.permit_wait` and
-     `lifecycle.next_launch_after`. Do not send a `help_request`: the runtime sends one per
-     refused request and tells the coach what to do. Finish the card `partial`. The XP poller
-     makes a new launch card after the backoff; it sends the same request again. Do not
-     create a launch card yourself, and do not change the request to get past the refusal
-     (D-27).
+     the batch (they ask before spending credits, or no league or another league is chosen).
+     For a permit, the tool already tried every request, so all of the batch's asks are
+     filed (`permit_asks`). Stop here. The tool already set `awaiting-permit` and
+     `lifecycle.permit_wait`. Do not send a `help_request`: the runtime sends one per batch
+     and tells the coach what to do. Finish the card `partial`. The XP poller reads the
+     coach's answers and makes a new launch card once all are approved (or stops the
+     experiment on a no); it sends the same requests again. Do not create a launch card
+     yourself, and do not change the requests to get past the refusal (D-27).
 6. Never wait for XP in the card (D-11). The runtime makes the review card when every
    request is terminal. Results count as evidence only when completed and inspected (D-06).
 

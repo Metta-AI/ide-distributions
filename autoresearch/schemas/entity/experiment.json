@@ -141,6 +141,7 @@
         "evaluating",
         "awaiting-credits",
         "awaiting-permit",
+        "stopped",
         "reviewed"
       ]
     },

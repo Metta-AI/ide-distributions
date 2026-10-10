@@ -872,89 +872,129 @@ def submission_pending(
 
 # --- the coach's IDE Controls (Softmax hosting) ---
 
-# What the agent asked Softmax to do, by ``act``: an XP request (hosted games) or a submission.
-_COACH_ACTS = {
-    "xp": "to run hosted games that evaluate one of its experiments",
-    "submit": "to submit a policy to the league",
-}
-_COACH_RETRY = {
+_STOP_ASKING = {
     "xp": (
-        "The agent retries the same request by itself, so it is never created twice: the first "
-        "retry is 30 minutes after the refusal, and each later one waits twice as long (at "
-        "most 8 hours), so it can take that long to go on after you answer."
+        "To stop being asked for each request, change Ask before in the IDE Controls: remove "
+        "“spend” to let the agent spend up to your daily credits without asking, or replace "
+        "it with “spend-over-N” to be asked only for a spend of more than N credits. Without "
+        "saved rules, Softmax asks before every action."
     ),
     "submit": (
-        "The runtime retries the same submission by itself, so it is never submitted twice: "
-        "the first retry is 30 minutes after the refusal, and each later one waits twice as "
-        "long (at most 8 hours), so it can take that long to go on after you answer. No other "
-        "promotion starts meanwhile."
+        "To stop being asked before each league submission, remove “submit” from Ask before in "
+        "the IDE Controls. Without saved rules, Softmax asks before every action."
     ),
 }
 
 
-def _coach_about(subject_name: str, subject: str, reason: str, **ids) -> dict[str, str]:
-    return _about(**{subject_name: subject}, server_reason=reason, **ids)
+def _subject_about(act: str, subject: str, **ids) -> dict[str, str]:
+    return _about(**{"experiment_batch" if act == "xp" else "promotion": subject}, **ids)
 
 
 def permit_needed(
     act: str,
     subject: str,
-    reason: str,
-    ask: str | None,
+    count: int,
+    asks: list[str],
     league_id: str | None = None,
+    over_cap: bool = False,
     refs: list | None = None,
 ) -> RuntimeMessage:
-    """Softmax refused an act until the coach answers its permit ask (403 ``permit_required``:
-    the IDE Controls ask before it). ``act`` is ``xp`` (``subject``: the XP request's tag) or
-    ``submit`` (``subject``: the promotion id). One per subject: a retry refused again names
-    the same subject and publishes nothing."""
-    what = "an XP request" if act == "xp" else "a league submission"
+    """Softmax holds ``count`` acts until the coach answers their permit asks (403
+    ``permit_required``: the IDE Controls ask before them). ``act`` is ``xp`` (``subject``:
+    ``<E>:b<batch>:a<attempt>``, every refused request of one batch) or ``submit``
+    (``subject``: the promotion id). One per subject, however often it is refused again."""
+    if act == "xp":
+        what = (
+            f"The agent asked Softmax for {count} hosted XP request(s) to evaluate one of its "
+            "experiments (each plays one seed, for the candidate or for the champion). Your IDE "
+            f"Controls ask before each spend of credits, so Softmax filed {count} permit ask(s) "
+            "and holds the requests. Approve them in the IDE Controls. The agent reads your "
+            "answers every few minutes and goes on once all are approved; nothing is created "
+            "twice. If you answer no to any of them, the agent stops this experiment and asks "
+            "nothing more for it."
+        )
+        if over_cap:
+            what += (
+                " Some of them cost more than the credits left today under your daily limit: "
+                "a yes covers them only after the UTC day turns, or once you raise the daily "
+                "credits."
+            )
+    else:
+        what = (
+            f"The agent is ready to submit a policy to the {league_id} league, and your IDE "
+            "Controls ask before league submissions, so Softmax filed a permit ask and holds "
+            "the submission. Approve it in the IDE Controls. The runtime reads your answer "
+            "every minute and submits once you approve, never twice. If you answer no, the "
+            "promotion is dropped and nothing more is asked for it."
+        )
     body = (
-        f"The agent asked Softmax {_COACH_ACTS[act]}, and your IDE Controls ask before "
-        f"{what} like this one. Softmax filed it as a permit ask and holds it until you "
-        "answer. To let it go on, approve the ask in the IDE Controls. "
-        f"{_COACH_RETRY[act]} If you answer no, it stays waiting and asks again at its next "
-        "retry; to stop it for good, send the agent a task that says so. This is the only help "
-        "request about it. Softmax's words and the ask are in this message's details (`about`)."
+        f"{what} {_STOP_ASKING[act]} The asks are in this message's details (`about`)."
     )
-    subject_name = "xp_request" if act == "xp" else "promotion"
     return RuntimeMessage(
         "help_request",
         "Waiting for your approval in the IDE Controls",
         body,
         refs or [],
-        about=_coach_about(subject_name, subject, reason, ask=ask, league=league_id),
+        about=_subject_about(act, subject, asks=", ".join(asks), league=league_id),
         key=f"permit-needed:{subject}",
     )
 
 
 def league_not_chosen(
-    act: str, subject: str, reason: str, league_id: str, refs: list | None = None
+    act: str, league_id: str, reason: str, retry_minutes: int, refs: list | None = None
 ) -> RuntimeMessage:
-    """Softmax refused a league-scoped act because the coach chose no league for the agent,
-    or another one (the league choice in the IDE Controls). ``act`` and ``subject`` as for
-    ``permit_needed``; one per subject."""
-    if reason.startswith("Your coach has not chosen"):
-        why = "no league is chosen for the agent yet"
-    else:
-        why = "the IDE Controls choose a different league for the agent"
-    body = (
-        f"The agent asked Softmax {_COACH_ACTS[act]} in the {league_id} league, and Softmax "
-        f"refused because {why}: the agent plays only the one league its coach chooses. To "
-        f"go on, choose the {league_id} league for the agent in the IDE Controls. (The "
-        "agent's league is set in its game's configuration; if it should play another league, "
-        f"ask the operator to change that instead.) {_COACH_RETRY[act]} This is the only help "
-        "request about it. Softmax's words are in this message's details (`about`)."
+    """Softmax refused a league-scoped act (``act``: ``xp`` or ``submit``) because the coach
+    chose no league for the agent, or another one. One per league and cause, whatever acts
+    and experiments it holds up."""
+    chosen_none = reason.startswith("Your coach has not chosen")
+    why = (
+        "no league is chosen for the agent yet"
+        if chosen_none
+        else "the IDE Controls choose a different league for the agent"
     )
-    subject_name = "xp_request" if act == "xp" else "promotion"
+    asked = "to run hosted games" if act == "xp" else "to submit a policy"
+    body = (
+        f"The agent asked Softmax {asked} in the {league_id} league, and Softmax refused because "
+        f"{why}: the agent plays only the one league its coach chooses. To go on, choose the "
+        f"{league_id} league for the agent in the IDE Controls. (The agent's league is set in "
+        "its game's configuration; if it should play another league, ask the operator to change "
+        "that instead.) The agent retries by itself: first "
+        f"{retry_minutes} minutes after the refusal, then twice as long each time (at most 8 "
+        "hours), so it can take that long to go on after you choose. Softmax's words are in this "
+        "message's details (`about`)."
+    )
     return RuntimeMessage(
         "help_request",
         "Choose the agent's league in the IDE Controls",
         body,
         refs or [],
-        about=_coach_about(subject_name, subject, reason, league=league_id),
-        key=f"league-not-chosen:{subject}",
+        about=_about(league=league_id, server_reason=reason),
+        key=f"league-not-chosen:{league_id}:{'none' if chosen_none else 'elsewhere'}",
     )
+
+
+def coach_declined(
+    act: str, subject: str, done: int = 0, total: int = 0, refs: list | None = None
+) -> RuntimeMessage:
+    """The coach answered no to a permit ask: the experiment is stopped (``xp``), or the
+    promotion dropped (``submit``). One per subject; nothing is asked again for it."""
+    if act == "xp":
+        body = (
+            "You answered no to a permit ask for one of the agent's experiments, so the agent "
+            f"stopped that experiment with {done} of its {total} XP requests run. It asks nothing "
+            "more for it, and its results so far are kept but not reviewed. Its other asks that "
+            "are still open in the IDE Controls can be left unanswered. Nothing needs to be done."
+        )
+        title = "Experiment stopped: you declined its XP requests"
+    else:
+        body = (
+            "You answered no to the agent's league submission, so that promotion is dropped: "
+            "nothing was submitted, the champion stays as it is, and the agent may promote "
+            "another policy later. Nothing needs to be done."
+        )
+        title = "Promotion dropped: you declined its submission"
+    about = _subject_about(act, subject)
+    return RuntimeMessage("note", title, body, refs or [], about, key=f"coach-declined:{subject}")
 
 
 def request_lost_in_rebuild(request_id: str, mode: str | None) -> RuntimeMessage:

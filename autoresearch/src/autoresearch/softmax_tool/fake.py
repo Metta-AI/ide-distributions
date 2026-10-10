@@ -11,10 +11,14 @@ Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value`
 ``crash_after=<label>`` (read by runtime code through :func:`fault`). The coach's refusals of
 Softmax hosting: ``permit=<acts>`` (comma-separated ``spend``, ``submit``) refuses a new XP
 request (``spend``) or a league submission (``submit``) with ``PermitRequired``, as when the
-coach's IDE Controls ask before it; the same act names the same ask every time (state
-``asks``, as the server keeps one waiting ask per act). ``league=none`` refuses both with
-``LeagueNotChosen`` (no league chosen), ``league=<id>`` likewise (the coach chose that one).
-Dropping the fault is the coach's yes. A request whose state
+coach's IDE Controls ask before it. Like the server, the same act names the same waiting ask
+(state ``asks``: ref -> key); the coach's answers are state ``answers`` (key -> ``yes`` or
+``no``; tests set them): a yes grants the act once (then ``used``), and after a no or a used
+yes the act gets a new ask (``-<n+1>``, reason "the coach said no; a new ask waits" or "the
+last yes was used; ..."). ``permit_answer`` reads them (``asks_read=fail``: None).
+``over_cap=1`` makes a spend refusal the over-today's-cap one. ``league=none`` refuses both
+acts with ``LeagueNotChosen`` (no league chosen), ``league=<id>`` likewise (the coach chose that
+one). A request whose state
 entry has ``"failed": true`` (tests set it in the state file) reports status ``failed``.
 
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
@@ -64,6 +68,13 @@ from autoresearch.softmax_tool.identity import (
     identity_problems,
 )
 from autoresearch.softmax_tool.protocol import (
+    ANSWER_NO,
+    ANSWER_USED,
+    ANSWER_WAITING,
+    ANSWER_YES,
+    PERMIT_DECLINED,
+    PERMIT_OVER_CAP,
+    PERMIT_WAITING,
     CoachRefusal,
     CreditDenied,
     Identity,
@@ -271,10 +282,35 @@ class FakeSoftmax:
             )
         if action not in self._faults.get("permit", "").split(","):
             return None
-        asks = state.setdefault("asks", {})
-        ask = asks.setdefault(ref, f"permit-{action}-{_short_hash(action, ref)}-1")
-        reason = f"{action} on {ref}: the ask waits for the coach (ask asks/{ask})"
-        return PermitRequired(reason, ask)
+        asks, answers = state.setdefault("asks", {}), state.setdefault("answers", {})
+        prefix = f"permit-{action}-{_short_hash(action, ref)}-"
+        ask = asks.setdefault(ref, f"{prefix}1")
+        answer = answers.get(ask)
+        if answer == ANSWER_YES:
+            answers[ask] = ANSWER_USED
+            return None
+        why, status = "the ask waits for the coach", PERMIT_WAITING
+        if answer in (ANSWER_NO, ANSWER_USED):
+            ask = asks[ref] = f"{prefix}{int(ask.rsplit('-', 1)[1]) + 1}"
+            why = "the coach said no; a new ask waits"
+            if answer == ANSWER_USED:
+                why = "the last yes was used; a new ask waits"
+            status = PERMIT_DECLINED if answer == ANSWER_NO else PERMIT_WAITING
+        elif action == "spend" and self._faults.get("over_cap"):
+            why, status = "40 credits is more than the 10 left today", PERMIT_OVER_CAP
+        return PermitRequired(f"{action} on {ref}: {why} (ask asks/{ask})", ask, status)
+
+    def permit_answer(self, ask: str) -> str | None:
+        if self._faults.get("asks_read") == "fail":
+            return None
+
+        def action(state: dict) -> str | None:
+            known = {*(state.get("asks") or {}).values(), *(state.get("answers") or {})}
+            if ask not in known:
+                return None  # no such ask (the server answers 404)
+            return (state.get("answers") or {}).get(ask, ANSWER_WAITING)
+
+        return self._operate("permit_answer", action, persist=False)
 
     def episode_cost(self) -> float | None:
         return 1.0  # the fake deducts one credit per (one-episode) request

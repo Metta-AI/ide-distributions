@@ -415,93 +415,164 @@ def _body(call) -> dict:
 
 
 def _coach_messages(host: Host) -> list[dict]:
-    keys = ("permit-needed:", "league-not-chosen:")
+    keys = ("permit-needed:", "league-not-chosen:", "coach-declined:")
     return [m for m in host.outbox() if str(m.get("runtime_key", "")).startswith(keys)]
 
 
-def _refused_launch(host: Host, sm) -> dict:
+def _refused_launch(host: Host, sm, experiment: str) -> dict:
     launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
-    refused = softmax_cli._xp_create(launcher, sm, _cli_args(host.store.find("experiment")[0]))
+    refused = softmax_cli._xp_create(launcher, sm, _cli_args(experiment))
     host.runtime_commit("launch: refused for the coach")
     return refused
 
 
-def test_permit_refusal_asks_the_coach_once_and_relaunches_the_same_request(host, monkeypatch):
+def _answer(host: Host, answer: str, keys) -> None:
+    state = read_json(host.canonical / ".supervisor" / "runtime" / "fake_softmax.json")
+    for key in keys:
+        state.setdefault("answers", {})[key] = answer
+    _set_fake_state(host, answers=state["answers"])
+
+
+def _awaiting_permit(host: Host, monkeypatch, faults: str = "permit=spend"):
+    """An uploaded experiment whose launch the coach's IDE Controls refused: ``(experiment,
+    the recording Softmax of that launch, its permit_wait, the backoff's end)``."""
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
     experiment = _experiment(host, "uploaded")
     _champion_is_the_baseline(host)
-    host.set_faults("permit=spend")  # the IDE Controls ask before XP requests
+    host.set_faults(faults)  # the IDE Controls ask before XP requests
     refusing = _RecordingCreates(host.sm)
-    refused = _refused_launch(host, refusing)
+    refused = _refused_launch(host, refusing, experiment)
     assert refused["permit_required"] and not refused["credit_denied"]
-    assert refused["created"] == []
     meta, _ = host.store.load(experiment)
     assert meta["status"] == "awaiting-permit"
     wait = meta["lifecycle"]["permit_wait"]
-    assert wait["kind"] == "permit" and wait["request"] == f"ar:{experiment}:b1:a1:s1:candidate"
-    backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
+    return experiment, refusing, wait, datetime.datetime.fromisoformat(
+        meta["lifecycle"]["next_launch_after"]
+    )
 
-    # One help request, before the backoff ends; no relaunch yet.
-    early = _poll(host, backoff_end - datetime.timedelta(minutes=5))
-    assert early.help_requests == [experiment] and early.launches == []
-    [asked] = _coach_messages(host)
-    assert asked["kind"] == "help_request" and asked["expects_response"] is True
-    assert "approve the ask in the IDE Controls" in asked["body"]
-    assert asked["about"]["ask"] == wait["ask"]
-    assert _poll(host, backoff_end - datetime.timedelta(minutes=4)).help_requests == []
 
-    # A second refusal of the same request (the coach has not answered): no second ask.
-    again = _refused_launch(host, refusing)
-    assert again["permit_required"]
+def test_permit_refusal_files_every_ask_asks_the_coach_once_and_relaunches_on_the_yes(
+    host, monkeypatch
+):
+    experiment, refusing, wait, backoff_end = _awaiting_permit(host, monkeypatch)
     meta, _ = host.store.load(experiment)
-    assert meta["lifecycle"]["permit_refusals"] == 2
-    assert meta["lifecycle"]["permit_wait"] == wait  # the same request, the same ask
-    backoff_end = datetime.datetime.fromisoformat(meta["lifecycle"]["next_launch_after"])
-    assert _poll(host, backoff_end - datetime.timedelta(minutes=1)).help_requests == []
-    assert len(_coach_messages(host)) == 1
+    planned = 2 * len(meta["evaluation_design"]["seeds"])
+    assert len(wait["asks"]) == planned  # one run filed every ask of the batch
+    keys = [entry["ask"] for entry in wait["asks"]]
 
-    # After the backoff: one relaunch; the coach said yes meanwhile.
-    [launch] = _poll(host, backoff_end + datetime.timedelta(minutes=1)).launches
-    assert "--attempt 1" in launch.why and "coach's refusal 2" in launch.why
-    host.set_faults("")
-    host.tick(backoff_end + datetime.timedelta(minutes=2))
+    # One help request for the batch; while the asks wait, no card, even after the backoff.
+    first = _poll(host, at(1))
+    assert first.help_requests == [experiment] and first.launches == []
+    [asked] = _coach_messages(host)
+    assert asked["runtime_key"] == f"permit-needed:{experiment}:b1:a1"
+    assert asked["kind"] == "help_request" and asked["expects_response"] is True
+    assert f"Softmax filed {planned} permit ask(s)" in asked["body"]
+    assert "remove “spend”" in asked["body"] and "“spend-over-N”" in asked["body"]
+    assert asked["about"]["asks"] == ", ".join(keys)
+    later = _poll(host, backoff_end + datetime.timedelta(hours=1))
+    assert later.help_requests == [] and later.launches == []
+
+    # Some answers in: still nothing. All yes: one relaunch at once, before any backoff.
+    _answer(host, "yes", keys[:-1])
+    assert _poll(host, at(2)).launches == []
+    _answer(host, "yes", keys[-1:])
+    [launch] = _poll(host, at(3)).launches
+    assert "--attempt 1" in launch.why and f"approved all {planned} permit ask(s)" in launch.why
+    host.tick(at(4))
     worker = host.claim("experimentation")
     assert worker.card.spec.request_id == launch.request_id
-    approved = _RecordingCreates(host.sm)
+    approved = _RecordingCreates(host.sm)  # the fault stays: each yes grants its own request
     relaunched = softmax_cli._xp_create(worker.ctx, approved, _cli_args(experiment))
     assert not relaunched["permit_required"] and relaunched["missing"] == []
-    # The refused request goes again with the identical body and idempotency key.
-    assert _body(approved.creates[0]) == _body(refusing.creates[0])
-    assert _body(approved.creates[0])["idempotency_key"] == wait["request"]
+    # Every refused request goes again with the identical body and idempotency key.
+    assert [_body(call) for call in approved.creates] == [_body(call) for call in refusing.creates]
+    assert [_body(call)["idempotency_key"] for call in approved.creates] == [
+        entry["request"] for entry in wait["asks"]
+    ]
     worker.finish()
-    host.tick(backoff_end + datetime.timedelta(minutes=3))
+    host.tick(at(5))
     meta, _ = host.store.load(experiment)
     assert meta["status"] == "evaluating" and meta["lifecycle"]["permit_wait"] is None
     assert len(_coach_messages(host)) == 1
 
 
-def test_league_choice_refusal_sends_one_help_request_naming_the_ide_control(host, monkeypatch):
+def test_permit_no_stops_the_experiment_with_one_note_and_never_asks_again(host, monkeypatch):
+    experiment, _, wait, backoff_end = _awaiting_permit(host, monkeypatch)
+    _poll(host, at(1))
+    _answer(host, "no", [wait["asks"][0]["ask"]])
+    stopped = _poll(host, at(2))
+    assert stopped.stopped == [experiment] and stopped.launches == []
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "stopped" and meta["lifecycle"]["stopped"]["by"] == "coach"
+    assert f"xp-poll: {experiment} stopped" in "\n".join(host.subjects())
+    [_, note] = _coach_messages(host)
+    assert note["kind"] == "note" and note["runtime_key"] == f"coach-declined:{experiment}:b1:a1"
+    assert "stopped that experiment with 0 of its" in note["body"]
+    after = _poll(host, backoff_end + datetime.timedelta(days=1))
+    assert after.launches == [] and after.help_requests == [] and len(_coach_messages(host)) == 2
+    asks = read_json(host.canonical / ".supervisor" / "runtime" / "fake_softmax.json")["asks"]
+    assert sorted(asks.values()) == sorted(entry["ask"] for entry in wait["asks"])  # no new ask
+
+
+def test_unreadable_answers_fall_back_to_the_backoff(host, monkeypatch):
+    faults = "permit=spend;asks_read=fail"
+    _, _, _, backoff_end = _awaiting_permit(host, monkeypatch, faults)
+    assert _poll(host, backoff_end - datetime.timedelta(minutes=1)).launches == []
+    [launch] = _poll(host, backoff_end + datetime.timedelta(minutes=1)).launches
+    assert "could not be read" in launch.why
+
+
+def test_over_the_cap_waits_for_the_utc_day_even_after_a_yes(host, monkeypatch):
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch, "permit=spend;over_cap=1")
+    _answer(host, "yes", [entry["ask"] for entry in wait["asks"]])
+    not_before = datetime.datetime.fromisoformat(wait["not_before"])
+    assert _poll(host, not_before - datetime.timedelta(minutes=1)).launches == []
+    [asked] = _coach_messages(host)
+    assert "after the UTC day turns" in asked["body"]
+    [launch] = _poll(host, not_before + datetime.timedelta(minutes=1)).launches
+    assert experiment in launch.why
+
+
+def test_league_choice_refusal_sends_one_help_request_per_league(host, monkeypatch):
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
-    experiment = _experiment(host, "uploaded")
     _champion_is_the_baseline(host)
     host.set_faults("league=none")
-    refused = _refused_launch(host, host.sm)
-    assert refused["league_not_chosen"] and not refused["permit_required"]
-    meta, _ = host.store.load(experiment)
-    assert meta["status"] == "awaiting-permit"
-    assert meta["lifecycle"]["permit_wait"]["kind"] == "league"
+    experiments = []
+    for _ in range(2):
+        experiment = _experiment(host, "uploaded")
+        refused = _refused_launch(host, host.sm, experiment)
+        assert refused["league_not_chosen"] and not refused["permit_required"]
+        meta, _ = host.store.load(experiment)
+        assert meta["status"] == "awaiting-permit"
+        assert meta["lifecycle"]["permit_wait"]["kind"] == "league"
+        experiments.append(experiment)
 
-    assert _poll(host, at(1)).help_requests == [experiment]
-    _refused_launch(host, host.sm)
+    assert _poll(host, at(1)).help_requests == experiments[:1]  # one cause, one request
     assert _poll(host, at(2)).help_requests == []
     [asked] = _coach_messages(host)
+    assert asked["runtime_key"] == f"league-not-chosen:{LEAGUE}:none"
     assert asked["title"] == "Choose the agent's league in the IDE Controls"
     assert f"choose the {LEAGUE} league for the agent in the IDE Controls" in asked["body"]
-    assert "no league is chosen" in asked["body"]
+    assert "first 30 minutes after the refusal" in asked["body"]
     assert asked["about"]["league"] == LEAGUE
-    assert asked["refs"][0]["uri"] == f"ar://experiment/{experiment}"
+
+
+def test_league_help_text_uses_the_configured_backoff(host, monkeypatch):
+    """M3: the worker's ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` is the first wait it states."""
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    monkeypatch.setenv(softmax_cli.BACKOFF_ENV, "7")
+    _champion_is_the_baseline(host)
+    host.set_faults("league=none")
+    experiment = _experiment(host, "uploaded")
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))
+    host.runtime_commit("launch: refused for the league")
+    _poll(host, at(1))
+    [asked] = _coach_messages(host)
+    assert "first 7 minutes after the refusal" in asked["body"]
 
 
 class _Clock(datetime.datetime):

@@ -33,17 +33,27 @@ class CreditDenied:
     reason: str
 
 
+# The refusal's state, from the server's ``detail.reason`` (metta
+# ``observatory_core.cogents.permits.check_permit``): the ask waits for the coach (also after an
+# outgrown or used yes, when the server files a new ask), the coach said no, or the act is more
+# than the credits left today, which no yes covers until the UTC day turns.
+PERMIT_WAITING, PERMIT_DECLINED, PERMIT_OVER_CAP = "waiting", "declined", "over_cap"
+# ``Softmax.permit_answer``: the coach's answer to one ask.
+ANSWER_YES, ANSWER_NO, ANSWER_USED, ANSWER_WAITING = "yes", "no", "used", "waiting"
+
+
 @dataclass(frozen=True)
 class PermitRequired:
     """The server refused the act until the coach answers a permit ask (HTTP 403 with detail
     ``type: permit_required``): on Softmax hosting the coach's IDE Controls can ask before XP
     requests and league submissions (``askBefore``). ``reason`` is the server's message;
-    ``ask`` the ask's record key (``asks/<ask>``) when the CLI output carried it. The server
-    files no second ask while one waits: the same act asked again names the same ask (metta
-    ``observatory_core.cogents.permits.check_permit``)."""
+    ``ask`` the ask's record key (``asks/<ask>``) when the CLI output carried it; ``state`` one
+    of ``PERMIT_WAITING``, ``PERMIT_DECLINED``, ``PERMIT_OVER_CAP``. The server files no second
+    ask while one waits: the same act asked again names the same ask."""
 
     reason: str
     ask: str | None = None
+    state: str = PERMIT_WAITING
 
 
 @dataclass(frozen=True)
@@ -138,6 +148,12 @@ class Softmax(Protocol):
         known: list[XpHandle] | None = None,
     ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen: ...
     def xp_status(self, handle: XpHandle) -> XpStatus: ...
+    def permit_answer(self, ask: str) -> str | None:
+        """The coach's answer to our permit ask ``ask`` (a key of our cogent's ``asks``):
+        ``ANSWER_YES`` (not used yet), ``ANSWER_USED`` (a yes an act consumed), ``ANSWER_NO``,
+        or ``ANSWER_WAITING``; None when it cannot be read (callers fall back to a backoff)."""
+        ...
+
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...
     def xp_recover(self, experiment: str) -> list[XpHandle]: ...
     def upload(self, artifact: Path, name: str) -> str: ...

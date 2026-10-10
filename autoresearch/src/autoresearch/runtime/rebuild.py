@@ -41,10 +41,11 @@ next run (the unfinished-rebuild rule above brings it back, in the same epoch):
 4. Experiment lifecycle cards, one per experiment whose next step no open request covers (an
    open request is committed, not closed, and refs ``ar://experiment/<E>``):
    ``designed`` -> build; ``built`` -> upload; ``uploaded`` with a ``candidate_binding`` ->
-   launch; ``awaiting-credits`` and ``awaiting-permit`` -> launch, unless
-   ``lifecycle.next_launch_after`` is still in the future (A10 backoff); ``evaluating`` whose
-   XP requests (``xp_recover``) all completed
-   -> review; ``reviewed`` with decision ``promote`` and no promotion of it -> promote.
+   launch; ``awaiting-credits`` -> launch, unless ``lifecycle.next_launch_after`` is still in
+   the future (A10 backoff); ``awaiting-permit`` -> nothing (xp-poll relaunches it from the
+   coach's answers); ``evaluating`` whose XP requests (``xp_recover``) all completed ->
+   review; ``reviewed`` with decision ``promote`` and no promotion of it (an aborted one counts
+   as none, unless the coach declined it) -> promote; ``stopped`` -> nothing.
    Markers come from ``runtime.markers`` (shared with queue-keeper and xp-poll). Launch is
    ``launch:<E>:<launch_attempts + 1>`` (the attempt about to be made), and the launch card
    says to run ``xp recover`` before any create, so a rebuilt launch never duplicates an XP
@@ -367,7 +368,10 @@ def review_refs(canonical: Path, experiment: dict) -> list[str]:
 def _promoted(canonical: Path, experiment: str) -> bool:
     for path in (Path(canonical) / promotion.HISTORY_DIR_REL).glob("P-*.json"):
         record = read_json(path)
-        if record.get("experiment") == experiment and record.get("stage") != "aborted":
+        if record.get("experiment") != experiment:
+            continue
+        # A promotion the coach declined counts too: asking again would only ask the coach again.
+        if record.get("stage") != "aborted" or promotion.declined(record):
             return True
     return False
 
@@ -414,7 +418,7 @@ def _lifecycle_step(
         return upload_marker(eid, epoch), f"Upload {eid}", why, "experimentation"
     if status == "uploaded" and experiment.get("candidate_binding"):
         return launch_step(experiment, REBUILT)
-    if status in ("awaiting-credits", "awaiting-permit"):
+    if status == "awaiting-credits":
         after = _parse_time((experiment.get("lifecycle") or {}).get("next_launch_after"))
         return None if after is not None and now < after else launch_step(experiment, REBUILT)
     if status == "evaluating" and _xp_completed(sm, eid):

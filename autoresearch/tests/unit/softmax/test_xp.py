@@ -6,8 +6,16 @@ import pytest
 
 from autoresearch.softmax_tool import xp
 from autoresearch.softmax_tool.client import SoftmaxClient
-from autoresearch.softmax_tool.platform_cli import PlatformCli, SoftmaxCliError, coach_refusal
+from autoresearch.softmax_tool.platform_cli import (
+    PlatformCli,
+    SoftmaxCliError,
+    coach_refusal,
+    permit_state,
+)
 from autoresearch.softmax_tool.protocol import (
+    PERMIT_DECLINED,
+    PERMIT_OVER_CAP,
+    PERMIT_WAITING,
     CreditDenied,
     LeagueNotChosen,
     PermitRequired,
@@ -137,6 +145,20 @@ def test_league_choice_refusal_becomes_league_not_chosen(env, runner):
     assert result == LeagueNotChosen(
         "Your coach has not chosen a league for this cogent yet; ask them to pick one in the IDE."
     )
+
+
+def test_permit_refusal_states_come_from_the_servers_reason(env, runner):
+    """M1: ``detail.reason`` tells a waiting ask from a no and from today's cap."""
+    _create_fails_with(runner, "xp_request_create_403_permit.stderr")
+    assert xp.create(cli(env, runner), E, 1, 1, SPEC).state == PERMIT_WAITING
+    _create_fails_with(runner, "xp_request_create_403_permit_declined.stderr")
+    declined = xp.create(cli(env, runner), E, 1, 1, SPEC)
+    assert declined.state == PERMIT_DECLINED
+    assert declined.ask == "permit-spend-8c5edbef63cc84a1-2"  # the server's new ask
+    _create_fails_with(runner, "xp_request_create_403_permit_over_cap.stderr")
+    assert xp.create(cli(env, runner), E, 1, 1, SPEC).state == PERMIT_OVER_CAP
+    assert permit_state("40 credits is more than the 10 left today") == PERMIT_OVER_CAP
+    assert permit_state("the last yes was used; a new ask waits") == PERMIT_WAITING
 
 
 def test_permit_detail_without_a_readable_body_still_names_the_refusal():

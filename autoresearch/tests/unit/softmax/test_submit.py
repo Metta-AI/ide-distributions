@@ -268,9 +268,12 @@ def test_a_permit_refusal_keeps_the_promotion_at_intent_and_reconcile_submits_it
     [handled] = board.process()
     assert handled.state == "validated"  # waits at intent
 
-    due = datetime.datetime.fromisoformat(current.waiting_detail["next_retry_after"])
-    later = due + datetime.timedelta(minutes=1)
-    actions = promotion.reconcile(board.ctx(), board.queue, board.sm, LEAGUE, now=later)
+    state_path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = json.loads(state_path.read_text())
+    state["answers"] = {current.waiting_detail["ask"]: "yes"}  # the coach approves
+    state_path.write_text(json.dumps(state))
+    now = datetime.datetime.now(datetime.UTC)  # a yes is due at once, before any backoff
+    actions = promotion.reconcile(board.ctx(), board.queue, refusing, LEAGUE, now=now)
     assert [a.kind for a in actions][:2] == ["help_requested", "submitted"]
     assert load(board.canonical).stage == "submitted"
     assert len(submissions_of(board, PV_A)) == 1

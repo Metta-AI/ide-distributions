@@ -48,7 +48,9 @@ EXPERIMENT_TRANSITIONS: dict[str, frozenset[str]] = {
     "uploaded": frozenset({"evaluating", "awaiting-credits", "awaiting-permit"}),
     "evaluating": frozenset({"reviewed", "awaiting-credits", "awaiting-permit"}),
     "awaiting-credits": frozenset({"evaluating", "awaiting-permit"}),
-    "awaiting-permit": frozenset({"evaluating", "awaiting-credits"}),
+    # The coach answered no to a permit ask (xp-poll): the evaluation ends, unreviewed.
+    "awaiting-permit": frozenset({"evaluating", "awaiting-credits", "stopped"}),
+    "stopped": frozenset(),
     "reviewed": frozenset(),
 }
 

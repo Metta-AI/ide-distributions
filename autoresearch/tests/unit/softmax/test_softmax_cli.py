@@ -377,38 +377,64 @@ def test_xp_create_credit_denied_mid_batch_reports_missing_and_relaunch_fills_th
     assert meta["lifecycle"]["credit_denials"] == 0
 
 
-def test_xp_create_permit_required_sets_awaiting_permit_until_the_coach_says_yes(board, launch):
-    """Softmax hosting: the coach's IDE Controls ask before XP requests (403 permit_required).
-    The batch stops like a credit denial; the same request asked again names the same ask; the
-    run after the coach's yes creates the requests and clears the wait."""
-    worker, experiment = launch
+def _answer_fake_asks(board, answer: str, keys=None) -> None:
+    """The coach answers our permit asks (all, or ``keys``) in the fake platform's state."""
+    path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
+    state = read_json(path)
+    for key in keys if keys is not None else state.get("asks", {}).values():
+        state.setdefault("answers", {})[key] = answer
+    write_json(path, state)
+
+
+def test_xp_create_permit_required_files_every_ask_of_the_batch_in_one_run(board, launch):
+    """Softmax hosting: the IDE Controls ask before each spend (403 permit_required). Each
+    request has its own ask, so the batch goes on and one run files them all; the same
+    requests asked again name the same asks; after the coach's yes the same run creates them."""
+    worker, experiment = launch  # seeds (1, 2): four requests
     refusing = base_env(board, worker, **{FAULTS_ENV: "permit=spend"})
     code, data = softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
     assert code == 0, data
     assert data["data"]["permit_required"] is True and data["data"]["credit_denied"] is False
     assert data["data"]["created"] == [] and len(data["data"]["missing"]) == 4
+    asks = data["data"]["permit_asks"]
+    assert [(entry["seed"], entry["arm"]) for entry in asks] == [
+        (1, "candidate"),
+        (1, "baseline"),
+        (2, "candidate"),
+        (2, "baseline"),
+    ]
+    assert len({entry["ask"] for entry in asks}) == 4
+    assert {entry["state"] for entry in asks} == {"waiting"}
     meta = worker.store.load(experiment)[0]
     assert meta["status"] == "awaiting-permit" and data["data"]["status"] == "awaiting-permit"
-    lifecycle = meta["lifecycle"]
-    assert lifecycle["permit_refusals"] == 1
-    assert lifecycle["next_launch_after"] == data["data"]["next_launch_after"]
-    wait = lifecycle["permit_wait"]
-    assert wait["kind"] == "permit" and wait["request"] == f"ar:{experiment}:b1:a1:s1:candidate"
-    assert wait["ask"] and wait["league_id"] == LEAGUE
+    wait = meta["lifecycle"]["permit_wait"]
+    assert wait["kind"] == "permit" and wait["asks"] == asks and wait["refusals"] == 1
+    assert (wait["batch"], wait["attempt"], wait["league_id"]) == (1, 1, LEAGUE)
+    assert wait["retry_minutes"] == 30 and wait["not_before"] is None
+    first = meta["lifecycle"]["next_launch_after"]
 
     code, data = softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
-    assert code == 0 and data["data"]["permit_required"] is True
-    meta = worker.store.load(experiment)[0]
-    assert meta["lifecycle"]["permit_refusals"] == 2 and meta["lifecycle"]["permit_wait"] == wait
-    assert meta["lifecycle"]["next_launch_after"] > lifecycle["next_launch_after"]
+    assert data["data"]["permit_asks"] == asks  # the same requests, the same asks
+    again = worker.store.load(experiment)[0]["lifecycle"]
+    assert again["permit_wait"]["refusals"] == 2 and again["next_launch_after"] > first
 
-    approved = base_env(board, worker)
-    code, data = softmax(approved, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    _answer_fake_asks(board, "yes")
+    code, data = softmax(refusing, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
     assert code == 0 and data["data"]["permit_required"] is False
     assert len(data["data"]["created"]) == 4
     meta = worker.store.load(experiment)[0]
-    assert meta["status"] == "evaluating"
-    assert meta["lifecycle"]["permit_refusals"] == 0 and meta["lifecycle"]["permit_wait"] is None
+    assert meta["status"] == "evaluating" and meta["lifecycle"]["permit_wait"] is None
+
+
+def test_xp_create_over_todays_cap_waits_for_the_next_utc_day(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker, **{FAULTS_ENV: "permit=spend;over_cap=1"})
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and {entry["state"] for entry in data["data"]["permit_asks"]} == {"over_cap"}
+    lifecycle = worker.store.load(experiment)[0]["lifecycle"]
+    not_before = datetime.fromisoformat(lifecycle["permit_wait"]["not_before"])
+    assert not_before > datetime.now(UTC) and (not_before.hour, not_before.minute) == (0, 0)
+    assert datetime.fromisoformat(lifecycle["next_launch_after"]) >= not_before
 
 
 def test_xp_create_league_choice_refusal_sets_awaiting_permit(board, launch):

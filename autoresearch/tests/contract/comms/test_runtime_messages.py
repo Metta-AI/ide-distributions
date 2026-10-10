@@ -286,33 +286,23 @@ FIXTURES = {
             "hours": 24,
         }
     ],
-    # The server's words name the act's ref and the ask: they go to ``about`` only.
+    # Ask keys and the server's words name refs and ids: they go to ``about`` only.
     "permit_needed": [
         {
             "act": "xp",
-            "subject": f"ar:{EXPERIMENT}:b1:a1:s7:candidate",
-            "reason": f"spend on spend:league_x:cow_x:ar%3A{EXPERIMENT}: the ask waits for "
-            f"the coach (ask asks/{ASK})",
-            "ask": ASK,
+            "subject": f"{EXPERIMENT}:b1:a1",
+            "count": 4,
+            "asks": [ASK, ASK.replace("-1", "-2")],
             "league_id": "league_x",
+            "over_cap": over_cap,
             "refs": [{"uri": f"ar://experiment/{EXPERIMENT}"}],
-        },
-        {
-            "act": "submit",
-            "subject": PROMOTION,
-            "reason": f"submit on league:league_x:{SHA}: the coach said no; a new ask waits "
-            f"(ask asks/{ASK})",
-            "ask": None,
-        },
-    ],
-    "league_not_chosen": [
-        {
-            "act": act,
-            "subject": subject,
-            "reason": reason,
-            "league_id": "league_x",
         }
-        for act, subject in (("xp", f"ar:{EXPERIMENT}:b1:a1"), ("submit", PROMOTION))
+        for over_cap in (False, True)
+    ]
+    + [{"act": "submit", "subject": PROMOTION, "count": 1, "asks": [ASK], "league_id": "league_x"}],
+    "league_not_chosen": [
+        {"act": act, "league_id": "league_x", "reason": reason, "retry_minutes": 30}
+        for act in ("xp", "submit")
         for reason in (
             (
                 "Your coach has not chosen a league for this cogent yet; ask them to pick one "
@@ -323,6 +313,10 @@ FIXTURES = {
                 "is refused."
             ),
         )
+    ],
+    "coach_declined": [
+        {"act": "xp", "subject": f"{EXPERIMENT}:b1:a1", "done": 2, "total": 40},
+        {"act": "submit", "subject": PROMOTION},
     ],
     "request_lost_in_rebuild": [{"request_id": REQUEST, "mode": "investigation"}],
     "skill_proposal": [

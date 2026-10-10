@@ -54,7 +54,14 @@ from pathlib import Path
 import yaml
 
 from autoresearch.io.docs import write_text
-from autoresearch.softmax_tool.protocol import CoachRefusal, LeagueNotChosen, PermitRequired
+from autoresearch.softmax_tool.protocol import (
+    PERMIT_DECLINED,
+    PERMIT_OVER_CAP,
+    PERMIT_WAITING,
+    CoachRefusal,
+    LeagueNotChosen,
+    PermitRequired,
+)
 
 DEFAULT_SERVER = "https://softmax.com/api"
 SERVER_ENV = "COGAMES_API_URL"
@@ -284,7 +291,8 @@ def coach_refusal(stderr: str) -> CoachRefusal | None:
     - ``Error: Access denied (403) for <path>. <response body>. <hint>``, when the detail is an
       object. The permit refusal (``permits.refusal_detail``) is
       ``{"detail": {"type": "permit_required", "message", "reason", "ask": <record>}, ...}``:
-      ``PermitRequired`` with its ``message`` and the ask's ``key``.
+      ``PermitRequired`` with its ``message``, the ask's ``key`` and the state its ``reason``
+      names (``permit_state``).
     """
     if PERMIT_DENIAL.search(stderr):
         return _permit_required(stderr)
@@ -306,8 +314,28 @@ def _permit_required(stderr: str) -> PermitRequired:
     if not isinstance(message, str) or not message.strip():
         message = next((line for line in stderr.splitlines() if line.strip()), stderr)
         message = message.removeprefix("Error: ").strip()
-    ask = (detail.get("ask") or {}).get("key") if isinstance(detail.get("ask"), dict) else None
-    return PermitRequired(reason=message.strip(), ask=ask if isinstance(ask, str) else None)
+    record = detail.get("ask") if isinstance(detail.get("ask"), dict) else {}
+    ask = record.get("key")
+    why = (record.get("body") or {}).get("why") if isinstance(record.get("body"), dict) else None
+    return PermitRequired(
+        reason=message.strip(),
+        ask=ask if isinstance(ask, str) else None,
+        state=permit_state(detail.get("reason"), why),
+    )
+
+
+def permit_state(reason: object, why: object = None) -> str:
+    """The refusal's state from the server's ``detail.reason`` and the ask's ``why`` (metta
+    ``permits.check_permit``): ``the coach said no; ...`` is declined; ``<n> credits is more than
+    the <m> left today`` (a yes that today's cap does not cover) or a new ask whose ``why`` says
+    ``a yes will not cover it until the UTC day turns`` is over the cap; anything else (``the ask
+    waits for the coach``, a used or outgrown yes, an ask naming another act) waits."""
+    reason = reason if isinstance(reason, str) else ""
+    if reason.startswith("the coach said no"):
+        return PERMIT_DECLINED
+    if "left today" in reason or (isinstance(why, str) and "until the UTC day turns" in why):
+        return PERMIT_OVER_CAP
+    return PERMIT_WAITING
 
 
 def describe_failure(tool: str, args: Sequence[str], result: subprocess.CompletedProcess) -> str:
