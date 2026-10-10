@@ -45,6 +45,7 @@ takes it: ``process_handoffs`` calls ``publish_hook`` while it holds the (non-re
 """
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,6 +86,8 @@ FINAL_OUTCOMES = ("done", "partial", "dropped", "failed")
 # handoff, or the repair of a run that left no handoff). The bound lets every repair in a full
 # chain need one recovery: repair, recovery, repair, recovery.
 REPAIR_HOPS = 2 * MAX_REPAIR_CHAIN
+
+log = logging.getLogger(__name__)
 # CardSpec.created_by of a runtime request; equal to ``runtime.planning.RUNTIME``, which cannot be
 # imported here (planning -> routing -> publisher is an import cycle).
 CREATED_BY_RUNTIME = "runtime"
@@ -661,22 +664,33 @@ def _finishes_blocked_work(canonical: Path, record: dict, blocked_card: str, han
 
 
 def _published_repair_outcome(canonical: Path, blocked_card: str) -> dict | None:
-    """The committed handoff of a repair in ``blocked_card``'s chain (``_repair_requests``)
-    whose request is already ``published`` with a final outcome, else None. A repair can
-    publish before the ``blocked`` handoff it repairs: health repairs a card blocked twice
-    while that handoff waits (its board lookup failed, say)."""
+    """The latest committed handoff, itself ``published`` with a final outcome, of a card of a
+    repair or recovery request in ``blocked_card``'s chain (``_repair_requests``); else None.
+    A repair can publish before the ``blocked`` handoff it repairs: health repairs a card
+    blocked twice while that handoff waits (its board lookup failed, say). The handoff records
+    are read directly: a receipt's ``handed_off`` can name a newer run that has not published
+    (a card requeued before its earlier handoff published)."""
+    ledger = ledger_of(canonical)
     for request_id in _repair_requests(canonical, blocked_card):
-        receipt = committed_json(canonical, request_receipt_path(ledger_of(canonical), request_id))
-        if not isinstance(receipt, dict) or receipt.get("state") != "published":
-            continue
-        handed_off = receipt.get("handed_off") or {}
-        if not handed_off.get("task_id") or not handed_off.get("run_id"):
-            continue
-        path = ledger_of(canonical) / "handoffs" / handed_off["task_id"]
-        handoff = committed_json(canonical, path / f"{handed_off['run_id']}.json")
-        if isinstance(handoff, dict) and handoff.get("outcome") in FINAL_OUTCOMES:
-            return handoff
+        receipt = committed_json(canonical, request_receipt_path(ledger, request_id))
+        tasks = receipt.get("tasks", []) if isinstance(receipt, dict) else []
+        for task in tasks:
+            for path in reversed(
+                _committed_listing(canonical, ledger / "handoffs" / task["task_id"])
+            ):
+                handoff = committed_json(canonical, path)
+                if (
+                    isinstance(handoff, dict)
+                    and handoff.get("state") == "published"
+                    and handoff.get("request_id") == request_id
+                    and handoff.get("outcome") in FINAL_OUTCOMES
+                ):
+                    return handoff
     return None
+
+
+# A handoff the follow-up note is built from must name these (``_task_acknowledgement``).
+ACK_FIELDS = ("card", "request_id", "merge_sha", "outcome")
 
 
 def _final_acknowledgements(
@@ -703,6 +717,13 @@ def _final_acknowledgements(
         else:
             final = _published_repair_outcome(canonical, blocked_card)
         if final is None:
+            continue
+        missing = [name for name in ACK_FIELDS if not final.get(name)]
+        if missing:  # never raise here: it would stop every acknowledgement of this pass
+            log.warning(
+                "follow-up of %s not sent: handoff %s/%s lacks %s",
+                inbound_id, final.get("card"), final.get("run_id"), ", ".join(missing),
+            )  # fmt: skip
             continue
         # The planning-card lead line is only true when the card that took it finishes it.
         backlog = record["responsible"]["backlog"] and blocked_card == final["card"]

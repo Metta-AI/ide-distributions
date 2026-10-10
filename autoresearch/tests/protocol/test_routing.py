@@ -1314,3 +1314,59 @@ def test_a_repair_that_leaves_no_handoff_is_finished_by_its_missing_handoff_repa
     assert len(_replies(board, task)) == 1
 
     _finish_recovery(board, request_id, task, first)
+
+
+def test_a_repair_receipt_naming_an_unpublished_newer_run_is_not_taken_as_finished(board):
+    """Codex round 4: the repair is requeued before its own ``blocked`` handoff publishes; its
+    rerun hands off ``done`` (the receipt's ``handed_off`` moves to it) but is still running.
+    Publishing the older run closes the receipt. The sweep must not take the unpublished
+    newer handoff as finished (it has no ``merge_sha``); the follow-up waits for it."""
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    _handle_blocked(board)  # requeued
+    worker.start()
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    [action] = _handle_blocked(board)
+    repair = _start_repair(board, action)
+    repair.finish(outcome="blocked", terminal=False)
+    board.queue.block(repair.task_id, repair.run_id, "circuit breaker")
+    assert [a.action for a in _handle_blocked(board)] == [blocked.REQUEUED]
+    repair.start()
+    repair.write_journal()
+    repair.finish(terminal=False)  # done, still running: handed_off now names this run
+    lookup_fails = _LookupFails(board.queue, worker.task_id)
+    board.process(publish=local_hook, queue=lookup_fails)
+    assert repair.receipt()["state"] == "published"
+
+    board.process(publish=local_hook)  # the original's blocked handoff publishes
+
+    [first] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    repair.end_run()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["card"] == repair.task_id
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+    _assert_clean(board)
+
+
+def test_a_follow_up_candidate_missing_a_field_is_skipped_with_a_log_line(
+    board, monkeypatch, caplog
+):
+    """The follow-up builder never raises on a candidate handoff without ``merge_sha``: it
+    would stop every acknowledgement of the pass."""
+    task, _worker, _first = _blocked_task(board)
+    incomplete = {"card": "K-x", "run_id": "r-x", "request_id": "Q-x", "outcome": "done"}
+    monkeypatch.setattr(publisher, "_published_repair_outcome", lambda *args: incomplete)
+    other = board.admit()
+    other.start()
+    other.write_journal()
+    other.finish()
+
+    with caplog.at_level("WARNING", logger="autoresearch.comms.publisher"):
+        board.process(publish=local_hook)
+
+    assert other.receipt()["state"] == "published"
+    assert len(_replies(board, task)) == 1
+    assert any("merge_sha" in r.getMessage() and task in r.getMessage() for r in caplog.records)
