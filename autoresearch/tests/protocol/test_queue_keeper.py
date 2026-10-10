@@ -1264,6 +1264,33 @@ def _replies(host: Host, inbound_id: str) -> list[dict]:
     return [m for m in host.outbox() if m.get("in_reply_to") == inbound_id]
 
 
+def test_a_coach_task_and_a_pause_in_one_run_start_the_agent_and_hold_the_task(host):
+    """Routing takes the task first (controls come after the other kinds): the task is routed
+    and starts the agent; then the pause holds research, so admission defers its request and
+    planning waits. The resume admits it."""
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    control = _control(host, "pause")  # sent first: id order must not matter
+    task = _send_task(host, "coach:ply_x")
+
+    run = host.tick(at(1))
+
+    record = host.committed(host.ledger / "inbound" / f"{task}.json")
+    assert record["state"] == "routed" and record["responsible"]["request_id"]
+    assert _started(host)["by"] == task
+    assert (host.ledger / "coach-hold.json").exists()
+    assert not any(result.ok for result in run.admitted)  # deferred: "paused"
+    assert host.receipt(record["responsible"]["request_id"]) is None
+    assert run.planning is None and run.planning_skipped and run.failures == {}
+    [note] = _replies(host, control)
+    assert note["title"] == "Research paused at your request."
+
+    _control(host, "resume")
+    resumed = host.tick(at(2))
+    assert [r.ok for r in resumed.admitted] == [True]
+    assert host.receipt(record["responsible"]["request_id"]) is not None
+
+
 def _held_card(host: Host) -> str:
     """Tick until a planning card is pending and assigned, then hold research; return it."""
     host.tick(at(0))
