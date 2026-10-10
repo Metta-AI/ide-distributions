@@ -39,8 +39,10 @@ tool-fault block (also ``needs_input``) lands in ``triage``.
 
 While the agent is paused (``pause.json``) or the coach holds research (``coach-hold.json``),
 a card due for its requeue is left blocked: the requeue keeps the card's assignee, so it would
-be dispatched. The first run after the resume requeues it. Repair requests are still written:
-admission holds them until the resume.
+be dispatched. The first run after the resume requeues it. The check and the requeue run under the
+canonical lock, as ``pause.hold`` does: health is its own process, and a hold applied between
+an unlocked check and the requeue would leave the card assigned under the hold. Repair requests
+are still written: admission holds them until the resume.
 
 The queue change comes before the commit, so a crash between them at worst requeues a card
 a second time; it never skips straight to a repair.
@@ -156,10 +158,18 @@ def _refs(card: Card) -> list[dict]:
     return [{"uri": uri} for uri in card.spec.refs]
 
 
-def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction:
-    queue.requeue(card.task_id, "requeued once after a block (health)")
+def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction | None:
+    """Requeue the card once, unless the agent is paused or the coach holds research: a
+    requeue keeps the assignee, so the card would be dispatched. The check and the requeue are
+    under the canonical lock, as ``pause.hold`` (which unassigns pending cards) is: health runs
+    in its own process, and a hold applied between an unlocked check and the requeue would
+    miss the card."""
     marker = blocked_marker_path(canonical, card.task_id)
     with canonical_lock(canonical):
+        ledger = ledger_of(canonical)
+        if is_paused(ledger) or is_held(ledger):
+            return None  # wait for the resume
+        queue.requeue(card.task_id, "requeued once after a block (health)")
         write_json(
             marker,
             {
@@ -312,9 +322,6 @@ def _handle_one(
     if record is None or record["state"] == TOOL_FAULT:
         if outcome == "blocked":
             return _repair(canonical, card, record, allow_no_remote, after_publish=True)
-        ledger = ledger_of(canonical)
-        if is_paused(ledger) or is_held(ledger):
-            return None  # a requeue keeps the assignee, so it would dispatch: wait for resume
         return _requeue(canonical, queue, card)
     if record["state"] == REQUEUED:
         return _repair(canonical, card, record, allow_no_remote)

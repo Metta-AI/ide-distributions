@@ -1057,3 +1057,43 @@ def test_a_planning_request_in_the_backlog_is_shown_to_the_next_planning_card(bo
     assert board.committed(path)["taken_by"] == planner.task_id
     assert any("Plan jungle" in line for line in planning_backlog(board.canonical, planner.task_id))
     assert planning_backlog(board.canonical, "K-other") == []
+
+
+# --- final fix round ---
+
+
+def test_a_hold_applied_while_health_requeues_a_blocked_card_still_holds_it(board, monkeypatch):
+    """Health runs in its own process. A coach hold applied (by queue-keeper routing, under the
+    canonical lock) between health's hold check and its requeue must not leave the requeued
+    card pending and assigned, so dispatchable, under the hold."""
+    import threading
+
+    from autoresearch.runtime import pause
+
+    worker = board.admit()
+    worker.start()
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    real_is_held = blocked.is_held
+    holders = []
+
+    def is_held_then_hold_applies(ledger):
+        held = real_is_held(ledger)
+        if not holders:
+
+            def apply_hold():
+                with canonical_lock(board.canonical):
+                    pause.hold(board.queue, board.ledger, "coach:ply_x")
+
+            holders.append(threading.Thread(target=apply_hold))
+            holders[0].start()
+            holders[0].join(timeout=2)  # finishes unless health holds the canonical lock
+        return held
+
+    monkeypatch.setattr(blocked, "is_held", is_held_then_hold_applies)
+
+    _handle_blocked(board)
+    holders[0].join()
+
+    assert board.committed(board.ledger / "coach-hold.json") is not None
+    card = board.queue.get(worker.task_id)
+    assert not (card.state == "pending" and card.assignee is not None)
