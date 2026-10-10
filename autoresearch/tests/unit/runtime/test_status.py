@@ -4,12 +4,14 @@ import datetime
 import json
 
 import pytest
+from support.keeper_host import evaluating_experiment
 from support.state_db import add_session
 
 from autoresearch import cli
 from autoresearch.comms import runtime_messages
 from autoresearch.comms.publisher import publish_message
 from autoresearch.io.docs import write_json
+from autoresearch.records.store import RecordStore
 from autoresearch.runtime import promotion, status
 from autoresearch.runtime.ledger import commit
 from autoresearch.runtime.pause import pause
@@ -189,3 +191,31 @@ def test_a_raising_queue_gives_no_running_cards_and_a_warning(ctx, queue):
     result = build(ctx, BrokenQueue())
     assert result["data"]["running_cards"] == []
     assert any("running cards unavailable" in warning for warning in result["warnings"])
+
+
+def test_permit_asks_open_counts_waiting_experiments_and_a_waiting_promotion(
+    ctx, canonical, queue
+):
+    store = RecordStore(canonical.layout)
+    waiting = evaluating_experiment(store, canonical.hypothesis_id)
+    asks = [{"ask": "ask-1", "request": "k-1"}, {"ask": "ask-2", "request": "k-2"}]
+    store.update(
+        waiting,
+        {"status": "awaiting-permit", "lifecycle": {"permit_wait": {"kind": "permit", "asks": asks}}},
+    )
+    evaluating_experiment(store, canonical.hypothesis_id)  # evaluating: no asks
+    waiting_promotion = promotion.Promotion(
+        id="P-1", holder_task="t_1", run_id="1", board_epoch="e1", experiment=None,
+        version="V-1", platform_policy_version_id="pv_1", candidate_ref="card/x:p",
+        candidate_sha=None, stage="intent", updated_at="2026-10-09T00:00:00Z",
+        kind="bootstrap", waiting="permit", waiting_detail={"ask": "ask-3"},
+    )  # fmt: skip
+    path = promotion.promotion_path(canonical.root)
+    write_json(path, waiting_promotion.to_dict())
+    commit(canonical.root, [*canonical.root.glob("experiments/**/*.md"), path], "records")
+
+    assert build(ctx, queue)["data"]["permit_asks_open"] == 3
+
+
+def test_a_fresh_agent_has_no_permit_asks_open(ctx, queue):
+    assert build(ctx, queue)["data"]["permit_asks_open"] == 0

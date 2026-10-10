@@ -13,6 +13,12 @@ Files read, besides the ledger and comms:
 - ``<profile>/.softmax-update-failed``: JSON ``{"commit": str, "error": str}``, written by the
   Softmax runtime when a distribution update failed. Absent means no failed update.
 - ``<canonical>/.supervisor/ledger/coach-hold.json``: present while the coach holds the agent.
+
+``permit_asks_open`` counts the permit asks the agent waits on (Softmax hosting, IDE Controls
+"Ask before"): the recorded asks of every ``awaiting-permit`` experiment
+(``lifecycle.permit_wait.asks``) plus one for a promotion whose submit waits on an ask
+(``waiting == "permit"``). It is read from canonical only; whether the coach has answered yet
+is read by xp-poll and queue-keeper, not here.
 """
 
 import datetime
@@ -27,9 +33,11 @@ from autoresearch import __version__
 from autoresearch.comms import delivery, reader
 from autoresearch.comms.inbound import parse_time
 from autoresearch.io.docs import read_json
+from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
+from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import autonomy, spend
+from autoresearch.runtime import autonomy, promotion, spend
 from autoresearch.runtime.ledger import ledger_of
 from autoresearch.runtime.pause import is_held, is_paused, pause_path
 from autoresearch.runtime.preflight import HttpGet, credit_floor, fetch_key_data
@@ -75,6 +83,7 @@ def build(
         "openrouter_floor_usd": floor,
         "running_cards": _running_cards(queue, warnings),
         "open_questions": _open_questions(ctx.canonical, now, warnings),
+        "permit_asks_open": _permit_asks_open(ctx.canonical, warnings),
         "champion": champion_section(league_check, env, now, warnings),
         "last_keeper_run": _last_keeper_run(ctx),
     }
@@ -187,6 +196,25 @@ def _open_questions(canonical: Path, now: datetime.datetime, warnings: list[str]
         )
     except Exception as error:  # noqa: BLE001
         warnings.append(f"open questions unavailable: {type(error).__name__}: {error}")
+        return 0
+
+
+def _permit_asks_open(canonical: Path, warnings: list[str]) -> int:
+    """The permit asks the agent waits on (module docstring)."""
+    try:
+        store = RecordStore(Layout(canonical))
+        count = 0
+        for experiment_id in store.find("experiment"):
+            meta, _ = store.load(experiment_id)
+            if meta.get("status") == "awaiting-permit":
+                wait = (meta.get("lifecycle") or {}).get("permit_wait") or {}
+                count += len(wait.get("asks") or [])
+        current = promotion.load(canonical)
+        if current is not None and current.waiting == "permit":
+            count += 1
+        return count
+    except Exception as error:  # noqa: BLE001
+        warnings.append(f"permit asks unavailable: {type(error).__name__}: {error}")
         return 0
 
 

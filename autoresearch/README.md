@@ -243,8 +243,10 @@ Read state with the CLI:
 and commit (and a failed update, from the profile's `.softmax-update-failed` JSON
 `{"commit", "error"}`), pause state and reasons, coach hold, `AUTORESEARCH_AUTONOMY` and
 whether the agent started, today's estimated spend against the daily budget, the OpenRouter
-key's limit, usage and remaining credit, running cards, open questions, the champion and any
-conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
+key's limit, usage and remaining credit, running cards, open questions, the permit asks the
+agent waits on (`permit_asks_open`: the recorded asks of `awaiting-permit` experiments, plus
+one for a promotion whose submit waits on an ask; whether the coach already answered is not
+read here), the champion and any conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
 `warnings` entry. It never prints a credential.
 
 `report baseline --since <YYYY-MM-DD> --json` reports performance and cost from that UTC
