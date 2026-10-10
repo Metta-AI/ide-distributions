@@ -92,6 +92,45 @@ Follow G2's `summary.episode_dir` to the episode results and logs; build locator
 are relative to the build directory. Read failed/errored receipts too; a process
 exit alone is not evidence of passing gates.
 
+### G2 episode runner
+
+G2 runs one competition episode with the candidate in all ten seats, at the
+manifest variant's seed, `max_ticks` and draft mode. By default (`GOTA_G2_RUNNER`
+unset or `native`) it runs the native `gota_match` binary through
+`tools/gota_local.py`, for the build's resolved engine commit (`engine.env`'s pin
+when none is resolved). It needs Nim-built native helpers, not Docker, so it runs in
+the hosted sandbox. Set `GOTA_G2_RUNNER=docker` to run pinned `coworld run-episode`
+instead; that needs Docker and the release's container image. `details.runner` in the
+G2 receipt names the runner. The native runner reports a tool error (`errored`) when
+the manifest's `game_config` differs from the one the binary was built with. The
+evidence each runner reads back is in the [gate reference](gates/README.md#evidence-and-limits).
+
+The native runner runs `gota_match` with `COGAME_LLM=off` and kills it, with its
+process group, after the gate timeout (default 600 seconds); a timeout is a tool
+error (`errored`). It writes the episode under the build's `episode/` directory,
+including the recording `replay.bin` (the file size grows with the recorded actions).
+The native match binary's receipt covers `tools/gota_match.nim`, so a build order
+that was already in flight when this change deployed finds its cached binary stale
+and reports `errored` ("stale or modified native build") once, until the binary is
+rebuilt offline with `tools/build_gota_match.sh`.
+
+Native G2 does not prove:
+
+- that the published container image (`game.runnable.image` in the manifest) starts,
+  contains this engine, or runs the policy. It runs the same engine source, built
+  locally with Nim 2.2.10 on the host's own platform, not the image's linux/amd64
+  build;
+- the coworld runner path: staging the artifact as an uploaded player file,
+  the per-seat player processes and their protocol and timeouts, and coworld's own
+  `results.json` and replay writer;
+- policy behavior that depends on LLM host calls: native G2 runs with `COGAME_LLM=off`,
+  so no LLM request is made (and none is paid for);
+- anything set in the manifest outside the variant's `game_config`, such as the
+  runnable's `env` (for example `COGAME_PLAYER_SEATS_SCHEMA`): the native runner
+  does not read it.
+
+A Docker G2 on a host with Docker, or a league episode, is the evidence for those.
+
 ## Metrics
 
 Each episode observation belongs to one subject seat; repeated copies in one

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ..tools.gota_episodes import _parse_telemetry
 from . import GateContext, GateResult, PolicyFailure, gate_run
-from .g2_episode import inspect_episode
+from .g2_episode import inspect_episode, seat_log
 
 
 def parse_log(path: Path) -> dict:
@@ -31,10 +31,7 @@ def run(artifact: Path, context: GateContext) -> GateResult:
     inspect_episode(artifact, context.episode_dir)
     if context.compiler_map is not None:
         return compiler_logs(context)
-    seats = [
-        parse_log(context.episode_dir / "logs" / f"policy_agent_{slot}.log")
-        for slot in range(10)
-    ]
+    seats = [parse_log(seat_log(context.episode_dir, slot)) for slot in range(10)]
     return GateResult(
         'passed',
         {
@@ -63,7 +60,7 @@ def compiler_logs(context: GateContext) -> GateResult:
     seats = []
     try:
         for seat in range(10):
-            path = context.episode_dir / "logs" / f"policy_agent_{seat}.log"
+            path = seat_log(context.episode_dir, seat)
             counts = {}
             previous = -1
             for line in path.read_text().splitlines():

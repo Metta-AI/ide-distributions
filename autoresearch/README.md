@@ -101,6 +101,7 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long the league may take to make our admitted submission the champion (or, when its membership cannot be found, how long after the submit) before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
 | `AUTORESEARCH_RELAUNCH_MIN_CREDITS` | no | Credits an experiment refused for credits needs before xp-poll relaunches it, when the cost per XP episode cannot be estimated from recent requests (A10). Default 100. |
 | `AUTORESEARCH_CREDIT_BACKOFF_MINUTES` | no | First wait before an experiment refused for credits is relaunched when the credit balance cannot be read, or when the refusal came with a positive balance (doubles per refusal, at most 8 hours). Default 30. |
+| `GOTA_G2_RUNNER` | no | GotA G2 gate episode runner. Default `native`: the pinned native match binary, no Docker needed. `docker` runs pinned `coworld run-episode` instead, which needs Docker. See `games/gota/GAME.md`, "G2 episode runner". |
 
 Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 `HERMES_WRITE_SAFE_ROOT` (the canonical workspace) into the same `.env`. Do not set them

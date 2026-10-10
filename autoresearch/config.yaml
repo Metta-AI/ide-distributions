@@ -79,6 +79,7 @@ terminal:
     - AUTORESEARCH_FALLBACK_PRICES
     - AUTORESEARCH_RELAUNCH_MIN_CREDITS
     - AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD
+    - GOTA_G2_RUNNER
 
 # Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
 # process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin; the
