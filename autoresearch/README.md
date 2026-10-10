@@ -495,9 +495,9 @@ depends on it, it says "per the plan", and you should check the deployed metta v
 - **Stop and resume research.** Type `/pause-research` (hold: no new cards are admitted or dispatched, nothing
   is planned; running cards finish under their caps) and `/resume-research`. A resume does not override
   the agent's own pause (credit floor, daily budget, champion conflict); it says so and the agent
-  resumes when that cause clears. Cancelling one task in the IDE stops only that task (it arrives as a `steer`), and the chat's
-  stop button (`/stop`) stops only the chat turn that is running (per the plan; both are bridge behavior).
-  Neither pauses research.
+  resumes when that cause clears. Cancelling one task in the IDE stops only that task: it arrives as a
+  `steer`. The chat's stop button (`/stop`) stops only the chat turn that is running. Both are bridge
+  behavior, per the plan, and neither pauses research.
 - **Budgets you will meet.** The chat has its own cap, `AUTORESEARCH_CHAT_DAILY_USD` (default $3 per UTC
   day): over it the chat's tools refuse except `status`, and research is not affected. Research has the
   caps in the table under "Configure `.env`".
@@ -552,7 +552,8 @@ new image, which is a host replacement with workspace moves. Two things to know:
   can leave the profile partly updated. That is a known gap until M4.
 - **Replacing the earlier `rohit-optimizer` profile moves its Hermes state aside** (to
   `/opt/data/profiles/.optimizer-replaced-<UTC time>`), and ours is installed fresh. The agent therefore
-  starts without the earlier chat context, while the IDE can still show the old transcript.
+  starts without the earlier chat context, while the IDE can still show the old transcript. If installing ours
+  fails while the `rohit-optimizer` profile is present, the old profile keeps serving chat.
 
 ### What is not isolated
 

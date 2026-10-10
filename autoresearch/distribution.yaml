@@ -95,9 +95,9 @@ env_requires:
   - name: TMPDIR
     required: false
     description: >-
-      Scratch directory for builds and episodes. Softmax hosting sets /opt/data/tmp because
-      the sandbox /tmp is a small tmpfs. It is on terminal.env_passthrough so cron scripts and
-      workers see it. Leave it unset elsewhere.
+      Scratch directory for builds and episodes. Set by Softmax hosting (/opt/data/tmp, because
+      the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS. It is
+      on terminal.env_passthrough so cron scripts and workers see it.
   - name: AUTORESEARCH_FALLBACK_PRICES
     required: false
     default: input=3,output=12,cache_read=0.75,cache_write=3
