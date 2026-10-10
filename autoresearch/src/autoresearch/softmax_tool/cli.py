@@ -150,14 +150,19 @@ from datetime import UTC, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
+import frontmatter
+
 from autoresearch import runctx
 from autoresearch.cli import register_group
 from autoresearch.games.bindings import binding_evaluate
 from autoresearch.games.loader import GameError, load_game
 from autoresearch.ids import parse_id
+from autoresearch.io import gitops
 from autoresearch.io.docs import write_text
 from autoresearch.io.locks import LockTimeout, file_lock
+from autoresearch.paths import Layout
 from autoresearch.queue.select import queue_from_env
+from autoresearch.records.registry import path_for
 from autoresearch.records.store import RecordNotFound, RecordProblems
 from autoresearch.runtime.preflight import env_file_value
 from autoresearch.runtime.promotion import (
@@ -708,6 +713,19 @@ def _check_permit_wait(experiment: str, meta: dict, args, league_id: str) -> Non
         )
 
 
+def _closed_in_canonical(ctx, experiment: str) -> str | None:
+    """The experiment's status as committed in canonical when it is closed (``stopped``,
+    ``reviewed``), else None. xp-poll stops an experiment in canonical, not in this worker's
+    worktree, so the worktree copy cannot tell a running relaunch that the coach said no."""
+    canonical = Path(ctx.canonical)
+    rel = path_for(Layout(canonical), experiment).relative_to(canonical).as_posix()
+    content = gitops.show(canonical, "HEAD", rel)
+    if content is None:  # not merged to canonical yet
+        return None
+    status = frontmatter.loads(content.decode("utf-8")).metadata.get("status")
+    return status if status in CLOSED_EXPERIMENT else None
+
+
 def _xp_create(ctx, sm, args) -> dict:
     base = backoff_base(os.environ)
     with experiment_lock(ctx, args.experiment, "xp create"):
@@ -778,6 +796,16 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     for seed, arm, spec in planned:
         if (seed, arm) in existing:
             continue
+        # Before each request: the coach may have said no since this run began (xp-poll then
+        # stops the experiment in canonical). Nothing more is sent: no credits spent on the
+        # approved requests, and no new ask filed for the declined one.
+        closed = _closed_in_canonical(ctx, experiment)
+        if closed is not None:
+            raise Refused(
+                "experiment_closed",
+                f"{experiment} is {closed} in canonical (the coach declined it while this "
+                "batch ran); nothing more is sent",
+            )
         result = sm.xp_create(
             experiment, args.batch, args.attempt, spec, seed=seed, arm=arm, known=recovered
         )

@@ -84,7 +84,7 @@ def _launch_all(host: Host, experiment: str) -> list:
 
 def _poll(host: Host, now: datetime.datetime, sm=None) -> xp_poll.XpPollRun:
     host.now = now
-    return xp_poll.run(host.ctx, sm or host.sm, host.game, now, env=host.env)
+    return xp_poll.run(host.ctx, sm or host.sm, host.game, now, env=host.env, queue=host.queue)
 
 
 def _evidence(host: Host) -> list[dict]:
@@ -857,6 +857,59 @@ def test_a_relaunch_card_that_ends_without_the_requests_is_retried_then_asks_for
     assert later.launches == []
     assert len([m for m in host.outbox() if "relaunch-stuck:" in str(m.get("runtime_key"))]) == 1
     assert host.store.load(experiment)[0]["status"] == "awaiting-permit"
+
+
+class _CoachSaysNoMidway:
+    """Sends requests to the platform; right after the first one, ``between`` runs (the coach
+    changes an answer and xp-poll runs) while this relaunch is still going."""
+
+    def __init__(self, inner, between):
+        self.inner, self.between, self.creates = inner, between, 0
+
+    def xp_create(self, *args, **kwargs):
+        self.creates += 1
+        result = self.inner.xp_create(*args, **kwargs)
+        if self.creates == 1:
+            self.between()
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+def test_a_no_while_a_relaunch_runs_stops_it_before_the_next_request(host, monkeypatch):
+    """Codex round 6 (high): the coach changes a yes to no after the relaunch worker started.
+    xp-poll stops the experiment in canonical and stops the launch card; the running ``xp
+    create`` checks canonical before its next request, so it spends nothing more and files no
+    new ask."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _answer(host, "yes", keys)
+    [launch] = _poll(host, at(1)).launches
+    host.tick(at(2))
+    worker = host.claim("experimentation")
+    assert worker.card.spec.request_id == launch.request_id
+    polled = []
+
+    def coach_says_no():
+        _answer(host, "no", keys[2:3])
+        polled.append(_poll(host, at(3)))
+
+    midway = _CoachSaysNoMidway(host.sm, coach_says_no)
+    with pytest.raises(softmax_cli.Refused) as caught:
+        softmax_cli._xp_create(worker.ctx, midway, _cli_args(experiment))
+    assert caught.value.reason == "experiment_closed"
+    assert midway.creates == 1  # nothing sent after the stop
+    [stop] = polled
+    assert stop.stopped == [experiment] and stop.cards_stopped == [worker.card.task_id]
+    card = host.queue.get(worker.card.task_id)
+    assert card.state == "blocked" and card.block_reason.startswith("coach-stopped:")
+    state = read_json(host.canonical / ".supervisor" / "runtime" / "fake_softmax.json")
+    assert sorted(state["asks"].values()) == sorted(keys)  # no new ask
+    assert state["answers"][keys[1]] == "yes"  # the approved second request was not spent
+    assert host.store.load(experiment)[0]["status"] == "stopped"
+    host.tick(at(4))  # queue-keeper's blocked handling leaves the stopped card alone
+    assert host.queue.get(worker.card.task_id).state == "blocked"
 
 
 def test_a_declined_refusal_stops_the_batch_at_once(host, monkeypatch):

@@ -108,6 +108,11 @@ is generation 2, then 3, of the same marker (``markers.relaunch_generation``), f
 identical batch, and after ``RELAUNCH_GENERATIONS`` (3) one help request
 (``runtime_messages.relaunch_stuck``) and no more cards for that wait.
 
+When the coach's no stops an experiment, its open launch cards (pending or claimed) are stopped
+through the queue (``stop_relaunch_cards``; reason ``coach-stopped:``, which
+``blocked.handle_blocked`` leaves alone), and ``softmax xp create`` checks canonical before each
+request, so a relaunch already running sends nothing more.
+
 Each experiment is handled independently: a failure is logged to
 ``.supervisor/runtime/xp_poll.log`` and the others go on. Within one experiment, a failure
 while gathering evidence (artifacts, the evaluate binding, a platform read) is reported the
@@ -135,10 +140,13 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json, write_text
 from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.paths import Layout
+from autoresearch.queue.base import Queue
 from autoresearch.queue.card import CardSpec
+from autoresearch.queue.select import queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime import provenance
+from autoresearch.runtime.blocked import COACH_STOPPED_PREFIX
 from autoresearch.runtime.bootstrap import REPO_ROOT
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json
 from autoresearch.runtime.markers import (
@@ -191,6 +199,7 @@ class XpPollRun:
     reviews: list[CardSpec] = field(default_factory=list)
     launches: list[CardSpec] = field(default_factory=list)
     help_requests: list[str] = field(default_factory=list)  # experiments asked about
+    cards_stopped: list[str] = field(default_factory=list)  # launch cards of stopped experiments
     stopped: list[str] = field(default_factory=list)  # experiments the coach declined
     warnings: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)  # experiment -> error
@@ -733,6 +742,25 @@ def _stop_declined(canonical: Path, experiment: dict, now: datetime.datetime) ->
             publish_message(canonical, message, allow_no_remote=True)
 
 
+def stop_relaunch_cards(queue: Queue, experiment_id: str, result: XpPollRun) -> None:
+    """Stop the open (pending or claimed) launch cards of an experiment the coach stopped, so
+    no relaunch runs on (``Queue.stop``; a claimed card's worker is ended). A failure is
+    logged as a warning and the card's own ``xp create`` still refuses: it checks canonical
+    before each request."""
+    ref = f"ar://experiment/{experiment_id}"
+    for card in queue.list():
+        if card.state not in ("pending", "claimed") or ref not in card.spec.refs:
+            continue
+        if card.spec.title != f"Launch {experiment_id}":
+            continue
+        try:
+            queue.stop(card.task_id, f"{COACH_STOPPED_PREFIX} the coach declined {experiment_id}")
+        except Exception as error:  # noqa: BLE001 - the canonical check still holds it back
+            result.warnings.append(f"{card.task_id}: stopping it failed: {error}")
+            continue
+        result.cards_stopped.append(card.task_id)
+
+
 def _publish_once(
     canonical: Path, message: runtime_messages.RuntimeMessage, result: XpPollRun, eid: str
 ) -> None:
@@ -890,9 +918,11 @@ def run(
     env: Mapping[str, str],
     evaluate: Evaluate | None = None,
     repo_root: Path = REPO_ROOT,
+    queue: Queue | None = None,
 ) -> XpPollRun:
     """One xp-poll run (module docstring). ``evaluate`` defaults to the game's binding.
-    ``env`` gives ``AUTORESEARCH_RELAUNCH_MIN_CREDITS`` (the Softmax client reads its own)."""
+    ``env`` gives ``AUTORESEARCH_RELAUNCH_MIN_CREDITS`` (the Softmax client reads its own).
+    ``queue``: where the launch cards of stopped experiments are stopped (None: not done)."""
     result = XpPollRun()
     credits_view = CreditView(sm, min_relaunch_credits(env))
     evaluate = evaluate or binding_evaluate(game, repo_root)
@@ -917,6 +947,9 @@ def run(
                 except Exception as error:  # noqa: BLE001 - one experiment never stops the rest
                     result.failures[experiment_id] = f"{type(error).__name__}: {error}"
                     _log(ctx, f"{experiment_id} failed: {error}\n{traceback.format_exc()}")
+            if queue is not None:
+                for experiment_id in result.stopped:
+                    stop_relaunch_cards(queue, experiment_id, result)
             for warning in result.warnings:
                 _log(ctx, f"warning: {warning}")
             if REMOTE in gitops.git(ctx.canonical, "remote").split():
@@ -935,13 +968,14 @@ def main(argv: list[str] | None = None) -> int:
         ctx = runctx.from_env(env)
         game = load_game(REPO_ROOT, env.get(GAME_ENV) or DEFAULT_GAME)
         sm = softmax_from_env(env, ctx.canonical)
+        queue = queue_from_env(env, ctx)
     except Exception as error:  # noqa: BLE001 - report any setup failure and fail the job
         print(f"xp-poll: cannot start: {type(error).__name__}: {error}", file=sys.stderr)
         return 1
     if not (ctx.canonical / ".git").exists():
         print("xp-poll: no canonical workspace yet (queue-keeper bootstraps it)")
         return 0
-    result = run(ctx, sm, game, datetime.datetime.now(datetime.UTC), env=env)
+    result = run(ctx, sm, game, datetime.datetime.now(datetime.UTC), env=env, queue=queue)
     summary = {
         "skipped": result.skipped,
         "evidence": len(result.evidence),
@@ -949,6 +983,7 @@ def main(argv: list[str] | None = None) -> int:
         "launches": [spec.request_id for spec in result.launches],
         "help_requests": result.help_requests,
         "stopped": result.stopped,
+        "cards_stopped": result.cards_stopped,
         "warnings": result.warnings,
         "failures": result.failures,
     }

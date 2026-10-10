@@ -24,6 +24,10 @@ before ``kanban_block``); this one covers the runtime's view and a worker that c
 human unblocks the card and a later non-tool-fault block follows, the marker is ignored and
 the card follows the ordinary requeue-then-repair path.
 
+A card the runtime stopped because the coach declined its experiment (reason starting
+``coach-stopped:``, ``xp_poll.stop_relaunch_cards``) is skipped too: never requeued, never
+repaired, no help request; the experiment is ``stopped`` and the coach already has a note.
+
 Spend caps (``runtime.spend``) come first. A card stopped at a cap (reason starting
 ``spend-cap:``, or held at a cap) is skipped: never requeued, never repaired. With a
 ``spend_config``, a card that would be requeued or repaired but has reached its run cap or
@@ -56,6 +60,8 @@ from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, 
 from autoresearch.runtime.markers import repair_blocked_marker
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 
+# The block reason of a relaunch card the runtime stopped after the coach's no (xp-poll).
+COACH_STOPPED_PREFIX = "coach-stopped:"
 REQUEUED = "requeued"
 REPAIRED = "repaired"
 SPEND_CAP = "spend-cap"
@@ -186,7 +192,9 @@ def _handle_one(
     spend_config: spend.SpendConfig | None,
 ) -> BlockedAction | None:
     canonical = ctx.canonical
-    if spend.is_held(canonical, card):
+    if spend.is_held(canonical, card) or (card.block_reason or "").startswith(
+        COACH_STOPPED_PREFIX
+    ):
         return None
     record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
     reason = card.block_reason or ""
