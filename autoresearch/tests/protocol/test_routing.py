@@ -1097,3 +1097,38 @@ def test_a_hold_applied_while_health_requeues_a_blocked_card_still_holds_it(boar
     assert board.committed(board.ledger / "coach-hold.json") is not None
     card = board.queue.get(worker.task_id)
     assert not (card.state == "pending" and card.assignee is not None)
+
+
+def test_a_completed_rerun_of_a_card_whose_blocked_handoff_was_published_is_repaired(board):
+    """A human unblocks a card whose ``blocked`` handoff is published; the rerun's
+    ``card finish`` is refused and it completes between two runs of the blocked-card step.
+    It is repaired once, and the repair's handoff completes the coach's task."""
+    task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.TOOL_FAULT
+    board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
+    worker.start()
+    worker.end_run("done")  # refused card finish, then kanban_complete
+    assert board.queue.get(worker.task_id).state == "completed"
+
+    [action] = _handle_blocked(board)
+
+    assert _handle_blocked(board) == []  # the marker prevents a second repair
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
+    assert marker["state"] == blocked.REPAIRED
+    assert marker["repair_request"] == action.repair_request
+    repair = _start_repair(board, action)
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_completed_card_whose_only_run_handed_off_blocked_is_not_repaired_again(board):
+    """No rerun: the card's last run is the one whose handoff is published."""
+    _task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked")  # the run ends completed, not blocked
+    board.process(publish=local_hook)
+    assert board.queue.get(worker.task_id).state == "completed"
+
+    assert _handle_blocked(board) == []

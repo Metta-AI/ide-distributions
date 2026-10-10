@@ -67,7 +67,10 @@ first, then it closes the card (``drop`` when pending, ``stop`` when running), s
 the two leaves a card that the next run closes without a second request. A running card whose
 current run already has a committed handoff is left alone (it was requeued before its earlier
 handoff published, and its own handoff is on its way). A rerun that ends between two runs of this
-step (its refused ``card finish``, then ``kanban_complete``) is not seen, and gets no repair.
+step (its refused ``card finish``, then ``kanban_complete``) is found among the completed cards: a
+completed card with a run after its published ``blocked`` handoff and no ``repaired`` marker gets
+the same repair (``_repair_completed_rerun``). Only cards with two or more runs are read further,
+so the completed cards cost one receipt read each at most.
 
 Repair chains are bounded (``MAX_REPAIR_CHAIN``, both paths): the depth of a card is the number
 of repairs that led to it, counted back over the committed markers (each names its card's
@@ -120,14 +123,22 @@ class BlockedAction:
     repair_request: str | None = None
 
 
+def _handed_off(canonical: Path, card: Card) -> dict | None:
+    """The receipt's ``handed_off`` (``{task_id, run_id}``, possibly empty) once the card's
+    request receipt is ``published``; None while the request is open."""
+    receipt = committed_json(canonical, receipt_path(ledger_of(canonical), card.spec.request_id))
+    if receipt is None or receipt["state"] != "published":
+        return None
+    return receipt.get("handed_off") or {}
+
+
 def _published_outcome(canonical: Path, card: Card) -> str | None:
     """The outcome of the card's request's latest handoff once the request receipt is
     ``published`` (no run can hand off again); None while the request is open. A receipt that
     names no readable handoff counts as final (``unknown``): nothing is redone."""
-    receipt = committed_json(canonical, receipt_path(ledger_of(canonical), card.spec.request_id))
-    if receipt is None or receipt["state"] != "published":
+    handed_off = _handed_off(canonical, card)
+    if handed_off is None:
         return None
-    handed_off = receipt.get("handed_off") or {}
     handoff = None
     if handed_off:
         path = handoff_path(canonical, handed_off["task_id"], handed_off["run_id"])
@@ -357,6 +368,31 @@ def _close_rerun(
     return action
 
 
+def _repair_completed_rerun(
+    ctx: RunContext, queue: Queue, card: Card, allow_no_remote: bool
+) -> BlockedAction | None:
+    """A completed card with a run after its published ``blocked`` handoff: a rerun (a human
+    unblocked it) whose ``card finish`` was refused and that completed before ``_close_rerun``
+    saw it. It gets the repair it would have got there, once (the marker ``repaired``). A
+    card with one run, or whose last run is the published one, was not rerun."""
+    canonical = ctx.canonical
+    if len(card.runs) < 2:
+        return None
+    handed_off = _handed_off(canonical, card)
+    if not handed_off or handed_off.get("task_id") != card.task_id:
+        return None
+    if card.runs[-1].run_id == handed_off.get("run_id"):
+        return None
+    if _published_outcome(canonical, card) != "blocked":
+        return None
+    if promotion.covers_task(canonical, card.task_id):
+        return None
+    record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
+    if record is not None and record["state"] == REPAIRED:
+        return None
+    return _repair(canonical, card, record, allow_no_remote, after_publish=True)
+
+
 def handle_blocked(
     ctx: RunContext,
     queue: Queue,
@@ -377,6 +413,7 @@ def handle_blocked(
     cards = queue.list()
     handlers = [(card, _close_rerun, ()) for card in cards if card.state in ("pending", "claimed")]
     handlers += [(card, _handle_one, (spend_config,)) for card in cards if card.state == "blocked"]
+    handlers += [(card, _repair_completed_rerun, ()) for card in cards if card.state == "completed"]
     for card, handler, extra in handlers:
         try:
             action = handler(ctx, queue, card, allow_no_remote, *extra)

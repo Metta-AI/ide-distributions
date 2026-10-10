@@ -93,7 +93,8 @@ that contract:
      (the request was still open, so the rerun could hand off);
    - the repair card queue-keeper opens for a card whose `blocked` handoff is published and that
      Hermes then holds blocked (not a `tool-fault:` block), or that a human unblocks (the rerun
-     could not hand off: the runtime closes it and opens the repair card instead);
+     could not hand off: the runtime closes it and opens the repair card instead; a rerun that
+     already completed is repaired the same way);
    - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`).
 
    The bridge shows the task paused on the first note and closes it on the follow-up. A task first
@@ -102,9 +103,6 @@ that contract:
    - a card that finished `blocked` and then completed (`kanban_complete`), as most agent blocks do
      (for example `league-watch` on an identity refusal): nothing reruns it;
    - a `tool-fault:` card no human has unblocked yet (D-26), or a card held blocked at a spend cap;
-   - an unblocked card whose rerun ends (its `card finish` refused, then `kanban_complete`) before
-     queue-keeper or health sees it running: it is never repaired. Agent work before
-     `card finish` usually takes minutes, so this is unlikely;
    - a repair card that the agent or the planner drops before it runs;
    - a card a promotion covers (its promotion's recovery card carries the work on, outside the
      repair chain);
