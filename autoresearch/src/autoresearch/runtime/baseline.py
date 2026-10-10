@@ -20,7 +20,9 @@ Sources and rules:
   runs' models in start order. ``mode`` and ``outcome`` (the last finished run's outcome, else
   the card state) come from the board, else from the card's latest handoff record.
 - **days**: ``estimated_usd_by_source`` always has ``cli`` (card workers: Hermes sources
-  ``kanban`` and ``cli``), ``api_server`` (the coach chat), ``compiler`` (the compiler copies)
+  ``kanban`` and ``cli``), ``api_server`` (the coach chat, by the day it was spent: today from
+  the chat cap's snapshot, null on earlier days a chat session existed and today before the
+  first snapshot, with a warning; ``_chat_by_day``), ``compiler`` (the compiler copies)
   and ``cron``; any other source seen (``delegate``, ``oneshot``, ...) is an extra key with
   its own total. ``key_usage_delta_usd`` is the key's ``usage_daily`` for today and null for
   earlier days (no key history is kept). ``cards_finished`` counts cards with a ``done``
@@ -51,7 +53,7 @@ from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import spend
+from autoresearch.runtime import spend, state_db
 from autoresearch.runtime.ledger import ledger_of
 from autoresearch.runtime.preflight import HttpGet, fetch_key_data
 from autoresearch.runtime.status import finite_number
@@ -272,6 +274,8 @@ def _days(ctx, start, now, prices, key_data, handoffs, warnings) -> list[dict]:
     params = (start.timestamp(),)
     spend_by_day: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for row in _session_rows(ctx.hermes_home, query, params, warnings):
+        if row["source"] == state_db.CHAT_SOURCE:
+            continue  # by the day it was spent (_chat_by_day), not the session's start day
         source = "cli" if row["source"] in CARD_SOURCES else str(row["source"])
         spend_by_day[_utc_date(row["started_at"])][source] += _usd(row, prices)
     for home in sorted((ctx.hermes_home / COMPILER_SESSIONS).glob(f"*/{spend.STATE_DB}")):
@@ -281,15 +285,18 @@ def _days(ctx, start, now, prices, key_data, handoffs, warnings) -> list[dict]:
     today = now.astimezone(datetime.UTC).date()
     if start.date() > today:
         warnings.append(f"--since {start.date()} is after today ({today}): no days to report")
+    chat = _chat_by_day(ctx, start.date(), today, now, prices, warnings)
     days = []
     day = start.date()
     while day <= today:
         date = day.isoformat()
         by_source = {source: 0.0 for source in NAMED_SOURCES} | dict(spend_by_day.get(date, {}))
+        by_source = {k: round(v, 4) for k, v in by_source.items()}
+        by_source["api_server"] = chat.get(date, 0.0)
         days.append(
             {
                 "date": date,
-                "estimated_usd_by_source": {k: round(v, 4) for k, v in by_source.items()},
+                "estimated_usd_by_source": by_source,
                 "key_usage_delta_usd": (
                     finite_number(key_data.get("usage_daily")) if day == today else None
                 ),
@@ -298,6 +305,39 @@ def _days(ctx, start, now, prices, key_data, handoffs, warnings) -> list[dict]:
         )
         day += datetime.timedelta(days=1)
     return days
+
+
+def _chat_by_day(ctx, first_day, today, now, prices, warnings) -> dict[str, float | None]:
+    """Date -> the coach chat's spend that day, or None when it is not known. The chat is one
+    long-lived session whose running total Hermes keeps, so a day's spend is known only from
+    the chat cap's snapshot of today (``state_db.chat_day_estimate``). A day before today on
+    which a chat session already existed is unknown (no history is kept); a day before the
+    first chat session is 0."""
+    home = ctx.hermes_home
+    days = [first_day + datetime.timedelta(days=n) for n in range((today - first_day).days + 1)]
+    try:
+        first_start = state_db.first_chat_start(home)
+        today_usd = state_db.chat_day_estimate(home, home / state_db.CHAT_SPEND_FILE, now, prices)
+    except sqlite3.Error as error:
+        warnings.append(f"chat spend unavailable: {type(error).__name__}: {error}")
+        return {day.isoformat(): None for day in days}
+    chat: dict[str, float | None] = {}
+    first = None if first_start is None else _utc_date(first_start)
+    unknown = [day.isoformat() for day in days[:-1] if first and first <= day.isoformat()]
+    chat |= {date: None for date in unknown}
+    if unknown:
+        warnings.append(
+            f"chat spend per day is kept only for today: {', '.join(unknown)} reported as null"
+        )
+    if days:
+        chat[today.isoformat()] = None if today_usd is None else round(today_usd, 4)
+    if days and today_usd is None:
+        warnings.append(
+            f"chat spend on {today.isoformat()} is not known yet: the chat session started "
+            "earlier and there is no chat budget snapshot today (the next coach tool call "
+            "writes one)"
+        )
+    return chat
 
 
 def _utc_date(timestamp: float) -> str:

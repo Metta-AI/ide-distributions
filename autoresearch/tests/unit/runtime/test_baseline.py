@@ -217,3 +217,36 @@ def test_cli_prints_the_envelope(ctx, canonical, queue, monkeypatch, capsys):
     assert set(printed["data"]) == {"cards", "days", "experiments", "builds", "key"}
     assert cli.main(["report", "baseline", "--since", "last week"]) == 2
     assert "--since must be a date" in json.loads(capsys.readouterr().out)["error"]["message"]
+
+
+def _chat_days(ctx, queue, snapshot: dict | None):
+    if snapshot is not None:
+        write_json(ctx.hermes_home / "local" / "chat-spend.json", snapshot)
+    result = baseline.build(ctx, {}, SINCE, http_get, queue, NOW)
+    return {d["date"]: d["estimated_usd_by_source"]["api_server"] for d in result["data"]["days"]}, result["warnings"]
+
+
+def test_chat_spend_is_reported_on_the_day_it_was_spent(ctx, queue):
+    """Codex round 4: the hosted chat is one long-lived session. Its spend today is the rise
+    since today's snapshot (the chat cap's day delta), not its total on its start day. Earlier
+    days are not kept: null, with a warning, never 0."""
+    ctx.hermes_home.mkdir()
+    add_session(ctx.hermes_home, "chat", 1.0, source="api_server", started_at=ts(8, 8))
+
+    days, warnings = _chat_days(ctx, queue, {"day": "2026-10-09", "base_usd": {"chat": 0.6}})
+
+    assert days == {"2026-10-08": None, "2026-10-09": 0.4}
+    assert any("chat" in warning and "2026-10-08" in warning for warning in warnings)
+    assert json.loads((ctx.hermes_home / "local" / "chat-spend.json").read_text())["base_usd"] == {
+        "chat": 0.6}  # read only
+
+
+def test_chat_spend_today_without_a_snapshot_is_unknown(ctx, queue):
+    ctx.hermes_home.mkdir()
+    add_session(ctx.hermes_home, "chat", 1.0, source="api_server", started_at=ts(8, 8))
+
+    days, warnings = _chat_days(ctx, queue, None)
+
+    assert days == {"2026-10-08": None, "2026-10-09": None}
+    assert any("2026-10-09" in warning for warning in warnings)
+    assert not (ctx.hermes_home / "local" / "chat-spend.json").exists()

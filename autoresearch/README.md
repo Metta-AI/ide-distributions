@@ -254,7 +254,11 @@ source, today's key usage from OpenRouter's `usage_daily`, cards finished), per 
 ref it; `credits` is null because no per-request credit cost is stored), per uploaded build
 (wall time and each gate's seconds, null when the build did not record them), and the key.
 `estimated_usd_by_source` always has `cli` (card workers: Hermes sources `kanban` and `cli`),
-`api_server` (the coach chat), `compiler` (GotA compiler copies, below) and `cron`; any other
+`api_server` (the coach chat, counted on the day it was spent: the chat is one long-lived
+session, so today's figure comes from the chat budget's snapshot
+`$PROFILE/local/chat-spend.json`; earlier days on which a chat session existed, and today before
+the first coach tool call of the day, are null with a warning, because no history is kept),
+`compiler` (GotA compiler copies, below) and `cron`; any other
 source seen, such as `delegate`, is an extra key with its own total. Module docstring:
 `src/autoresearch/runtime/baseline.py`.
 

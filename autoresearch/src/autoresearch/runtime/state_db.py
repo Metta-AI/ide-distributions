@@ -15,7 +15,9 @@ each chat session's total since the day's first snapshot. ``chat_day_usd`` keeps
 snapshot in a small JSON file (``{"day": "YYYY-MM-DD", "base_usd": {session id: usd}}``,
 UTC days): a chat session first seen on a day is based at 0 when it started that day, else at
 its total when first seen. A lost or unreadable snapshot only under-counts the chat spend
-before it was rewritten; the inference key's own limit stays the hard ceiling.
+before it was rewritten; the inference key's own limit stays the hard ceiling. Only today's
+bases are kept, so earlier days' chat spend is not known (``report baseline`` reports it as
+null, ``chat_day_estimate``).
 """
 
 import datetime
@@ -27,6 +29,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 STATE_DB = "state.db"
+CHAT_SPEND_FILE = Path("local") / "chat-spend.json"  # under the profile home (chat_day_usd)
 CHAT_SOURCE = "api_server"  # sessions.source of the IDE coach chat
 ENV_FALLBACK_PRICES = "AUTORESEARCH_FALLBACK_PRICES"
 # USD per million tokens, for sessions Hermes could not price. Above the rate the box showed
@@ -110,6 +113,30 @@ def _write_snapshot(path: Path, day: str, base: dict[str, float]) -> None:
     os.replace(temporary, path)
 
 
+def _chat_rows(hermes_home: Path) -> list[sqlite3.Row]:
+    return state_rows(
+        hermes_home,
+        f"SELECT {COLUMNS}, s.started_at FROM sessions s WHERE s.source = ?",
+        (CHAT_SOURCE,),
+    )
+
+
+def _chat_total(
+    rows: list[sqlite3.Row], base: dict[str, float], start: datetime.datetime, prices
+) -> tuple[float, bool]:
+    """(the chat spend since the day's bases, whether a base was added). Adds the base of a
+    session first seen today to ``base`` (module docstring)."""
+    added = False
+    total = 0.0
+    for row in rows:
+        usd = session_usd(row, prices)[0]
+        if row["id"] not in base:
+            base[row["id"]] = 0.0 if (row["started_at"] or 0) >= start.timestamp() else usd
+            added = True
+        total += max(0.0, usd - base[row["id"]])
+    return total, added
+
+
 def chat_day_usd(
     hermes_home: Path, snapshot_path: Path, now: datetime.datetime, prices: Mapping[str, float]
 ) -> float:
@@ -118,20 +145,30 @@ def chat_day_usd(
     calls (the plugin holds a lock). Raises sqlite3.Error when ``state.db`` cannot be read."""
     start = utc_day_start(now)
     day = f"{start:%Y-%m-%d}"
-    rows = state_rows(
-        hermes_home,
-        f"SELECT {COLUMNS}, s.started_at FROM sessions s WHERE s.source = ?",
-        (CHAT_SOURCE,),
-    )
     base, current = _read_snapshot(snapshot_path, day)
-    changed = not current
-    total = 0.0
-    for row in rows:
-        usd = session_usd(row, prices)[0]
-        if row["id"] not in base:
-            base[row["id"]] = 0.0 if (row["started_at"] or 0) >= start.timestamp() else usd
-            changed = True
-        total += max(0.0, usd - base[row["id"]])
-    if changed:
+    total, added = _chat_total(_chat_rows(hermes_home), base, start, prices)
+    if added or not current:
         _write_snapshot(snapshot_path, day, base)
     return total
+
+
+def chat_day_estimate(
+    hermes_home: Path, snapshot_path: Path, now: datetime.datetime, prices: Mapping[str, float]
+) -> float | None:
+    """``chat_day_usd`` read only (``report baseline``): the chat spend of ``now``'s UTC day
+    from today's snapshot. None when there is no snapshot for today and a chat session
+    started before today: its spend today before the first snapshot is not known. Raises
+    sqlite3.Error when ``state.db`` cannot be read."""
+    start = utc_day_start(now)
+    base, current = _read_snapshot(snapshot_path, f"{start:%Y-%m-%d}")
+    rows = _chat_rows(hermes_home)
+    if not current and any((row["started_at"] or 0) < start.timestamp() for row in rows):
+        return None
+    return _chat_total(rows, base, start, prices)[0]
+
+
+def first_chat_start(hermes_home: Path) -> float | None:
+    """When the first chat session started (epoch seconds), or None when there is none."""
+    rows = _chat_rows(hermes_home)
+    starts = [row["started_at"] or 0 for row in rows]
+    return min(starts) if starts else None
