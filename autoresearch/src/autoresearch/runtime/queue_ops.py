@@ -42,7 +42,7 @@ from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card
 from autoresearch.queue.requests import load_schema, read_requests
-from autoresearch.runctx import RunContext, runtime_dir
+from autoresearch.runctx import BOARD, RunContext, runtime_dir
 from autoresearch.runtime import provenance
 from autoresearch.runtime.admission import receipt_path
 from autoresearch.runtime.ledger import (
@@ -156,7 +156,7 @@ def _give_up(
         entry["error"],
         request["id"],
         card.task_id if card is not None else None,
-        ctx.hermes_home.name,
+        BOARD,
     )
     with canonical_lock(canonical):
         if not already_published(canonical, message):

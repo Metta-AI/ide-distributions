@@ -81,19 +81,24 @@ def test_archive_distribution_and_candidate_committed_inputs(tmp_path, monkeypat
         compiler.committed_inputs(source)
 
 
-@pytest.mark.parametrize('status,security,timeout,environment,expected,budget,budget_env,expected_budget', [
-    ('passed', 'ready', None, None, 1200, None, None, 1800),
-    ('failed', 'ready', None, None, 1200, None, None, 1800),
-    ('errored', 'ready', None, None, 1200, None, None, 1800),
-    ('passed', 'empty', None, None, 1200, None, None, 1800),
-    ('passed', 'ready', None, '1234', 1234, None, '2400', 2400),
-    ('passed', 'ready', 1400, '1234', 1400, 2400, '1800', 2400),
-    ('passed', 'ready', 3600, 'invalid', 3600, 4200, 'invalid', 4200),
-    ('passed', 'ready', None, '', 1200, None, '', 1800),
+@pytest.mark.parametrize('status,security,timeout,environment,expected,budget,budget_env,expected_budget,copy_fails', [
+    ('passed', 'ready', None, None, 1200, None, None, 1800, False),
+    ('failed', 'ready', None, None, 1200, None, None, 1800, False),
+    ('errored', 'ready', None, None, 1200, None, None, 1800, False),
+    ('passed', 'empty', None, None, 1200, None, None, 1800, False),
+    ('passed', 'ready', None, '1234', 1234, None, '2400', 2400, False),
+    ('passed', 'ready', 1400, '1234', 1400, 2400, '1800', 2400, False),
+    ('passed', 'ready', 3600, 'invalid', 3600, 4200, 'invalid', 4200, False),
+    ('passed', 'ready', None, '', 1200, None, '', 1800, False),
+    # The compiler sessions cannot be copied (the profile path is a file): the build is
+    # unaffected, and a compiler that raises keeps its own error.
+    ('passed', 'ready', None, None, 1200, None, None, 1800, True),
+    ('raises', 'ready', None, None, 1200, None, None, 1800, True),
+    ('raises', 'ready', None, None, 1200, None, None, 1800, False),
 ])
 def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
-        tmp_path, monkeypatch, status, security, timeout, environment, expected,
-        budget, budget_env, expected_budget):
+        tmp_path, monkeypatch, capsys, status, security, timeout, environment, expected,
+        budget, budget_env, expected_budget, copy_fails):
     import hashlib
     import shutil
     import types
@@ -152,6 +157,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
         analysis.mkdir(parents=True)
         (analysis / 'evidence.json').write_text('{}')
         assert engine_identity['commit'] == POLYWORLD_COMMIT
+        (compiler.STAGING / '.claims' / 'abcdef12-1').mkdir(parents=True)
+        compiler_db(Path(os.environ['GOTA_COMPILER_HERMES_HOME']))
+        if status == 'raises':
+            raise RuntimeError('compiler crashed')
         target = compiler.BUILDS / 'abcdef12-1'
         target.mkdir(parents=True)
         (target / 'policy.bas').write_text('fake immutable policy')
@@ -164,6 +173,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
     parser = types.SimpleNamespace(parse_args=lambda argv: argv)
     monkeypatch.setitem(sys.modules, 'pw_strategy', types.SimpleNamespace(parser=lambda: parser, run=compile_fake))
     out = tmp_path / 'separate-output'
+    profile = tmp_path / 'profile'
+    if copy_fails:
+        profile.write_text('a file, not a directory')
+    monkeypatch.setenv('HERMES_HOME', str(profile))
     from games.gota.tools import engine_identity
     monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
     if security == 'empty':
@@ -171,7 +184,19 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
             module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
         assert error.value.exit_code == 3
         return
-    result = module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
+    if status == 'raises':
+        with pytest.raises(RuntimeError, match='compiler crashed'):
+            module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
+    else:
+        result = module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
+    if copy_fails:
+        assert 'compiler sessions not kept' in capsys.readouterr().err
+    else:
+        [kept] = (profile / 'gota-compiler').glob('abcdef12-1-*/state.db')
+        assert compiler_session_ids(kept) == ['compiler-session']
+        assert journal_mode(kept) == 'delete'  # read-only readers create no -wal/-shm files
+    if status == 'raises':
+        return
     if status != 'passed':
         assert not result['ok']
         assert result['status'] == status
@@ -188,8 +213,69 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
     assert version['driver']['installed_commit'] is None
     assert json.loads((out / 'coworld_manifest.json').read_text()) == json.loads(manifest.read_text())
     assert version['engine']['mode'] == 'offline'
+    built = json.loads((out / 'version.json').read_text())
+    assert built['started'] <= built['finished']
     with pytest.raises(ValueError, match='immutable'):
         module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
+
+
+def compiler_db(home):
+    import sqlite3
+    with sqlite3.connect(home / 'state.db') as connection:
+        connection.execute('PRAGMA journal_mode=WAL')  # as Hermes runs it
+        connection.execute('CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT)')
+        connection.execute("INSERT INTO sessions VALUES ('compiler-session', 'cli')")
+    connection.close()
+
+
+def compiler_session_ids(path):
+    import sqlite3
+    connection = sqlite3.connect(path)
+    try:
+        return [row[0] for row in connection.execute('SELECT id FROM sessions')]
+    finally:
+        connection.close()
+
+
+def journal_mode(path):
+    import sqlite3
+    connection = sqlite3.connect(path)
+    try:
+        return connection.execute('PRAGMA journal_mode').fetchone()[0]
+    finally:
+        connection.close()
+
+
+def load_build_module():
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_compiler_sessions_are_kept_under_the_profile_home(tmp_path, capsys):
+    module = load_build_module()
+    home, scratch = tmp_path / '.gota-build-abc123/hermes-home', tmp_path / '.gota-build-abc123'
+    home.mkdir(parents=True)
+    compiler_db(home)
+    (scratch / 'staging/.claims/abcdef12-1').mkdir(parents=True)
+    module.keep_compiler_sessions(home, scratch, str(tmp_path / 'profile'))
+    kept = tmp_path / 'profile/gota-compiler/abcdef12-1-abc123/state.db'
+    assert compiler_session_ids(kept) == ['compiler-session']
+
+
+def test_keeping_compiler_sessions_never_fails_the_build(tmp_path, capsys):
+    module = load_build_module()
+    home = tmp_path / '.gota-build-x/hermes-home'
+    home.mkdir(parents=True)
+    compiler_db(home)
+    module.keep_compiler_sessions(home, home.parent, None)
+    assert 'HERMES_HOME is not set' in capsys.readouterr().err
+    blocked = tmp_path / 'profile'
+    blocked.write_text('a file, not a directory')
+    module.keep_compiler_sessions(home, home.parent, str(blocked))
+    assert 'compiler sessions not kept' in capsys.readouterr().err
+    module.keep_compiler_sessions(tmp_path / 'no-home', home.parent, str(tmp_path))  # no db: no-op
+    assert not (tmp_path / 'gota-compiler').exists()
 
 
 def test_upload_delegates_only_to_shared_cli(monkeypatch):
@@ -305,7 +391,8 @@ def test_prebuilt_ignores_agent_timeout_env(tmp_path, monkeypatch):
     monkeypatch.setenv('GOTA_AGENT_BUDGET_S', 'invalid')
     monkeypatch.setattr(module, 'validate_manifest', lambda *a, **kw: {'identity': 'fixture'})
     from games.gota.tools import prebuilt
-    def fake_build(candidate, out, artifact, identity):
+    def fake_build(candidate, out, artifact, identity, *, started):
+        assert started
         assert identity == {'identity': 'fixture'}
         return {'ok': True}
     monkeypatch.setattr(prebuilt, 'build', fake_build)

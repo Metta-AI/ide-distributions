@@ -5,8 +5,10 @@ and the publish hook; it imports nothing that imports it back.
 A record moves ``received -> routed -> acknowledged``. ``responsible`` names the one card
 that must acknowledge it: ``request_id`` (the card request it was routed to), ``task_id``
 (filled once that request is admitted, or when a planning card takes a backlog entry), and
-``backlog`` (routed to the planning backlog). Writers hold the canonical lock and commit
-what they write; readers use the committed records (git is the ledger's truth).
+``backlog`` (routed to the planning backlog). A ``task`` acknowledged with outcome ``blocked``
+gets one more ``acknowledged`` history entry (note ``final outcome <outcome>``) and
+``final_ack_by``, the follow-up note, once its work finishes (``publisher.acknowledge_inbound``).
+Writers hold the canonical lock and commit what they write; readers use the committed records (git is the ledger's truth).
 """
 
 import functools

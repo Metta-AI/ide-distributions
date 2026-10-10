@@ -195,6 +195,7 @@ def test_shared_gate_order_and_advisory_screen(mocked_native_verification, tmp_p
     result = gota_gates.verify("abcdef12-1", context=GateContext(tmp_path))
     assert calls == ["G1", "G2", "G3", "G4", "G5"]
     assert all(row["passed"] for row in result.values())
+    assert all(isinstance(row["seconds"], float) and row["seconds"] >= 0 for row in result.values())
     monkeypatch.setattr(
         gota_gates.g4_screen, "run", lambda *a: GateResult('failed', {"error": "missing"})
     )
@@ -208,6 +209,7 @@ def test_shared_gate_order_and_advisory_screen(mocked_native_verification, tmp_p
     result = gota_gates.verify('abcdef12-1', context=GateContext(tmp_path))
     assert result['G1']['outcome'] == 'errored'
     assert 'different native build' in result['G1']['summary']['error']['message']
+    assert result['G1']['seconds'] >= 0  # an errored gate records its time too
 
 
 def test_source_inventory_includes_backend_and_shared_gate_closure(tmp_path):

@@ -11,6 +11,8 @@ existing installs is applied here with ``hermes config set`` (verified to write 
   value is the installer's and is kept. One-way: an installer who set exactly the old value
   on purpose (2700 or 180) is raised too, on every bootstrap; pick a nearby value (2701,
   181) to keep it.
+- ``ENSURE_CONTAINS``: a list that must contain some items; missing ones are appended and the
+  installer's (or Hermes's) other items are kept.
 - ``UNSET``: removed with ``hermes config unset`` when present.
 - ``ENV_OVERRIDES``: set from an environment variable when it is set and differs (the
   installer's ``OPENROUTER_MODEL`` in the profile ``.env`` becomes ``model.default``: Hermes
@@ -28,6 +30,9 @@ false`` turns that off ("auto-update off", C9). The curator only archives skills
 agent-created skills go to ``skills.create_dir`` (outside ``skills/``), so the curator already
 leaves shipped skills alone; ``curator.prune_builtins: false`` pins that. Hermes has no
 per-skill curator exclusion key (``docs/plans/findings/hermes-facts.md``, Task 5.1 observations).
+The coach chat rows (``platform_toolsets.api_server``, ``known_plugin_toolsets.cli``,
+``skills.platform_disabled.api_server``) give the IDE chat only the plugin's coach toolset
+and no research skills, and keep that toolset off for Kanban workers (``plugin.coach``).
 ``kanban.*`` rows govern only ``hermes -p <profile> kanban dispatch`` and profile tools; the
 gateway dispatcher reads the host root config, which preflight checks (A3).
 """
@@ -63,6 +68,9 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_FALLBACK_PRICES",
     "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
     "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",  # queue-keeper preflight's credit floor (A5)
+    "AUTORESEARCH_AUTONOMY",  # queue-keeper plans only after the coach's first task (on-request)
+    "AUTORESEARCH_CHAT_DAILY_USD",  # the coach chat's day cap (plugin.coach reads the .env)
+    "TMPDIR",  # hosted scratch dir: the sandbox /tmp is a small tmpfs, so cron scripts need it
     "GOTA_G2_RUNNER",  # GotA G2 episode runner in worker builds: native (default) or docker
 ]
 APPROVAL_DENY = [
@@ -87,6 +95,19 @@ APPROVAL_DENY = [
     "*runtime accept-commits *",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
+# The IDE coach chat (platform api_server) gets only the plugin's coach toolset; Kanban workers
+# (cli) keep theirs and never get it (plugin.coach, coach-chat-role.md §2.2).
+COACH_TOOLSET = "autoresearch_coach"
+SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
+
+
+def research_skills() -> list[str]:
+    """Every shipped skill's name: all are research skills, hidden from the coach chat."""
+    names = []
+    for path in sorted(SKILLS_DIR.rglob("SKILL.md")):
+        front = yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1])
+        names.append(str(front["name"]))
+    return sorted(names)
 
 
 def always(home: Path) -> dict[str, object]:
@@ -106,6 +127,8 @@ def always(home: Path) -> dict[str, object]:
         "skills.create_dir": str(Path(home) / SKILLS_STAGING_RELATIVE),
         "updates.check": False,
         "curator.prune_builtins": False,
+        "platform_toolsets.api_server": [COACH_TOOLSET],
+        "skills.platform_disabled.api_server": research_skills(),
     }
 
 
@@ -135,6 +158,9 @@ UPGRADE_DEFAULTS: dict[str, tuple[object, object]] = {
     "timeouts.tools.sequential_call": (420, 1900),  # the Hermes default
     "timeouts.tools.concurrent_batch": (420, 1900),  # the Hermes default
 }
+# A list that must contain these items; other items (Hermes writes every plugin's toolset to
+# known_plugin_toolsets.<platform> when the user saves `hermes tools`) are kept.
+ENSURE_CONTAINS: dict[str, list[object]] = {"known_plugin_toolsets.cli": [COACH_TOOLSET]}
 UNSET = ("kanban.default_assignee",)
 ENV_OVERRIDES = {"model.default": "OPENROUTER_MODEL"}
 
@@ -187,6 +213,12 @@ def pending(home: Path, env: Mapping[str, str] | None = None) -> list[list[str]]
     for key, (old, new) in UPGRADE_DEFAULTS.items():
         if _lookup(config, key) == old:
             commands.append(["config", "set", key, _cli_value(new)])
+    for key, items in ENSURE_CONTAINS.items():
+        current = _lookup(config, key)
+        current = current if isinstance(current, list) else []
+        missing = [item for item in items if item not in current]
+        if missing:
+            commands.append(["config", "set", key, _cli_value([*current, *missing])])
     for key in UNSET:
         if _lookup(config, key) not in (_ABSENT, None, ""):
             commands.append(["config", "unset", key])

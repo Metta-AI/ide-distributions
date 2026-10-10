@@ -56,7 +56,12 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    branches are force-pushed (a retried card rebuilds its branch), and a card ref origin
    still refuses is logged once. The run ends with the same push (step 13).
 8. Sweep staged skills into ``skills-proposed/`` (``proposals.sweep_skills``).
-9. Route inbound (C11), before admission so new requests carry their inbound.
+9. Route inbound (C11), before admission so new requests carry their inbound. With
+    ``AUTORESEARCH_AUTONOMY=on-request``, the first coach task routing accepted then starts
+    the agent (``runtime.autonomy``; step ``autonomy_start``, distinct from the setting check's
+    step ``autonomy``). Routing also applies a coach ``control`` pause or resume: the coach
+    hold (``ledger/coach-hold.json``, ``runtime.pause``), which stops admission (step 10) and
+    planning (steps 4 and 11) like a pause, and which this job never clears.
 10. Admission (C3, C10, C11) of every committed create request (merged from cards, or written
     by the runtime) still without a final receipt. Briefings get the card's inbound, the
     planning backlog and open proposals (planning cards), and the latest signals.
@@ -65,12 +70,13 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
     contained: a failing one is logged and retried, and after 3 failing runs given up with a
     ``failed`` marker and one runtime ``help_request``).
 11. Signals (with this run's failed steps as input), then the planning request (cadence, or
-    queue growth).
+    queue growth); not before the agent is started when ``AUTORESEARCH_AUTONOMY=on-request``.
 12. Orphaned done cards (C3), spend caps (``spend.enforce``: stop cards over their run or
     estimated-cost cap; pause when today's spend reaches the daily budget), blocked cards
     (``blocked.handle_blocked``), the daily re-raise of unanswered proposals, and resume when
     paused, preflight passed, this run's champion check found the league and the loop in
-    agreement, and today's spend is under the daily budget (``spend.may_resume``).
+    agreement, and today's spend is under the daily budget (``spend.may_resume``), unless the
+    coach holds research (lifting the pause would reassign cards the hold keeps back).
 13. Final push, then check that the remote ``main`` equals HEAD (``runtime/push_state.json``).
     After 3 consecutive failed runs, one runtime ``help_request`` per failure streak.
 
@@ -128,7 +134,14 @@ from autoresearch.queue.requests import read_requests
 from autoresearch.queue.select import ENV_CARD_MODELS, parse_card_models, queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import config_migrations, promotion, proposals, provenance, spend
+from autoresearch.runtime import (
+    autonomy,
+    config_migrations,
+    promotion,
+    proposals,
+    provenance,
+    spend,
+)
 from autoresearch.runtime.admission import (
     NEEDS_CALIBRATION,
     PLANNING_OWNED,
@@ -144,7 +157,7 @@ from autoresearch.runtime.game_source import PinUpdate, pin_update, record_pin
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of
 from autoresearch.runtime.memory_snapshot import snapshot_memory
 from autoresearch.runtime.merge import find_orphan_done, process_handoffs
-from autoresearch.runtime.pause import is_paused, pause, pause_path, resume
+from autoresearch.runtime.pause import is_held, is_paused, pause, pause_path, resume
 from autoresearch.runtime.planning import planning_request
 from autoresearch.runtime.preflight import (
     PreflightResult,
@@ -169,6 +182,7 @@ RUN_LOCK = "queue_keeper.run.lock"
 PUSH_STATE_FILE = "push_state.json"
 FAILURES_FILE = "keeper_failures.json"
 SIGNAL_LINES_FILE = "signal_lines.json"
+LOGGED_DAYS_FILE = "logged_days.json"
 PUSH_FAILURE_LIMIT = 3
 STEP_FAILURES_FILE = "step_failures.json"
 STEP_FAILURE_RUNS = 5  # consecutive failing runs of one step before a help_request ...
@@ -206,6 +220,7 @@ class KeeperRun:
     host_problems: list = field(default_factory=list)  # game host requirements workers lack
     signals: list = field(default_factory=list)
     planning: CardSpec | None = None
+    planning_skipped: bool = False  # coach hold, or on-request autonomy and no coach task yet
     orphans: list[str] = field(default_factory=list)
     spend_run: spend.SpendRun | None = None  # None: the spend step failed
     spend_attempted: bool = False  # the spend step ran (or failed) this run
@@ -240,6 +255,16 @@ def _log(ctx: RunContext, message: str) -> None:
     stamp = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"{stamp} {message}\n")
+
+
+def _log_once_a_day(ctx: RunContext, now: datetime.datetime, message: str) -> None:
+    """``_log`` ``message`` unless this run's UTC day already logged it."""
+    day = f"{now.astimezone(datetime.UTC):%Y-%m-%d}"
+    logged = _read_state(ctx, LOGGED_DAYS_FILE, {})
+    if logged.get(message) == day:
+        return
+    _log(ctx, message)
+    write_json(runtime_dir(ctx) / LOGGED_DAYS_FILE, logged | {message: day})
 
 
 def _read_state(ctx: RunContext, name: str, default):
@@ -817,6 +842,24 @@ def _card_models_check(
             publish_message(ctx.canonical, message, allow_no_remote, expects_response=True)
 
 
+def _autonomy_check(
+    run: KeeperRun, ctx: RunContext, env: Mapping[str, str], allow_no_remote: bool
+) -> str:
+    """The autonomy mode of ``env``. An unknown value runs as ``always``: a log line every
+    run, the step failure ``autonomy``, and one help_request per distinct value."""
+    mode, problem = autonomy.autonomy_mode(env)
+    if problem is None:
+        return mode
+    run.failures["autonomy"] = problem
+    _log(ctx, f"{autonomy.ENV_AUTONOMY}: {problem}; running as {autonomy.ALWAYS}")
+    if (ctx.canonical / ".git").exists():
+        message = runtime_messages.autonomy_invalid(env.get(autonomy.ENV_AUTONOMY) or "")
+        with canonical_lock(ctx.canonical):
+            if not already_published(ctx.canonical, message):
+                publish_message(ctx.canonical, message, allow_no_remote, expects_response=True)
+    return mode
+
+
 def _host_requirements_check(
     ctx: RunContext, game: Game, env: Mapping[str, str], allow_no_remote: bool
 ) -> list[str]:
@@ -836,13 +879,19 @@ def _host_requirements_check(
     return problems
 
 
-def _rebuild_step(ctx, queue, sm, game_version, now, allow_no_remote) -> list[CardSpec]:
+def _rebuild_step(ctx, queue, sm, game_version, now, allow_no_remote, autonomy_mode) -> list[CardSpec]:
     if not needs_rebuild(ctx, queue):
         return []
     if not game_version:
         raise RuntimeError("the board needs a rebuild but the game version is unknown")
     return rebuild(
-        ctx, queue, sm, game_version=game_version, now=now, allow_no_remote=allow_no_remote
+        ctx,
+        queue,
+        sm,
+        game_version=game_version,
+        now=now,
+        allow_no_remote=allow_no_remote,
+        plan=autonomy.may_plan(ctx.canonical, autonomy_mode),
     )
 
 
@@ -862,7 +911,14 @@ def _signals_step(run, ctx, queue, now, cfg, pre, allow_no_remote) -> list:
     return signals
 
 
-def _planning_step(ctx, queue, now, signals) -> CardSpec | None:
+def _planning_step(run, ctx, queue, now, signals, autonomy_mode) -> CardSpec | None:
+    if not autonomy.may_plan(ctx.canonical, autonomy_mode):
+        run.planning_skipped = True
+        if is_held(ledger_of(ctx.canonical)):
+            _log_once_a_day(ctx, now, "planning waits: the coach paused research")
+        else:
+            _log_once_a_day(ctx, now, "planning waits for the coach's first task (on-request)")
+        return None
     growth = any(signal.code == QUEUE_GROWTH for signal in signals)
     return planning_request(ctx, queue, now) or (
         planning_request(ctx, queue, now, growth=True) if growth else None
@@ -913,6 +969,7 @@ def _run_steps(
     for warning in run.preflight.warnings:
         _log(ctx, f"preflight warning: {warning}")
     _card_models_check(run, ctx, env, allow_no_remote)
+    autonomy_mode = _autonomy_check(run, ctx, env, allow_no_remote)
     run.host_problems = (
         _step(run, ctx, "host", _host_requirements_check, ctx, game, env, allow_no_remote) or []
     )
@@ -943,7 +1000,17 @@ def _run_steps(
     _step(run, ctx, "promotion", promotion.reconcile, ctx, queue, sm, game.league_id)
     run.rebuilt = (
         _step(
-            run, ctx, "rebuild", _rebuild_step, ctx, queue, sm, game_version, now, allow_no_remote
+            run,
+            ctx,
+            "rebuild",
+            _rebuild_step,
+            ctx,
+            queue,
+            sm,
+            game_version,
+            now,
+            allow_no_remote,
+            autonomy_mode,
         )
         or []
     )
@@ -975,6 +1042,8 @@ def _run_steps(
     _step(run, ctx, "push", push_early, canonical)
     run.skills = _step(run, ctx, "skills", proposals.sweep_skills, ctx, allow_no_remote) or []
     _step(run, ctx, "routing", _routing_step, run, ctx, queue, env, allow_no_remote)
+    if autonomy_mode == autonomy.ON_REQUEST:
+        _step(run, ctx, "autonomy_start", autonomy.start_on_first_coach_task, canonical)
     _step(
         run, ctx, "admission", admission_step,
         run, ctx, queue, game, game_version, profile, now, allow_no_remote,
@@ -995,7 +1064,9 @@ def _run_steps(
         )
         or []
     )
-    run.planning = _step(run, ctx, "planning", _planning_step, ctx, queue, now, run.signals)
+    run.planning = _step(
+        run, ctx, "planning", _planning_step, run, ctx, queue, now, run.signals, autonomy_mode
+    )
     run.orphans = _step(run, ctx, "orphans", find_orphan_done, queue, ledger_of(canonical)) or []
     spend_config = _spend_steps(run, ctx, queue, env, now, allow_no_remote)
     run.blocked = (
@@ -1005,6 +1076,7 @@ def _run_steps(
     run.reraised = _step(run, ctx, "proposals", proposals.reraise, ctx, now, allow_no_remote) or []
     if (
         is_paused(ledger_of(canonical))
+        and not is_held(ledger_of(canonical))  # lifting the pause would reassign held cards
         and run.champion_checked
         and not run.champion_conflict
         and spend.may_resume(ctx, run.spend_run, now)
@@ -1030,8 +1102,8 @@ def run(
     http_get: Callable | None = None,
     signal_config: SignalConfig | None = None,
 ) -> KeeperRun:
-    """One queue-keeper run (module docstring). ``profile`` (default: the profile home's
-    name) is the assignee of admitted cards; ``allow_no_remote`` lets tests run without an
+    """One queue-keeper run (module docstring). ``profile`` (default: ``ctx.profile``, the
+    install name) is the assignee of admitted cards; ``allow_no_remote`` lets tests run without an
     ``origin``; ``runner``, ``disk_free`` and ``http_get`` are the bootstrap and preflight
     seams."""
     result = KeeperRun()
@@ -1060,7 +1132,7 @@ def run(
                     game,
                     now,
                     env=env,
-                    profile=profile or ctx.hermes_home.name,
+                    profile=profile or ctx.profile,
                     allow_no_remote=allow_no_remote,
                     preflight_kwargs=preflight_kwargs,
                     signal_config=signal_config or SignalConfig(),

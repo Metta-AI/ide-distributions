@@ -86,9 +86,9 @@ def test_launcher_bootstraps(install):
     config = yaml.safe_load((profile / "config.yaml").read_text())
     assert config["plugins"]["enabled"] == ["autoresearch"]
     boards = install.hermes("kanban", "boards", "list").stdout
-    assert install.profile in boards
+    assert install.board in boards
     # Boards are host-wide (A2): under the throwaway root, not the profile or ~/.hermes.
-    assert (install.hermes_home / "kanban" / "boards" / install.profile / "kanban.db").is_file()
+    assert (install.hermes_home / "kanban" / "boards" / install.board / "kanban.db").is_file()
 
     # A second run is a no-op for the venv (lock hash unchanged).
     stamp_mtime = (profile / "local" / "venv" / ".lock-sha").stat().st_mtime
@@ -109,7 +109,7 @@ def _wait_for_terminal(install, task_id: str) -> dict:
     deadline = time.monotonic() + WORKER_TIMEOUT_S
     while True:
         shown = json.loads(
-            install.hermes("kanban", "--board", install.profile, "show", task_id, "--json").stdout
+            install.hermes("kanban", "--board", install.board, "show", task_id, "--json").stdout
         )
         if shown["task"]["status"] in TERMINAL_STATUSES:
             return shown
@@ -123,7 +123,7 @@ def worker_run(request):
     if not os.environ.get("OPENROUTER_API_KEY"):
         pytest.skip("needs OPENROUTER_API_KEY (one worker run with a real model)")
     install = request.getfixturevalue("module_install")
-    board = install.profile
+    board = install.board
     bootstrap(install)
     canonical = install.profile_dir / "workspace"
     created = install.hermes(
@@ -135,7 +135,7 @@ def worker_run(request):
         "--body",
         CARD_BODY,
         "--assignee",
-        board,
+        install.profile,
         "--workspace",
         f"worktree:{canonical}/.worktrees/it-cli",
         "--branch",
@@ -150,7 +150,7 @@ def worker_run(request):
     )
     task_id = json.loads(created.stdout)["id"]
     dispatched = json.loads(
-        install.hermes("-p", board, "kanban", "--board", board, "dispatch", "--json").stdout
+        install.hermes("-p", install.profile, "kanban", "--board", board, "dispatch", "--json").stdout
     )
     assert [s["task_id"] for s in dispatched["spawned"]] == [task_id], dispatched
     shown = _wait_for_terminal(install, task_id)
@@ -211,3 +211,47 @@ def test_update_preserves(install):
     assert cli_line in (profile / ".env").read_text().splitlines()
     assert venv_python.exists()
     assert shim.is_file() and os.access(shim, os.X_OK)
+
+
+# -- install name (plan Task 27, D2) ----------------------------------------------------------
+
+CRON_JOBS = ("queue-keeper", "xp-poll", "health")
+
+
+def test_works_under_any_install_name(optimizer_install):
+    """Installed as ``optimizer`` (Softmax hosting): cards go to ``optimizer`` on the board
+    ``autoresearch``, and an update keeps our ``terminal.env_passthrough``."""
+    install = optimizer_install
+    profile = install.profile_dir
+    assert install.profile == "optimizer" and install.board == "autoresearch"
+
+    # Hermes rewrites `name` to the install name and records a local source as its resolved
+    # path, unquoted (hermes_cli/profile_distribution.py `_stage_source`). The Softmax
+    # runtime's `is_ours` compares that `source:` line with `/opt/autoresearch`.
+    manifest_lines = (profile / "distribution.yaml").read_text().splitlines()
+    assert "name: optimizer" in manifest_lines
+    assert f"source: {install.source.resolve()}" in manifest_lines
+
+    bootstrap(install)
+    for job in CRON_JOBS:
+        install.hermes("-p", install.profile, "cron", "resume", job)
+    tasks = []
+    for _ in range(3):  # the first run requests the scheduled planning card, the next admits it
+        ran = install.hermes("-p", install.profile, "cron", "run", "queue-keeper", timeout=600)
+        assert "Ran now: succeeded." in ran.stdout, ran.stdout + ran.stderr
+        listed = install.hermes("kanban", "--board", install.board, "list", "--json").stdout
+        tasks = json.loads(listed)
+        if tasks:
+            break
+    assert install.board in install.hermes("kanban", "boards", "list").stdout
+    assert not (install.hermes_home / "kanban" / "boards" / install.profile).exists()
+    [task] = tasks
+    assert task["assignee"] == "optimizer", task
+    assert task["title"] == "Plan the work queue", task
+
+    shipped = yaml.safe_load((install.source / "config.yaml").read_text())
+    wanted = shipped["terminal"]["env_passthrough"]
+    install.hermes("profile", "update", install.profile, "-y")
+    config = yaml.safe_load((profile / "config.yaml").read_text())
+    assert set(wanted) <= set(config["terminal"]["env_passthrough"])
+    assert "name: optimizer" in (profile / "distribution.yaml").read_text().splitlines()

@@ -101,11 +101,8 @@ def _record_seen(canonical: Path, consumer: str, ids: list[str]) -> Path:
     return path
 
 
-def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> str:
-    """Validate, write and commit one inbound message from ``author``; return its I-id.
-    Takes the canonical lock: the caller must not hold it. Raises InboundProblems."""
-    inbound_id = new_id("inbound")
-    record = {
+def _inbound_record(kind: str, payload: dict, author: str, inbound_id: str) -> dict:
+    return {
         **payload,
         "schema": SCHEMA_VERSION,
         "id": inbound_id,
@@ -113,6 +110,22 @@ def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> st
         "author": author,
         "received_at": now_iso(),
     }
+
+
+def check_inbound(canonical: Path, kind: str, payload: dict, author: str) -> None:
+    """Validate the message ``submit_inbound`` would write, without writing it (``comms
+    inbound --dry-run``, which the coach chat's ``propose_inbound`` runs). Raises
+    InboundProblems."""
+    problems = inbound_problems(canonical, _inbound_record(kind, payload, author, new_id("inbound")))
+    if problems:
+        raise InboundProblems(problems)
+
+
+def submit_inbound(canonical: Path, kind: str, payload: dict, author: str) -> str:
+    """Validate, write and commit one inbound message from ``author``; return its I-id.
+    Takes the canonical lock: the caller must not hold it. Raises InboundProblems."""
+    inbound_id = new_id("inbound")
+    record = _inbound_record(kind, payload, author, inbound_id)
     path = Layout(canonical).comms_inbox / f"{inbound_id}.json"
     with canonical_lock(canonical):
         problems = inbound_problems(canonical, record)

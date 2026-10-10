@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "comms/inbound/control.json",
+  "title": "Inbound control (ar-comms/0): the coach pauses or resumes the research loop (D15). The runtime applies it when it routes it: pause sets the coach hold (.supervisor/ledger/coach-hold.json: no admission, no dispatch of pending cards, no planning; running cards finish under their caps), resume clears it. It answers with a note in reply. The Softmax IDE sends it for the chat lines /pause-research and /resume-research.",
+  "x-autoresearch": {
+    "direction": "inbound",
+    "ack": "none",
+    "summary": "Pauses or resumes the research loop for the coach; the runtime applies it and answers with a note.",
+    "describe": ["Coach control: {action} research"]
+  },
+  "allOf": [{"$ref": "../envelope.inbound.json"}],
+  "required": ["action"],
+  "properties": {
+    "kind": {"const": "control"},
+    "action": {"enum": ["pause", "resume"], "x-message": "must be one of pause, resume"}
+  }
+}

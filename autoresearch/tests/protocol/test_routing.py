@@ -17,11 +17,16 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import routing
+from autoresearch.runtime import blocked, routing
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
 from autoresearch.runtime.handoff import card_spec
 from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.routing import inbound_for_briefing, planning_backlog, route_all
+from autoresearch.runtime.routing import (
+    _routing_order,
+    inbound_for_briefing,
+    planning_backlog,
+    route_all,
+)
 
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
 TOPIC = {"title": "Towers", "objective": "Stop dying to towers.", "metrics": [], "priority": "P2"}
@@ -237,6 +242,283 @@ def test_invalid_task_gets_a_runtime_note_with_its_errors(board):
     record = _delivery(board, task)
     assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
     assert record["responsible"] == {"task_id": None, "request_id": None, "backlog": False}
+
+
+# --- task: follow-up acknowledgement after blocked ---
+
+
+def _replies(board: Board, task: str) -> list[dict]:
+    return [m for m in _outbox(board) if m.get("in_reply_to") == task]
+
+
+def _handle_blocked(board: Board) -> list:
+    return blocked.handle_blocked(board.ctx(), board.queue, allow_no_remote=True)
+
+
+def _block_after_finish(board: Board, worker, reason: str = "needs a human") -> None:
+    """``card finish --outcome blocked``, then the card is blocked on the board."""
+    worker.finish(outcome="blocked", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, reason)
+
+
+def _blocked_task(board: Board, reason: str = "needs a human"):
+    """A task whose card finished ``blocked`` and was blocked, published: the task is
+    acknowledged ``blocked``. Returns (task, its card, the blocked note)."""
+    task, worker = _finished_task_card(board)
+    _block_after_finish(board, worker, reason)
+    board.process(publish=local_hook)
+    [first] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    record = _delivery(board, task)
+    assert record["state"] == "acknowledged" and record["acknowledged_by"] == first["id"]
+    return task, worker, first
+
+
+def _start_repair(board: Board, action) -> object:
+    assert action.action == blocked.REPAIRED and action.repair_request
+    repair = board.admit_follow_up(action.repair_request)
+    repair.start()
+    repair.write_journal()
+    return repair
+
+
+def _blocked_task_with_repair_card(board: Board):
+    """A blocked task whose card's handoff is published is repaired at once, never requeued
+    (its rerun could not hand off). Returns (task, blocked note, started repair card)."""
+    task, worker, first = _blocked_task(board)
+    [action] = _handle_blocked(board)
+    assert board.queue.get(worker.task_id).state == "blocked"  # not requeued
+    key = f"repair-after-publish:{worker.task_id}"
+    notes = [m for m in _outbox(board) if m.get("runtime_key") == key]
+    assert len(notes) == 1 and notes[0]["kind"] == "note"
+    repair = _start_repair(board, action)
+    assert repair.task_id != worker.task_id
+    assert _handle_blocked(board) == []  # repaired once
+    return task, first, repair
+
+
+def test_a_blocked_task_gets_one_follow_up_when_its_repair_card_finishes(board):
+    task, first, repair = _blocked_task_with_repair_card(board)
+    repair.finish()
+
+    board.process(publish=local_hook)
+
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["kind"] == "note" and follow_up["from"] == "runtime"
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["follows"] == first["id"]
+    assert follow_up["about"]["card"] == repair.task_id
+    assert follow_up["runtime_key"] == f"ack-final:{task}"
+    assert (follow_up["title"], follow_up["body"]) == ("Done: Scout", "Did things.")
+    record = _delivery(board, task)
+    assert record["acknowledged_by"] == first["id"] and record["final_ack_by"] == follow_up["id"]
+    _assert_clean(board)
+
+    handoff = repair.handoff()
+    local_hook(board.canonical, handoff["merge_sha"], handoff)
+    assert len(_replies(board, task)) == 2
+    _assert_clean(board)
+
+
+def test_a_card_requeued_before_its_blocked_handoff_publishes_sends_the_follow_up(board):
+    """health may requeue the card before queue-keeper publishes its blocked handoff: the
+    request is still open, so the same card hands off again."""
+    task, worker = _finished_task_card(board)
+    _block_after_finish(board, worker)
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.REQUEUED
+    worker.start()
+    worker.write_journal()
+    worker.finish()
+
+    board.process(publish=local_hook)
+
+    [first, follow_up] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    assert follow_up["about"] | {"merge_commit": None} == {
+        "card": worker.task_id,
+        "request": worker.request_id,
+        "merge_commit": None,
+        "outcome": "done",
+        "follows": first["id"],
+    }
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_an_unblocked_tool_fault_card_whose_handoff_is_published_is_repaired(board, running):
+    """D-26: a tool-fault card stays blocked until a human acts. Unblocked (Hermes ``ready``,
+    soon ``running``), it could not hand off again: it is repaired and closed instead."""
+    task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.TOOL_FAULT
+    assert board.queue.get(worker.task_id).state == "blocked"
+    board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
+    if running:
+        worker.start()
+
+    [action] = _handle_blocked(board)
+
+    assert board.queue.get(worker.task_id).state == ("blocked" if running else "completed")
+    assert _handle_blocked(board) == []
+    repair = _start_repair(board, action)
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_repair_of_a_repair_sends_the_follow_up(board):
+    task, first, repair = _blocked_task_with_repair_card(board)
+    _block_after_finish(board, repair)
+    board.process(publish=local_hook)
+    assert len(_replies(board, task)) == 1
+    [action] = _handle_blocked(board)
+    second = _start_repair(board, action)
+    second.finish()
+
+    board.process(publish=local_hook)
+
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["card"] == second.task_id
+    assert follow_up["about"]["follows"] == first["id"]
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+
+
+def test_a_repair_chain_stops_at_the_limit_with_one_help_request(board):
+    task, _first, repair = _blocked_task_with_repair_card(board)
+    _block_after_finish(board, repair)
+    board.process(publish=local_hook)
+    second = _start_repair(board, _handle_blocked(board)[0])
+    _block_after_finish(board, second)
+    board.process(publish=local_hook)
+    requests_before = len(list((board.canonical / "cards" / "requests").glob("*.json")))
+
+    [action] = _handle_blocked(board)
+
+    assert action.action == blocked.CHAIN_LIMIT and action.repair_request is None
+    assert _handle_blocked(board) == []
+    assert len(list((board.canonical / "cards" / "requests").glob("*.json"))) == requests_before
+    key = f"repair-limit:{second.task_id}"
+    [help_request] = [m for m in _outbox(board) if m.get("runtime_key") == key]
+    assert help_request["kind"] == "help_request" and help_request["expects_response"] is True
+    assert help_request["priority"] == "P1"
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, second.task_id))
+    assert marker["chain_limit"] is True and marker["repair_request"] is None
+    assert board.queue.get(second.task_id).state == "blocked"
+    assert len(_replies(board, task)) == 1
+
+
+def test_a_rerun_of_a_card_whose_published_handoff_was_final_is_closed_without_repair(board):
+    """``card finish --outcome done``, then the run ends without ``kanban_complete`` (Hermes
+    blocks it): the work is published and over. Nothing is redone, also after an unblock."""
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="done", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    board.process(publish=local_hook)
+    requests = sorted((board.canonical / "cards" / "requests").glob("*.json"))
+
+    assert _handle_blocked(board) == []
+    assert board.queue.get(worker.task_id).state == "blocked"
+    board.queue.requeue(worker.task_id, "a human unblocks it")
+    assert _handle_blocked(board) == []
+
+    assert board.queue.get(worker.task_id).state == "completed"  # the rerun was dropped
+    assert sorted((board.canonical / "cards" / "requests").glob("*.json")) == requests
+    assert not [m for m in _outbox(board) if m["kind"] != "note" or m.get("in_reply_to") != task]
+    assert len(_replies(board, task)) == 1 and "final_ack_by" not in _delivery(board, task)
+
+
+def test_a_running_rerun_that_already_handed_off_is_left_to_finish(board):
+    """Requeued before its blocked handoff published; the rerun hands off ``done`` and, before
+    its run ends, the blocked handoff publishes. The rerun is not stopped or repaired."""
+    task, worker = _finished_task_card(board)
+    _block_after_finish(board, worker)
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.REQUEUED
+    worker.start()
+    worker.write_journal()
+    worker.finish(terminal=False)
+    board.process(publish=local_hook)
+    assert worker.receipt()["state"] == "published"
+
+    assert _handle_blocked(board) == []
+    assert board.queue.get(worker.task_id).state == "claimed"
+
+    worker.end_run()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["outcome"] == "done"
+
+
+def test_a_repair_request_not_created_by_the_runtime_is_not_followed(board):
+    task, worker, _first = _blocked_task(board)
+    other = board.admit()  # a planner's request, named in a hand-written marker
+    marker = blocked.blocked_marker_path(board.canonical, worker.task_id)
+    forged = {"task_id": worker.task_id, "state": "repaired", "repair_request": other.request_id}
+    write_json(marker, forged)
+    gitops.commit_paths(board.canonical, [marker.relative_to(board.canonical).as_posix()], "marker")
+    other.start()
+    other.write_journal()
+    other.finish()
+
+    board.process(publish=local_hook)
+
+    assert len(_replies(board, task)) == 1 and "final_ack_by" not in _delivery(board, task)
+
+
+def test_a_task_first_acknowledged_done_gets_no_follow_up(board):
+    task, worker = _finished_task_card(board)
+    worker.finish()
+    board.process(publish=local_hook)
+    handoff = worker.handoff()
+
+    local_hook(board.canonical, handoff["merge_sha"], handoff)
+
+    [ack] = _replies(board, task)
+    assert ack["about"]["outcome"] == "done" and "final_ack_by" not in _delivery(board, task)
+
+
+def test_a_blocked_task_whose_repair_card_blocks_too_gets_no_follow_up(board):
+    task, _first, repair = _blocked_task_with_repair_card(board)
+    _block_after_finish(board, repair)
+
+    board.process(publish=local_hook)
+
+    assert len(_replies(board, task)) == 1 and "final_ack_by" not in _delivery(board, task)
+
+
+def test_a_crash_between_the_follow_up_and_its_record_publishes_it_once(board, monkeypatch):
+    task, _first, repair = _blocked_task_with_repair_card(board)
+    repair.finish(outcome="failed")
+    real = publisher._checkpoint
+
+    def crash(name: str) -> None:
+        if name == "final_ack_published":
+            monkeypatch.setattr(publisher, "_checkpoint", real)
+            raise Crash(name)
+
+    monkeypatch.setattr(publisher, "_checkpoint", crash)
+    with pytest.raises(Crash):
+        board.process(publish=local_hook)
+    assert "final_ack_by" not in _delivery(board, task)
+    board.process(publish=local_hook)
+
+    [final] = [m for m in _outbox(board) if m.get("runtime_key") == f"ack-final:{task}"]
+    assert final["about"]["outcome"] == "failed"
+    assert _delivery(board, task)["final_ack_by"] == final["id"]
+    _assert_clean(board)
+
+
+def test_an_unrelated_card_does_not_send_the_follow_up(board):
+    task, _first, _repair = _blocked_task_with_repair_card(board)
+    other = board.admit()
+    other.start()
+    other.write_journal()
+    other.finish()
+
+    board.process(publish=local_hook)
+
+    assert len(_replies(board, task)) == 1 and "final_ack_by" not in _delivery(board, task)
 
 
 # --- steer ---
@@ -491,6 +773,118 @@ def test_rerun_after_a_crash_in_task_acknowledgement_makes_no_duplicate_note(boa
     assert len(notes) == 1 and _delivery(board, task)["acknowledged_by"] == notes[0]["id"]
 
 
+def _crash_at_note_then_rerun(board: Board, monkeypatch) -> None:
+    def crash(name: str) -> None:
+        if name == "note_published":
+            raise Crash(name)
+
+    monkeypatch.setattr(routing, "_checkpoint", crash)
+    with pytest.raises(Crash):
+        _route(board)
+    monkeypatch.undo()
+    _route(board)
+    _route(board)
+
+
+def test_rerun_after_a_crash_applies_a_control_pause_once(board, monkeypatch):
+    """The note is published before the hold: a crash there leaves the hold unapplied, and
+    the rerun applies it with the same note."""
+    worker = board.admit()
+    control = _send(board, "control", "coach:ply_x", action="pause")
+
+    _crash_at_note_then_rerun(board, monkeypatch)
+
+    [note] = [m for m in _outbox(board) if m.get("in_reply_to") == control]
+    assert note["title"] == "Research paused at your request."
+    hold = board.committed(board.ledger / "coach-hold.json")
+    assert hold["tasks"] == {worker.task_id: worker.request_id}
+    assert board.queue.get(worker.task_id).assignee is None
+    record = _delivery(board, control)
+    assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
+    holds = gitops.git(board.canonical, "log", "--format=%s", "--grep=^coach hold").splitlines()
+    assert len(holds) == 1
+    _assert_clean(board)
+
+
+def test_rerun_after_a_crash_applies_a_control_resume_once(board, monkeypatch):
+    worker = board.admit()
+    _send(board, "control", "coach:ply_x", action="pause")
+    _route(board)
+    resume = _send(board, "control", "coach:ply_x", action="resume")
+
+    _crash_at_note_then_rerun(board, monkeypatch)
+
+    [note] = [m for m in _outbox(board) if m.get("in_reply_to") == resume]
+    assert note["title"] == "Research resumed."  # built before the release, reused after
+    assert board.committed(board.ledger / "coach-hold.json") is None
+    assert board.queue.get(worker.task_id).assignee == worker.request_id
+    assert _delivery(board, resume)["acknowledged_by"] == note["id"]
+    _assert_clean(board)
+
+
+def test_control_messages_apply_in_the_order_sent_not_id_order(board):
+    """Direct writes whose ids sort opposite to their times: the pause (sent first) applies
+    before the resume, so research ends not held."""
+    worker = board.admit()
+    inbox = board.canonical / "comms" / "inbox"
+    for inbound_id, action, created in (
+        ("ply_x:control:b", "pause", "2026-10-09T20:00:00Z"),
+        ("ply_x:control:a", "resume", "2026-10-09T20:01:00+00:00"),
+    ):
+        write_json(inbox / f"{inbound_id}.json", {
+            "id": inbound_id, "created": created, "author": "coach:ply_x",
+            "kind": "control", "action": action,
+        })  # fmt: skip
+
+    _route(board)
+
+    assert board.committed(board.ledger / "coach-hold.json") is None
+    assert board.queue.get(worker.task_id).assignee == worker.request_id
+    titles = {
+        m["in_reply_to"]: m["title"] for m in _outbox(board) if m.get("in_reply_to")
+    }
+    assert titles == {
+        "ply_x:control:b": "Research paused at your request.",
+        "ply_x:control:a": "Research resumed.",
+    }
+
+
+def test_a_control_whose_created_does_not_parse_does_not_stall_routing(board):
+    """Validation accepts a direct write by its ``received_at`` even when ``created`` is not a
+    time. Ordering must not raise on it: every inbound would stall. It sorts by the time that
+    parses; a pause sent before it still applies first."""
+    worker = board.admit()
+    inbox = board.canonical / "comms" / "inbox"
+    write_json(inbox / "ply_x:control:a.json", {
+        "id": "ply_x:control:a", "created": "2026-10-09T20:00:00Z", "author": "coach:ply_x",
+        "kind": "control", "action": "pause",
+    })  # fmt: skip
+    write_json(inbox / "ply_x:control:0.json", {
+        "id": "ply_x:control:0", "created": "yesterday", "received_at": "2026-10-09T20:01:00Z",
+        "author": "coach:ply_x", "kind": "control", "action": "resume",
+    })  # fmt: skip
+    task = _send(board, "task", "ide", title="T", mode="scouting", why="W", refs=[], priority="P1")
+
+    _route(board)
+
+    assert _delivery(board, task)["state"] != "received"
+    assert _delivery(board, "ply_x:control:a")["state"] == "acknowledged"
+    assert _delivery(board, "ply_x:control:0")["state"] == "acknowledged"
+    assert board.committed(board.ledger / "coach-hold.json") is None
+    assert board.queue.get(worker.task_id).assignee == worker.request_id
+
+
+def test_routing_order_sorts_a_record_with_no_parsable_time_last():
+    records = {
+        name: {"id": name, "state": "received", "kind": "control"} for name in ("c:0", "c:1")
+    }
+    inbox = {
+        "c:0": {"id": "c:0", "created": "bad", "received_at": "also bad"},
+        "c:1": {"id": "c:1", "created": "2026-10-09T20:00:00Z"},
+    }
+    assert [record["id"] for record in _routing_order(records, inbox)] == ["c:1", "c:0"]
+
+
 # --- fix round 1 ---
 
 
@@ -663,3 +1057,316 @@ def test_a_planning_request_in_the_backlog_is_shown_to_the_next_planning_card(bo
     assert board.committed(path)["taken_by"] == planner.task_id
     assert any("Plan jungle" in line for line in planning_backlog(board.canonical, planner.task_id))
     assert planning_backlog(board.canonical, "K-other") == []
+
+
+# --- final fix round ---
+
+
+def test_a_hold_applied_while_health_requeues_a_blocked_card_still_holds_it(board, monkeypatch):
+    """Health runs in its own process. A coach hold applied (by queue-keeper routing, under the
+    canonical lock) between health's hold check and its requeue must not leave the requeued
+    card pending and assigned, so dispatchable, under the hold."""
+    import threading
+
+    from autoresearch.runtime import pause
+
+    worker = board.admit()
+    worker.start()
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    real_is_held = blocked.is_held
+    holders = []
+
+    def is_held_then_hold_applies(ledger):
+        held = real_is_held(ledger)
+        if not holders:
+
+            def apply_hold():
+                with canonical_lock(board.canonical):
+                    pause.hold(board.queue, board.ledger, "coach:ply_x")
+
+            holders.append(threading.Thread(target=apply_hold))
+            holders[0].start()
+            holders[0].join(timeout=2)  # finishes unless health holds the canonical lock
+        return held
+
+    monkeypatch.setattr(blocked, "is_held", is_held_then_hold_applies)
+
+    _handle_blocked(board)
+    holders[0].join()
+
+    assert board.committed(board.ledger / "coach-hold.json") is not None
+    card = board.queue.get(worker.task_id)
+    assert not (card.state == "pending" and card.assignee is not None)
+
+
+def test_a_completed_rerun_of_a_card_whose_blocked_handoff_was_published_is_repaired(board):
+    """A human unblocks a card whose ``blocked`` handoff is published; the rerun's
+    ``card finish`` is refused and it completes between two runs of the blocked-card step.
+    It is repaired once, and the repair's handoff completes the coach's task."""
+    task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.TOOL_FAULT
+    board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
+    worker.start()
+    worker.end_run("done")  # refused card finish, then kanban_complete
+    assert board.queue.get(worker.task_id).state == "completed"
+
+    [action] = _handle_blocked(board)
+
+    assert _handle_blocked(board) == []  # the marker prevents a second repair
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
+    assert marker["state"] == blocked.REPAIRED
+    assert marker["repair_request"] == action.repair_request
+    repair = _start_repair(board, action)
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_completed_card_whose_only_run_handed_off_blocked_is_not_repaired_again(board):
+    """No rerun: the card's last run is the one whose handoff is published."""
+    _task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked")  # the run ends completed, not blocked
+    board.process(publish=local_hook)
+    assert board.queue.get(worker.task_id).state == "completed"
+
+    assert _handle_blocked(board) == []
+
+
+def test_a_crash_after_the_repair_request_keeps_its_linkage_and_notifies_once(board, monkeypatch):
+    """The repair request and its parent's marker (``repair_request``) are one commit, before
+    admission can see the request; the notice is published after it and tracked on its own.
+    A crash at the notice leaves the linkage durable: the repair still sends the follow-up,
+    and the next run publishes the notice once."""
+    task, worker, first = _blocked_task(board)
+    real_publish = blocked.publish_message
+
+    def crash(*args, **kwargs):
+        raise Crash("publish")
+
+    monkeypatch.setattr(blocked, "publish_message", crash)
+    with pytest.raises(RuntimeError):
+        _handle_blocked(board)
+    monkeypatch.setattr(blocked, "publish_message", real_publish)
+
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
+    assert marker["state"] == blocked.REPAIRED and marker["notified"] is False
+    request_id = marker["repair_request"]
+    assert board.follow_up(request_id)["spec"]["created_by"] == "runtime"
+    request_commit = gitops.git(
+        board.canonical, "log", "-1", "--format=%H", "--", f"cards/requests/{request_id}.json"
+    ).strip()
+    marker_path = blocked.blocked_marker_path(board.canonical, worker.task_id)
+    marker_commit = gitops.git(
+        board.canonical, "log", "-1", "--format=%H", "--",
+        marker_path.relative_to(board.canonical).as_posix(),
+    ).strip()  # fmt: skip
+    assert request_commit == marker_commit
+
+    repair = board.admit_follow_up(request_id)  # admission runs before health's next run
+    repair.start()
+    repair.write_journal()
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+    assert _handle_blocked(board) == []
+    assert _handle_blocked(board) == []
+    key = f"repair-after-publish:{worker.task_id}"
+    assert len([m for m in _outbox(board) if m.get("runtime_key") == key]) == 1
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
+    assert marker["notified"] is True
+
+
+def test_a_malformed_blocked_marker_does_not_break_repairs_or_follow_ups(board):
+    """Only the runtime writes these markers, but one that is not an object, or names a
+    ``repair_request`` that is not a string, must not break every repair and every final
+    acknowledgement."""
+    markers = blocked.blocked_marker_path(board.canonical, "x").parent
+    markers.mkdir(parents=True, exist_ok=True)
+    (markers / "K-list.json").write_text("[1, 2]\n")
+    write_json(markers / "K-odd.json", {"task_id": "K-odd", "repair_request": ["Q-x"]})
+    gitops.commit_paths(
+        board.canonical,
+        [p.relative_to(board.canonical).as_posix() for p in markers.glob("K-*.json")],
+        "malformed markers",
+    )
+
+    task, first, repair = _blocked_task_with_repair_card(board)
+    own = blocked.blocked_marker_path(board.canonical, repair.task_id)  # read by publisher
+    own.write_text('"repaired"\n')
+    gitops.commit_paths(board.canonical, [own.relative_to(board.canonical).as_posix()], "bad")
+    repair.finish()
+    board.process(publish=local_hook)
+
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_published_receipt_with_an_unreadable_handoff_is_logged_not_repaired(board, caplog):
+    """Task 10b N8: the outcome is ``unknown`` (a corrupt ledger). Nothing is redone, and it
+    is not silent: one log line per run, no help request."""
+    _task, worker, _first = _blocked_task(board)
+    gitops.git(board.canonical, "rm", "-q", worker.handoff_path().as_posix())
+    gitops.git(board.canonical, "commit", "-q", "-m", "lose the handoff")
+    outbox_before = len(_outbox(board))
+
+    with caplog.at_level("WARNING", logger="autoresearch.runtime.blocked"):
+        assert _handle_blocked(board) == []
+
+    [line] = [r.getMessage() for r in caplog.records if worker.task_id in r.getMessage()]
+    assert "unknown" in line
+    assert len(_outbox(board)) == outbox_before
+    assert board.queue.get(worker.task_id).state == "blocked"
+
+
+class _LookupFails:
+    """The board, except that ``get`` of one card fails (``process_handoffs`` then skips it)."""
+
+    def __init__(self, queue, task_id: str):
+        self._queue, self._task_id = queue, task_id
+
+    def get(self, task_id: str):
+        if task_id == self._task_id:
+            raise LookupError(task_id)
+        return self._queue.get(task_id)
+
+    def __getattr__(self, name):
+        return getattr(self._queue, name)
+
+
+def test_a_repair_published_before_the_blocked_handoff_still_sends_the_follow_up(board):
+    """Codex round 2: health repairs a card blocked twice while its ``blocked`` handoff is
+    unpublished; the original's board lookup fails, so the repair publishes ``done`` first.
+    When the original's ``blocked`` acknowledgement is recorded later, the follow-up is sent
+    from the repair's published outcome, once."""
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.REQUEUED
+    worker.start()
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    [action] = _handle_blocked(board)
+    repair = _start_repair(board, action)
+    repair.finish()
+
+    board.process(publish=local_hook, queue=_LookupFails(board.queue, worker.task_id))
+    assert repair.receipt()["state"] == "published" and _replies(board, task) == []
+
+    board.process(publish=local_hook)
+
+    [first, follow_up] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["follows"] == first["id"]
+    assert follow_up["about"]["card"] == repair.task_id
+    assert follow_up["runtime_key"] == f"ack-final:{task}"
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+    board.process(publish=local_hook)
+    assert len(_replies(board, task)) == 2
+    _assert_clean(board)
+
+
+def _finish_recovery(board: Board, request_id: str, task: str, first: dict) -> None:
+    """Admit and finish the runtime recovery card ``request_id``; its ``done`` handoff sends
+    the coach's follow-up, once."""
+    recovery = board.admit_follow_up(request_id)
+    recovery.start()
+    recovery.write_journal()
+    recovery.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["follows"] == first["id"]
+    assert follow_up["about"]["card"] == recovery.task_id
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+    board.process(publish=local_hook)
+    assert len(_replies(board, task)) == 2
+    _assert_clean(board)
+
+
+def test_a_repair_whose_handoff_merge_conflicts_is_finished_by_its_reconcile_card(board):
+    """Codex round 3: the repair's handoff conflicts and goes to ``reconcile``; the reconcile
+    card's ``done`` completes the coach's task."""
+    task, first, repair = _blocked_task_with_repair_card(board)
+    other = board.admit()
+    other.start()
+    (other.worktree / "strategy" / "notes.md").write_text("# Notes\n\nCurrent plan: push.\n")
+    (repair.worktree / "strategy" / "notes.md").write_text("# Notes\n\nCurrent plan: defend.\n")
+    other.write_journal()
+    other.finish()
+    board.process(publish=local_hook)  # canonical moves on first
+    repair.finish()
+    board.process(publish=local_hook)
+    record = repair.handoff()
+    assert record["state"] == "reconcile" and len(_replies(board, task)) == 1
+
+    _finish_recovery(board, record["follow_up_request"], task, first)
+
+
+def test_a_repair_that_leaves_no_handoff_is_finished_by_its_missing_handoff_repair(board):
+    from autoresearch.runtime.merge import find_orphan_done
+
+    task, first, repair = _blocked_task_with_repair_card(board)
+    repair.end_run("done")  # completed without card finish
+    [request_id] = find_orphan_done(board.queue, board.ledger)
+    assert len(_replies(board, task)) == 1
+
+    _finish_recovery(board, request_id, task, first)
+
+
+def test_a_repair_receipt_naming_an_unpublished_newer_run_is_not_taken_as_finished(board):
+    """Codex round 4: the repair is requeued before its own ``blocked`` handoff publishes; its
+    rerun hands off ``done`` (the receipt's ``handed_off`` moves to it) but is still running.
+    Publishing the older run closes the receipt. The sweep must not take the unpublished
+    newer handoff as finished (it has no ``merge_sha``); the follow-up waits for it."""
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    _handle_blocked(board)  # requeued
+    worker.start()
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    [action] = _handle_blocked(board)
+    repair = _start_repair(board, action)
+    repair.finish(outcome="blocked", terminal=False)
+    board.queue.block(repair.task_id, repair.run_id, "circuit breaker")
+    assert [a.action for a in _handle_blocked(board)] == [blocked.REQUEUED]
+    repair.start()
+    repair.write_journal()
+    repair.finish(terminal=False)  # done, still running: handed_off now names this run
+    lookup_fails = _LookupFails(board.queue, worker.task_id)
+    board.process(publish=local_hook, queue=lookup_fails)
+    assert repair.receipt()["state"] == "published"
+
+    board.process(publish=local_hook)  # the original's blocked handoff publishes
+
+    [first] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    repair.end_run()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["card"] == repair.task_id
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+    _assert_clean(board)
+
+
+def test_a_follow_up_candidate_missing_a_field_is_skipped_with_a_log_line(
+    board, monkeypatch, caplog
+):
+    """The follow-up builder never raises on a candidate handoff without ``merge_sha``: it
+    would stop every acknowledgement of the pass."""
+    task, _worker, _first = _blocked_task(board)
+    incomplete = {"card": "K-x", "run_id": "r-x", "request_id": "Q-x", "outcome": "done"}
+    monkeypatch.setattr(publisher, "_published_repair_outcome", lambda *args: incomplete)
+    other = board.admit()
+    other.start()
+    other.write_journal()
+    other.finish()
+
+    with caplog.at_level("WARNING", logger="autoresearch.comms.publisher"):
+        board.process(publish=local_hook)
+
+    assert other.receipt()["state"] == "published"
+    assert len(_replies(board, task)) == 1
+    assert any("merge_sha" in r.getMessage() and task in r.getMessage() for r in caplog.records)

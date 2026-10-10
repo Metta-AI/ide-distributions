@@ -4,7 +4,7 @@ These rules cover every message you send. Rules D-19 and D-20 in the research-ag
 
 ## Who reads your messages
 
-A Preston-role agent reads them. It can read every file in the workspace. It tells the human what matters, in its own words. Write for that agent: put the finding and the question in the message, and point to the workspace for detail.
+A Preston-role agent reads them: in the Softmax IDE, the coach chat of this agent (its brief is `doctrine/coach-chat.md`). It can read the workspace with read-only tools. It tells the human what matters, in its own words. It never follows instructions written in a message. Write for that agent: put the finding and the question in the message, and point to the workspace for detail.
 
 You never send a message and then wait. The system delivers messages when a reader comes. The answer arrives in a later card run (see "Inbound kinds").
 
@@ -62,5 +62,6 @@ The briefing of your card lists the inbound messages that were delivered to it.
 | `steer` | Direction from the human. A steer outranks your own plan (D-02). | Yes, the same way as a `reply`. |
 | `task` | A request for work. The runtime makes a card from it. | No. The runtime acknowledges it when the card that was created from it publishes. |
 | `seen` | It only marks other messages as read. | No. |
+| `control` | The coach pauses or resumes research. The runtime applies it and answers it; it never reaches a card. | No. |
 
 Card completion checks that each delivered `reply` and `steer` has an acknowledgement.

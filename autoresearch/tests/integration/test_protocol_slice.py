@@ -132,7 +132,8 @@ class Slice:
 
     def __init__(self, install):
         self.install = install
-        self.board = install.profile
+        self.board = install.board
+        self.profile = install.profile
         self.home = install.profile_dir
         self.canonical = self.home / "workspace"
         self.gateway: subprocess.Popen | None = None
@@ -259,7 +260,7 @@ class Slice:
 
     def cron(self, action: str) -> None:
         for job in CRON_JOBS:
-            self.install.hermes("-p", self.board, "cron", action, job)
+            self.install.hermes("-p", self.profile, "cron", action, job)
 
     def wait_until(self, what: str, done, timeout: float) -> float:
         start = time.monotonic()
@@ -406,7 +407,7 @@ def test_protocol_slice(install):
         for name in "ABC":
             assert receipt(canonical, cards[name])["state"] == "admitted", name
         task = {name: s.task_of(cards[name]) for name in "ABC"}
-        assert {s.show(t)["task"]["assignee"] for t in task.values()} == {s.board}
+        assert {s.show(t)["task"]["assignee"] for t in task.values()} == {s.profile}
         assert summary["planning"] is None  # the parked planning card owns planning
 
         # Step 3: resume cron, run the gateway, wait for every handoff to be final.
@@ -510,7 +511,7 @@ def test_protocol_slice(install):
             PHASE_WAIT_S,
         )  # fmt: skip
         pending = s.show(task["P"])["task"]
-        assert (pending["status"], pending["assignee"]) == ("ready", s.board), pending
+        assert (pending["status"], pending["assignee"]) == ("ready", s.profile), pending
 
         # 5a: a wrong player id in .env: the next run pauses; the running worker is refused.
         s.set_env(AUTORESEARCH_PLAYER_ID=WRONG_PLAYER)
@@ -562,7 +563,7 @@ def test_protocol_slice(install):
         for message_id in staged_ids:
             assert [m["id"] for m in messages].count(message_id) == 1, message_id
         assert committed(canonical, ".supervisor/ledger/pause.json") is None  # resumed
-        assert s.show(task["P"])["task"]["assignee"] == s.board
+        assert s.show(task["P"])["task"]["assignee"] == s.profile
         assert gitops.git(install.remote, "rev-parse", "main") == gitops.head(canonical)
         report["crashed_handoff"] = crashed_path
     finally:

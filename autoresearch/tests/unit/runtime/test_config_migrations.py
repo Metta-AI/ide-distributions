@@ -23,6 +23,9 @@ EXPECTED_PASSTHROUGH = [
     "AUTORESEARCH_FALLBACK_PRICES",
     "AUTORESEARCH_RELAUNCH_MIN_CREDITS",
     "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",
+    "AUTORESEARCH_AUTONOMY",
+    "AUTORESEARCH_CHAT_DAILY_USD",
+    "TMPDIR",
     "GOTA_G2_RUNNER",
 ]
 
@@ -172,3 +175,31 @@ def test_earlier_shipped_defaults_are_upgraded_but_tuned_values_kept(tmp_path):
     assert config["terminal"]["timeout"] == 1800
     assert config["timeouts"]["tools"] == {"sequential_call": 1900, "concurrent_batch": 1900}
     assert cm.pending(tmp_path) == []
+
+
+def test_the_coach_chat_gets_only_its_toolset_and_no_research_skills(tmp_path):
+    cm.apply(Recorder(), tmp_path)
+    config = config_of(tmp_path)
+    assert config["platform_toolsets"] == {"api_server": ["autoresearch_coach"]}
+    assert config["known_plugin_toolsets"] == {"cli": ["autoresearch_coach"]}
+    hidden = config["skills"]["platform_disabled"]["api_server"]
+    shipped = {path.parent.name for path in cm.SKILLS_DIR.rglob("SKILL.md")}
+    assert set(hidden) == shipped and {"queue", "submit", "build-upload"} <= set(hidden)
+
+
+def test_the_shipped_config_already_has_every_always_row(tmp_path):
+    """Bootstrap only adds the home-dependent skills.create_dir to the shipped config.yaml."""
+    (tmp_path / "config.yaml").write_text((cm.SKILLS_DIR.parent / "config.yaml").read_text())
+    assert [argv[2] for argv in cm.pending(tmp_path)] == ["skills.create_dir"]
+
+
+def test_the_cli_known_toolsets_keep_other_plugins(tmp_path):
+    """M1: Hermes lists every plugin toolset there; bootstrap adds ours and keeps the rest."""
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(
+        {"known_plugin_toolsets": {"cli": ["spotify", "google_meet"]}}
+    ))
+    cm.apply(Recorder(), tmp_path)
+    assert config_of(tmp_path)["known_plugin_toolsets"]["cli"] == [
+        "spotify", "google_meet", "autoresearch_coach",
+    ]
+    assert not [argv for argv in cm.pending(tmp_path) if "known_plugin_toolsets" in argv[2]]

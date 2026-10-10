@@ -11,7 +11,9 @@ fields (``schemas/comms/envelope.outbound.json``):
 
 - ``about``: name -> id of what the message is about (``card``, ``request``,
   ``merge_commit``, ...), for a reader that needs to look further. A note answering an inbound
-  also has ``outcome``: the card outcome (``done``, ``partial``, ...), or ``rejected``.
+  also has ``outcome``: the card outcome (``done``, ``partial``, ...), or ``rejected``. A task
+  first acknowledged ``blocked`` gets one follow-up note once its work finishes, with the final
+  ``outcome`` and ``follows``: the id of the ``blocked`` note.
 - ``runtime_key``: a stable key the runtime uses to publish a message only once
   (``publisher.already_published``). Messages published before ``runtime_key`` existed
   (2026-10-08) carried their key in the title instead; a builder sets ``legacy_title`` to that
@@ -180,11 +182,13 @@ def task_acknowledgement(
     asked_for_help: bool,
     refs: list,
     about: dict[str, str],
+    key: str | None = None,
 ) -> RuntimeMessage:
     """The note that closes an inbound ``task`` once its card is published (C11). ``summary``
     is the card's own completion summary, if it left one (``plainest_summary``);
     ``sent_titles`` the titles of the messages the card published; ``asked_for_help``
-    whether one of them is a ``help_request``."""
+    whether one of them is a ``help_request``. ``key`` is set only on the follow-up of a task
+    first acknowledged ``blocked`` (``final_acknowledgement_key``)."""
     parts = []
     if backlog:
         parts.append("A planning card that was already open took this task on with its other work.")
@@ -203,7 +207,13 @@ def task_acknowledgement(
         parts.append(f"The agent also sent: {_quoted_list(titles)}.")
     lead = OUTCOME_WORDS.get(outcome, str(outcome).capitalize())
     title = _title(lead, task_title or "your task")
-    return RuntimeMessage("note", title, " ".join(parts), refs, about)
+    return RuntimeMessage("note", title, " ".join(parts), refs, about, key=key)
+
+
+def final_acknowledgement_key(inbound_id: str) -> str:
+    """The ``runtime_key`` of the one follow-up note a task acknowledged ``blocked`` gets when
+    its work finishes (``publisher.acknowledge_inbound``)."""
+    return f"ack-final:{inbound_id}"
 
 
 def task_not_started(task_title: str | None, problems: list[str]) -> RuntimeMessage:
@@ -301,6 +311,51 @@ def card_blocked_twice(
         _about(card=task_id, request=request_id, repair_request=repair_request),
         key=f"blocked-twice:{task_id}",
         legacy_title=f"Card {task_id} is blocked again after a requeue",
+    )
+
+
+def card_repaired_after_publish(
+    card_title: str, task_id: str, request_id: str, repair_request: str | None, refs: list
+) -> RuntimeMessage:
+    """A card whose work was already published was blocked again or put back in the queue:
+    it cannot finish a second time, so the runtime repairs it instead of running it again."""
+    follow_up = (
+        "A repair card will redo its work."
+        if repair_request
+        else "The recovery card of its promotion carries its work on."
+    )
+    body = (
+        f"The card “{_line(card_title, 80)}” was blocked or put back in the queue after its "
+        "work was published, so it cannot finish a second time. The runtime did not run it "
+        f"again. {follow_up}"
+    )
+    return RuntimeMessage(
+        "note",
+        _title("Repairing", card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id, repair_request=repair_request),
+        key=f"repair-after-publish:{task_id}",
+    )
+
+
+def repair_chain_limit(
+    card_title: str, task_id: str, request_id: str, limit: int, refs: list
+) -> RuntimeMessage:
+    """A repair card was blocked again at the repair-chain limit: no further repair."""
+    body = (
+        f"The card “{_line(card_title, 80)}” is a repair card, {limit} repairs deep, and it was "
+        "blocked again. The runtime opens no more repair cards for this work, so it stays "
+        "blocked. Please check the Hermes logs and the card's help requests, fix the cause, "
+        "and send a new task if the work still matters."
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title("Repair limit reached", card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id),
+        key=f"repair-limit:{task_id}",
     )
 
 
@@ -498,6 +553,22 @@ def card_models_invalid(value: str, problems: list[str]) -> RuntimeMessage:
     )
 
 
+def autonomy_invalid(value: str) -> RuntimeMessage:
+    """``AUTORESEARCH_AUTONOMY`` has an unknown value (one per distinct value)."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    body = (
+        f"AUTORESEARCH_AUTONOMY in the profile .env is {value!r}, which is not a known setting. "
+        "The agent runs as if it were 'always', so it plans its own research without waiting "
+        "for a task. Please set it to 'always' or 'on-request'."
+    )
+    return RuntimeMessage(
+        "help_request",
+        "Autonomy setting has errors",
+        body,
+        key=f"autonomy:{digest}",
+    )
+
+
 def host_requirements_missing(game: str, problems: list[str]) -> RuntimeMessage:
     """The workers lack something the game's ``host_requirements`` declare (one per game and
     distinct set of problems)."""
@@ -581,6 +652,37 @@ def agent_resumed(count: int, champion: bool = False, provenance: bool = False) 
         "needs to be done."
     )
     return RuntimeMessage("note", "Agent resumed", body)
+
+
+def research_paused(already: bool) -> RuntimeMessage:
+    """The coach paused research (a ``control`` pause); ``already``: it was paused before."""
+    lead = "Research was already paused at your request." if already else (
+        "No new cards start, pending cards were unassigned, and the agent plans nothing new."
+    )
+    body = (
+        f"{lead} Cards already running finish their work, within their spend limits. Send "
+        "/resume-research to start research again."
+    )
+    return RuntimeMessage("note", "Research paused at your request.", body)
+
+
+def research_resumed(was_held: bool, still_paused: bool) -> RuntimeMessage:
+    """The coach resumed research (a ``control`` resume). ``was_held``: the coach had paused
+    it; ``still_paused``: the runtime's own pause (preflight, budget, champion) still holds."""
+    if not was_held:
+        return RuntimeMessage(
+            "note",
+            "Research was not paused",
+            "Nothing was paused at your request, so there was nothing to resume.",
+        )
+    if still_paused:
+        body = (
+            "Your pause is lifted, but the agent is still paused for another reason, which its "
+            "own message explains. It resumes by itself once that cause clears."
+        )
+    else:
+        body = "Pending cards were assigned again, and the agent plans its research again."
+    return RuntimeMessage("note", "Research resumed.", body)
 
 
 _FILES_LISTED = 8

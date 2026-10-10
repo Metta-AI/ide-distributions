@@ -5,7 +5,15 @@ Signatures follow Hermes v0.21.5 (`website/docs/user-guide/features/hooks.md`,
 
 A plugin must never break the agent. Hermes fails *closed* when a `pre_tool_call` callback
 raises (the tool is blocked), so every hook here catches everything: an internal error
-allows the call (returns None) and is appended to `runtime/plugin_errors.jsonl`.
+allows the call (returns None) and is appended to `runtime/plugin_errors.jsonl`. The IDE
+coach chat (platform `api_server`, `plugin.coach`) is the exception: there an internal error
+blocks the tool, because the chat must never fall back to research tools.
+
+Hooks for the chat: `pre_llm_call` (platform `api_server`) records the session, injects the
+chat brief and runs the coach's exact-line commands; `pre_tool_call` allows only the
+`autoresearch_coach` tools in a recorded chat session (or a turn Hermes bound to
+`api_server`); `transform_llm_output` puts the plugin's own lines (proposal renderings,
+"Sent ..." lines) first in a chat reply, above the model's escaped text. `register` also registers the coach tools.
 """
 
 import json
@@ -16,7 +24,7 @@ import traceback
 from pathlib import Path
 
 from autoresearch import runctx
-from autoresearch.plugin import peers, policy
+from autoresearch.plugin import coach, peers, policy
 
 TOOL_EVENTS_FILE = "tool_events.jsonl"
 KANBAN_EVENTS_FILE = "kanban_events.jsonl"
@@ -89,7 +97,31 @@ def _load_card(ctx: runctx.RunContext) -> dict | None:
     return card
 
 
-def pre_tool_call(tool_name=None, args=None, task_id=None, **kwargs):
+def _chat_tool_directive(tool_name, args, session_id, turn_id, api_request_id) -> dict | None:
+    """The block directive for a chat session's tool call, or None to allow it: only coach
+    tools, none when another plugin owns a coach tool name, and at most
+    ``coach.MAX_TOOL_ROUNDS`` model calls with tools per turn."""
+    try:
+        foreign = coach.foreign_tool_names()
+        if foreign:
+            return {"action": "block", "message": (
+                f"{policy.PREFIX}coach tools are off: another plugin owns {', '.join(foreign)}."
+            )}
+        allowed, reason = policy.chat_tool_policy(tool_name or "", args or {}, coach.TOOL_NAMES)
+        if allowed and coach.over_round_cap(session_id, turn_id, api_request_id):
+            allowed, reason = False, (
+                f"{policy.PREFIX}the chat used its {coach.MAX_TOOL_ROUNDS} tool rounds for this "
+                "turn. Answer the coach now with what you found."
+            )
+    except Exception as error:  # noqa: BLE001 - fail closed in the chat
+        allowed, reason = False, f"{policy.PREFIX}internal error ({type(error).__name__})"
+    return None if allowed else {"action": "block", "message": reason}
+
+
+def pre_tool_call(tool_name=None, args=None, task_id=None, session_id=None, turn_id=None,
+                  api_request_id=None, **kwargs):
+    if coach.is_chat_session(session_id) or coach.session_platform() == coach.CHAT_PLATFORM:
+        return _chat_tool_directive(tool_name, args, session_id, turn_id, api_request_id)
     ctx = None
     try:
         ctx = _run_context()
@@ -211,8 +243,19 @@ def on_session_end(
         _log_error(ctx, "on_session_end", error)
 
 
-def pre_llm_call(is_first_turn=False, session_id=None, **kwargs):
-    """The card briefing, injected into the first user turn of a Kanban card worker, with
+def _chat_pre_llm_call(session_id, user_message, is_first_turn) -> str | None:
+    try:
+        return coach.chat_turn(session_id, user_message, is_first_turn) or None
+    except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
+        coach.record_chat_session(session_id)  # the tool allowlist still applies
+        coach.log_error("pre_llm_call", session_id, error)
+        return coach.BRIEF_FALLBACK
+
+
+def pre_llm_call(is_first_turn=False, session_id=None, platform=None, user_message=None, **kwargs):
+    """In the IDE coach chat (platform ``api_server``): ``coach.chat_turn``.
+
+    Otherwise the card briefing, injected into the first user turn of a Kanban card worker, with
     the run id (the journal ``iteration``) and the other cards running now (``peers``; left
     out, and the error logged, when the board cannot be read). It also records the worker identity for the
     worker's subprocesses, which Hermes strips of ``HERMES_KANBAN_TASK``/``_RUN_ID``
@@ -220,6 +263,8 @@ def pre_llm_call(is_first_turn=False, session_id=None, **kwargs):
     this card run: the runtime's spend caps price a card from its sessions in ``state.db``
     (``runtime.spend``). Later sessions of the run (context compression, subagents) carry it
     as ``parent_session_id``."""
+    if platform == coach.CHAT_PLATFORM:
+        return _chat_pre_llm_call(session_id, user_message, is_first_turn)
     task = os.environ.get(runctx.ENV_CARD_ID)
     if not is_first_turn or not task:
         return None
@@ -251,6 +296,19 @@ def pre_llm_call(is_first_turn=False, session_id=None, **kwargs):
     return text
 
 
+def transform_llm_output(response_text=None, session_id=None, platform=None, turn_id=None,
+                         **kwargs):
+    """A chat reply with the plugin's lines first (``coach.transform``); None elsewhere, which
+    leaves the reply unchanged."""
+    if platform != coach.CHAT_PLATFORM or not isinstance(response_text, str):
+        return None
+    try:
+        return coach.transform(session_id, response_text, turn_id)
+    except Exception as error:  # noqa: BLE001 - a plugin must never break the agent
+        coach.log_error("transform_llm_output", session_id, error)
+    return None
+
+
 def kanban_task_completed(task_id=None, run_id=None, **kwargs):
     ctx = None
     try:
@@ -267,7 +325,8 @@ def kanban_task_completed(task_id=None, run_id=None, **kwargs):
 
 
 def register(ctx) -> None:
-    """Hermes `PluginContext.register_hook(name, callback)` (hermes_cli/plugins.py:912).
+    """Hermes `PluginContext.register_hook(name, callback)` (hermes_cli/plugins.py:912) and
+    `register_tool(name, toolset, schema, handler, ...)` (v0.21.6 `hermes_cli/plugins.py`).
     Also marks this process as an agent session (``runctx.ENV_AGENT_SESSION``): Hermes builds
     terminal and code environments from ``os.environ``, so operator-only commands run from a
     model's tool call see it and refuse."""
@@ -276,4 +335,10 @@ def register(ctx) -> None:
     ctx.register_hook("post_tool_call", post_tool_call)
     ctx.register_hook("on_session_end", on_session_end)
     ctx.register_hook("pre_llm_call", pre_llm_call)
+    ctx.register_hook("transform_llm_output", transform_llm_output)
     ctx.register_hook("kanban_task_completed", kanban_task_completed)
+    for name, schema, handler in coach.SPECS:
+        ctx.register_tool(
+            name=name, toolset=coach.TOOLSET, schema=schema, handler=handler,
+            description=schema["description"],
+        )

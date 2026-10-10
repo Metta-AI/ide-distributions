@@ -3,6 +3,7 @@ import hashlib
 import json
 import subprocess
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -65,7 +66,7 @@ def validate_source(candidate, artifact, identity):
     return head, hashes, provenance
 
 
-def build(candidate, out, artifact, identity):
+def build(candidate, out, artifact, identity, *, started=None):
     from games.gota.gates import (
         GateContext,
         GateResult,
@@ -98,6 +99,7 @@ def build(candidate, out, artifact, identity):
     gates = {}
     error = None
     for name, module in zip(('G1', 'G2', 'G3', 'G4'), (g1_lint, g2_episode, g3_budget, g4_screen)):
+        gate_started = time.monotonic()
         try:
             if fingerprint(json.loads(manifest.read_text())) != identity['manifest_sha256']:
                 raise ValueError('manifest changed after engine resolution')
@@ -112,7 +114,8 @@ def build(candidate, out, artifact, identity):
         except Exception as fault:  # noqa: BLE001 - retain arbitrary tool faults and stop.
             result = GateResult.errored(fault)
         gates[name] = {'outcome': result.outcome, 'passed': result.ok,
-                       'summary': result.details, 'advisory': name == 'G4'}
+                       'summary': result.details, 'advisory': name == 'G4',
+                       'seconds': round(time.monotonic() - gate_started, 3)}
         if result.outcome == 'errored':
             error = result.details['error']
             break
@@ -144,7 +147,8 @@ def build(candidate, out, artifact, identity):
                'artifact': 'policy.bas', 'policy_sha256': digest(frozen),
                'source_commit': head, 'source_path': next(iter(hashes)), 'source_hashes': hashes,
                'strategy_sha256': provenance['artifact_sha256'], 'prebuilt': provenance,
-               'created': datetime.now(UTC).isoformat(), 'engine': identity, 'native_builds': native,
+               'created': datetime.now(UTC).isoformat(), 'started': started,
+               'finished': datetime.now(UTC).isoformat(timespec='seconds'), 'engine': identity, 'native_builds': native,
                'compiler': {'mode': 'prebuilt', 'prebuilt_provenance': provenance, 'installed_source_hashes': driver},
                'driver': {'candidate_commit': head, 'installed_commit': None,
                           'installed_source_sha256': hashlib.sha256(json.dumps(driver, sort_keys=True).encode()).hexdigest()}}

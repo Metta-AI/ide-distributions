@@ -167,6 +167,18 @@ def test_needs_rebuild_when_the_board_is_missing(host, tmp_path):
     assert needs_rebuild(host.ctx(), _lose_board(host, tmp_path)) is True
 
 
+def test_rebuild_without_plan_writes_no_planning_request(host, tmp_path):
+    """Start on request: a board rebuilt before the coach's first task must not plan."""
+    host.admit_requested()
+    queue = _lose_board(host, tmp_path)
+
+    rebuild(host.ctx(), queue, host.sm, game_version=GAME_VERSION, now=NOW, plan=False)
+
+    assert [c for c in queue.list() if c.spec.mode == "planning"] == []
+    requests = (host.canonical / "cards" / "requests").glob("*.json")
+    assert not any("planning:rebuild:" in path.read_text() for path in requests)
+
+
 def test_needs_rebuild_when_no_task_of_an_open_request_is_on_the_board(host, tmp_path):
     host.admit_requested()
     queue = _lose_board(host, tmp_path)

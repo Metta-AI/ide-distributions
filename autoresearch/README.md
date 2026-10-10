@@ -1,8 +1,9 @@
 # autoresearch
 
 An autonomous research agent that improves game policies (first game: Gods of the Arena,
-GotA) without human approval, and reports to an external "Preston-role" interface agent
-through a file-based communication interface.
+GotA) without human approval, and reports to a "Preston-role" interface agent through a
+file-based communication interface. In the Softmax IDE that agent is the profile's own coach
+chat ("IDE coach chat" below); elsewhere it is an external agent.
 
 `autoresearch/` is the root of a Hermes Agent profile distribution. Install it with
 `hermes profile install`. This file is the operations guide: install, configure, run,
@@ -21,9 +22,10 @@ Design documents (open the HTML files in a browser):
 - [Softmax hosting integration](docs/designs/softmax-integration-plan-2026-10-09.html): how the
   profile goes into the hosted Hermes fleet (milestones M0-M5, decisions D1-D15). The task-level
   plan is [plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), with evidence in
-  [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). This is a plan: none of
-  the hosted work is built yet. The coach chat it adds is designed in
-  [coach-chat-role.md](docs/designs/coach-chat-role.md).
+  [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). The profile side is
+  built ("Softmax hosting" below); the hosting runtime changes are metta work that is not in
+  this repository. The coach chat it adds is designed in
+  [coach-chat-role.md](docs/designs/coach-chat-role.md) and built ("IDE coach chat" below).
 
 ## Prerequisites
 
@@ -52,17 +54,31 @@ Or use the official `install.sh` from the Hermes repository on a host.
 ## Install the profile
 
 ```sh
-hermes profile install /path/to/ide-mvp/autoresearch --name autoresearch
+export PROFILE_NAME=autoresearch
+hermes profile install /path/to/ide-mvp/autoresearch --name "$PROFILE_NAME"
 ```
 
-This creates the profile `autoresearch` under `<host root>/profiles/`. The host root is
-`~/.hermes` unless `HERMES_HOME` is set in your shell. Use that name everywhere below. The
-Kanban board has the same name. The three cron jobs arrive paused.
+The profile works under any install name. Below, `<profile>` (the shell variable
+`$PROFILE_NAME`) is that name: `optimizer` on Softmax hosting, `autoresearch` in a manual
+install. This creates the profile `<profile>` under `<host root>/profiles/`. The host root is
+`~/.hermes` unless `HERMES_HOME` is set in your shell. Cards are assigned to `<profile>`.
+The Kanban board is always named `autoresearch`, whatever the install name, and Kanban boards
+are host-wide (`<host root>/kanban/boards/<slug>`). Install **one autoresearch profile per
+Hermes root**: two would share the board and requeue, repair and spend-cap each other's
+cards. Preflight fails (the agent pauses with one help request) when another profile under
+`<host root>/profiles/` has `plugins/autoresearch/plugin.yaml`. The three cron
+jobs arrive paused. Shell variables do not survive a new shell: export `PROFILE_NAME` (and
+`PROFILE`, below) again in each new shell before running the commands in this guide.
+
+An existing install not named `autoresearch` (an earlier version named its board after the
+profile) gets a new `autoresearch` board with a new board epoch on its next queue-keeper run.
+Cards on the old profile-named board stay there: let them finish or archive each one with
+`hermes kanban --board "$PROFILE_NAME" archive <card>` (`hermes kanban --board "$PROFILE_NAME" list` shows them).
 
 Set `PROFILE` once. Every path below is relative to it:
 
 ```sh
-export PROFILE="${HERMES_HOME:-$HOME/.hermes}/profiles/autoresearch"
+export PROFILE="${HERMES_HOME:-$HOME/.hermes}/profiles/$PROFILE_NAME"
 ```
 
 Do not confuse the two homes. The host root holds all profiles. `$PROFILE` is the home of
@@ -95,8 +111,10 @@ AUTORESEARCH_WORKSPACE_REMOTE=git@github.com:your-org/autoresearch-workspace.git
 | `AUTORESEARCH_CARD_MODELS` | no | Model per card mode, as `mode=model` pairs separated by commas. Default `planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3`: mechanical cards run on the cheaper model, `investigation` and `experimentation` on `model.default`. A mode set to `default` (or the whole value `none`) uses `model.default`. queue-keeper pins the model when it creates the card (`hermes kanban create --model ... --provider openrouter`), so a change applies to new cards only; `hermes kanban --board autoresearch set-model <task> <model>` changes a card already on the board. A bad entry (unknown mode, no model) is skipped, so that mode uses `model.default`; queue-keeper logs it, records the step failure `card_models`, and sends one help request per distinct value. |
 | `AUTORESEARCH_MAX_CARD_RUNS` | no | Runs per card. Default 4. queue-keeper stops a card that would start, or has started, one more run: it blocks it (`hermes kanban block --kind capability`, or `needs_input` when its last block was `capability`, so Hermes' unblock-loop breaker does not send it to triage; reason `spend-cap: ...`) and sends one help request. Only `running` and `ready` cards can be blocked; others are skipped. A stop that fails is retried every minute and reported once per failure streak; it grants no new allowance. A stopped card is never requeued or repaired; unblocking it gives it another full allowance. The blocked-card check (queue-keeper and `health`) also keeps a blocked card blocked, without requeue or repair, once it has reached this cap or the cost cap. The caps also run while preflight fails and the agent is paused. `0` turns the cap off. |
 | `AUTORESEARCH_MAX_CARD_USD` | no | Estimated model spend per card, in USD. Default 4. Same stop as above. The estimate is Hermes' own (`state.db`, `sessions.estimated_cost_usd`), summed over the sessions of the card's runs and their compression and subagent sessions. `0` turns the cap off. |
-| `AUTORESEARCH_DAILY_BUDGET_USD` | no | Estimated model spend per UTC day of every session of this profile. Default 100. At the budget queue-keeper pauses dispatch (the usual pause: pending cards unassigned, no admission) and sends one help request a day; running cards finish under their own caps. It resumes by itself on the next UTC day, or after you raise the value. `0` turns it off. |
+| `AUTORESEARCH_DAILY_BUDGET_USD` | no | Estimated model spend per UTC day of every research session of this profile (all but the IDE coach chat's sessions, Hermes source `api_server`, which have their own cap below). Default 100. At the budget queue-keeper pauses dispatch (the usual pause: pending cards unassigned, no admission) and sends one help request a day; running cards finish under their own caps. It resumes by itself on the next UTC day, or after you raise the value. `0` turns it off. |
+| `AUTORESEARCH_CHAT_DAILY_USD` | no | Estimated model spend per UTC day of the IDE coach chat ("IDE coach chat" below). Default 3. Over it, the chat's tools refuse except `status`, and the chat tells the coach its budget is spent; research is not affected. The plugin reads it from the profile `.env`. `0` turns it off. |
 | `AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD` | no | Credit floor of the OpenRouter key, in USD. Default 10. Preflight reads the key's remaining credit (`limit_remaining` from `GET https://openrouter.ai/api/v1/key`) on every queue-keeper run and pauses the agent with a help request when it is below this floor, because Hermes retries a refused (402) model call forever. A fresh $10 key is not below the default; it pauses after its first spend. Set the floor lower when the key itself is small and should be spent further down. A value that is not a non-negative number uses the default and logs a preflight warning. |
+| `AUTORESEARCH_AUTONOMY` | no | `always` (default) or `on-request`. With `on-request` the agent plans nothing (no scheduled, queue-growth or board-rebuild planning card) until the coach's first task arrives: an inbound `task` whose `author` starts with `coach:` and that routing accepted (a task answered with a rejection note, for example because its refs do not resolve, does not start the agent). That task commits `.supervisor/ledger/started.json` (`{"started_at": ..., "by": "<inbound id>"}`), which is permanent; a coach `steer` (what cancelling a task produces) or a task from anyone else does not start the agent, though tasks are still admitted and run. Until then queue-keeper logs once a day that planning waits. This is a convenience, not a security control: everything in the sandbox runs as one uid, so any process there can write a `coach:` task. An unknown value runs as `always`; queue-keeper logs it, records the step failure `autonomy`, and sends one help request per distinct value. A failed commit of `started.json` is the step failure `autonomy_start`. |
 | `AUTORESEARCH_FALLBACK_PRICES` | no | USD per million tokens for a session Hermes could not price (its estimate missing, for example when OpenRouter pricing was unreachable), as `kind=price` pairs. Default `input=3,output=12,cache_read=0.75,cache_write=3`, above kimi-k3's observed rate on purpose. queue-keeper logs each session priced this way once. |
 | `AUTORESEARCH_CHAMPION_GRACE_MINUTES` | no | How long the league may take to make our admitted submission the champion (or, when its membership cannot be found, how long after the submit) before queue-keeper pauses the agent for a champion conflict (A9). Default 30. |
 | `AUTORESEARCH_RELAUNCH_MIN_CREDITS` | no | Credits an experiment refused for credits needs before xp-poll relaunches it, when the cost per XP episode cannot be estimated from recent requests (A10). Default 100. |
@@ -123,7 +141,7 @@ helpers prepared once on the host. Details: [games/gota/GAME.md](games/gota/GAME
 ## Host configuration
 
 One Hermes gateway runs one Kanban dispatcher for the whole host. It uses the config of the
-host default profile, not the config of `autoresearch` (amendment A3). The profile
+host default profile, not the config of `<profile>` (amendment A3). The profile
 configuration cannot fix this. Set it once on the host:
 
 ```sh
@@ -148,22 +166,22 @@ Start the gateway if it is not running (`hermes gateway start`).
 The jobs arrive paused. Review them, then resume them:
 
 ```sh
-hermes -p autoresearch cron resume queue-keeper
-hermes -p autoresearch cron resume xp-poll
-hermes -p autoresearch cron resume health
-hermes -p autoresearch cron list
+hermes -p "$PROFILE_NAME" cron resume queue-keeper
+hermes -p "$PROFILE_NAME" cron resume xp-poll
+hermes -p "$PROFILE_NAME" cron resume health
+hermes -p "$PROFILE_NAME" cron list
 ```
 
 | Job | Runs | Does |
 |---|---|---|
 | `queue-keeper` | every 1 minute | Bootstrap, preflight, merge of finished cards, publication, admission of new cards, planning, spend caps (per card and per day, see `AUTORESEARCH_MAX_CARD_RUNS` and the rows after it). The only writer of the canonical workspace. A card the runtime did not create is never merged, in any board epoch: a board task with no card body (for example one a model added with `kanban_create`), or a handoff whose request has no committed `cards/requests/<Q-id>.json` (a receipt its worker wrote). It gets one help request that says how to archive it, and the marker `.supervisor/ledger/foreign/<task>.json`; the spend caps still apply to it while it runs. Its card branch is still pushed to `origin` with the others (`refs/heads/card/*`), unmerged. `main` is pushed on its own and never forced; card branches are force-pushed (a retried card rebuilds its branch, so origin's copy is stale), and a card ref origin still refuses is logged once in `keeper.log`. One card that fails (unreadable on the board, or a blocked card the board will not requeue) does not stop the other cards in the same step; the step is still logged as failed. A merge or publication that fails and leaves canonical unchanged is handled the same way; one that leaves it changed stops the step, and the next run repairs it. If the board cannot list its foreign cards, the spend caps still apply to the other cards. A Hermes status the runtime does not know reads as claimed. |
 | `xp-poll` | every 5 minutes | Collects the results of Softmax experience (XP) requests as evidence, and asks for review cards. It also relaunches an experiment that waits for credits (`awaiting-credits`) or for the coach (`awaiting-permit`, see the IDE Controls paragraphs in Operate), reads the coach's answers, and stops an experiment the coach declined. Log: `.supervisor/runtime/xp_poll.log`. |
-| `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
+| `health` | every 15 minutes | Checks blocked cards (requeued once, then repaired; a `tool-fault:` block is never requeued and gets one help request per blocked run; a card whose handoff is already published cannot hand off again, so it is never requeued: when that handoff was `blocked` it is repaired at once, at most 2 repairs deep (then one help request), and a rerun a human starts by unblocking it is closed, after its repair card is opened when the handoff was `blocked`; a rerun that completes before the check sees it is not repaired; a card stopped at a spend cap, or blocked at its run or cost cap, is left blocked), free disk, and the credential; each problem becomes one help request per day. Log: `.supervisor/runtime/health.log`. |
 
 To start a `queue-keeper` run now instead of waiting for the schedule:
 
 ```sh
-hermes -p autoresearch cron run queue-keeper
+hermes -p "$PROFILE_NAME" cron run queue-keeper
 ```
 
 `cron run` claims the job and runs it in the foreground, then prints `Ran now: succeeded.` or
@@ -171,7 +189,7 @@ hermes -p autoresearch cron run queue-keeper
 `tools/cronjob_tools.py`, `_action_run`). It does not wait for the gateway. If the scheduler
 already holds the job it prints "Already being fired by the scheduler" and does not run it
 again; if the CLI inherits a gateway session it may instead report that the job runs in the
-background. `hermes -p autoresearch cron tick` runs every due job once, by hand.
+background. `hermes -p <profile> cron tick` runs every due job once, by hand.
 
 To run only bootstrap (no cards), use a subshell. It loads the profile `.env`, because the runtime
 reads `AUTORESEARCH_WORKSPACE_REMOTE` and the other keys from the environment. `uv` must be
@@ -200,7 +218,7 @@ profile `.env` sets it).
 
 `AUTORESEARCH_CLI` is only in the profile `.env`, and the CLI needs `HERMES_HOME` to be the
 profile home. Softmax commands also need `SOFTMAX_PLAYER_CREDENTIAL` and
-`AUTORESEARCH_PLAYER_ID`, and `COGAMES_API_URL` when the server is not softmax.com. Prepare each operator shell like this (after `PROFILE` is set):
+`AUTORESEARCH_PLAYER_ID`, and `COGAMES_API_URL` when the server is not softmax.com. Prepare each operator shell like this (after `PROFILE_NAME` and `PROFILE` are set):
 
 ```sh
 set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"
@@ -208,7 +226,7 @@ set -a; . "$PROFILE/.env"; set +a; export HERMES_HOME="$PROFILE"
 
 Now `HERMES_HOME` is the profile home in this shell. Run `hermes` commands for the host
 (`hermes config`, `hermes gateway`) in a different shell, or with `HERMES_HOME` unset.
-`hermes -p autoresearch ...` commands work in both.
+`hermes -p <profile> ...` commands work in both.
 
 Read state with the CLI:
 
@@ -217,7 +235,33 @@ Read state with the CLI:
 "$AUTORESEARCH_CLI" comms list
 "$AUTORESEARCH_CLI" promotion status
 "$AUTORESEARCH_CLI" softmax whoami
+"$AUTORESEARCH_CLI" status --json
+"$AUTORESEARCH_CLI" report baseline --since 2026-10-09 --json
 ```
+
+`status --json` is one read-only snapshot, also allowed to cards: the distribution version
+and commit (and a failed update, from the profile's `.softmax-update-failed` JSON
+`{"commit", "error"}`), pause state and reasons, coach hold, `AUTORESEARCH_AUTONOMY` and
+whether the agent started, today's estimated spend against the daily budget, the OpenRouter
+key's limit, usage and remaining credit, running cards, open questions, the champion and any
+conflict, and the time of the last queue-keeper run. A source it cannot read becomes a
+`warnings` entry. It never prints a credential.
+
+`report baseline --since <YYYY-MM-DD> --json` reports performance and cost from that UTC
+day on, read only and allowed to cards (the coach chat's `baseline_report`): per card (mode,
+model, runs, wall time, tokens, estimated USD, outcome), per day (estimated USD by session
+source, today's key usage from OpenRouter's `usage_daily`, cards finished), per experiment
+(XP requests, episodes, time from creation to its latest evidence, the cost of the cards that
+ref it; `credits` is null because no per-request credit cost is stored), per uploaded build
+(wall time and each gate's seconds, null when the build did not record them), and the key.
+`estimated_usd_by_source` always has `cli` (card workers: Hermes sources `kanban` and `cli`),
+`api_server` (the coach chat, counted on the day it was spent: the chat is one long-lived
+session, so today's figure comes from the chat budget's snapshot
+`$PROFILE/local/chat-spend.json`; earlier days on which a chat session existed, and today before
+the first coach tool call of the day, are null with a warning, because no history is kept),
+`compiler` (GotA compiler copies, below) and `cron`; any other
+source seen, such as `delegate`, is an extra key with its own total. Module docstring:
+`src/autoresearch/runtime/baseline.py`.
 
 Look at the Kanban board with `hermes kanban --board autoresearch list`.
 
@@ -237,8 +281,13 @@ Where things live:
 | Canonical workspace (git) | `$PROFILE/workspace/` |
 | Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
+| Coach hold | `$PROFILE/workspace/.supervisor/ledger/coach-hold.json` (exists only while the coach holds research) |
+| Agent started (`AUTORESEARCH_AUTONOMY=on-request`; permanent once written) | `$PROFILE/workspace/.supervisor/ledger/started.json` |
 | Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
 | Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
+| IDE coach chat budget: the day's first snapshot of the chat sessions' cost | `$PROFILE/local/chat-spend.json` |
+| IDE coach chat event log | `$PROFILE/workspace/.supervisor/runtime/chat_events.jsonl` |
+| GotA compiler child sessions, one full copy per build, not pruned yet (read by `report baseline`) | `$PROFILE/gota-compiler/<build id>-<suffix>/state.db` |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
 | Commit provenance journal and its key (not committed) | `$PROFILE/workspace/.git/autoresearch/provenance.jsonl`, `provenance.key` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
@@ -363,8 +412,26 @@ The runtime reads the coach's answers itself, every run, with the agent token
   submissions, doubling, at most 8 hours. A retried submission that fails waits for the next
   step too.
 
+A coach pauses and resumes research from the IDE chat with the exact lines
+`/pause-research` and `/resume-research`, for which the plugin sends an inbound `control` message
+(`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with
+`"$AUTORESEARCH_CLI" comms inbound control --json '{"action": "pause"}' --author coach:<player id>`.
+queue-keeper applies it on its next run, when it routes inbound. Routing runs only after the preflight check passes, so a `control` sent while preflight is failing (for example, the key is out of credit) is applied, and answered with its note, only on the first run whose preflight passes. A pause sets the coach hold,
+`.supervisor/ledger/coach-hold.json` (`{"held_at", "by", "tasks"}`: `by` is the message's
+author, `tasks` the pending cards it unassigned and their assignees): no card is admitted, no
+pending card is dispatched, and the agent plans nothing; running cards finish their work
+under their spend caps, and a card that blocks meanwhile stays blocked (its one requeue waits for the resume, as it does under the agent's own pause). A resume removes the file and assigns those cards again. Each is
+answered with a runtime note in reply ("Research paused at your request." or "Research
+resumed."; a resume with no hold says nothing was paused). `status --json` shows the hold as
+`coach_hold`. The hold is independent of the agent's own pauses (preflight, daily budget,
+champion conflict, `pause.json`): queue-keeper never clears the hold, and it does not lift its
+own pause while the hold is set. A resume clears only the hold: if the agent is also paused
+for its own reason, it stays paused (the note says so), the cards the hold unassigned wait in
+`pause.json`, and it resumes by itself once that cause clears.
+
 Only the runtime commits on the canonical workspace's `main` (C1): queue-keeper, xp-poll,
-health, bootstrap, and `card finish` (the handoff commit). Each of them records every commit
+health, bootstrap, `card finish` (the handoff commit), and `comms inbound` (also the IDE coach
+chat's confirmed send, which runs it). Each of them records every commit
 it makes in a journal outside the work tree (`.git/autoresearch/provenance.jsonl`, entries
 numbered in sequence and signed with a key in `provenance.key`; a signed entry copied to the
 end again, for example to hide a reset, vouches for nothing). Before it acts, every queue-keeper run checks the
@@ -484,7 +551,7 @@ cp "$PROFILE/workspace/.supervisor/hermes-memory.md" "$PROFILE/memories/MEMORY.m
 ## Update
 
 ```sh
-hermes profile update autoresearch -y
+hermes profile update "$PROFILE_NAME" -y
 ```
 
 This replaces the files the distribution owns (code, doctrine, skills, cron job definitions)
@@ -496,9 +563,186 @@ automatic update; `updates.check` is set to false so it does not even check.
 After an install or update, check once that agent terminals carry the plugin's agent-session
 marker (`runtime accept-commits` refuses agents by it; this rests on reading the Hermes
 source and is not yet observed live). In an agent session of the profile (a chat with
-`hermes -p autoresearch chat`, or a card worker), have the agent run
+`hermes -p "$PROFILE_NAME" chat`, or a card worker), have the agent run
 `"$AUTORESEARCH_CLI" runtime session`. It must print `"agent_session": true`. The same
 command in an operator shell prints `false`.
+
+### IDE coach chat
+
+On Softmax hosting each coach line in the IDE chat is one Hermes run on the API server
+(platform `api_server`), in this profile. The plugin turns those runs into the coach's
+interface to the research (design: [coach-chat-role.md](docs/designs/coach-chat-role.md);
+code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers (platform
+`cli`) are unchanged.
+
+- **Persona.** For an `api_server` turn the plugin's `pre_llm_call` injects the brief
+  `doctrine/coach-chat.md` (once per session: Hermes keeps injected context in the history).
+  `SOUL.md` names both roles.
+- **Tools.** Config (C9 rows, re-applied by bootstrap) gives `api_server` only the toolset
+  `autoresearch_coach` and none of the shipped skills, and keeps that toolset off for `cli`
+  (`platform_toolsets.api_server`, `known_plugin_toolsets.cli`,
+  `skills.platform_disabled.api_server`; bootstrap adds the coach toolset to
+  `known_plugin_toolsets.cli` and keeps the other entries Hermes wrote there). The tools are fixed-argv read commands of the
+  profile CLI, with no shell (`list_messages`, `get_message`, `message_status`,
+  `resolve_ref`, `list_cards`, `show_card`, `find_records`, `show_record`,
+  `promotion_status`, `status`, `baseline_report`; output cut to 12,000 characters), and
+  `propose_inbound`. Because Hermes's config load fails open to the full default toolset, the
+  plugin's `pre_tool_call` also blocks every other tool in a chat session (Hermes's
+  tool-search bridge passes only as far as it reaches coach tools), and the coach tools refuse
+  outside one or under `HERMES_KANBAN_TASK`. A chat turn gets at most 8 tool rounds (model
+  calls with tools). The tool names are the design's (`status`, `list_cards`, ...); since they
+  are generic, the plugin checks that Hermes's tool registry maps each to its own handler, and
+  if another plugin owns any of them, every coach tool is refused and the chat says so.
+- **Profile environment.** The tools run inside the one multiplexed gateway process. They
+  find the routed profile with Hermes's `get_hermes_home()` at call time, refuse unless it
+  carries this plugin (`plugins/autoresearch/plugin.yaml`) and a `.env`, and run
+  `AUTORESEARCH_CLI` with the gateway's environment minus `HERMES_*`, `AUTORESEARCH_*` and
+  `SOFTMAX_*` names, plus the profile `.env`, plus `HERMES_HOME=<profile>`.
+- **Sending needs the coach's own line.** No model tool call can run `comms inbound`.
+  `propose_inbound(kind, payload, summary)` (`task`, `steer`, `reply` or `control`; only the
+  kind's schema fields) validates the payload with `comms inbound --dry-run` and keeps the
+  proposal in plugin memory for 15 minutes, bound to the session. The plugin's
+  `transform_llm_output` hook puts its own rendering first in the reply: the payload exactly as
+  it will be sent, as JSON in a fenced code block (so Markdown or HTML in a value shows as
+  text), with control and format characters such as bidi overrides and zero-width spaces shown
+  as `\uXXXX` escapes, never the model's summary, ending `To send exactly this, reply: confirm
+  P-xxxx`. Unicode default-ignorable characters (variation selectors, tag characters, Hangul
+  fillers) are escaped too, as JSON escapes, so the block parses back to the exact payload.
+  The plugin's block comes first in the reply, then a horizontal rule, then the model's text,
+  so nothing the model writes can hide it. All model text in a reply that carries a plugin
+  block is escaped (line endings normalized, `&` and `<` escaped on every line, so inline
+  code shows entities such as `&lt;` literally). Only after that is the proposal
+  confirmable, and it is shown again in every reply while it is pending, so the plugin's
+  rendering is shown first, before the model's text, for that id. When the coach's whole line (surrounding
+  whitespace stripped) is `confirm P-xxxx` in that session, the plugin runs `comms inbound
+  <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once. The send runs
+  on a plugin thread (it can wait for the canonical lock longer than Hermes's 30 s hook
+  timeout). Sends to one profile run one at a time, in the order the coach typed them (one
+  queue per profile), so a slow pause can never land after a later resume; the turn says "Sending P-xxxx", and the next reply carries `Sent P-xxxx as I-...`
+  or the failure. The send runs in its own process group, killed whole after 300 s; a send that
+  timed out or broke unexpectedly is reported as "may or may not have been sent", never as
+  "nothing was sent"; only a validation answer or a bad-arguments exit from the CLI is reported
+  as "Nothing was sent". A send killed at the timeout can leave a stale
+  `workspace/.git/index.lock`: if later commits fail with "index.lock exists", check that no
+  `git` process is running in the workspace, then remove the file. `cancel P-xxxx` drops it. Any other line, another session, an
+  expired, cancelled or never-shown proposal sends nothing. State is keyed by profile and
+  session. A gateway restart drops all proposals and any send outcome not yet shown. A context
+  compression inside a turn starts a new session id: the coach tools refuse for the rest of
+  that turn (fails closed) and the next turn records the new id and injects the brief again.
+- **Budget.** `AUTORESEARCH_CHAT_DAILY_USD` (default 3) per UTC day, from the rise of the chat
+  sessions' Hermes cost since the day's first snapshot (`$PROFILE/local/chat-spend.json`,
+  module `runtime/state_db.py`). Over it, every coach tool but `status` refuses. A spend that
+  cannot be read refuses too.
+- **Log.** `workspace/.supervisor/runtime/chat_events.jsonl`: chat turns, read tools (name and `ok`), proposals (id and
+  kind), shown renderings, sends (proposal id and inbound id). Payload text is not logged.
+
+## Softmax hosting
+
+How the profile runs when Softmax hosts it for a coach (plan:
+[plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), sections 3.4-3.7 and decisions D1-D15). The
+profile side described here is built on this branch. The hosting runtime (image, installer, key budget, bridge) is
+metta code that the plan describes and that is not part of this repository; where a sentence below
+depends on it, it says "per the plan", and you should check the deployed metta version before relying on it.
+
+### For coaches
+
+- **Set up your player's Controls first.** Before you do, the server applies no league choice and no
+  daily credit cap to the hosted agent's `cga_` token. In the IDE Controls set the league (Gods of
+  the Arena), what the agent must ask before (submission, uploads and XP requests are allowed without
+  asking when the list is empty), and `dailyCredits` (the most XP credits it may use per day). Add
+  asks whenever you want to approve more.
+- **Research starts when you ask.** With `AUTORESEARCH_AUTONOMY=on-request` (the hosted setting) the agent plans
+  nothing until your first accepted `task`. After that it plans on its own, permanently
+  (`.supervisor/ledger/started.json`). A `steer` (what cancelling a task produces) does not start it.
+- **Ask the chat what is going on.** The chat reads the workspace (`status`, `baseline_report`,
+  cards, records, messages; see "IDE coach chat" above). It cannot change anything by itself.
+- **Send work with a proposal.** Ask the chat for a `task`, `steer`, `reply` or `control`. The plugin shows
+  the exact message first in its reply, ending `To send exactly this, reply: confirm P-xxxx`. Nothing is
+  sent until your whole line is `confirm P-xxxx` in the same chat session, within 15 minutes. `cancel P-xxxx`
+  drops it. The send runs in the background, so the reply to `confirm` says "Sending P-xxxx" and the
+  next reply tells you whether it was sent.
+- **Stop and resume research.** Type `/pause-research` (hold: no new cards are admitted or dispatched, nothing
+  is planned; running cards finish under their caps) and `/resume-research`. A resume does not override
+  the agent's own pause (credit floor, daily budget, champion conflict); it says so and the agent
+  resumes when that cause clears. Cancelling one task in the IDE stops only that task: it arrives as a
+  `steer`. The chat's stop button (`/stop`) stops only the chat turn that is running. Both are bridge
+  behavior, per the plan, and neither pauses research.
+- **Budgets you will meet.** The chat has its own cap, `AUTORESEARCH_CHAT_DAILY_USD` (default $3 per UTC
+  day): over it the chat's tools refuse except `status`, and research is not affected. Research has the
+  caps in the table under "Configure `.env`".
+
+### Budgets on hosting
+
+| Limit | Value | Who enforces it | What happens at the limit |
+|---|---|---|---|
+| OpenRouter key | $500 per week, resets Monday 00:00 UTC, expires after 30 days (per the plan; existing keys of $10 stay until the operator raises them) | OpenRouter | Model calls are refused. The credit floor (below) pauses research first. |
+| Credit floor | `AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD`, default $10 | preflight, every queue-keeper run | The agent pauses with one help request and resumes by itself once the key's remaining credit is back above the floor (for example after the weekly reset). A coach hold is never cleared by this. |
+| Research per day | `AUTORESEARCH_DAILY_BUDGET_USD`, default $100 | queue-keeper | Dispatch pauses with one help request; resumes the next UTC day. At $100 a day the weekly $500 lasts about 5 days. |
+| Per card | 4 runs and $4 | queue-keeper | The card is blocked with a help request. |
+| IDE coach chat | `AUTORESEARCH_CHAT_DAILY_USD`, default $3 | the plugin | Chat tools refuse except `status`. |
+| XP credits | the player's `dailyCredits` | the Softmax server, once Controls are set | Experiments are refused for credits and relaunched later (A10). |
+
+The spend figures are Hermes's estimates for this profile's own sessions. GotA compiler child runs are not counted
+by the daily and card caps; `report baseline` shows them separately, and the key's real usage is in `status`.
+
+### What the runtime writes and where things live
+
+Per the plan (3.4), the hosting runtime writes the profile `.env` (mode 0600): `SOFTMAX_PLAYER_CREDENTIAL` (the
+workspace's `cga_` token), `AUTORESEARCH_PLAYER_ID`, `AUTORESEARCH_WORKSPACE_REMOTE`
+(`/opt/data/autoresearch-workspace.git`), `COGAMES_API_URL`, `OPENROUTER_API_KEY`, and the hosted settings
+`AUTORESEARCH_GAME=gota`, `AUTORESEARCH_AUTONOMY=on-request`, `TMPDIR=/opt/data/tmp` and the GotA tool paths.
+It does not set `AUTORESEARCH_INBOX_WRITERS` or any spend-cap name. The three variables the plugin
+and cron scripts read (`AUTORESEARCH_AUTONOMY`, `AUTORESEARCH_CHAT_DAILY_USD`, `TMPDIR`) are on
+`terminal.env_passthrough` in `config.yaml`, which bootstrap keeps in place.
+
+| What | Where (hosted) |
+|---|---|
+| Profile | `/opt/data/profiles/optimizer` (install name `optimizer`; the Kanban board is still named `autoresearch`) |
+| Canonical workspace and the relay path the bridge reads and writes | `/opt/data/profiles/optimizer/workspace` |
+| Everything else | the table under "Operate", relative to that profile |
+
+### Looking at the agent
+
+The chat's `status` and `baseline_report` tools, or in an operator shell `"$AUTORESEARCH_CLI" status --json` and
+`"$AUTORESEARCH_CLI" report baseline --since <YYYY-MM-DD> --json` (see "Operate"). `status` shows the
+installed version and commit, whether the last profile update failed (`distribution.update_failed`), pause
+state, the coach hold, whether the agent has started, spend against the budget, the key's remaining credit,
+running cards and the champion.
+
+### Updates
+
+Per the plan: the profile is baked into the hosting image and installed as `optimizer` when a workspace
+starts. A workspace that starts on a newer image gets `hermes profile update`, after which `.env`, the workspace and
+the board stay and the cron jobs run again. Until the plan's later milestone (M4) a new profile version needs a
+new image, which is a host replacement with workspace moves. Two things to know:
+
+- **A failed update keeps serving.** The runtime logs it, leaves a `.softmax-update-failed` marker and carries on with the
+  installed profile; `status` reports it. `hermes profile update` copies files in steps, so a failed update
+  can leave the profile partly updated. That is a known gap until M4.
+- **Replacing the earlier `rohit-optimizer` profile moves its Hermes state aside.** This is the behavior in the
+  hosting runtime PRs (Metta-AI/metta #27216), not yet deployed. Ours is installed fresh into a staging directory first. Only when that install succeeds is the old profile moved to
+  `/opt/data/profiles/.optimizer-replaced-<UTC time>` and ours renamed into its place. The agent therefore
+  starts without the earlier chat context, while the IDE can still show the old transcript. If the install
+  fails, the runtime logs it and the `rohit-optimizer` profile stays in place and keeps serving chat; the next
+  start tries again. With no earlier profile, a failed install stops the start, since there is nothing to serve.
+
+### What is not isolated
+
+Everything in the sandbox runs as one uid (plan D9): the gateway, the bridge, the coach chat and the research
+workers. `AUTORESEARCH_INBOX_WRITERS` is not set on hosting, because there is no second user to name. The
+commit provenance check (A15, merged in PR #24; "Operate" above) pauses the agent on a commit to canonical
+`main` that the runtime did not make, but it is detection of accidental writes only (see its Known gaps): a research
+process can still write the inbox, sign a commit through the runtime's own code, or run `comms inbound`, and the
+inbound messages carry the coach's authority. The `OPENROUTER_API_KEY` and `cga_` token in the profile `.env` are readable by
+the same processes. See [softmax-ide-bridge-compat.md](docs/integrations/softmax-ide-bridge-compat.md), "Trust: who
+may write the inbox".
+
+### If the token leaks or must stop
+
+The `cga_` token does not expire. Revoke the workspace's agent (the `CogentAgent` named
+`hermes-<provisioning hex>`) in Softmax. Per the plan, the host controller's next `/whoami` check then stops the
+sandbox and reports `revoked`; until it does, the agent pauses itself with a help request when Softmax rejects the token. Revoking the
+OpenRouter key stops model calls the same way the credit floor does.
 
 ## Known gaps
 
@@ -520,7 +764,17 @@ command in an operator shell prints `false`.
 - **The league choice is not read.** The runtime reads the coach's answers to permit asks,
   but not the league choice, so after a league refusal it retries on the backoff (see the IDE
   Controls paragraphs in Operate).
-- **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
+- **Gateway turn hooks** of the plugin are verified for multiplexed API-server runs on the
+  pinned image (the coach chat, [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md)
+  "Verified in Task 5 Step 4"); other gateway paths are not (hermes-facts.md, item 2).
+- **The coach chat's proposal text reaches the coach through the reply.** The plugin shows
+  its rendering first (again on every reply while pending), but the model's own words below it could
+  still misdescribe it, and a reply
+  the bridge replaces ("Stopped at your request.") marks a rendering shown that the coach
+  never saw (safe: the coach cannot type an id they did not see). A deterministic bridge-side
+  rendering is a later bridge change (coach-chat-role.md §3.1). Everything in the sandbox runs
+  as one uid, so a research process could still write the inbox or call the API server
+  directly; the chat design does not change that (plan D9).
 - **One OS user, so no guard inside the profile is a security boundary.** Card workers,
   queue-keeper and the other jobs all run as the workspace user. The plugin refuses canonical
   writes from the shell, file tools and literal interpreter code (`python -c`, `python3 -
@@ -573,3 +827,4 @@ command in an operator shell prints `false`.
 | Document | Covers |
 |---|---|
 | [`docs/integrations/softmax-ide-bridge.md`](docs/integrations/softmax-ide-bridge.md) | The Softmax IDE bridge as the external agent on `comms/`: the inbox files it writes, the outbox fields it reads, how it treats acknowledgements, and what is not exercised yet |
+| [`docs/integrations/softmax-ide-bridge-compat.md`](docs/integrations/softmax-ide-bridge-compat.md) | What the distribution guarantees the bridge, notes for the bridge (acknowledgement and follow-up rules), and the trust model for who may write the inbox |

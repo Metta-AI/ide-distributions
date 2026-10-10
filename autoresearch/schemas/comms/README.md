@@ -42,6 +42,7 @@ What each kind means is its schema's `x-autoresearch.summary` and `title`.
 | `note` | outbound | `outbound/note.json` |
 | `question` | outbound | `outbound/question.json` |
 | `suggestion` | outbound | `outbound/suggestion.json` |
+| `control` | inbound | `inbound/control.json` |
 | `reply` | inbound | `inbound/reply.json` |
 | `seen` | inbound | `inbound/seen.json` |
 | `steer` | inbound | `inbound/steer.json` |

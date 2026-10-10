@@ -51,8 +51,8 @@ def card_models(env: Mapping[str, str]) -> dict[str, str]:
 
 
 def queue_from_env(env: Mapping[str, str], ctx: runctx.RunContext) -> Queue:
-    """Kanban, where the board and worker profile are both named after the profile home, with
-    the per-mode models of ``card_models``.
+    """Kanban on the ``runctx.BOARD`` board, with the profile's install name as the worker
+    profile and the per-mode models of ``card_models``.
 
     ``AUTORESEARCH_QUEUE=file`` is a test hook (like ``AUTORESEARCH_SOFTMAX=fake``): it selects
     the FileQueue test double under the canonical runtime dir, so tests can run the real CLI
@@ -60,5 +60,4 @@ def queue_from_env(env: Mapping[str, str], ctx: runctx.RunContext) -> Queue:
     ``terminal.env_passthrough``: no shipped job runs FileQueue cards (amendment A13)."""
     if env.get(ENV_QUEUE) == "file":
         return FileQueue(runctx.runtime_dir(ctx) / FILE_QUEUE_RELATIVE)
-    profile = ctx.hermes_home.name
-    return KanbanQueue(board=profile, profile=profile, models=card_models(env))
+    return KanbanQueue(board=runctx.BOARD, profile=ctx.profile, models=card_models(env))
