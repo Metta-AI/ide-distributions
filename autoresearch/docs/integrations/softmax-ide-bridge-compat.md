@@ -84,6 +84,43 @@ that contract:
 2. **The acknowledgement covers every card outcome.** It is published when the card's work is
    published, whatever the card's outcome. The title starts with the outcome: `Done:`,
    `Partly done:`, `Dropped:`, `Failed:` or `Blocked:`; `about.outcome` has the raw value.
+   A `blocked` task is not finished. The runtime publishes exactly one follow-up `note` for it,
+   with the same `in_reply_to`, the final `about.outcome`, `about.follows` set to the `blocked`
+   note's id, and `runtime_key` `ack-final:<inbound id>` (the task's `I-` id, not a card id) (the delivery record names it in
+   `final_ack_by`), when a later handoff ends the work with `done`, `partial`, `dropped` or
+   `failed`. That later handoff comes from one of these:
+   - the same card, when queue-keeper requeued it before its `blocked` handoff was published
+     (the request was still open, so the rerun could hand off);
+   - the repair card queue-keeper opens for a card whose `blocked` handoff is published and that
+     Hermes then holds blocked (not a `tool-fault:` block), or that a human unblocks (the rerun
+     could not hand off: the runtime closes it and opens the repair card instead; a rerun that
+     already completed is repaired the same way);
+   - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`);
+   - the recovery card queue-keeper opens when one of these cards' handoffs cannot merge (a
+     repair or reconcile of the handoff, for example a merge conflict) or a run completes
+     without a handoff. The walk is bounded at 4 hops: each repair in a full chain may need one
+     recovery.
+
+   A repair can publish its final outcome before the `blocked` handoff it repairs; the follow-up
+   then goes out right after the `blocked` note, in the same publication.
+
+   The bridge shows the task paused on the first note and closes it on the follow-up. A task first
+   acknowledged with a final outcome gets no follow-up, and a second `blocked` publishes nothing.
+   These blocked tasks get **no** follow-up, so the IDE task stays paused:
+   - a card that finished `blocked` and then completed (`kanban_complete`), as most agent blocks do
+     (for example `league-watch` on an identity refusal): nothing reruns it;
+   - a `tool-fault:` card no human has unblocked yet (D-26), or a card held blocked at a spend cap;
+   - a repair card that the agent or the planner drops before it runs;
+   - a card a promotion covers (its promotion's recovery card carries the work on, outside the
+     repair chain);
+   - a chain that reached the repair limit: its last card stays blocked, and one P1 help request
+     asks a human.
+
+   To close such a task in the IDE, the coach cancels it. That closes the IDE task, and the bridge
+   sends the stop `steer` (note 3), which costs one P0 card for a task whose work is already over.
+   The operator can instead unblock a `tool-fault:` card once the tool is fixed, which opens the
+   repair card that sends the follow-up.
+
 3. **A stop is a request, not a cancel.** The stop `steer` gives the agent a P0 card, and the agent
    decides what to do (for example drop the task's card if it is still pending). If the task's card is
    already running or finished, its acknowledgement can still arrive after the stop. The bridge
@@ -120,6 +157,12 @@ What we do:
   rejected with a runtime note, which also makes a forgery attempt visible to the human. When it is
   unset, queue-keeper adopts any valid file and logs in `keeper.log` that direct writes are
   unauthenticated.
+
+On Softmax hosting there is no second user: the gateway, the bridge, the coach chat and the
+research workers share one uid (plan D9, option (a) for the first deploy), so
+`AUTORESEARCH_INBOX_WRITERS` is not set there and direct writes are unauthenticated (README,
+"Softmax hosting", "What is not isolated"). The steps below are what a deployment with a separate
+bridge user does.
 
 What the deployment should do:
 

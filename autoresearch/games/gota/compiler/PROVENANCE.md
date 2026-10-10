@@ -307,4 +307,6 @@ fresh home containing the host's officially installed scanner. The supported
 `ensure_installed()` readiness check must resolve that copy before generation.
 Hermes Kanban/profile environment selectors are removed from the child; its write
 root is its disposable compiler unit repository. Stream parsing and post-process
-write-scope/index/ref validation remain unchanged.
+write-scope/index/ref validation remain unchanged. The adapter copies the child home's `state.db` to
+`$HERMES_HOME/gota-compiler/<build id>-<scratch suffix>/state.db` (the worker's profile
+home) before it deletes the scratch directory, and after a compiler fault.

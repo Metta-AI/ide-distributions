@@ -1,10 +1,24 @@
 name: autoresearch
 version: 0.1.0
-description: Policy hooks for the autoresearch agent (tool guard, briefing injection, event log).
+description: Policy hooks for the autoresearch agent (tool guard, briefing injection, event log) and the IDE coach chat's tools.
 author: autoresearch
 provides_hooks:
   - pre_tool_call
   - post_tool_call
   - on_session_end
   - pre_llm_call
+  - transform_llm_output
   - kanban_task_completed
+provides_tools:
+  - list_messages
+  - get_message
+  - message_status
+  - resolve_ref
+  - list_cards
+  - show_card
+  - find_records
+  - show_record
+  - promotion_status
+  - status
+  - baseline_report
+  - propose_inbound

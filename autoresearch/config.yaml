@@ -7,7 +7,7 @@ fallback_providers:
   - provider: openrouter
     model: z-ai/glm-5.3
 
-# These rows govern `hermes -p autoresearch kanban dispatch` and profile tools only.
+# These rows govern `hermes -p <profile> kanban dispatch` and profile tools only.
 # The host gateway runs one dispatcher with the host default profile's kanban.*
 # config (amendment A3); queue-keeper preflight checks that config.
 kanban:
@@ -79,6 +79,9 @@ terminal:
     - AUTORESEARCH_FALLBACK_PRICES
     - AUTORESEARCH_RELAUNCH_MIN_CREDITS
     - AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD
+    - AUTORESEARCH_AUTONOMY
+    - AUTORESEARCH_CHAT_DAILY_USD
+    - TMPDIR
     - GOTA_G2_RUNNER
 
 # Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
@@ -89,6 +92,44 @@ timeouts:
   tools:
     sequential_call: 1900
     concurrent_batch: 1900
+
+# The IDE coach chat arrives through Hermes's API server (platform api_server). It gets only
+# the plugin's coach toolset (read tools and propose_inbound; no terminal, file or code tools)
+# and none of the research skills. Kanban workers (platform cli) keep their toolset; listing
+# the coach toolset as known for cli keeps it off there (coach-chat-role.md §2.2).
+platform_toolsets:
+  api_server:
+    - autoresearch_coach
+known_plugin_toolsets:
+  cli:
+    - autoresearch_coach
+skills:
+  platform_disabled:
+    api_server:
+      - ab
+      - ab-compare
+      - build-upload
+      - calibrate-noise
+      - communicate
+      - complete-card
+      - diagnose
+      - diagnosis
+      - eval-design
+      - experiment
+      - fetch-artifacts
+      - groom-queue
+      - kb-maintenance
+      - league-watch
+      - lessons
+      - meta-recon
+      - opponent-profile
+      - queue
+      - replay-diagnosis
+      - replay-inspection
+      - review-xp
+      - submit
+      - survey
+      - xp-request
 
 plugins:
   enabled:

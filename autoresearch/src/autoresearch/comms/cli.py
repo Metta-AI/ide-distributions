@@ -18,8 +18,9 @@ not found, unresolvable), 2 bad arguments or no workspace.
   ``status <M-id>``, ``resolve <uri> [--rev R] [--game G]``. ``status``
   data: ``{id, published, seq, published_rev, seen_by}`` plus, for a published message, the
   derived ``state`` (open | answered | withdrawn | expired) and ``late``.
-- ``inbound KIND (--json J | --file F) --author A``: an external agent submits an inbound
-  message of one of the registry's inbound kinds (``comms.kinds``; ``comms.inbound``).
+- ``inbound KIND (--json J | --file F) --author A [--dry-run]``: an external agent submits an
+  inbound message of one of the registry's inbound kinds (``comms.kinds``; ``comms.inbound``).
+  ``--dry-run`` only validates it (data ``{kind, valid: true}``; the coach chat's proposals).
   Refused (exit 2) in a card worker (``WORKER_ENV_MARKERS``); the plugin blocks it in every
   agent session too.
 
@@ -39,6 +40,7 @@ from autoresearch.comms.envelope import PRIORITIES, MessageProblems
 from autoresearch.comms.inbound import (
     INBOUND_KINDS,
     InboundProblems,
+    check_inbound,
     derived_status,
     submit_inbound,
 )
@@ -180,6 +182,9 @@ def _inbound(args) -> int:
         )
     text = _read_file(args.file) if args.file is not None else args.json
     payload = _json_object(text, "--json")
+    if args.dry_run:
+        check_inbound(_canonical(args), args.kind, payload, author=args.author)
+        return _ok({"kind": args.kind, "valid": True})
     inbound_id = submit_inbound(_canonical(args), args.kind, payload, author=args.author)
     return _ok({"id": inbound_id, "kind": args.kind})
 
@@ -255,6 +260,9 @@ def setup(parser: argparse.ArgumentParser) -> None:
     payload.add_argument("--json", help="the message fields as a JSON object")
     payload.add_argument("--file", help="path to the message fields as a JSON object")
     sub.add_argument("--author", required=True, help="consumer name of the sender")
+    sub.add_argument(
+        "--dry-run", action="store_true", help="validate only: write, commit and push nothing"
+    )
 
 
 register_group("comms", setup)

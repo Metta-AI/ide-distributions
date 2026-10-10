@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 from support.hermes_python import hermes_python
 
+from autoresearch.runctx import BOARD
+
 DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # .../autoresearch
 REPO_ROOT = DISTRIBUTION_ROOT.parent
 PROFILE = "ar-it"
@@ -50,11 +52,12 @@ def uv_cache_dir() -> str:
 class Install:
     root: Path  # the tmp dir that holds everything below
     hermes_home: Path  # host root (HERMES_HOME for `hermes` commands)
-    profile: str  # installed profile name (also the board slug)
+    profile: str  # installed profile name (the card assignee)
     profile_dir: Path  # installed profile home
     source: Path  # extracted distribution copy (the recorded install source)
     remote: Path  # bare repo used as AUTORESEARCH_WORKSPACE_REMOTE
     base_env: dict
+    board: str = BOARD  # the Kanban board slug: fixed, whatever the install name
 
     def env(self, **overrides: str) -> dict:
         return {**self.base_env, **overrides}
@@ -128,7 +131,7 @@ def write_profile_env(profile_dir: Path, remote: Path) -> None:
     env_file.chmod(0o600)
 
 
-def make_install(root: Path) -> Install:
+def make_install(root: Path, name: str = PROFILE) -> Install:
     if shutil.which("hermes") is None:
         pytest.skip("hermes not installed")
     hermes_home = root / "hh"
@@ -144,14 +147,14 @@ def make_install(root: Path) -> Install:
     install = Install(
         root=root,
         hermes_home=hermes_home,
-        profile=PROFILE,
-        profile_dir=hermes_home / "profiles" / PROFILE,
+        profile=name,
+        profile_dir=hermes_home / "profiles" / name,
         source=extract_distribution(root / "src-copy"),
         remote=root / "remote.git",
         base_env=base_env,
     )
     subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(install.remote)], check=True)
-    install.hermes("profile", "install", str(install.source), "--name", PROFILE, "-y")
+    install.hermes("profile", "install", str(install.source), "--name", name, "-y")
     write_profile_env(install.profile_dir, install.remote)
     return install
 
@@ -167,6 +170,13 @@ def _cleanup(root: Path, keep: bool) -> None:
 def install(request, tmp_path):
     """A fresh install of the distribution as profile ``ar-it`` in a throwaway host root."""
     yield make_install(tmp_path / "it")
+    _cleanup(tmp_path, keep=_test_failed(request.node))
+
+
+@pytest.fixture
+def optimizer_install(request, tmp_path):
+    """A fresh install under the name Softmax hosting uses, ``optimizer`` (plan D2)."""
+    yield make_install(tmp_path / "it", name="optimizer")
     _cleanup(tmp_path, keep=_test_failed(request.node))
 
 

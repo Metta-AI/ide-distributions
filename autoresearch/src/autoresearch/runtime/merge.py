@@ -55,7 +55,7 @@ from autoresearch.queue.kanban_queue import ForeignCardError
 from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.registry import parse_record_path
 from autoresearch.records.store import RecordStore
-from autoresearch.runctx import RunContext
+from autoresearch.runctx import BOARD, RunContext
 from autoresearch.runtime import promotion, provenance
 from autoresearch.runtime.admission import admitted_spec, board_epoch, receipt_path
 from autoresearch.runtime.foreign import is_foreign, record_foreign
@@ -455,7 +455,7 @@ def _ready(
     if admitted_spec(canonical, record["request_id"]) is None:
         title = _board_title(queue, record["card"])
         record_foreign(
-            canonical, record["card"], title, ctx.hermes_home.name, allow_no_remote,
+            canonical, record["card"], title, BOARD, allow_no_remote,
             forged_handoff=True,
         )  # fmt: skip
         return False, None

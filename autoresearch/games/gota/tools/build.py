@@ -6,15 +6,21 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / 'games/gota/compiler/tools'
 DEFAULT_AGENT_TIMEOUT_S = 1200
 DEFAULT_AGENT_BUDGET_S = 1800
+# Under the profile home (the worker's HERMES_HOME): one directory per compiler build holding a
+# copy of the compiler child's ``state.db``, so its sessions outlive the build's scratch
+# directory. The baseline report reads them as source ``compiler``.
+COMPILER_SESSIONS_DIR = 'gota-compiler'
 
 
 def validate_manifest(path, *, offline=False):
@@ -38,8 +44,42 @@ def agent_limit(value, flag, environment, default):
         raise ValueError(f'{setting} must be a positive integer number of seconds') from None
 
 
+def now_iso():
+    return datetime.now(UTC).isoformat(timespec='seconds')
+
+
+def keep_compiler_sessions(home, scratch, profile_home):
+    """Copy the compiler child's ``state.db`` to
+    ``<profile_home>/gota-compiler/<build id>-<scratch suffix>/state.db`` before the scratch
+    directory goes. The compiler's build id (``<commit>-<n>``) repeats when the same candidate
+    commit is built again, so the scratch directory's unique suffix is appended. Never fails the
+    build: a problem is a warning on stderr."""
+    source = home / 'state.db'
+    if not source.is_file():
+        return
+    if not profile_home:
+        print('warning: HERMES_HOME is not set; compiler sessions not kept', file=sys.stderr)
+        return
+    try:
+        claims = scratch / 'staging' / '.claims'
+        build_ids = sorted(path.name for path in claims.iterdir()) if claims.is_dir() else []
+        name = f"{build_ids[0] if build_ids else 'no-build-id'}-{scratch.name.removeprefix('.gota-build-')}"
+        target = Path(profile_home) / COMPILER_SESSIONS_DIR / name / 'state.db'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # The backup API gives a consistent copy that includes any WAL content. The copy then
+        # leaves WAL mode, so read-only readers create no -wal/-shm files beside it.
+        with contextlib.closing(sqlite3.connect(source)) as src, \
+                contextlib.closing(sqlite3.connect(target)) as dst:
+            src.backup(dst)
+            dst.execute('PRAGMA journal_mode=DELETE')
+    except Exception as error:  # noqa: BLE001 - never fail the build or mask its own error
+        print(f'warning: compiler sessions not kept ({type(error).__name__}: {error})', file=sys.stderr)
+
+
 def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=False, prebuilt=None):
     """Output is new and immutable; failure retains evidence without an upload envelope."""
+    started = now_iso()
+    profile_home = os.environ.get('HERMES_HOME')
     if prebuilt is None:
         timeout = agent_limit(timeout, '--agent-timeout', 'GOTA_AGENT_TIMEOUT_S',
                               DEFAULT_AGENT_TIMEOUT_S)
@@ -52,7 +92,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
         raise ValueError(f'output already exists (immutable): {out}')
     if prebuilt is not None:
         from games.gota.tools import prebuilt as existing
-        return existing.build(candidate, out, prebuilt, identity)
+        return existing.build(candidate, out, prebuilt, identity, started=started)
     source = candidate / 'STRATEGY.md'
     repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     os.environ['GOTA_CANDIDATE_REPO'] = repo
@@ -99,8 +139,12 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
                                            '--manifest', str(manifest), '--agent-timeout', str(timeout),
                                            '--agent-budget', str(budget)])
     report = pw_cli.Report('gota_build', json_mode=True)
-    with contextlib.redirect_stdout(sys.stderr):
-        result = pw_strategy.run(args, report, engine_identity=identity)
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            result = pw_strategy.run(args, report, engine_identity=identity)
+    except BaseException:  # the scratch directory stays; keep the sessions findable too
+        keep_compiler_sessions(home, scratch, profile_home)
+        raise
     target = Path(result['build'])
     analysis = scratch / 'analysis'
     if analysis.exists():
@@ -109,6 +153,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     version['engine'] = identity
     version['compiler']['security_scanner_sha256'] = hashlib.sha256(scanner.read_bytes()).hexdigest()
     version['artifact'] = 'policy.bas'
+    version['started'], version['finished'] = started, now_iso()
     version['strategy_sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
     installed = {name: value for name, value in version['source_hashes'].items() if Path(name).is_absolute()}
     version['compiler']['installed_source_hashes'] = installed
@@ -118,6 +163,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     compiler.dump(target / 'version.json', version)
     shutil.copyfile(manifest, target / 'coworld_manifest.json')
     target.rename(out)
+    keep_compiler_sessions(home, scratch, profile_home)
     shutil.rmtree(scratch)
     return {'ok': version['status'] == 'passed', 'build_id': version['build_id'],
             'status': version['status'], 'error': result.get('error'), 'build': str(out),

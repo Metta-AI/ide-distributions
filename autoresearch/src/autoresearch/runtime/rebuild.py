@@ -499,8 +499,10 @@ def rebuild(
     game_version: str,
     now: datetime.datetime | None = None,
     allow_no_remote: bool = False,
+    plan: bool = True,
 ) -> list[CardSpec]:
-    """C12 rebuild (module docstring). ``game_version`` is the league's current game version
+    """C12 rebuild (module docstring). ``plan=False`` skips the planning request (the agent
+    may not plan yet: ``runtime.autonomy``). ``game_version`` is the league's current game version
     (calibration); ``now`` (default: the current time) is for the A10 launch backoff;
     ``allow_no_remote`` is for the help_request of an unrecoverable request (tests).
     Returns the specs of the cards it created, re-admitted requests included. The caller
@@ -516,8 +518,12 @@ def rebuild(
     created += _lifecycle_cards(ctx, sm, epoch, now)
     created += _reconcile_promotion(ctx, queue, sm)
     created += request_calibration(ctx, game_version)
-    planning = request_planning(
-        ctx, queue, planning_rebuild_marker(epoch), f"The board was rebuilt (epoch {epoch})."
+    planning = (
+        request_planning(
+            ctx, queue, planning_rebuild_marker(epoch), f"The board was rebuilt (epoch {epoch})."
+        )
+        if plan
+        else None
     )
     if planning is not None:
         created.append(planning)

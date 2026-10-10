@@ -890,3 +890,45 @@ def test_accept_champion_through_the_promotion_cli(board, capsys, monkeypatch, t
     assert env["data"]["policy_version_id"] is None
     assert env["data"]["league_id"] == "fake-league"
     assert board.committed(board.ledger / "champion_accepted.json") == env["data"]
+
+
+def _status_champion(board, now, grace=datetime.timedelta(minutes=30)):
+    """The ``status`` champion section, read from this board's fake league."""
+    from autoresearch.runtime import status
+
+    def check(at, window):
+        return promotion.league_check(board.ctx(), board.sm, LEAGUE, at, window)
+
+    return status.champion_section(check, {}, now, [])
+
+
+def _set_league_state(board, memberships=None, hand_made=None):
+    path = board.canonical / ".supervisor/runtime/fake_softmax.json"
+    state = json.loads(path.read_text())
+    state["memberships"] = memberships or {}
+    state["submissions"] = [s for s in state["submissions"] if s["policy_version_id"] != PV_A]
+    if hand_made:
+        state["submissions"].append({**state["submissions"][-1], "policy_version_id": hand_made})
+    path.write_text(json.dumps(state))
+
+
+@pytest.mark.parametrize("stage", ["rejected", "pending"])
+def test_status_agrees_with_queue_keeper_when_the_league_keeps_the_old_champion(board, stage):
+    """A rejected or still-qualifying submission is no conflict, however long ago."""
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.finish()
+    board.process()
+    _set_league_state(board, {PV_A: {"stage": stage, "is_champion": False}})
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
+    assert _status_champion(board, later) == {"policy": BASELINE_PV, "conflict": False}
+
+
+def test_status_reports_a_hand_submitted_policy_as_a_conflict(board):
+    a = Promoter(board, PV_A)
+    assert a.submit().ok
+    a.finish()
+    board.process()
+    _set_league_state(board, hand_made="hand-made:v1")
+    now = datetime.datetime.now(datetime.UTC)
+    assert _status_champion(board, now) == {"policy": "hand-made:v1", "conflict": True}

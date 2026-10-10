@@ -85,7 +85,15 @@ fit a foreground terminal `timeout` of at most 600 seconds.
 After the process exits, read the exit code and command JSON, then the retained
 evidence before continuing. A build writes `NEW_BUILD_DIRECTORY/report.json`,
 `report.md`, `version.json` (including `gates`, `engine` and `native_builds`)
-and, when available, `policy.bas` and `coworld_manifest.json`. A local check
+and, when available, `policy.bas` and `coworld_manifest.json`. Each executed gate
+in `version.json` records `seconds` (wall time), and a completed build records
+`started` and `finished` (ISO UTC); a startup fault's error report has neither. A
+compiler build copies its compiler child's Hermes `state.db` (passed, failed, or
+raised) to `$HERMES_HOME/gota-compiler/<build id>-<scratch suffix>/state.db`, so
+the baseline report can count compiler spend after the build's scratch directory
+is deleted; a copy that fails is a warning on stderr, never a build failure. The
+copies are not pruned yet: disk use grows by one full `state.db` (transcripts
+included) per compiler build, and `report baseline` scans them all. A local check
 writes `OUTPUT/gates.json`, `engine_identity.json`, `coworld_manifest.json` and
 hashed native measurement JSON files containing `native_build` receipts.
 Follow G2's `summary.episode_dir` to the episode results and logs; build locators

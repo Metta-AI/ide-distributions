@@ -111,6 +111,25 @@ FIXTURES = {
         }
         for repair in (REQUEST, None)
     ],
+    "card_repaired_after_publish": [
+        {
+            "card_title": "Scout andre",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "repair_request": repair,
+            "refs": [],
+        }
+        for repair in (REQUEST, None)
+    ],
+    "repair_chain_limit": [
+        {
+            "card_title": "Scout andre",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "limit": 2,
+            "refs": [],
+        }
+    ],
     "card_tool_fault": [
         {
             "card_title": "Scout andre",
@@ -177,6 +196,7 @@ FIXTURES = {
     "card_models_invalid": [
         {"value": "planing=z-ai/glm-5.3", "problems": ["unknown card mode 'planing' (skipped)"]}
     ],
+    "autonomy_invalid": [{"value": "on_request"}],
     "daily_budget_reached": [{"spent_usd": 25.31, "budget_usd": 25.0, "day": "2026-10-08"}],
     "signal_persists": [
         {
@@ -199,6 +219,12 @@ FIXTURES = {
         {"count": 2},
         {"count": 0, "champion": True},
         {"count": 1, "provenance": True},
+    ],
+    "research_paused": [{"already": False}, {"already": True}],
+    "research_resumed": [
+        {"was_held": True, "still_paused": False},
+        {"was_held": True, "still_paused": True},
+        {"was_held": False, "still_paused": False},
     ],
     "commits_accepted": [
         {

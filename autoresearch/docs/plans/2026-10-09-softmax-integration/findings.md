@@ -121,8 +121,7 @@ This file is the evidence appendix for [plan.md](plan.md). It was checked agains
 
 ## Unverified (checked by plan tasks)
 
-- **Plugin hooks:** whether our plugin's hooks fire for multiplexed `/p/autoresearch/` runs in the `-p default`
-  gateway.
+- **Plugin hooks:** verified 2026-10-09 (Task 5 Step 4, below).
 - **Memory:** use under gVisor at the proposed sizes.
 - **Task status:** whether a cogent may set an IDE task to active/paused.
 - **Config:** whether `hermes config unset` fails on a missing key.
@@ -151,3 +150,34 @@ This file is the evidence appendix for [plan.md](plan.md). It was checked agains
   (`permits/service.py:35`). Whether the player-facing read API returns it is unverified.
 - **gVisor networking (unverified).** Each `runsc` container is its own sandbox with its own network stack, so a second
   container joined with `--network=container:` very likely does not share the first's loopback. Task 26's spike checks it.
+
+## Verified in Task 5 Step 4 (coach chat on the pinned image, 2026-10-09)
+
+`tests/integration/test_plugin_hermes.py::test_coach_chat_routes_by_platform`, run in an image
+built from `packages/observatory-hosted-worker/Dockerfile` lines 1-4 and 8-10 (base
+`sha256:9774f4f3…`, Hermes v0.21.6 `818c13be`) with the `fleet.py` flags Docker Desktop allows
+(no runsc), the profile installed as `optimizer`, one `GATEWAY_MULTIPLEX_PROFILES=true hermes -p
+default gateway run`, runs posted to `/p/optimizer/v1/runs` the way the bridge posts them, model
+`z-ai/glm-5.3`. Passed. Model spend for the passing run about $0.014 (OpenRouter key usage).
+
+- **Plugin hooks fire for multiplexed API-server runs.** `pre_llm_call` got `platform=api_server`
+  and the bridge's `session_id`; `pre_tool_call`, `post_tool_call` and `transform_llm_output`
+  fired in the same turns. The coach tools ran with the routed profile's `.env` (`status`
+  returned `ok: true`), so `get_hermes_home()` is the routed profile inside tool handlers too.
+- **Config per platform is read from the routed profile.** Hermes resolved `api_server` to
+  `{autoresearch_coach}` only and `cli` to the full research list without the coach toolset;
+  only our plugin registers `transform_llm_output`.
+- **The API server passes `/pause-research` to the run** (not a gateway slash command): the
+  plugin matched the line and committed a `control` inbound. No bridge-side fallback is needed
+  for D15.
+- **`transform_llm_output` output is the run's `output`:** the bridge would say the reply ending
+  in the plugin's `To send exactly this, reply: confirm P-xxxx`.
+- **Tool search.** v0.21.6 may hide plugin tools behind the bridge tools `tool_search`,
+  `tool_describe` and `tool_call` (`tools/tool_search.py`); `tool_call` is unwrapped so
+  `pre_tool_call` sees each real tool name. The model called `tool_describe` in the first run.
+  The chat allowlist lets the two catalog reads through and a `tool_call` only when every call
+  it names is a coach tool (`plugin/policy.py` `chat_tool_policy`).
+- **API server key.** The adapter refuses to start with an `API_SERVER_KEY` under 16 characters
+  (`gateway/config.py` `_has_usable_api_server_key`); the gateway then logs only "No messaging
+  platforms enabled".
+

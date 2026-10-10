@@ -27,6 +27,9 @@ Every runtime job builds markers here, never by hand.
 """
 
 import datetime
+from pathlib import Path
+
+from autoresearch.runtime.ledger import ledger_of
 
 
 def launch_marker(experiment: str, next_attempt: int) -> str:
@@ -65,6 +68,17 @@ def calibrate_marker(game_version: str) -> str:
 
 def repair_blocked_marker(task_id: str) -> str:
     return f"repair-blocked:{task_id}"
+
+
+# Repairs of a blocked card's repairs (``blocked.handle_blocked``): a card this many repairs
+# deep gets a help request instead of another repair. ``publisher`` follows the chain this far.
+MAX_REPAIR_CHAIN = 2
+
+
+def blocked_marker_path(canonical: Path, task_id: str) -> Path:
+    """The committed health marker of a blocked card (``blocked.handle_blocked``): its
+    ``state`` (requeued, repaired, tool-fault) and, once repaired, its ``repair_request``."""
+    return ledger_of(canonical) / "health" / "blocked" / f"{task_id}.json"
 
 
 def planning_marker(slot_start: datetime.datetime) -> str:

@@ -27,8 +27,10 @@ profile's ``kanban.*`` config. When the profile home is ``<root>/profiles/<name>
 reads ``<root>/config.yaml`` (read only) and fails when ``kanban.default_assignee`` is set
 (unassigned cards would run, breaking pause, C7), when ``kanban.dispatch_profiles`` is set and
 leaves out our profile, or when ``kanban.dispatch_in_gateway`` is false. A config that cannot
-be read or parsed fails too: pause safety depends on it. Any other home layout skips the
-check with a warning.
+be read or parsed fails too: pause safety depends on it. It also fails when another profile
+under ``<root>/profiles`` has ``plugins/autoresearch/plugin.yaml``: the Kanban board is
+host-wide and always ``autoresearch``, so two autoresearch profiles on one root would act on
+each other's cards. Any other home layout skips the check with a warning.
 
 OpenRouter (A5). ``GET https://openrouter.ai/api/v1/key`` with the key; ``limit_remaining``
 below the credit floor fails (Hermes would retry 402s forever). The floor is
@@ -44,7 +46,6 @@ The key never appears in a reason or warning.
 
 import json
 import math
-import re
 import shutil
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
@@ -55,6 +56,7 @@ from pathlib import Path
 import yaml
 
 from autoresearch.io.docs import read_json, write_json
+from autoresearch.io.dotenv import BARE_REFERENCE, dotenv_entries, worker_env
 from autoresearch.softmax_tool.identity import CredentialRejected, identity_problems
 from autoresearch.softmax_tool.platform_cli import CredentialError
 from autoresearch.softmax_tool.protocol import Softmax
@@ -112,7 +114,7 @@ def host_config_problems(hermes_home: Path) -> tuple[list[str], list[str]]:
     if not isinstance(config, dict) or not isinstance(config.get("kanban") or {}, dict):
         return [f"host config {path} is not a mapping with a kanban mapping"], []
     kanban = config.get("kanban") or {}
-    profile = Path(hermes_home).name
+    profile = Path(hermes_home).name  # the install name, as RunContext.profile (card assignee)
     reasons = []
     if kanban.get("default_assignee"):
         reasons.append(
@@ -131,7 +133,21 @@ def host_config_problems(hermes_home: Path) -> tuple[list[str], list[str]]:
         reasons.append(
             f"host kanban.dispatch_in_gateway is false in {path}: no dispatcher runs our cards"
         )
+    reasons += other_autoresearch_profiles(root, profile)
     return reasons, []
+
+
+def other_autoresearch_profiles(root: Path, profile: str) -> list[str]:
+    """One reason per other profile under ``<root>/profiles`` with this plugin installed. The
+    Kanban board is host-wide and always ``autoresearch`` (``runctx.BOARD``), so two
+    autoresearch profiles on one Hermes root would requeue, repair and cap each other's cards."""
+    return [
+        f"profile {other.name!r} under {root} also has the autoresearch plugin: the board is "
+        "host-wide and always 'autoresearch', so the two would act on each other's cards. "
+        "Run one autoresearch profile per Hermes root; uninstall the plugin from the other"
+        for other in sorted((root / "profiles").glob("*"))
+        if other.name != profile and (other / "plugins" / "autoresearch" / "plugin.yaml").is_file()
+    ]
 
 
 def env_file_value(path: Path, name: str) -> str | None:
@@ -143,58 +159,6 @@ def env_file_value(path: Path, name: str) -> str | None:
         if separator and key.strip() == name:
             return value.strip().strip("'\"") or None
     return None
-
-
-# Hermes reads the profile .env with python-dotenv's parser (quotes stripped, no quote flag
-# kept) and then expands only ``${VAR}`` and ``${VAR:-default}``, in every value, quoted or
-# not (``hermes_cli/env_loader._load_dotenv_with_fallback``; python-dotenv ``variables.py``).
-# A bare ``$VAR`` stays literal. These are the same rules, ported (python-dotenv is not one
-# of our dependencies).
-_DOTENV_REFERENCE = re.compile(r"\$\{(?P<name>[^}:]*)(?::-(?P<default>[^}]*))?\}")
-_BARE_REFERENCE = re.compile(r"\$(?!\{)[A-Za-z_]")
-
-
-def _dotenv_value(raw: str) -> str:
-    """A dotenv value with its quotes (and escapes) or inline comment removed."""
-    raw = raw.strip()
-    if len(raw) >= 2 and raw[0] == raw[-1] == "'":
-        return raw[1:-1].replace("\\'", "'").replace("\\\\", "\\")
-    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
-        return raw[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-    return re.sub(r"\s+#.*", "", raw).rstrip()
-
-
-def _dotenv_entries(path: Path) -> list[tuple[str, str]]:
-    """``(name, value)`` per assignment line of a dotenv file, values unexpanded."""
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip().removeprefix("export ")
-        key, separator, raw = line.partition("=")
-        key = key.strip()
-        if separator and key and not key.startswith("#"):
-            entries.append((key, _dotenv_value(raw)))
-    return entries
-
-
-def worker_env(env: Mapping[str, str], hermes_home: Path | None) -> dict[str, str]:
-    """What a card worker's terminal sees, as near as a cron job can tell: ``env`` with the
-    profile ``.env`` laid over it as Hermes loads it (override; ``${VAR}`` and
-    ``${VAR:-default}`` expanded against ``env`` and the lines before, in any quoting; a bare
-    ``$VAR`` kept literal), so ``PATH=/x:${PATH}`` extends the PATH. Provider keys, which
-    Hermes strips from terminals, are not removed here; the host requirements never name
-    them."""
-    found = dict(env)
-    path = Path(hermes_home) / ".env" if hermes_home is not None else None
-    if path is None or not path.exists():
-        return found
-
-    def resolve(match: re.Match) -> str:
-        value = found.get(match.group("name"), match.group("default") or "")
-        return value if value is not None else ""
-
-    for key, value in _dotenv_entries(path):
-        found[key] = _DOTENV_REFERENCE.sub(resolve, value)
-    return found
 
 
 def host_requirement_problems(
@@ -212,8 +176,8 @@ def host_requirement_problems(
     problems = []
     path = Path(hermes_home) / ".env" if hermes_home is not None else None
     checked = set(env_names) | ({"PATH"} if tools else set())
-    for key, value in _dotenv_entries(path) if path is not None and path.exists() else []:
-        if key in checked and _BARE_REFERENCE.search(value):
+    for key, value in dotenv_entries(path) if path is not None and path.exists() else []:
+        if key in checked and BARE_REFERENCE.search(value):
             problems.append(
                 f"{key} in the profile .env has a bare $ reference ({value}), which Hermes "
                 "leaves as literal text: write ${NAME} with braces"
@@ -250,23 +214,38 @@ def credit_floor(env: Mapping[str, str]) -> tuple[float, list[str]]:
     return value, []
 
 
+def fetch_key_data(
+    env: Mapping[str, str], hermes_home: Path | None, http_get: HttpGet
+) -> tuple[dict | None, list[str]]:
+    """(the ``data`` object of ``GET /api/v1/key``, warnings). None, with a warning, when the
+    check is skipped, there is no key, or the lookup fails. The key never appears in a warning."""
+    if env.get(SKIP_OPENROUTER_ENV) == "1":
+        return None, [f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
+    key = env.get(OPENROUTER_KEY_ENV)
+    if not key and hermes_home is not None:
+        key = env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
+    if not key:
+        return None, [f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
+    try:
+        payload = json.loads(http_get(OPENROUTER_KEY_URL, {"Authorization": f"Bearer {key}"}))
+        return dict(payload.get("data") or {}), []
+    except Exception as error:  # noqa: BLE001 - a lookup failure must not pause the agent
+        return None, [f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
+
+
 def openrouter_problems(
     env: Mapping[str, str], hermes_home: Path | None, http_get: HttpGet
 ) -> tuple[list[str], list[str]]:
     """(reasons, warnings) from the OpenRouter key's remaining credit (A5)."""
     floor, warnings = credit_floor(env)
-    if env.get(SKIP_OPENROUTER_ENV) == "1":
-        return [], [*warnings, f"OpenRouter credit not checked ({SKIP_OPENROUTER_ENV}=1)"]
-    key = env.get(OPENROUTER_KEY_ENV)
-    if not key and hermes_home is not None:
-        key = env_file_value(Path(hermes_home) / ".env", OPENROUTER_KEY_ENV)
-    if not key:
-        return [], [*warnings, f"OpenRouter credit not checked: no {OPENROUTER_KEY_ENV}"]
+    data, lookup_warnings = fetch_key_data(env, hermes_home, http_get)
+    warnings = [*warnings, *lookup_warnings]
+    if data is None:
+        return [], warnings
     try:
-        payload = json.loads(http_get(OPENROUTER_KEY_URL, {"Authorization": f"Bearer {key}"}))
-        remaining = (payload.get("data") or {}).get("limit_remaining")
+        remaining = data.get("limit_remaining")
         remaining = None if remaining is None else float(remaining)
-    except Exception as error:  # noqa: BLE001 - a lookup failure must not pause the agent
+    except (TypeError, ValueError, OverflowError) as error:
         return [], [*warnings, f"OpenRouter credit unavailable: {type(error).__name__}: {error}"]
     if remaining is not None and remaining < floor:
         reason = f"OpenRouter key has ${remaining:.2f} left, below ${floor:g}: top it up (A5)"

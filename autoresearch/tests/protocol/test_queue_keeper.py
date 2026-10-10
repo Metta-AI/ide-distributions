@@ -12,6 +12,7 @@ import yaml
 from support.board import ForeignBoard
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
+from autoresearch.comms.inbound import InboundProblems, submit_inbound
 from autoresearch.comms.publisher import PublishResult, publish_runtime
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
@@ -1139,3 +1140,318 @@ def test_a_renewal_failure_keeps_the_pin_and_still_runs_the_kb_step(host, tmp_pa
     monkeypatch.setattr(queue_keeper, "renew_code_citations", lambda *a, **k: None)
     queue_keeper.kb_step(host.canonical, at(2), "fake-2", pin)
     assert read_json(ledger)["pin"] == "b" * 40
+
+
+# --- start on request (AUTORESEARCH_AUTONOMY) ---
+
+
+def _planning_requests(host: Host) -> list[dict]:
+    return [r for r in host.requests() if r.get("spec", {}).get("mode") == "planning"]
+
+
+def _started(host: Host) -> dict | None:
+    return host.committed(host.ledger / "started.json")
+
+
+def _send_task(host: Host, author: str, refs: list[str] | None = None) -> str:
+    return submit_inbound(
+        host.canonical,
+        "task",
+        {
+            "title": "Scout andre",
+            "mode": "scouting",
+            "why": "Leads.",
+            "refs": refs or [],
+            "priority": "P1",
+        },
+        author,
+    )
+
+
+def test_on_request_does_not_plan_before_a_coach_task(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+
+    first, second = host.tick(at(0)), host.tick(at(1))
+
+    for run in (first, second):
+        assert run.planning is None and run.planning_skipped and run.failures == {}
+        assert run.admitted == []
+    assert host.queue.list() == [] and _planning_requests(host) == []
+    assert _started(host) is None
+    log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
+    assert log.count("planning waits for the coach's first task") == 1  # once a day
+
+
+def test_first_coach_task_starts_the_agent(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    task = _send_task(host, "coach:ply_x")
+
+    run = host.tick(at(1))
+
+    assert [r.ok for r in run.admitted] == [True]
+    assert _started(host)["by"] == task and _started(host)["started_at"]
+    assert host.clean()
+    host.tick(at(2))
+    assert len(_planning_requests(host)) == 1  # the agent plans from now on
+
+
+def test_a_rejected_coach_task_does_not_start_the_agent(host):
+    """M1: a coach task routing answers with a rejection note (its refs do not resolve) does
+    not start the agent; the next accepted coach task does."""
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    rejected = _send_task(host, "coach:ply_x", refs=["ar://claim/C-01K6Z3V8QX0000000000000009"])
+
+    run = host.tick(at(1))
+
+    record = host.committed(host.ledger / "inbound" / f"{rejected}.json")
+    assert record["state"] == "acknowledged" and record["responsible"]["request_id"] is None
+    assert _started(host) is None and run.planning_skipped and run.failures == {}
+    task = _send_task(host, "coach:ply_x")
+    host.tick(at(2))
+    assert _started(host)["by"] == task
+
+
+def test_coach_steer_does_not_start_the_agent(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    steer = submit_inbound(
+        host.canonical, "steer", {"text": "Stop that task.", "urgency": "now"}, "coach:ply_x"
+    )
+
+    run = host.tick(at(1))
+
+    assert host.committed(host.ledger / "inbound" / f"{steer}.json") is not None  # adopted
+    assert _started(host) is None and run.planning_skipped
+
+
+def test_non_coach_task_does_not_start_the_agent(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    _send_task(host, "operator")
+
+    run = host.tick(at(1))
+
+    assert [r.ok for r in run.admitted] == [True]
+    assert _started(host) is None and run.planning_skipped
+
+
+def test_always_is_unchanged(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "always"
+    run = host.tick(at(0))
+    assert run.planning is not None and not run.planning_skipped and run.failures == {}
+    assert _started(host) is None
+
+
+def test_unknown_autonomy_runs_as_always_with_one_help_request(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on_request"
+    first = host.tick(at(0))
+    host.tick(at(1))
+    assert first.planning is not None
+    assert "autonomy" in first.failures
+    assert len(_help_requests(host, "Autonomy setting")) == 1
+
+
+# --- coach pause and resume (inbound control, D15) ---
+
+
+def _control(host: Host, action: str) -> str:
+    return submit_inbound(host.canonical, "control", {"action": action}, "coach:ply_x")
+
+
+def _replies(host: Host, inbound_id: str) -> list[dict]:
+    return [m for m in host.outbox() if m.get("in_reply_to") == inbound_id]
+
+
+def test_a_coach_task_and_a_pause_in_one_run_start_the_agent_and_hold_the_task(host):
+    """Routing takes the task first (controls come after the other kinds): the task is routed
+    and starts the agent; then the pause holds research, so admission defers its request and
+    planning waits. The resume admits it."""
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    control = _control(host, "pause")  # sent first: id order must not matter
+    task = _send_task(host, "coach:ply_x")
+
+    run = host.tick(at(1))
+
+    record = host.committed(host.ledger / "inbound" / f"{task}.json")
+    assert record["state"] == "routed" and record["responsible"]["request_id"]
+    assert _started(host)["by"] == task
+    assert (host.ledger / "coach-hold.json").exists()
+    assert not any(result.ok for result in run.admitted)  # deferred: "paused"
+    assert host.receipt(record["responsible"]["request_id"]) is None
+    assert run.planning is None and run.planning_skipped and run.failures == {}
+    [note] = _replies(host, control)
+    assert note["title"] == "Research paused at your request."
+
+    _control(host, "resume")
+    resumed = host.tick(at(2))
+    assert [r.ok for r in resumed.admitted] == [True]
+    assert host.receipt(record["responsible"]["request_id"]) is not None
+
+
+def _held_card(host: Host) -> str:
+    """Tick until a planning card is pending and assigned, then hold research; return it."""
+    host.tick(at(0))
+    host.tick(at(1))
+    [card] = host.queue.list("pending")
+    assert card.assignee == PROFILE
+    _control(host, "pause")
+    host.tick(at(2))
+    return card.task_id
+
+
+def test_a_control_pause_holds_research_while_running_cards_keep_running(host):
+    host.tick(at(0))
+    host.tick(at(1))
+    running = host.claim()  # the planning card
+    pending_request = host.runtime_request(spec=_spec("Pending"))
+    host.tick(at(2))
+    pending = host.receipt(pending_request)["tasks"][-1]["task_id"]
+    assert host.queue.get(pending).assignee == PROFILE
+    control = _control(host, "pause")
+    waiting = host.runtime_request(spec=_spec("Waiting"))
+
+    run = host.tick(at(3))
+
+    hold = host.committed(host.ledger / "coach-hold.json")
+    assert hold["by"] == "coach:ply_x" and hold["held_at"]
+    assert hold["tasks"] == {pending: PROFILE}
+    assert host.queue.get(pending).assignee is None  # never dispatched
+    assert host.queue.get(running.task_id).state == "claimed"  # keeps running
+    assert run.spend_run is not None  # ... under its caps
+    assert host.receipt(waiting) is None  # admission stopped
+    assert run.planning is None and run.planning_skipped and run.failures == {}
+    [note] = _replies(host, control)
+    assert note["from"] == "runtime" and note["kind"] == "note"
+    assert note["title"] == "Research paused at your request."
+    record = host.committed(host.ledger / "inbound" / f"{control}.json")
+    assert record["state"] == "acknowledged" and record["acknowledged_by"] == note["id"]
+    assert not (host.ledger / "pause.json").exists()  # independent of the C7 pause
+
+    later = host.tick(at(60 * 24))  # a day later planning would be due: still held
+    assert later.planning is None and later.planning_skipped
+    assert host.receipt(waiting) is None and len(_replies(host, control)) == 1
+    log = (host.canonical / ".supervisor" / "runtime" / "keeper.log").read_text()
+    assert "planning waits: the coach paused research" in log
+
+
+def test_queue_keeper_never_clears_a_control_hold(host):
+    card = _held_card(host)
+
+    assert not host.tick(at(3)).paused  # preflight passes
+    assert (host.ledger / "coach-hold.json").exists()
+    host.set_faults("player=ply_someone_else")
+    assert host.tick(at(4)).paused
+    host.set_faults("")
+    run = host.tick(at(5))  # preflight passes again: the agent's own pause stays while held
+
+    assert not run.paused and run.resumed is None and run.failures == {}
+    assert (host.ledger / "coach-hold.json").exists() and (host.ledger / "pause.json").exists()
+    assert host.queue.get(card).assignee is None
+    assert not [m for m in host.outbox() if m["title"] == "Agent resumed"]
+
+
+def test_a_control_resume_releases_the_hold_and_one_without_a_hold_says_so(host):
+    card = _held_card(host)
+    resume = _control(host, "resume")
+
+    run = host.tick(at(3))
+
+    assert not (host.ledger / "coach-hold.json").exists()
+    assert host.committed(host.ledger / "coach-hold.json") is None
+    assert host.queue.get(card).assignee == PROFILE
+    [note] = _replies(host, resume)
+    assert note["title"] == "Research resumed." and run.failures == {}
+    assert not run.planning_skipped
+
+    again = _control(host, "resume")
+    host.tick(at(4))
+    [note] = _replies(host, again)
+    assert note["title"] == "Research was not paused"
+    assert "Nothing was paused" in note["body"]
+
+
+def test_a_control_resume_leaves_the_agents_own_pause_in_place(host, monkeypatch):
+    card = _held_card(host)
+    conflict = promotion.ChampionConflict("ar-E-x:v1", "hand-made:v2", "submitted by hand")
+    monkeypatch.setattr(promotion, "champion_conflict", lambda *args: conflict)
+    host.tick(at(3))  # the agent pauses itself too
+    resume = _control(host, "resume")
+
+    host.tick(at(4))
+
+    assert not (host.ledger / "coach-hold.json").exists()
+    pause = host.committed(host.ledger / "pause.json")
+    assert "champion conflict" in pause["reason"] and pause["tasks"] == {card: PROFILE}
+    assert host.queue.get(card).assignee is None  # still paused
+    [note] = _replies(host, resume)
+    assert note["title"] == "Research resumed." and "still paused" in note["body"]
+
+    monkeypatch.undo()
+    host.tick(at(5))  # the conflict clears: the agent resumes by itself
+    assert not (host.ledger / "pause.json").exists()
+    assert host.queue.get(card).assignee == PROFILE
+
+
+def test_a_control_with_an_unknown_action_is_rejected_with_a_note(host):
+    host.tick(at(0))
+    inbound_id = "ply_x:control:bad"
+    write_json(
+        host.canonical / "comms" / "inbox" / f"{inbound_id}.json",
+        {"id": inbound_id, "created": "2026-10-09T20:00:00Z", "author": "coach:ply_x",
+         "kind": "control", "action": "stop"},
+    )  # fmt: skip
+    with pytest.raises(InboundProblems, match="action: must be one of pause, resume"):
+        submit_inbound(host.canonical, "control", {"action": "stop"}, "coach:ply_x")
+
+    run = host.tick(at(1))
+
+    [note] = _replies(host, inbound_id)
+    assert note["about"]["outcome"] == "rejected"
+    assert "action: must be one of pause, resume" in note["body"]
+    assert not (host.ledger / "coach-hold.json").exists() and run.failures == {}
+
+
+def _block(host: Host, task_id: str) -> None:
+    record_path = host.queue.directory / "cards" / f"{task_id}.json"
+    record = read_json(record_path)
+    record["state"] = "blocked"
+    write_json(record_path, record)
+
+
+def test_a_card_blocked_under_a_control_hold_is_not_requeued_until_resume(host):
+    host.tick(at(0))
+    host.tick(at(1))
+    running = host.claim()  # keeps its assignee: the hold unassigns only pending cards
+    _control(host, "pause")
+    host.tick(at(2))
+    _block(host, running.task_id)
+
+    held = host.tick(at(3))
+
+    assert held.blocked == [] and host.queue.get(running.task_id).state == "blocked"
+    _control(host, "resume")
+    resumed = host.tick(at(4))
+    assert [a.action for a in resumed.blocked] == ["requeued"]
+    assert host.queue.get(running.task_id).state == "pending"
+
+
+def test_a_card_blocked_under_a_pause_is_not_requeued_until_resume(host, monkeypatch):
+    host.tick(at(0))
+    host.tick(at(1))
+    running = host.claim()
+    conflict = promotion.ChampionConflict("ar-E-x:v1", "hand-made:v2", "submitted by hand")
+    monkeypatch.setattr(promotion, "champion_conflict", lambda *args: conflict)
+    host.tick(at(2))  # paused
+    _block(host, running.task_id)
+
+    paused = host.tick(at(3))
+
+    assert paused.blocked == [] and host.queue.get(running.task_id).state == "blocked"
+    monkeypatch.undo()
+    resumed = host.tick(at(4))  # resumes (step 12) after the blocked step: requeued next run
+    assert resumed.blocked == [] and not (host.ledger / "pause.json").exists()
+    assert [a.action for a in host.tick(at(5)).blocked] == ["requeued"]
+    assert host.queue.get(running.task_id).state == "pending"

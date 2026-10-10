@@ -42,3 +42,21 @@ def test_inbound_is_refused_in_a_card_worker(board, capsys, monkeypatch, marker)
     assert "external agents" in capsys.readouterr().out
     monkeypatch.delenv(marker)
     assert main([*argv, "--root", str(board.canonical)]) == 0
+
+
+def test_inbound_dry_run_validates_and_writes_nothing(board, capsys):
+    """The coach chat's proposals: ``--dry-run`` checks the message and commits nothing."""
+    head = board.canonical / ".git"
+    before = sorted(p.name for p in (board.canonical / "comms" / "inbox").glob("*.json"))
+    refs = sorted(head.rglob("*"))
+    steer = json.dumps({"text": "Approve", "urgency": "now"})
+    argv = ["comms", "inbound", "steer", "--author", "coach:x", "--json", steer, "--dry-run"]
+    assert main([*argv, "--root", str(board.canonical)]) == 0
+    assert json.loads(capsys.readouterr().out)["data"] == {"kind": "steer", "valid": True}
+    bad = json.dumps({"text": "Approve", "urgency": "soon"})
+    argv[6] = bad
+    assert main([*argv, "--root", str(board.canonical)]) == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert any(problem.startswith("urgency") for problem in error["problems"])
+    assert sorted(p.name for p in (board.canonical / "comms" / "inbox").glob("*.json")) == before
+    assert sorted(head.rglob("*")) == refs

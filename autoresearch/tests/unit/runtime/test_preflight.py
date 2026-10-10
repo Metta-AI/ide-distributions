@@ -187,6 +187,34 @@ def test_host_dispatch_in_gateway_off_fails(tmp_path):
     assert not result.ok and any("dispatch_in_gateway" in r for r in result.reasons)
 
 
+def test_a_second_autoresearch_profile_on_the_host_fails(tmp_path):
+    """The board is host-wide and always ``autoresearch``: two autoresearch profiles on one
+    Hermes root would act on each other's cards."""
+    other = tmp_path / "root" / "profiles" / "optimizer" / "plugins" / "autoresearch"
+    other.mkdir(parents=True)
+    (other / "plugin.yaml").write_text("name: autoresearch\n")
+    plain = tmp_path / "root" / "profiles" / "plain" / "plugins" / "other"
+    plain.mkdir(parents=True)
+    (plain / "plugin.yaml").write_text("name: other\n")
+    result = host_run(tmp_path, None)
+    assert not result.ok
+    assert [r for r in result.reasons if "optimizer" in r and "one autoresearch profile" in r]
+    assert not [r for r in result.reasons if "plain" in r]
+
+
+def test_our_own_plugin_install_is_not_another_profile(tmp_path):
+    ours = tmp_path / "root" / "profiles" / "autoresearch" / "plugins" / "autoresearch"
+    ours.mkdir(parents=True)
+    (ours / "plugin.yaml").write_text("name: autoresearch\n")
+    home = tmp_path / "root" / "profiles" / "autoresearch"
+    env = {"AUTORESEARCH_PLAYER_ID": "ply_a"}
+    sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)
+    result = preflight(
+        env, sm, tmp_path, NOW, disk_free=lambda _p: Usage(0, 0, 10 * GB), hermes_home=home
+    )
+    assert result.ok, result.reasons
+
+
 def test_host_config_skipped_outside_profiles(tmp_path):
     env = {"AUTORESEARCH_PLAYER_ID": "ply_a"}
     sm = FakeSoftmax(tmp_path, env, clock=lambda: NOW)

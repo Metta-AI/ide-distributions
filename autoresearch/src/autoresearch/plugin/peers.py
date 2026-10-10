@@ -22,7 +22,7 @@ import time
 
 from autoresearch.queue.card import Card
 from autoresearch.queue.kanban_queue import KanbanQueue
-from autoresearch.runctx import RunContext
+from autoresearch.runctx import BOARD, RunContext
 
 HEADING = "## Other cards running now"
 FRAME = (
@@ -45,7 +45,7 @@ def running_peers_section(ctx: RunContext, now: float | None = None) -> str:
     """The section for this worker's run. Raises ``KanbanError`` when the board cannot be
     read (the caller logs it and leaves the section out rather than claim nobody runs)."""
     queue = KanbanQueue(
-        board=ctx.hermes_home.name, profile=ctx.hermes_home.name, hermes_home=ctx.hermes_home,
+        board=BOARD, profile=ctx.profile, hermes_home=ctx.hermes_home,
         board_db_only=True,
     )
     peers = [card for card in queue.list("claimed") if card.task_id != ctx.card_id]
