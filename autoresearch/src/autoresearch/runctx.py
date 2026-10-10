@@ -23,6 +23,10 @@ ENV_CANONICAL = "AUTORESEARCH_WORKSPACE"
 ENV_WORKER = "HERMES_KANBAN_WORKSPACE"
 ENV_CARD_ID = "HERMES_KANBAN_TASK"
 ENV_RUN_ID = "HERMES_KANBAN_RUN_ID"
+# Set to "1" by the plugin in every process it loads into (Hermes agent sessions: card workers,
+# chat); their terminals and code inherit it. Operator-only commands refuse when it is set.
+# Cooperative like any environment variable; the plugin also refuses commands that name it.
+ENV_AGENT_SESSION = "AUTORESEARCH_AGENT_SESSION"
 
 WORKERS_RELATIVE = Path(".supervisor/runtime/workers")
 

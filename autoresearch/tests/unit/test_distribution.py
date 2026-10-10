@@ -79,6 +79,7 @@ def test_plugin_stub_registers_five_hooks_and_logs_tool_events(tmp_path, monkeyp
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv("AUTORESEARCH_WORKSPACE", raising=False)
+    monkeypatch.setenv("AUTORESEARCH_AGENT_SESSION", "")  # register sets it; restored after
     hooks = {}
 
     class FakeCtx:
@@ -140,6 +141,9 @@ def _is_denied(command: str) -> bool:
         ('"$AUTORESEARCH_CLI" promotion accept-champion', True),
         ("cd /x && autoresearch promotion accept-champion --help", True),
         ('git commit -m "do not run promotion accept-champion"', False),
+        ('"$AUTORESEARCH_CLI" runtime accept-commits abc1234', True),
+        ("cd /x && autoresearch runtime accept-commits", True),
+        ('git commit -m "do not run runtime accept-commits"', False),
         ("cd /tmp && hermes kanban create x", True),
         ("hermes kanban show t_1 --json", False),
         ('git commit -m "no hermes kanban create here"', False),

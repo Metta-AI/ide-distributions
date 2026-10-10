@@ -28,6 +28,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.runctx import RunContext
+from autoresearch.runtime import provenance
 from autoresearch.runtime.admission import admitted_spec
 from autoresearch.runtime.handoff import HANDOFFS_DIR
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
@@ -97,7 +98,7 @@ def report_foreign_cards(ctx: RunContext, queue: Queue, allow_no_remote: bool) -
         return []
     canonical = ctx.canonical
     admitted = None
-    recorded, failures = [], []
+    recorded, failures, journal = [], [], None
     for card in queue.foreign_cards():
         if is_foreign(canonical, card.task_id):
             continue
@@ -113,6 +114,10 @@ def report_foreign_cards(ctx: RunContext, queue: Queue, allow_no_remote: bool) -
                 recorded.append(card.task_id)
         except Exception as error:  # noqa: BLE001 - per-card containment, raised below
             failures.append(f"{card.task_id}: {type(error).__name__}: {error}")
+            journal = journal or provenance.journal_error(error)
+    message = "foreign card check: " + "; ".join(failures)
+    if journal is not None:  # typed, so queue-keeper fails closed
+        raise provenance.JournalError(message) from journal
     if failures:
-        raise RuntimeError("foreign card check: " + "; ".join(failures))
+        raise RuntimeError(message)
     return recorded

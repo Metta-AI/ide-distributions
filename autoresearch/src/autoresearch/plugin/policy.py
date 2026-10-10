@@ -36,7 +36,48 @@
   queue-keeper adopts only files they own (`comms.inbound.adopt_direct_writes`);
 - resolving a champion conflict (A9: the pause holds until a human resolves it): the
   operator command `promotion accept-champion` in any agent session (also the approvals deny
-  globs `*promotion accept-champion[ *]`; the command itself refuses in a card context).
+  globs `*promotion accept-champion[ *]`; the command itself refuses in a card context);
+- clearing a commit provenance pause (C1, ``runtime.provenance``): any terminal command or
+  code that contains `accept-commits` (approvals deny globs `*runtime accept-commits[ *]`
+  too). The command itself refuses in a card context and in any agent session: the plugin
+  sets ``AUTORESEARCH_AGENT_SESSION`` in the agent process on load
+  (``adapters.register``), its terminals and code inherit it, and the CLI checks it, so a
+  command word assembled from variables is refused at run time;
+- the provenance journal and key (``runtime.provenance``): any tool call (terminal, file
+  tools, code, ...) whose arguments name `.git/autor...` (also a glob, or `.git` and
+  `autor...` later on the line), canonical's `.git` directory itself (`find`, `grep -r`,
+  `search_files` there), `provenance.key`, `provenance.jsonl`, the module
+  (`runtime.provenance`, `ledger.provenance`, `runtime import ... provenance`) or
+  ``AUTORESEARCH_AGENT_SESSION`` (``PROVENANCE_TEXT``, ``_Guard.names_canonical_git``).
+  Content is not access (``_access_texts``): what a file tool writes, message text
+  (``INERT_KEYS``) and the quoted `--title`/`--body` of a trusted `comms` command may name
+  the key, so a refusal can be recorded and reported (D-27). A
+  module name built from pieces (`import_module('...prov' + 'enance')`) and canonical writes
+  split across lines pass. The OS cannot hide the key from
+  workers (same user, and `card finish` writes the journal); this refusal is policy;
+- canonical writes from interpreter code (C1, D-27; best effort): `python -c`, a Python
+  script read from stdin (`python3 - <<EOF`, a here-string, a pipe) and `execute_code` text
+  that names the canonical workspace (its path, not under `.worktrees/`, or
+  `AUTORESEARCH_WORKSPACE` / `HERMES_WRITE_SAFE_ROOT`), `.supervisor/ledger` or
+  `canonical.lock`, and writes it (``_Guard.writes_canonical``, on the parsed code): a
+  write-shaped call whose destination names canonical (`open`/`io.open`/`codecs.open` with
+  a write mode, `os.open` with write flags, `write_text`/`write_bytes` and other `Path` writes
+  on a canonical receiver, `Path.rename`/`Path.replace` from or to canonical, `os` writes,
+  `shutil.copy*` to canonical, `shutil.move`/`rmtree`; ``_write_destinations``; a literal
+  relative destination is resolved against the shell's directory, so `../../plan.md` from a
+  worktree counts), a git argv
+  (a list starting with `git`, or a `git ...` string) whose subcommand writes and that is
+  aimed elsewhere than the worktree (a literal `-C` directory, and git's own directory, are
+  resolved against the owning call's `cwd=` or else the shell's directory, so `git -C .
+  commit` or `cwd='.'` in the worktree passes and `cd <canonical> && python3 -c "...git
+  commit..."` is refused; ``chdir`` makes it unknown) or names canonical, or
+  `flock`/`lockf` with `canonical.lock`. Canonical as the source only (`shutil.copyfile`
+  from canonical into the worktree, `git -C <canonical> show`) passes, as do writes to the
+  worktree; the refusal says to read the worktree copy. Text that does not parse as Python
+  falls back to a line heuristic (``CANONICAL_WRITE_SHAPES``, ``GIT_WRITE_SHAPES``). This
+  stays best effort: paths built at run time, variables and other interpreters pass. On 2026-10-09 a card worker committed on canonical `main` from a
+  `python3 - <<'PYEOF'` script after reasoning that `git commit` would be refused.
+  queue-keeper's provenance check detects such a commit after the fact, whatever wrote it.
 
 Tool names and argument keys are those of Hermes v0.21.5 (source tag v2026.9.24):
 (`tools/terminal_tool.py`
@@ -72,9 +113,10 @@ blocked command, not an adversary. Known unhandled forms:
   `HERMES_DELEGATED_CHILD_CONTEXT`; nothing stops raw sqlite), and a command word taken from a
   variable set by a substitution (`h=$(which hermes); "$h" kanban create ...`);
 - interpreter writes in general: a `python -c`, `execute_code`, `node -e`, `perl -e`, ... body
-  can write any file the user can. Only a literal check stops `python -c` and `execute_code`
-  text that names the identity files (the profile `.env` with `HERMES_HOME` or its path, or
-  `.softmax`); a constructed path passes. The softmax tool therefore never takes identity
+  can write any file the user can. Only a literal check stops `python -c`, stdin Python and
+  `execute_code` text that names the identity files (the profile `.env` with `HERMES_HOME` or
+  its path, or `.softmax`) or the canonical workspace with a write; a constructed path, a
+  script file run by name, and other interpreters pass. The softmax tool therefore never takes identity
   from the `.env` (it only refuses when the `.env` differs from its spawn-time identity).
   The same holds for `comms/inbox`: a constructed path passes the literal check, which is why
   inbox adoption also checks the file owner when `AUTORESEARCH_INBOX_WRITERS` is set.
@@ -86,6 +128,7 @@ Allowed calls return `(True, "")`, or `(True, "unparsed ...")` when a shell comm
 not be tokenized and was allowed anyway; the adapter logs that note.
 """
 
+import ast
 import os
 import re
 import shlex
@@ -241,6 +284,25 @@ ACCEPT_CHAMPION = (
     "until a person resolves it (A9). Record the conflict in the journal; the runtime already "
     "told the user."
 )
+ACCEPT_COMMITS = (
+    "`runtime accept-commits` is for a human operator: a commit the runtime did not make "
+    "pauses the agent until a person checks it (C1). Do not work around this (D-27)."
+)
+_D27 = (
+    "Do not work around a refusal to get the refused effect (D-27): no other interpreter, "
+    "script, path or identity. Record it in your journal and end the card the way your skill "
+    'says; if nothing else applies, stage a help_request and finish blocked.'
+)
+CANONICAL_WRITE = (
+    "code that writes the canonical workspace, its ledger or canonical.lock is blocked: only "
+    "the runtime writes canonical (C1). If you only meant to read, read the same file in your "
+    "worktree copy. Your own changes go in your worktree; canonical bookkeeping goes through "
+    f'"$AUTORESEARCH_CLI". {_D27}'
+)
+PROVENANCE_FILES = (
+    "the runtime's commit provenance journal, its key and the provenance module are for the "
+    f"runtime only (C1). {_D27}"
+)
 INBOX_DIR_TEXT = "comms/inbox"
 # Interpreter code naming the inbox is refused only when it also looks like a write; a read
 # (`print(open(".../comms/inbox/x.json").read())`) passes. Literal and best effort, like the
@@ -249,6 +311,74 @@ CODE_WRITE_HINT = re.compile(
     r"""['"][rwax]?[wax+][bt]?['"]|write|rename|replace|symlink|link|copy|move|touch|mkdir"""
     r"""|unlink|remove|rmtree|chmod|truncate|dump"""
 )
+
+
+# Canonical names in code (besides its path): the ledger, the canonical lock, and the env
+# vars that hold the canonical path. Interpreter code naming one of them is refused when it
+# also looks like a write, a lock or a git write. Literal and best effort.
+CANONICAL_TEXTS = (
+    ".supervisor/ledger", "canonical.lock", "AUTORESEARCH_WORKSPACE", "HERMES_WRITE_SAFE_ROOT",
+)
+_GIT_WRITE_WORDS = (
+    r"commit|commit-tree|update-ref|push|add|rm|mv|reset|merge|rebase|cherry-pick|revert"
+    r"|checkout|switch|restore|stash|apply|am|clean|pull|tag|branch"
+)
+CANONICAL_WRITE_SHAPES = re.compile(
+    r"""\bopen\([^)]*?['"][rbt]*[wax+][rwabxt+]*['"]"""  # open(path, "w" / "a" / "x" / "r+")
+    r"|\bwrite_(?:text|bytes)\s*\("
+    r"|\bos\.(?:replace|rename|renames|remove|unlink|rmdir|removedirs|makedirs|mkdir|symlink"
+    r"|link|truncate|chmod)\s*\("
+    r"|\bshutil\.(?:copy\w*|move|rmtree)\s*\("
+    r"|\.(?:unlink|rename|touch|mkdir|rmdir|symlink_to|hardlink_to)\s*\("
+    r"|\b(?:flock|lockf)\b"
+)
+GIT_WRITE_SHAPES = re.compile(
+    rf"""['"](?:{_GIT_WRITE_WORDS})['"]"""  # a git write subcommand as an argv element
+    rf"|\bgit\b[^\n'\"]*?\s(?:{_GIT_WRITE_WORDS})\b"  # "git -C x commit ..." in a string
+)
+# Code that points git somewhere other than the current directory (the worktree).
+GIT_ELSEWHERE = re.compile(r"""['"]-C['"]|\s-C\s|\bcwd\s*=|\bchdir\b|--git-dir|--work-tree""")
+CODE_GIT_WRITES = frozenset(_GIT_WRITE_WORDS.split("|"))
+# Git options that name the directory git works on (each takes a value).
+GIT_TARGET_OPTIONS = {"-C", "--git-dir", "--work-tree"}
+# Write-shaped Python calls (``_write_destinations``): a method whose receiver is the
+# destination, ``os``/``shutil`` functions and the argument positions they write.
+RECEIVER_WRITES = {
+    "write_text", "write_bytes", "unlink", "touch", "mkdir", "rmdir", "symlink_to", "hardlink_to",
+}
+MODULE_WRITES = {
+    "os": {
+        "replace": (0, 1), "rename": (0, 1), "renames": (0, 1), "remove": (0,), "unlink": (0,),
+        "rmdir": (0,), "removedirs": (0,), "makedirs": (0,), "mkdir": (0,), "truncate": (0,),
+        "chmod": (0,), "symlink": (1,), "link": (1,),
+    },
+    "shutil": {
+        "copy": (1,), "copy2": (1,), "copyfile": (1,), "copytree": (1,), "copymode": (1,),
+        "copystat": (1,), "move": (0, 1), "rmtree": (0,),
+    },
+}
+WRITE_MODE = re.compile(r"[wax+]")
+OPEN_MODULES = {"io", "codecs"}  # ``io.open`` / ``codecs.open`` take ``open``'s arguments
+WRITE_FLAGS = re.compile(r"\bO_(?:WRONLY|RDWR|CREAT|APPEND|TRUNC)\b")
+LOCK_CALLS = re.compile(r"\b(?:flock|lockf)\b")
+ACCEPT_COMMITS_TEXT = re.compile(r"accept-commits")
+PROVENANCE_TEXT = re.compile(
+    r"\.git/autor"  # the journal directory, also as a glob (`.git/autor*`)
+    r"|\.git\b[^\n]*\bautor"  # `cd .../.git && cat autoresearch/*`
+    r"|provenance\.(?:key|jsonl)|runtime\.provenance\b|ledger\.provenance\b"
+    r"|runtime\s+import\s[^\n]*\bprovenance\b|AUTORESEARCH_AGENT_SESSION"
+)
+
+
+def _strings(value) -> list[str]:
+    """Every string inside a tool call's arguments."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _strings(item)]
+    if isinstance(value, list | tuple):
+        return [text for item in value for text in _strings(item)]
+    return []
 
 
 def _code_writes_inbox(code: str) -> bool:
@@ -276,6 +406,13 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
     """Decide one tool call: `(allowed, reason)`. `card` is `runtime/cards/<task>.json` or None."""
     args = args if isinstance(args, dict) else {}
     guard = _Guard(ctx, card)
+    access = _access_texts(tool_name, args)
+    if any(PROVENANCE_TEXT.search(text) or guard.names_canonical_git(text) for text in access):
+        return _block(PROVENANCE_FILES)
+    if tool_name in ("terminal", "execute_code") and any(
+        ACCEPT_COMMITS_TEXT.search(text) for text in access
+    ):
+        return _block(ACCEPT_COMMITS)
     try:
         if tool_name == "terminal":
             command = args.get("command")
@@ -305,14 +442,41 @@ def tool_policy(tool_name: str, args: dict, ctx: RunContext, card: dict | None) 
                 )
             if isinstance(code, str) and guard.names_identity_files(code):
                 return _block(IDENTITY_FILES)
-            if isinstance(code, str) and _code_writes_inbox(code):
-                return _block(INBOX_WRITE)
+            if isinstance(code, str):
+                guard.check_code(code)
             return ALLOW
     except _Blocked as blocked:
         return _block(str(blocked))
     except (ValueError, OSError) as error:  # e.g. a NUL byte in an executable path
         return True, f"unparsed call allowed ({error})"
     return ALLOW
+
+
+# Arguments that are content, not access: what a file tool writes, and message text. A
+# refusal must be recordable (D-27: journal entry, help_request) even when it names the key.
+INERT_KEYS = {"content", "body", "message", "text", "title", "summary", "old_string",
+              "new_string"}  # fmt: skip
+# The text options of the trusted CLI's ``comms`` commands, quoted so the shell runs nothing
+# inside them (single quotes, or double quotes without ``$``/backticks).
+INERT_CLI_TEXT = re.compile(r"""--(?:title|body)(?:=|\s+)(?:'[^']*'|"[^"$`\\]*")""")
+
+
+def _access_texts(tool_name: str, args: dict) -> list[str]:
+    """The argument text that can reach a file or run something, for the provenance-journal
+    refusal: file write tools' paths only; a terminal command without the quoted
+    ``--title``/``--body`` of a trusted ``comms`` command; every other string except
+    ``INERT_KEYS`` values."""
+    if tool_name in FILE_WRITE_TOOLS:
+        return _file_tool_targets(args)
+    texts = _strings({key: value for key, value in args.items() if key not in INERT_KEYS})
+    if tool_name == "terminal":
+        texts = [
+            INERT_CLI_TEXT.sub("--text ''", text)
+            if "AUTORESEARCH_CLI" in text and " comms " in text
+            else text
+            for text in texts
+        ]
+    return texts
 
 
 def _file_tool_targets(args: dict) -> list[str]:
@@ -339,6 +503,211 @@ class _Guard:
         self.inbox_dir = _real(ctx.canonical / INBOX_DIR_TEXT)
         self.trusted = _trusted_cli_words(ctx)
         self.foreground = False  # set per terminal call: waiting rules apply only then
+
+    def names_canonical(self, text: str) -> bool:
+        """Literal check: ``text`` names a canonical text (``CANONICAL_TEXTS``), or the
+        canonical path anywhere but at the start of a path under its ``.worktrees/`` (where
+        card worktrees live, so a worker naming its own worktree passes)."""
+        if any(name in text for name in CANONICAL_TEXTS):
+            return True
+        for root in {str(self.ctx.canonical), str(_real(self.ctx.canonical))}:
+            for match in re.finditer(re.escape(root.rstrip("/")) + r"(?![\w.-])", text):
+                if not text.startswith("/.worktrees/", match.end()):
+                    return True
+        return False
+
+    def names_canonical_git(self, text: str) -> bool:
+        """``text`` names canonical's ``.git`` directory (``<canon>/.git`` followed by a path
+        separator, a glob, a quote or the end), which holds the provenance journal: `find`,
+        `grep -r`, `search_files` or a glob there could reach the key without naming it."""
+        for root in {str(self.ctx.canonical), str(_real(self.ctx.canonical))}:
+            if re.search(re.escape(root.rstrip("/") + "/.git") + r"(?![\w.-])", text):
+                return True
+        return False
+
+    def check_code(self, code: str, cwd: Path | None = None) -> None:
+        """Raise `_Blocked` for interpreter code (`python -c`, stdin Python, `execute_code`)
+        that names a blocked command or a protected file and looks like it acts on it."""
+        _refuse_text(code)
+        if ACCEPT_COMMITS_TEXT.search(code):
+            raise _Blocked(ACCEPT_COMMITS)
+        if PROVENANCE_TEXT.search(code):
+            raise _Blocked(PROVENANCE_FILES)
+        if self.names_identity_files(code):
+            raise _Blocked(IDENTITY_FILES)
+        if _code_writes_inbox(code):
+            raise _Blocked(INBOX_WRITE)
+        if self.writes_canonical(code, cwd or self.base):
+            raise _Blocked(CANONICAL_WRITE)
+
+    def writes_canonical(self, code: str, cwd: Path) -> bool:
+        """Literal, best-effort heuristic (module docstring): a lock call when the code names
+        canonical.lock; a write-shaped call whose destination names canonical or is a literal
+        path that resolves into it from ``cwd`` (the shell's directory; ``../../plan.md`` from
+        a worktree is canonical); a git argv (a list starting with ``git``, or a ``git ...``
+        string) with a write subcommand that runs on canonical (``git_argv_writes``). Reading
+        canonical to write elsewhere passes. A write through a variable that holds a
+        canonical path passes (and the provenance check catches a commit). Text that does
+        not parse as Python (a piped shell line, an unquoted here-document with shell
+        expansions) falls back to the line heuristic when it names canonical."""
+        mentions = self.names_canonical(code)
+        if "canonical.lock" in code and LOCK_CALLS.search(code):
+            return True
+        try:
+            tree = ast.parse(code)
+        except (SyntaxError, ValueError):
+            return mentions and self._writes_canonical_by_line(code)
+        lines = code.splitlines()
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        # The call whose first argument is a git argv (or command string): its ``cwd=`` is
+        # where git runs. An argv built elsewhere (a variable) runs where an unknown call says.
+        owner = {id(call.args[0]): call for call in calls if call.args}
+        unknown_cwd = bool(re.search(r"\bchdir\b", code)) or any(
+            _keyword(call, "cwd") is not None
+            and call.args
+            and not isinstance(call.args[0], ast.List | ast.Tuple | ast.Constant)
+            for call in calls
+        )
+
+        def text(node: ast.AST) -> str:
+            return ast.get_source_segment(code, node) or ast.unparse(node)
+
+        def line_of(node: ast.AST) -> str:
+            return "\n".join(lines[node.lineno - 1 : node.end_lineno])
+
+        def run_dir(node: ast.AST) -> Path | None:
+            """Where git runs for this argv: the owning call's ``cwd=``, else the shell's."""
+            call = owner.get(id(node))
+            value = _keyword(call, "cwd") if call is not None else None
+            if value is None:
+                return None if unknown_cwd and call is None else Path(cwd)
+            literal = _literal_path(value)
+            if literal is not None:
+                return Path(cwd) / os.path.expanduser(literal)
+            return self.worker if self._names_worker(text(value)) else None
+
+        def destination_is_canonical(node: ast.expr) -> bool:
+            if self.names_canonical(text(node)):
+                return True
+            literal = _literal_path(node)
+            return literal is not None and self._in_canonical(
+                Path(cwd) / os.path.expanduser(literal)
+            )
+
+        def writes(node: ast.AST) -> bool:
+            if isinstance(node, ast.Call):
+                return any(destination_is_canonical(t) for t in _write_destinations(node))
+            if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+                constant = [isinstance(elt, ast.Constant) for elt in node.elts]
+                argv = [
+                    str(elt.value) if literal else text(elt)
+                    for elt, literal in zip(node.elts, constant, strict=True)
+                ]
+                return (
+                    constant[0]
+                    and _is_git(argv[0])
+                    and self.git_argv_writes(argv, constant, line_of(node), run_dir(node), mentions)
+                )
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return bool(re.search(r"\bgit\b", node.value)) and self._git_string_writes(
+                    node.value, line_of(node), run_dir(node), mentions
+                )
+            return False
+
+        return any(writes(node) for node in ast.walk(tree))
+
+    def _in_canonical(self, path: Path) -> bool:
+        """``path`` is inside canonical, not under its ``.worktrees/`` (card worktrees)."""
+        resolved, root = _real(path), _real(self.ctx.canonical)
+        return _within(resolved, root) and not _within(resolved, root / ".worktrees")
+
+    def _git_string_writes(
+        self, command: str, line: str, run_dir: Path | None, mentions: bool
+    ) -> bool:
+        """A ``git ...`` command in a string (``os.system``, ``shell=True``)."""
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            words = command.split()
+        return any(
+            self.git_argv_writes(
+                words[index:], [True] * (len(words) - index), line, run_dir, mentions
+            )
+            for index, word in enumerate(words)
+            if _is_git(word)
+        )
+
+    def git_argv_writes(
+        self, argv: list[str], constant: list[bool], line: str, run_dir: Path | None,
+        mentions: bool,
+    ) -> bool:
+        """``argv`` (``git`` first; ``constant`` marks the literal elements) runs a git write
+        subcommand (or one taken from a variable) on canonical. ``run_dir`` is where git
+        runs (the owning call's ``cwd=``, else the shell's directory; None when unknown). A
+        literal ``-C``/``--git-dir``/``--work-tree`` directory is resolved against it.
+        Refused: git runs in canonical; or, when the code names canonical, git is pointed
+        at a directory other than the worktree (or one we cannot resolve), or the argv
+        names canonical."""
+        targets, index = [], 1
+        while index < len(argv) and constant[index] and argv[index].startswith("-"):
+            option, _, value = argv[index].partition("=")
+            literal = True
+            if option in GIT_TARGET_OPTIONS | GIT_VALUE_OPTIONS and not value:
+                index += 1
+                value = argv[index] if index < len(argv) else ""
+                literal = index < len(argv) and constant[index]
+            if option in GIT_TARGET_OPTIONS:
+                targets.append((value, literal))
+            index += 1
+        if index >= len(argv):
+            return False  # `git --version`
+        if constant[index] and argv[index] not in CODE_GIT_WRITES:
+            return False
+        if self.names_canonical(" ".join(argv)):
+            return True
+        directories = []
+        for target, literal in targets:
+            if literal and run_dir is not None:
+                directories.append(run_dir / os.path.expanduser(target))
+            elif self._names_worker(target):
+                directories.append(self.worker)
+            else:
+                directories.append(None)  # from a variable: unknown
+        if not targets:
+            if run_dir is None:
+                return mentions and not self._names_worker(line)
+            directories = [run_dir]
+        for directory in directories:
+            if directory is None:
+                elsewhere = mentions
+            else:
+                pointed_away = targets and mentions and not self._is_worker_dir(directory)
+                elsewhere = self._in_canonical(directory) or pointed_away
+            if elsewhere:
+                return True
+        return False
+
+    def _is_worker_dir(self, directory: Path) -> bool:
+        return self.worker is not None and _within(_real(directory), self.worker)
+
+    def _writes_canonical_by_line(self, code: str) -> bool:
+        """The line heuristic for text that is not Python: a line with a write-shaped call
+        that names canonical; a git write on a line that does not name the worker's
+        worktree, when the code points git elsewhere (``-C``, ``cwd=``, ...) or the line
+        names canonical."""
+        elsewhere = bool(GIT_ELSEWHERE.search(code))
+        for line in code.splitlines():
+            if CANONICAL_WRITE_SHAPES.search(line) and self.names_canonical(line):
+                return True
+            git_write = GIT_WRITE_SHAPES.search(line) and not self._names_worker(line)
+            if git_write and (elsewhere or self.names_canonical(line)):
+                return True
+        return False
+
+    def _names_worker(self, text: str) -> bool:
+        return self.worker is not None and (
+            str(self.ctx.worker) in text or str(self.worker) in text
+        )
 
     def names_identity_files(self, text: str) -> bool:
         """Literal check (module docstring): ``text`` names ``.softmax``, or ``.env`` together
@@ -497,6 +866,8 @@ class _Guard:
                 raise _Blocked(INBOX_WRITE)
             if subcommand == ["promotion", "accept-champion"]:
                 raise _Blocked(ACCEPT_CHAMPION)
+            if subcommand == ["runtime", "accept-commits"]:
+                raise _Blocked(ACCEPT_COMMITS)
             if trusted:
                 return []
         if first.startswith("$"):  # `c=coworld; $c submit`
@@ -587,12 +958,14 @@ class _Guard:
                     return [words[module_at].split(".")[0], *words[module_at + 1:]]
                 if "-c" in rest:
                     code_at = index + 1 + rest.index("-c") + 1
-                    code = words[code_at] if code_at < len(words) else ""
-                    _refuse_text(code)
-                    if self.names_identity_files(code):
-                        raise _Blocked(IDENTITY_FILES)
-                    if _code_writes_inbox(code):
-                        raise _Blocked(INBOX_WRITE)
+                    self.check_code(words[code_at] if code_at < len(words) else "", cwd)
+                elif _reads_script_from_stdin(rest):
+                    # `python3 - <<'EOF'`, `python3 <<< "..."`, `... | python3`: the script
+                    # is the here-document, here-string or (piped) the whole line.
+                    for text in line.bodies + line.herestrings:
+                        self.check_code(text, cwd)
+                    if line.piped:
+                        self.check_code(line.raw, cwd)
                 return words[index:]
             elif name in SHELLS:
                 mode, script_at = _shell_mode(words, index + 1)
@@ -672,6 +1045,97 @@ class _Guard:
                 inner = [w for w in core[start:] if w not in {";", "+", "{}"}]
                 return self._inspect(inner, cwd, depth, notes, line)
         return []
+
+
+def _is_git(word: str) -> bool:
+    return word == "git" or word.endswith("/git")
+
+
+def _write_destinations(call: ast.Call) -> list[ast.expr]:
+    """The expressions a write-shaped call writes or removes (``RECEIVER_WRITES``,
+    ``MODULE_WRITES``, ``open``/``io.open``/``codecs.open``/``Path.open`` with a literal write
+    mode, ``os.open`` with write flags, ``Path.rename``/``Path.replace`` source and target); []
+    for any other call. A source that is only read (``shutil.copy`` from canonical,
+    ``Path(...).read_text()`` as an argument) is not a destination."""
+    func = call.func
+    module = (
+        func.value.id
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+        else None
+    )
+    if (isinstance(func, ast.Name) and func.id == "open") or (
+        module in OPEN_MODULES and func.attr == "open"
+    ):
+        mode = call.args[1] if len(call.args) > 1 else _keyword(call, "mode")
+        target = call.args[0] if call.args else _keyword(call, "file")
+        return [target] if target is not None and _write_mode(mode) else []
+    if not isinstance(func, ast.Attribute):
+        return []
+    if module == "os" and func.attr == "open":
+        flags = call.args[1] if len(call.args) > 1 else _keyword(call, "flags")
+        target = call.args[0] if call.args else _keyword(call, "path")
+        writes = flags is not None and WRITE_FLAGS.search(ast.unparse(flags))
+        return [target] if target is not None and writes else []
+    if module in MODULE_WRITES:
+        positions = MODULE_WRITES[module].get(func.attr, ())
+        keywords = {name for i in positions for name in (("src", "path"), ("dst",))[i]}
+        return [call.args[i] for i in positions if i < len(call.args)] + [
+            kw.value for kw in call.keywords if kw.arg in keywords
+        ]
+    if func.attr in RECEIVER_WRITES:
+        return [func.value]
+    if func.attr == "rename" or (
+        # ``Path.replace(target)``: one argument (``str.replace`` takes two or more)
+        func.attr == "replace" and len(call.args) == 1 and not call.keywords
+    ):
+        return [func.value, *call.args]
+    if func.attr == "open":
+        mode = call.args[0] if call.args else _keyword(call, "mode")
+        return [func.value] if _write_mode(mode) else []
+    return []
+
+
+def _literal_path(node: ast.expr) -> str | None:
+    """A path written as a literal: ``'x'`` or ``Path('x')`` / ``PurePath('x')``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name | ast.Attribute)
+        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr)
+        in {"Path", "PurePath", "PosixPath"}
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        return node.args[0].value
+    return None
+
+
+def _keyword(call: ast.Call, name: str) -> ast.expr | None:
+    return next((kw.value for kw in call.keywords if kw.arg == name), None)
+
+
+def _write_mode(mode: ast.expr | None) -> bool:
+    return (
+        isinstance(mode, ast.Constant)
+        and isinstance(mode.value, str)
+        and bool(WRITE_MODE.search(mode.value))
+    )
+
+
+def _reads_script_from_stdin(args: list[str]) -> bool:
+    """Python's arguments after the interpreter name: no script file (only options), or the
+    script ``-`` (stdin)."""
+    index = 0
+    while index < len(args):
+        word = args[index]
+        if word == "-":
+            return True
+        if not word.startswith("-"):
+            return False  # a script file: run by name, not inspected (module docstring)
+        index += 2 if word in PYTHON_VALUE_OPTIONS else 1
+    return True
 
 
 def _check_hermes(args: list[str]) -> None:

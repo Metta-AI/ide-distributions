@@ -15,7 +15,7 @@ Design documents (open the HTML files in a browser):
 - [Runtime](docs/designs/autoresearch-runtime-2026-10-06.html): how it runs on Hermes.
 - [Open questions](docs/designs/autoresearch-open-questions-2026-10-07.html).
 - [Implementation plan](docs/plans/2026-10-07-autoresearch-v0/00-overview.md): contracts
-  C1-C12 and amendments A1-A14. The contract numbers in this file refer to it.
+  C1-C12 and amendments A1-A15. The contract numbers in this file refer to it.
 - [Verified Hermes facts](docs/plans/findings/hermes-facts.md): what was checked on Hermes
   v0.21.5.
 - [Softmax hosting integration](docs/designs/softmax-integration-plan-2026-10-09.html): how the
@@ -239,6 +239,7 @@ Where things live:
 | Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
 | Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
+| Commit provenance journal and its key (not committed) | `$PROFILE/workspace/.git/autoresearch/provenance.jsonl`, `provenance.key` |
 | Per-experiment locks (`softmax xp create`, `upload`, `submit`) | `$PROFILE/workspace/.supervisor/runtime/locks/xp-<E-id>.lock` |
 | queue-keeper log | `$PROFILE/workspace/.supervisor/runtime/keeper.log` |
 | Hermes logs, cron output | `$PROFILE/logs/`, `$PROFILE/cron/` |
@@ -302,6 +303,90 @@ agree: either make the league show the expected policy again, or accept what it 
 run it). It resumes on the
 next queue-keeper run after that.
 
+Only the runtime commits on the canonical workspace's `main` (C1): queue-keeper, xp-poll,
+health, bootstrap, and `card finish` (the handoff commit). Each of them records every commit
+it makes in a journal outside the work tree (`.git/autoresearch/provenance.jsonl`, entries
+numbered in sequence and signed with a key in `provenance.key`; a signed entry copied to the
+end again, for example to hide a reset, vouches for nothing). Before it acts, every queue-keeper run checks the
+first-parent history of `main` since the last checked commit. A commit nobody recorded (for
+example one a card worker made itself, working around the plugin), a rewritten history
+(reset, rebase, amend), or a missing or unverifiable journal pauses the agent and sends one
+help request; that run then only applies the spend caps, and nothing is merged, published or
+admitted until a person checks. While the violation stands, no job pushes `main` to
+`AUTORESEARCH_WORKSPACE_REMOTE` (`provenance.push_main` checks one commit and pushes exactly
+that commit, under the canonical lock), so the unrecorded commits stay on the host; the help request still reaches the coach
+because the bridge reads `comms/outbox/` from the local workspace. Pushing resumes after
+`accept-commits`. In an operator shell:
+
+```sh
+"$AUTORESEARCH_CLI" runtime check-commits
+git -C "$PROFILE/workspace" show --stat <commit>
+"$AUTORESEARCH_CLI" runtime accept-commits <commit>
+```
+
+`check-commits` lists the commits the runtime did not make (id, author, time, files) and the
+commit to accept; it changes nothing. Keep the commits, or undo them in the workspace (a
+revert is one more commit to accept; do not reset, which is reported as a rewrite), then run
+`accept-commits` with the commit `check-commits` names: it trusts that commit and everything
+before it, and the next queue-keeper run resumes the agent. It reads its entry back before it
+reports success and fails loudly if the journal does not return it (a journal line cut short
+by a killed writer is ended before the next entry, so it never swallows that entry). `accept-commits` is refused
+for agents (best effort: plugin policy, approvals deny list, and the command refuses in a
+card or any agent session; see Known gaps), and every accept is announced: queue-keeper
+publishes one note per accept ("Workspace commits accepted"), so an accept nobody ran is
+visible. A check that cannot run (an unreadable journal or key, also when bootstrap or one
+of its own commits finds it so, or a git error) also pauses the agent and still applies the spend caps.
+Every run first checks that the journal can be written (without writing to it), and a journal
+failure in any later step of the run pauses the same way; a step that
+keeps failing gets its usual help request. The pause unassigns pending cards even when its
+own commit fails (a journal that cannot be written fails every canonical commit, so then the
+help request cannot be published either and is only logged and retried; the uncommitted
+`pause.json` holds the pause until the journal is fixed). A runtime writer
+builds each commit before it moves `main` and first records an intent naming that exact
+commit, so a crash between moving `main` and the journal entry is recognized, not reported,
+and the next queue-keeper run writes the missing entry and sets the index for that commit;
+an intent vouches for no other commit (one made on the same parent with the same subject is
+reported). The first run of this check on an existing workspace, and a newly
+seeded or cloned one, trusts the current `HEAD` once and commits
+`.supervisor/ledger/provenance.json`; once that marker has been in history, a lost journal
+is reported, not trusted again.
+
+What this check is, and is not. It catches accidental and naive writes to canonical (a worker
+committing by hand, as on 2026-10-09). It does not stop a deliberate one: card workers run as
+the same OS user as the runtime, so a process that imports the runtime and calls its own commit
+function (`ledger.commit`), or reads `provenance.key`, produces commits signed like the
+runtime's, with no accept and no announcement. The plugin refuses model tool calls that do this
+openly, but that is policy, not a boundary. Truncating the journal (cutting off its newest
+entries) is also not detectable from inside the workspace. Real prevention needs card workers
+under a different user than the owner of canonical, or coach requests by API (D9 options (c)
+or (d) in `docs/plans/2026-10-09-softmax-integration/plan.md`); for the first hosted deploy
+James accepted D9 option (a), detection only.
+
+Known gaps of the provenance check:
+
+- **A deliberate same-uid writer defeats it** (above): it can sign commits through the
+  runtime's own code or the key, and truncate the journal. Fixing this needs D9 option (c) or (d).
+- **The plugin's refusals are best effort.** Paths built at run time, variables, script files
+  and other interpreters get past the interpreter-write and journal checks; the provenance
+  check is what catches a commit.
+- **No help request while the journal cannot be written.** Publishing is a canonical commit,
+  and every canonical commit needs the journal. The run still pauses and unassigns pending
+  cards, but the help request is only logged (`.supervisor/runtime/keeper.log`) and retried. Check that log
+  for `provenance` failures when the agent is paused with no message.
+- **A board epoch can be left uncommitted.** If the journal fails exactly when bootstrap
+  creates the board, `board.json` gets the new epoch on disk but not in a commit.
+- **Seeding fails on a journal error.** A brand new workspace whose first (seed) commit
+  cannot be recorded fails bootstrap; there are no cards to pause yet, and the next run
+  retries.
+- **A crash during a restore gives a false journal-loss pause.** If bootstrap clones a
+  workspace from `AUTORESEARCH_WORKSPACE_REMOTE` and dies before the journal is
+  initialized, the next run finds the committed marker but no local anchor. It reports
+  `journal_lost`, pauses and holds pushes. This fails safe. Remedy, in an operator shell:
+  check that the workspace is exactly the remote's `main`
+  (`git -C "$PROFILE/workspace" rev-parse HEAD` against
+  `git -C "$PROFILE/workspace" ls-remote origin refs/heads/main`), then run
+  `"$AUTORESEARCH_CLI" runtime accept-commits <that commit>`.
+
 ## Restore on a new host
 
 Privacy note: the memory snapshot is committed to the workspace and pushed to
@@ -322,7 +407,10 @@ memory is not in that repository by itself: queue-keeper copies it to
 ```
 
    When the remote has a `main`, bootstrap clones it into `$PROFILE/workspace/`. It does
-   not seed a new history.
+   not seed a new history. The commit provenance journal is local to the host, so the new
+   host trusts the cloned history once (Operate, above): whatever is on the remote's `main`
+   is trusted, so check the remote's recent history before a restore if the old host may
+   have been tampered with.
 3. Copy the memory snapshot back:
 
 ```sh
@@ -345,6 +433,13 @@ and keeps `.env`, `config.yaml`, memories, the workspace, and `local/`. The next
 `hermes config set` and re-seeds `AGENTS.md` when `doctrine/VERSION` changed. Hermes has no
 automatic update; `updates.check` is set to false so it does not even check.
 
+After an install or update, check once that agent terminals carry the plugin's agent-session
+marker (`runtime accept-commits` refuses agents by it; this rests on reading the Hermes
+source and is not yet observed live). In an agent session of the profile (a chat with
+`hermes -p autoresearch chat`, or a card worker), have the agent run
+`"$AUTORESEARCH_CLI" runtime session`. It must print `"agent_session": true`. The same
+command in an operator shell prints `false`.
+
 ## Known gaps
 
 - **GotA is bound but not yet proven end to end.** `games/gota` has real `build`,
@@ -363,6 +458,26 @@ automatic update; `updates.check` is set to false so it does not even check.
   `AUTORESEARCH_RELAUNCH_MIN_CREDITS`), at most one experiment per xp-poll run; otherwise the
   backoff decides (A10).
 - **Gateway turn hooks** of the plugin are unverified (see hermes-facts.md, item 2).
+- **One OS user, so no guard inside the profile is a security boundary.** Card workers,
+  queue-keeper and the other jobs all run as the workspace user. The plugin refuses canonical
+  writes from the shell, file tools and literal interpreter code (`python -c`, `python3 -
+  <<EOF`, `execute_code`), but a constructed path, a script file run by name or another
+  interpreter gets past it, and `canonical.lock` is advisory. The commit provenance check
+  (Operate, above) detects a commit on canonical `main` that the runtime did not make, after
+  the fact. It is detection, not prevention, and it can be defeated on purpose. The OS
+  cannot hide the journal key from workers (same user, and `card finish` in the worker writes
+  the journal); the plugin refuses model tool calls that name the journal, its key or the
+  provenance module, and `runtime accept-commits` refuses in any agent session, but both are
+  policy, so a process that gets the key anyway can write valid entries, and a deliberate
+  agent can assemble the command and clear its environment. Each accept is announced by a
+  runtime note, so a forged one is visible but not prevented. Deleting the journal
+  is reported, not trusted again, once the ledger marker has been in history; only a history
+  rewrite that also removes the marker resets the trust, and that is itself loud. The check
+  sees commits, not files: a file a worker writes into a directory that a runtime commit
+  picks up whole (`comms/outbox`, the receipts directory, `comms/inbox` by design) arrives
+  in a recorded commit. Doctrine D-27 forbids working around any refusal. The real fix is to
+  run card workers as a separate OS user without write access to canonical (Rohit's
+  sandbox).
 - **Spend caps see only this profile's sessions.** GotA compiler child runs (their own
   `HERMES_HOME`) and spend outside the profile are not counted. A card's cost needs the
   plugin's `session_start` event for each run, so sessions from before this feature count
@@ -373,15 +488,15 @@ automatic update; `updates.check` is set to false so it does not even check.
 - **Pause timing.** A budget pause, like a preflight pause, unassigns pending cards on the
   next queue-keeper run; a card Hermes itself returns to `ready` (a crash retry keeps its
   assignee) can start again in the minute before that.
-- **A card worker can still write the canonical workspace through interpreter code.** The
-  plugin refuses shell and file-tool writes outside the worktree, but not a `python3 - <<EOF`
-  script that writes files and runs `git` itself (a residual risk listed in
-  `plugin/policy.py`). On 2026-10-09 a worker used this to commit its own receipt to canonical
-  `main` (`admit Q-... (manual admission repair ...)`), so `card finish` took the handoff of a
-  card that skipped admission. queue-keeper now refuses to merge such a card's work (above),
-  but the single-writer rule (C1) is enforced only by the workers' cooperation, not by the OS.
-  `card finish` now refuses a receipt whose request was never committed, and foreign cards are
-  decided from the ledger, but a worker that can write canonical can forge those files too.
+- **A card worker can still write the canonical workspace through interpreter code.** On
+  2026-10-09 a worker committed its own receipt to canonical `main` from a `python3 - <<EOF`
+  script (`admit Q-... (manual admission repair ...)`), so `card finish` took the handoff of a
+  card that skipped admission. Since then: the plugin refuses literal interpreter writes to
+  canonical (best effort), `card finish` refuses a receipt whose request was never committed,
+  foreign cards are decided from the ledger and never merged (above), and the commit
+  provenance check pauses the agent on any commit the runtime did not make (Operate, and the
+  one-OS-user bullet above). A worker that writes canonical another way can still forge
+  files, but its commit is detected.
 - **A malformed ledger file stops a step.** Routing, handoff processing and rebuild parse every
   committed receipt and handoff; one file that is not valid JSON (only a direct write as above
   can produce one) fails that step every run until a human fixes or removes it.

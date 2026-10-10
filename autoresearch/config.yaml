@@ -53,6 +53,8 @@ approvals:
     - "hermes kanban --board * link*"
     - "*promotion accept-champion"
     - "*promotion accept-champion *"
+    - "*runtime accept-commits"
+    - "*runtime accept-commits *"
 
 terminal:
   # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground
