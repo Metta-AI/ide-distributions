@@ -623,30 +623,36 @@ def send_inbound(where: tuple[Path, dict[str, str]], kind: str, payload: dict) -
     return str((sent.get("data") or {}).get("id"))
 
 
+def _note(key: str, text: str) -> None:
+    """Queue a note for the plugin block. Its text can carry CLI words (an error reason), so
+    ``&``, ``<`` and ``[`` are escaped: no HTML, link or link reference can form in the block."""
+    STORE.note(key, text.replace("&", "&amp;").replace("<", "&lt;").replace("[", "\\["))
+
+
 def _send_in_background(key: str, where, label: str, kind: str, payload: dict, event: dict):
     """Run the send on a plugin thread, so ``pre_llm_call`` returns inside Hermes's hook
     timeout (v0.21.6 ``hermes_cli/plugins_dispatch.py``: 30 s by default, and a callback that
-    times out is skipped for 60 s). The outcome goes out as a note: appended to the next chat
-    reply and named in the next turn's context. The caller already took the proposal, so a
+    times out is skipped for 60 s). The outcome goes out as a note: shown in the plugin block
+    of the next chat reply and named in the next turn's context. The caller already took the proposal, so a
     second confirm can never send it again."""
 
     def work():
         try:
             inbound_id = send_inbound(where, kind, payload)
         except Refused as refused:  # the CLI refused it: nothing was committed
-            STORE.note(key, f"Sending {label} failed: {refused}. Nothing was sent.")
+            _note(key, f"Sending {label} failed: {refused}. Nothing was sent.")
             _log({**event, "event": "send_failed"}, where)
             return
         except Exception as error:  # noqa: BLE001 - timed out or broke: outcome unknown
             reason = str(error) if isinstance(error, SendUnknown) else type(error).__name__
-            STORE.note(key, (
+            _note(key, (
                 f"Sending {label} did not finish ({reason}): it may or may not have been sent. "
                 "Check message_status (or list the inbox with get_message) before proposing it "
                 "again."
             ))
             _log({**event, "event": "send_unknown"}, where)
             return
-        STORE.note(key, f"Sent {label} as {inbound_id}.")
+        _note(key, f"Sent {label} as {inbound_id}.")
         _log({**event, "event": "sent", "inbound": inbound_id}, where)
 
     worker = threading.Thread(target=work, name=f"coach-send-{label}", daemon=True)

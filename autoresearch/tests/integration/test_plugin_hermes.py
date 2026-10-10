@@ -144,7 +144,7 @@ BRIDGE_INSTRUCTIONS = (  # what the Softmax bridge sends with every run (metta b
     "This IDE session acts as Softmax player ply_fake. Use --server on softmax and coworld "
     "commands. Never print credentials or request them in chat."
 )
-CONFIRM_LINE = re.compile(r"To send exactly this, reply: confirm (P-[0-9a-f]{4,})\n")
+CONFIRM_LINE = re.compile(r"To send exactly this, reply: confirm (P-[0-9a-f]{4,})(?:\n|$)")
 
 
 def _free_port() -> int:

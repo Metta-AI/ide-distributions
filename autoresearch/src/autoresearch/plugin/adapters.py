@@ -12,8 +12,8 @@ blocks the tool, because the chat must never fall back to research tools.
 Hooks for the chat: `pre_llm_call` (platform `api_server`) records the session, injects the
 chat brief and runs the coach's exact-line commands; `pre_tool_call` allows only the
 `autoresearch_coach` tools in a recorded chat session (or a turn Hermes bound to
-`api_server`); `transform_llm_output` appends the plugin's own lines (proposal renderings,
-"Sent ..." lines) to a chat reply. `register` also registers the coach tools.
+`api_server`); `transform_llm_output` puts the plugin's own lines (proposal renderings,
+"Sent ..." lines) first in a chat reply, above the model's escaped text. `register` also registers the coach tools.
 """
 
 import json
@@ -298,8 +298,8 @@ def pre_llm_call(is_first_turn=False, session_id=None, platform=None, user_messa
 
 def transform_llm_output(response_text=None, session_id=None, platform=None, turn_id=None,
                          **kwargs):
-    """A chat reply with the plugin's lines appended (``coach.transform``); None elsewhere,
-    which leaves the reply unchanged."""
+    """A chat reply with the plugin's lines first (``coach.transform``); None elsewhere, which
+    leaves the reply unchanged."""
     if platform != coach.CHAT_PLATFORM or not isinstance(response_text, str):
         return None
     try:

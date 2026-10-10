@@ -3,6 +3,7 @@ proposals, exact-line commands, the chat tool allowlist and the chat budget."""
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -764,3 +765,20 @@ def test_only_a_refusal_means_nothing_was_sent(tmp_path, body, error):
     env = _cli_script(tmp_path, body)
     with pytest.raises(error):
         coach.send_inbound((tmp_path, env), "steer", STEER)
+
+
+def test_note_text_cannot_form_markup_in_the_plugin_block(chat):
+    """A CLI reason in a note is escaped: ``['now']`` plus a model link-reference definition
+    must not become a link, and no HTML can open."""
+    pid = _shown_proposal(chat)
+    chat.cli.stdout["comms"] = json.dumps({"ok": False, "error": {
+        "message": "invalid", "problems": ["urgency: must be one of ['now'] <b>x</b> & y"]}})
+    _turn(line=f"confirm {pid}")
+    _settled()
+    reply = _reply(text="[\'now\']: https://example.invalid/phish")
+    block, _, model = reply.partition("\n\n---\n\n")
+    assert "\\['now']" in block and "&lt;b>" in block and "&amp; y" in block
+    assert "<b>" not in block
+    sending = next(line for line in block.split("\n\n") if line.startswith("Sending"))
+    assert not re.search(r"(?<!\\)\[", sending)  # every [ in the note is escaped
+    assert model.startswith("[")  # the model's own text: escaped for HTML, a stray link-ref def
