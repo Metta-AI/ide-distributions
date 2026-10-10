@@ -47,6 +47,7 @@ import datetime
 import json
 import os
 import re
+import signal
 import subprocess
 import threading
 import time
@@ -102,6 +103,11 @@ def _now() -> float:
 
 class Refused(Exception):
     """A coach tool or send that must not run; the message says why, in plain words."""
+
+
+class SendUnknown(Exception):
+    """A send whose outcome is not known (timed out, or failed unexpectedly): it may or may
+    not have been committed."""
 
 
 # --- sessions ---
@@ -224,15 +230,35 @@ def log_error(hook: str, session_id: str | None, error: BaseException) -> None:
 # --- running the profile CLI ---
 
 
+def spawn(argv: list[str], env: dict[str, str], cwd: str, timeout: float):
+    """Run ``argv`` (no shell) in a session of its own and return its CompletedProcess. On
+    timeout the whole process group is killed (the CLI's ``git commit``/``git push`` children
+    too, not only the shim) and TimeoutExpired is raised."""
+    process = subprocess.Popen(
+        argv, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
 def run_cli(env: dict[str, str], args: list[str], timeout: float) -> dict:
     """``"$AUTORESEARCH_CLI" <args>`` with no shell; its JSON envelope, or a failure
-    envelope when it printed none."""
+    envelope when it printed none (``error.timed_out`` when it was killed at ``timeout``)."""
     argv = [env["AUTORESEARCH_CLI"], *args]
     try:
-        result = subprocess.run(
-            argv, env=env, cwd=env[runctx.ENV_HERMES_HOME], capture_output=True, text=True,
-            timeout=timeout, check=False, stdin=subprocess.DEVNULL,
-        )
+        result = spawn(argv, env, env[runctx.ENV_HERMES_HOME], timeout)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": {"message": f"{args[0]}: timed out after {timeout:.0f} s",
+                                       "timed_out": True}}
     except (OSError, subprocess.SubprocessError) as error:
         return {"ok": False, "error": {"message": f"{args[0]}: {type(error).__name__}: {error}"}}
     try:
@@ -578,6 +604,8 @@ def send_inbound(where: tuple[Path, dict[str, str]], kind: str, payload: dict) -
     )
     if not sent.get("ok"):
         error = sent.get("error") or {}
+        if error.get("timed_out"):
+            raise SendUnknown(str(error.get("message")))
         problems = "; ".join(str(p) for p in error.get("problems") or [])
         raise Refused(problems or str(error.get("message") or "the send failed"))
     return str((sent.get("data") or {}).get("id"))
@@ -593,10 +621,18 @@ def _send_in_background(key: str, where, label: str, kind: str, payload: dict, e
     def work():
         try:
             inbound_id = send_inbound(where, kind, payload)
-        except Exception as error:  # noqa: BLE001 - every failure is reported to the coach
-            reason = str(error) if isinstance(error, Refused) else type(error).__name__
-            STORE.note(key, f"Sending {label} failed: {reason}. Nothing was sent.")
+        except Refused as refused:  # the CLI refused it: nothing was committed
+            STORE.note(key, f"Sending {label} failed: {refused}. Nothing was sent.")
             _log({**event, "event": "send_failed"}, where)
+            return
+        except Exception as error:  # noqa: BLE001 - timed out or broke: outcome unknown
+            reason = str(error) if isinstance(error, SendUnknown) else type(error).__name__
+            STORE.note(key, (
+                f"Sending {label} did not finish ({reason}): it may or may not have been sent. "
+                "Check message_status (or list the inbox with get_message) before proposing it "
+                "again."
+            ))
+            _log({**event, "event": "send_unknown"}, where)
             return
         STORE.note(key, f"Sent {label} as {inbound_id}.")
         _log({**event, "event": "sent", "inbound": inbound_id}, where)
@@ -725,4 +761,30 @@ def transform(session_id: str | None, response_text: str, turn_id: str | None) -
     if not lines:
         return None
     _log({"event": "shown", "session_id": session_id, "turn": turn_id, "lines": len(lines)})
-    return f"{response_text.rstrip()}\n\n" + "\n\n".join(lines)
+    return f"{neutralize(response_text).rstrip()}\n\n" + "\n\n".join(lines)
+
+
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
+
+
+def neutralize(text: str) -> str:
+    """The model's reply made unable to swallow what follows it: outside fenced code, ``&`` and
+    ``<`` are HTML-escaped (no comment, ``<details>`` or hidden element can open), and a fence
+    left open is closed. Used whenever the plugin appends its own block after model text."""
+    out, fence = [], None  # fence: the open fence's character and length
+    for line in text.split("\n"):
+        match = _FENCE.match(line)
+        if fence is None:
+            if match and not (match.group(1)[0] == "`" and "`" in line[match.end():]):
+                fence = (match.group(1)[0], len(match.group(1)))
+                out.append(line)
+                continue
+            out.append(line.replace("&", "&amp;").replace("<", "&lt;"))
+            continue
+        out.append(line)
+        if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= fence[1] \
+                and not line[match.end():].strip():
+            fence = None
+    if fence is not None:
+        out.append(fence[0] * fence[1])
+    return "\n".join(out)

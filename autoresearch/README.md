@@ -438,13 +438,19 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
   it will be sent, as JSON in a fenced code block (so Markdown or HTML in a value shows as
   text), with control and format characters such as bidi overrides and zero-width spaces shown
   as `\uXXXX` escapes, never the model's summary, ending `To send exactly this, reply: confirm
-  P-xxxx`. Only after that is it confirmable, and it is appended again to every reply while it
+  P-xxxx`. Unicode default-ignorable characters (variation selectors, tag characters, Hangul
+  fillers) are escaped too, as JSON escapes, so the block parses back to the exact payload.
+  The model's text before the block is neutralized (`&` and `<` escaped outside code, an
+  unclosed code fence closed), so no comment, `<details>` or hidden element it opens can hide
+  the block. Only after that is it confirmable, and it is appended again to every reply while it
   is pending, so the plugin's rendering is always the last one shown for that id. When the coach's whole line (surrounding
   whitespace stripped) is `confirm P-xxxx` in that session, the plugin runs `comms inbound
   <kind> --json <payload> --author coach:<AUTORESEARCH_PLAYER_ID>` itself, once. The send runs
   on a plugin thread (it can wait for the canonical lock longer than Hermes's 30 s hook
   timeout); the turn says "Sending P-xxxx", and the next reply carries `Sent P-xxxx as I-...`
-  or the failure. `cancel P-xxxx` drops it. Any other line, another session, an
+  or the failure. The send runs in its own process group, killed whole after 300 s; a send that
+  timed out or broke unexpectedly is reported as "may or may not have been sent", never as
+  "nothing was sent". `cancel P-xxxx` drops it. Any other line, another session, an
   expired, cancelled or never-shown proposal sends nothing. State is keyed by profile and
   session. A gateway restart drops all proposals and any send outcome not yet shown. A context
   compression inside a turn starts a new session id: the coach tools refuse for the rest of

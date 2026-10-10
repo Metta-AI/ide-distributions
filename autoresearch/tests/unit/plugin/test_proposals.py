@@ -145,3 +145,29 @@ def test_a_reply_names_the_answered_title_in_its_own_block():
 def test_line_states_the_exact_confirm():
     proposal = proposals.Store().propose("s1", "steer", STEER, "x", 0.0)
     assert proposal.line().endswith(f"To send exactly this, reply: confirm {proposal.id}")
+
+
+
+@pytest.mark.parametrize("char", [
+    "\U000e0041",  # tag LATIN CAPITAL A (astral, ASCII-smuggling channel)
+    "\U000e0100",  # variation selector 17 (astral)
+    "\ufe0f",  # variation selector 16 (category Mn)
+    "\u034f",  # combining grapheme joiner
+    "\u115f", "\u1160", "\u3164", "\uffa0",  # Hangul fillers
+    "\u180b", "\u180f",  # Mongolian variation selectors and vowel separator
+    "\u17b4",  # Khmer inherent vowel
+    "\U000f0000",  # private use (astral)
+])
+def test_ignorable_and_astral_characters_are_escaped_as_valid_json(char):
+    """N2, N3: every invisible character is escaped, and the block still parses back exactly."""
+    payload = {"text": f"Stop{char}kill-steals", "urgency": "now"}
+    rendering = proposals.render("steer", payload)
+    assert char not in rendering
+    assert json.loads(_code_block(rendering)) == payload
+    assert "Hidden or control characters are shown as" in rendering
+
+
+def test_visible_characters_outside_the_bmp_stay_as_they_are():
+    payload = {"text": "Stop kill-steals \U0001f600", "urgency": "now"}
+    rendering = proposals.render("steer", payload)
+    assert "\U0001f600" in rendering and json.loads(_code_block(rendering)) == payload

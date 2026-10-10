@@ -38,21 +38,37 @@ EXPIRY_SECONDS = 15 * 60
 ID_PATTERN = r"P-[0-9a-f]{4,}"
 _ID_BYTES = 3  # six hex digits
 # Characters a Markdown or HTML client could hide or reorder: controls, format characters (bidi
-# overrides, zero-width), private use, surrogates and line/paragraph separators.
+# overrides, zero-width), private use, surrogates and line/paragraph separators, plus Unicode's
+# Default_Ignorable_Code_Point ranges outside those categories (Python does not expose the
+# property): the combining grapheme joiner, Hangul fillers, Mongolian variation selectors,
+# variation selectors (the "variation-selector smuggling" channel) and the tag block.
 _HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
+_IGNORABLE_RANGES = (
+    (0x034F, 0x034F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xE0000, 0xE0FFF),
+)
 _BACKTICKS = re.compile(r"`+")
 
 
+def _hidden(char: str) -> bool:
+    code = ord(char)
+    return unicodedata.category(char) in _HIDDEN_CATEGORIES or any(
+        low <= code <= high for low, high in _IGNORABLE_RANGES
+    )
+
+
+def _escape(code: int) -> str:
+    """A JSON escape: ``\\uXXXX``, or a UTF-16 surrogate pair above U+FFFF."""
+    if code <= 0xFFFF:
+        return f"\\u{code:04x}"
+    code -= 0x10000
+    return f"\\u{0xD800 + (code >> 10):04x}\\u{0xDC00 + (code & 0x3FF):04x}"
+
+
 def visible(text: str) -> str:
-    """``text`` with every hidden character but a newline replaced by its ``\\uXXXX`` escape."""
-    out = []
-    for char in text:
-        if char != "\n" and unicodedata.category(char) in _HIDDEN_CATEGORIES:
-            code = ord(char)
-            out.append(f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}")
-        else:
-            out.append(char)
-    return "".join(out)
+    """``text`` (JSON) with every hidden character but a newline replaced by its JSON escape,
+    so the result still parses to the same value."""
+    return "".join(_escape(ord(char)) if char != "\n" and _hidden(char) else char for char in text)
 
 
 def fenced(text: str, info: str = "") -> str:

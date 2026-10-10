@@ -14,8 +14,9 @@ shim switch in section 5 are not built. Where the build differs from this text:
 - `show_card` runs `queue show` only (the shim also read briefing and handoff files).
 - Hermes v0.21.6 tool search: the chat allowlist also passes `tool_search`/`tool_describe` and a
   `tool_call` whose calls are all coach tools.
-- Renderings are fenced JSON with hidden characters escaped, shown again on every reply while
-  pending. Sends run on a plugin thread (Hermes bounds hooks at 30 s). State is keyed by
+- Renderings are fenced JSON with hidden and default-ignorable characters escaped (valid JSON
+  escapes), shown again on every reply while pending, after the model's text is neutralized
+  (HTML-escaped outside code, open fences closed). Sends run on a plugin thread (Hermes bounds hooks at 30 s). State is keyed by
   profile home and session id. The tool names stay as designed; the plugin checks Hermes's
   registry maps each to its handler and refuses all coach tools otherwise. A turn gets at most
   8 tool rounds.

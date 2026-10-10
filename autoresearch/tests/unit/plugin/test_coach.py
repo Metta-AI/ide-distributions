@@ -89,7 +89,8 @@ def chat(tmp_path, monkeypatch):
     module.get_hermes_home = lambda: resolver.home
     monkeypatch.setitem(sys.modules, "hermes_constants", module)
     fake = FakeCLI(tmp_path)
-    monkeypatch.setattr(coach.subprocess, "run", fake)
+    monkeypatch.setattr(coach, "spawn", lambda argv, env, cwd, timeout: fake(
+        argv, env=env, cwd=cwd, timeout=timeout))
     monkeypatch.setattr(coach, "STORE", proposals.Store())
     monkeypatch.setattr(coach, "_sessions", {})
     monkeypatch.setattr(coach, "_rounds", {})
@@ -559,12 +560,12 @@ def test_a_slow_send_never_holds_the_hook_and_is_sent_once(chat, monkeypatch):
     gate = threading.Event()
     real = chat.cli.__call__
 
-    def slow(argv, **kwargs):
+    def slow(argv, env, cwd, timeout):
         if argv[1:3] == ["comms", "inbound"] and "--dry-run" not in argv:
             gate.wait(10)  # the canonical lock is held elsewhere
-        return real(argv, **kwargs)
+        return real(argv, env=env, cwd=cwd, timeout=timeout)
 
-    monkeypatch.setattr(coach.subprocess, "run", slow)
+    monkeypatch.setattr(coach, "spawn", slow)
     started = time.monotonic()
     context = _turn(line=f"confirm {pid}")
     assert time.monotonic() - started < 1.0
@@ -637,3 +638,82 @@ def test_a_chat_turn_gets_at_most_eight_tool_rounds(chat):
     blocked = call("t1", "r8")
     assert blocked["action"] == "block" and "8 tool rounds" in blocked["message"]
     assert call("t2", "r0") is None  # a new turn starts again
+
+
+# --- fix round 2 ---
+
+
+@pytest.mark.parametrize("tail", [
+    "All set. <!-- ", "Here it is:\n<details><summary>more</summary>", "<div hidden>",
+    "Look:\n```\nunclosed code", "~~~~\nunclosed tilde fence", "<span style='display:none'>",
+])
+def test_model_text_cannot_swallow_the_plugin_block(chat, tail):
+    """N1: whatever the model writes before it, the plugin's rendering stays visible."""
+    _turn()
+    pid = _propose()["proposal"]
+    fake = f"Proposal {pid}: steer, harmless. To send exactly this, reply: confirm {pid}\n"
+    reply = _reply(text=fake + tail)
+    block_start = reply.index(f"Proposal {pid}: steer, exactly as it will be sent:")
+    before = reply[:block_start]
+    assert "<" not in before.replace("&lt;", "")  # no raw HTML can open before the block
+    fences = [line for line in before.splitlines() if line.lstrip().startswith(("```", "~~~"))]
+    assert len(fences) % 2 == 0  # every fence the model opened is closed before the block
+    assert '"text": "Stop kill-steals"' in reply[block_start:]
+    assert reply.rstrip().endswith(f"confirm {pid}")
+
+
+def test_neutralize_leaves_code_and_plain_text_readable():
+    text = "a < b & c\n```python\nif a < b:\n```\ndone"
+    assert coach.neutralize(text) == "a &lt; b &amp; c\n```python\nif a < b:\n```\ndone"
+
+
+def test_a_send_that_breaks_unexpectedly_is_reported_as_unknown(chat, monkeypatch):
+    """N4: an outcome the plugin cannot know is never reported as "nothing was sent"."""
+    pid = _shown_proposal(chat)
+
+    def broken(where, kind, payload):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(coach, "send_inbound", broken)
+    _turn(line=f"confirm {pid}")
+    _settled()
+    reply = _reply()
+    assert "may or may not have been sent" in reply and "Nothing was sent" not in reply
+
+
+def test_a_timed_out_send_is_reported_as_unknown(chat, monkeypatch):
+    pid = _shown_proposal(chat)
+    coach_spawn = coach.spawn
+
+    def timeout(argv, env, cwd, timeout):
+        if "--dry-run" not in argv:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return coach_spawn(argv, env, cwd, timeout)
+
+    monkeypatch.setattr(coach, "spawn", timeout)
+    _turn(line=f"confirm {pid}")
+    _settled()
+    reply = _reply()
+    assert "timed out" in reply and "may or may not have been sent" in reply
+    assert "message_status" in reply
+
+
+def _alive(pid: int) -> bool:
+    """True while ``pid`` runs (a killed process waiting to be reaped counts as dead)."""
+    state = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
+                           check=False)
+    return bool(state.stdout.strip()) and not state.stdout.strip().startswith("Z")
+
+
+def test_spawn_kills_the_whole_process_group_on_timeout(tmp_path):
+    """N4: the CLI's own children (git commit, git push) die with it."""
+    pid_file = tmp_path / "child.pid"
+    script = tmp_path / "cli.sh"  # a file, not `sh -c` (tests/unit/gota/conftest.py guard)
+    script.write_text(f"sleep 60 & echo $! > {pid_file}.tmp && mv {pid_file}.tmp {pid_file}\nwait\n")
+    with pytest.raises(subprocess.TimeoutExpired):
+        coach.spawn(["/bin/sh", str(script)], {"PATH": "/bin:/usr/bin"}, str(tmp_path), 3)
+    child = int(pid_file.read_text())  # written well inside the 3 s, even on a busy machine
+    deadline = time.monotonic() + 15
+    while _alive(child):
+        assert time.monotonic() < deadline, "the grandchild survived the timeout"
+        time.sleep(0.1)
