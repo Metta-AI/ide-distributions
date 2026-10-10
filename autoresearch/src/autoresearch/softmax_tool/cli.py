@@ -45,8 +45,11 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   ``lifecycle.next_launch_after`` is the fallback for when the answers cannot be read (and for
   a league refusal): the credit backoff, counted by ``refusals`` of the same asks only. A
   credit denial of an ``awaiting-permit`` experiment moves it to ``awaiting-credits``. A
-  ``stopped`` experiment (the coach declined it) is refused (``experiment_closed``) before
-  anything is created.
+  ``stopped`` (the coach declined it) or ``reviewed`` experiment, or one whose wait records a
+  declined ask, is refused (``experiment_closed``) before anything is created. A refusal that
+  says the coach said no ends the batch at once (``permit_declined: true``). While permit asks
+  wait (also during a credit wait, which keeps the batch's asks in ``permit_wait``), only
+  their exact ``--batch``/``--attempt``/``--batches`` may run (``permit_batch_mismatch``).
   Rerunning the same ``--batch``/``--attempt`` later creates only the missing requests. A new
   attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
@@ -156,6 +159,7 @@ from autoresearch.softmax_tool.identity import IdentityError, identity_problems
 from autoresearch.softmax_tool.league import episode_rows
 from autoresearch.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
 from autoresearch.softmax_tool.protocol import (
+    PERMIT_DECLINED,
     PERMIT_OVER_CAP,
     CreditDenied,
     LeagueNotChosen,
@@ -180,7 +184,9 @@ BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
 BACKOFF_CAP = timedelta(hours=8)
 LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
 # Statuses whose evaluation is over: ``xp create`` refuses them (``experiment_closed``).
-CLOSED_EXPERIMENT = ("stopped",)
+CLOSED_EXPERIMENT = ("stopped", "reviewed")
+# Statuses in which ``lifecycle.permit_wait`` names the batch that must run next.
+WAITING_FOR_PERMIT = ("awaiting-permit", "awaiting-credits")
 # ``xp create``'s refusal flags when nothing refused the batch.
 NOT_REFUSED = {"credit_denied": False, "permit_required": False, "league_not_chosen": False}
 
@@ -447,11 +453,22 @@ def _credits(ctx, sm, args) -> dict:
 
 
 def _credit_denied(
-    store, experiment: str, meta: dict, reason: str, base: timedelta, credits: float | None
+    store,
+    experiment: str,
+    meta: dict,
+    reason: str,
+    base: timedelta,
+    credits: float | None,
+    permit: tuple | None = None,
 ) -> dict:
+    """``awaiting-credits`` with the backoff (A10). ``permit`` is ``(args, asks, league_id)``
+    when requests earlier in the batch were refused for a permit: their asks are kept in
+    ``lifecycle.permit_wait`` too, so xp-poll keeps reading their answers (a no stops the
+    experiment during the credit wait)."""
     lifecycle = dict(meta.get("lifecycle") or {})
     denials = int(lifecycle.get("credit_denials", 0)) + 1
-    after = datetime.now(UTC) + credit_backoff(denials, base)
+    now = datetime.now(UTC)
+    after = now + credit_backoff(denials, base)
     next_launch_after = after.isoformat(timespec="seconds")
     patch: dict = {
         "lifecycle": {
@@ -461,6 +478,10 @@ def _credit_denied(
             "credits_at_denial": credits,
         }
     }
+    if permit is not None and permit[1]:
+        args, asks, league_id = permit
+        wait, _ = _permit_wait(lifecycle, args, None, asks, league_id, base, now)
+        patch["lifecycle"]["permit_wait"] = wait
     if meta["status"] in ("uploaded", "evaluating", "awaiting-permit"):
         patch["status"] = "awaiting-credits"
     store.update(experiment, patch)
@@ -478,21 +499,17 @@ def _next_utc_day(now: datetime) -> datetime:
     return datetime.combine(now.astimezone(UTC).date() + timedelta(days=1), dtime.min, UTC)
 
 
-def _awaiting_coach(
-    store,
-    experiment: str,
-    meta: dict,
+def _permit_wait(
+    lifecycle: dict,
     args,
     refusal: LeagueNotChosen | None,
     asks: list[dict],
     league_id: str,
     base: timedelta,
-) -> dict:
-    """The coach refused the batch: the league choice (``refusal``), or one permit ask per
-    refused request (``asks``). ``awaiting-permit`` with the wait recorded (module docstring,
-    ``xp create``)."""
-    lifecycle = dict(meta.get("lifecycle") or {})
-    now = datetime.now(UTC)
+    now: datetime,
+) -> tuple[dict, datetime]:
+    """``lifecycle.permit_wait`` for the coach's refusal of this batch, and the fallback
+    relaunch time (module docstring, ``xp create``)."""
     kind = "league" if refusal is not None else "permit"
     previous = lifecycle.get("permit_wait") or {}
     keys = sorted(entry["ask"] or "" for entry in asks)
@@ -519,6 +536,26 @@ def _awaiting_coach(
     if any(entry["state"] == PERMIT_OVER_CAP for entry in asks):
         wait["not_before"] = _next_utc_day(now).isoformat(timespec="seconds")
         after = max(after, _next_utc_day(now))
+    return wait, after
+
+
+def _awaiting_coach(
+    store,
+    experiment: str,
+    meta: dict,
+    args,
+    refusal: LeagueNotChosen | None,
+    asks: list[dict],
+    league_id: str,
+    base: timedelta,
+) -> dict:
+    """The coach refused the batch: the league choice (``refusal``), or one permit ask per
+    refused request (``asks``). ``awaiting-permit`` with the wait recorded (module docstring,
+    ``xp create``)."""
+    lifecycle = dict(meta.get("lifecycle") or {})
+    wait, after = _permit_wait(
+        lifecycle, args, refusal, asks, league_id, base, datetime.now(UTC)
+    )
     next_launch_after = after.isoformat(timespec="seconds")
     patch: dict = {
         "lifecycle": {**lifecycle, "next_launch_after": next_launch_after, "permit_wait": wait}
@@ -526,10 +563,12 @@ def _awaiting_coach(
     if meta["status"] in ("uploaded", "evaluating", "awaiting-credits"):
         patch["status"] = "awaiting-permit"
     store.update(experiment, patch)
+    kind = wait["kind"]
     return {
         **NOT_REFUSED,
         "permit_required": kind == "permit",
         "league_not_chosen": kind == "league",
+        "permit_declined": any(entry["state"] == PERMIT_DECLINED for entry in asks),
         "reason": refusal.reason if refusal is not None else asks[0]["reason"],
         "permit_asks": asks,
         "next_launch_after": next_launch_after,
@@ -593,6 +632,33 @@ def check_new_attempt(
         )
 
 
+def _check_permit_wait(experiment: str, meta: dict, args) -> None:
+    """While the experiment waits on permit asks (``lifecycle.permit_wait``, also during a
+    credit wait), only the exact batch they were filed for may run: the same ``--batch``,
+    ``--attempt`` and ``--batches`` give the same requests and idempotency keys, so each one
+    replays against its own ask (``permit_batch_mismatch`` otherwise). A wait with a declined
+    ask is final (``experiment_closed``): xp-poll stops the experiment."""
+    wait = (meta.get("lifecycle") or {}).get("permit_wait") or {}
+    if wait.get("kind") != "permit" or meta.get("status") not in WAITING_FOR_PERMIT:
+        return
+    if any(entry.get("state") == PERMIT_DECLINED for entry in wait.get("asks") or []):
+        raise Refused(
+            "experiment_closed",
+            f"the coach declined an XP request of {experiment}; its evaluation does not run "
+            "again",
+        )
+    saved = (wait.get("batch"), wait.get("attempt"), wait.get("batches"))
+    if saved != (args.batch, args.attempt, args.batches):
+        batch, attempt, batches = saved
+        raise Refused(
+            "permit_batch_mismatch",
+            f"{experiment} waits on the coach's permit asks for --batch {batch} --attempt "
+            f"{attempt} --batches {batches}; run exactly that, so the approved requests replay "
+            "under the same keys",
+            {"batch": batch, "attempt": attempt, "batches": batches},
+        )
+
+
 def _xp_create(ctx, sm, args) -> dict:
     base = backoff_base(os.environ)
     with experiment_lock(ctx, args.experiment, "xp create"):
@@ -609,6 +675,7 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
             "experiment_closed",
             f"{experiment} is {meta['status']}; its evaluation does not run again",
         )
+    _check_permit_wait(experiment, meta, args)
     binding = meta.get("candidate_binding")
     if not binding:
         raise Refused("no_binding", f"{experiment} has no candidate_binding; upload first")
@@ -649,7 +716,9 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         )
         if isinstance(result, PermitRequired):
             # Each request has its own ask: file them all in this run, so the coach sees the
-            # whole batch at once. A refused request holds no credits.
+            # whole batch at once. A refused request holds no credits. A no ends the batch at
+            # once (H2): nothing more is submitted, and the wait records it, so xp-poll stops
+            # the experiment and ``xp create`` refuses it from now on.
             request = tag(experiment, args.batch, args.attempt, seed, arm)
             asks.append(
                 {
@@ -661,6 +730,8 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
                     "reason": result.reason,
                 }
             )
+            if result.state == PERMIT_DECLINED:
+                break
             continue
         if isinstance(result, CreditDenied | LeagueNotChosen):
             denial = result  # the whole batch: stop
@@ -687,7 +758,9 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     meta, _ = store.load(experiment)
     if isinstance(denial, CreditDenied):
         credits = read_credits(sm)
-        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}
+        permit = (args, asks, _league_id())
+        denied = _credit_denied(store, experiment, meta, denial.reason, base, credits, permit)
+        return {**report, **denied, "permit_asks": asks}
     if denial is not None or asks:
         waiting = _awaiting_coach(store, experiment, meta, args, denial, asks, _league_id(), base)
         return {**report, **waiting}

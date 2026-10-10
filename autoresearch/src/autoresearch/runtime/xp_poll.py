@@ -91,7 +91,12 @@ Only asks without a final answer are read again (``permit_answers``; final answe
 set, so they get their own help request.
 
 A league refusal relaunches on that backoff. Relaunches of every kind share the one-per-run
-limit.
+limit. A permit relaunch names the exact batch of the asks (``permit_wait.batch``, ``attempt``,
+``batches``; ``rebuild.launch_step``), and ``xp create`` refuses any other batch while they wait.
+
+``awaiting-credits`` with permit asks in ``permit_wait`` (a credit denial later in a batch whose
+earlier requests were refused for a permit): the help request about the asks, and their answers
+read each run; a no stops the experiment as above, before any credit relaunch.
 
 Each experiment is handled independently: a failure is logged to
 ``.supervisor/runtime/xp_poll.log`` and the others go on. One run at a time
@@ -534,7 +539,13 @@ def _commit_relaunch(canonical: Path, experiment: dict, reason: str) -> CardSpec
     """The relaunch request of a waiting experiment (marker ``markers.relaunch_marker``), unless
     an open request covers the experiment."""
     lifecycle = experiment.get("lifecycle") or {}
-    attempt = next_launch_attempt(experiment)
+    wait = lifecycle.get("permit_wait") or {}
+    # A permit wait names its batch's attempt (``launch_step`` uses the same).
+    attempt = (
+        int(wait["attempt"])
+        if wait.get("kind") == "permit" and wait.get("attempt") is not None
+        else next_launch_attempt(experiment)
+    )
     marker = relaunch_marker(experiment["id"], attempt, lifecycle["next_launch_after"])
     marker, title, why, mode = launch_step(experiment, reason, marker)
     spec = CardSpec("", title, mode, why, _experiment_refs(experiment), RUNTIME, CARD_PRIORITY)
@@ -577,12 +588,20 @@ def permit_answers(ctx: RunContext, sm: Softmax, wait: dict) -> list[str | None]
     """The coach's answer to each ask of ``wait`` (``Softmax.permit_answer``; None when it
     cannot be read). A refusal the server already called declined counts as a no. Only asks
     without a final answer are read again: a yes, a used yes and a no are kept in
-    ``_answers_path`` (an answer is given once)."""
+    ``_answers_path`` (an answer is given once). The cache is never pruned: one small entry per
+    answered ask."""
     path = _answers_path(ctx)
     try:
-        known = read_json(path) if path.exists() else {}
+        cached = read_json(path) if path.exists() else {}
     except ValueError:
-        known = {}
+        cached = {}
+    # Only final answers count; anything else (a hand edit, a torn or foreign file) is read again.
+    final = (ANSWER_YES, ANSWER_USED, ANSWER_NO)
+    known = (
+        {key: value for key, value in cached.items() if isinstance(key, str) and value in final}
+        if isinstance(cached, dict)
+        else {}
+    )
     answers, learned = [], {}
     for entry in wait.get("asks") or []:
         key = entry.get("ask")
@@ -615,7 +634,8 @@ def _stop_declined(canonical: Path, experiment: dict, now: datetime.datetime) ->
     with canonical_lock(canonical):
         current, _ = store.load(experiment_id)
         lifecycle = current.get("lifecycle") or {}
-        if current.get("status") != "awaiting-permit" or lifecycle.get("permit_wait") != wait:
+        waiting = current.get("status") in ("awaiting-permit", "awaiting-credits")
+        if not waiting or lifecycle.get("permit_wait") != wait:
             return
         stopped = {"by": "coach", "at": now.isoformat(timespec="seconds"), "wait": wait}
         store.update(
@@ -638,6 +658,23 @@ def _stop_declined(canonical: Path, experiment: dict, now: datetime.datetime) ->
         )
         if not already_published(canonical, message):
             publish_message(canonical, message, allow_no_remote=True)
+
+
+def _credit_wait_declined(
+    ctx: RunContext, sm: Softmax, experiment: dict, now: datetime.datetime, result: XpPollRun
+) -> bool:
+    """An ``awaiting-credits`` experiment whose batch also has permit asks (H1): the coach is
+    told about them, their answers are read, and a no stops the experiment (True) before any
+    credit relaunch."""
+    wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
+    if wait.get("kind") != "permit" or not wait.get("asks"):
+        return False
+    _publish_once(ctx.canonical, coach_wait_message(experiment), result, experiment["id"])
+    if ANSWER_NO not in permit_answers(ctx, sm, wait):
+        return False
+    _stop_declined(ctx.canonical, experiment, now)
+    result.stopped.append(experiment["id"])
+    return True
 
 
 def _publish_once(
@@ -742,6 +779,10 @@ def poll_experiment(
             )
             if review is not None:
                 result.reviews.append(review)
+    elif experiment.get("status") == "awaiting-credits" and _credit_wait_declined(
+        ctx, sm, experiment, now, result
+    ):
+        return
     elif experiment.get("status") == "awaiting-credits" and not result.launches:
         launch = _request_relaunch(canonical, credits_view, experiment, now)
         if launch is not None:

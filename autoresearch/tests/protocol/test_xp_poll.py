@@ -607,6 +607,84 @@ def test_the_stop_note_counts_each_seed_and_arm_once(host, monkeypatch):
     assert "with 1 of its 4 XP requests run" in note["body"]
 
 
+def test_a_credit_denial_keeps_the_batchs_asks_and_a_no_still_stops_it(host, monkeypatch):
+    """H1: requests refused for a permit before a credit denial in the same batch keep their
+    asks; xp-poll tells the coach and reads them during the credit wait, and a no stops the
+    experiment before any credit relaunch."""
+    experiment, refusing, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    _answer(host, "yes", keys[1:2])  # the second request may run; one credit for it only
+    _set_fake_state(host, credits=1)
+    rerun = _refused_launch(host, refusing, experiment)
+    assert rerun["credit_denied"] and len(rerun["created"]) == 1
+    assert [entry["ask"] for entry in rerun["permit_asks"]] == keys[:1]
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "awaiting-credits"
+    assert [entry["ask"] for entry in meta["lifecycle"]["permit_wait"]["asks"]] == keys[:1]
+
+    _answer(host, "no", keys[:1])
+    stopped = _poll(host, at(1))
+    assert stopped.stopped == [experiment] and stopped.launches == []
+    assert host.store.load(experiment)[0]["status"] == "stopped"
+    assert _coach_messages(host)[-1]["runtime_key"].startswith("coach-declined:")
+
+
+def test_a_declined_refusal_stops_the_batch_at_once(host, monkeypatch):
+    """H2: when the server says the coach said no, nothing more of the batch is submitted, the
+    wait records the no, ``xp create`` refuses the experiment from then on, and xp-poll stops
+    it."""
+    experiment, refusing, wait, _ = _awaiting_permit(host, monkeypatch)
+    _answer(host, "no", [wait["asks"][0]["ask"]])
+    refusing.creates.clear()
+    rerun = _refused_launch(host, refusing, experiment)
+    assert rerun["permit_declined"] and len(refusing.creates) == 1  # stopped at the first
+    meta, _ = host.store.load(experiment)
+    assert [entry["state"] for entry in meta["lifecycle"]["permit_wait"]["asks"]] == ["declined"]
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    with pytest.raises(softmax_cli.Refused) as caught:
+        softmax_cli._xp_create(launcher, refusing, _cli_args(experiment))
+    assert caught.value.reason == "experiment_closed" and len(refusing.creates) == 1
+    assert _poll(host, at(1)).stopped == [experiment]
+
+
+def test_a_permit_relaunch_names_and_runs_exactly_the_saved_batch(host, monkeypatch):
+    """M: the relaunch card runs the batch the asks were filed for (batch 2, attempt 2, batches
+    3 here), whatever ``launch_attempts`` says; ``xp create`` refuses any other batch."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    saved = {**wait, "batch": 2, "attempt": 2, "batches": 3}
+    meta, _ = host.store.load(experiment)
+    host.store.update(experiment, {"lifecycle": {**meta["lifecycle"], "permit_wait": saved}})
+    host.runtime_commit("a wait for batch 2 of 3, attempt 2")
+    _answer(host, "yes", [entry["ask"] for entry in wait["asks"]])
+    [launch] = _poll(host, at(1)).launches
+    assert "xp create " + experiment + " --batch 2 --attempt 2 --batches 3" in launch.why
+    assert ":2:after:" in launch.why  # the relaunch marker names attempt 2
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    with pytest.raises(softmax_cli.Refused) as caught:
+        softmax_cli._xp_create(launcher, host.sm, _cli_args(experiment))  # batch 1, attempt 1
+    assert caught.value.reason == "permit_batch_mismatch"
+    assert caught.value.details == {"batch": 2, "attempt": 2, "batches": 3}
+    exact = argparse.Namespace(experiment=experiment, batch=2, attempt=2, batches=3)
+    try:
+        softmax_cli._xp_create(launcher, host.sm, exact)
+    except softmax_cli.Refused as refused:  # later guards may refuse; this one does not
+        assert refused.reason != "permit_batch_mismatch"
+
+
+@pytest.mark.parametrize("cache", ["null", "[]", '"x"', '{"%s": "waiting"}', '{"%s": "bogus"}'])
+def test_a_bad_answers_cache_is_ignored_and_the_asks_read_again(host, monkeypatch, cache):
+    """R1, R2: only a dict of final answers (yes, used, no) counts."""
+    _, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    keys = [entry["ask"] for entry in wait["asks"]]
+    path = host.canonical / ".supervisor" / "runtime" / xp_poll.ANSWERS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cache.replace("%s", keys[0]) if "%s" in cache else cache)
+    _answer(host, "yes", keys)
+    [launch] = _poll(host, at(1)).launches  # every ask read again, all yes
+    assert launch is not None
+    assert read_json(path) == {key: "yes" for key in keys}
+
+
 def test_league_choice_refusal_sends_one_help_request_per_league(host, monkeypatch):
     monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
     monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])

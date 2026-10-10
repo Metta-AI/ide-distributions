@@ -393,14 +393,29 @@ def launch_step(
 ) -> tuple[str, str, str, str]:
     """(marker, title, why, mode) of a card that launches ``experiment``'s XP evaluation with
     attempt ``launch_attempts + 1``. ``reason`` says why (in parentheses); ``marker`` defaults
-    to ``launch:<E>:<attempt>`` (xp-poll passes its relaunch marker)."""
-    attempt = next_launch_attempt(experiment)
+    to ``launch:<E>:<attempt>`` (xp-poll passes its relaunch marker).
+
+    An experiment waiting on permit asks (``lifecycle.permit_wait`` of kind ``permit``) is
+    relaunched with exactly the batch the asks were filed for: its ``--batch``, ``--attempt``
+    and ``--batches``, so the approved requests replay under the same idempotency keys
+    (``softmax xp create`` refuses any other batch while the asks wait)."""
     eid = experiment["id"]
+    wait = (experiment.get("lifecycle") or {}).get("permit_wait") or {}
+    if wait.get("kind") == "permit" and wait.get("attempt") is not None:
+        attempt = int(wait["attempt"])
+        command = (
+            f"--batch {wait['batch']} --attempt {attempt} --batches {wait.get('batches') or 1}"
+        )
+        how = "exactly as written: it sends again the requests the coach was asked about"
+    else:
+        attempt = next_launch_attempt(experiment)
+        command = f"--batch <n> --attempt {attempt}"
+        how = "which creates only the requests still missing"
     why = (
         f"Launch the XP evaluation of {eid}, attempt {attempt} ({reason}). First "
         f'run "$AUTORESEARCH_CLI" softmax xp recover {eid}: requests it finds already exist '
         f'and must not be created again. Then run "$AUTORESEARCH_CLI" softmax xp create {eid} '
-        f"--batch <n> --attempt {attempt}, which creates only the requests still missing."
+        f"{command}, {how}."
     )
     return marker or launch_marker(eid, attempt), f"Launch {eid}", why, "experimentation"
 

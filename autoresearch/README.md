@@ -327,7 +327,10 @@ The runtime reads the coach's answers itself, every run, with the agent token
 - An XP batch the coach refused leaves its experiment `awaiting-permit` (with
   `lifecycle.permit_wait`). When every ask of the batch is approved, xp-poll requests one
   relaunch card at once; it sends each refused request again with the same body and
-  idempotency key, so Softmax grants it against its yes and creates nothing twice. A request
+  idempotency key (the card names the exact `--batch`, `--attempt` and `--batches`, and
+  `xp create` refuses any other batch while the asks wait), so Softmax grants it against its
+  yes and creates nothing twice. A credit denial later in the same batch keeps the asks: their
+  answers are still read during the credit wait, and a no still stops the experiment. A request
   over today's cap waits for the next UTC day, whatever the coach answers before then. A
   relaunch whose price moved past an earlier yes gets new asks, and with them a new help
   request.
@@ -335,7 +338,8 @@ The runtime reads the coach's answers itself, every run, with the agent token
   (`"$AUTORESEARCH_CLI" promotion status` shows it). After the yes, queue-keeper's reconcile
   submits the same policy version once; no other promotion starts meanwhile.
 - **A no ends it.** An experiment with a declined ask goes `stopped` (its results so far are
-  kept, unreviewed, and `softmax xp create` refuses it); a declined submission drops its
+  kept, unreviewed, and `softmax xp create` refuses it; the batch stops at the first refusal
+  that reports the no); a declined submission drops its
   promotion (`aborted`, the slot is free). Either way the coach gets one note, and nothing is
   asked or retried again for it. A declined first champion (the starter policy) leaves no
   champion, so research is paused: no new bootstrap runs until an operator runs

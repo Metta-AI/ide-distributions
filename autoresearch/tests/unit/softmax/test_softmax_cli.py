@@ -449,6 +449,16 @@ def test_xp_create_refuses_a_stopped_experiment(board, launch):
     assert not path.exists() or not read_json(path).get("asks")  # nothing was asked
 
 
+def test_xp_create_refuses_a_reviewed_experiment(board, launch):
+    """R4: a reviewed experiment's evaluation is over."""
+    worker, experiment = launch
+    worker.store.update(experiment, {"status": "evaluating"})
+    worker.store.update(experiment, {"status": "reviewed"})
+    env = base_env(board, worker)
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 1 and data["error"]["reason"] == "experiment_closed", data
+
+
 def test_xp_create_league_choice_refusal_sets_awaiting_permit(board, launch):
     worker, experiment = launch
     env = base_env(board, worker, **{FAULTS_ENV: "league=league_other"})
