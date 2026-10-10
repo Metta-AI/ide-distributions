@@ -27,8 +27,10 @@ profile's ``kanban.*`` config. When the profile home is ``<root>/profiles/<name>
 reads ``<root>/config.yaml`` (read only) and fails when ``kanban.default_assignee`` is set
 (unassigned cards would run, breaking pause, C7), when ``kanban.dispatch_profiles`` is set and
 leaves out our profile, or when ``kanban.dispatch_in_gateway`` is false. A config that cannot
-be read or parsed fails too: pause safety depends on it. Any other home layout skips the
-check with a warning.
+be read or parsed fails too: pause safety depends on it. It also fails when another profile
+under ``<root>/profiles`` has ``plugins/autoresearch/plugin.yaml``: the Kanban board is
+host-wide and always ``autoresearch``, so two autoresearch profiles on one root would act on
+each other's cards. Any other home layout skips the check with a warning.
 
 OpenRouter (A5). ``GET https://openrouter.ai/api/v1/key`` with the key; ``limit_remaining``
 below the credit floor fails (Hermes would retry 402s forever). The floor is
@@ -131,7 +133,21 @@ def host_config_problems(hermes_home: Path) -> tuple[list[str], list[str]]:
         reasons.append(
             f"host kanban.dispatch_in_gateway is false in {path}: no dispatcher runs our cards"
         )
+    reasons += other_autoresearch_profiles(root, profile)
     return reasons, []
+
+
+def other_autoresearch_profiles(root: Path, profile: str) -> list[str]:
+    """One reason per other profile under ``<root>/profiles`` with this plugin installed. The
+    Kanban board is host-wide and always ``autoresearch`` (``runctx.BOARD``), so two
+    autoresearch profiles on one Hermes root would requeue, repair and cap each other's cards."""
+    return [
+        f"profile {other.name!r} under {root} also has the autoresearch plugin: the board is "
+        "host-wide and always 'autoresearch', so the two would act on each other's cards. "
+        "Run one autoresearch profile per Hermes root; uninstall the plugin from the other"
+        for other in sorted((root / "profiles").glob("*"))
+        if other.name != profile and (other / "plugins" / "autoresearch" / "plugin.yaml").is_file()
+    ]
 
 
 def env_file_value(path: Path, name: str) -> str | None:

@@ -61,7 +61,11 @@ The profile works under any install name. Below, `<profile>` (the shell variable
 `$PROFILE_NAME`) is that name: `optimizer` on Softmax hosting, `autoresearch` in a manual
 install. This creates the profile `<profile>` under `<host root>/profiles/`. The host root is
 `~/.hermes` unless `HERMES_HOME` is set in your shell. Cards are assigned to `<profile>`.
-The Kanban board is always named `autoresearch`, whatever the install name. The three cron
+The Kanban board is always named `autoresearch`, whatever the install name, and Kanban boards
+are host-wide (`<host root>/kanban/boards/<slug>`). Install **one autoresearch profile per
+Hermes root**: two would share the board and requeue, repair and spend-cap each other's
+cards. Preflight fails (the agent pauses with one help request) when another profile under
+`<host root>/profiles/` has `plugins/autoresearch/plugin.yaml`. The three cron
 jobs arrive paused. Shell variables do not survive a new shell: export `PROFILE_NAME` (and
 `PROFILE`, below) again in each new shell before running the commands in this guide.
 
