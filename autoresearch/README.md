@@ -495,7 +495,7 @@ command in an operator shell prints `false`.
   canonical (best effort), `card finish` refuses a receipt whose request was never committed,
   foreign cards are decided from the ledger and never merged (above), and the commit
   provenance check pauses the agent on any commit the runtime did not make (Operate, and the
-  one-OS-user bullet below). A worker that writes canonical another way can still forge
+  one-OS-user bullet above). A worker that writes canonical another way can still forge
   files, but its commit is detected.
 - **A malformed ledger file stops a step.** Routing, handoff processing and rebuild parse every
   committed receipt and handoff; one file that is not valid JSON (only a direct write as above

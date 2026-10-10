@@ -4,14 +4,18 @@
 Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
-   Then the commit provenance check (``runtime.provenance``, C1): every commit on canonical
+   Then the commit provenance check (``runtime.provenance``, C1), under the canonical lock:
+   probe that the journal can be written (without writing to it), finish commits a crash left
+   unrecorded (``provenance.recover``), then every commit on canonical
    HEAD's first-parent history since the last checked one must be one a runtime writer
    recorded. On a violation (a commit the runtime did not make, a rewritten history, a lost
    journal): pause (C7), one runtime ``help_request`` per violation, the spend step, and
    stop. Nothing is merged, published or admitted until an operator runs
    ``runtime accept-commits``; the run after that resumes the agent like any other pause.
    A check that raises fails closed the same way (pause, spend, stop; the step failure
-   escalates after 5 runs like any other).
+   escalates after 5 runs like any other). A journal failure in any later step fails closed
+   the same way. Every push of ``main`` (here, in bootstrap, xp-poll, health, promotion and the
+   publisher) goes through ``provenance.push_main``, which holds it while a violation stands.
 2. ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
    them (``preflight.host_requirement_problems``: the profile ``.env`` over this job's
    environment): missing ones are logged and get one runtime ``help_request`` per distinct
@@ -48,7 +52,7 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    runtime-only: cards run read-only ``kb lint``/``kb hubs`` and edit only claims their refs
    name (D-23).
 7. Push ``main`` and ``refs/heads/card/*`` to ``origin`` (card finish does not push), so
-   merged work leaves the host early. ``main`` is pushed on its own and never forced; card
+   merged work leaves the host early. ``main`` is pushed on its own through ``provenance.push_main`` (one checked commit) and never forced; card
    branches are force-pushed (a retried card rebuilds its branch), and a card ref origin
    still refuses is logged once. The run ends with the same push (step 13).
 8. Sweep staged skills into ``skills-proposed/`` (``proposals.sweep_skills``).
