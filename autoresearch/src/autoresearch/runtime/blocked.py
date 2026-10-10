@@ -44,6 +44,24 @@ admission holds them until the resume.
 
 The queue change comes before the commit, so a crash between them at worst requeues a card
 a second time; it never skips straight to a repair.
+
+A card whose handoff is already published (its request receipt is ``published``: the card
+finished ``blocked`` and was then blocked, or a human unblocked it) cannot hand off again:
+``card finish`` refuses a closed request. Rerunning it would waste a whole run, so it is never
+requeued; it goes to the repair path at once, with one runtime ``note``
+(``card_repaired_after_publish``) instead of the blocked-twice help_request:
+
+- Blocked by Hermes, not a ``tool-fault:`` block, and not at a cap: a repair request
+  (``repair-blocked:<task-id>``) instead of the requeue; the card stays blocked.
+- A ``tool-fault:`` block stays blocked until a human acts, as above (D-26). When the human
+  unblocks it, the card is ``pending`` (Hermes ``kanban unblock``: ``ready``) and soon
+  ``claimed`` (the dispatcher takes it within seconds). Each run of ``handle_blocked`` also
+  looks at pending and claimed cards whose handoff is published: it writes the repair request
+  first, then closes the card (``drop`` when pending, ``stop`` when running), so a crash between
+  the two leaves a card that the next run closes without a second request.
+
+The repair card redoes the work, and its handoff completes the coach's task
+(``publisher.acknowledge_inbound``: the follow-up acknowledgement of a ``blocked`` task).
 """
 
 import sqlite3
@@ -57,8 +75,9 @@ from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
 from autoresearch.runctx import RunContext
 from autoresearch.runtime import promotion, spend
+from autoresearch.runtime.admission import receipt_path
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
-from autoresearch.runtime.markers import repair_blocked_marker
+from autoresearch.runtime.markers import blocked_marker_path, repair_blocked_marker
 from autoresearch.runtime.pause import is_held, is_paused
 from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
 
@@ -68,6 +87,8 @@ SPEND_CAP = "spend-cap"
 TOOL_FAULT = "tool-fault"
 TOOL_FAULT_PREFIX = "tool-fault:"
 REPAIR_PRIORITY = "P1"
+# The reason a card rerun after its published handoff is stopped with (``_close_rerun``).
+RERUN_AFTER_PUBLISH = "handoff already published: a repair card redoes its work"
 
 
 @dataclass
@@ -77,8 +98,10 @@ class BlockedAction:
     repair_request: str | None = None
 
 
-def blocked_marker_path(canonical: Path, task_id: str) -> Path:
-    return ledger_of(canonical) / "health" / "blocked" / f"{task_id}.json"
+def _handoff_published(canonical: Path, card: Card) -> bool:
+    """True once the card's request receipt is ``published``: no run can hand off again."""
+    receipt = committed_json(canonical, receipt_path(ledger_of(canonical), card.spec.request_id))
+    return receipt is not None and receipt["state"] == "published"
 
 
 def _refs(card: Card) -> list[dict]:
@@ -103,16 +126,30 @@ def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction:
     return BlockedAction(card.task_id, REQUEUED)
 
 
-def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) -> BlockedAction:
+def _repair(
+    canonical: Path,
+    card: Card,
+    record: dict | None,
+    allow_no_remote: bool,
+    after_publish: bool = False,
+) -> BlockedAction:
+    """One repair request and one runtime message, then the marker ``repaired``. Blocked
+    twice by Hermes, or (``after_publish``) blocked or rerun after its handoff was published."""
     task_id = card.task_id
     covered = promotion.covers_task(canonical, task_id)
     with canonical_lock(canonical):
         request_id = None
         if not covered:
+            what = (
+                "was blocked or put back in the queue after its handoff was published, so it "
+                "cannot hand off again"
+                if after_publish
+                else "was blocked by Hermes twice: an operational failure such as a circuit "
+                "breaker or bad credentials"
+            )
             why = (
-                f"Card {task_id} (request {card.spec.request_id}, {card.spec.title!r}) was "
-                f"blocked by Hermes twice: an operational failure such as a circuit breaker or "
-                f"bad credentials. Redo its work; recover anything useful from branch "
+                f"Card {task_id} (request {card.spec.request_id}, {card.spec.title!r}) {what}. "
+                f"Redo its work; recover anything useful from branch "
                 f"card/{card.spec.request_id} if it exists."
             )
             spec = CardSpec(
@@ -126,19 +163,18 @@ def _repair(canonical: Path, card: Card, record: dict, allow_no_remote: bool) ->
             )
             commit_runtime_request(canonical, repair_blocked_marker(task_id), spec)
             request_id = marked_request(canonical, repair_blocked_marker(task_id)).stem
-        message = runtime_messages.card_blocked_twice(
-            card.spec.title, task_id, card.spec.request_id, request_id, _refs(card)
-        )
+        args = (card.spec.title, task_id, card.spec.request_id, request_id, _refs(card))
+        if after_publish:
+            message = runtime_messages.card_repaired_after_publish(*args)
+            fields = {}
+        else:
+            message = runtime_messages.card_blocked_twice(*args)
+            fields = {"priority": REPAIR_PRIORITY, "expects_response": True}
         if not already_published(canonical, message):
-            publish_message(
-                canonical,
-                message,
-                allow_no_remote,
-                priority=REPAIR_PRIORITY,
-                expects_response=True,
-            )
+            publish_message(canonical, message, allow_no_remote, **fields)
         marker = blocked_marker_path(canonical, task_id)
-        write_json(marker, record | {"state": REPAIRED, "repair_request": request_id})
+        base = record or {"task_id": task_id, "request_id": card.spec.request_id}
+        write_json(marker, base | {"state": REPAIRED, "repair_request": request_id})
         commit(canonical, [marker], f"health: blocked card {task_id} needs repair")
     return BlockedAction(task_id, REPAIRED, request_id)
 
@@ -213,6 +249,8 @@ def _handle_one(
         spend.hold_blocked(ctx, card, why, spend_config, allow_no_remote)
         return BlockedAction(card.task_id, SPEND_CAP)
     if record is None or record["state"] == TOOL_FAULT:
+        if _handoff_published(canonical, card):
+            return _repair(canonical, card, record, allow_no_remote, after_publish=True)
         ledger = ledger_of(canonical)
         if is_paused(ledger) or is_held(ledger):
             return None  # a requeue keeps the assignee, so it would dispatch: wait for resume
@@ -222,6 +260,29 @@ def _handle_one(
     return None
 
 
+def _close_rerun(
+    ctx: RunContext, queue: Queue, card: Card, allow_no_remote: bool
+) -> BlockedAction | None:
+    """A pending or running card whose handoff is published (a human unblocked it, or it was
+    requeued after it published): the repair request first, then the card is closed. A
+    promotion's card is left to its promotion; a running card in a status the queue cannot
+    stop is left for a later run."""
+    canonical = ctx.canonical
+    if not _handoff_published(canonical, card) or promotion.covers_task(canonical, card.task_id):
+        return None
+    if card.state == "claimed" and card.board_status not in (None, "running"):
+        return None
+    record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
+    action = None
+    if record is None or record["state"] != REPAIRED:
+        action = _repair(canonical, card, record, allow_no_remote, after_publish=True)
+    if card.state == "pending":
+        queue.drop(card.task_id, RERUN_AFTER_PUBLISH)
+    else:
+        queue.stop(card.task_id, RERUN_AFTER_PUBLISH)
+    return action
+
+
 def handle_blocked(
     ctx: RunContext,
     queue: Queue,
@@ -229,17 +290,21 @@ def handle_blocked(
     spend_config: spend.SpendConfig | None = None,
 ) -> list[BlockedAction]:
     """Requeue each blocked card once, then repair; a ``tool-fault:`` block only asks for
-    help; cards at a spend cap are left to the caps (module docstring). The caller must not
-    hold the canonical lock.
+    help; cards at a spend cap are left to the caps; a card whose handoff is already published
+    is repaired instead of rerun, also when it is pending or running again (module docstring).
+    The caller must not hold the canonical lock.
 
     One card never stops the others: a card whose handling fails (the board refuses the
     unblock, say) is left for the next run, and once every card was tried the failures are
     raised together, so the caller logs the step as failed (the actions of that run are then
     lost to the caller; their markers are committed)."""
     actions, failures = [], []
-    for card in queue.list("blocked"):
+    reruns = [*queue.list("pending"), *queue.list("claimed")]
+    handlers = [(card, _close_rerun, ()) for card in reruns]
+    handlers += [(card, _handle_one, (spend_config,)) for card in queue.list("blocked")]
+    for card, handler, extra in handlers:
         try:
-            action = _handle_one(ctx, queue, card, allow_no_remote, spend_config)
+            action = handler(ctx, queue, card, allow_no_remote, *extra)
         except Exception as error:  # noqa: BLE001 - per-card containment, raised below
             failures.append(f"{card.task_id}: {type(error).__name__}: {error}")
             continue

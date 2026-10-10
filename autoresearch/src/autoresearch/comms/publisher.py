@@ -65,11 +65,11 @@ from autoresearch.comms.envelope import (
 from autoresearch.comms.runtime_messages import RuntimeMessage
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
-from autoresearch.kb.requests import has_marker
 from autoresearch.paths import Layout
 from autoresearch.records.registry import entity_of_id
-from autoresearch.runtime.ledger import committed_json
-from autoresearch.runtime.markers import repair_blocked_marker
+from autoresearch.runtime.admission import receipt_path as request_receipt_path
+from autoresearch.runtime.ledger import committed_json, ledger_of
+from autoresearch.runtime.markers import blocked_marker_path
 
 OUTBOX_DIR = "comms/outbox"
 INBOX_DIR = "comms/inbox"
@@ -78,6 +78,9 @@ REFERENCED_RECORDS = 10  # journal and created records a task acknowledgement re
 # Card outcomes that end a task's work; ``blocked`` does not (a task acknowledged blocked gets
 # a follow-up acknowledgement with one of these).
 FINAL_OUTCOMES = ("done", "partial", "dropped", "failed")
+# Repairs of repairs followed from a blocked card to the card that finishes its work.
+REPAIR_HOPS = 5
+CREATED_BY_RUNTIME = "runtime"  # CardSpec.created_by of a runtime request (planning.RUNTIME)
 STAGED_DIR = "comms/staged"
 RECEIPTS_DIR = ".supervisor/ledger/published"
 REMOTE = "origin"
@@ -567,32 +570,55 @@ def _task_acknowledgement(
     return message_id_of_seq(canonical, result.seq)
 
 
-def _blocked_note(canonical: Path, record: dict) -> dict | None:
+def _blocked_note(outbox: dict[str, tuple[int, Path]], record: dict) -> dict | None:
     """The note that acknowledged ``record`` (a ``task``) with outcome ``blocked``, if no
-    follow-up has been recorded for it yet."""
+    follow-up has been recorded for it yet. ``outbox`` is ``_outbox_files``."""
     if record["state"] != "acknowledged" or record["kind"] != "task" or record.get("final_ack_by"):
         return None
-    found = _outbox_files(canonical).get(record["acknowledged_by"])
+    found = outbox.get(record["acknowledged_by"])
     note = read_json(found[1]) if found else None
     about = note.get("about") if isinstance(note, dict) else None
     blocked = isinstance(about, dict) and about.get("outcome") == "blocked"
     return note if blocked else None
 
 
+def _repair_requests(canonical: Path, blocked_card: str) -> list[str]:
+    """The repair requests written for ``blocked_card``, then for the cards of those requests,
+    up to ``REPAIR_HOPS`` deep. Followed through runtime-written records only: the card's
+    blocked marker names its ``repair_request`` (``runtime.blocked``), that request must be
+    created by the runtime, and its receipt's ``tasks`` are the next cards."""
+    found, cards = [], [blocked_card]
+    for _hop in range(REPAIR_HOPS):
+        next_cards = []
+        for card in cards:
+            marker = committed_json(canonical, blocked_marker_path(canonical, card)) or {}
+            request_id = marker.get("repair_request")
+            if not request_id:
+                continue
+            request = committed_json(
+                canonical, Layout(canonical).card_requests / f"{request_id}.json"
+            )
+            spec = request.get("spec") if isinstance(request, dict) else None
+            if not isinstance(spec, dict) or spec.get("created_by") != CREATED_BY_RUNTIME:
+                continue
+            found.append(request_id)
+            receipt = committed_json(
+                canonical, request_receipt_path(ledger_of(canonical), request_id)
+            )
+            next_cards += [task["task_id"] for task in (receipt or {}).get("tasks", [])]
+        cards = next_cards
+    return found
+
+
 def _finishes_blocked_work(canonical: Path, record: dict, blocked_card: str, handoff: dict) -> bool:
-    """The handoff is of the card responsible for ``record``, or of the repair card
-    queue-keeper requested for ``blocked_card`` (the ``blocked`` note's ``about.card``) once it
-    blocked twice (``runtime.blocked``: a new card and request, whose ``why`` carries
-    ``repair-blocked:<task id>``). In practice it is the repair card: the blocked card's
-    published handoff closed its request, so a requeued run of the same card cannot hand off
-    again (``card_finish``)."""
+    """The handoff is of the card responsible for ``record``, or of a repair card of
+    ``blocked_card`` (the ``blocked`` note's ``about.card``), or of a repair of a repair
+    (``_repair_requests``). The same card hands off again only when health requeued it before
+    its ``blocked`` handoff was published: a published handoff closes the request, and
+    ``card finish`` refuses a closed request (``runtime.blocked`` then repairs the card)."""
     if _is_responsible(record, handoff):
         return True
-    request = committed_json(
-        canonical, Layout(canonical).card_requests / f"{handoff['request_id']}.json"
-    )
-    spec = request.get("spec") if isinstance(request, dict) else None
-    return isinstance(spec, dict) and has_marker(spec, repair_blocked_marker(blocked_card))
+    return handoff["request_id"] in _repair_requests(canonical, blocked_card)
 
 
 def _final_acknowledgements(canonical: Path, handoff: dict, allow_no_remote: bool) -> list[Path]:
@@ -605,8 +631,9 @@ def _final_acknowledgements(canonical: Path, handoff: dict, allow_no_remote: boo
     if outcome not in FINAL_OUTCOMES:
         return []
     written = []
+    outbox = _outbox_files(canonical)
     for inbound_id, record in delivery.records(canonical).items():
-        first = _blocked_note(canonical, record)
+        first = _blocked_note(outbox, record)
         if first is None:
             continue
         blocked_card = first["about"]["card"]  # set with outcome (_task_acknowledgement)

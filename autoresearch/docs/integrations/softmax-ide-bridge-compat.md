@@ -84,13 +84,30 @@ that contract:
 2. **The acknowledgement covers every card outcome.** It is published when the card's work is
    published, whatever the card's outcome. The title starts with the outcome: `Done:`,
    `Partly done:`, `Dropped:`, `Failed:` or `Blocked:`; `about.outcome` has the raw value.
-   A `blocked` task is not finished: when its work later ends with `done`, `partial`, `dropped` or
-   `failed` (in practice by the repair card queue-keeper requests once the card blocked twice), the
-   runtime publishes exactly one follow-up `note` with the same `in_reply_to`, the final
-   `about.outcome`, `about.follows` set to the `blocked` note's id, and `runtime_key`
-   `ack-final:<task id>`. The delivery record names it in `final_ack_by`. The bridge shows the task
-   paused on the first note and closes it on the follow-up. A task first acknowledged with a final
-   outcome gets no follow-up, and a second block publishes nothing.
+   A `blocked` task is not finished. The runtime publishes exactly one follow-up `note` for it,
+   with the same `in_reply_to`, the final `about.outcome`, `about.follows` set to the `blocked`
+   note's id, and `runtime_key` `ack-final:<task id>` (the delivery record names it in
+   `final_ack_by`), when a later handoff ends the work with `done`, `partial`, `dropped` or
+   `failed`. That later handoff comes from one of these:
+   - the same card, when queue-keeper requeued it before its `blocked` handoff was published
+     (the request was still open, so the rerun could hand off);
+   - the repair card queue-keeper opens for a card whose `blocked` handoff is published and that
+     Hermes then holds blocked (not a `tool-fault:` block), or that a human unblocks (the rerun
+     could not hand off: the runtime closes it and opens the repair card instead);
+   - a repair of a repair, up to 5 repairs deep.
+
+   The bridge shows the task paused on the first note and closes it on the follow-up. A task first
+   acknowledged with a final outcome gets no follow-up, and a second `blocked` publishes nothing.
+   These blocked tasks get **no** follow-up, so the IDE task stays paused:
+   - a card that finished `blocked` and then completed (`kanban_complete`), as most agent blocks do
+     (for example `league-watch` on an identity refusal): nothing reruns it;
+   - a `tool-fault:` card no human has unblocked yet (D-26), or a card held blocked at a spend cap;
+   - a card a promotion covers (its promotion's recovery card carries the work on, outside the
+     repair chain), and a chain more than 5 repairs deep.
+
+   To close such a task, the coach cancels it in the IDE or sends a new task; the operator can
+   unblock a `tool-fault:` card once the tool is fixed, which opens the repair card that sends the
+   follow-up.
 3. **A stop is a request, not a cancel.** The stop `steer` gives the agent a P0 card, and the agent
    decides what to do (for example drop the task's card if it is still pending). If the task's card is
    already running or finished, its acknowledgement can still arrive after the stop. The bridge

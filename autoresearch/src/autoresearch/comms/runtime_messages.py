@@ -313,6 +313,31 @@ def card_blocked_twice(
     )
 
 
+def card_repaired_after_publish(
+    card_title: str, task_id: str, request_id: str, repair_request: str | None, refs: list
+) -> RuntimeMessage:
+    """A card whose work was already published was blocked again or put back in the queue:
+    it cannot finish a second time, so the runtime repairs it instead of running it again."""
+    follow_up = (
+        "A repair card will redo its work."
+        if repair_request
+        else "The recovery card of its promotion carries its work on."
+    )
+    body = (
+        f"The card “{_line(card_title, 80)}” was blocked or put back in the queue after its "
+        "work was published, so it cannot finish a second time. The runtime did not run it "
+        f"again. {follow_up}"
+    )
+    return RuntimeMessage(
+        "note",
+        _title("Repairing", card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id, repair_request=repair_request),
+        key=f"repair-after-publish:{task_id}",
+    )
+
+
 def card_tool_fault(
     card_title: str, reason: str, task_id: str, request_id: str, run_id: str, refs: list
 ) -> RuntimeMessage:

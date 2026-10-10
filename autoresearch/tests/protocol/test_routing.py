@@ -19,7 +19,6 @@ from autoresearch.paths import Layout
 from autoresearch.queue.requests import load_schema
 from autoresearch.runtime import blocked, routing
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
-from autoresearch.runtime.card_finish import FinishUsageError
 from autoresearch.runtime.handoff import card_spec
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.routing import inbound_for_briefing, planning_backlog, route_all
@@ -247,32 +246,49 @@ def _replies(board: Board, task: str) -> list[dict]:
     return [m for m in _outbox(board) if m.get("in_reply_to") == task]
 
 
-def _blocked_task_with_repair_card(board: Board):
-    """A task whose card blocked: ``card finish blocked`` then ``kanban_block``, so the task is
-    acknowledged ``blocked``. queue-keeper requeues the card once; its published handoff closed
-    the request, so the rerun cannot hand off and blocks again; queue-keeper then requests a
-    repair card (a new card and request). Returns (task, blocked note, started repair card)."""
-    task, worker = _finished_task_card(board)
+def _handle_blocked(board: Board) -> list:
+    return blocked.handle_blocked(board.ctx(), board.queue, allow_no_remote=True)
+
+
+def _block_after_finish(board: Board, worker, reason: str = "needs a human") -> None:
+    """``card finish --outcome blocked``, then the card is blocked on the board."""
     worker.finish(outcome="blocked", terminal=False)
-    board.queue.block(worker.task_id, worker.run_id, "needs a human")
+    board.queue.block(worker.task_id, worker.run_id, reason)
+
+
+def _blocked_task(board: Board, reason: str = "needs a human"):
+    """A task whose card finished ``blocked`` and was blocked, published: the task is
+    acknowledged ``blocked``. Returns (task, its card, the blocked note)."""
+    task, worker = _finished_task_card(board)
+    _block_after_finish(board, worker, reason)
     board.process(publish=local_hook)
     [first] = _replies(board, task)
     assert first["about"]["outcome"] == "blocked"
     record = _delivery(board, task)
     assert record["state"] == "acknowledged" and record["acknowledged_by"] == first["id"]
+    return task, worker, first
 
-    [requeued] = blocked.handle_blocked(board.ctx(), board.queue, allow_no_remote=True)
-    assert requeued.action == blocked.REQUEUED
-    worker.start()
-    with pytest.raises(FinishUsageError, match="is published"):
-        worker.finish()
-    board.queue.block(worker.task_id, worker.run_id, "still needs a human")
-    [repaired] = blocked.handle_blocked(board.ctx(), board.queue, allow_no_remote=True)
-    assert repaired.action == blocked.REPAIRED
-    repair = board.admit_follow_up(repaired.repair_request)
-    assert repair.task_id != worker.task_id
+
+def _start_repair(board: Board, action) -> object:
+    assert action.action == blocked.REPAIRED and action.repair_request
+    repair = board.admit_follow_up(action.repair_request)
     repair.start()
     repair.write_journal()
+    return repair
+
+
+def _blocked_task_with_repair_card(board: Board):
+    """A blocked task whose card's handoff is published is repaired at once, never requeued
+    (its rerun could not hand off). Returns (task, blocked note, started repair card)."""
+    task, worker, first = _blocked_task(board)
+    [action] = _handle_blocked(board)
+    assert board.queue.get(worker.task_id).state == "blocked"  # not requeued
+    key = f"repair-after-publish:{worker.task_id}"
+    notes = [m for m in _outbox(board) if m.get("runtime_key") == key]
+    assert len(notes) == 1 and notes[0]["kind"] == "note"
+    repair = _start_repair(board, action)
+    assert repair.task_id != worker.task_id
+    assert _handle_blocked(board) == []  # repaired once
     return task, first, repair
 
 
@@ -298,6 +314,87 @@ def test_a_blocked_task_gets_one_follow_up_when_its_repair_card_finishes(board):
     _assert_clean(board)
 
 
+def test_a_card_requeued_before_its_blocked_handoff_publishes_sends_the_follow_up(board):
+    """health may requeue the card before queue-keeper publishes its blocked handoff: the
+    request is still open, so the same card hands off again."""
+    task, worker = _finished_task_card(board)
+    _block_after_finish(board, worker)
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.REQUEUED
+    worker.start()
+    worker.write_journal()
+    worker.finish()
+
+    board.process(publish=local_hook)
+
+    [first, follow_up] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    assert follow_up["about"] | {"merge_commit": None} == {
+        "card": worker.task_id,
+        "request": worker.request_id,
+        "merge_commit": None,
+        "outcome": "done",
+        "follows": first["id"],
+    }
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_an_unblocked_tool_fault_card_whose_handoff_is_published_is_repaired(board, running):
+    """D-26: a tool-fault card stays blocked until a human acts. Unblocked (Hermes ``ready``,
+    soon ``running``), it could not hand off again: it is repaired and closed instead."""
+    task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.TOOL_FAULT
+    assert board.queue.get(worker.task_id).state == "blocked"
+    board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
+    if running:
+        worker.start()
+
+    [action] = _handle_blocked(board)
+
+    assert board.queue.get(worker.task_id).state == ("blocked" if running else "completed")
+    assert _handle_blocked(board) == []
+    repair = _start_repair(board, action)
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_repair_of_a_repair_sends_the_follow_up(board):
+    task, first, repair = _blocked_task_with_repair_card(board)
+    _block_after_finish(board, repair)
+    board.process(publish=local_hook)
+    assert len(_replies(board, task)) == 1
+    [action] = _handle_blocked(board)
+    second = _start_repair(board, action)
+    second.finish()
+
+    board.process(publish=local_hook)
+
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["card"] == second.task_id
+    assert follow_up["about"]["follows"] == first["id"]
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+
+
+def test_a_repair_request_not_created_by_the_runtime_is_not_followed(board):
+    task, worker, _first = _blocked_task(board)
+    other = board.admit()  # a planner's request, named in a hand-written marker
+    marker = blocked.blocked_marker_path(board.canonical, worker.task_id)
+    forged = {"task_id": worker.task_id, "state": "repaired", "repair_request": other.request_id}
+    write_json(marker, forged)
+    gitops.commit_paths(board.canonical, [marker.relative_to(board.canonical).as_posix()], "marker")
+    other.start()
+    other.write_journal()
+    other.finish()
+
+    board.process(publish=local_hook)
+
+    assert len(_replies(board, task)) == 1 and "final_ack_by" not in _delivery(board, task)
+
+
 def test_a_task_first_acknowledged_done_gets_no_follow_up(board):
     task, worker = _finished_task_card(board)
     worker.finish()
@@ -312,8 +409,7 @@ def test_a_task_first_acknowledged_done_gets_no_follow_up(board):
 
 def test_a_blocked_task_whose_repair_card_blocks_too_gets_no_follow_up(board):
     task, _first, repair = _blocked_task_with_repair_card(board)
-    repair.finish(outcome="blocked", terminal=False)
-    board.queue.block(repair.task_id, repair.run_id, "needs a human")
+    _block_after_finish(board, repair)
 
     board.process(publish=local_hook)
 

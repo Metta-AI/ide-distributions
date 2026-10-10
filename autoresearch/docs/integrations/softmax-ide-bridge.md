@@ -47,7 +47,9 @@ Not sent yet: `reply` and `seen`. The IDE has no surface for answering a `questi
   (System Design: "acknowledge a task when its card completes"). The bridge then marks the IDE task done with the
   note as its outcome. Any other kind, or a note answering something else, is said in chat only. A task
   acknowledged `about.outcome: blocked` gets one later follow-up note with the final outcome and `about.follows`
-  (see [softmax-ide-bridge-compat.md](softmax-ide-bridge-compat.md), "Notes for the bridge", note 2).
+  only when a rerun or repair card finishes its work; several kinds of blocked task never get one and stay paused
+  until the coach cancels them (see [softmax-ide-bridge-compat.md](softmax-ide-bridge-compat.md), "Notes for the
+  bridge", note 2, for when it is sent and when it is not).
 
 ## What is not exercised yet
 

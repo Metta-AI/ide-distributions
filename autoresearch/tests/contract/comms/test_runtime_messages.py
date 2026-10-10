@@ -101,6 +101,16 @@ FIXTURES = {
         }
         for repair in (REQUEST, None)
     ],
+    "card_repaired_after_publish": [
+        {
+            "card_title": "Scout andre",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "repair_request": repair,
+            "refs": [],
+        }
+        for repair in (REQUEST, None)
+    ],
     "card_tool_fault": [
         {
             "card_title": "Scout andre",
