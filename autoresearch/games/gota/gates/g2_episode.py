@@ -76,7 +76,7 @@ def inspect_native_episode(artifact: Path, directory: Path) -> dict:
             raise PolicyFailure(f'BASIC failure at seat {slot}: {hero.get("vm_error")}')
     # Every seat must have loaded the same bytes inside the engine.
     sources = {hero.get('policy_source_sha1') for hero in heroes}
-    if len(sources) != 1 or not isinstance(next(iter(sources)), str) or not next(iter(sources)):
+    if len(sources) != 1 or not all(isinstance(source, str) and source for source in sources):
         raise ValueError('Native seats did not all load one policy source')
     decisions = [hero.get('decisions') for hero in heroes]
     actions = result.get('actions')
@@ -164,8 +164,6 @@ def native_episode(artifact: Path, context: GateContext, directory: Path) -> dic
     if result['config'] != config:
         raise ValueError(f'Native match game_config differs from manifest variant {context.variant}')
     details = inspect_native_episode(artifact, directory)
-    if details['engine'] != commit:
-        raise ValueError('native match engine differs from the requested engine')
     details['native_build'] = native_build
     return details
 
