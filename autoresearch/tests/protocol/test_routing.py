@@ -1220,3 +1220,50 @@ def test_a_published_receipt_with_an_unreadable_handoff_is_logged_not_repaired(b
     assert "unknown" in line
     assert len(_outbox(board)) == outbox_before
     assert board.queue.get(worker.task_id).state == "blocked"
+
+
+class _LookupFails:
+    """The board, except that ``get`` of one card fails (``process_handoffs`` then skips it)."""
+
+    def __init__(self, queue, task_id: str):
+        self._queue, self._task_id = queue, task_id
+
+    def get(self, task_id: str):
+        if task_id == self._task_id:
+            raise LookupError(task_id)
+        return self._queue.get(task_id)
+
+    def __getattr__(self, name):
+        return getattr(self._queue, name)
+
+
+def test_a_repair_published_before_the_blocked_handoff_still_sends_the_follow_up(board):
+    """Codex round 2: health repairs a card blocked twice while its ``blocked`` handoff is
+    unpublished; the original's board lookup fails, so the repair publishes ``done`` first.
+    When the original's ``blocked`` acknowledgement is recorded later, the follow-up is sent
+    from the repair's published outcome, once."""
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="blocked", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.REQUEUED
+    worker.start()
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    [action] = _handle_blocked(board)
+    repair = _start_repair(board, action)
+    repair.finish()
+
+    board.process(publish=local_hook, queue=_LookupFails(board.queue, worker.task_id))
+    assert repair.receipt()["state"] == "published" and _replies(board, task) == []
+
+    board.process(publish=local_hook)
+
+    [first, follow_up] = _replies(board, task)
+    assert first["about"]["outcome"] == "blocked"
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["follows"] == first["id"]
+    assert follow_up["about"]["card"] == repair.task_id
+    assert follow_up["runtime_key"] == f"ack-final:{task}"
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+    board.process(publish=local_hook)
+    assert len(_replies(board, task)) == 2
+    _assert_clean(board)

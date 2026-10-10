@@ -97,6 +97,9 @@ that contract:
      already completed is repaired the same way);
    - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`).
 
+   A repair can publish its final outcome before the `blocked` handoff it repairs; the follow-up
+   then goes out right after the `blocked` note, in the same publication.
+
    The bridge shows the task paused on the first note and closes it on the follow-up. A task first
    acknowledged with a final outcome gets no follow-up, and a second `blocked` publishes nothing.
    These blocked tasks get **no** follow-up, so the IDE task stays paused:

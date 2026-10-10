@@ -629,34 +629,61 @@ def _finishes_blocked_work(canonical: Path, record: dict, blocked_card: str, han
     return handoff["request_id"] in _repair_requests(canonical, blocked_card)
 
 
-def _final_acknowledgements(canonical: Path, handoff: dict, allow_no_remote: bool) -> list[Path]:
-    """Publish the follow-up of each ``task`` acknowledged ``blocked`` whose work this handoff
-    finishes with a final outcome, and record it as ``final_ack_by``; return the records
-    written (the caller commits them). The note is committed by its own publication, before
-    the record: a rerun after a crash between the two finds the note by its ``runtime_key``
-    and only writes the record."""
-    outcome = handoff.get("outcome")
-    if outcome not in FINAL_OUTCOMES:
-        return []
+def _published_repair_outcome(canonical: Path, blocked_card: str) -> dict | None:
+    """The committed handoff of a repair in ``blocked_card``'s chain (``_repair_requests``)
+    whose request is already ``published`` with a final outcome, else None. A repair can
+    publish before the ``blocked`` handoff it repairs: health repairs a card blocked twice
+    while that handoff waits (its board lookup failed, say)."""
+    for request_id in _repair_requests(canonical, blocked_card):
+        receipt = committed_json(canonical, request_receipt_path(ledger_of(canonical), request_id))
+        if not isinstance(receipt, dict) or receipt.get("state") != "published":
+            continue
+        handed_off = receipt.get("handed_off") or {}
+        if not handed_off.get("task_id") or not handed_off.get("run_id"):
+            continue
+        path = ledger_of(canonical) / "handoffs" / handed_off["task_id"]
+        handoff = committed_json(canonical, path / f"{handed_off['run_id']}.json")
+        if isinstance(handoff, dict) and handoff.get("outcome") in FINAL_OUTCOMES:
+            return handoff
+    return None
+
+
+def _final_acknowledgements(
+    canonical: Path, handoff: dict, allow_no_remote: bool, fresh: dict[str, dict]
+) -> list[Path]:
+    """Publish the follow-up of each ``task`` acknowledged ``blocked`` whose work is now
+    finished with a final outcome, and record it as ``final_ack_by``; return the records
+    written (the caller commits them). The work is finished by this handoff, or by a repair
+    in the chain whose final handoff was published earlier (``_published_repair_outcome``):
+    every pass sweeps the unresolved ``blocked`` acknowledgements, so the order the two
+    publish in does not matter. ``fresh``: records this pass wrote, not yet committed. The
+    note is committed by its own publication, before the record: a rerun after a crash
+    between the two finds the note by its ``runtime_key`` and only writes the record."""
+    final_here = handoff.get("outcome") in FINAL_OUTCOMES
     written = []
     outbox = _outbox_files(canonical)
-    for inbound_id, record in delivery.records(canonical).items():
+    for inbound_id, record in (delivery.records(canonical) | fresh).items():
         first = _blocked_note(outbox, record)
         if first is None:
             continue
         blocked_card = first["about"]["card"]  # set with outcome (_task_acknowledgement)
-        if not _finishes_blocked_work(canonical, record, blocked_card, handoff):
+        if final_here and _finishes_blocked_work(canonical, record, blocked_card, handoff):
+            final = handoff
+        else:
+            final = _published_repair_outcome(canonical, blocked_card)
+        if final is None:
             continue
         # The planning-card lead line is only true when the card that took it finishes it.
-        backlog = record["responsible"]["backlog"] and blocked_card == handoff["card"]
+        backlog = record["responsible"]["backlog"] and blocked_card == final["card"]
         message_id = _task_acknowledgement(
-            canonical, inbound_id, handoff, backlog, allow_no_remote, follow_up_of=first["id"]
+            canonical, inbound_id, final, backlog, allow_no_remote, follow_up_of=first["id"]
         )
         _checkpoint("final_ack_published")
-        final = delivery.moved(
+        outcome = final["outcome"]
+        moved = delivery.moved(
             record, "acknowledged", note=f"final outcome {outcome}", final_ack_by=message_id
         )
-        written.append(delivery.write_record(canonical, final))
+        written.append(delivery.write_record(canonical, moved))
     return written
 
 
@@ -673,8 +700,11 @@ def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = 
     the final outcome, ``about.follows`` the ``blocked`` note, ``runtime_key``
     ``ack-final:<inbound id>``, recorded as ``final_ack_by``) when this handoff finishes its
     work with ``done``, ``partial``, ``dropped`` or ``failed`` (``_final_acknowledgements``).
-    The IDE bridge closes the task it showed as paused with it. Under the lock; idempotent."""
-    changed = []
+    The work may also be finished by a repair whose final handoff published before this
+    ``blocked`` one: every pass sweeps the unresolved ``blocked`` acknowledgements against the
+    published repairs in their chain. The IDE bridge closes the task it showed as paused with
+    it. Under the lock; idempotent."""
+    changed, fresh = [], {}
     for inbound_id, record in delivery.records(canonical).items():
         if record["state"] != "routed" or not _is_responsible(record, handoff):
             continue
@@ -697,7 +727,9 @@ def acknowledge_inbound(canonical: Path, handoff: dict, allow_no_remote: bool = 
             continue
         acknowledged = delivery.moved(record, "acknowledged", acknowledged_by=message_id)
         changed.append(delivery.write_record(canonical, acknowledged))
-    changed += _final_acknowledgements(canonical, handoff, allow_no_remote)
+        fresh[inbound_id] = acknowledged
+    finals = _final_acknowledgements(canonical, handoff, allow_no_remote, fresh)
+    changed += [path for path in finals if path not in changed]
     if changed:
         commit_and_push(canonical, changed, f"inbound acknowledged by {handoff['card']}")
 
