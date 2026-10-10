@@ -1178,3 +1178,28 @@ def test_a_crash_after_the_repair_request_keeps_its_linkage_and_notifies_once(bo
     assert len([m for m in _outbox(board) if m.get("runtime_key") == key]) == 1
     marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
     assert marker["notified"] is True
+
+
+def test_a_malformed_blocked_marker_does_not_break_repairs_or_follow_ups(board):
+    """Only the runtime writes these markers, but one that is not an object, or names a
+    ``repair_request`` that is not a string, must not break every repair and every final
+    acknowledgement."""
+    markers = blocked.blocked_marker_path(board.canonical, "x").parent
+    markers.mkdir(parents=True, exist_ok=True)
+    (markers / "K-list.json").write_text("[1, 2]\n")
+    write_json(markers / "K-odd.json", {"task_id": "K-odd", "repair_request": ["Q-x"]})
+    gitops.commit_paths(
+        board.canonical,
+        [p.relative_to(board.canonical).as_posix() for p in markers.glob("K-*.json")],
+        "malformed markers",
+    )
+
+    task, first, repair = _blocked_task_with_repair_card(board)
+    own = blocked.blocked_marker_path(board.canonical, repair.task_id)  # read by publisher
+    own.write_text('"repaired"\n')
+    gitops.commit_paths(board.canonical, [own.relative_to(board.canonical).as_posix()], "bad")
+    repair.finish()
+    board.process(publish=local_hook)
+
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]

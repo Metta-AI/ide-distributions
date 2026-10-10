@@ -157,8 +157,8 @@ def _repair_depth(canonical: Path, request_id: str) -> int:
     listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{directory}/")
     parent_of = {}
     for path in listing.splitlines():
-        marker = committed_json(canonical, canonical / path) or {}
-        if marker.get("repair_request"):
+        marker = committed_json(canonical, canonical / path)
+        if isinstance(marker, dict) and isinstance(marker.get("repair_request"), str):
             parent_of[marker["repair_request"]] = marker.get("request_id")
     depth = 0
     while request_id in parent_of and depth < MAX_REPAIR_CHAIN:

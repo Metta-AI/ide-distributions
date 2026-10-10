@@ -599,9 +599,9 @@ def _repair_requests(canonical: Path, blocked_card: str) -> list[str]:
     for _hop in range(REPAIR_HOPS):
         next_cards = []
         for card in cards:
-            marker = committed_json(canonical, blocked_marker_path(canonical, card)) or {}
-            request_id = marker.get("repair_request")
-            if not request_id:
+            marker = committed_json(canonical, blocked_marker_path(canonical, card))
+            request_id = marker.get("repair_request") if isinstance(marker, dict) else None
+            if not request_id or not isinstance(request_id, str):
                 continue
             request = committed_json(
                 canonical, Layout(canonical).card_requests / f"{request_id}.json"
