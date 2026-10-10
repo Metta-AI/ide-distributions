@@ -16,11 +16,14 @@ shim switch in section 5 are not built. Where the build differs from this text:
   `tool_call` whose calls are all coach tools.
 - Renderings are fenced JSON with hidden and default-ignorable characters escaped (valid JSON
   escapes), shown again on every reply while pending, first in the reply before the model's text
-  (which is HTML-escaped throughout). Sends run on a plugin thread (Hermes bounds hooks at 30 s), one at a time per profile in the order typed. State is keyed by
-  profile home and session id. The tool names stay as designed; the plugin checks Hermes's
+  (which is HTML-escaped throughout). Sends run on a plugin thread (Hermes bounds hooks at 30 s),
+  one at a time per profile in the order typed. State is keyed by profile home and session id. The tool names stay as designed; the plugin checks Hermes's
   registry maps each to its handler and refuses all coach tools otherwise. A turn gets at most
   8 tool rounds.
-- `status` does not yet report the chat's own spend.
+- The chat budget is built as recommended in section 4: chat sessions (`api_server`) are excluded
+  from the research daily budget, and the chat's own cap (`AUTORESEARCH_CHAT_DAILY_USD`) counts
+  the rise of their cost since the day's first snapshot (`<profile>/local/chat-spend.json`). A
+  spend that cannot be read refuses the tools. `status` does not yet report the chat's own spend.
 - Verified on the pinned image: hooks fire for multiplexed `/p/<profile>/` runs, and the API
   server passes `/pause-research` to the run
   ([findings.md](../plans/2026-10-09-softmax-integration/findings.md)).

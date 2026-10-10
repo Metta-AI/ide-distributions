@@ -10,7 +10,7 @@
 
 **Spec:** the "Integration architecture" section below. It argues from: [findings.md](findings.md) (survey evidence with file:line citations), [`../../designs/coach-chat-role.md`](../../designs/coach-chat-role.md) (chat persona; this plan builds a reduced v1), [`../../integrations/rohit-architecture-integration.md`](../../integrations/rohit-architecture-integration.md) (gap table), Rohit's gist reply (gist `823149ec…`, 2026-10-09) and his update of 2026-10-09. Executors read this plan and findings.md.
 
-**Status:** plan, revision 6 (2026-10-09). Revision 3: James's decisions D1-D15 folded in (section 2). Revision 2 followed an independent review (scratchpad `review-integ-plan.md`: 1 Critical, 9 Important, 12 Minor; all adopted). Nothing here is built except what an implementer is doing now for Tasks 1-2. Rohit is on vacation; every task is executable by us. metta changes are PRs we author; hosted deploys need an operator with access (D10).
+**Status:** plan, revision 6 (2026-10-09). Revision 3: James's decisions D1-D15 folded in (section 2). Revision 2 followed an independent review (scratchpad `review-integ-plan.md`: 1 Critical, 9 Important, 12 Minor; all adopted). The ide-mvp tasks 1-6, 10b, 24, 25 and 27 are built on branch `jboggs/autoresearch-hosted-m1b` and Task 16 (native G2) is on `main`; the metta tasks (7-11, 17) and Task 15 are not built. Rohit is on vacation; every task is executable by us. metta changes are PRs we author; hosted deploys need an operator with access (D10).
 
 **Direction from James (2026-10-09):** "Rather than tightening/slimming our work, feel free to increase workspace budget and sandbox size for now. I'd rather get a working prototype first and have baseline data on performance and cost than have something that's cheap but doesn't actually work." So: a `$500`-per-week key (weekly reset) for every hosted workspace (D1/D3, raised from `$150`/30 days on 2026-10-09); larger sandboxes (8 CPU, 16 GiB, 100 GiB, 2 GiB `/tmp`, two per `m7i.4xlarge`; D12); our models (kimi-k3 research, `glm-5.3` routine) and spend caps (`$4`/card unchanged; the daily cap raised from `$25` to `$100` on 2026-10-09, revision 6); GotA in the sandbox; baseline performance and cost data as a deliverable (Task 24). Cheaper and smaller is a later phase (section 8).
 
@@ -126,7 +126,7 @@ The container runs with `--restart=no`; the controller starts it again on its ne
 ### 3.3 Routing and the bridge
 
 - `fleet.py`: `hermes_url` stays `/p/optimizer/` (D2); `workspace` `/opt/data/profiles/optimizer/workspace` (relay on), chat `model` `z-ai/glm-5.3` (D8).
-- Outcome mapping (Task 10): `done`/`partial` → done/kept (`partial` text starts "Partly done. "), `dropped` → done/dropped, `failed`/`rejected` → done/failed, `blocked` → active/paused, no `about.outcome` → say only. A blocked task is closed later by a follow-up acknowledgement that ide-mvp publishes when the card finishes (Task 10b); the bridge acknowledges each note with its own idempotency key (`bridge.py:487-490`), so a second note for the same task applies.
+- Outcome mapping (Task 10): `done`/`partial` → done/kept (`partial` text starts "Partly done. "), `dropped` → done/dropped, `failed`/`rejected` → done/failed, `blocked` → active/paused, no `about.outcome` → say only. A blocked task is closed later by a follow-up acknowledgement that ide-mvp publishes when the work finishes, on the card or on a repair card the runtime opened for it (Task 10b; some blocked tasks never get one, see softmax-ide-bridge-compat.md); the bridge acknowledges each note with its own idempotency key (`bridge.py:487-490`), so a second note for the same task applies.
 - The bridge's per-run `instructions` (`bridge.py:359-367`) tell the model to use `softmax`/`coworld` commands. Our chat brief says explicitly that it overrides that for the chat role.
 
 ### 3.4 Runtime `.env` for our profile
@@ -486,11 +486,11 @@ Why the first design did not work: `acknowledge_inbound` visits only delivery re
 - Test: the acknowledgement protocol tests (`grep -rl "acknowledge_inbound" autoresearch/tests/`), driven through `publish_hook` with real handoff dicts
 
 **Interfaces:**
-- Produces: for a delivery record in state `acknowledged`, kind `task`, whose `acknowledged_by` note has `about.outcome == "blocked"`, with no `final_ack_by`, and for which this handoff's card is the responsible card (`_is_responsible(record, handoff)`; check whether a repaired or retried card keeps the same `card` id, and if not, also accept the card the repair was made for, read from the repair card's request): publish a runtime note with `in_reply_to` = the inbound id, `about.outcome` = this handoff's outcome, `about.follows` = the first note's id, `runtime_key` `ack-final:<inbound id>`; then write `final_ack_by=<note id>` on the record. **These are two commits:** `publish_message` commits the outbox file itself (`publish_runtime` → `_commit_pending`, `comms/publisher.py:377`), and it does not dedupe by `runtime_key`. So before publishing, call `already_published(canonical, message)` (`publisher.py:121-135`) with the `ack-final:<inbound id>` message; if it is already there, find that note's id by scanning the outbox for the `runtime_key` (`find_reply` returns the oldest reply, the `blocked` note, so it cannot be used) and only write `final_ack_by`. Only when this handoff's outcome is terminal (`done|partial|dropped|failed`); a second `blocked` publishes nothing. The bridge (Task 10) closes the IDE task with it.
+- Produces: for a delivery record in state `acknowledged`, kind `task`, whose `acknowledged_by` note has `about.outcome == "blocked"`, with no `final_ack_by`, and for which this handoff finishes the blocked work: the responsible card (`_is_responsible(record, handoff)`), or a runtime repair or recovery card in its chain (built: a repair gets a new card id, so the chain is followed through runtime-written requests and receipts, at most `2 * MAX_REPAIR_CHAIN` hops; a repair that published its final handoff before the `blocked` one is found by sweeping every pass): publish a runtime note with `in_reply_to` = the inbound id, `about.outcome` = this handoff's outcome, `about.follows` = the first note's id, `runtime_key` `ack-final:<inbound id>`; then write `final_ack_by=<note id>` on the record. **These are two commits:** `publish_message` commits the outbox file itself (`publish_runtime` → `_commit_pending`, `comms/publisher.py:377`), and it does not dedupe by `runtime_key`. So before publishing, call `already_published(canonical, message)` (`publisher.py:121-135`) with the `ack-final:<inbound id>` message; if it is already there, find that note's id by scanning the outbox for the `runtime_key` (`find_reply` returns the oldest reply, the `blocked` note, so it cannot be used) and only write `final_ack_by`. Only when this handoff's outcome is terminal (`done|partial|dropped|failed`); a second `blocked` publishes nothing. The bridge (Task 10) closes the IDE task with it.
 
-- [ ] **Step 1: Write the failing tests** through the real path (`publish_hook` with a merged handoff, as the existing acknowledgement tests do): (1) an inbound `task` routed to card C; a handoff of C with outcome `blocked` acknowledges it (`acknowledged`, note with `about.outcome: blocked`); a later handoff of C with outcome `done` publishes exactly one follow-up (`in_reply_to` the inbound id, `about.outcome: done`, `about.follows` the first note) and sets `final_ack_by`; running the same `publish_hook` again publishes nothing; (2) a first acknowledgement `done` never gets a follow-up; (3) `blocked` then `blocked` publishes nothing new; (4) a crash after the follow-up's commit and before `final_ack_by` is written (a `_checkpoint` placed between the two, as the existing crash tests do) is repaired on rerun: exactly one follow-up note exists in the outbox afterwards (assert the count by `runtime_key`), and `final_ack_by` names it; (5) if the blocked card is repaired as a new card (check the repair path first), the repair card's `done` handoff produces the follow-up.
+- [ ] **Step 1: Write the failing tests** through the real path (`publish_hook` with a merged handoff, as the existing acknowledgement tests do): (1) an inbound `task` routed to card C; a handoff of C with outcome `blocked` acknowledges it (`acknowledged`, note with `about.outcome: blocked`); a later handoff of C with outcome `done` publishes exactly one follow-up (`in_reply_to` the inbound id, `about.outcome: done`, `about.follows` the first note) and sets `final_ack_by`; running the same `publish_hook` again publishes nothing; (2) a first acknowledgement `done` never gets a follow-up; (3) `blocked` then `blocked` publishes nothing new; (4) a crash after the follow-up's commit and before `final_ack_by` is written (a `_checkpoint` placed between the two, as the existing crash tests do) is repaired on rerun: exactly one follow-up note exists in the outbox afterwards (assert the count by `runtime_key`), and `final_ack_by` names it; (5) the blocked card is repaired as a new card (built: health opens a repair card for a card whose `blocked` handoff is published), and the repair card's `done` handoff produces the follow-up; so does a handoff-recovery card, and a repair that published first.
 - [ ] **Step 2: Run** them. Expected: FAIL (the `acknowledged` record is skipped).
-- [ ] **Step 3: Implement** a second pass in `acknowledge_inbound` over `acknowledged` records matching the rule above, checking `already_published` first, publishing through `_task_acknowledgement(..., follow_up_of=<first note id>)` when needed (its own commit), then writing `final_ack_by` with `delivery.write_record` in the pass's commit, under the same lock.
+- [ ] **Step 3: Implement** (built as `_final_acknowledgements`, called from `acknowledge_inbound`) a second pass over `acknowledged` records matching the rule above, checking `already_published` first, publishing through `_task_acknowledgement(..., follow_up_of=<first note id>)` when needed (its own commit), then writing `final_ack_by` with `delivery.write_record` in the pass's commit, under the same lock.
 - [ ] **Step 4: Run** the default tier. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(comms): follow-up acknowledgement when a blocked task finishes`.
 
@@ -772,14 +772,15 @@ def prepare_profile(home: Path, env: dict[str, str]) -> None:
     """Install the image's distribution once, atomically; update it when the image carries a new commit.
 
     Runs only at container start, so no Kanban worker is mid-run. A failed update keeps the installed
-    profile serving chat and research (raising here would restart the container forever, with no chat);
-    a failed fresh install raises, because there is nothing to serve."""
+    profile serving chat and research (raising here would restart the container forever, with no chat).
+    A foreign profile (D2: an earlier image installed rohit-optimizer under this name; updating it would
+    re-pull that source) is moved aside only after our staged install succeeds; if that install fails the
+    foreign profile keeps serving and the next start retries. A failed install with no profile raises,
+    because there is nothing to serve."""
     wanted = DISTRIBUTION_COMMIT.read_text().strip()
     profile = profile_home(home)
-    if profile.exists() and not is_ours(profile):
-        # D2: an earlier image installed rohit-optimizer under this name; updating it would re-pull that source.
-        profile.rename(profile.parent / f".{PROFILE}-replaced-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}")
-    if profile.exists():
+    foreign = profile.exists() and not is_ours(profile)
+    if profile.exists() and not foreign:
         marker = profile / COMMIT_MARKER
         if marker.exists() and marker.read_text().strip() == wanted:
             return
@@ -801,10 +802,18 @@ def prepare_profile(home: Path, env: dict[str, str]) -> None:
     with tempfile.TemporaryDirectory(prefix=".autoresearch-install-", dir=home) as temporary:
         staging = Path(temporary)
         install_env = env | {"HERMES_HOME": str(staging)}
-        subprocess.run([HERMES, "profile", "install", str(DISTRIBUTION), "--name", PROFILE, "--yes"], env=install_env, check=True)
-        resume_cron(install_env)
-        (staging / "profiles" / PROFILE / COMMIT_MARKER).write_text(wanted + "\n")
+        try:
+            subprocess.run([HERMES, "profile", "install", str(DISTRIBUTION), "--name", PROFILE, "--yes"], env=install_env, check=True)
+            resume_cron(install_env)
+            (staging / "profiles" / PROFILE / COMMIT_MARKER).write_text(wanted + "\n")
+        except Exception as error:  # noqa: BLE001 - a foreign profile must keep serving chat
+            if not foreign:
+                raise
+            print(f"autoresearch install failed ({type(error).__name__}: {error}); keeping the existing profile", flush=True)
+            return
         profile.parent.mkdir(exist_ok=True)
+        if foreign:
+            profile.rename(profile.parent / f".{PROFILE}-replaced-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}")
         (staging / "profiles" / PROFILE).rename(profile)
 
 

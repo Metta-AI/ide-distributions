@@ -23,7 +23,8 @@ Design documents (open the HTML files in a browser):
   profile goes into the hosted Hermes fleet (milestones M0-M5, decisions D1-D15). The task-level
   plan is [plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), with evidence in
   [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). The profile side is
-  built on this branch ("Softmax hosting" below); the hosting runtime changes are metta work that is not in this repository. The coach chat it adds is designed in
+  built ("Softmax hosting" below); the hosting runtime changes are metta work that is not in
+  this repository. The coach chat it adds is designed in
   [coach-chat-role.md](docs/designs/coach-chat-role.md) and built ("IDE coach chat" below).
 
 ## Prerequisites
@@ -281,8 +282,11 @@ Where things live:
 | Durable ledger (committed, pushed) | `$PROFILE/workspace/.supervisor/ledger/` |
 | Pause state | `$PROFILE/workspace/.supervisor/ledger/pause.json` (exists only while paused) |
 | Coach hold | `$PROFILE/workspace/.supervisor/ledger/coach-hold.json` (exists only while the coach holds research) |
+| Agent started (`AUTORESEARCH_AUTONOMY=on-request`; permanent once written) | `$PROFILE/workspace/.supervisor/ledger/started.json` |
 | Spend-cap stops of a card (committed) | `$PROFILE/workspace/.supervisor/ledger/health/spend/<task-id>.json` |
 | Hermes session usage and cost estimates (read by the spend caps) | `$PROFILE/state.db` (`sessions`) |
+| IDE coach chat budget: the day's first snapshot of the chat sessions' cost | `$PROFILE/local/chat-spend.json` |
+| IDE coach chat event log | `$PROFILE/workspace/.supervisor/runtime/chat_events.jsonl` |
 | GotA compiler child sessions, one full copy per build, not pruned yet (read by `report baseline`) | `$PROFILE/gota-compiler/<build id>-<suffix>/state.db` |
 | Disposable runtime state | `$PROFILE/workspace/.supervisor/runtime/` |
 | Commit provenance journal and its key (not committed) | `$PROFILE/workspace/.git/autoresearch/provenance.jsonl`, `provenance.key` |
@@ -761,3 +765,4 @@ OpenRouter key stops model calls the same way the credit floor does.
 | Document | Covers |
 |---|---|
 | [`docs/integrations/softmax-ide-bridge.md`](docs/integrations/softmax-ide-bridge.md) | The Softmax IDE bridge as the external agent on `comms/`: the inbox files it writes, the outbox fields it reads, how it treats acknowledgements, and what is not exercised yet |
+| [`docs/integrations/softmax-ide-bridge-compat.md`](docs/integrations/softmax-ide-bridge-compat.md) | What the distribution guarantees the bridge, notes for the bridge (acknowledgement and follow-up rules), and the trust model for who may write the inbox |

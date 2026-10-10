@@ -158,6 +158,12 @@ What we do:
   unset, queue-keeper adopts any valid file and logs in `keeper.log` that direct writes are
   unauthenticated.
 
+On Softmax hosting there is no second user: the gateway, the bridge, the coach chat and the
+research workers share one uid (plan D9, option (a) for the first deploy), so
+`AUTORESEARCH_INBOX_WRITERS` is not set there and direct writes are unauthenticated (README,
+"Softmax hosting", "What is not isolated"). The steps below are what a deployment with a separate
+bridge user does.
+
 What the deployment should do:
 
 1. Run the bridge as its own user, for example `ide-bridge`.

@@ -27,7 +27,7 @@ writes nothing. Flat JSON: the envelope fields and the kind's fields together.
 | `id` | `<player_id>:task:<task key>` for a task, `<player_id>:stop:<task key>` for its cancellation |
 | `created` | ISO 8601, UTC |
 | `author` | `coach:<player_id>` |
-| `on_behalf_of` | `human` (a coach action in the IDE; chat-proposed work is not sent yet) |
+| `on_behalf_of` | `human` (a coach action in the IDE; work the coach confirms in the chat is sent by the profile plugin, not by the bridge) |
 | `kind` | `task` or `steer` |
 
 A `task` carries `title` (the IDE task text, at most 500 chars), `mode` (one of the five research modes, from the IDE
@@ -53,11 +53,13 @@ Not sent yet: `reply` and `seen`. The IDE has no surface for answering a `questi
 
 ## What is not exercised yet
 
-The distribution reads only inbox files committed at canonical HEAD (`comms.delivery.inbox`), and
-the supported way to add one is `"$AUTORESEARCH_CLI" comms inbound <kind> --author <name>`, which validates the
-message, assigns an `I-<ULID>` id, adds `schema` and `received_at`, and commits. A file the bridge writes directly into
-the working tree, with an id like `<player_id>:task:<key>` and an author like `coach:<player_id>` (a `:` is not
-allowed in a consumer name), is not read by queue-keeper. The bridge-to-distribution path is therefore not wired yet,
-and the acknowledgement path has been proved against fixture files only. The bridge's
+The distribution routes only inbox files committed at canonical HEAD (`comms.delivery.inbox`). The
+supported CLI way to add one is `"$AUTORESEARCH_CLI" comms inbound <kind> --author <name>`, which validates the
+message, assigns an `I-<ULID>` id, adds `schema` and `received_at`, and commits. A file the bridge writes directly
+into the working tree, with an id like `<player_id>:task:<key>` and an author like `coach:<player_id>`, is adopted by
+queue-keeper on its next run: it is validated and committed unchanged, or answered once with a rejection note
+(`comms.inbound.adopt_direct_writes`; see [softmax-ide-bridge-compat.md](softmax-ide-bridge-compat.md), "Trust: who may
+write the inbox"). The acknowledgement path has been proved against fixture files and the distribution's tests only,
+not against a live bridge. The bridge's
 message models (`InboundTask`, `InboundSteer`, `Outbound` in `bridge.py`) are the place to update when the
 distribution publishes its schema and contract tests.
