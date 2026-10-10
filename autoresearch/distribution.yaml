@@ -92,6 +92,12 @@ env_requires:
       Estimated model spend (USD per UTC day) of the IDE coach chat. Over it, the chat's
       tools refuse (except status) and the chat says its budget is spent. Counted apart from
       the research budget, which never includes chat sessions. 0 turns it off.
+  - name: TMPDIR
+    required: false
+    description: >-
+      Scratch directory for builds and episodes. Softmax hosting sets /opt/data/tmp because
+      the sandbox /tmp is a small tmpfs. It is on terminal.env_passthrough so cron scripts and
+      workers see it. Leave it unset elsewhere.
   - name: AUTORESEARCH_FALLBACK_PRICES
     required: false
     default: input=3,output=12,cache_read=0.75,cache_write=3

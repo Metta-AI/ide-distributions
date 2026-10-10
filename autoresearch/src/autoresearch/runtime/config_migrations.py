@@ -70,6 +70,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",  # queue-keeper preflight's credit floor (A5)
     "AUTORESEARCH_AUTONOMY",  # queue-keeper plans only after the coach's first task (on-request)
     "AUTORESEARCH_CHAT_DAILY_USD",  # the coach chat's day cap (plugin.coach; status reads it too)
+    "TMPDIR",  # hosted scratch dir: the sandbox /tmp is a small tmpfs, so cron scripts need it
 ]
 APPROVAL_DENY = [
     "coworld player use*",

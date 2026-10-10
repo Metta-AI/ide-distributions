@@ -326,3 +326,5 @@ the points that change this document:
   our Hermes tests against that exact image (findings: `docs/plans/findings/hermes-image-compat.md`, pending).
 - **Milestones** unchanged (fake game → real player operations with `cga_` → GotA), plus structured outcome handling and
   profile routing in the first integration contract.
+
+How coaches and operators use the hosted profile (budgets, pause and resume, updates, what is not isolated) is in [README.md](../../README.md), "Softmax hosting".

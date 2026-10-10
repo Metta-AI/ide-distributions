@@ -22,8 +22,8 @@ Design documents (open the HTML files in a browser):
 - [Softmax hosting integration](docs/designs/softmax-integration-plan-2026-10-09.html): how the
   profile goes into the hosted Hermes fleet (milestones M0-M5, decisions D1-D15). The task-level
   plan is [plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), with evidence in
-  [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). This is a plan: none of
-  the hosted work is built yet. The coach chat it adds is designed in
+  [findings.md](docs/plans/2026-10-09-softmax-integration/findings.md). The profile side is
+  built on this branch ("Softmax hosting" below); the hosting runtime changes are metta work that is not in this repository. The coach chat it adds is designed in
   [coach-chat-role.md](docs/designs/coach-chat-role.md) and built ("IDE coach chat" below).
 
 ## Prerequisites
@@ -466,6 +466,109 @@ code: `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Kanban workers
   cannot be read refuses too.
 - **Log.** `workspace/.supervisor/runtime/chat_events.jsonl`: chat turns, read tools (name and `ok`), proposals (id and
   kind), shown renderings, sends (proposal id and inbound id). Payload text is not logged.
+
+## Softmax hosting
+
+How the profile runs when Softmax hosts it for a coach (plan:
+[plan.md](docs/plans/2026-10-09-softmax-integration/plan.md), sections 3.4-3.7 and decisions D1-D15). The
+profile side described here is built on this branch. The hosting runtime (image, installer, key budget, bridge) is
+metta code that the plan describes and that is not part of this repository; where a sentence below
+depends on it, it says "per the plan", and you should check the deployed metta version before relying on it.
+
+### For coaches
+
+- **Set up your player's Controls first.** Before you do, the server applies no league choice and no
+  daily credit cap to the hosted agent's `cga_` token. In the IDE Controls set the league (Gods of
+  the Arena), what the agent must ask before (submission, uploads and XP requests are allowed without
+  asking when the list is empty), and `dailyCredits` (the most XP credits it may use per day). Add
+  asks whenever you want to approve more.
+- **Research starts when you ask.** With `AUTORESEARCH_AUTONOMY=on-request` (the hosted setting) the agent plans
+  nothing until your first accepted `task`. After that it plans on its own, permanently
+  (`.supervisor/ledger/started.json`). A `steer` (what cancelling a task produces) does not start it.
+- **Ask the chat what is going on.** The chat reads the workspace (`status`, `baseline_report`,
+  cards, records, messages; see "IDE coach chat" above). It cannot change anything by itself.
+- **Send work with a proposal.** Ask the chat for a `task`, `steer`, `reply` or `control`. The plugin shows
+  the exact message first in its reply, ending `To send exactly this, reply: confirm P-xxxx`. Nothing is
+  sent until your whole line is `confirm P-xxxx` in the same chat session, within 15 minutes. `cancel P-xxxx`
+  drops it. The send runs in the background, so the reply to `confirm` says "Sending P-xxxx" and the
+  next reply tells you whether it was sent.
+- **Stop and resume research.** Type `/pause-research` (hold: no new cards are admitted or dispatched, nothing
+  is planned; running cards finish under their caps) and `/resume-research`. A resume does not override
+  the agent's own pause (credit floor, daily budget, champion conflict); it says so and the agent
+  resumes when that cause clears. Cancelling one task in the IDE stops only that task (it arrives as a `steer`), and the chat's
+  stop button (`/stop`) stops only the chat turn that is running (per the plan; both are bridge behavior).
+  Neither pauses research.
+- **Budgets you will meet.** The chat has its own cap, `AUTORESEARCH_CHAT_DAILY_USD` (default $3 per UTC
+  day): over it the chat's tools refuse except `status`, and research is not affected. Research has the
+  caps in the table under "Configure `.env`".
+
+### Budgets on hosting
+
+| Limit | Value | Who enforces it | What happens at the limit |
+|---|---|---|---|
+| OpenRouter key | $500 per week, resets Monday 00:00 UTC, expires after 30 days (per the plan; existing keys of $10 stay until the operator raises them) | OpenRouter | Model calls are refused. The credit floor (below) pauses research first. |
+| Credit floor | `AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD`, default $10 | preflight, every queue-keeper run | The agent pauses with one help request and resumes by itself once the key's remaining credit is back above the floor (for example after the weekly reset). A coach hold is never cleared by this. |
+| Research per day | `AUTORESEARCH_DAILY_BUDGET_USD`, default $25 in this code (the plan sets $100 for hosting, as a separate change) | queue-keeper | Dispatch pauses with one help request; resumes the next UTC day. At $100 a day the weekly $500 lasts about 5 days. |
+| Per card | 4 runs and $4 | queue-keeper | The card is blocked with a help request. |
+| IDE coach chat | `AUTORESEARCH_CHAT_DAILY_USD`, default $3 | the plugin | Chat tools refuse except `status`. |
+| XP credits | the player's `dailyCredits` | the Softmax server, once Controls are set | Experiments are refused for credits and relaunched later (A10). |
+
+The spend figures are Hermes's estimates for this profile's own sessions. GotA compiler child runs are not counted
+by the daily and card caps; `report baseline` shows them separately, and the key's real usage is in `status`.
+
+### What the runtime writes and where things live
+
+Per the plan (3.4), the hosting runtime writes the profile `.env` (mode 0600): `SOFTMAX_PLAYER_CREDENTIAL` (the
+workspace's `cga_` token), `AUTORESEARCH_PLAYER_ID`, `AUTORESEARCH_WORKSPACE_REMOTE`
+(`/opt/data/autoresearch-workspace.git`), `COGAMES_API_URL`, `OPENROUTER_API_KEY`, and the hosted settings
+`AUTORESEARCH_GAME=gota`, `AUTORESEARCH_AUTONOMY=on-request`, `TMPDIR=/opt/data/tmp` and the GotA tool paths.
+It does not set `AUTORESEARCH_INBOX_WRITERS` or any spend-cap name. The three variables the plugin
+and cron scripts read (`AUTORESEARCH_AUTONOMY`, `AUTORESEARCH_CHAT_DAILY_USD`, `TMPDIR`) are on
+`terminal.env_passthrough` in `config.yaml`, which bootstrap keeps in place.
+
+| What | Where (hosted) |
+|---|---|
+| Profile | `/opt/data/profiles/optimizer` (install name `optimizer`; the Kanban board is still named `autoresearch`) |
+| Canonical workspace and the relay path the bridge reads and writes | `/opt/data/profiles/optimizer/workspace` |
+| Everything else | the table under "Operate", relative to that profile |
+
+### Looking at the agent
+
+The chat's `status` and `baseline_report` tools, or in an operator shell `"$AUTORESEARCH_CLI" status --json` and
+`"$AUTORESEARCH_CLI" report baseline --since <YYYY-MM-DD> --json` (see "Operate"). `status` shows the
+installed version and commit, whether the last profile update failed (`distribution.update_failed`), pause
+state, the coach hold, whether the agent has started, spend against the budget, the key's remaining credit,
+running cards and the champion.
+
+### Updates
+
+Per the plan: the profile is baked into the hosting image and installed as `optimizer` when a workspace
+starts. A workspace that starts on a newer image gets `hermes profile update`, after which `.env`, the workspace and
+the board stay and the cron jobs run again. Until the plan's later milestone (M4) a new profile version needs a
+new image, which is a host replacement with workspace moves. Two things to know:
+
+- **A failed update keeps serving.** The runtime logs it, leaves a `.softmax-update-failed` marker and carries on with the
+  installed profile; `status` reports it. `hermes profile update` copies files in steps, so a failed update
+  can leave the profile partly updated. That is a known gap until M4.
+- **Replacing the earlier `rohit-optimizer` profile moves its Hermes state aside** (to
+  `/opt/data/profiles/.optimizer-replaced-<UTC time>`), and ours is installed fresh. The agent therefore
+  starts without the earlier chat context, while the IDE can still show the old transcript.
+
+### What is not isolated
+
+Everything in the sandbox runs as one uid (plan D9): the gateway, the bridge, the coach chat and the research
+workers. `AUTORESEARCH_INBOX_WRITERS` is not set on hosting, because there is no second user to name. The plan's
+commit-provenance check (A15) is detection of accidental writes only and is not built on this branch; a research
+process can still write the inbox, commit, or run `comms inbound`, and each carries the coach's authority. The `OPENROUTER_API_KEY` and `cga_` token in the profile `.env` are readable by
+the same processes. See [softmax-ide-bridge-compat.md](docs/integrations/softmax-ide-bridge-compat.md), "Trust: who
+may write the inbox".
+
+### If the token leaks or must stop
+
+The `cga_` token does not expire. Revoke the workspace's agent (the `CogentAgent` named
+`hermes-<provisioning hex>`) in Softmax. Per the plan, the host controller's next `/whoami` check then stops the
+sandbox and reports `revoked`; until it does, the agent pauses itself with a help request when Softmax rejects the token. Revoking the
+OpenRouter key stops model calls the same way the credit floor does.
 
 ## Known gaps
 
