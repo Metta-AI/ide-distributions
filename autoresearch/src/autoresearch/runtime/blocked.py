@@ -8,8 +8,10 @@ Per blocked card, tracked by the committed marker
 1. First block: requeue the card once (``queue.requeue``, Kanban ``unblock``), then commit the
    marker ``{state: requeued}``.
 2. Blocked again after that: one runtime repair request (marker ``repair-blocked:<task-id>``,
-   the card's mode and refs, P1) and one runtime ``help_request``, then the marker becomes
-   ``{state: repaired, repair_request}``. A card a promotion covers gets no repair request:
+   the card's mode and refs, P1), committed with the marker ``{state: repaired,
+   repair_request, notified: false}`` in one commit (admission never sees the request without
+   its link to this card), then one runtime ``help_request`` and the marker ``notified: true``.
+   A crash before that is finished by the next run. A card a promotion covers gets no repair request:
    the promotion-recovery card is its only follow-up (A11); the help_request still goes out.
 3. Later: nothing more. The blocked card stays blocked for a human to inspect.
 
@@ -103,7 +105,8 @@ from autoresearch.runtime.markers import (
     repair_blocked_marker,
 )
 from autoresearch.runtime.pause import is_held, is_paused
-from autoresearch.runtime.planning import RUNTIME, commit_runtime_request, marked_request
+from autoresearch.runtime.planning import RUNTIME, marked_request
+from autoresearch.runtime.routing import request_card
 
 REQUEUED = "requeued"
 REPAIRED = "repaired"
@@ -194,6 +197,51 @@ def _requeue(canonical: Path, queue: Queue, card: Card) -> BlockedAction | None:
     return BlockedAction(card.task_id, REQUEUED)
 
 
+def _repair_notice(
+    card: Card, request_id: str | None, at_limit: bool, after_publish: bool
+) -> tuple[runtime_messages.RuntimeMessage, dict]:
+    """The runtime message of a repair (or of the chain limit) and its publish fields."""
+    if at_limit:
+        message = runtime_messages.repair_chain_limit(
+            card.spec.title, card.task_id, card.spec.request_id, MAX_REPAIR_CHAIN, _refs(card)
+        )
+        return message, {"priority": REPAIR_PRIORITY, "expects_response": True}
+    args = (card.spec.title, card.task_id, card.spec.request_id, request_id, _refs(card))
+    if after_publish:
+        return runtime_messages.card_repaired_after_publish(*args), {}
+    message = runtime_messages.card_blocked_twice(*args)
+    return message, {"priority": REPAIR_PRIORITY, "expects_response": True}
+
+
+def _notify(canonical: Path, card: Card, record: dict, allow_no_remote: bool) -> None:
+    """Publish the notice of a ``repaired`` marker written with ``notified: false``, once
+    (``already_published``), then commit the marker ``notified: true``. Markers written before
+    this field existed count as notified. Call under the canonical lock."""
+    message, fields = _repair_notice(
+        card,
+        record.get("repair_request"),
+        bool(record.get("chain_limit")),
+        bool(record.get("after_publish")),
+    )
+    if not already_published(canonical, message):
+        publish_message(canonical, message, allow_no_remote, **fields)
+    marker = blocked_marker_path(canonical, card.task_id)
+    write_json(marker, record | {"notified": True})
+    commit(canonical, [marker], f"health: notified about blocked card {card.task_id}")
+
+
+def _notify_if_pending(
+    canonical: Path, card: Card, record: dict | None, allow_no_remote: bool
+) -> None:
+    """Finish the notice of a repair whose run crashed after its marker commit (``_repair``)."""
+    if record is None or record["state"] != REPAIRED or record.get("notified", True):
+        return
+    with canonical_lock(canonical):
+        record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
+        if record is not None and record.get("notified") is False:
+            _notify(canonical, card, record, allow_no_remote)
+
+
 def _repair(
     canonical: Path,
     card: Card,
@@ -203,11 +251,18 @@ def _repair(
 ) -> BlockedAction:
     """One repair request and one runtime message, then the marker ``repaired``. Blocked
     twice by Hermes, or (``after_publish``) blocked or rerun after its ``blocked`` handoff was
-    published. At ``MAX_REPAIR_CHAIN`` repairs deep, a help request instead of the repair."""
+    published. At ``MAX_REPAIR_CHAIN`` repairs deep, a help request instead of the repair.
+
+    The request and the marker that links it to this card (``repair_request``) are one commit,
+    so admission never sees a repair request whose parent link is missing (``publisher``
+    follows that link to send the coach's follow-up). The marker says ``notified: false``
+    until the message is published (``_notify``): a crash in between is finished by the next
+    run (``_notify_if_pending``)."""
     task_id = card.task_id
     covered = promotion.covers_task(canonical, task_id)
     with canonical_lock(canonical):
-        request_id = None
+        request_id = key = None
+        paths = []
         depth = 0 if covered else _repair_depth(canonical, card.spec.request_id)
         at_limit = depth >= MAX_REPAIR_CHAIN
         if not covered and not at_limit:
@@ -232,29 +287,28 @@ def _repair(
                 RUNTIME,
                 REPAIR_PRIORITY,
             )
-            commit_runtime_request(canonical, repair_blocked_marker(task_id), spec)
-            request_id = marked_request(canonical, repair_blocked_marker(task_id)).stem
-        args = (card.spec.title, task_id, card.spec.request_id, request_id, _refs(card))
-        if at_limit:
-            message = runtime_messages.repair_chain_limit(
-                card.spec.title, task_id, card.spec.request_id, MAX_REPAIR_CHAIN, _refs(card)
-            )
-            fields = {"priority": REPAIR_PRIORITY, "expects_response": True}
-        elif after_publish:
-            message = runtime_messages.card_repaired_after_publish(*args)
-            fields = {}
-        else:
-            message = runtime_messages.card_blocked_twice(*args)
-            fields = {"priority": REPAIR_PRIORITY, "expects_response": True}
-        if not already_published(canonical, message):
-            publish_message(canonical, message, allow_no_remote, **fields)
+            key = repair_blocked_marker(task_id)
+            request = marked_request(canonical, key) or request_card(canonical, key, spec)
+            paths.append(request)
+            request_id = request.stem
         marker = blocked_marker_path(canonical, task_id)
         base = record or {"task_id": task_id, "request_id": card.spec.request_id}
-        repaired = {"state": REPAIRED, "repair_request": request_id}
+        repaired = base | {
+            "state": REPAIRED,
+            "repair_request": request_id,
+            "after_publish": after_publish,
+            "notified": False,
+        }
         if at_limit:
             repaired["chain_limit"] = True
-        write_json(marker, base | repaired)
-        commit(canonical, [marker], f"health: blocked card {task_id} needs repair")
+        write_json(marker, repaired)
+        request_note = f": runtime request {request_id} [{key}]" if request_id else ""
+        commit(
+            canonical,
+            [*paths, marker],
+            f"health: blocked card {task_id} needs repair{request_note}",
+        )
+        _notify(canonical, card, repaired, allow_no_remote)
     return BlockedAction(task_id, CHAIN_LIMIT if at_limit else REPAIRED, request_id)
 
 
@@ -336,6 +390,7 @@ def _handle_one(
         return _requeue(canonical, queue, card)
     if record["state"] == REQUEUED:
         return _repair(canonical, card, record, allow_no_remote)
+    _notify_if_pending(canonical, card, record, allow_no_remote)
     return None
 
 
@@ -361,6 +416,8 @@ def _close_rerun(
     action = None
     if outcome == "blocked" and (record is None or record["state"] != REPAIRED):
         action = _repair(canonical, card, record, allow_no_remote, after_publish=True)
+    else:
+        _notify_if_pending(canonical, card, record, allow_no_remote)
     if card.state == "pending":
         queue.drop(card.task_id, RERUN_AFTER_PUBLISH)
     else:
@@ -389,6 +446,7 @@ def _repair_completed_rerun(
         return None
     record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
     if record is not None and record["state"] == REPAIRED:
+        _notify_if_pending(canonical, card, record, allow_no_remote)
         return None
     return _repair(canonical, card, record, allow_no_remote, after_publish=True)
 

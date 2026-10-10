@@ -1132,3 +1132,49 @@ def test_a_completed_card_whose_only_run_handed_off_blocked_is_not_repaired_agai
     assert board.queue.get(worker.task_id).state == "completed"
 
     assert _handle_blocked(board) == []
+
+
+def test_a_crash_after_the_repair_request_keeps_its_linkage_and_notifies_once(board, monkeypatch):
+    """The repair request and its parent's marker (``repair_request``) are one commit, before
+    admission can see the request; the notice is published after it and tracked on its own.
+    A crash at the notice leaves the linkage durable: the repair still sends the follow-up,
+    and the next run publishes the notice once."""
+    task, worker, first = _blocked_task(board)
+    real_publish = blocked.publish_message
+
+    def crash(*args, **kwargs):
+        raise Crash("publish")
+
+    monkeypatch.setattr(blocked, "publish_message", crash)
+    with pytest.raises(RuntimeError):
+        _handle_blocked(board)
+    monkeypatch.setattr(blocked, "publish_message", real_publish)
+
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
+    assert marker["state"] == blocked.REPAIRED and marker["notified"] is False
+    request_id = marker["repair_request"]
+    assert board.follow_up(request_id)["spec"]["created_by"] == "runtime"
+    request_commit = gitops.git(
+        board.canonical, "log", "-1", "--format=%H", "--", f"cards/requests/{request_id}.json"
+    ).strip()
+    marker_path = blocked.blocked_marker_path(board.canonical, worker.task_id)
+    marker_commit = gitops.git(
+        board.canonical, "log", "-1", "--format=%H", "--",
+        marker_path.relative_to(board.canonical).as_posix(),
+    ).strip()  # fmt: skip
+    assert request_commit == marker_commit
+
+    repair = board.admit_follow_up(request_id)  # admission runs before health's next run
+    repair.start()
+    repair.write_journal()
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+    assert _handle_blocked(board) == []
+    assert _handle_blocked(board) == []
+    key = f"repair-after-publish:{worker.task_id}"
+    assert len([m for m in _outbox(board) if m.get("runtime_key") == key]) == 1
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, worker.task_id))
+    assert marker["notified"] is True
