@@ -101,7 +101,9 @@ A league refusal relaunches on that backoff (a no to an ask it still holds stops
 Relaunches of every kind share the one-per-run limit.
 
 Each experiment is handled independently: a failure is logged to
-``.supervisor/runtime/xp_poll.log`` and the others go on. One run at a time
+``.supervisor/runtime/xp_poll.log`` and the others go on. Within one experiment, a failure
+while gathering evidence (artifacts, the evaluate binding, a platform read) is reported the
+same way, but only after the relaunch and coach-answer steps above have run. One run at a time
 (``runtime/xp_poll.run.lock``). The run ends with a push of ``main``.
 """
 
@@ -753,7 +755,7 @@ def _statuses(sm: Softmax, handles: list[XpHandle], result: XpPollRun) -> dict[s
     return statuses
 
 
-def poll_experiment(
+def _evidence_and_review(
     ctx: RunContext,
     sm: Softmax,
     experiment: dict,
@@ -761,12 +763,10 @@ def poll_experiment(
     evaluate: Evaluate,
     league_version: Callable[[], str],
     result: XpPollRun,
-    credits_view: CreditView | None = None,
 ) -> None:
-    """Evidence, then the review (``evaluating``) or relaunch (``awaiting-credits``,
-    ``awaiting-permit``)."""
+    """Evidence for every completed request, then the review of a finished ``evaluating``
+    experiment (module docstring)."""
     canonical, experiment_id = ctx.canonical, experiment["id"]
-    credits_view = credits_view or CreditView(sm, DEFAULT_MIN_CREDITS)
     handles = latest_handles(sm.xp_recover(experiment_id))
     statuses = _statuses(sm, handles, result)
     for handle in handles:
@@ -795,12 +795,38 @@ def poll_experiment(
             )
             if review is not None:
                 result.reviews.append(review)
-    elif experiment.get("status") == "awaiting-credits" and not result.launches:
-        launch = _request_relaunch(canonical, credits_view, experiment, now)
+
+
+def poll_experiment(
+    ctx: RunContext,
+    sm: Softmax,
+    experiment: dict,
+    now: datetime.datetime,
+    evaluate: Evaluate,
+    league_version: Callable[[], str],
+    result: XpPollRun,
+    credits_view: CreditView | None = None,
+) -> None:
+    """Evidence, then the review (``evaluating``) or relaunch (``awaiting-credits``,
+    ``awaiting-permit``). The relaunch decision and the coach's answers do not depend on the
+    evidence: a failure there (artifacts, the evaluate binding, a platform read) is raised
+    after them, so it never keeps a no from stopping the experiment or a yes from relaunching
+    it."""
+    credits_view = credits_view or CreditView(sm, DEFAULT_MIN_CREDITS)
+    evidence_failure: Exception | None = None
+    try:
+        _evidence_and_review(ctx, sm, experiment, now, evaluate, league_version, result)
+    except Exception as error:  # noqa: BLE001 - raised below, after the waits are handled
+        evidence_failure = error
+    status = experiment.get("status")
+    if status == "awaiting-credits" and not result.launches:
+        launch = _request_relaunch(ctx.canonical, credits_view, experiment, now)
         if launch is not None:
             result.launches.append(launch)
-    elif experiment.get("status") == "awaiting-permit":
+    elif status == "awaiting-permit":
         _wait_for_coach(ctx, sm, experiment, now, result, credits_view)
+    if evidence_failure is not None:
+        raise evidence_failure
 
 
 def run(

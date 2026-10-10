@@ -86,6 +86,10 @@ Doctrine upheld: D-03, D-06, D-11, D-21.
   exact batch (`error.details`: `batch`, `attempt`, `batches`). Run `xp create` with exactly
   those values (the launch card names them), so the approved requests replay under the same
   keys.
+- Reason `permit_league_changed`: the game's league configuration changed while the coach's
+  permit asks are open (`error.details`: `saved_league`, `configured_league`). Nothing was
+  sent. Do not work around it: record it, send a `help_request` asking the operator to
+  restore the league or to stop the experiment, and finish `blocked`.
 - Reason `empty_batch`: `--batches` is larger than the seeds allow. Use fewer batches.
 - Reason `attempt_incomplete`: an earlier attempt of the batch still lacks requests (for
   example after a credit denial). Rerun `xp create` with the attempt the message names. It

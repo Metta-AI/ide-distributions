@@ -708,6 +708,88 @@ def test_one_reminder_while_credits_are_short_too(host, monkeypatch):
     assert "Softmax filed 3 permit ask(s)" in reminder["body"]  # the asks still open
 
 
+class _FailsAfterFirstCreate:
+    """The first ``xp_create`` goes to the platform; the next one times out."""
+
+    def __init__(self, inner):
+        self.inner, self.calls = inner, 0
+
+    def xp_create(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("timed out")
+        return self.inner.xp_create(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+def test_each_refusal_is_saved_before_the_next_request(host, monkeypatch):
+    """Codex round 3 (1): the server keeps an ask as soon as it refuses a request, so a later
+    failure in the batch must not lose it: the run ends awaiting-permit with that ask, and
+    xp-poll announces it and stops the experiment on a no."""
+    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", host.env["AUTORESEARCH_PLAYER_ID"])
+    experiment = _experiment(host, "uploaded")
+    _champion_is_the_baseline(host)
+    host.set_faults("permit=spend")
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    with pytest.raises(RuntimeError, match="timed out"):
+        softmax_cli._xp_create(launcher, _FailsAfterFirstCreate(host.sm), _cli_args(experiment))
+    host.runtime_commit("launch: refused, then a timeout")
+    meta, _ = host.store.load(experiment)
+    assert meta["status"] == "awaiting-permit"
+    [ask] = meta["lifecycle"]["permit_wait"]["asks"]
+    assert _poll(host, at(1)).help_requests == [experiment]
+    _answer(host, "no", [ask["ask"]])
+    assert _poll(host, at(2)).stopped == [experiment]
+
+
+@pytest.mark.parametrize("answer", ["no", "yes"])
+def test_an_evidence_failure_does_not_hold_back_the_coachs_answers(host, monkeypatch, answer):
+    """Codex round 3 (2): a failing evaluate binding is still reported, but a no still stops
+    the experiment and an all-yes still relaunches it."""
+    experiment, _, keys, _ = _short_of_credits(host, monkeypatch)
+    _set_fake_state(host, polls_to_complete=1, credits=100)  # B completed: evidence to fetch
+
+    def broken(path):
+        raise ValueError("the evaluate binding failed")
+
+    def poll(now):
+        host.now = now
+        return xp_poll.run(host.ctx, host.sm, host.game, now, env=host.env, evaluate=broken)
+
+    first = poll(at(2))
+    assert "the evaluate binding failed" in first.failures[experiment]
+    _answer(host, answer, [keys[0], keys[2], keys[3]] if answer == "yes" else keys[2:3])
+    after = poll(at(3))
+    assert "the evaluate binding failed" in after.failures[experiment]
+    if answer == "no":
+        assert after.stopped == [experiment]
+        assert host.store.load(experiment)[0]["status"] == "stopped"
+    else:
+        [launch] = after.launches
+        assert "approved all 3 permit ask(s)" in launch.why
+
+
+def test_a_changed_league_is_refused_while_asks_are_open(host, monkeypatch):
+    """Codex round 3 (3): the league is part of each request body and ask, so a replay under a
+    changed league configuration is refused before anything is sent."""
+    experiment, _, wait, _ = _awaiting_permit(host, monkeypatch)
+    _answer(host, "yes", [entry["ask"] for entry in wait["asks"]])
+    monkeypatch.setattr(softmax_cli, "_league_id", lambda: "another_league")
+    recording = _RecordingCreates(host.sm)
+    launcher = RunContext(host.home, host.canonical, host.canonical, "K-launch", "r-1")
+    with pytest.raises(softmax_cli.Refused) as caught:
+        softmax_cli._xp_create(launcher, recording, _cli_args(experiment))
+    assert caught.value.reason == "permit_league_changed"
+    assert caught.value.details == {
+        "saved_league": wait["league_id"],
+        "configured_league": "another_league",
+    }
+    assert recording.creates == []
+
+
 def test_a_declined_refusal_stops_the_batch_at_once(host, monkeypatch):
     """H2: when the server says the coach said no, nothing more of the batch is submitted, the
     wait records the no, ``xp create`` refuses the experiment from then on, and xp-poll stops

@@ -55,8 +55,11 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   ``refusals`` of the same asks only. A ``stopped`` (the coach declined it) or ``reviewed``
   experiment, or one whose wait records a declined ask, is refused (``experiment_closed``)
   before anything is created. A refusal that says the coach said no ends the batch at once
-  (``permit_declined: true``). While permit asks are open, only their exact
-  ``--batch``/``--attempt``/``--batches`` may run (``permit_batch_mismatch``).
+  (``permit_declined: true``). Each refusal is saved to ``permit_wait`` before the next
+  request is sent, so a later failure or crash in the batch loses no ask the server already
+  filed. While permit asks are open, only their exact ``--batch``/``--attempt``/``--batches``
+  may run (``permit_batch_mismatch``), and only in the saved ``permit_wait.league_id``: a
+  changed game league is refused (``permit_league_changed``) before anything is sent.
   Rerunning the same ``--batch``/``--attempt`` later creates only the missing requests. A new
   attempt (one with no request yet in the batch) is a retry, and
   the only reason to retry is a failed or cancelled request, so it is refused unless it is
@@ -562,6 +565,7 @@ def _awaiting_coach(
     store,
     experiment: str,
     meta: dict,
+    previous_wait: dict | None,
     args,
     refusal: LeagueNotChosen | None,
     asks: list[dict],
@@ -573,8 +577,10 @@ def _awaiting_coach(
     """The coach refused the batch: the league choice (``refusal``), or permit asks are open
     (``asks``, merged). ``awaiting-permit`` with the wait recorded (module docstring, ``xp
     create``). ``shortfall`` is ``(reason, balance)`` when credits also ran out in this run: it
-    is recorded as ``permit_wait.credits_short`` and the status stays ``awaiting-permit``."""
-    lifecycle = dict(meta.get("lifecycle") or {})
+    is recorded as ``permit_wait.credits_short`` and the status stays ``awaiting-permit``.
+    ``previous_wait`` is the wait before this run: saving the wait again in the same run (once
+    per refusal) gives the same counters, ``since`` and ``announced``."""
+    lifecycle = {**(meta.get("lifecycle") or {}), "permit_wait": previous_wait}
     now = datetime.now(UTC)
     wait, after = _permit_wait(lifecycle, args, refusal, asks, over_cap, league_id, base, now)
     next_launch_after = after.isoformat(timespec="seconds")
@@ -659,12 +665,15 @@ def check_new_attempt(
         )
 
 
-def _check_permit_wait(experiment: str, meta: dict, args) -> None:
+def _check_permit_wait(experiment: str, meta: dict, args, league_id: str) -> None:
     """While the experiment waits on open permit asks (``awaiting-permit`` with
     ``lifecycle.permit_wait.asks``), only the exact batch they were filed for may run: the same
     ``--batch``, ``--attempt`` and ``--batches`` give the same requests and idempotency keys, so
-    each one replays against its own ask (``permit_batch_mismatch`` otherwise). A wait with a
-    declined ask is final (``experiment_closed``): xp-poll stops the experiment."""
+    each one replays against its own ask (``permit_batch_mismatch`` otherwise). The league is
+    part of each request body and of the ask's identity, so the game's configured league
+    (``league_id``) must still be the saved ``permit_wait.league_id``; a changed configuration is
+    refused (``permit_league_changed``) instead of sending other bodies under the same keys. A
+    wait with a declined ask is final (``experiment_closed``): xp-poll stops the experiment."""
     wait = (meta.get("lifecycle") or {}).get("permit_wait") or {}
     if not wait.get("asks") or meta.get("status") != "awaiting-permit":
         return
@@ -684,6 +693,16 @@ def _check_permit_wait(experiment: str, meta: dict, args) -> None:
             "under the same keys",
             {"batch": batch, "attempt": attempt, "batches": batches},
         )
+    saved_league = wait.get("league_id")
+    if saved_league and saved_league != league_id:
+        raise Refused(
+            "permit_league_changed",
+            f"{experiment} waits on the coach's permit asks for XP requests in league "
+            f"{saved_league}, but the game is now configured for {league_id}. Requests for "
+            "another league would not match the approved asks. Restore the game's league "
+            f"({saved_league}) to replay them; nothing was sent",
+            {"saved_league": saved_league, "configured_league": league_id},
+        )
 
 
 def _xp_create(ctx, sm, args) -> dict:
@@ -702,7 +721,13 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
             "experiment_closed",
             f"{experiment} is {meta['status']}; its evaluation does not run again",
         )
-    _check_permit_wait(experiment, meta, args)
+    _check_permit_wait(experiment, meta, args, _league_id())
+    # The wait before this run: the base of every merge and of the wait's counters, however
+    # often this run saves the wait (each refusal is saved before the next request is sent).
+    previous_wait = (meta.get("lifecycle") or {}).get("permit_wait")
+    open_asks = (
+        ((previous_wait or {}).get("asks") or []) if meta["status"] == "awaiting-permit" else []
+    )
     binding = meta.get("candidate_binding")
     if not binding:
         raise Refused("no_binding", f"{experiment} has no candidate_binding; upload first")
@@ -735,6 +760,18 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     created: list[dict] = []
     denial: CreditDenied | LeagueNotChosen | None = None
     fresh: list[dict] = []  # one per request refused for a permit in this run; the batch goes on
+
+    def hold(league: LeagueNotChosen | None, shortfall) -> dict:
+        """Save the wait with every ask filed so far (``_awaiting_coach``)."""
+        done = set(existing) | {(entry["seed"], entry["arm"]) for entry in created}
+        current, _ = store.load(experiment)
+        over_cap = any(entry["state"] == PERMIT_OVER_CAP for entry in fresh)
+        asks = _merge_asks(open_asks, fresh, done)
+        return _awaiting_coach(
+            store, experiment, current, previous_wait, args, league, asks, over_cap,
+            _league_id(), base, shortfall,
+        )
+
     for seed, arm, spec in planned:
         if (seed, arm) in existing:
             continue
@@ -757,6 +794,9 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
                     "reason": result.reason,
                 }
             )
+            # Saved before the next request: the server keeps the ask, so a later failure or
+            # crash in this batch must not lose it.
+            hold(None, None)
             if result.state == PERMIT_DECLINED:
                 break
             continue
@@ -783,19 +823,13 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         "missing": missing,
     }
     meta, _ = store.load(experiment)
-    saved = (meta.get("lifecycle") or {}).get("permit_wait") or {}
-    open_asks = (saved.get("asks") or []) if meta["status"] == "awaiting-permit" else []
     asks = _merge_asks(open_asks, fresh, done)
     credits_out = isinstance(denial, CreditDenied)
     if isinstance(denial, LeagueNotChosen) or asks:
         # Open asks keep the experiment awaiting-permit, also when credits ran out too.
         shortfall = (denial.reason, read_credits(sm)) if credits_out else None
-        over_cap = any(entry["state"] == PERMIT_OVER_CAP for entry in fresh)
         league = denial if isinstance(denial, LeagueNotChosen) else None
-        waiting = _awaiting_coach(
-            store, experiment, meta, args, league, asks, over_cap, _league_id(), base, shortfall
-        )
-        return {**report, **waiting}
+        return {**report, **hold(league, shortfall)}
     if credits_out:
         credits = read_credits(sm)
         return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}

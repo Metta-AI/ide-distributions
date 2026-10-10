@@ -328,9 +328,11 @@ The runtime reads the coach's answers itself, every run, with the agent token
   `lifecycle.permit_wait`). When every ask of the batch is approved, xp-poll requests one
   relaunch card at once; it sends each refused request again with the same body and
   idempotency key (the card names the exact `--batch`, `--attempt` and `--batches`, and
-  `xp create` refuses any other batch while the asks wait), so Softmax grants it against its
-  yes and creates nothing twice. Every ask stays tracked until its request is created: a rerun
-  that stops early (credits ran out, or a no) keeps the asks it did not reach, and a new ask
+  `xp create` refuses any other batch while the asks wait, and refuses with
+  `permit_league_changed` if the game's league configuration changed meanwhile), so Softmax
+  grants it against its yes and creates nothing twice. Every ask stays tracked until its
+  request is created: each refusal is saved before the next request is sent, a rerun that
+  stops early (credits ran out, or a no) keeps the asks it did not reach, and a new ask
   the server files for a request replaces that request's old one. An experiment with any ask
   open is always `awaiting-permit`: when credits also ran out in the batch, that is recorded in
   the wait (`credits_short`), and the relaunch waits for every yes and then for the credits,
