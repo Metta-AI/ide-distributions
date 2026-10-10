@@ -86,7 +86,7 @@ that contract:
    `Partly done:`, `Dropped:`, `Failed:` or `Blocked:`; `about.outcome` has the raw value.
    A `blocked` task is not finished. The runtime publishes exactly one follow-up `note` for it,
    with the same `in_reply_to`, the final `about.outcome`, `about.follows` set to the `blocked`
-   note's id, and `runtime_key` `ack-final:<task id>` (the delivery record names it in
+   note's id, and `runtime_key` `ack-final:<inbound id>` (the task's `I-` id, not a card id) (the delivery record names it in
    `final_ack_by`), when a later handoff ends the work with `done`, `partial`, `dropped` or
    `failed`. That later handoff comes from one of these:
    - the same card, when queue-keeper requeued it before its `blocked` handoff was published

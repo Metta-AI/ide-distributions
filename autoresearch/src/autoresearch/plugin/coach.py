@@ -710,8 +710,9 @@ def _control(key: str, action: str) -> str:
     )
     return (
         f"The coach typed {command}. The plugin is sending it now (Sending {command}…); it "
-        f"shows the result with a reply. Once the runtime applies it (within about a minute) "
-        f"{effect}. Tell the coach it is being sent."
+        f"shows the result with a reply. The runtime applies it on its next full run; if the "
+        f"agent is paused for credit or commit checks, when that clears (`status` shows why). "
+        f"Then {effect}. Tell the coach it is being sent."
     )
 
 

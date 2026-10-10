@@ -421,6 +421,15 @@ def test_pause_and_resume_lines_send_control(chat, action):
     assert f"Sent /{action}-research as I-SENT0." in _reply()
 
 
+def test_a_control_line_does_not_promise_a_minute_while_a_pause_skips_routing(chat):
+    """Routing waits while a preflight or provenance pause holds: the control applies on the
+    next full run, or when that pause clears."""
+    context = _turn(line="/pause-research")
+    _settled()
+    assert "within about a minute" not in context
+    assert "on its next full run" in context and "`status` shows why" in context
+
+
 @pytest.mark.parametrize("line", ["please /pause-research", "/pause-research now", "/pause"])
 def test_a_command_inside_other_text_does_nothing(chat, line):
     _turn(line=line)

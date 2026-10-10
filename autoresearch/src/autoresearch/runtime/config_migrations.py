@@ -69,7 +69,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_RELAUNCH_MIN_CREDITS",  # xp-poll's relaunch threshold (A10)
     "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",  # queue-keeper preflight's credit floor (A5)
     "AUTORESEARCH_AUTONOMY",  # queue-keeper plans only after the coach's first task (on-request)
-    "AUTORESEARCH_CHAT_DAILY_USD",  # the coach chat's day cap (plugin.coach; status reads it too)
+    "AUTORESEARCH_CHAT_DAILY_USD",  # the coach chat's day cap (plugin.coach reads the .env)
     "TMPDIR",  # hosted scratch dir: the sandbox /tmp is a small tmpfs, so cron scripts need it
     "GOTA_G2_RUNNER",  # GotA G2 episode runner in worker builds: native (default) or docker
 ]
