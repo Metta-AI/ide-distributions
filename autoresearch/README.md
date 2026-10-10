@@ -371,7 +371,7 @@ Known gaps of the provenance check:
   check is what catches a commit.
 - **No help request while the journal cannot be written.** Publishing is a canonical commit,
   and every canonical commit needs the journal. The run still pauses and unassigns pending
-  cards, but the help request is only logged (`keeper.log`) and retried. Check `keeper.log`
+  cards, but the help request is only logged (`.supervisor/runtime/keeper.log`) and retried. Check that log
   for `provenance` failures when the agent is paused with no message.
 - **A board epoch can be left uncommitted.** If the journal fails exactly when bootstrap
   creates the board, `board.json` gets the new epoch on disk but not in a commit.
