@@ -111,6 +111,15 @@ FIXTURES = {
         }
         for repair in (REQUEST, None)
     ],
+    "repair_chain_limit": [
+        {
+            "card_title": "Scout andre",
+            "task_id": CARD,
+            "request_id": REQUEST,
+            "limit": 2,
+            "refs": [],
+        }
+    ],
     "card_tool_fault": [
         {
             "card_title": "Scout andre",

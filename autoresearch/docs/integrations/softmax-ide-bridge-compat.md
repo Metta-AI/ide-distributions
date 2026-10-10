@@ -94,7 +94,7 @@ that contract:
    - the repair card queue-keeper opens for a card whose `blocked` handoff is published and that
      Hermes then holds blocked (not a `tool-fault:` block), or that a human unblocks (the rerun
      could not hand off: the runtime closes it and opens the repair card instead);
-   - a repair of a repair, up to 5 repairs deep.
+   - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`).
 
    The bridge shows the task paused on the first note and closes it on the follow-up. A task first
    acknowledged with a final outcome gets no follow-up, and a second `blocked` publishes nothing.
@@ -102,12 +102,20 @@ that contract:
    - a card that finished `blocked` and then completed (`kanban_complete`), as most agent blocks do
      (for example `league-watch` on an identity refusal): nothing reruns it;
    - a `tool-fault:` card no human has unblocked yet (D-26), or a card held blocked at a spend cap;
+   - an unblocked card whose rerun ends (its `card finish` refused, then `kanban_complete`) before
+     queue-keeper or health sees it running: it is never repaired. Agent work before
+     `card finish` usually takes minutes, so this is unlikely;
+   - a repair card that the agent or the planner drops before it runs;
    - a card a promotion covers (its promotion's recovery card carries the work on, outside the
-     repair chain), and a chain more than 5 repairs deep.
+     repair chain);
+   - a chain that reached the repair limit: its last card stays blocked, and one P1 help request
+     asks a human.
 
-   To close such a task, the coach cancels it in the IDE or sends a new task; the operator can
-   unblock a `tool-fault:` card once the tool is fixed, which opens the repair card that sends the
-   follow-up.
+   To close such a task in the IDE, the coach cancels it. That closes the IDE task, and the bridge
+   sends the stop `steer` (note 3), which costs one P0 card for a task whose work is already over.
+   The operator can instead unblock a `tool-fault:` card once the tool is fixed, which opens the
+   repair card that sends the follow-up.
+
 3. **A stop is a request, not a cancel.** The stop `steer` gives the agent a P0 card, and the agent
    decides what to do (for example drop the task's card if it is still pending). If the task's card is
    already running or finished, its acknowledgement can still arrive after the stop. The bridge

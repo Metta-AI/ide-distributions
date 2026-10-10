@@ -379,6 +379,72 @@ def test_a_repair_of_a_repair_sends_the_follow_up(board):
     assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
 
 
+def test_a_repair_chain_stops_at_the_limit_with_one_help_request(board):
+    task, _first, repair = _blocked_task_with_repair_card(board)
+    _block_after_finish(board, repair)
+    board.process(publish=local_hook)
+    second = _start_repair(board, _handle_blocked(board)[0])
+    _block_after_finish(board, second)
+    board.process(publish=local_hook)
+    requests_before = len(list((board.canonical / "cards" / "requests").glob("*.json")))
+
+    [action] = _handle_blocked(board)
+
+    assert action.action == blocked.CHAIN_LIMIT and action.repair_request is None
+    assert _handle_blocked(board) == []
+    assert len(list((board.canonical / "cards" / "requests").glob("*.json"))) == requests_before
+    key = f"repair-limit:{second.task_id}"
+    [help_request] = [m for m in _outbox(board) if m.get("runtime_key") == key]
+    assert help_request["kind"] == "help_request" and help_request["expects_response"] is True
+    assert help_request["priority"] == "P1"
+    marker = board.committed(blocked.blocked_marker_path(board.canonical, second.task_id))
+    assert marker["chain_limit"] is True and marker["repair_request"] is None
+    assert board.queue.get(second.task_id).state == "blocked"
+    assert len(_replies(board, task)) == 1
+
+
+def test_a_rerun_of_a_card_whose_published_handoff_was_final_is_closed_without_repair(board):
+    """``card finish --outcome done``, then the run ends without ``kanban_complete`` (Hermes
+    blocks it): the work is published and over. Nothing is redone, also after an unblock."""
+    task, worker = _finished_task_card(board)
+    worker.finish(outcome="done", terminal=False)
+    board.queue.block(worker.task_id, worker.run_id, "circuit breaker")
+    board.process(publish=local_hook)
+    requests = sorted((board.canonical / "cards" / "requests").glob("*.json"))
+
+    assert _handle_blocked(board) == []
+    assert board.queue.get(worker.task_id).state == "blocked"
+    board.queue.requeue(worker.task_id, "a human unblocks it")
+    assert _handle_blocked(board) == []
+
+    assert board.queue.get(worker.task_id).state == "completed"  # the rerun was dropped
+    assert sorted((board.canonical / "cards" / "requests").glob("*.json")) == requests
+    assert not [m for m in _outbox(board) if m["kind"] != "note" or m.get("in_reply_to") != task]
+    assert len(_replies(board, task)) == 1 and "final_ack_by" not in _delivery(board, task)
+
+
+def test_a_running_rerun_that_already_handed_off_is_left_to_finish(board):
+    """Requeued before its blocked handoff published; the rerun hands off ``done`` and, before
+    its run ends, the blocked handoff publishes. The rerun is not stopped or repaired."""
+    task, worker = _finished_task_card(board)
+    _block_after_finish(board, worker)
+    [action] = _handle_blocked(board)
+    assert action.action == blocked.REQUEUED
+    worker.start()
+    worker.write_journal()
+    worker.finish(terminal=False)
+    board.process(publish=local_hook)
+    assert worker.receipt()["state"] == "published"
+
+    assert _handle_blocked(board) == []
+    assert board.queue.get(worker.task_id).state == "claimed"
+
+    worker.end_run()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["outcome"] == "done"
+
+
 def test_a_repair_request_not_created_by_the_runtime_is_not_followed(board):
     task, worker, _first = _blocked_task(board)
     other = board.admit()  # a planner's request, named in a hand-written marker

@@ -70,6 +70,11 @@ def repair_blocked_marker(task_id: str) -> str:
     return f"repair-blocked:{task_id}"
 
 
+# Repairs of a blocked card's repairs (``blocked.handle_blocked``): a card this many repairs
+# deep gets a help request instead of another repair. ``publisher`` follows the chain this far.
+MAX_REPAIR_CHAIN = 2
+
+
 def blocked_marker_path(canonical: Path, task_id: str) -> Path:
     """The committed health marker of a blocked card (``blocked.handle_blocked``): its
     ``state`` (requeued, repaired, tool-fault) and, once repaired, its ``repair_request``."""

@@ -338,6 +338,26 @@ def card_repaired_after_publish(
     )
 
 
+def repair_chain_limit(
+    card_title: str, task_id: str, request_id: str, limit: int, refs: list
+) -> RuntimeMessage:
+    """A repair card was blocked again at the repair-chain limit: no further repair."""
+    body = (
+        f"The card “{_line(card_title, 80)}” is a repair card, {limit} repairs deep, and it was "
+        "blocked again. The runtime opens no more repair cards for this work, so it stays "
+        "blocked. Please check the Hermes logs and the card's help requests, fix the cause, "
+        "and send a new task if the work still matters."
+    )
+    return RuntimeMessage(
+        "help_request",
+        _title("Repair limit reached", card_title),
+        body,
+        refs,
+        _about(card=task_id, request=request_id),
+        key=f"repair-limit:{task_id}",
+    )
+
+
 def card_tool_fault(
     card_title: str, reason: str, task_id: str, request_id: str, run_id: str, refs: list
 ) -> RuntimeMessage:

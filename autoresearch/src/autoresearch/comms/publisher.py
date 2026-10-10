@@ -69,7 +69,7 @@ from autoresearch.paths import Layout
 from autoresearch.records.registry import entity_of_id
 from autoresearch.runtime.admission import receipt_path as request_receipt_path
 from autoresearch.runtime.ledger import committed_json, ledger_of
-from autoresearch.runtime.markers import blocked_marker_path
+from autoresearch.runtime.markers import MAX_REPAIR_CHAIN, blocked_marker_path
 
 OUTBOX_DIR = "comms/outbox"
 INBOX_DIR = "comms/inbox"
@@ -78,9 +78,12 @@ REFERENCED_RECORDS = 10  # journal and created records a task acknowledgement re
 # Card outcomes that end a task's work; ``blocked`` does not (a task acknowledged blocked gets
 # a follow-up acknowledgement with one of these).
 FINAL_OUTCOMES = ("done", "partial", "dropped", "failed")
-# Repairs of repairs followed from a blocked card to the card that finishes its work.
-REPAIR_HOPS = 5
-CREATED_BY_RUNTIME = "runtime"  # CardSpec.created_by of a runtime request (planning.RUNTIME)
+# Repairs of repairs followed from a blocked card to the card that finishes its work: as deep
+# as ``runtime.blocked`` repairs (``MAX_REPAIR_CHAIN``), so the last repair card is reached.
+REPAIR_HOPS = MAX_REPAIR_CHAIN
+# CardSpec.created_by of a runtime request; equal to ``runtime.planning.RUNTIME``, which cannot be
+# imported here (planning -> routing -> publisher is an import cycle).
+CREATED_BY_RUNTIME = "runtime"
 STAGED_DIR = "comms/staged"
 RECEIPTS_DIR = ".supervisor/ledger/published"
 REMOTE = "origin"
