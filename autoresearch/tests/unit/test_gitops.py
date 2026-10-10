@@ -57,17 +57,42 @@ def test_contains_and_merge_base(repo):
     assert gitops.merge_base(repo, side, "main") == base
 
 
-def test_merge_no_ff_clean(repo):
+def _land(repo, prepared):
+    gitops.land(repo, prepared)
+    gitops.settle(repo, prepared)
+    return prepared.sha
+
+
+def test_prepare_merge_builds_the_merge_before_head_moves(repo):
+    base = gitops.head(repo)
     gitops.git(repo, "checkout", "-b", "side")
     (repo / "s.txt").write_text("s\n")
     side = gitops.commit_all(repo, "side")
     gitops.git(repo, "checkout", "main")
-    ok, conflicts = gitops.merge_no_ff(repo, side, "merge side")
-    assert ok and conflicts == []
+    prepared, conflicts = gitops.prepare_merge(repo, side, "merge side")
+    assert conflicts == [] and prepared.parent == base and gitops.head(repo) == base
+    assert _land(repo, prepared) == gitops.head(repo)
     assert len(gitops.git(repo, "rev-list", "--parents", "-n1", "HEAD").split()) == 3
+    assert gitops.git(repo, "status", "--porcelain") == ""
+    assert gitops._run(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode
 
 
-def test_merge_no_ff_conflict_aborts_cleanly(repo):
+def test_land_refuses_a_moved_head_and_aborts_a_prepared_merge(repo):
+    gitops.git(repo, "checkout", "-b", "side")
+    (repo / "s.txt").write_text("s\n")
+    side = gitops.commit_all(repo, "side")
+    gitops.git(repo, "checkout", "main")
+    prepared, _ = gitops.prepare_merge(repo, side, "merge side")
+    moved = gitops.git(repo, "commit-tree", f"{prepared.parent}^{{tree}}", "-p", prepared.parent,
+                       "-m", "someone else")  # fmt: skip
+    gitops.git(repo, "update-ref", "HEAD", moved)
+    with pytest.raises(gitops.GitError):
+        gitops.land(repo, prepared)
+    assert gitops.head(repo) == moved
+    assert gitops._run(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode
+
+
+def test_prepare_merge_conflict_aborts_cleanly(repo):
     gitops.git(repo, "checkout", "-b", "side")
     (repo / "f.txt").write_text("side\n")
     side = gitops.commit_all(repo, "side")
@@ -75,7 +100,7 @@ def test_merge_no_ff_conflict_aborts_cleanly(repo):
     (repo / "f.txt").write_text("main\n")
     gitops.commit_all(repo, "main edit")
     before = gitops.head(repo)
-    assert gitops.merge_no_ff(repo, side, "m") == (False, ["f.txt"])
+    assert gitops.prepare_merge(repo, side, "m") == (None, ["f.txt"])
     assert gitops.head(repo) == before
     assert gitops.git(repo, "status", "--porcelain") == ""
 
@@ -110,9 +135,9 @@ def test_push_with_rejections_names_the_refs_the_remote_refused(repo, tmp_path):
     assert gitops.push_with_rejections(repo, "origin", ["+" + refspec[0]]) == (True, [])
 
 
-def test_merge_no_ff_non_conflict_failure_raises_with_stderr(repo):
+def test_prepare_merge_non_conflict_failure_raises_with_stderr(repo):
     with pytest.raises(gitops.GitError) as excinfo:
-        gitops.merge_no_ff(repo, "deadbeef" * 5, "m")
+        gitops.prepare_merge(repo, "deadbeef" * 5, "m")
     assert "deadbeef" in excinfo.value.stderr
     assert gitops.git(repo, "status", "--porcelain") == ""
 
@@ -135,13 +160,16 @@ def test_commit_paths_commits_only_named_paths(repo):
     assert gitops.show(repo, "HEAD", "ledger.json") is None
 
 
-def test_commit_blobs_ignores_and_keeps_unrelated_staged_changes(repo):
+def test_prepare_blobs_ignores_and_keeps_unrelated_staged_changes(repo):
     (repo / "stray.txt").write_text("staged by someone else\n")
     gitops.git(repo, "add", "stray.txt")
     (repo / "inbox.json").write_text("rewritten later\n")  # the committed bytes are the blob's
     (repo / "seen.json").write_text("{}\n")
 
-    sha = gitops.commit_blobs(repo, {"inbox.json": b"validated\n"}, ["seen.json"], "adopt")
+    before = gitops.head(repo)
+    prepared = gitops.prepare_blobs(repo, {"inbox.json": b"validated\n"}, ["seen.json"], "adopt")
+    assert gitops.head(repo) == before and prepared.parent == before  # nothing moved yet
+    sha = _land(repo, prepared)
 
     assert gitops.head(repo) == sha
     assert gitops.show(repo, "HEAD", "inbox.json") == b"validated\n"
@@ -150,9 +178,35 @@ def test_commit_blobs_ignores_and_keeps_unrelated_staged_changes(repo):
     assert gitops.git(repo, "diff", "--cached", "--name-only") == "stray.txt"
 
 
-def test_commit_blobs_leaves_nothing_staged_when_it_fails(repo):
+def test_prepare_blobs_leaves_nothing_staged_when_it_fails(repo):
     before = gitops.head(repo)
     with pytest.raises(gitops.GitError):
-        gitops.commit_blobs(repo, {"inbox.json": b"x\n"}, ["missing.json"], "adopt")
+        gitops.prepare_blobs(repo, {"inbox.json": b"x\n"}, ["missing.json"], "adopt")
     assert gitops.head(repo) == before
     assert gitops.git(repo, "diff", "--cached", "--name-only") == ""
+
+
+def test_prepare_paths_commits_only_named_paths_and_none_without_changes(repo):
+    (repo / "f.txt").write_text("unrelated edit\n")
+    (repo / "ledger.json").write_text("{}\n")
+    tip = _land(repo, gitops.prepare_paths(repo, ["ledger.json"], "ledger"))
+    assert tip == gitops.head(repo)
+    assert gitops.git(repo, "show", "--name-only", "--format=", "HEAD") == "ledger.json"
+    assert gitops.git(repo, "status", "--porcelain") == "M f.txt"
+    assert gitops.prepare_paths(repo, ["ledger.json"], "again") is None
+    (repo / "ledger.json").unlink()
+    _land(repo, gitops.prepare_paths(repo, ["ledger.json"], "remove"))
+    assert gitops.show(repo, "HEAD", "ledger.json") is None
+    assert gitops.git(repo, "status", "--porcelain") == "M f.txt"
+
+
+def test_prepare_paths_makes_a_root_commit(tmp_path):
+    repo = tmp_path / "empty"
+    gitops.git(tmp_path, "init", "-q", "-b", "main", str(repo))
+    gitops.git(repo, "config", "user.email", "t@example.com")
+    gitops.git(repo, "config", "user.name", "T")
+    (repo / "a.txt").write_text("a\n")
+    prepared = gitops.prepare_paths(repo, ["a.txt"], "first")
+    assert prepared.parent is None
+    assert _land(repo, prepared) == gitops.head(repo)
+    assert gitops.git(repo, "status", "--porcelain") == ""

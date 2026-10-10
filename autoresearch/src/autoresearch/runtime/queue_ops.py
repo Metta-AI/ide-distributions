@@ -43,6 +43,7 @@ from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card
 from autoresearch.queue.requests import load_schema, read_requests
 from autoresearch.runctx import BOARD, RunContext, runtime_dir
+from autoresearch.runtime import provenance
 from autoresearch.runtime.admission import receipt_path
 from autoresearch.runtime.ledger import (
     canonical_lock,
@@ -180,7 +181,9 @@ def _apply_one(
         state, detail = _apply(queue, request, card)
         with canonical_lock(canonical):
             _record(canonical, request, state, detail)
-    except Exception as error:  # noqa: BLE001 - per-op containment (module docstring)
+    except Exception as error:  # per-op containment (module docstring)
+        if provenance.journal_error(error) is not None:
+            raise  # not an op failure: apply_ops raises it after the other ops
         previous = failures.get(request["id"]) or {"runs": 0, "since": now_iso()}
         entry = {**previous, "runs": int(previous["runs"]) + 1}
         entry["error"] = f"{type(error).__name__}: {error}"
@@ -189,7 +192,9 @@ def _apply_one(
             return outcome("retrying", f"failing run {entry['runs']}: {entry['error']}")
         try:
             _give_up(ctx, request, card, entry, allow_no_remote)
-        except Exception as problem:  # noqa: BLE001 - give up again next run
+        except Exception as problem:  # give up again next run
+            if provenance.journal_error(problem) is not None:
+                raise
             return outcome("retrying", f"{entry['error']}; could not give up: {problem}")
         failures.pop(request["id"])
         return outcome("failed", entry["error"])
@@ -210,7 +215,9 @@ def _settle_failed_drop(ctx: RunContext, queue: Queue, request: dict) -> OpOutco
         detail = "card dropped (archived) after the runtime gave up"
         with canonical_lock(canonical):
             _record(canonical, request, "applied", detail)
-    except Exception:  # noqa: BLE001 - per-op containment; checked again next run
+    except Exception as error:  # per-op containment; checked again next run
+        if provenance.journal_error(error) is not None:
+            raise
         return None
     return OpOutcome(request["id"], "drop", request["target_request"], "applied", detail)
 
@@ -223,21 +230,27 @@ def apply_ops(ctx: RunContext, queue: Queue, allow_no_remote: bool = False) -> l
     failures = _read_failures(ctx)
     outcomes = []
     pending = []
+    journal = None
     for request in read_requests(canonical, "HEAD"):
         if request.get("op") not in OPS:
             continue
         marker = committed_json(canonical, op_marker_path(canonical, request["id"]))
-        if marker is not None:
-            if marker["state"] == "failed" and request["op"] == "drop":
-                settled = _settle_failed_drop(ctx, queue, request)
-                if settled is not None:
-                    outcomes.append(settled)
-            continue
-        pending.append(request["id"])
-        outcomes.append(_apply_one(ctx, queue, request, failures, allow_no_remote))
+        try:
+            if marker is not None:
+                if marker["state"] == "failed" and request["op"] == "drop":
+                    settled = _settle_failed_drop(ctx, queue, request)
+                    if settled is not None:
+                        outcomes.append(settled)
+                continue
+            pending.append(request["id"])
+            outcomes.append(_apply_one(ctx, queue, request, failures, allow_no_remote))
+        except provenance.JournalError as error:  # the other ops still run; raised below
+            journal = journal or error
     # Forget the counts of ops that are settled or gone.
     failures = {key: value for key, value in failures.items() if key in pending}
     path = runtime_dir(ctx) / OP_FAILURES_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, failures)
+    if journal is not None:  # typed, so queue-keeper fails closed
+        raise journal
     return outcomes

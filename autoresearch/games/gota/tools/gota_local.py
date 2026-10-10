@@ -12,6 +12,8 @@ import fcntl
 import hashlib
 import json
 import math
+import os
+import signal
 import statistics
 import subprocess
 import sys
@@ -25,30 +27,51 @@ DEFAULT_TICKS = 28_800
 BUILD_COMMAND = "games/gota/tools/build_gota_match.sh"
 
 
-def binary_identity() -> dict:
-    """Validate the full native input/output receipt before accepting this cache."""
+def binary_path(commit: str | None = None) -> Path:
+    """The cached match executable for `commit` (default: the engine.env pin), unvalidated."""
+    commit = commit or gota_cli.engine()['POLYWORLD_COMMIT']
+    return TOOLS / 'bin' / f'gota_match-{commit[:8]}'
+
+
+def binary_identity(commit: str | None = None) -> dict:
+    """Validate the full native input/output receipt before accepting this cache.
+
+    `commit` defaults to the engine.env pin; callers holding a resolved engine pass it.
+    """
     import native_build
-    commit = gota_cli.engine()['POLYWORLD_COMMIT']
-    path = TOOLS / 'bin' / f'gota_match-{commit[:8]}'
-    return native_build.validate(path, 'gota_match', commit)
+    commit = commit or gota_cli.engine()['POLYWORLD_COMMIT']
+    return native_build.validate(binary_path(commit), 'gota_match', commit)
 
 
-def binary() -> Path:
-    binary_identity()
-    return TOOLS / 'bin' / f"gota_match-{gota_cli.engine()['POLYWORLD_COMMIT'][:8]}"
+def binary(commit: str | None = None) -> Path:
+    binary_identity(commit)
+    return binary_path(commit)
 
 
 class EngineError(RuntimeError):
     """The pinned engine refused an input or could not verify its replay."""
 
 
-def _invoke(*arguments: str) -> dict:
-    completed = subprocess.run([str(binary()), *map(str, arguments)], capture_output=True, text=True, check=False)
-    if completed.stderr:
-        print(completed.stderr, end="", file=sys.stderr)
-    if completed.returncode:
-        raise EngineError(completed.stderr.strip() or f"Engine exited {completed.returncode}")
-    return json.loads(completed.stdout)
+def _invoke(*arguments: str, commit: str | None = None, timeout: float | None = None,
+            env: dict | None = None, executable: Path | None = None) -> dict:
+    """Run the match binary; `executable` skips re-validating a receipt the caller checked.
+
+    The binary runs in its own process group so a timeout kills everything it started.
+    """
+    command = [str(executable or binary(commit)), *map(str, arguments)]
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          env=env, start_new_session=True) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            raise EngineError(f"gota_match timed out after {timeout}s") from None
+    if stderr:
+        print(stderr, end="", file=sys.stderr)
+    if process.returncode:
+        raise EngineError(stderr.strip() or f"Engine exited {process.returncode}")
+    return json.loads(stdout)
 
 
 def host() -> dict:
@@ -82,8 +105,15 @@ def _validate(seed: int, ticks: int, draft: str) -> None:
 
 def match(seats: list[str | Path], *, seed: int = 1, ticks: int = DEFAULT_TICKS,
           draft: str = "open", out: str | Path, tables: bool = False,
-          replay: bool = False, roster: list[int] | None = None) -> dict:
-    """Run ten seats; failed policies remain data in heroes[].vm_failed."""
+          replay: bool = False, roster: list[int] | None = None,
+          commit: str | None = None, timeout: float | None = None,
+          env: dict | None = None, executable: Path | None = None) -> dict:
+    """Run ten seats; failed policies remain data in heroes[].vm_failed.
+
+    `commit` selects the engine's match binary; it defaults to the engine.env pin.
+    `executable` is that binary when the caller already validated its receipt.
+    `timeout` (seconds) and `env` apply to the binary's process.
+    """
     _validate(seed, ticks, draft)
     if len(seats) != 10:
         raise gota_cli.UsageError("match requires exactly ten --seat paths")
@@ -94,7 +124,8 @@ def match(seats: list[str | Path], *, seed: int = 1, ticks: int = DEFAULT_TICKS,
             raise gota_cli.UsageError("unique draft requires ten distinct classes")
         if draft == "team" and any(len(set(roster[start:start + 5])) != 5 for start in (0, 5)):
             raise gota_cli.UsageError("team draft requires distinct classes on each team")
-    binary()
+    commit = commit or gota_cli.engine()["POLYWORLD_COMMIT"]
+    executable = executable or binary(commit)
     paths = [Path(path).resolve() for path in seats]
     output = Path(out).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -105,13 +136,14 @@ def match(seats: list[str | Path], *, seed: int = 1, ticks: int = DEFAULT_TICKS,
     _write_json(output / "job.json", job)
     # Missing/unreadable policy files are seat failures, just like compile errors.
     meta = {"seed": seed, "ticks": ticks, "draft": draft,
-            "engine": gota_cli.engine()["POLYWORLD_COMMIT"],
+            "engine": commit,
             "seats": [{"path": str(path), "sha256": _sha256(path) if path.is_file() else None}
                       for path in paths]}
     if roster is not None:
         meta["roster"] = list(roster)
     _write_json(output / "meta.json", meta)
-    result = _invoke("match", str(output / "job.json"))
+    result = _invoke("match", str(output / "job.json"), commit=commit, timeout=timeout,
+                     env=env, executable=executable)
     for seat, hero in zip(meta['seats'], result['heroes']):
         seat.update({field: hero[field] for field in ('vm_failed', 'vm_error', 'vm_routine', 'vm_pc')})
     _write_json(output / 'meta.json', meta)

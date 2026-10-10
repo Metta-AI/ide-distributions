@@ -88,7 +88,7 @@ from autoresearch.io.docs import write_json
 from autoresearch.queue.base import Queue
 from autoresearch.queue.card import Card, CardSpec
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import promotion, spend
+from autoresearch.runtime import promotion, provenance, spend
 from autoresearch.runtime.admission import receipt_path
 from autoresearch.runtime.handoff import handoff_path
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
@@ -366,7 +366,7 @@ def handle_blocked(
     unblock, say) is left for the next run, and once every card was tried the failures are
     raised together, so the caller logs the step as failed (the actions of that run are then
     lost to the caller; their markers are committed)."""
-    actions, failures = [], []
+    actions, failures, journal = [], [], None
     cards = queue.list()
     handlers = [(card, _close_rerun, ()) for card in cards if card.state in ("pending", "claimed")]
     handlers += [(card, _handle_one, (spend_config,)) for card in cards if card.state == "blocked"]
@@ -375,9 +375,13 @@ def handle_blocked(
             action = handler(ctx, queue, card, allow_no_remote, *extra)
         except Exception as error:  # noqa: BLE001 - per-card containment, raised below
             failures.append(f"{card.task_id}: {type(error).__name__}: {error}")
+            journal = journal or provenance.journal_error(error)
             continue
         if action is not None:
             actions.append(action)
+    message = "blocked card(s) not handled: " + "; ".join(failures)
+    if journal is not None:  # typed, so queue-keeper fails closed
+        raise provenance.JournalError(message) from journal
     if failures:
-        raise RuntimeError("blocked card(s) not handled: " + "; ".join(failures))
+        raise RuntimeError(message)
     return actions

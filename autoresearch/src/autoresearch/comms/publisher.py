@@ -67,6 +67,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.records.registry import entity_of_id
+from autoresearch.runtime import provenance
 from autoresearch.runtime.admission import receipt_path as request_receipt_path
 from autoresearch.runtime.ledger import committed_json, ledger_of
 from autoresearch.runtime.markers import MAX_REPAIR_CHAIN, blocked_marker_path
@@ -232,7 +233,9 @@ def _commit_pending(canonical: Path, message: str) -> str | None:
     paths += staged_removed
     if not paths:
         return None
-    return gitops.commit_paths(canonical, sorted(set(paths)), message)
+    return provenance.commit_recorded(
+        canonical, message, lambda: gitops.prepare_paths(canonical, sorted(set(paths)), message)
+    )
 
 
 def push(canonical: Path, allow_no_remote: bool = False) -> bool:
@@ -242,7 +245,7 @@ def push(canonical: Path, allow_no_remote: bool = False) -> bool:
         if allow_no_remote:
             return False
         raise PublishError(f"canonical {canonical} has no {REMOTE!r} remote to push to")
-    return gitops.push(canonical, REMOTE, [BRANCH])
+    return provenance.push_main(canonical, REMOTE)
 
 
 def commit_and_push(canonical: Path, paths: list[Path], message: str) -> bool:
@@ -251,7 +254,9 @@ def commit_and_push(canonical: Path, paths: list[Path], message: str) -> bool:
     and queue-keeper pushes ``main`` every run. Returns whether the push happened. Call under
     the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
-    gitops.commit_paths(canonical, relative, message)
+    provenance.commit_recorded(
+        canonical, message, lambda: gitops.prepare_paths(canonical, relative, message)
+    )
     return push(canonical, allow_no_remote=True)
 
 

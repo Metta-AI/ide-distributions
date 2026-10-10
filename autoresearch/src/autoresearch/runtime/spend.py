@@ -65,6 +65,7 @@ from autoresearch.queue.kanban_queue import STOPPABLE_STATUSES
 from autoresearch.runctx import RunContext, runtime_dir
 from autoresearch.runtime.ledger import canonical_lock, commit, committed_json, ledger_of, now_iso
 from autoresearch.runtime.pause import is_paused, pause, pause_path
+from autoresearch.runtime.provenance import JournalError, journal_error
 from autoresearch.runtime.state_db import (  # noqa: F401 - public here too (baseline, tests)
     CHAT_SOURCE,
     COLUMNS,
@@ -344,6 +345,9 @@ class SpendRun:
     unpriced: list[str] = field(default_factory=list)
     failures: dict[str, str] = field(default_factory=dict)  # "spend_db" -> error
     stop_failures: dict[str, str] = field(default_factory=dict)  # task id -> error (retried)
+    # A stop's record could not be committed (the provenance journal): the caller fails
+    # closed once every card was capped and the budget checked.
+    journal_error: JournalError | None = None
 
 
 def _stop(
@@ -406,7 +410,14 @@ def enforce_cards(
         why = _over_cap(card, counted_runs(card) - runs, cost.usd - usd, config)
         if why is None:
             continue
-        problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        try:
+            problem = _stop(ctx, queue, card, why, cost.usd, config, allow_no_remote)
+        except Exception as error:  # noqa: BLE001 - recording failed; keep capping the others
+            # ``_stop`` blocks before it records, and its recording is a canonical commit,
+            # which a broken provenance journal fails: the other cards must still be stopped.
+            result.failures[f"record {card.task_id}"] = f"{type(error).__name__}: {error}"
+            result.journal_error = result.journal_error or journal_error(error)
+            continue
         if problem is None:
             result.stopped.append((card.task_id, why))
         else:

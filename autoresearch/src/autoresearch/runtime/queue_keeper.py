@@ -4,6 +4,18 @@
 Order of one run (Overview C1-C12; Plan 01 Task 3.9):
 
 1. ``bootstrap`` (C1; local setup, never cards). ``--bootstrap-only`` stops here.
+   Then the commit provenance check (``runtime.provenance``, C1), under the canonical lock:
+   probe that the journal can be written (without writing to it), finish commits a crash left
+   unrecorded (``provenance.recover``), then every commit on canonical
+   HEAD's first-parent history since the last checked one must be one a runtime writer
+   recorded. On a violation (a commit the runtime did not make, a rewritten history, a lost
+   journal): pause (C7), one runtime ``help_request`` per violation, the spend step, and
+   stop. Nothing is merged, published or admitted until an operator runs
+   ``runtime accept-commits``; the run after that resumes the agent like any other pause.
+   A check that raises fails closed the same way (pause, spend, stop; the step failure
+   escalates after 5 runs like any other). A journal failure in any later step fails closed
+   the same way. Every push of ``main`` (here, in bootstrap, xp-poll, health, promotion and the
+   publisher) goes through ``provenance.push_main``, which holds it while a violation stands.
 2. ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
    them (``preflight.host_requirement_problems``: the profile ``.env`` over this job's
    environment): missing ones are logged and get one runtime ``help_request`` per distinct
@@ -40,7 +52,7 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    runtime-only: cards run read-only ``kb lint``/``kb hubs`` and edit only claims their refs
    name (D-23).
 7. Push ``main`` and ``refs/heads/card/*`` to ``origin`` (card finish does not push), so
-   merged work leaves the host early. ``main`` is pushed on its own and never forced; card
+   merged work leaves the host early. ``main`` is pushed on its own through ``provenance.push_main`` (one checked commit) and never forced; card
    branches are force-pushed (a retried card rebuilds its branch), and a card ref origin
    still refuses is logged once. The run ends with the same push (step 13).
 8. Sweep staged skills into ``skills-proposed/`` (``proposals.sweep_skills``).
@@ -122,7 +134,14 @@ from autoresearch.queue.requests import read_requests
 from autoresearch.queue.select import ENV_CARD_MODELS, parse_card_models, queue_from_env
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext, runtime_dir
-from autoresearch.runtime import autonomy, config_migrations, promotion, proposals, spend
+from autoresearch.runtime import (
+    autonomy,
+    config_migrations,
+    promotion,
+    proposals,
+    provenance,
+    spend,
+)
 from autoresearch.runtime.admission import (
     NEEDS_CALIBRATION,
     PLANNING_OWNED,
@@ -169,7 +188,6 @@ STEP_FAILURES_FILE = "step_failures.json"
 STEP_FAILURE_RUNS = 5  # consecutive failing runs of one step before a help_request ...
 STEP_FAILURE_AGE = datetime.timedelta(hours=1)  # ... or this long failing, whichever first
 REMOTE = "origin"
-MAIN_REFSPEC = "HEAD:refs/heads/main"  # never forced
 # Forced: origin's card/* copies are a one-way mirror only this runtime writes, and a retried
 # card rebuilds its branch, so the remote copy is stale rather than newer.
 CARD_REFSPEC = "+refs/heads/card/*:refs/heads/card/*"
@@ -191,6 +209,7 @@ class KeeperRun:
     preflight: PreflightResult | None = None
     paused: bool = False  # preflight failed and this run paused (or kept paused) the agent
     champion_checked: bool = False  # the A9 champion check ran to the end this run
+    provenance_violation: provenance.Violation | None = None  # commits the runtime did not make
     champion_conflict: promotion.ChampionConflict | None = None
     foreign: list[str] = field(default_factory=list)  # foreign tasks recorded this run
     rebuilt: list[CardSpec] = field(default_factory=list)
@@ -204,6 +223,7 @@ class KeeperRun:
     planning_skipped: bool = False  # coach hold, or on-request autonomy and no coach task yet
     orphans: list[str] = field(default_factory=list)
     spend_run: spend.SpendRun | None = None  # None: the spend step failed
+    spend_attempted: bool = False  # the spend step ran (or failed) this run
     blocked: list = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     reraised: list[str] = field(default_factory=list)
@@ -289,15 +309,39 @@ def _routing_step(
     return actions
 
 
+class _JournalFailed(Exception):
+    """A step hit ``provenance.JournalError`` while the run was not yet paused: the run
+    stops there and fails closed (``_journal_fail_closed``)."""
+
+
 def _step(run: KeeperRun, ctx: RunContext, name: str, fn: Callable, *args, **kwargs):
-    """Run one step; contain and record its failure (module docstring)."""
+    """Run one step; contain and record its failure (module docstring). A journal failure
+    (``provenance.JournalError``: no canonical commit can be recorded) is not contained:
+    unless the run is already paused, it ends the run's normal steps (``_JournalFailed``)."""
     try:
         return fn(*args, **kwargs)
-    except Exception as error:  # noqa: BLE001 - containment is the point
+    except Exception as error:  # containment is the point (a journal failure re-raises)
         message = f"{type(error).__name__}: {error}"
         run.failures[name] = message
         _log(ctx, f"step {name} failed: {message}\n{traceback.format_exc()}")
+        if provenance.journal_error(error) is not None and not run.paused:
+            raise _JournalFailed(f"step {name}: {message}") from error
         return None
+
+
+def _journal_fail_closed(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str],
+    now: datetime.datetime, allow_no_remote: bool, error: str,
+) -> None:
+    """A journal failure after the provenance step: pause (unassigning pending cards even
+    though the pause commit itself fails) and keep the spend caps, like a check that cannot
+    run."""
+    run.paused = True
+    run.failures.setdefault("provenance", error)
+    reason = f"{provenance.PAUSE_REASON}: the journal cannot be written: {error}"
+    _step(run, ctx, "provenance_pause", pause, queue, ledger_of(ctx.canonical), reason)
+    if not run.spend_attempted:
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
 
 
 # --- pause ---
@@ -363,11 +407,49 @@ def check_champion(
     run.champion_checked = True
 
 
+def check_provenance(
+    run: KeeperRun, ctx: RunContext, queue: Queue, now: datetime.datetime, allow_no_remote: bool
+) -> None:
+    """C1: check that every new commit on canonical is one the runtime made
+    (``provenance.check``); on a violation pause and publish one help_request for it. Each
+    ``accept-commits`` anchor gets one note, so an accept (even a forged one) is visible."""
+    canonical = ctx.canonical
+    with canonical_lock(canonical):
+        provenance.probe(canonical)  # a check that only reads must not pass a read-only journal
+        for sha in provenance.recover(canonical):
+            _log(ctx, f"provenance: recorded and settled {sha}, left unfinished by a crash")
+        violation = run.provenance_violation = provenance.check(canonical)
+        invalid = provenance.invalid_lines(canonical)
+        for anchor in provenance.operator_anchors(canonical):
+            try:
+                info = provenance.describe(canonical, anchor["sha"])
+                author, subject = info.author, info.subject
+            except gitops.GitError:  # the accepted commit is gone from the repository
+                author, subject = "an unknown author", "a commit no longer in the workspace"
+            note = runtime_messages.commits_accepted(anchor["sha"], anchor["at"], author, subject)
+            if not already_published(canonical, note):
+                publish_message(canonical, note, allow_no_remote)
+    if invalid:
+        _log(ctx, f"provenance: {invalid} journal line(s) do not verify and are ignored")
+    if violation is None:
+        return
+    _log(ctx, f"provenance violation: {json.dumps(violation.to_dict(), sort_keys=True)}")
+    pause(queue, ledger_of(canonical), f"{provenance.PAUSE_REASON}: {violation.summary()}")
+    message = runtime_messages.commit_provenance(violation.to_dict(), now.date().isoformat())
+    with canonical_lock(canonical):
+        if not already_published(canonical, message):
+            publish_message(canonical, message, allow_no_remote)
+
+
 def resume_after_preflight(ctx: RunContext, queue: Queue, allow_no_remote: bool) -> list[str]:
     canonical = ctx.canonical
     reason = read_json(pause_path(ledger_of(canonical))).get("reason", "")
     resumed = resume(queue, ledger_of(canonical))
-    message = runtime_messages.agent_resumed(len(resumed), reason.startswith(CHAMPION_PAUSE))
+    message = runtime_messages.agent_resumed(
+        len(resumed),
+        reason.startswith(CHAMPION_PAUSE),
+        provenance=reason.startswith(provenance.PAUSE_REASON),
+    )
     with canonical_lock(canonical):
         publish_message(canonical, message, allow_no_remote)
     return resumed
@@ -470,7 +552,7 @@ def _remote_main(canonical: Path) -> str | None:
 def _push_main_and_cards(canonical: Path) -> list[str]:
     """Push main, then the card branches separately so a card refusal never touches main's
     result. Returns the card refs origin rejected."""
-    gitops.push(canonical, REMOTE, [MAIN_REFSPEC])
+    provenance.push_main(canonical, REMOTE)
     _, rejected = gitops.push_with_rejections(canonical, REMOTE, [CARD_REFSPEC])
     return rejected
 
@@ -556,7 +638,7 @@ def escalate_step_failures(
     kept = {step: entry for step, entry in state.items() if step in failures}
     if not all_steps_ran:  # unknown whether the steps that did not run would have failed
         kept |= {step: entry for step, entry in state.items() if step != "bootstrap"}
-    escalated = []
+    escalated, journal = [], None
     for step, error in sorted(failures.items()):
         entry = dict(kept.get(step) or {"since": now.isoformat(), "runs": 0, "help_sent": False})
         entry["runs"] = int(entry["runs"]) + 1
@@ -568,12 +650,31 @@ def escalate_step_failures(
                 _publish_step_help(ctx, step, entry, allow_no_remote)
             except Exception as problem:  # noqa: BLE001 - retried on the next run
                 _log(ctx, f"could not report failing step {step}: {problem}")
+                journal = journal or provenance.journal_error(problem)
             else:
                 entry["help_sent"] = True
                 escalated.append(step)
         kept[step] = entry
     write_json(runtime_dir(ctx) / STEP_FAILURES_FILE, kept)
+    if journal is not None:  # typed, so ``run`` fails closed (``_escalate``)
+        raise journal
     return escalated
+
+
+def _escalate(
+    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str],
+    now: datetime.datetime, allow_no_remote: bool, all_steps_ran: bool,
+) -> None:
+    """``escalate_step_failures``; a journal failure while publishing a help_request fails
+    closed like one in a step (``_journal_fail_closed``)."""
+    try:
+        run.escalated = escalate_step_failures(
+            ctx, run.failures, now, allow_no_remote, all_steps_ran=all_steps_ran
+        )
+    except provenance.JournalError as error:
+        message = f"step escalation: {type(error).__name__}: {error}"
+        _journal_fail_closed(run, ctx, queue, env, now, allow_no_remote, message)
+        write_json(runtime_dir(ctx) / FAILURES_FILE, run.failures)
 
 
 def _briefing_inputs(
@@ -678,7 +779,10 @@ def _spend_step(
     run: KeeperRun, ctx: RunContext, queue: Queue, config: spend.SpendConfig,
     now: datetime.datetime, allow_no_remote: bool,
 ) -> spend.SpendRun:
-    result = spend.enforce(ctx, queue, config, now, allow_no_remote)
+    result = run.spend_run = spend.enforce(ctx, queue, config, now, allow_no_remote)
+    if result.journal_error is not None:
+        # Every card was capped and the budget checked; now fail closed (``_step``).
+        raise result.journal_error
     for task_id, why in result.stopped:
         _log(ctx, f"spend: stopped card {task_id}: {why}")
     for key, error in result.failures.items():
@@ -708,6 +812,7 @@ def _spend_steps(
 ) -> spend.SpendConfig | None:
     """The spend step (``spend.enforce``); returns its config for the blocked step, or None
     when the config is invalid (the step failure is recorded)."""
+    run.spend_attempted = True
     config = _step(run, ctx, "spend", spend.SpendConfig.from_env, env)
     if config is not None:
         run.spend_run = _step(
@@ -838,6 +943,23 @@ def _run_steps(
     signal_config: SignalConfig,
 ) -> None:
     canonical = ctx.canonical
+    if run.bootstrap is not None and run.bootstrap.provenance_error:
+        # Bootstrap could not read the journal: the check would fail the same way.
+        run.failures["provenance"] = f"bootstrap: {run.bootstrap.provenance_error}"
+    else:
+        _step(run, ctx, "provenance", check_provenance, run, ctx, queue, now, allow_no_remote)
+    if run.provenance_violation is not None or "provenance" in run.failures:
+        run.paused = True
+    if "provenance" in run.failures:
+        # Fail closed: a check that cannot run is treated like a violation (no merge, publish
+        # or admission, and no resume). The step failure escalates like any failing step.
+        error = run.failures["provenance"]
+        reason = f"{provenance.PAUSE_REASON}: the check could not run: {error}"
+        _step(run, ctx, "provenance_pause", pause, queue, ledger_of(canonical), reason)
+    if run.paused:
+        # Running cards keep running while paused: the caps still apply to them.
+        _spend_steps(run, ctx, queue, env, now, allow_no_remote)
+        return
     try:
         run.preflight = preflight(env, sm, canonical, now, **preflight_kwargs)
     except Exception as error:  # noqa: BLE001 - a preflight that cannot finish has failed
@@ -994,31 +1116,32 @@ def run(
                 _log(ctx, f"bootstrap failed: {result.bootstrap.error}")
                 result.exit_code = 1
                 result.failures["bootstrap"] = result.bootstrap.error or "unknown error"
-                result.escalated = escalate_step_failures(
-                    ctx, result.failures, now, allow_no_remote, all_steps_ran=False
-                )
+                _escalate(result, ctx, queue, env, now, allow_no_remote, all_steps_ran=False)
                 return result
             if bootstrap_only:
                 return result
             preflight_kwargs: dict = {"disk_free": disk_free, "hermes_home": ctx.hermes_home}
             if http_get is not None:
                 preflight_kwargs["http_get"] = http_get
-            _run_steps(
-                result,
-                ctx,
-                queue,
-                sm,
-                game,
-                now,
-                env=env,
-                profile=profile or ctx.profile,
-                allow_no_remote=allow_no_remote,
-                preflight_kwargs=preflight_kwargs,
-                signal_config=signal_config or SignalConfig(),
-            )
+            try:
+                _run_steps(
+                    result,
+                    ctx,
+                    queue,
+                    sm,
+                    game,
+                    now,
+                    env=env,
+                    profile=profile or ctx.profile,
+                    allow_no_remote=allow_no_remote,
+                    preflight_kwargs=preflight_kwargs,
+                    signal_config=signal_config or SignalConfig(),
+                )
+            except _JournalFailed as failure:
+                _journal_fail_closed(result, ctx, queue, env, now, allow_no_remote, str(failure))
             write_json(runtime_dir(ctx) / FAILURES_FILE, result.failures)
-            result.escalated = escalate_step_failures(
-                ctx, result.failures, now, allow_no_remote, all_steps_ran=not result.paused
+            _escalate(
+                result, ctx, queue, env, now, allow_no_remote, all_steps_ran=not result.paused
             )
     except LockTimeout:
         result.skipped = True

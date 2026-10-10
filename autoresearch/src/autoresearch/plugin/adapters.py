@@ -326,7 +326,11 @@ def kanban_task_completed(task_id=None, run_id=None, **kwargs):
 
 def register(ctx) -> None:
     """Hermes `PluginContext.register_hook(name, callback)` (hermes_cli/plugins.py:912) and
-    `register_tool(name, toolset, schema, handler, ...)` (v0.21.6 `hermes_cli/plugins.py`)."""
+    `register_tool(name, toolset, schema, handler, ...)` (v0.21.6 `hermes_cli/plugins.py`).
+    Also marks this process as an agent session (``runctx.ENV_AGENT_SESSION``): Hermes builds
+    terminal and code environments from ``os.environ``, so operator-only commands run from a
+    model's tool call see it and refuse."""
+    os.environ[runctx.ENV_AGENT_SESSION] = "1"
     ctx.register_hook("pre_tool_call", pre_tool_call)
     ctx.register_hook("post_tool_call", post_tool_call)
     ctx.register_hook("on_session_end", on_session_end)

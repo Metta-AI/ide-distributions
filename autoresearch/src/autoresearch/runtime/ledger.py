@@ -1,7 +1,9 @@
 """Committed bookkeeping under ``canonical/.supervisor/ledger`` (Overview C2).
 
 Every ledger write runs under ``canonical/.supervisor/runtime/canonical.lock`` and is committed
-to canonical git with only the ledger paths it touched. The lock is not re-entrant: callers of
+to canonical git with only the ledger paths it touched. Every canonical commit the runtime
+makes is recorded in the provenance journal (``runtime.provenance``), which queue-keeper
+checks on each run. The lock is not re-entrant: callers of
 the functions in this package must not already hold it.
 """
 
@@ -13,6 +15,7 @@ from pathlib import Path
 
 from autoresearch.io import gitops
 from autoresearch.io.locks import file_lock
+from autoresearch.runtime import provenance
 
 LOCK_NAME = "canonical.lock"
 
@@ -33,9 +36,12 @@ def canonical_lock(canonical: Path) -> Iterator[None]:
 
 
 def commit(canonical: Path, paths: list[Path], message: str) -> str | None:
-    """Commit exactly ``paths`` (absolute, under canonical); call under the canonical lock."""
+    """Commit exactly ``paths`` (absolute, under canonical) and record the commit in the
+    provenance journal (``runtime.provenance``); call under the canonical lock."""
     relative = [Path(path).relative_to(canonical).as_posix() for path in paths]
-    return gitops.commit_paths(canonical, relative, message)
+    return provenance.commit_recorded(
+        canonical, message, lambda: gitops.prepare_paths(canonical, relative, message)
+    )
 
 
 def committed_json(canonical: Path, path: Path) -> dict | None:

@@ -536,6 +536,221 @@ def test_file_tools_and_code_cannot_write_the_inbox(layout):
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        '"$AUTORESEARCH_CLI" runtime accept-commits abc1234',
+        "cd {canon} && python -m autoresearch runtime accept-commits HEAD",
+        "{cli} runtime accept-commits HEAD",
+        "python3 -c \"import subprocess; subprocess.run(['{cli}', 'runtime', 'accept-commits', 'x'])\"",
+    ],
+)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_accepting_canonical_commits_is_blocked_in_every_agent_session(layout, command, card):
+    """C1: a commit the runtime did not make pauses the agent until a human checks it."""
+    allowed, reason = _terminal(layout, command, card=card, worker=card is not None)
+    assert not allowed and "human operator" in reason and "D-27" in reason
+    assert _terminal(layout, '"$AUTORESEARCH_CLI" runtime check-commits', card=card)[0]
+
+
+# The 2026-10-09 incident, and other interpreter code that writes canonical (C1, D-27).
+INCIDENT_SCRIPT = """cd {worker} && python3 - <<'PYEOF'
+import fcntl, json, subprocess
+ws = "{canon}"
+lock = open(ws + "/.supervisor/runtime/canonical.lock", "a")
+fcntl.flock(lock, fcntl.LOCK_EX)
+json.dump({{"state": "admitted"}}, open(ws + "/.supervisor/ledger/requests/Q-1.json", "w"))
+subprocess.run(["git", "-C", ws, "commit", "-am", "admit Q-1"], check=True)
+PYEOF"""
+CANONICAL_CODE_WRITES = [
+    INCIDENT_SCRIPT,
+    "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', '-C', '{canon}', 'commit', '-m', 'x'])\nEOF",
+    "python3 <<< \"open('{canon}/plan.md', 'w').write('x')\"",
+    "echo \"import os; os.rename('{canon}/plan.md', 'y')\" | python3 - --flag",
+    "python3 -c \"import os; open(os.environ['AUTORESEARCH_WORKSPACE'] + '/plan.md', 'w')\"",
+    "python -c \"import fcntl; fcntl.flock(open('x/canonical.lock'), 2)\"",
+    "python3 -c \"open('.supervisor/ledger/pause.json', 'w').write('{{}}')\"",
+    # canonical as the destination (codex review of PR #24, F4: judged by destination)
+    "python3 -c \"import shutil; shutil.copyfile('notes/plan.md', '{canon}/plan.md')\"",
+    (
+        "python3 -c \"from pathlib import Path; "
+        "Path('{canon}/plan.md').write_text(Path('notes/plan.md').read_text())\""
+    ),
+    (
+        "python3 - <<'EOF'\nimport subprocess\n"
+        "subprocess.run('git commit -am x', shell=True, cwd='{canon}')\nEOF"
+    ),
+    (
+        "python3 - <<'EOF'\nimport subprocess\n"
+        "subprocess.run(['git', '-C', '{canon}', 'branch', '-f', 'main', 'HEAD~1'])\nEOF"
+    ),
+    # codex review of PR #24 round 2, M3: io.open, os.open with write flags, Path.replace
+    "python3 -c \"import io; io.open('{canon}/plan.md', 'w').write('x')\"",
+    "python3 -c \"import os; os.open('{canon}/plan.md', os.O_WRONLY | os.O_CREAT)\"",
+    (
+        "python3 -c \"from pathlib import Path; "
+        "Path('{canon}/plan.md').replace('{worker}/notes/plan.md')\""
+    ),
+    "python3 -c \"from pathlib import Path; Path('notes/x.md').replace('{canon}/plan.md')\"",
+    # round 3, item 6: literal relative destinations and git's implicit directory resolve
+    # against the shell's directory
+    "python3 -c \"open('../../plan.md', 'w').write('x')\"",
+    "cd {canon} && python3 -c \"import subprocess; subprocess.run(['git', 'commit', '-am', 'x'])\"",
+    "cd {canon} && python3 -c \"from pathlib import Path; Path('plan.md').write_text('x')\"",
+    # round 2, L1: -C resolves against the shell's directory, here canonical
+    (
+        "cd {canon} && python3 -c \"import subprocess; t = open('{canon}/plan.md').read(); "
+        "subprocess.run(['git', '-C', '.', 'commit'])\""
+    ),
+]
+
+
+@pytest.mark.parametrize("command", CANONICAL_CODE_WRITES)
+def test_interpreter_code_that_writes_canonical_is_refused(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert not allowed, command
+    assert "only the runtime writes canonical" in reason and "D-27" in reason
+
+
+def test_execute_code_that_writes_canonical_is_refused(layout):
+    ctx = layout.ctx()
+    code = f"import subprocess\nsubprocess.run(['git', '-C', '{layout.canonical}', 'commit'])"
+    allowed, reason = tool_policy("execute_code", {"code": code}, ctx, WORKING)
+    assert not allowed and "D-27" in reason
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        # read-only analysis the first version refused (review I-2)
+        "import json\nprint(json.dumps(json.load(open('{canon}/.supervisor/ledger/board.json'))))",
+        "import pandas as pd\ndf = pd.read_csv('{canon}/stats/a.csv')\nd2 = df.copy()",
+        "s = set()\nfor l in open('{canon}/plan.md'):\n    s.add(l)",
+        (
+            "import os\nt = open(os.environ['AUTORESEARCH_WORKSPACE'] + '/plan.md').read()\n"
+            "print(t.replace('a', 'b'))"
+        ),
+        (
+            "import subprocess\nout = subprocess.run(['git', '-C', '{canon}', 'show', "
+            "'HEAD:plan.md'], capture_output=True).stdout\n"
+            "open('{worker}/notes/plan.md', 'wb').write(out)"
+        ),
+        # canonical only as the source (codex review of PR #24, F4)
+        "import shutil\nshutil.copyfile('{canon}/plan.md', '{worker}/notes/plan.md')",
+        (
+            "from pathlib import Path\n"
+            "Path('notes/plan.md').write_text(Path('{canon}/plan.md').read_text())"
+        ),
+        (
+            "import subprocess\nout = subprocess.run(['git', '-C', '{canon}', 'show', "
+            "'HEAD:plan.md'], capture_output=True).stdout\nresults = {{'branch': 'candidate'}}"
+        ),
+        # round 2, M3: reads through io.open / os.open, and str.replace on canonical text
+        "import io\nprint(io.open('{canon}/plan.md').read())",
+        "import os\nfd = os.open('{canon}/plan.md', os.O_RDONLY)",
+        "print(open('{canon}/plan.md').read().replace('a', 'b'))",
+        # round 3, item 7: only the owning call's cwd counts, and cwd='.' is the worktree
+        (
+            "import subprocess\ntext = open('{canon}/plan.md').read()\n"
+            "subprocess.run(['git', 'add', 'notes/a.md'], cwd='.')"
+        ),
+        # round 2, L1: a worktree commit with a relative -C after reading canonical
+        (
+            "import subprocess\ntext = open('{canon}/plan.md').read()\n"
+            "subprocess.run(['git', '-C', '.', 'commit', '-am', 'notes'])"
+        ),
+    ],
+)
+def test_read_only_code_that_names_canonical_is_allowed(layout, code):
+    filled = _fill(code, layout)
+    allowed, reason = tool_policy("execute_code", {"code": filled}, layout.ctx(), WORKING)
+    assert allowed, (code, reason)
+    heredoc = f"python3 - <<'EOF'\n{filled}\nEOF"
+    assert tool_policy("terminal", {"command": heredoc}, layout.ctx(), WORKING)[0], code
+
+
+def test_the_canonical_write_refusal_says_how_to_read(layout):
+    code = "open('{canon}/plan.md', 'w').write('x')"
+    allowed, reason = tool_policy("execute_code", {"code": _fill(code, layout)}, layout.ctx(), WORKING)
+    assert not allowed and "worktree copy" in reason
+
+
+PROVENANCE_ACCESS = [
+    ("terminal", {"command": "cat {canon}/.git/autoresearch/provenance.key"}),
+    ("terminal", {"command": "tail -1 {canon}/.git/autoresearch/provenance.jsonl"}),
+    ("terminal", {"command": "env -u AUTORESEARCH_AGENT_SESSION {cli} runtime check-commits"}),
+    ("read_file", {"path": "{canon}/.git/autoresearch/provenance.key"}),
+    ("search_files", {"pattern": "mac", "path": "{canon}/.git/autoresearch"}),
+    ("write_file", {"path": "{canon}/.git/autoresearch/provenance.jsonl", "content": "{{}}"}),
+    ("execute_code", {"code": "import os\nfrom autoresearch.runtime import provenance as p\n"
+                      "p.accept(os.getcwd().split('/.worktrees')[0], 'HEAD')"}),
+    ("execute_code", {"code": "import autoresearch.runtime.provenance as p; p.record('.', 'x', 'y')"}),
+    ("terminal", {"command": "python3 -c 'from autoresearch.runtime import ledger, provenance'"}),
+    # review R2-M3: globs, cd + relative, searches under canonical's .git, the ledger route
+    ("terminal", {"command": "cat {canon}/.git/autor*/prov*.key"}),
+    ("terminal", {"command": "cd {canon}/.git && cat autoresearch/*"}),
+    ("terminal", {"command": "find {canon}/.git -name '*.key' -exec cat {{}} \\;"}),
+    ("terminal", {"command": "grep -r . {canon}/.git"}),
+    ("search_files", {"pattern": "mac", "path": "{canon}/.git"}),
+    ("execute_code", {"code": "from autoresearch.runtime import ledger\n"
+                      "ledger.provenance.accept('.', 'HEAD')"}),
+]
+
+
+@pytest.mark.parametrize(("tool", "args"), PROVENANCE_ACCESS)
+@pytest.mark.parametrize("card", [WORKING, None])
+def test_the_provenance_journal_key_and_module_are_refused_to_any_tool(layout, tool, args, card):
+    """Review I-3: the OS cannot hide the key from workers; the policy refuses model access."""
+    allowed, reason = tool_policy(tool, _fill(args, layout), layout.ctx(worker=card is not None), card)
+    assert not allowed and "provenance journal" in reason and "D-27" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat .gitignore",
+        "git -C {canon} log -1",
+        "cat {worker}/.git",  # the worktree's gitdir pointer file
+        "git status && cat {canon}/.gitignore",
+    ],
+)
+def test_git_use_outside_the_journal_is_allowed(layout, command):
+    allowed, reason = _terminal(layout, command)
+    assert allowed, (command, reason)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'a=accept-commits; "$AUTORESEARCH_CLI" runtime $a HEAD',
+        "{cli} runtime 'accept-commits' HEAD",
+        'git commit -m "x" && "$AUTORESEARCH_CLI" runtime accept-commits HEAD',
+    ],
+)
+def test_accept_commits_is_refused_however_the_command_is_written(layout, command):
+    allowed, reason = _terminal(layout, command, card=None, worker=False)
+    assert not allowed and "human operator" in reason
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        # the worker's own worktree, under canonical/.worktrees/
+        "open('{worker}/notes/a.md', 'w').write('x')",
+        "import subprocess; subprocess.run(['git', '-C', '{worker}', 'commit', '-am', 'x'])",
+        # reading canonical
+        "print(open('{canon}/plan.md').read())",
+        "import subprocess; subprocess.run(['git', '-C', '{canon}', 'log', '-1'])",
+    ],
+)
+def test_interpreter_code_in_the_worktree_or_reading_canonical_is_allowed(layout, code):
+    filled = _fill(code, layout)
+    assert tool_policy("execute_code", {"code": filled}, layout.ctx(), WORKING)[0], code
+    heredoc = f"python3 - <<'EOF'\n{filled}\nEOF"
+    assert tool_policy("terminal", {"command": heredoc}, layout.ctx(), WORKING)[0], code
+    assert _terminal(layout, "python3 .scratch/s.py")[0]  # a script file is not inspected
+
+
+@pytest.mark.parametrize(
     ("command", "program"),
     [
         ('"$AUTORESEARCH_CLI" queue list | grep x', "grep"),
@@ -607,3 +822,38 @@ def test_short_sleeps_and_loops_that_do_not_poll_are_allowed(layout, command):
 def test_waiting_is_refused_outside_card_sessions_too(layout):
     allowed, _ = _terminal(layout, "sleep 60", card=None, worker=False)
     assert not allowed
+
+
+D27_REFUSAL = (
+    "autoresearch policy: the runtime's commit provenance journal, its key and the provenance "
+    "module are for the runtime only (C1). D-27"
+)
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        # the journal entry that records the refusal (write_file and a V4A patch)
+        ("write_file", {"path": "{worker}/notes/journal.md",
+                        "content": "Blocked: cat {canon}/.git/autoresearch/provenance.key "
+                                   "was refused (" + D27_REFUSAL + ")."}),
+        ("patch", {"mode": "patch", "patch": "*** Begin Patch\n*** Update File: notes/journal.md\n"
+                   "@@\n+Refused: provenance.key, accept-commits. D-27\n*** End Patch"}),
+        # the help_request that names the command and the refusal text
+        ("terminal", {"command": '"$AUTORESEARCH_CLI" comms stage help_request --title '
+                      '"Refused: provenance.key" --body \'cat {canon}/.git/autoresearch/'
+                      'provenance.key: ' + D27_REFUSAL + '\' --expects-response'}),
+    ],
+)
+def test_recording_a_provenance_refusal_is_allowed(layout, tool, args):
+    """Codex review of PR #24 round 3, item 8: D-27 says record the refusal in the journal
+    and stage a help_request naming it. Content that only mentions the key is not access."""
+    allowed, reason = tool_policy(tool, _fill(args, layout), layout.ctx(), WORKING)
+    assert allowed, reason
+
+
+def test_a_substitution_inside_a_help_request_body_is_still_access(layout):
+    command = ('"$AUTORESEARCH_CLI" comms stage help_request --title x --body '
+               '"$(cat {canon}/.git/autoresearch/provenance.key)"')
+    allowed, reason = _terminal(layout, command)
+    assert not allowed and "provenance journal" in reason

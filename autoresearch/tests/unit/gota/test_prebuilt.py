@@ -273,6 +273,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
         shutil.copyfile(fixture / 'v13-live-game.log', episode / 'logs/game.stdout.log')
         shutil.copyfile(fixture / 'v13-live-results.json', episode / 'results.json')
         return subprocess.CompletedProcess(argv, 0)
+    monkeypatch.setenv('GOTA_G2_RUNNER', 'docker')
     monkeypatch.setattr(subprocess, 'run', recorded_process)
     real_budget = g3_budget.run
     monkeypatch.setattr(g3_budget, 'run', lambda policy, context: real_budget(

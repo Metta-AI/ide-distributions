@@ -116,6 +116,12 @@ env_requires:
     required: false
     default: "30"
     description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
+  - name: GOTA_G2_RUNNER
+    required: false
+    default: native
+    description: >-
+      GotA G2 episode runner. "native" runs the pinned native match binary and needs no
+      Docker; "docker" runs pinned coworld run-episode (needs Docker).
   - name: AUTORESEARCH_SOFTMAX
     required: false
     description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.

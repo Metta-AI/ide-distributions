@@ -53,6 +53,8 @@ approvals:
     - "hermes kanban --board * link*"
     - "*promotion accept-champion"
     - "*promotion accept-champion *"
+    - "*runtime accept-commits"
+    - "*runtime accept-commits *"
 
 terminal:
   # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground
@@ -80,6 +82,7 @@ terminal:
     - AUTORESEARCH_AUTONOMY
     - AUTORESEARCH_CHAT_DAILY_USD
     - TMPDIR
+    - GOTA_G2_RUNNER
 
 # Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
 # process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin; the

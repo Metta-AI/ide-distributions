@@ -515,6 +515,7 @@ def test_verify_retries_use_fresh_episode_and_same_attempt_logs(
         telemetry.append((context.episode_dir, result))
         return result
 
+    monkeypatch.setenv('GOTA_G2_RUNNER', 'docker')
     monkeypatch.setattr(gota_gates.g2_episode.subprocess, 'run', episode_runner)
     monkeypatch.setattr(gota_gates.g3_budget, 'run', budget)
     monkeypatch.setattr(gota_gates.g5_telemetry, 'run', g5)

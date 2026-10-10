@@ -24,7 +24,13 @@ Local setup only, idempotent, and it never creates cards (admission does, after 
    the directory when a coach clicks a research button early). Seed commits only the paths
    it wrote, so those files stay untracked; clone holds them next to the workspace
    directory during checkout and puts them back (a held file a crash left behind is put
-   back on the next run). queue-keeper's routing then adopts them like any direct write.
+   back on the next run). queue-keeper's routing then adopts them like any direct write. Bootstrap's own canonical
+   commits are recorded in the provenance journal, and when the journal has no anchor yet it
+   trusts the current HEAD once (``provenance.initialize``: a new or restored workspace, or the
+   first run of the provenance check on an existing one). A journal or key that cannot be read
+   does not fail bootstrap, neither in ``initialize`` nor in another bootstrap commit
+   (``.gitignore``, ``AGENTS.md``, the board epoch; ``BootstrapResult.provenance_error``):
+   queue-keeper treats it as a provenance check that cannot run, and pauses.
 5. The board (A2): ``queue.ensure_board()`` when ``queue.board_exists()`` is False, and then a
    new board epoch in ``ledger/board.json`` (committed).
 
@@ -43,7 +49,7 @@ from autoresearch.io.docs import write_text
 from autoresearch.paths import Layout
 from autoresearch.queue.base import Queue
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import config_migrations
+from autoresearch.runtime import config_migrations, provenance
 from autoresearch.runtime.config_migrations import Runner
 from autoresearch.runtime.ledger import canonical_lock, ledger_of
 from autoresearch.runtime.rebuild import new_board_epoch
@@ -78,6 +84,9 @@ class BootstrapResult:
     ok: bool = True
     error: str | None = None
     board_created: bool = False
+    # The provenance journal could not be read or initialized; queue-keeper fails closed on
+    # it (provenance pause, spend caps) instead of failing bootstrap.
+    provenance_error: str | None = None
     actions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -251,6 +260,23 @@ def _agents_md(repo_root: Path) -> str:
     return header + "\n".join(parts)
 
 
+@contextmanager
+def _journal_failures(result: BootstrapResult) -> Iterator[None]:
+    """A bootstrap commit that fails because the provenance journal cannot be read or
+    written does not fail bootstrap: queue-keeper must still reach its fail-closed pause and
+    the spend caps (``BootstrapResult.provenance_error``)."""
+    try:
+        yield
+    except provenance.JournalError as error:
+        _provenance_failed(result, error)
+
+
+def _provenance_failed(result: BootstrapResult, error: Exception) -> None:
+    message = f"{type(error).__name__}: {error}"
+    result.provenance_error = result.provenance_error or message
+    result.warnings.append(f"provenance journal: {message}")
+
+
 def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult) -> None:
     """Rewrite ``AGENTS.md`` when ``doctrine/VERSION`` differs from the header's version."""
     wanted = _doctrine_version(repo_root)
@@ -260,10 +286,13 @@ def _reseed_agents_md(canonical: Path, repo_root: Path, result: BootstrapResult)
     current = VERSION_HEADER.match(path.read_text(encoding="utf-8")) if path.exists() else None
     if current and current.group(1) == wanted:
         return
-    with canonical_lock(canonical):
+    with _journal_failures(result), canonical_lock(canonical):
         write_text(path, _agents_md(repo_root))
-        gitops.commit_paths(canonical, ["AGENTS.md"], f"bootstrap: doctrine version {wanted}")
-    result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
+        subject = f"bootstrap: doctrine version {wanted}"
+        provenance.commit_recorded(
+            canonical, subject, lambda: gitops.prepare_paths(canonical, ["AGENTS.md"], subject)
+        )
+        result.actions.append(f"re-seeded AGENTS.md at doctrine version {wanted}")
 
 
 def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: BootstrapResult):
@@ -284,12 +313,15 @@ def _seed(canonical: Path, game: str, remote: str, repo_root: Path, result: Boot
     # external agent wrote before this first bootstrap) stays untracked, for routing to adopt.
     paths = [p.relative_to(seed).as_posix() for p in sorted(seed.rglob("*")) if p.is_file()]
     paths += ["AGENTS.md", ".gitignore", gitkeep.relative_to(canonical).as_posix()]
-    gitops.commit_paths(canonical, paths, f"bootstrap: seed workspace from games/{game}/seed")
+    subject = f"bootstrap: seed workspace from games/{game}/seed"
+    provenance.commit_recorded(canonical, subject, lambda: gitops.prepare_paths(canonical, paths, subject))
     early = sorted((canonical / INBOX).iterdir()) if (canonical / INBOX).is_dir() else []
     if early:
         result.actions.append(f"kept {len(early)} inbox files written before bootstrap for adoption")
     result.actions.append(f"seeded canonical from games/{game}/seed")
-    if not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
+    with canonical_lock(canonical):
+        pushed = provenance.push_main(canonical, REMOTE)
+    if not pushed:
         result.warnings.append(f"initial push to {remote} failed; queue-keeper retries it")
 
 
@@ -298,10 +330,13 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     missing = [line for line in GITIGNORE_LINES if line not in lines]
     if missing:
-        with canonical_lock(canonical):
+        with _journal_failures(result), canonical_lock(canonical):
             write_text(path, "\n".join([*lines, *missing]) + "\n")
-            gitops.commit_paths(canonical, [".gitignore"], "bootstrap: .gitignore runtime dirs")
-        result.actions.append(f"added {missing} to .gitignore")
+            subject = "bootstrap: .gitignore runtime dirs"
+            provenance.commit_recorded(
+                canonical, subject, lambda: gitops.prepare_paths(canonical, [".gitignore"], subject)
+            )
+            result.actions.append(f"added {missing} to .gitignore")
     remotes = gitops.git(canonical, "remote").split()
     if REMOTE not in remotes:
         if remote:
@@ -318,7 +353,8 @@ def _update_existing(canonical: Path, remote: str | None, result: BootstrapResul
 
 def _ensure_workspace(
     ctx: RunContext, env: Mapping[str, str], repo_root: Path, result: BootstrapResult
-) -> None:
+) -> bool:
+    """Return True when this run created the workspace (cloned or seeded)."""
     canonical = ctx.canonical
     _restore_early_inbox(canonical, result)  # what a clone that crashed left held
     remote = env.get(REMOTE_ENV) or None
@@ -327,7 +363,7 @@ def _ensure_workspace(
     if (canonical / ".git").exists():
         _update_existing(canonical, remote, result)
         _reseed_agents_md(canonical, repo_root, result)
-        return
+        return False
     if not remote:
         raise BootstrapError(f"{REMOTE_ENV} is not set: it is required to create the workspace")
     if _remote_has_main(remote, ctx.hermes_home):
@@ -335,6 +371,20 @@ def _ensure_workspace(
         _reseed_agents_md(canonical, repo_root, result)
     else:
         _seed(canonical, env.get(GAME_ENV) or DEFAULT_GAME, remote, repo_root, result)
+    return True
+
+
+def _ensure_provenance(canonical: Path, fresh: bool, result: BootstrapResult) -> None:
+    """Initialize the journal. A failure (an unreadable journal or key) does not fail
+    bootstrap: queue-keeper must still reach its fail-closed provenance pause."""
+    try:
+        with canonical_lock(canonical):
+            action = provenance.initialize(canonical, fresh)
+    except Exception as error:  # noqa: BLE001 - reported as the provenance step failure
+        _provenance_failed(result, error)
+        return
+    if action:
+        result.actions.append(action)
 
 
 def _ensure_comms_dirs(canonical: Path) -> None:
@@ -351,17 +401,20 @@ def _ensure_board(ctx: RunContext, queue: Queue, result: BootstrapResult) -> Non
     if board_exists is None or ensure_board is None or board_exists():
         return
     ensure_board()
-    with canonical_lock(ctx.canonical):
-        epoch = new_board_epoch(ctx.canonical, "board created by bootstrap")
     result.board_created = True
-    result.actions.append(f"created the board (epoch {epoch})")
+    with _journal_failures(result), canonical_lock(ctx.canonical):
+        epoch = new_board_epoch(ctx.canonical, "board created by bootstrap")
+        result.actions.append(f"created the board (epoch {epoch})")
 
 
 def _push(canonical: Path, result: BootstrapResult) -> None:
     """Push the epoch commit now (queue-keeper's push step would too, but ``--bootstrap-only``
     stops before it)."""
-    has_remote = REMOTE in gitops.git(canonical, "remote").split()
-    if has_remote and not gitops.push(canonical, REMOTE, [f"HEAD:refs/heads/{BRANCH}"]):
+    if REMOTE not in gitops.git(canonical, "remote").split():
+        return
+    with canonical_lock(canonical):
+        pushed = provenance.push_main(canonical, REMOTE)
+    if not pushed:
         result.warnings.append("push of the board epoch failed; queue-keeper retries it")
 
 
@@ -386,7 +439,8 @@ def bootstrap(
         }
         if set_env_lines(home / ".env", env_values):
             result.actions.append("updated the profile .env")
-        _ensure_workspace(ctx, env, Path(repo_root), result)
+        fresh = _ensure_workspace(ctx, env, Path(repo_root), result)
+        _ensure_provenance(ctx.canonical, fresh, result)
         _ensure_comms_dirs(ctx.canonical)
         _ensure_board(ctx, queue, result)
         if result.board_created:

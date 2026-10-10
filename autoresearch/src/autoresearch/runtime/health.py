@@ -38,6 +38,7 @@ from autoresearch.io.locks import LockTimeout, file_lock
 from autoresearch.queue.base import Queue
 from autoresearch.queue.select import queue_from_env
 from autoresearch.runctx import RunContext, runtime_dir
+from autoresearch.runtime import provenance
 from autoresearch.runtime.blocked import BlockedAction, handle_blocked
 from autoresearch.runtime.ledger import canonical_lock
 from autoresearch.runtime.preflight import EXPIRY_WARNING, MIN_FREE_BYTES
@@ -161,7 +162,7 @@ def _push(ctx: RunContext) -> None:
     """Push the run's commits (markers, requests); queue-keeper owns push failure reports."""
     if REMOTE in gitops.git(ctx.canonical, "remote").split():
         with canonical_lock(ctx.canonical):
-            if not gitops.push(ctx.canonical, REMOTE, ["HEAD:refs/heads/main"]):
+            if not provenance.push_main(ctx.canonical, REMOTE):
                 _log(ctx, "push of main failed; queue-keeper retries it")
 
 

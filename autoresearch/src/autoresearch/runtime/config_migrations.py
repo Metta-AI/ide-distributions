@@ -71,6 +71,7 @@ ENV_PASSTHROUGH = [
     "AUTORESEARCH_AUTONOMY",  # queue-keeper plans only after the coach's first task (on-request)
     "AUTORESEARCH_CHAT_DAILY_USD",  # the coach chat's day cap (plugin.coach; status reads it too)
     "TMPDIR",  # hosted scratch dir: the sandbox /tmp is a small tmpfs, so cron scripts need it
+    "GOTA_G2_RUNNER",  # GotA G2 episode runner in worker builds: native (default) or docker
 ]
 APPROVAL_DENY = [
     "coworld player use*",
@@ -89,6 +90,9 @@ APPROVAL_DENY = [
     # journal text that merely mentions the command is not denied.
     "*promotion accept-champion",
     "*promotion accept-champion *",
+    # A human clears a commit provenance pause (C1), anchored the same way.
+    "*runtime accept-commits",
+    "*runtime accept-commits *",
 ]
 SKILLS_STAGING_RELATIVE = Path("local") / "skills-staging"
 # The IDE coach chat (platform api_server) gets only the plugin's coach toolset; Kanban workers

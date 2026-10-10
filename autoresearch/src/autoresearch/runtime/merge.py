@@ -56,7 +56,7 @@ from autoresearch.queue.requests import load_schema, write_request
 from autoresearch.records.registry import parse_record_path
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import BOARD, RunContext
-from autoresearch.runtime import promotion
+from autoresearch.runtime import promotion, provenance
 from autoresearch.runtime.admission import admitted_spec, board_epoch, receipt_path
 from autoresearch.runtime.foreign import is_foreign, record_foreign
 from autoresearch.runtime.handoff import (
@@ -333,13 +333,20 @@ def _merge(canonical: Path, path: Path, record: dict, store: RecordStore) -> dic
             canonical, path, record, "reconcile", why, overlap=overlap, conflicts=[]
         )
     message = f"merge card/{record['request_id']} ({_label(record)})"
-    merged, conflicts = gitops.merge_no_ff(canonical, record["result_sha"], message)
-    if not merged:
+    conflicts: list[str] = []
+
+    def merge_commit() -> gitops.PreparedCommit | None:
+        prepared, found = gitops.prepare_merge(canonical, record["result_sha"], message)
+        conflicts.extend(found)
+        return prepared
+
+    merge_sha = provenance.commit_recorded(canonical, message, merge_commit)
+    if merge_sha is None:
         why = _reconcile_why(record, head, [], conflicts)
         return _request_follow_up(
             canonical, path, record, "reconcile", why, overlap=[], conflicts=conflicts
         )
-    return _mark_merged(canonical, path, record, gitops.head(canonical))
+    return _mark_merged(canonical, path, record, merge_sha)
 
 
 def _supersede(canonical: Path, ref: str, by: str) -> list[Path]:
@@ -501,6 +508,7 @@ def process_handoffs(
     publish = publish or _no_publish
     outcomes = []
     failures: list[str] = []
+    journal = None
     for path, record in _committed_handoffs(canonical):
         if record["state"] not in PROCESS_STATES or is_foreign(canonical, record["card"]):
             continue
@@ -508,6 +516,7 @@ def process_handoffs(
             ready, summary = _ready(ctx, queue, record, allow_no_remote)
         except Exception as error:  # noqa: BLE001 - per-card containment, raised below
             failures.append(f"{_label(record)}: {type(error).__name__}: {error}")
+            journal = journal or provenance.journal_error(error)
             continue
         if not ready:
             continue
@@ -519,6 +528,7 @@ def process_handoffs(
             if not _left_unchanged(canonical, head_before):
                 raise
             failures.append(f"{_label(record)}: {type(error).__name__}: {error}")
+            journal = journal or provenance.journal_error(error)
             continue
         outcomes.append(
             HandoffOutcome(
@@ -529,8 +539,11 @@ def process_handoffs(
                 follow_up_request=record.get("follow_up_request"),
             )
         )
+    message = "handoff(s) not processed: " + "; ".join(failures)
+    if journal is not None:  # typed, so queue-keeper fails closed
+        raise provenance.JournalError(message) from journal
     if failures:
-        raise RuntimeError("handoff(s) not processed: " + "; ".join(failures))
+        raise RuntimeError(message)
     return outcomes
 
 

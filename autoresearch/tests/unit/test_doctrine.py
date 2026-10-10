@@ -14,7 +14,7 @@ def rule_ids() -> list[str]:
 
 
 def test_rule_ids_are_unique_contiguous_and_ordered():
-    assert rule_ids() == [f"D-{n:02d}" for n in range(1, 27)]
+    assert rule_ids() == [f"D-{n:02d}" for n in range(1, 28)]
 
 
 def test_groups_hold_the_rules_in_order():

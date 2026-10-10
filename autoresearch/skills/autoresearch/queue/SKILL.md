@@ -8,7 +8,7 @@ description: Use when a card starts, to read it and choose the work.
 This skill implements System Design §5.1 (iteration start) and §5.9 (responding to a stuck
 signal). Use it at the start of every card, before any other skill.
 
-Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23.
+Doctrine upheld: D-02, D-12, D-13, D-21, D-22, D-23, D-27.
 
 ## Reads and writes
 
@@ -123,3 +123,6 @@ you are alive while a tool runs). `notify` does not reach a card worker: always 
   a `help_request`.
 - Change only the entities the card names (D-23). Card finish rejects other changes. To
   change another entity, request a card for it.
+- Never work around a refusal by the plugin, a CLI, a lock or a permission to get the
+  refused effect (no `python3 - <<EOF`, other path or identity; D-27). Record it and end the
+  card as the skill you are following says; when none says, see `complete-card`.

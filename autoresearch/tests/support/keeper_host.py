@@ -20,7 +20,7 @@ from autoresearch.queue.file_queue import FileQueue
 from autoresearch.queue.requests import write_request
 from autoresearch.records.store import RecordStore
 from autoresearch.runctx import RunContext
-from autoresearch.runtime import card_finish, queue_keeper
+from autoresearch.runtime import card_finish, provenance, queue_keeper
 from autoresearch.runtime.admission import board_epoch
 from autoresearch.runtime.card_finish import finish
 from autoresearch.softmax_tool import cli as softmax_cli
@@ -190,8 +190,18 @@ class Host:
     def runtime_request(self, op: str = "create", **fields) -> str:
         request_id = write_request(Layout(self.canonical), op, **fields)
         path = f"cards/requests/{request_id}.json"
-        gitops.commit_paths(self.canonical, [path], f"test request {request_id}")
+        message = f"test request {request_id}"
+        provenance.commit_recorded(
+            self.canonical, message, lambda: gitops.prepare_paths(self.canonical, [path], message)
+        )
         return request_id
+
+    def runtime_commit(self, message: str) -> str:
+        """Commit everything in canonical as a runtime writer would: recorded in the
+        provenance journal, so queue-keeper's provenance check accepts it."""
+        return provenance.commit_recorded(
+            self.canonical, message, lambda: gitops.prepare_paths(self.canonical, ["."], message)
+        )
 
     # --- workers ---
 
