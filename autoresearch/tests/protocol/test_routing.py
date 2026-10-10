@@ -1267,3 +1267,50 @@ def test_a_repair_published_before_the_blocked_handoff_still_sends_the_follow_up
     board.process(publish=local_hook)
     assert len(_replies(board, task)) == 2
     _assert_clean(board)
+
+
+def _finish_recovery(board: Board, request_id: str, task: str, first: dict) -> None:
+    """Admit and finish the runtime recovery card ``request_id``; its ``done`` handoff sends
+    the coach's follow-up, once."""
+    recovery = board.admit_follow_up(request_id)
+    recovery.start()
+    recovery.write_journal()
+    recovery.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["outcome"] == "done" and follow_up["about"]["follows"] == first["id"]
+    assert follow_up["about"]["card"] == recovery.task_id
+    assert _delivery(board, task)["final_ack_by"] == follow_up["id"]
+    board.process(publish=local_hook)
+    assert len(_replies(board, task)) == 2
+    _assert_clean(board)
+
+
+def test_a_repair_whose_handoff_merge_conflicts_is_finished_by_its_reconcile_card(board):
+    """Codex round 3: the repair's handoff conflicts and goes to ``reconcile``; the reconcile
+    card's ``done`` completes the coach's task."""
+    task, first, repair = _blocked_task_with_repair_card(board)
+    other = board.admit()
+    other.start()
+    (other.worktree / "strategy" / "notes.md").write_text("# Notes\n\nCurrent plan: push.\n")
+    (repair.worktree / "strategy" / "notes.md").write_text("# Notes\n\nCurrent plan: defend.\n")
+    other.write_journal()
+    other.finish()
+    board.process(publish=local_hook)  # canonical moves on first
+    repair.finish()
+    board.process(publish=local_hook)
+    record = repair.handoff()
+    assert record["state"] == "reconcile" and len(_replies(board, task)) == 1
+
+    _finish_recovery(board, record["follow_up_request"], task, first)
+
+
+def test_a_repair_that_leaves_no_handoff_is_finished_by_its_missing_handoff_repair(board):
+    from autoresearch.runtime.merge import find_orphan_done
+
+    task, first, repair = _blocked_task_with_repair_card(board)
+    repair.end_run("done")  # completed without card finish
+    [request_id] = find_orphan_done(board.queue, board.ledger)
+    assert len(_replies(board, task)) == 1
+
+    _finish_recovery(board, request_id, task, first)

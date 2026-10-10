@@ -95,7 +95,11 @@ that contract:
      Hermes then holds blocked (not a `tool-fault:` block), or that a human unblocks (the rerun
      could not hand off: the runtime closes it and opens the repair card instead; a rerun that
      already completed is repaired the same way);
-   - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`).
+   - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`);
+   - the recovery card queue-keeper opens when one of these cards' handoffs cannot merge (a
+     repair or reconcile of the handoff, for example a merge conflict) or a run completes
+     without a handoff. The walk is bounded at 4 hops: each repair in a full chain may need one
+     recovery.
 
    A repair can publish its final outcome before the `blocked` handoff it repairs; the follow-up
    then goes out right after the `blocked` note, in the same publication.

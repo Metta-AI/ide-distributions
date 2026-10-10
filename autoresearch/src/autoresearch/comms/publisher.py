@@ -79,9 +79,12 @@ REFERENCED_RECORDS = 10  # journal and created records a task acknowledgement re
 # Card outcomes that end a task's work; ``blocked`` does not (a task acknowledged blocked gets
 # a follow-up acknowledgement with one of these).
 FINAL_OUTCOMES = ("done", "partial", "dropped", "failed")
-# Repairs of repairs followed from a blocked card to the card that finishes its work: as deep
-# as ``runtime.blocked`` repairs (``MAX_REPAIR_CHAIN``), so the last repair card is reached.
-REPAIR_HOPS = MAX_REPAIR_CHAIN
+# Hops followed from a blocked card to the card that finishes its work (``_repair_requests``).
+# Two kinds of edge count: a blocked-card repair (at most ``MAX_REPAIR_CHAIN`` deep,
+# ``runtime.blocked``) and a handoff recovery (``runtime.merge``: a repair or reconcile of a
+# handoff, or the repair of a run that left no handoff). The bound lets every repair in a full
+# chain need one recovery: repair, recovery, repair, recovery.
+REPAIR_HOPS = 2 * MAX_REPAIR_CHAIN
 # CardSpec.created_by of a runtime request; equal to ``runtime.planning.RUNTIME``, which cannot be
 # imported here (planning -> routing -> publisher is an import cycle).
 CREATED_BY_RUNTIME = "runtime"
@@ -590,38 +593,66 @@ def _blocked_note(outbox: dict[str, tuple[int, Path]], record: dict) -> dict | N
     return note if blocked else None
 
 
+def _committed_listing(canonical: Path, directory: Path) -> list[Path]:
+    """The files committed at HEAD directly in ``directory`` (absolute, under canonical)."""
+    relative = directory.relative_to(canonical).as_posix()
+    listing = gitops.git(canonical, "ls-tree", "--name-only", "HEAD", f"{relative}/")
+    return [canonical / line for line in listing.splitlines() if line]
+
+
+def _follow_ups_of(canonical: Path, card: str) -> list[str]:
+    """The request ids the runtime wrote to redo ``card``'s work, as named in committed ledger
+    records: its blocked marker's ``repair_request`` (``runtime.blocked``), and the
+    ``follow_up_request`` of each of its handoffs sent to repair or reconcile, and of each
+    marker of its runs that left no handoff (``runtime.merge``)."""
+    ledger = ledger_of(canonical)
+    records = [committed_json(canonical, blocked_marker_path(canonical, card))]
+    names = [("repair_request", records[0])]
+    for path in _committed_listing(canonical, ledger / "handoffs" / card):
+        names.append(("follow_up_request", committed_json(canonical, path)))
+    for path in _committed_listing(canonical, ledger / "orphans"):
+        if path.name.startswith(f"{card}-"):
+            names.append(("follow_up_request", committed_json(canonical, path)))
+    found = []
+    for field_name, record in names:
+        value = record.get(field_name) if isinstance(record, dict) else None
+        if isinstance(value, str) and value and value not in found:
+            found.append(value)
+    return found
+
+
 def _repair_requests(canonical: Path, blocked_card: str) -> list[str]:
-    """The repair requests written for ``blocked_card``, then for the cards of those requests,
-    up to ``REPAIR_HOPS`` deep. Followed through runtime-written records only: the card's
-    blocked marker names its ``repair_request`` (``runtime.blocked``), that request must be
+    """The runtime requests that redo ``blocked_card``'s work, then those that redo the work
+    of their cards, up to ``REPAIR_HOPS`` hops: blocked-card repairs and handoff recoveries
+    (``_follow_ups_of``). Followed through runtime-written records only: each request must be
     created by the runtime, and its receipt's ``tasks`` are the next cards."""
     found, cards = [], [blocked_card]
     for _hop in range(REPAIR_HOPS):
         next_cards = []
         for card in cards:
-            marker = committed_json(canonical, blocked_marker_path(canonical, card))
-            request_id = marker.get("repair_request") if isinstance(marker, dict) else None
-            if not request_id or not isinstance(request_id, str):
-                continue
-            request = committed_json(
-                canonical, Layout(canonical).card_requests / f"{request_id}.json"
-            )
-            spec = request.get("spec") if isinstance(request, dict) else None
-            if not isinstance(spec, dict) or spec.get("created_by") != CREATED_BY_RUNTIME:
-                continue
-            found.append(request_id)
-            receipt = committed_json(
-                canonical, request_receipt_path(ledger_of(canonical), request_id)
-            )
-            next_cards += [task["task_id"] for task in (receipt or {}).get("tasks", [])]
+            for request_id in _follow_ups_of(canonical, card):
+                if request_id in found:
+                    continue
+                request = committed_json(
+                    canonical, Layout(canonical).card_requests / f"{request_id}.json"
+                )
+                spec = request.get("spec") if isinstance(request, dict) else None
+                if not isinstance(spec, dict) or spec.get("created_by") != CREATED_BY_RUNTIME:
+                    continue
+                found.append(request_id)
+                receipt = committed_json(
+                    canonical, request_receipt_path(ledger_of(canonical), request_id)
+                )
+                tasks = receipt.get("tasks", []) if isinstance(receipt, dict) else []
+                next_cards += [task["task_id"] for task in tasks]
         cards = next_cards
     return found
 
 
 def _finishes_blocked_work(canonical: Path, record: dict, blocked_card: str, handoff: dict) -> bool:
     """The handoff is of the card responsible for ``record``, or of a repair card of
-    ``blocked_card`` (the ``blocked`` note's ``about.card``), or of a repair of a repair
-    (``_repair_requests``). The same card hands off again only when health requeued it before
+    ``blocked_card`` (the ``blocked`` note's ``about.card``), a repair of a repair, or a
+    handoff-recovery card of any of them (``_repair_requests``). The same card hands off again only when health requeued it before
     its ``blocked`` handoff was published: a published handoff closes the request, and
     ``card finish`` refuses a closed request (``runtime.blocked`` then repairs the card)."""
     if _is_responsible(record, handoff):
