@@ -46,7 +46,7 @@ _SELECT_TASKS = (
 )
 _SELECT_TASK = "SELECT id, title, body, assignee, status, priority FROM tasks WHERE id = ?"
 _SELECT_RUNS = (
-    "SELECT id, ended_at, outcome, metadata, summary, last_heartbeat_at FROM task_runs"
+    "SELECT id, ended_at, outcome, metadata, summary, last_heartbeat_at, worker_pid FROM task_runs"
     " WHERE task_id = ? ORDER BY id"
 )
 
@@ -251,7 +251,13 @@ class KanbanQueue:
     def _run_info(run: dict) -> RunInfo:
         # Drops are recorded as outcome "completed" by Hermes; our metadata says "dropped".
         outcome = (run.get("metadata") or {}).get("outcome") or run["outcome"]
-        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome, run.get("summary"))
+        return RunInfo(
+            str(run["id"]),
+            run["ended_at"] is not None,
+            outcome,
+            run.get("summary"),
+            run.get("worker_pid"),
+        )
 
     @staticmethod
     def _liveness(shown: dict) -> tuple[str | None, int | None]:
@@ -447,7 +453,8 @@ class KanbanQueue:
 
         The worker of a running task is not signalled here: the dispatcher's
         ``reap_terminal_workers`` ends a worker that outlived its run, 120 s after the run
-        ended, on its next tick. ValueError for another status."""
+        ended, on its next tick. Until then the ended run keeps its ``worker_pid``
+        (``RunInfo.worker_pid``). ValueError for another status."""
         shown = self._show_task(task_id)
         task = shown["task"]
         if task["status"] not in STOPPABLE_STATUSES:

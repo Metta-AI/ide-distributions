@@ -8,6 +8,7 @@ import json
 import jsonschema
 import pytest
 from support.board import Board
+from support.state_db import add_session
 
 from autoresearch.comms import publisher, runtime_messages
 from autoresearch.comms.inbound import derived_status, submit_inbound
@@ -18,7 +19,7 @@ from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.paths import Layout
 from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import blocked, routing
+from autoresearch.runtime import blocked, routing, spend
 from autoresearch.runtime.briefing import BriefingInputs, build_briefing
 from autoresearch.runtime.handoff import card_spec
 from autoresearch.runtime.ledger import canonical_lock
@@ -356,6 +357,10 @@ def test_an_unblocked_tool_fault_card_whose_handoff_is_published_is_repaired(boa
     board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
     if running:
         worker.start()
+        assert _handle_blocked(board) == []  # stopped; its worker outlives the stop
+        assert _handle_blocked(board) == []
+        assert _repair_requests(board, worker.task_id) == []
+        board.queue.reap_workers()
 
     [action] = _handle_blocked(board)
 
@@ -383,33 +388,55 @@ def _repair_requests(board: Board, task_id: str) -> list[dict]:
     return [r for r in _requests(board) if f"[repair-blocked:{task_id}]" in r["spec"]["why"]]
 
 
-def test_an_unblocked_card_claimed_between_the_listing_and_the_drop_is_stopped(board):
-    """The dispatcher claims an unblocked card within seconds. The listing said ``pending``,
-    the drop finds it claimed: the rerun is stopped, and only then is the repair requested."""
+def _unblocked_rerun(board: Board):
+    """A tool-fault card whose ``blocked`` handoff is published, unblocked by a human."""
     task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
     _handle_blocked(board)
     board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
-    queue, repairs_at_stop = board.queue, []
+    return task, worker, first
+
+
+def _listed_as(queue, board_status: str):
+    """``list`` with the pending cards in that Hermes status (FileQueue has none)."""
+
+    def list_cards(state=None):
+        return [
+            dataclasses.replace(card, board_status=board_status)
+            if card.state == "pending"
+            else card
+            for card in queue.list(state)
+        ]
+
+    return list_cards
+
+
+def test_an_unblocked_card_claimed_between_the_listing_and_the_drop_is_stopped(board):
+    """The dispatcher claims an unblocked card within seconds. The listing said ``pending``,
+    the drop finds it claimed: the rerun is stopped. Its worker outlives the stop, and the
+    repair is requested only when the board no longer records that worker."""
+    task, worker, first = _unblocked_rerun(board)
+    queue = board.queue
 
     def drop(task_id, reason):
         worker.start()  # the dispatcher wins the race
         queue.drop(task_id, reason)
 
-    def stop(task_id, reason):
-        repairs_at_stop.extend(_repair_requests(board, task_id))
-        return queue.stop(task_id, reason)
+    board.queue = _QueueWith(queue, drop=drop)
+    assert _handle_blocked(board) == []
+    board.queue = queue
 
-    board.queue = _QueueWith(queue, drop=drop, stop=stop)
+    card = queue.get(worker.task_id)
+    assert (card.state, card.block_reason) == ("blocked", blocked.RERUN_AFTER_PUBLISH)
+    assert card.runs[-1].worker_pid is not None  # stopped, and still alive
+    assert _handle_blocked(board) == []
+    assert _repair_requests(board, worker.task_id) == []
+    queue.reap_workers()  # the dispatcher ended it
 
     [action] = _handle_blocked(board)
 
-    assert repairs_at_stop == []
-    card = queue.get(worker.task_id)
-    assert (card.state, card.block_reason) == ("blocked", blocked.RERUN_AFTER_PUBLISH)
     assert _handle_blocked(board) == []
     [request] = _repair_requests(board, worker.task_id)
     assert request["id"] == action.repair_request
-    board.queue = queue
     repair = _start_repair(board, action)
     repair.finish()
     board.process(publish=local_hook)
@@ -417,11 +444,8 @@ def test_an_unblocked_card_claimed_between_the_listing_and_the_drop_is_stopped(b
     assert follow_up["about"]["follows"] == first["id"]
 
 
-def test_a_rerun_that_cannot_be_closed_gets_no_repair_request_until_it_is_closed(board):
-    """The rerun and its repair card never both run: no close, no repair request."""
-    _task, worker, _first = _blocked_task(board, reason="tool-fault: softmax build: boom")
-    _handle_blocked(board)
-    board.queue.requeue(worker.task_id, "fixed the tool")
+def test_a_rerun_that_cannot_be_stopped_gets_no_repair_request(board):
+    _task, worker, _first = _unblocked_rerun(board)
     worker.start()
     queue = board.queue
 
@@ -431,26 +455,65 @@ def test_a_rerun_that_cannot_be_closed_gets_no_repair_request_until_it_is_closed
     board.queue = _QueueWith(queue, stop=stop)
     with pytest.raises(RuntimeError, match="database is locked"):
         _handle_blocked(board)
-    assert _repair_requests(board, worker.task_id) == []
-    assert queue.get(worker.task_id).state == "claimed"
-
     board.queue = queue
+    queue.reap_workers()  # no run has ended: nothing to forget
+
+    assert _handle_blocked(board) == []  # stopped now
+    assert _repair_requests(board, worker.task_id) == []
+    assert queue.get(worker.task_id).state == "blocked"
+
+
+def test_a_rerun_that_ends_between_the_listing_and_the_stop_is_repaired_as_completed(board):
+    """The listing said ``claimed``; the run ends before the stop, which the queue refuses.
+    Nothing fails: the card is found completed, and repaired once its worker is gone."""
+    _task, worker, _first = _unblocked_rerun(board)
+    worker.start()
+    queue = board.queue
+
+    def stop(task_id, reason):
+        worker.end_run("done")
+        return queue.stop(task_id, reason)
+
+    board.queue = _QueueWith(queue, stop=stop)
+    assert _handle_blocked(board) == []
+    board.queue = queue
+    assert queue.get(worker.task_id).state == "completed"
+    assert _handle_blocked(board) == []
+    queue.reap_workers()
+
     [action] = _handle_blocked(board)
 
-    assert queue.get(worker.task_id).state == "blocked"
     assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
 
 
-@pytest.mark.parametrize("closed_as", ["blocked", "completed"])
-def test_a_crash_between_the_close_and_the_repair_request_is_finished_once(
-    board, monkeypatch, closed_as
-):
-    """Stopped, the rerun is found ``blocked``; dropped, it is found ``completed``."""
-    _task, worker, _first = _blocked_task(board, reason="tool-fault: softmax build: boom")
-    _handle_blocked(board)
-    board.queue.requeue(worker.task_id, "fixed the tool")
-    if closed_as == "blocked":
-        worker.start()
+def test_a_stopped_rerun_is_repaired_at_its_run_cap_like_a_dropped_one(board):
+    """queue-keeper and health pass the spend caps. A stopped rerun waits for its repair as a
+    blocked card that has reached the run cap; it is repaired all the same, not held at the
+    cap, as the rerun dropped before its claim is."""
+    _task, worker, _first = _unblocked_rerun(board)
+    worker.start()
+    home = board.ctx().hermes_home
+    home.mkdir()
+    add_session(home, "s-other", 0.0)  # a readable state.db
+    config = spend.SpendConfig(max_runs=2)
+    passes = functools.partial(
+        blocked.handle_blocked, board.ctx(), board.queue, allow_no_remote=True, spend_config=config
+    )
+    assert passes() == []  # stopped
+    card = board.queue.get(worker.task_id)
+    assert spend.cap_reached(board.ctx(), card, config)  # 2 runs: at the cap
+    board.queue.reap_workers()
+
+    [action] = passes()
+
+    assert action.action == blocked.REPAIRED
+    assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
+    assert not spend.is_held(board.canonical, board.queue.get(worker.task_id))
+    assert passes() == []
+
+
+def test_a_crash_between_the_drop_and_the_repair_request_is_finished_once(board, monkeypatch):
+    _task, worker, _first = _unblocked_rerun(board)
     repair = blocked._repair
 
     def crash(*args, **kwargs):
@@ -459,7 +522,7 @@ def test_a_crash_between_the_close_and_the_repair_request_is_finished_once(
     monkeypatch.setattr(blocked, "_repair", crash)
     with pytest.raises(RuntimeError, match="Crash"):
         _handle_blocked(board)
-    assert board.queue.get(worker.task_id).state == closed_as
+    assert board.queue.get(worker.task_id).state == "completed"
     assert _repair_requests(board, worker.task_id) == []
     monkeypatch.setattr(blocked, "_repair", repair)
 
@@ -469,25 +532,65 @@ def test_a_crash_between_the_close_and_the_repair_request_is_finished_once(
     assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
 
 
-def test_a_rerun_the_dispatcher_never_claims_is_repaired_before_it_is_archived(board):
-    """Hermes ``triage`` (also ``todo``, ``scheduled``): the drop archives the card and the
-    listing then leaves it out, so its repair request is written before the drop."""
-    _task, worker, _first = _blocked_task(board, reason="tool-fault: softmax build: boom")
-    _handle_blocked(board)
-    board.queue.requeue(worker.task_id, "fixed the tool")
-    queue, repairs_at_drop = board.queue, []
+def test_a_todo_rerun_is_left_until_hermes_makes_it_ready_and_is_then_closed(board):
+    """Hermes promotes a ``todo`` card to ``ready`` by itself and the dispatcher claims it. So
+    a ``todo`` rerun gets no repair request while it can still start; once claimed it is
+    stopped, and repaired when its worker is gone."""
+    _task, worker, _first = _unblocked_rerun(board)
+    queue = board.queue
+    board.queue = _QueueWith(queue, list=_listed_as(queue, "todo"))
+    assert _handle_blocked(board) == []
+    assert queue.get(worker.task_id).state == "pending"  # not archived
+    assert _repair_requests(board, worker.task_id) == []
+
+    worker.start()  # todo -> ready (recompute_ready), then claimed
+    assert _handle_blocked(board) == []
+    assert queue.get(worker.task_id).state == "blocked"
+    assert _repair_requests(board, worker.task_id) == []
+    queue.reap_workers()
+
+    [action] = _handle_blocked(board)
+
+    assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
+
+
+def test_a_todo_rerun_promoted_and_claimed_during_the_pass_gets_no_repair_request(board):
+    """The listing said ``todo``; by the time the card is handled it runs. Nothing is written
+    for it in this pass, whatever the board does meanwhile."""
+    _task, worker, _first = _unblocked_rerun(board)
+    queue = board.queue
 
     def list_cards(state=None):
-        return [
-            dataclasses.replace(card, board_status="triage") if card.state == "pending" else card
-            for card in queue.list(state)
-        ]
+        cards = _listed_as(queue, "todo")(state)
+        worker.start()  # promoted and claimed right after the listing
+        return cards
+
+    board.queue = _QueueWith(queue, list=list_cards)
+
+    assert _handle_blocked(board) == []
+
+    assert _repair_requests(board, worker.task_id) == []
+    assert queue.get(worker.task_id).state == "claimed"  # stopped by the next pass
+
+
+def test_a_triage_rerun_is_repaired_before_it_is_archived(board):
+    """Hermes ``triage`` is left only by a human's ``kanban specify``. The drop archives the
+    card and the listing then leaves it out, so its repair request is written before the
+    drop, and only when no worker is recorded for it (a stop can land in ``triage``)."""
+    _task, worker, _first = _unblocked_rerun(board)
+    worker.start()
+    board.queue.stop(worker.task_id, blocked.RERUN_AFTER_PUBLISH)
+    board.queue.requeue(worker.task_id, "stands in for Hermes routing the stop to triage")
+    queue, repairs_at_drop = board.queue, []
 
     def drop(task_id, reason):
         repairs_at_drop.extend(_repair_requests(board, task_id))
         queue.drop(task_id, reason)
 
-    board.queue = _QueueWith(queue, list=list_cards, drop=drop)
+    board.queue = _QueueWith(queue, list=_listed_as(queue, "triage"), drop=drop)
+    assert _handle_blocked(board) == []  # the stopped worker is still recorded
+    assert queue.get(worker.task_id).state == "pending"
+    queue.reap_workers()
 
     [action] = _handle_blocked(board)
 
@@ -1238,6 +1341,8 @@ def test_a_completed_rerun_of_a_card_whose_blocked_handoff_was_published_is_repa
     worker.start()
     worker.end_run("done")  # refused card finish, then kanban_complete
     assert board.queue.get(worker.task_id).state == "completed"
+    assert _handle_blocked(board) == []  # the board still records the worker of that run
+    board.queue.reap_workers()
 
     [action] = _handle_blocked(board)
 
