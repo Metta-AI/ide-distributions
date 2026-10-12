@@ -28,6 +28,15 @@ class RunInfo:
     terminal: bool
     outcome: str | None
     summary: str | None = None  # what the run ended with (kanban_complete summary, block reason)
+    # The worker process the board still records for the run; None once it is gone. Hermes
+    # keeps it on an ended run (the worker can outlive its run, for example after
+    # ``Queue.stop``) and clears it when the process is gone, at the earliest 120 s after the
+    # run ended (``reap_terminal_workers``). Hermes never clears it on a run that has no
+    # ``worker_started_at`` (the start fingerprint of the process; rows from before Hermes
+    # recorded it), so that field and the end time of the run (epoch seconds) come with it.
+    worker_pid: int | None = None
+    worker_started_at: str | None = None
+    ended_at: float | None = None
 
 
 @dataclass

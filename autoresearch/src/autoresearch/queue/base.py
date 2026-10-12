@@ -40,4 +40,5 @@ class Queue(Protocol):
     def stop(self, task_id: str, reason: str) -> str:
         """Block a pending or claimed card with ``reason`` (the runtime's spend caps); return
         the board status it landed in (``blocked``, or Hermes ``triage``). A claimed card's run
-        ends with outcome ``blocked``; Hermes ends its worker process."""
+        ends with outcome ``blocked``; Hermes ends its worker process later, and until then the
+        run keeps its ``RunInfo.worker_pid``."""

@@ -46,7 +46,8 @@ _SELECT_TASKS = (
 )
 _SELECT_TASK = "SELECT id, title, body, assignee, status, priority FROM tasks WHERE id = ?"
 _SELECT_RUNS = (
-    "SELECT id, ended_at, outcome, metadata, summary, last_heartbeat_at FROM task_runs"
+    "SELECT id, ended_at, outcome, metadata, summary, last_heartbeat_at, worker_pid,"
+    " worker_started_at FROM task_runs"
     " WHERE task_id = ? ORDER BY id"
 )
 
@@ -168,11 +169,23 @@ class KanbanQueue:
         if self.board_db_only:
             return self._show_from_board_db(_BOARD_DB_ARGV, task_id)
         try:
-            return json.loads(self._kanban("show", task_id, "--json"))
+            shown = json.loads(self._kanban("show", task_id, "--json"))
         except KanbanError as error:
             if _DELEGATE_FENCE_MESSAGE not in error.stderr:
                 raise
             return self._show_from_board_db(error.argv, task_id)
+        if any(run.get("worker_pid") and run.get("ended_at") for run in shown["runs"]):
+            # The show JSON has no ``worker_started_at``; it is needed only for an ended run
+            # that still records a worker (``RunInfo.worker_pid``).
+            rows = self._read_board_db(
+                ["kanban", "show", task_id],
+                "SELECT id, worker_started_at FROM task_runs WHERE task_id = ?",
+                (task_id,),
+            )
+            started = {row["id"]: row["worker_started_at"] for row in rows}
+            for run in shown["runs"]:
+                run["worker_started_at"] = started.get(run["id"])
+        return shown
 
     def _show_from_board_db(self, argv: list[str], task_id: str) -> dict:
         tasks = self._read_board_db(argv, _SELECT_TASK, (task_id,))
@@ -251,7 +264,15 @@ class KanbanQueue:
     def _run_info(run: dict) -> RunInfo:
         # Drops are recorded as outcome "completed" by Hermes; our metadata says "dropped".
         outcome = (run.get("metadata") or {}).get("outcome") or run["outcome"]
-        return RunInfo(str(run["id"]), run["ended_at"] is not None, outcome, run.get("summary"))
+        return RunInfo(
+            str(run["id"]),
+            run["ended_at"] is not None,
+            outcome,
+            run.get("summary"),
+            run.get("worker_pid"),
+            run.get("worker_started_at"),
+            run["ended_at"],
+        )
 
     @staticmethod
     def _liveness(shown: dict) -> tuple[str | None, int | None]:
@@ -447,7 +468,8 @@ class KanbanQueue:
 
         The worker of a running task is not signalled here: the dispatcher's
         ``reap_terminal_workers`` ends a worker that outlived its run, 120 s after the run
-        ended, on its next tick. ValueError for another status."""
+        ended, on its next tick. Until then the ended run keeps its ``worker_pid``
+        (``RunInfo.worker_pid``). ValueError for another status."""
         shown = self._show_task(task_id)
         task = shown["task"]
         if task["status"] not in STOPPABLE_STATUSES:

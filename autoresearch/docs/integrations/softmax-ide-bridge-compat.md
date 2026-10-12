@@ -93,8 +93,9 @@ that contract:
      (the request was still open, so the rerun could hand off);
    - the repair card queue-keeper opens for a card whose `blocked` handoff is published and that
      Hermes then holds blocked (not a `tool-fault:` block), or that a human unblocks (the rerun
-     could not hand off: the runtime closes it and opens the repair card instead; a rerun that
-     already completed is repaired the same way);
+     could not hand off: the runtime closes it and opens the repair card instead, for a rerun
+     it had to stop only once Hermes has ended its worker, 2 minutes or more after the stop; a
+     rerun that already completed is repaired the same way);
    - a repair of a repair, up to 2 repairs deep (`MAX_REPAIR_CHAIN`);
    - the recovery card queue-keeper opens when one of these cards' handoffs cannot merge (a
      repair or reconcile of the handoff, for example a merge conflict) or a run completes

@@ -6,6 +6,8 @@ One JSON file per card under ``<directory>/cards/`` plus ``index.json`` (idempot
 and a creation counter). Every mutation runs under ``<directory>/queue.lock``.
 """
 
+import os
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -35,6 +37,9 @@ class FileQueue:
         return read_json(path)
 
     def _save_record(self, record: dict) -> None:
+        for run in record["runs"]:
+            if run["terminal"] and run.get("ended_at") is None:
+                run["ended_at"] = time.time()
         write_json(self._card_path(record["task_id"]), record)
 
     def _load_index(self) -> dict:
@@ -173,9 +178,24 @@ class FileQueue:
                 ),
             )
             best["state"] = "claimed"
-            best["runs"].append(asdict(RunInfo(f"r-{ULID()}", False, None)))
+            run = RunInfo(
+                f"r-{ULID()}", False, None, worker_pid=os.getpid(), worker_started_at="spawn"
+            )
+            best["runs"].append(asdict(run))
             self._save_record(best)
             return self._to_card(best)
+
+    def reap_workers(self) -> None:
+        """Forget the worker of every ended run, as the Hermes dispatcher does once the
+        process is gone. Until then an ended run keeps its ``worker_pid``. As in Hermes, a run
+        without ``worker_started_at`` is never cleared."""
+        with file_lock(self._lock_path):
+            for path in self._cards_dir.glob("K-*.json"):
+                record = read_json(path)
+                for run in record["runs"]:
+                    if run["terminal"] and run.get("worker_started_at") is not None:
+                        run["worker_pid"] = None
+                self._save_record(record)
 
     def finish(self, task_id: str, run_id: str, outcome: str, summary: str | None = None) -> None:
         with file_lock(self._lock_path):
