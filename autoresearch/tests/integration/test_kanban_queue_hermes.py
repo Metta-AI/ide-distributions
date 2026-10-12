@@ -101,6 +101,8 @@ def test_a_stopped_run_keeps_its_worker_until_hermes_clears_it(queue, tmp_path):
 
     [run] = queue.get(task_id).runs
     assert (run.terminal, run.outcome, run.worker_pid) == (True, "blocked", os.getpid())
+    # ``kanban claim`` records no start fingerprint: a row Hermes' reaper never clears.
+    assert run.worker_started_at is None and run.ended_at is not None
 
 
 def test_hermes_makes_a_todo_child_ready_when_its_parent_completes(queue, tmp_path):

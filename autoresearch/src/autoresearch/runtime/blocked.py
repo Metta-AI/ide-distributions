@@ -74,13 +74,15 @@ claimed cards whose handoff is published, and closes them (``_close_rerun``). Th
 of a ``blocked`` one is written only once the rerun is closed and its worker is gone, so the rerun
 and its repair card never both run:
 
-- a pending card the dispatcher can claim is dropped, and the repair request follows at once (the
-  board refuses the drop of a claimed card, so a dropped card had no worker);
+- a pending card the dispatcher can claim is dropped, and the repair request follows at once
+  unless an earlier run of the card still has a worker (the board refuses the drop of a claimed
+  card, so the dropped rerun itself had none);
 - a claimed card, also one claimed between the listing and the drop, is stopped and nothing else.
   ``stop`` only ends the run: the worker lives on until the dispatcher ends it, 120 s or more
   later. The card is then ``blocked`` with the reason ``RERUN_AFTER_PUBLISH``, and a later run
-  writes the repair request once the board no longer records a worker for the stopped run
-  (``RunInfo.worker_pid``, ``_worker_recorded``). No spend cap applies to that repair, as to
+  writes the repair request once the board no longer records a worker for any run of the card
+  (``RunInfo.worker_pid``, ``_worker_recorded``: the one rule of every path that writes the
+  repair of a rerun, also after a drop). No spend cap applies to that repair, as to
   the one after a drop;
 - a pending card in Hermes ``todo`` or ``scheduled`` cannot be stopped or completed. Hermes makes
   it ``ready`` by itself (``recompute_ready``), so it is left alone and closed then;
@@ -110,6 +112,7 @@ The repair card redoes the work, and its handoff completes the coach's task
 
 import logging
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -145,6 +148,11 @@ REPAIR_PRIORITY = "P1"
 # The reason a card rerun after its published handoff is closed with (``_close_rerun``). A
 # card blocked with it is a stopped rerun that waits for its repair (``_handle_one``).
 RERUN_AFTER_PUBLISH = "handoff already published: a repair card redoes its work"
+
+# Hermes never clears the worker of a run without a start fingerprint (``RunInfo``). After
+# this long past the end of such a run its worker counts as gone: well over the 120 s after
+# which Hermes ends the workers it does track.
+UNTRACKED_WORKER_SECONDS = 900
 
 log = logging.getLogger(__name__)
 
@@ -391,9 +399,7 @@ def _handle_one(
     spend_config: spend.SpendConfig | None,
 ) -> BlockedAction | None:
     canonical = ctx.canonical
-    if card.block_reason == RERUN_AFTER_PUBLISH:
-        if _worker_recorded(card):
-            return None  # stopped, but its worker is still there: no repair card beside it
+    if card.block_reason == RERUN_AFTER_PUBLISH:  # a stopped rerun, repaired here
         outcome = _published_outcome(canonical, card)
         return _repair_rerun(canonical, card, outcome, allow_no_remote)
     if spend.is_held(canonical, card) or (card.block_reason or "").startswith(
@@ -439,16 +445,31 @@ def _handle_one(
 
 
 def _worker_recorded(card: Card) -> bool:
-    """True while the board records a worker process for the card's last run. A worker can
-    outlive its run (``RunInfo.worker_pid``), so an ended run alone does not say it is gone."""
-    return bool(card.runs) and card.runs[-1].worker_pid is not None
+    """True while the board records a worker process for any run of the card. A worker can
+    outlive its run (``RunInfo.worker_pid``), so an ended run alone does not say it is gone,
+    and an earlier run's worker can outlive a later close (stopped, unblocked again, dropped).
+    A run Hermes never clears counts until ``UNTRACKED_WORKER_SECONDS`` after its end."""
+    now = time.time()
+    return any(
+        run.worker_pid is not None
+        and not (
+            run.worker_started_at is None
+            and run.ended_at is not None
+            and now - run.ended_at > UNTRACKED_WORKER_SECONDS
+        )
+        for run in card.runs
+    )
 
 
 def _repair_rerun(
     canonical: Path, card: Card, outcome: str | None, allow_no_remote: bool
 ) -> BlockedAction | None:
     """The repair request of a closed rerun whose published handoff was ``blocked``, once (the
-    marker ``repaired``); for any other outcome nothing is redone. No spend cap applies."""
+    marker ``repaired``); for any other outcome nothing is redone. No spend cap applies.
+    Nothing is written while the board records a worker for the card (``_worker_recorded``):
+    the next run looks again, whatever state the card is in by then."""
+    if _worker_recorded(card):
+        return None
     record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
     if outcome == "blocked" and (record is None or record["state"] != REPAIRED):
         return _repair(canonical, card, record, allow_no_remote, after_publish=True)

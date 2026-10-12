@@ -354,6 +354,7 @@ def test_an_unblocked_tool_fault_card_whose_handoff_is_published_is_repaired(boa
     [action] = _handle_blocked(board)
     assert action.action == blocked.TOOL_FAULT
     assert board.queue.get(worker.task_id).state == "blocked"
+    board.queue.reap_workers()  # the blocked run's worker is long gone when the human acts
     board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
     if running:
         worker.start()
@@ -392,6 +393,7 @@ def _unblocked_rerun(board: Board):
     """A tool-fault card whose ``blocked`` handoff is published, unblocked by a human."""
     task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
     _handle_blocked(board)
+    board.queue.reap_workers()  # the blocked run's worker is long gone when the human acts
     board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
     return task, worker, first
 
@@ -442,6 +444,51 @@ def test_an_unblocked_card_claimed_between_the_listing_and_the_drop_is_stopped(b
     board.process(publish=local_hook)
     [_, follow_up] = _replies(board, task)
     assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_stopped_rerun_unblocked_again_is_not_repaired_while_its_worker_lives(board):
+    """Stopped; a human unblocks it again before its repair exists; it is dropped. The drop's
+    own run has no worker, but the stopped run's worker is still alive: no repair yet."""
+    _task, worker, _first = _unblocked_rerun(board)
+    worker.start()
+    assert _handle_blocked(board) == []  # stopped; its worker outlives the stop
+    board.queue.requeue(worker.task_id, "unblocked again")
+
+    assert _handle_blocked(board) == []
+
+    card = board.queue.get(worker.task_id)
+    assert card.state == "completed" and card.runs[-1].worker_pid is None  # dropped
+    assert _handle_blocked(board) == []
+    assert _repair_requests(board, worker.task_id) == []
+    board.queue.reap_workers()
+
+    [action] = _handle_blocked(board)
+
+    assert _handle_blocked(board) == []
+    assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
+
+
+def test_a_worker_hermes_never_clears_stops_counting_after_a_margin(board):
+    """A run without a start fingerprint is left out by Hermes' reaper, so its ``worker_pid``
+    stays. The repair waits ``UNTRACKED_WORKER_SECONDS`` after that run ended, not for ever."""
+    _task, worker, _first = _unblocked_rerun(board)
+    worker.start()
+    path = board.queue.directory / "cards" / f"{worker.task_id}.json"
+    record = read_json(path)
+    record["runs"][-1]["worker_started_at"] = None
+    write_json(path, record)
+    assert _handle_blocked(board) == []  # stopped
+    board.queue.reap_workers()
+    assert board.queue.get(worker.task_id).runs[-1].worker_pid is not None  # never cleared
+    assert _handle_blocked(board) == []
+    assert _repair_requests(board, worker.task_id) == []
+    record = read_json(path)
+    record["runs"][-1]["ended_at"] -= blocked.UNTRACKED_WORKER_SECONDS + 1
+    write_json(path, record)
+
+    [action] = _handle_blocked(board)
+
+    assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
 
 
 def test_a_rerun_that_cannot_be_stopped_gets_no_repair_request(board):

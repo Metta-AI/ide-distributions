@@ -269,14 +269,31 @@ def test_list_filters_by_state_and_returns_runs(fake, queue):
     assert fake.argvs()[0] == [*BOARD, "list", "--json"]
 
 
-def test_a_run_carries_the_worker_hermes_still_records(fake, queue):
-    """Hermes keeps ``worker_pid`` on an ended run until the process is gone."""
+def test_a_run_carries_the_worker_hermes_still_records(fake, tmp_path, monkeypatch):
+    """Hermes keeps ``worker_pid`` on an ended run until the process is gone. Its show JSON
+    has no ``worker_started_at``, so that comes from the board DB, only when it is needed."""
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    home = tmp_path / "hermes-home"
+    db_path = home / "kanban" / "boards" / "board1" / "kanban.db"
+    db_path.parent.mkdir(parents=True)
+    db = sqlite3.connect(db_path)
+    db.execute("CREATE TABLE task_runs (id INTEGER, task_id TEXT, worker_started_at TEXT)")
+    db.execute("INSERT INTO task_runs VALUES (1, 't_abc', NULL), (2, 't_abc', 'boot|77')")
+    db.commit()
+    db.close()
+    queue = KanbanQueue("board1", "prof", hermes_home=home)
     runs = [
-        {"id": 1, "outcome": "blocked", "ended_at": 9, "worker_pid": None},
+        {"id": 1, "outcome": "blocked", "ended_at": 9, "worker_pid": 4141},
         {"id": 2, "outcome": "blocked", "ended_at": 12, "worker_pid": 4242},
     ]
     fake.reply("show", {"task": task_json("blocked"), "runs": runs})
-    assert [run.worker_pid for run in queue.get("t_abc").runs] == [None, 4242]
+    found = [(r.worker_pid, r.worker_started_at, r.ended_at) for r in queue.get("t_abc").runs]
+    assert found == [(4141, None, 9), (4242, "boot|77", 12)]
+
+    open_run = [{"id": 3, "outcome": None, "ended_at": None, "worker_pid": 4343}]
+    fake.reply("show", {"task": task_json("running"), "runs": open_run})
+    db_path.unlink()  # not read for a run in flight
+    assert queue.get("t_abc").runs[0].worker_pid == 4343
 
 
 def test_dropped_outcome_comes_from_run_metadata(fake, queue):
@@ -443,7 +460,7 @@ def fenced(fake, tmp_path, monkeypatch):
         " priority INTEGER);"
         "CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,"
         " outcome TEXT, metadata TEXT, summary TEXT, last_heartbeat_at INTEGER,"
-        " worker_pid INTEGER);"
+        " worker_pid INTEGER, worker_started_at TEXT);"
     )
     body = json.dumps(asdict(SPEC))
     db.executemany(
@@ -456,10 +473,10 @@ def fenced(fake, tmp_path, monkeypatch):
         ],
     )
     db.executemany(
-        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            (1, "t_run", 5, "completed", '{"outcome": "dropped"}', None, 4, None),
-            (2, "t_run", None, None, None, None, 130, 4242),
+            (1, "t_run", 5, "completed", '{"outcome": "dropped"}', None, 4, None, None),
+            (2, "t_run", None, None, None, None, 130, 4242, "boot|77"),
         ],
     )
     db.commit()
@@ -473,7 +490,7 @@ def test_delegate_child_reads_the_block_reason_from_the_board_db(fenced, tmp_pat
     db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
     db.execute("UPDATE tasks SET status = 'blocked' WHERE id = 't_ready'")
     db.execute(
-        "INSERT INTO task_runs VALUES (5, 't_ready', 9, 'blocked', NULL, 'tool-fault: x', NULL, NULL)"
+        "INSERT INTO task_runs VALUES (5, 't_ready', 9, 'blocked', NULL, 'tool-fault: x', NULL, NULL, NULL)"
     )
     db.commit()
     db.close()
@@ -573,9 +590,9 @@ def test_delegate_child_reads_the_pinned_db(fenced, tmp_path, monkeypatch):
 def test_malformed_run_metadata_and_corrupt_db_are_tolerated(fenced, tmp_path):
     db = sqlite3.connect(tmp_path / "hermes-home/kanban/boards/board1/kanban.db")
     db.execute(
-        "INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json', NULL, NULL, NULL)"
+        "INSERT INTO task_runs VALUES (3, 't_ready', 9, 'completed', 'not json', NULL, NULL, NULL, NULL)"
     )
-    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]', NULL, NULL, NULL)")
+    db.execute("INSERT INTO task_runs VALUES (4, 't_ready', 9, 'completed', '[1]', NULL, NULL, NULL, NULL)")
     db.commit()
     db.close()
     assert [r.outcome for r in fenced.get("t_ready").runs] == ["completed", "completed"]

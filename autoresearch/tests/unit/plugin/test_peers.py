@@ -28,7 +28,7 @@ class BoardDb:
             " priority INTEGER);"
             "CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,"
             " outcome TEXT, metadata TEXT, summary TEXT, last_heartbeat_at INTEGER,"
-            " worker_pid INTEGER);"
+            " worker_pid INTEGER, worker_started_at TEXT);"
         )
         db.commit()
         db.close()
@@ -42,7 +42,7 @@ class BoardDb:
         )
         if run is not None:
             db.execute(
-                "INSERT INTO task_runs VALUES (?, ?, NULL, NULL, NULL, NULL, ?, NULL)",
+                "INSERT INTO task_runs VALUES (?, ?, NULL, NULL, NULL, NULL, ?, NULL, NULL)",
                 (run, task_id, heartbeat),
             )
         db.commit()
