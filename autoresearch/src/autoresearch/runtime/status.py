@@ -48,7 +48,8 @@ COMMIT_MARKER = ".softmax-distribution-commit"
 UPDATE_FAILED_MARKER = ".softmax-update-failed"
 KEEPER_LOG = "keeper.log"
 QUESTION_KINDS = frozenset({"question", "help_request"})
-LOG_TAIL_BYTES = 4096
+# Enough to hold the traceback (chained ones too) under the last entry of ``keeper.log``.
+LOG_TAIL_BYTES = 65536
 
 # ``promotion.league_check`` for this agent's league, as of ``now`` with the given grace
 # (read only, ``record=False``); may raise.
@@ -237,7 +238,8 @@ def champion_section(
 
 
 def _last_keeper_run(ctx: RunContext) -> str | None:
-    """The time stamp that starts the last line of ``keeper.log``."""
+    """The time stamp of the last entry of ``keeper.log``: the last line that starts with one
+    (an entry with a traceback ends in lines that do not)."""
     path = runtime_dir(ctx) / KEEPER_LOG
     try:
         with path.open("rb") as handle:
@@ -246,5 +248,11 @@ def _last_keeper_run(ctx: RunContext) -> str | None:
             lines = handle.read().decode("utf-8", errors="replace").splitlines()
     except OSError:
         return None
-    last = next((line for line in reversed(lines) if line.strip()), "")
-    return last.split(" ", 1)[0] or None
+    for line in reversed(lines):
+        stamp = line.split(" ", 1)[0]
+        try:
+            datetime.datetime.fromisoformat(stamp)
+        except ValueError:
+            continue
+        return stamp
+    return None

@@ -97,6 +97,23 @@ def test_no_credential_appears_in_the_output(ctx, queue):
     assert CREDENTIAL not in json.dumps(result) and OPENROUTER_KEY not in json.dumps(result)
 
 
+def test_last_keeper_run_is_the_time_of_an_entry_that_ends_in_a_traceback(ctx, canonical, queue):
+    """A failed step is logged with its traceback, whose lines carry no time stamp."""
+    keeper_log = canonical.root / ".supervisor" / "runtime" / "keeper.log"
+    keeper_log.parent.mkdir(parents=True, exist_ok=True)
+    frames = '  File "blocked.py", line 500, in handle_blocked\n    raise RuntimeError(message)\n' * 60
+    keeper_log.write_text(
+        "2026-10-11T05:54:13+00:00 admit Q-1\n"
+        "2026-10-11T05:55:13+00:00 step blocked failed: RuntimeError: blocked card(s) not handled\n"
+        "Traceback (most recent call last):\n"
+        f"{frames}"
+        "RuntimeError: blocked card(s) not handled: t_1: ValueError: cannot drop a claimed card\n"
+        "\n"
+    )
+
+    assert build(ctx, queue)["data"]["last_keeper_run"] == "2026-10-11T05:55:13+00:00"
+
+
 def test_a_fresh_agent(ctx, queue):
     data = build(ctx, queue)["data"]
     assert data["paused"] is False and data["pause_reasons"] == []
