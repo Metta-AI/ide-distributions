@@ -70,9 +70,10 @@ receipt's ``handed_off`` run):
 A ``tool-fault:`` block stays blocked until a human acts, as above (D-26). When the human
 unblocks it, the card is ``pending`` (Hermes ``kanban unblock``: ``ready``) and soon ``claimed``
 (the dispatcher takes it within seconds). Each run of ``handle_blocked`` also looks at pending and
-claimed cards whose handoff is published: for a ``blocked`` one it writes the repair request
-first, then it closes the card (``drop`` when pending, ``stop`` when running), so a crash between
-the two leaves a card that the next run closes without a second request. A running card whose
+claimed cards whose handoff is published: it closes the card (``drop`` when pending, ``stop``
+when running, also when the card was claimed between the listing and the drop), and only then,
+for a ``blocked`` one, it writes the repair request, so the rerun and its repair card never both
+run; a crash between the two is finished by the next run (``_close_rerun``). A running card whose
 current run already has a committed handoff is left alone (it was requeued before its earlier
 handoff published, and its own handoff is on its way). A rerun that ends between two runs of this
 step (its refused ``card finish``, then ``kanban_complete``) is found among the completed cards: a
@@ -414,35 +415,62 @@ def _handle_one(
     return None
 
 
+def _repair_rerun(
+    canonical: Path, card: Card, outcome: str, allow_no_remote: bool
+) -> BlockedAction | None:
+    """The repair request of a rerun whose published handoff was ``blocked``, once (the marker
+    ``repaired``); for any other outcome nothing is redone."""
+    record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
+    if outcome == "blocked" and (record is None or record["state"] != REPAIRED):
+        return _repair(canonical, card, record, allow_no_remote, after_publish=True)
+    _notify_if_pending(canonical, card, record, allow_no_remote)
+    return None
+
+
 def _close_rerun(
     ctx: RunContext, queue: Queue, card: Card, allow_no_remote: bool
 ) -> BlockedAction | None:
     """A pending or running card whose handoff is published (a human unblocked it, or Hermes
-    ran it again): it cannot hand off, so it is closed; when that handoff was ``blocked``, the
-    repair request comes first. A promotion's card is left to its promotion; a running card in a
+    ran it again): it cannot hand off, so it is closed; when that handoff was ``blocked``, it
+    gets the repair request. A promotion's card is left to its promotion; a running card in a
     status the queue cannot stop is left for a later run, and one whose current run already
-    handed off is left to finish."""
+    handed off is left to finish.
+
+    The close comes first and the repair request only after it succeeded, so the rerun and its
+    repair card never both run: a close that fails writes no request, and the next run starts
+    again from the card's new state. A crash between the two is finished by the next run too:
+    the stopped card is then ``blocked`` (``_handle_one``) and the dropped one ``completed``
+    (``_repair_completed_rerun``). The listing can be seconds old, and the dispatcher claims an
+    unblocked card within seconds, so a drop the queue refuses is followed by a new read of
+    the card: when it is claimed by then, it is stopped.
+
+    The one exception is a pending card the dispatcher never claims (Hermes ``todo``,
+    ``triage``, ``scheduled``): its repair request comes first. ``drop`` archives it, the
+    listing leaves out archived cards, and so no later run could finish a repair that failed
+    after the close."""
     canonical = ctx.canonical
     outcome = _published_outcome(canonical, card)
     if outcome is None or promotion.covers_task(canonical, card.task_id):
         return None
+    if card.state == "pending" and card.board_status not in (None, "ready"):
+        action = _repair_rerun(canonical, card, outcome, allow_no_remote)
+        queue.drop(card.task_id, RERUN_AFTER_PUBLISH)
+        return action
+    if card.state == "pending":
+        try:
+            queue.drop(card.task_id, RERUN_AFTER_PUBLISH)
+        except Exception:  # raised again unless the card was claimed meanwhile
+            card = queue.get(card.task_id)
+            if card.state != "claimed":
+                raise
     if card.state == "claimed":
         if card.board_status not in (None, "running"):
             return None
         run = card.current_run_id
         if run and committed_json(canonical, handoff_path(canonical, card.task_id, run)):
             return None
-    record = committed_json(canonical, blocked_marker_path(canonical, card.task_id))
-    action = None
-    if outcome == "blocked" and (record is None or record["state"] != REPAIRED):
-        action = _repair(canonical, card, record, allow_no_remote, after_publish=True)
-    else:
-        _notify_if_pending(canonical, card, record, allow_no_remote)
-    if card.state == "pending":
-        queue.drop(card.task_id, RERUN_AFTER_PUBLISH)
-    else:
         queue.stop(card.task_id, RERUN_AFTER_PUBLISH)
-    return action
+    return _repair_rerun(canonical, card, outcome, allow_no_remote)
 
 
 def _repair_completed_rerun(

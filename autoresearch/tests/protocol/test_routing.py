@@ -1,6 +1,7 @@
 """Inbound routing, acknowledgement and delivery state (Task 3.7, Overview C11): real git
 canonical, FileQueue and simulated workers (``tests/support/board.py``)."""
 
+import dataclasses
 import functools
 import json
 
@@ -365,6 +366,133 @@ def test_an_unblocked_tool_fault_card_whose_handoff_is_published_is_repaired(boa
     board.process(publish=local_hook)
     [_, follow_up] = _replies(board, task)
     assert follow_up["about"]["follows"] == first["id"]
+
+
+class _QueueWith:
+    """The real queue, with some methods replaced."""
+
+    def __init__(self, queue, **replaced):
+        self.queue = queue
+        self.__dict__.update(replaced)
+
+    def __getattr__(self, name):
+        return getattr(self.queue, name)
+
+
+def _repair_requests(board: Board, task_id: str) -> list[dict]:
+    return [r for r in _requests(board) if f"[repair-blocked:{task_id}]" in r["spec"]["why"]]
+
+
+def test_an_unblocked_card_claimed_between_the_listing_and_the_drop_is_stopped(board):
+    """The dispatcher claims an unblocked card within seconds. The listing said ``pending``,
+    the drop finds it claimed: the rerun is stopped, and only then is the repair requested."""
+    task, worker, first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    _handle_blocked(board)
+    board.queue.requeue(worker.task_id, "fixed the tool")  # the human's kanban unblock
+    queue, repairs_at_stop = board.queue, []
+
+    def drop(task_id, reason):
+        worker.start()  # the dispatcher wins the race
+        queue.drop(task_id, reason)
+
+    def stop(task_id, reason):
+        repairs_at_stop.extend(_repair_requests(board, task_id))
+        return queue.stop(task_id, reason)
+
+    board.queue = _QueueWith(queue, drop=drop, stop=stop)
+
+    [action] = _handle_blocked(board)
+
+    assert repairs_at_stop == []
+    card = queue.get(worker.task_id)
+    assert (card.state, card.block_reason) == ("blocked", blocked.RERUN_AFTER_PUBLISH)
+    assert _handle_blocked(board) == []
+    [request] = _repair_requests(board, worker.task_id)
+    assert request["id"] == action.repair_request
+    board.queue = queue
+    repair = _start_repair(board, action)
+    repair.finish()
+    board.process(publish=local_hook)
+    [_, follow_up] = _replies(board, task)
+    assert follow_up["about"]["follows"] == first["id"]
+
+
+def test_a_rerun_that_cannot_be_closed_gets_no_repair_request_until_it_is_closed(board):
+    """The rerun and its repair card never both run: no close, no repair request."""
+    _task, worker, _first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    _handle_blocked(board)
+    board.queue.requeue(worker.task_id, "fixed the tool")
+    worker.start()
+    queue = board.queue
+
+    def stop(task_id, reason):
+        raise RuntimeError("hermes kanban block: database is locked")
+
+    board.queue = _QueueWith(queue, stop=stop)
+    with pytest.raises(RuntimeError, match="database is locked"):
+        _handle_blocked(board)
+    assert _repair_requests(board, worker.task_id) == []
+    assert queue.get(worker.task_id).state == "claimed"
+
+    board.queue = queue
+    [action] = _handle_blocked(board)
+
+    assert queue.get(worker.task_id).state == "blocked"
+    assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
+
+
+@pytest.mark.parametrize("closed_as", ["blocked", "completed"])
+def test_a_crash_between_the_close_and_the_repair_request_is_finished_once(
+    board, monkeypatch, closed_as
+):
+    """Stopped, the rerun is found ``blocked``; dropped, it is found ``completed``."""
+    _task, worker, _first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    _handle_blocked(board)
+    board.queue.requeue(worker.task_id, "fixed the tool")
+    if closed_as == "blocked":
+        worker.start()
+    repair = blocked._repair
+
+    def crash(*args, **kwargs):
+        raise Crash
+
+    monkeypatch.setattr(blocked, "_repair", crash)
+    with pytest.raises(RuntimeError, match="Crash"):
+        _handle_blocked(board)
+    assert board.queue.get(worker.task_id).state == closed_as
+    assert _repair_requests(board, worker.task_id) == []
+    monkeypatch.setattr(blocked, "_repair", repair)
+
+    [action] = _handle_blocked(board)
+
+    assert _handle_blocked(board) == []
+    assert [r["id"] for r in _repair_requests(board, worker.task_id)] == [action.repair_request]
+
+
+def test_a_rerun_the_dispatcher_never_claims_is_repaired_before_it_is_archived(board):
+    """Hermes ``triage`` (also ``todo``, ``scheduled``): the drop archives the card and the
+    listing then leaves it out, so its repair request is written before the drop."""
+    _task, worker, _first = _blocked_task(board, reason="tool-fault: softmax build: boom")
+    _handle_blocked(board)
+    board.queue.requeue(worker.task_id, "fixed the tool")
+    queue, repairs_at_drop = board.queue, []
+
+    def list_cards(state=None):
+        return [
+            dataclasses.replace(card, board_status="triage") if card.state == "pending" else card
+            for card in queue.list(state)
+        ]
+
+    def drop(task_id, reason):
+        repairs_at_drop.extend(_repair_requests(board, task_id))
+        queue.drop(task_id, reason)
+
+    board.queue = _QueueWith(queue, list=list_cards, drop=drop)
+
+    [action] = _handle_blocked(board)
+
+    assert [r["id"] for r in repairs_at_drop] == [action.repair_request]
+    assert queue.get(worker.task_id).state == "completed"
 
 
 def test_a_repair_of_a_repair_sends_the_follow_up(board):
