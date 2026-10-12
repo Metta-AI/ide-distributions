@@ -184,7 +184,7 @@ default gateway run`, runs posted to `/p/optimizer/v1/runs` the way the bridge p
 
 ## Task 12 local end-to-end (2026-10-10)
 
-**Status: finished on 2026-10-12. Steps 1-12 passed, with four real bugs found.** Two were fixed and verified on the way (the literal `${PATH}`, 3f7e0237e0; the login-shell PATH, 35b61b447b). One is open: the bridge ends the whole runtime on any API error (metta). The fourth, the rerun close racing the dispatcher (ide-mvp), is fixed on branch `jboggs/autoresearch-task12-fixes` (8ef7bf0, af31ae0), by tests only: it was not run again end to end. Spend $10.11 of the $20 key. VM and dev stack stopped, state kept. Running log: `.superpowers/sdd/plan/task-12-log.md`. (Earlier stops: Step 2, the broker approval reached nobody; Step 7, the Mac's free disk fell to 1.2 GiB from activity outside the run. The session was also suspended from 23:28 PDT Oct 10 to 11:32 PDT Oct 12; the workspace ran unattended in that window and paused itself on the credit floor after 13 minutes.)
+**Status: finished on 2026-10-12. Steps 1-12 passed, with four real bugs found.** Two were fixed and verified on the way (the literal `${PATH}`, 3f7e0237e0; the login-shell PATH, 35b61b447b). One is open: the bridge ends the whole runtime on any API error (metta). The fourth, the rerun close racing the dispatcher (ide-mvp), is fixed on branch `jboggs/autoresearch-task12-fixes` (8ef7bf0, af31ae0, 10f1d7d), by tests only: it was not run again end to end. Spend $10.11 of the $20 key. VM and dev stack stopped, state kept. Running log: `.superpowers/sdd/plan/task-12-log.md`. (Earlier stops: Step 2, the broker approval reached nobody; Step 7, the Mac's free disk fell to 1.2 GiB from activity outside the run. The session was also suspended from 23:28 PDT Oct 10 to 11:32 PDT Oct 12; the workspace ran unattended in that window and paused itself on the credit floor after 13 minutes.)
 
 Code under test: metta-wt `jboggs/hosted-autoresearch-start-pause` 59817c2f49 (on main 89fbbaa247); pin ide-mvp
 fc85e37 (tree 2069e73a). Host: Lima vz VM, aarch64, 10 CPU / 20 GiB / 60 GiB sparse disk.
@@ -291,7 +291,7 @@ in the VM; nothing was built on the Mac).
 - **Step 7 passed.** Pause: no card admitted for about 9 minutes under the hold. `/resume-research`: the reply said
   "Sent /resume-research as I-…" at once; queue-keeper committed "coach resume" 100 s later; chat showed "Research
   resumed."; held requests were admitted within 25 s.
-- **Unblocking a tool-fault card works as documented, with one race (BUG, ide-mvp, fixed in 8ef7bf0 and af31ae0).** `hermes kanban unblock`
+- **Unblocking a tool-fault card works as documented, with one race (BUG, ide-mvp, fixed in 8ef7bf0, af31ae0 and 10f1d7d).** `hermes kanban unblock`
   put both cards in `ready` and the dispatcher claimed them within seconds (a human unblock is not an admission, so
   the coach hold does not stop it). For one card, health wrote the repair request and stopped the rerun, as
   documented. For the other, `runtime/blocked.py` `_close_rerun` saw the card `pending`, wrote the repair request,
@@ -302,9 +302,9 @@ in the VM; nothing was built on the Mac).
   checked first ("Nothing needed redoing"). Proposed fix: when `drop` fails because the card was claimed, fall
   through to `queue.stop` in the same pass (or use `stop` for `ready` cards, which `STOPPABLE_STATUSES` allows), and
   do not leave a repair request behind for a card that was not closed.
-  **Fixed in 8ef7bf0 and af31ae0** (branch `jboggs/autoresearch-task12-fixes`): `_close_rerun` drops a waiting rerun
+  **Fixed in 8ef7bf0, af31ae0 and 10f1d7d** (branch `jboggs/autoresearch-task12-fixes`): `_close_rerun` drops a waiting rerun
   and stops a claimed one, also one claimed between the listing and the drop. The repair request of a stopped rerun
-  is written by a later pass, only when the board no longer records a worker for the stopped run: `queue.stop` does
+  is written by a later pass, only when the board no longer records a worker for any run of the card: `queue.stop` does
   not signal the worker, and Hermes ends it 120 s or more later. A `todo` or `scheduled` rerun is left until Hermes
   makes it `ready`. Not covered: a human who unblocks the card again after its repair was requested (the next pass
   closes that rerun).
