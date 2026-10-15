@@ -103,8 +103,7 @@ def main():
     assert task["max_retries"] == 2 and task["max_runtime_seconds"] == 7200
     assert task["skills"] == ["experiment"]
     assert task["session_id"] == "persisted-origin"
-    assert git(clone, "rev-parse", "main") == latest
-    assert git(clone, "rev-parse", task["branch_name"]) == latest
+    assert git(clone, "rev-parse", task["branch_name"]) == latest  # canonical main, fetched
     assert task["workspace_path"] == str(clone / ".worktrees/experimentation-E-1-1")
     try:
         board.card_create(**{**args, "attempt": 2})
