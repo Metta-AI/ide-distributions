@@ -3,57 +3,44 @@ name: kb-maintenance
 description: Use when a maintenance card keeps the knowledge base sound.
 ---
 
-# Knowledge-base maintenance
+# Maintain the knowledge base
 
-This skill implements System Design §5.6 (maintenance), except lessons (the `lessons`
-skill) and the noise record (the `calibrate-noise` skill).
-
+Implements System Design §5.6, except `lessons` and `calibrate-noise`.
 Doctrine upheld: D-07, D-14, D-15, D-16, D-22, D-23, D-24.
 
-## Reads and writes
-
-- Reads: claims, hubs, the linter report, `plan.md`, the journal.
-- Writes: the claims and hubs this card's refs name, card requests, and the journal.
-- Never runs: `kb apply`, `kb stale`, `kb renew`, `kb compact`, `kb index`. They change many
-  claims at once, so card finish would reject them (D-23). queue-keeper runs them on
-  canonical every run: code-citation renewal when the game source commit changes (games
-  whose contract has `source`), stale marking on a game-version change, lint fixes,
-  compaction and the generated views.
-- Never writes: `kb/index.md`, backlinks, and other files under `kb/_generated/` (D-24).
+The maintenance worker runs KB operations in its card worktree. Read the card's scope,
+claims, hubs, current game version, source pins and journal. Do not edit generated views by
+hand or modify the profile's main clone.
 
 ## Procedure
 
-1. Run the linter. It writes nothing:
-   `"$AUTORESEARCH_CLI" kb lint`
-   Read each finding: stale claims, code citations to renew, contradictions, orphans, hub
-   sentences without claims, and grade changes. Grades, demotions, stale marks and
-   compaction are the runtime's; do not repeat them by hand.
-2. Work through the re-verification items and unresolved contradictions on the claims this
-   card's refs name. Check each claim against current evidence and the current game version
-   (`"$AUTORESEARCH_CLI" softmax game-version`). Renew a claim that still holds by adding
-   the evidence and setting `last_checked_version`:
-   `"$AUTORESEARCH_CLI" records link <C-id> evidence '{"ref": "<ar://evidence/EV-id>", "tier": "<S-E>", "direct": true, "stance": "supports"}'`
-   `"$AUTORESEARCH_CLI" records update <C-id> --patch '{"last_checked_version": "<game version>"}'`
-   Close a contradicted claim with `superseded_by` or `valid_to_version`; never delete it
-   (D-15):
-   `"$AUTORESEARCH_CLI" records status <C-id> superseded --reason "<why>" --ref <ar://ref>`
-   `"$AUTORESEARCH_CLI" records update <C-id> --patch '{"superseded_by": "<C-id>"}'`
-3. Fix the hub sentences the card's refs name. Every hub sentence must cite claims (D-16).
-   Prose describes the present (D-14).
-4. For every finding on a claim or hub this card does not name, request a maintenance card
-   whose refs name it (D-22, D-23), grouping related claims in one card:
-   `"$AUTORESEARCH_CLI" queue request create --title "Re-verify <subject>" --mode maintenance --why "<lint finding>" --ref ar://claim/<C-id>`
-5. Check hub health and request split or merge cards for flagged hubs:
-   `"$AUTORESEARCH_CLI" kb hubs --request`
-6. Record stale open threads in the journal Decisions section, and request a planning card
-   to archive them:
-   `"$AUTORESEARCH_CLI" queue request create --title "Archive stale open threads" --mode planning --why "<threads>" --ref ar://plan`
-7. Validate (`"$AUTORESEARCH_CLI" records validate --all`) and finish with `complete-card`.
+1. Read findings with `"$RESEARCH_CLI" kb lint`: evidence grades, stale claims, contradictions,
+   orphans and uncited hub sentences. Apply deterministic fixes within the assigned
+   maintenance scope with `"$RESEARCH_CLI" kb apply`.
+2. For a game-version update, read `"$RESEARCH_CLI" softmax game-version`, then mark old claims
+   with `"$RESEARCH_CLI" kb stale --version <game-version>`.
+3. If the game contract names a source repository and the prior/current commits are known,
+   renew unchanged code citations:
+   `"$RESEARCH_CLI" kb renew --game-repo <path> --old <commit> --new <commit> --version <game-version>`
+   Its `reverify` IDs are findings to investigate, not automatically scheduled work. Check
+   those within this card's scope; recommend follow-up work for the others to the orchestrator.
+4. Re-verify claims against current evidence. Link the evidence and update the checked version:
+   `"$RESEARCH_CLI" records link <C-id> evidence '{"ref":"ar://evidence/<EV-id>","tier":"C","direct":true,"stance":"supports"}'`
+   `"$RESEARCH_CLI" records update <C-id> --patch '{"last_checked_version":"<game-version>"}'`
+   Close contradicted claims with `superseded_by` or `valid_to_version`; never delete them:
+   `"$RESEARCH_CLI" records status <C-id> superseded --reason "<why>" --ref <ar://ref>`
+   `"$RESEARCH_CLI" records update <C-id> --patch '{"superseded_by":"<C-id>"}'`
+5. Repair the scoped hub prose: present tense, with a claim citation for every sentence.
+   Read health flags with `"$RESEARCH_CLI" kb hubs`. Suggest splits/merges and other out-of-scope
+   work with reasons and refs in `metadata.next` or `suggestion:` comments.
+6. Use `"$RESEARCH_CLI" kb compact` when the assigned maintenance needs stale-claim compaction.
+   `"$RESEARCH_CLI" kb index` regenerates index/backlinks; integration also regenerates canonical
+   views. Never rewrite them manually. Review the changes so broad maintenance stays within
+   the card's assigned scope; ask the orchestrator if that scope needs expanding.
+7. Record the fixes, contradictions, remaining re-verification and stale plan threads in the
+   journal. Recommend plan changes to the orchestrator rather than editing `plan.md`.
+   Validate with `"$RESEARCH_CLI" records validate --all`, then finish through `card`.
 
-## Failure handling
-
-- A change to an entity that the card does not name fails card finish (D-23). Undo it and
-  request a maintenance card that names it instead.
-- The linter reports a stale claim that a game update should have renewed from unchanged
-  source: the game contract may have no `source`, or the platform declares no source commit.
-  Re-verify the claims this card names by hand and say so in the journal.
+If source pins are missing or code changed, re-verify from evidence; do not mark a claim
+current merely because it still parses. If maintenance cannot proceed without a scope or
+source decision, comment and block for the orchestrator. Tool faults follow D-26.

@@ -3,113 +3,67 @@ name: xp-request
 description: Use when launching or relaunching an experiment's XP.
 ---
 
-# XP request
+# Launch XP and hand off the wait
 
-This skill implements the launch steps of System Design §5.4: create XP requests per the
-decision rule, handle a credit refusal, record the handles, and set `evaluating`. It adapts
-optimizer-seed `run-eval` and the co-gas custody rules. Use it in a design card after
-`build-upload`, and in a "Launch E-…" card.
+Implements the launch steps of System Design §5.4. Use after `build-upload` or on an assigned
+launch card. Doctrine upheld: D-03, D-06, D-09, D-11, D-21, D-27.
 
-Doctrine upheld: D-03, D-06, D-11, D-21.
-
-## Reads and writes
-
-- Reads: the experiment (its frozen design and candidate binding), credits.
-- Writes: XP requests, their handles in `experiment.xp_requests`, the experiment status,
-  and the journal.
+Read the experiment's frozen design, uploaded candidate binding and recorded requests.
+The orchestrator assigns work on this entity; your job is to recover or launch the specified
+batch, preserve its state and complete without waiting for the platform.
 
 ## Procedure
 
-1. Find the attempt number. A "Launch E-…" card names it in its reason. Otherwise it is
-   `lifecycle.launch_attempts + 1` of the experiment (1 for a new experiment). Do not change
-   `lifecycle.launch_attempts` yourself.
-2. Recover first. Requests that already exist must not be created again:
-   `"$AUTORESEARCH_CLI" softmax xp recover <E-id>`
-   Check the running peers too (D-21): `"$AUTORESEARCH_CLI" queue list --state claimed`. If
-   another card names this experiment, do not launch it as well: record that in the journal
-   and finish `partial`. `last_heartbeat_at` is in epoch seconds.
-3. Optionally read credits (the account's XP credit balance; `available: false` means the
-   read failed, which is not an error):
-   `"$AUTORESEARCH_CLI" softmax credits`
-4. Create the requests. Each seed of the design gets one candidate and one baseline request
-   with one episode, so the pair plays the same seed:
-   `"$AUTORESEARCH_CLI" softmax xp create <E-id> --batch 1 --attempt <n>`
-   To launch the seeds in slices, add `--batches <K>` and run batches 1 to K. The tool
-   creates only the requests that are missing, records each handle in the experiment at
-   once, and sets the status to `evaluating`.
-5. Read `data`:
-   - `credit_denied: false`: every request exists (`created` and `existing`). Write the
-     request count, `pairing`, and attempt in the journal. Finish the card `done` with
-     `complete-card`.
-   - `credit_denied: true`: stop here. The tool already set `awaiting-credits` and
-     `lifecycle.next_launch_after` (the backoff). Requests already created stay recorded;
-     `missing` lists the rest. Finish the card `partial`. The XP poller makes a new launch
-     card when the credit balance is above 0 again (or after the backoff, when the balance
-     cannot be read). Do not create a launch card yourself. If `permit_required` is also
-     true, permit asks are still open: the tool set `awaiting-permit` instead (the shortfall
-     is in `credits_short`), and the next case applies.
-   - `permit_required: true` or `league_not_chosen: true`: the coach's IDE Controls refused
-     the batch (they ask before spending credits, or no league or another league is chosen).
-     For a permit, the tool already tried every request, so all of the batch's asks are
-     filed (`permit_asks`). Stop here. The tool already set `awaiting-permit` and
-     `lifecycle.permit_wait`. `permit_declined: true` means the coach said no: the tool
-     stopped at once and the runtime stops the experiment. Do not send a `help_request`: the
-     runtime sends one per batch
-     and tells the coach what to do. Finish the card `partial`. The XP poller reads the
-     coach's answers and makes a new launch card once all are approved (or stops the
-     experiment on a no); it sends the same requests again. Do not create a launch card
-     yourself, and do not change the requests to get past the refusal (D-27).
-6. Never wait for XP in the card (D-11). The runtime makes the review card when every
-   request is terminal. Results count as evidence only when completed and inspected (D-06).
+1. Read `"$RESEARCH_CLI" records show <E-id>`. Use the attempt named on the launch card;
+   otherwise use `lifecycle.launch_attempts + 1`. Never increment that field yourself.
+2. Recover existing requests first:
+   `"$RESEARCH_CLI" softmax xp recover <E-id>`
+   Existing handles are work already launched, not a reason to create another attempt.
+3. Create the missing requests for the frozen design:
+   `"$RESEARCH_CLI" softmax xp create <E-id> --batch 1 --attempt <n>`
+   Each seed gets one candidate and one baseline request, one episode each. For planned
+   slices, use `--batches <K>` and the assigned batch number. The tool records each handle
+   immediately, preserves existing requests, and updates the experiment's state.
+4. Read the returned `created`, `existing`, `missing`, `pairing` and refusal fields. Journal
+   the attempt, batch, request IDs and what remains. Read the experiment again for its
+   durable state; do not hand-edit platform bookkeeping.
+5. Finish through `card`, including integration, with the following handoff:
+
+   | Result | Handoff |
+   | --- | --- |
+   | All requests exist | `outcome: done`, `experiment.id`, and `awaiting: {xp: [request IDs]}`. |
+   | Credit refusal | `outcome: partial`, `awaiting: {credits: true}`; name existing and missing requests in the journal and `next`. |
+   | Permit asks remain open | `outcome: partial`, `awaiting: {permit: <ask ID>}`. Report every `permit_asks` entry, the exact batch/attempt and any credit shortfall to the orchestrator. |
+   | Permit declined | Respect the no. Complete `partial` with the refusal and remaining state; do not launch again or change the request to avoid the decision. |
+   | League not chosen/mismatched | Complete `partial` with the returned reason and a clear `next` for the orchestrator; do not guess a different league. |
+
+   For combined credit/permit waits, report the permit in `awaiting` and the full combination
+   in the experiment and `next`. Do not discard already launched handles.
+6. Never wait for XP inside the card (D-11). The orchestrator watches the platform and
+   commissions a review or another launch card. Only completed, inspected episodes count
+   as evidence (D-06).
 
 ## Failure handling
 
-- Reason `identity` (D-03): stop. Send a `help_request` that names the problem (see
-  `communicate`), and finish `blocked`.
-- Reason `no_binding`: the experiment is not uploaded. Run `build-upload` first.
-- Reason `baseline_not_champion`: the design's baseline is no longer the current champion
-  (another policy was promoted since the design froze), so this experiment can never
-  promote and nothing was launched. Do not edit the design (D-09). Record it in the journal.
-  Unless a pending or claimed card already designs this hypothesis (`queue list --state
-  pending`, `--state claimed`: a later launch card of the same experiment may get here
-  again), request a new experiment for it against the current champion
-  (`"$AUTORESEARCH_CLI" queue request create --title "Experiment for <H-id>" --mode experimentation --why "champion changed; redesign against it" --ref ar://hypothesis/<H-id>`).
-  Finish `done`.
-- Reason `champion_unknown` or `champion_conflict`: the league shows no champion, or the
-  league and the loop disagree (A9). Nothing was launched. Record it and finish `blocked`
-  (for a conflict the runtime already told the user; for no champion send a
-  `help_request`).
-- Reason `experiment_closed`: the experiment is `stopped` or `reviewed`, or the coach declined
-  one of its XP requests. Nothing more is sent. If it stopped partway through a batch, the
-  requests created before the stop stay recorded in the experiment (`xp_requests`). Do not
-  launch it again; record it and finish `done`.
-- Reason `permit_batch_mismatch`: the experiment waits on the coach's permit asks for one
-  exact batch (`error.details`: `batch`, `attempt`, `batches`). Run `xp create` with exactly
-  those values (the launch card names them), so the approved requests replay under the same
-  keys.
-- Reason `permit_league_changed`: the game's league configuration changed while the coach's
-  permit asks are open (`error.details`: `saved_league`, `configured_league`). Nothing was
-  sent. Do not work around it: record it, send a `help_request` asking the operator to
-  restore the league or to stop the experiment, and finish `blocked`.
-- Reason `empty_batch`: `--batches` is larger than the seeds allow. Use fewer batches.
-- Reason `attempt_incomplete`: an earlier attempt of the batch still lacks requests (for
-  example after a credit denial). Rerun `xp create` with the attempt the message names. It
-  creates only the missing requests. A new attempt would repeat every request.
-- Reason `busy`: a process is running `xp create`, `upload` or `submit` for this experiment
-  now; `error.details.holder` names its card, run, pid and command. If `details.own_run` is
-  `true`, it is your own earlier command (for example one that went to the background): wait
-  for it to finish and use its result; do not rerun it and do not finish `partial`. To wait,
-  call the native `process_manage` tool with action `wait`, that command's `session_id` and
-  `timeout` 1800 ("Long commands" in the `queue` skill), then read the result with
-  `"$AUTORESEARCH_CLI" softmax xp recover <E-id>`.
-  Otherwise another card holds it: do not loop, record it in the journal, and finish
-  `partial`.
-- Reason `bad_attempt`: the attempt skips a number. Use the attempt the message names.
-- Reason `attempt_not_needed`: the latest attempt is complete and nothing failed. Do not
-  relaunch; the runtime makes the review card.
-- Reason `platform` (a refusal, not a tool fault), or a crash mid-batch: run the same `xp create` command again with the
-  same `--batch` and `--attempt`. It creates only what is missing. After a second failure,
-  finish `partial` and say so in the journal.
-- Lost handles: `softmax xp recover <E-id>` lists every request tagged for the experiment,
-  and `xp create` backfills any missing from the record.
-- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `complete-card`, "Tool fault").
+- `identity`: the credential is not our Player. Send `help_request:` and block; do not switch identity.
+- `no_binding`: use `build-upload` first if it is within this card's work.
+- `baseline_not_champion`: nothing launched; do not edit a frozen design. Recommend a new
+  experiment against the current champion in `metadata.next`, with hypothesis/experiment refs.
+- `champion_unknown` or `champion_conflict`: report the current league/canonical mismatch
+  and block for an orchestrator answer. Do not assume a separate process reported it.
+- `experiment_closed`: the experiment is stopped/reviewed or a permit was declined. Preserve
+  existing handles, report the state and finish without another launch.
+- `permit_batch_mismatch`: use exactly the saved `batch`, `attempt` and `batches` when the
+  orchestrator has commissioned the permitted retry. Never alter requests to bypass the wait.
+- `permit_league_changed`: report `saved_league` and `configured_league`, then block for
+  resolution; do not substitute a league.
+- `empty_batch`: `--batches` exceeds the available seeds. Correct the slicing.
+- `attempt_incomplete`: use the earlier attempt named by the tool to fill only its missing
+  requests. `bad_attempt`: use the next valid attempt. `attempt_not_needed`: no relaunch;
+  return existing handles for review.
+- `busy`: do not duplicate a running command. If `details.own_run` is true, wait on your own
+  process with `process_manage` as in `card`, then recover its handles. Otherwise report the
+  holder and complete `partial`; do not loop or take its lock.
+- A retryable `platform` refusal or interrupted launch can replay the same batch/attempt to
+  create only missing requests. If it still fails, preserve the state and complete `partial`.
+- A tooling traceback, an `errored` check or `tool_missing` follows D-26 in `card`. Do not retry it.

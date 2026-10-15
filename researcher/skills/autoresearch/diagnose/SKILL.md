@@ -21,8 +21,8 @@ Doctrine upheld: D-05, D-07, D-08, D-10, D-22.
 
 1. Check the record first (D-10). Find refuted mechanism claims on the levers you will
    touch:
-   `"$AUTORESEARCH_CLI" records find claim --where status=refuted`
-   `"$AUTORESEARCH_CLI" records show <C-id>`
+   `"$RESEARCH_CLI" records find claim --where status=refuted`
+   `"$RESEARCH_CLI" records show <C-id>`
    A lever is closed unless your new evidence meets the claim's `revise_if`. Say which
    evidence does, or drop the idea.
 2. Read the league meta hub and opponent hubs. A loss can come from the field, not from our
@@ -39,19 +39,19 @@ Doctrine upheld: D-05, D-07, D-08, D-10, D-22.
    - its Topics;
    - the evidence it rests on.
 5. Create each one:
-   `"$AUTORESEARCH_CLI" records new hypothesis --meta-file .scratch/hypothesis.json --body-file .scratch/hypothesis.md --slug <slug>`
+   `"$RESEARCH_CLI" records new hypothesis --meta-file .scratch/hypothesis.json --body-file .scratch/hypothesis.md --slug <slug>`
    with `{"statement": …, "prediction": …, "lever": …, "topics": ["T-…"], "source": ["ar://claim/C-…"], "state": "proposed"}`.
    Link it from its Topic when the card names the Topic:
-   `"$AUTORESEARCH_CLI" records link <T-id> hypotheses <H-id>`
-6. Request one experimentation card for the best hypothesis (D-22). Do not design the
-   experiment in this card:
-   `"$AUTORESEARCH_CLI" queue request create --title "Design experiment for <H-id>" --mode experimentation --why "<prediction and evidence>" --ref ar://hypothesis/<H-id> --ref ar://topic/<T-id>`
+   `"$RESEARCH_CLI" records link <T-id> hypotheses <H-id>`
+6. Recommend one experimentation card for the best hypothesis (D-22) in `metadata.next`
+   or a `suggestion:` comment, citing `ar://hypothesis/<H-id>` and `ar://topic/<T-id>`, the
+   prediction and evidence. Do not design the experiment in this card.
 7. Write the journal Decisions section: which hypotheses, why this order, and which levers
-   you skipped as refuted. Finish with `complete-card`.
+   you skipped as refuted. Finish with `card`.
 
 ## Failure handling
 
-- The cause is not visible in the evidence: do not propose a behaviour change. Request an
-  instrumentation card (see `replay-diagnosis` step 7).
-- Every idea matches a refuted lever: record that in the journal and request a scouting or
-  investigation card on a different Topic.
+- The cause is not visible in the evidence: do not propose a behaviour change. Suggest an
+  instrumentation card to the orchestrator (see `replay-diagnosis` step 7).
+- Every idea matches a refuted lever: record that in the journal and suggest scouting or
+  investigation on a different Topic to the orchestrator.

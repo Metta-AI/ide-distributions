@@ -1,41 +1,26 @@
-"""Core and GotA skill conformance (Plan 03 Task 4.3, Plan 02 Task 1.5).
+"""File-only researcher prompt contracts, independent of the shared CLI implementation.
 
-Every core skill under ``skills/autoresearch/`` must:
-
-- have valid Hermes front matter (``name`` equal to its directory, a ``description`` that
-  begins "Use when" and fits Hermes's 60-character skill-index budget,
-  ``agent/skill_utils.py:763`` at v0.21.5) and a body;
-- name only CLI commands and flags that exist: every ``"$AUTORESEARCH_CLI" ...`` call, and
-  every inline-code span that starts with a CLI group name (such as ``stats design``), resolves
-  to a leaf parser, and every ``--flag`` is one of that parser's option strings;
-- call the CLI as ``"$AUTORESEARCH_CLI"``, never as bare ``autoresearch``;
-- never name a game;
-- cite only doctrine IDs that exist.
-
-The core set is System Design §6.1 plus two maintenance skills. GotA bindings share
-metadata, doctrine and CLI checks; only core skills must avoid game names. Game
-instruments are checked through whitelisted --help paths without executing actions.
+The command/flag contract comes from Round 10 and the unchanged research commands.
+Game instrument flags are read from source, never executed. These tests validate
+prompt interfaces and role boundaries, not runtime integration or platform behavior.
 """
 
-import argparse
+import ast
+import json
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import frontmatter
 import pytest
 
-from ide_research_core.cli import build_parser
-
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS = ROOT / "skills" / "autoresearch"
 RULE_LINE = re.compile(r"^(D-\d{2})\. ", re.MULTILINE)
 
-# System Design §6.1, the skills table.
-SECTION_6_1 = {
-    "complete-card",
-    "queue",
+# Round 10 replaces lifecycle, communication and submission skills.
+CORE_SKILLS = {
+    "card",
+    "report",
     "replay-diagnosis",
     "diagnose",
     "league-watch",
@@ -47,23 +32,35 @@ SECTION_6_1 = {
     "fetch-artifacts",
     "review-xp",
     "ab-compare",
-    "submit",
+    "candidate",
     "lessons",
-    "communicate",
-    "groom-queue",
 }
 # Plan 03 Task 4.2 adds these for System Design §5.6 and C10.
-PLAN_EXTRAS = {"kb-maintenance", "calibrate-noise"}
+MAINTENANCE_SKILLS = {"kb-maintenance", "calibrate-noise"}
 
 NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*")  # Hermes skill_manager_tool.VALID_NAME_RE
 DESCRIPTION_LIMIT = 60  # Hermes SKILL_PROMPT_DESC_LIMIT: longer descriptions are truncated
 # A CLI call: the quoted variable, then words up to the end of the line, an inline-code
 # backtick, or a shell operator. Backslash-newline continues a line. ``>`` ends a call only
 # after a space (a redirect), so placeholders such as ``<E-id>`` stay inside the call.
-CLI_CALL = re.compile(r'"\$AUTORESEARCH_CLI"((?:\\\n|[^`\n|;&>)]|(?<! )>)*)')
+CLI_CALL = re.compile(r'"\$RESEARCH_CLI"((?:\\\n|[^`\n|;&>)]|(?<! )>)*)')
 # A single-backtick inline-code span (not a fence); it may wrap across lines.
 INLINE_CODE = re.compile(r"(?<!`)`(?!`)([^`]+?)`(?!`)")
-GROUPS = ("records", "stats", "kb", "card", "comms", "queue", "promotion", "softmax", "game")
+GROUPS = (
+    "records",
+    "stats",
+    "kb",
+    "card",
+    "comms",
+    "queue",
+    "promotion",
+    "softmax",
+    "game",
+    "workspace",
+    "runtime",
+    "provenance",
+    "report",
+)
 # An inline-code span naming a command without the variable: a group, then a subcommand.
 PREFIXLESS = re.compile(rf"^(?:{'|'.join(GROUPS)}) [a-z]")
 BARE_CALL = re.compile(rf"(?<![\w/$.-])(?:python3? -m )?autoresearch (?:{'|'.join(GROUPS)})\b")
@@ -82,25 +79,58 @@ def rule_ids() -> set[str]:
     return set(RULE_LINE.findall(text))
 
 
-def subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return dict(action.choices)
-    return {}
+# Explicit contract keeps these tests usable while shared/ changes independently.
+COMMAND_FLAGS = {
+    "records new": "--meta --meta-file --body --body-file --slug",
+    "records show": "",
+    "records update": "--patch --patch-file --body --body-file",
+    "records status": "--reason --ref",
+    "records link": "",
+    "records find": "--where",
+    "records validate": "--all",
+    "records summary": "",
+    "records resolve": "",
+    "stats ingest": "--rows --league --experiment --game-version --game",
+    "stats noise": "--league --game-version --metrics --evidence",
+    "stats design": "--request-file --planned-pairs --game",
+    "stats evaluate": "--champion",
+    "kb lint": "",
+    "kb apply": "",
+    "kb stale": "--version",
+    "kb renew": "--game-repo --old --new --version",
+    "kb compact": "",
+    "kb hubs": "--size-limit-tokens",
+    "kb index": "--token-budget",
+    "game show": "",
+    "softmax whoami": "",
+    "softmax credits": "",
+    "softmax xp create": "--batch --attempt --batches",
+    "softmax xp status": "",
+    "softmax xp recover": "",
+    "softmax xp artifacts": "--dest --batch --attempt",
+    "softmax upload": "--build-dir",
+    "softmax upload-bootstrap": "--build-dir",
+    "softmax leaderboard": "",
+    "softmax game-version": "",
+    "softmax standings": "",
+    "softmax league-episodes": "--league --limit --out",
+    "workspace integrate": "",
+    "workspace merged": "--branch",
+}
 
 
-def resolve(words: list[str]) -> tuple[list[str], argparse.ArgumentParser, list[str]]:
-    """Walk the parser tree along ``words``: (command path, leaf parser, remaining words)."""
-    parser, path = build_parser(), []
-    while words and (children := subcommands(parser)):
-        if words[0] not in children:
-            where = " ".join(path) or "top level"
-            raise AssertionError(f"{where}: no command {words[0]!r}\n{parser.format_help()}")
-        path.append(words[0])
-        parser = children[words.pop(0)]
-    if subcommands(parser):
-        raise AssertionError(f"{' '.join(path)} needs a subcommand")
-    return path, parser, words
+def check_cli_call(call: str) -> None:
+    words = call.split()
+    if not words or words == ["<group>", "<command>"]:
+        return  # Invocation convention in prose.
+    size = 3 if words[:2] == ["softmax", "xp"] else 2
+    command = " ".join(words[:size])
+    assert command in COMMAND_FLAGS, f"unknown researcher command: {command}"
+    options = set(COMMAND_FLAGS[command].split()) | {"--help"}
+    if words[0] in {"records", "stats", "kb"}:
+        options.add("--root")
+    for flag in re.findall(r"--[a-z][a-z0-9-]*", " ".join(words[size:])):
+        assert flag in options, f"{command}: unknown flag {flag}"
 
 
 def _unwrap_inline_code(text: str) -> str:
@@ -109,7 +139,7 @@ def _unwrap_inline_code(text: str) -> str:
 
 
 def cli_calls(text: str) -> list[str]:
-    """Every CLI call: ``"$AUTORESEARCH_CLI" ...`` ones, then inline-code spans that start
+    """Every CLI call: ``"$RESEARCH_CLI" ...`` ones, then inline-code spans that start
     with a group name (such as ``stats design <E-id>``), as the words after the program."""
     text = _unwrap_inline_code(text)
     calls = [match.group(1).replace("\\\n", " ") for match in CLI_CALL.finditer(text)]
@@ -120,17 +150,13 @@ def cli_calls(text: str) -> list[str]:
     return calls
 
 
-def option_strings(parser: argparse.ArgumentParser) -> set[str]:
-    return set(parser._option_string_actions)
-
-
 @pytest.fixture(params=skill_files(), ids=skill_ids())
 def skill(request) -> Path:
     return request.param
 
 
 def test_every_core_skill_has_a_file():
-    assert {p.parent.name for p in SKILLS.glob("*/SKILL.md")} == SECTION_6_1 | PLAN_EXTRAS
+    assert {p.parent.name for p in SKILLS.glob("*/SKILL.md")} == CORE_SKILLS | MAINTENANCE_SKILLS
     assert {p.parent.name for p in (ROOT / "skills" / "gota").glob("*/SKILL.md")} == {
         "replay-inspection",
         "eval-design",
@@ -154,48 +180,39 @@ def test_names_its_system_design_procedure(skill):
     assert re.search(r"System Design §5\.\d+", skill.read_text(encoding="utf-8"))
 
 
-def test_cli_commands_and_flags_exist(skill):
-    calls = cli_calls(skill.read_text(encoding="utf-8"))
-    for call in calls:
-        words = call.split()
-        if not words:  # the variable named in prose, not a call
-            continue
-        path, leaf, rest = resolve(list(words))
-        options = option_strings(leaf)
-        for word in rest:
-            if word.startswith("--"):
-                flag = word.split("=", 1)[0]
-                assert flag in options, (
-                    f"{skill.parent.name}: {' '.join(path)} has no flag {flag} "
-                    f"(has {sorted(options)})"
-                )
+def test_cli_commands_and_flags_match_researcher_contract(skill):
+    for call in cli_calls(skill.read_text(encoding="utf-8")):
+        check_cli_call(call)
 
 
-def test_cli_calls_parse_on_the_test_helpers():
+def test_command_checks_cover_multiline_calls_and_fail_closed():
     calls = cli_calls(
-        'Run `"$AUTORESEARCH_CLI" card finish --outcome done` and\n'
-        '"$AUTORESEARCH_CLI" queue request drop Q-1 \\\n  --reason "x" | jq .\n'
-        '`"$AUTORESEARCH_CLI" queue request drop <Q-id> --reason "y"` > out.json\n'
-        '`"$AUTORESEARCH_CLI" queue request create --title "t"\n   --mode maintenance`\n'
-        "Then `stats design <E-id> --request-file F` and see `queue`."
+        '"$RESEARCH_CLI" workspace merged --branch card/42\n'
+        '`"$RESEARCH_CLI" records new journal\n'
+        " --meta-file F --body-file B`\n"
+        "`softmax xp artifacts <E-id> --dest D`"
     )
-    assert [call.split()[:3] for call in calls] == [
-        ["card", "finish", "--outcome"],
-        ["queue", "request", "drop"],
-        ["queue", "request", "drop"],
-        ["queue", "request", "create"],
-        ["stats", "design", "<E-id>"],
-    ]
-    assert "--reason" in calls[1]
-    assert "--reason" in calls[2] and "out.json" not in calls[2]  # past the placeholder
-    assert "--mode" in calls[3]  # a call wrapped inside one inline-code span
-    assert "--request-file" in calls[4]
-    with pytest.raises(AssertionError):
-        resolve(["queue", "nosuch"])
-    _, leaf, _ = resolve(["queue", "request", "drop", "Q-1"])
-    assert "--reason" in option_strings(leaf) and "--outcome" not in option_strings(leaf)
-    assert BARE_CALL.search("run autoresearch records new")
-    assert not BARE_CALL.search('"$AUTORESEARCH_CLI" records new')
+    assert len(calls) == 3
+    for call in calls:
+        check_cli_call(call)
+    for invalid in (
+        "comms stage",
+        "queue request create",
+        "card finish",
+        "promotion submit",
+        "softmax submit",
+        "softmax bootstrap-champion",
+        "runtime status",
+        "status",
+        "report baseline",
+        "provenance check",
+        "kb hubs --request",
+        "workspace publish",
+        "workspace integrate --branch card/other",
+        "stats design E-1 --invented-option",
+    ):
+        with pytest.raises(AssertionError):
+            check_cli_call(invalid)
 
 
 def test_no_bare_autoresearch_call(skill):
@@ -217,24 +234,30 @@ def test_cited_doctrine_ids_exist(skill):
     assert cited <= rule_ids(), cited - rule_ids()
 
 
-GAME_CALL = re.compile(r'"\$AR_PYTHON" "\$AR_HOME/games/gota/tools/([^"/]+)"([^`\n]*)')
+GAME_CALL = re.compile(r'"\$RESEARCH_PYTHON" "\$RESEARCH_HOME/games/gota/tools/([^"/]+)"([^`\n]*)')
 
 
 def check_game_call(script: str, arguments: str) -> None:
-    # Only advertised instruments may run, and only their read-only --help path.
-    assert script in {"replay_stats.py", "evaluate.py", "compare.py", "make_v13_live.py", "build.py"}, script
+    assert script in {
+        "replay_stats.py",
+        "evaluate.py",
+        "compare.py",
+        "make_v13_live.py",
+        "build.py",
+    }, script
     path = ROOT / "games" / "gota" / "tools" / script
-    assert path.is_file(), path
-    result = subprocess.run(
-        [sys.executable, str(path), "--help"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    supported = set(re.findall(r"--[a-z][a-z0-9-]*", result.stdout))
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    supported = {
+        argument.value
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "add_argument"
+        for argument in call.args
+        if isinstance(argument, ast.Constant)
+        and isinstance(argument.value, str)
+        and argument.value.startswith("--")
+    }
     for flag in re.findall(r"--[a-z][a-z0-9-]*", arguments):
         assert flag in supported, f"{script}: unknown flag {flag}"
 
@@ -254,4 +277,64 @@ def test_game_command_regressions_fail_closed():
     with pytest.raises(AssertionError, match="unknown flag"):
         check_game_call("evaluate.py", "--invented-option")
     with pytest.raises(AssertionError):
-        resolve(["softmax", "missing-command"])
+        check_cli_call("softmax missing-command")
+
+
+def test_removed_transport_and_scheduling_are_not_in_prompts(skill):
+    text = skill.read_text(encoding="utf-8")
+    for obsolete in (
+        "AUTORESEARCH_",
+        "queue-keeper",
+        "xp-poll",
+        "outbox",
+        "inbox",
+        "briefing",
+        "receipt",
+        "cards/requests/",
+        "spend cap",
+        "credit floor",
+        "chat cap",
+        "kanban_create",
+        "kanban_link",
+        "kanban_schedule",
+    ):
+        assert obsolete not in text, f"{skill.parent.name}: {obsolete}"
+
+
+def test_completion_example_carries_the_native_handoff():
+    text = (SKILLS / "card" / "SKILL.md").read_text(encoding="utf-8")
+    examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.DOTALL)]
+    handoff = next(example for example in examples if "merged" in example)
+    assert set(handoff) == {
+        "outcome",
+        "journal",
+        "records_changed",
+        "merged",
+        "experiment",
+        "awaiting",
+        "next",
+    }
+    assert handoff["journal"].startswith("ar://J-")
+    assert set(handoff["merged"]) == {"card_sha", "main_sha"}
+    assert set(handoff["experiment"]) == {"id", "status", "decision"}
+    assert set(handoff["awaiting"]) == {"xp"}
+    assert isinstance(handoff["awaiting"]["xp"], list)
+    assert '"$RESEARCH_CLI" workspace merged --branch card/<id>' in text
+    assert '"$RESEARCH_CLI" workspace integrate' in text
+    assert "kanban_complete" in text and "kanban_block" in text
+    assert "## Decisions" in text
+
+
+def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap():
+    text = (SKILLS / "candidate" / "SKILL.md").read_text(encoding="utf-8")
+    for required in (
+        "decision.outcome: promote",
+        "stats/outcomes/<E-id>.json",
+        "strategy/candidates/<E-id>/STRATEGY.md",
+        "uploaded candidate binding",
+        "softmax upload-bootstrap",
+        "version_id",
+        "platform_policy_version_id",
+        "explicitly assigned a bootstrap card",
+    ):
+        assert required in text

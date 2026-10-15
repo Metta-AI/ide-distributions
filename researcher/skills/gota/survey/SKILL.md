@@ -14,19 +14,19 @@ The adaptation supplies GotA instruments and constraints, not a new research sys
 
 ## Worker setup
 
-Follow the core `queue` skill first. Run shared commands through the quoted shim.
+Follow the core `card` skill first. Run shared commands through the quoted shim.
 Resolve tools without changing the worker cwd:
 
 ```sh
-AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
-AR_PYTHON="$AR_HOME/local/venv/bin/python"
+RESEARCH_HOME="$HERMES_HOME"
+RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
 mkdir -p .scratch
 ```
 
 Use absolute paths for downloaded episode directories and output files below.
 Use the installed profile environment; do not substitute a global CLI or Python.
 Read `games/gota/GAME.md` and its linked mechanics and replay-format references
-under AR_HOME. Current source readback at seed preparation was 2026.10.8.1 /
+under RESEARCH_HOME. Current source readback at seed preparation was 2026.10.8.1 /
 `02eda3d34d0e7cc3ae1986d2ab57482a04cbe08a`; resolve the current version for new work.
 Replay decoding and equivalence tools remain recording-pinned/historical. A live
 build qualification does not prove every current replay is supported. Historical
@@ -35,16 +35,11 @@ Games Bond champion assertion.
 
 ## Long commands
 
-Use the core `queue` skill's **Long commands** procedure for episode runs, Nim
+Use the core `card` skill's **Long commands** procedure for episode runs, Nim
 replay-expander builds (including `replay_stats.py --ref`), replay inspection,
 `gota_local.py` and `gota_episodes.py`, and any build or local check below.
-Run in the foreground with terminal `timeout` at most 600 seconds only when
-known to fit. Otherwise start with terminal `background: true`, keep the
-`session_id`, then call `process_manage` with `action: "wait"`, that `session_id`
-and `timeout: 1800`. Repeat `wait` only on `status: "timeout"`, with nothing
-between waits. No polling, repeated log calls or sleep/probing loops.
 After exit, read the exit code, command output and retained evidence before
-interpreting the results. Build/check receipts are named in GAME.md's
+interpreting the results. Build/check reports are named in GAME.md's
 **Commands** section. Replay inspection writes the requested `<ABS_OUTPUT_JSON>`
 and each decoded episode's `expanded-replay.jsonl` and
 `expanded-replay.cache.json`; check their hashes, coverage and `errors`.
@@ -55,10 +50,10 @@ Use core `league-watch`, `opponent-profile` or `meta-recon` for scouting and cor
 `replay-diagnosis` for a witnessed failure. Survey completed evidence first:
 
 ```sh
-"$AUTORESEARCH_CLI" records find evidence --where kind=xp-result
-"$AUTORESEARCH_CLI" softmax leaderboard
-"$AR_PYTHON" "$AR_HOME/games/gota/tools/evaluate.py" --results <ABS_RESULTS_JSON> --json
-"$AR_PYTHON" "$AR_HOME/games/gota/tools/replay_stats.py" <ABS_EPISODES> --binary <ABS_RECORDING_EXPANDER> --json <ABS_OUTPUT_JSON>
+"$RESEARCH_CLI" records find evidence --where kind=xp-result
+"$RESEARCH_CLI" softmax leaderboard
+"$RESEARCH_PYTHON" "$RESEARCH_HOME/games/gota/tools/evaluate.py" --results <ABS_RESULTS_JSON> --json
+"$RESEARCH_PYTHON" "$RESEARCH_HOME/games/gota/tools/replay_stats.py" <ABS_EPISODES> --binary <ABS_RECORDING_EXPANDER> --json <ABS_OUTPUT_JSON>
 ```
 
 Build a finding-first table: episode/request, full game version, stable subject
@@ -74,8 +69,8 @@ a witness for inspection; it is not the cause. List sample size and teammate
 aggregation; sparse subgroups and shifting field composition weaken conclusions.
 
 ```sh
-"$AUTORESEARCH_CLI" records new claim --meta-file .scratch/claim.json --body-file .scratch/claim.md --slug <slug>
-"$AUTORESEARCH_CLI" records new lesson --meta-file .scratch/lesson.json --body-file .scratch/lesson.md
+"$RESEARCH_CLI" records new claim --meta-file .scratch/claim.json --body-file .scratch/claim.md --slug <slug>
+"$RESEARCH_CLI" records new lesson --meta-file .scratch/lesson.json --body-file .scratch/lesson.md
 ```
 
 Use core claim schema with tiered evidence and revise_if. Keep observations
