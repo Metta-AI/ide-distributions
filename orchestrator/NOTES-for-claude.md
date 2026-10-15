@@ -143,3 +143,31 @@ now fixed. Clean-install validation exports HEAD, so the full Hermes suite follo
 checkpoint to test these changes rather than the earlier commit's 21-tool installation.
 The new accept tool is also in plugin.yaml's discovery list. Added a manifest/schema parity
 check; the default suite is now 29 passing tests. Ruff and formatting checks pass.
+
+## Round 11 complete
+
+Code checkpoint: `f92f549` (`fix(orchestrator): wake only for actionable research changes`).
+All five requested fixes and the database-lock check are addressed. The permit read is fine
+as written: main has no equivalent shared CLI read, so no replacement was made.
+
+Final validation:
+- `cd orchestrator && uv run pytest -q`: **29 passed**, 2 Hermes tests deselected.
+- `HERMES_PYTHON=/Users/jamesboggs/coding/ide-distributions-orchestrator/orchestrator/local/hermes/bin/python PATH=/Users/jamesboggs/coding/ide-distributions-orchestrator/orchestrator/local/hermes/bin:$PATH uv run pytest -q -m hermes`:
+  **2 passed**, 29 default tests deselected, against checkpoint f92f549.
+- The clean-export installation registered all **22 tools** and kept the supervisor paused.
+  The native board scenario verified the wake-set match, own-comment filtering, late worker
+  comments, concurrent idempotent creation, and a gate read during the create/fetch lock.
+- `uv run ruff check .`, `uv run ruff format --check src/orchestrator tests`, and
+  `git diff --check`: passed.
+
+Final documentation audit: README, SOUL, doctrine, plugin discovery, tool schemas and test
+expectations agree on version-required bootstrap and user-confirmed champion acceptance.
+No new state store or admission rules. Changes are only under orchestrator/; no merge or push,
+no real platform calls or model runs. Shared wrappers remain tested against subprocess
+contracts; the shared source on main was inspected read-only, not copied or changed here.
+
+**Codebase friction: 2/5.** Snapshot filtering and thin CLI adapters provided clear edit points.
+The canonical pause reader needed moving out of Service for gate reuse, and the clean-export
+installation test required a commit before validating the new tool inventory.
+
+CODEX FIXES 11 DONE
