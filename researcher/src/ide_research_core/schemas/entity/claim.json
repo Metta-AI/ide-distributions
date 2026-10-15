@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/entity/claim.json",
+  "title": "Claim: one checkable assertion with graded evidence (System Design 3.1 #9, 3.5). Body states the assertion in the present tense and may be edited.",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "status",
+    "confidence",
+    "evidence",
+    "revise_if",
+    "topics"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^C-[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "kind": {
+      "enum": [
+        "mechanism",
+        "behaviour",
+        "strategy",
+        "opponent",
+        "platform"
+      ]
+    },
+    "status": {
+      "enum": [
+        "hypothesis",
+        "belief",
+        "verified",
+        "stale",
+        "superseded",
+        "refuted"
+      ]
+    },
+    "status_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "reason"
+        ],
+        "properties": {
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidence_grade": {
+      "enum": [
+        "high",
+        "moderate",
+        "low",
+        "very_low"
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ref",
+          "tier",
+          "direct",
+          "stance"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tier": {
+            "enum": [
+              "S",
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ]
+          },
+          "direct": {
+            "type": "boolean"
+          },
+          "stance": {
+            "enum": [
+              "supports",
+              "contradicts",
+              "resolves"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_group": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "if": {
+          "properties": {
+            "stance": {
+              "const": "resolves"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "target"
+          ]
+        }
+      }
+    },
+    "revise_if": {
+      "type": "string",
+      "minLength": 1
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "supports",
+              "contradicts",
+              "refines",
+              "depends_on",
+              "undercuts"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "valid_from_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_to_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_checked_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "superseded_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recorded": {
+      "type": "string"
+    },
+    "archived_at": {
+      "type": "string",
+      "description": "Set when compaction moves the claim to kb/archive/."
+    },
+    "archive_reason": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

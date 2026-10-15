@@ -1,5 +1,4 @@
 import datetime
-import json
 
 import pytest
 
@@ -110,16 +109,13 @@ def _commit(repo, combat=None, tower=None):
     return gitops.commit_all(repo, "v66")
 
 
-def _requests(layout):
-    return [json.loads(p.read_text()) for p in sorted(layout.card_requests.glob("*.json"))]
-
 
 def test_unchanged_lines_renew_and_unstale(kb_layout, game_repo):
     repo, old = game_repo
     new = _commit(repo, combat=25, tower=1)  # outside 10-20 and 5-9
     mark_stale(kb_layout, "66", NOW)
     report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    assert report.renewed == sorted([C_GOOD, C_VERIF]) and report.requested == []
+    assert report.renewed == sorted([C_GOOD, C_VERIF]) and report.reverify == []
     store = RecordStore(kb_layout)
     for claim_id in (C_GOOD, C_VERIF):
         assert store.load(claim_id)[0]["last_checked_version"] == "66"
@@ -129,22 +125,16 @@ def test_unchanged_lines_renew_and_unstale(kb_layout, game_repo):
     # Behaviour claims keep stale: unchanged source does not show unchanged behaviour.
     assert store.load(C_VERIF)[0]["status"] == "stale"
     assert store.load(C_GRADE)[0]["status"] == "stale"  # no code citation
-    assert _requests(kb_layout) == []
     again = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    assert again.renewed == [] and again.requested == []
+    assert again.renewed == [] and again.reverify == []
 
 
-def test_changed_lines_create_reverification_request(kb_layout, game_repo):
+def test_changed_lines_are_reported_for_reverification(kb_layout, game_repo):
     repo, old = game_repo
     new = _commit(repo, tower=7)  # inside src/tower.py:5-9 (C_VERIF)
     report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
     assert report.renewed == [C_GOOD]
-    assert report.requested == [C_VERIF]
-    (request,) = _requests(kb_layout)
-    spec = request["spec"]
-    assert request["op"] == "create"
-    assert spec["priority"] == "P2" and spec["mode"] == "maintenance"
-    assert spec["refs"] == [f"ar://claim/{C_VERIF}"]
+    assert report.reverify == [C_VERIF]
     store = RecordStore(kb_layout)
     assert store.load(C_VERIF)[0]["last_checked_version"] == "65"
 
@@ -156,7 +146,7 @@ def test_insertion_inside_range_counts_as_change(kb_layout, game_repo):
     (repo / "src" / "tower.py").write_text("".join(text))
     new = gitops.commit_all(repo, "insert")
     report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    assert report.requested == [C_VERIF]
+    assert report.reverify == [C_VERIF]
 
 
 def test_deleted_file_counts_as_change(kb_layout, game_repo):
@@ -164,17 +154,7 @@ def test_deleted_file_counts_as_change(kb_layout, game_repo):
     (repo / "src" / "tower.py").unlink()
     new = gitops.commit_all(repo, "delete")
     report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    assert report.requested == [C_VERIF]
-
-
-def test_rerun_does_not_duplicate_requests(kb_layout, game_repo):
-    repo, old = game_repo
-    new = _commit(repo, tower=7)
-    renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    again = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    assert again.requested == []
-    (request,) = _requests(kb_layout)
-    assert f"[reverify {old}..{new}]" in request["spec"]["why"]
+    assert report.reverify == [C_VERIF]
 
 
 def test_file_absent_at_old_sha_counts_as_change(kb_layout, game_repo):
@@ -184,4 +164,4 @@ def test_file_absent_at_old_sha_counts_as_change(kb_layout, game_repo):
     (repo / "src" / "tower.py").write_text(_lines(30))
     new = gitops.commit_all(repo, "tower back")
     report = renew_code_citations(kb_layout, repo, old, new, current_version="66", now=NOW)
-    assert report.requested == [C_VERIF] and report.renewed == [C_GOOD]
+    assert report.reverify == [C_VERIF] and report.renewed == [C_GOOD]

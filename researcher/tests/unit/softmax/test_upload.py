@@ -34,7 +34,7 @@ class Workspace:
         for state in ("built", "uploaded")[: ("designed", "built", "uploaded").index(status)]:
             self.store.set_status(self.experiment, state)
         self.sm = FakeSoftmax(self.canonical, {})
-        self.ctx = RunContext(tmp_path / "home", self.canonical, self.worker, "K-1", "run-1")
+        self.ctx = RunContext(tmp_path / "home", self.canonical, self.worker)
 
     def write_build(self, artifact: bytes = b"policy-bytes", **version) -> Path:
         self.build.mkdir(exist_ok=True)
@@ -236,7 +236,7 @@ def test_refuses_different_build_once_bound(ws):
 
 def test_refuses_without_worker(ws):
     ws.write_build()
-    ws.ctx = RunContext(ws.ctx.hermes_home, ws.canonical, None, None, None)
+    ws.ctx = RunContext(ws.ctx.hermes_home, ws.canonical, None)
     assert refused(ws).reason == "no_worker"
 
 

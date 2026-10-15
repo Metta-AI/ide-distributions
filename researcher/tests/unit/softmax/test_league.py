@@ -258,9 +258,9 @@ def test_real_standings_walk_the_division_ladder(env, runner):
 @pytest.fixture
 def profile(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(tmp_path / "ws"))
-    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
-    monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    monkeypatch.setenv("RESEARCH_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("RESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("RESEARCH_SOFTMAX", "fake")
     for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
         monkeypatch.delenv(name, raising=False)
     return tmp_path

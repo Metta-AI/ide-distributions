@@ -1,12 +1,7 @@
-import datetime
 import json
 import subprocess
 import sys
 
-from ide_research_core.paths import Layout
-from ide_research_core.queue.card import CardSpec
-from ide_research_core.queue.requests import write_request
-from ide_research_core.records.store import RecordStore
 
 from .conftest import C_GOOD, C_GRADE, C_VERIF, HUB, kb_id
 from .test_staleness import _commit, game_repo  # noqa: F401  (pytest fixture)
@@ -59,13 +54,10 @@ def test_compact_runs(kb_layout):
     assert code == 0 and out["data"] == {"archived": []}
 
 
-def test_hubs_with_request(kb_layout):
-    code, out = run_kb(kb_layout.root, "hubs", "--size-limit-tokens", "10", "--request")
+def test_hubs_reports_findings(kb_layout):
+    code, out = run_kb(kb_layout.root, "hubs", "--size-limit-tokens", "10")
     assert code == 0
     assert [f["entity"] for f in out["data"]["findings"]] == [HUB]
-    assert len(out["data"]["requested"]) == 1
-    _, again = run_kb(kb_layout.root, "hubs", "--size-limit-tokens", "10", "--request")
-    assert again["data"]["requested"] == []
 
 
 def test_renew_with_unreadable_repo_is_a_business_failure(kb_layout, tmp_path):
@@ -110,62 +102,4 @@ def test_renew_via_cli(kb_layout, game_repo):  # noqa: F811
         "66",
     )
     assert code == 0
-    assert out["data"] == {"renewed": [C_GOOD], "requested": [C_VERIF]}
-
-
-def test_compact_skips_claim_with_pending_reverification(tmp_path):
-    store = RecordStore(Layout(tmp_path))
-    long_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=400)
-
-    def claim(stale):
-        meta = {
-            "kind": "mechanism",
-            "status": "belief",
-            "confidence": 0.5,
-            "evidence": [],
-            "revise_if": "x",
-            "topics": [],
-            "last_checked_version": "65",
-        }
-        if stale:
-            at = long_ago.isoformat()
-            meta |= {
-                "status": "stale",
-                "status_reason": "game version changed: 65 -> 66",
-                "status_history": [{"from": "belief", "to": "stale", "reason": "r", "at": at}],
-            }
-        return store.create("claim", meta, "A claim.")
-
-    guarded, unguarded = claim(True), claim(True)
-    for _ in range(8):
-        claim(False)
-    spec = CardSpec(
-        "",
-        "Re-verify",
-        "maintenance",
-        "changed [reverify aaa..bbb].",
-        [f"ar://claim/{guarded}"],
-        "kb-staleness",
-        "P2",
-    )
-    write_request(Layout(tmp_path), "create", spec=spec)
-    code, out = run_kb(tmp_path, "compact")
-    assert code == 0
-    assert out["data"] == {"archived": [unguarded]}
-
-
-def test_mutating_kb_commands_are_marked_runtime_only():
-    import argparse
-
-    from ide_research_core.cli import build_parser
-    from ide_research_core.kb.cli import RUNTIME_ONLY
-
-    parser = build_parser()
-    group = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
-    kb = group.choices["kb"]
-    commands = next(a for a in kb._actions if isinstance(a, argparse._SubParsersAction))
-    helps = {action.dest: action.help for action in commands._choices_actions}
-    for name in ("apply", "index", "stale", "renew", "compact"):
-        assert helps[name].startswith(RUNTIME_ONLY), name
-    for name in ("lint", "hubs"):
-        assert RUNTIME_ONLY not in helps[name]
+    assert out["data"] == {"renewed": [C_GOOD], "reverify": [C_VERIF]}

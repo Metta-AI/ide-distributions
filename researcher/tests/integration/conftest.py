@@ -14,13 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from support.hermes_python import hermes_python
 
-from ide_research_core.runctx import BOARD
 
-DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # .../autoresearch
+DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # .../researcher
 REPO_ROOT = DISTRIBUTION_ROOT.parent
-PROFILE = "ar-it"
+BOARD = "autoresearch"  # the Kanban board slug: fixed, whatever the install name
+PROFILE = "researcher-1"
 FAKE_CREDENTIAL = '{"token": "ply_fake", "expires_at": "2099-01-01T00:00:00Z"}'
 
 # Inherited variables that would leak the developer's setup into the install under test.
@@ -55,7 +54,7 @@ class Install:
     profile: str  # installed profile name (the card assignee)
     profile_dir: Path  # installed profile home
     source: Path  # extracted distribution copy (the recorded install source)
-    remote: Path  # bare repo used as AUTORESEARCH_WORKSPACE_REMOTE
+    remote: Path  # bare repo used as RESEARCH_CANONICAL
     base_env: dict
     board: str = BOARD  # the Kanban board slug: fixed, whatever the install name
 
@@ -79,51 +78,38 @@ class Install:
             )
         return result
 
-    def profile_env(self) -> dict:
-        """Env a cron script gets: ``HERMES_HOME`` is the profile, plus the passthrough names."""
+    def profile_env(self, **overrides: str) -> dict:
+        """The profile's environment: ``HERMES_HOME`` is the profile, plus its .env names."""
         return self.env(
             HERMES_HOME=str(self.profile_dir),
-            AUTORESEARCH_WORKSPACE_REMOTE=str(self.remote),
-            AUTORESEARCH_PLAYER_ID="ply_fake",
-            AUTORESEARCH_GAME="fakegame",
-            AUTORESEARCH_SOFTMAX="fake",
+            RESEARCH_CANONICAL=str(self.remote),
+            RESEARCH_PLAYER_ID="ply_fake",
+            RESEARCH_GAME="fakegame",
+            RESEARCH_SOFTMAX="fake",
             SOFTMAX_PLAYER_CREDENTIAL=FAKE_CREDENTIAL,
-        )
+        ) | overrides
 
-    def run_launcher(self, script: str, *args: str, timeout: float = 600):
-        """Run a cron launcher the way Hermes cron does: Hermes's interpreter, cwd
-        ``$HERMES_HOME/scripts`` (amendment A4)."""
-        scripts = self.profile_dir / "scripts"
-        return subprocess.run(
-            [hermes_python(), str(scripts / script), *args],
-            check=False,
-            cwd=scripts,
-            env=self.profile_env(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
 
 
 def extract_distribution(dest: Path) -> Path:
-    """``git archive HEAD autoresearch`` extracted under ``dest``; returns the copy's root."""
+    """``git archive HEAD researcher`` extracted under ``dest``; returns the copy's root."""
     dest.mkdir(parents=True)
     archive = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "archive", "HEAD", "autoresearch"],
+        ["git", "-C", str(REPO_ROOT), "archive", "HEAD", "researcher"],
         check=True,
         capture_output=True,
     )
     subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
-    return dest / "autoresearch"
+    return dest / "researcher"
 
 
 def write_profile_env(profile_dir: Path, remote: Path) -> None:
     lines = {
         "SOFTMAX_PLAYER_CREDENTIAL": f"'{FAKE_CREDENTIAL}'",
-        "AUTORESEARCH_PLAYER_ID": "ply_fake",
-        "AUTORESEARCH_WORKSPACE_REMOTE": str(remote),
-        "AUTORESEARCH_GAME": "fakegame",
-        "AUTORESEARCH_SOFTMAX": "fake",
+        "RESEARCH_PLAYER_ID": "ply_fake",
+        "RESEARCH_CANONICAL": str(remote),
+        "RESEARCH_GAME": "fakegame",
+        "RESEARCH_SOFTMAX": "fake",
         "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY") or "sk-or-fake",
     }
     env_file = profile_dir / ".env"
@@ -168,23 +154,6 @@ def _cleanup(root: Path, keep: bool) -> None:
 
 @pytest.fixture
 def install(request, tmp_path):
-    """A fresh install of the distribution as profile ``ar-it`` in a throwaway host root."""
+    """A fresh install of the distribution as profile ``researcher-1`` in a throwaway host root."""
     yield make_install(tmp_path / "it")
     _cleanup(tmp_path, keep=_test_failed(request.node))
-
-
-@pytest.fixture
-def optimizer_install(request, tmp_path):
-    """A fresh install under the name Softmax hosting uses, ``optimizer`` (plan D2)."""
-    yield make_install(tmp_path / "it", name="optimizer")
-    _cleanup(tmp_path, keep=_test_failed(request.node))
-
-
-@pytest.fixture(scope="module")
-def module_install(request, tmp_path_factory):
-    """One install shared by a module's tests (for tests that observe the same worker run).
-    Kept when any test in the module failed."""
-    root = tmp_path_factory.mktemp("it-shared")
-    failed_before = request.session.testsfailed
-    yield make_install(root / "it")
-    _cleanup(root, keep=request.session.testsfailed > failed_before)

@@ -25,7 +25,7 @@ from ide_research_core.paths import Layout
 from ide_research_core.stats.ingest import EpisodeRow
 
 MIN_PAIRS_FOR_PAIRED_SD = 10
-_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "metric-noise.json"
+_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "metric-noise.json"
 
 
 class NoiseError(ValueError):

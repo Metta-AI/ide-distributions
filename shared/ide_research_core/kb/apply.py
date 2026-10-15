@@ -11,7 +11,7 @@ Writes go through ``RecordStore.update``, so the record mutability rules hold, a
 is ``{at, finding, entity, before, after}``. Each finding is re-checked against the current
 workspace first, so applying again (or applying a stale report) writes nothing.
 
-queue-keeper runs ``analyze`` then ``apply`` after each merge, under the canonical lock.
+A maintenance card runs ``kb apply`` in its worktree; integrate merges the result.
 """
 
 import datetime

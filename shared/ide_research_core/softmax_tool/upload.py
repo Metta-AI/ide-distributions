@@ -41,7 +41,7 @@ build both follow it):
 - ``build_id``, ``compiler``, ``source_hashes``, ``source_path``, ``created``, ``started``,
   ``finished``, ``engine``, ``driver`` (optional): copied into the version record under
   ``build``. ``started``/``finished`` (ISO UTC) give the build's wall time and a gate's
-  optional ``seconds`` its own (``runtime.baseline``).
+  optional ``seconds`` its own.
 
 The artifact hash is the sha256 of the file, or for a directory the sha256 of the sorted
 ``<relative path>\\0<file sha256>\\n`` lines of every file in it.

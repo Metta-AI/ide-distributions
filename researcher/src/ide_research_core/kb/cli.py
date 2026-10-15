@@ -1,6 +1,6 @@
-"""``autoresearch kb ...``: the knowledge-base linter, currency and index tools.
+"""``research kb ...``: the knowledge-base linter, currency and index tools.
 
-Same envelope, exit codes and root resolution as ``autoresearch records`` (see
+Same envelope, exit codes and root resolution as ``research records`` (see
 ``ide_research_core.records.cli``). Findings are data: ``kb lint`` and ``kb hubs`` exit 0 with
 ``ok: true`` and list what they found; exit 1 is for failures such as an unreadable game repo.
 
@@ -9,17 +9,13 @@ Same envelope, exit codes and root resolution as ``autoresearch records`` (see
 - ``kb index``: regenerate ``kb/index.md`` and ``kb/_generated/*``.
 - ``kb stale --version V``: mark claims checked against older versions stale.
 - ``kb renew --game-repo P --old SHA --new SHA --version V``: renew claims whose cited code
-  did not change; request re-verification for those whose code did.
-- ``kb compact``: archive the longest-stale claims when too many are stale. Claims with a
-  re-verification request in ``cards/requests`` are never archived.
-- ``kb hubs [--request]``: hub health flags; ``--request`` also writes maintenance requests.
+  did not change; list in ``reverify`` those whose code did.
+- ``kb compact``: archive the longest-stale claims when too many are stale.
+- ``kb hubs``: hub health flags.
 
-``apply``, ``index``, ``stale``, ``renew`` and ``compact`` are operator/runtime commands: they
-change many claims at once, so a card running them would fail the D-23 ref check at card
-finish. queue-keeper's KB step runs them on canonical every run: ``renew`` when the game
-contract has ``source`` and the game source pin changed (``runtime.game_source``), then stale
-marking, apply, compaction and the generated views. Cards use ``kb lint`` and ``kb hubs`` and
-edit only the claims their refs name.
+``apply``, ``stale``, ``renew`` and ``compact`` change many claims at once: a maintenance card
+runs them in its worktree, and ``workspace integrate`` merges the result like any card's.
+``index`` is for local inspection; integrate regenerates the views on ``main``.
 """
 
 import argparse
@@ -31,10 +27,10 @@ from ide_research_core.cli import register_group
 from ide_research_core.io import gitops
 from ide_research_core.kb.apply import apply
 from ide_research_core.kb.compaction import compact
-from ide_research_core.kb.hubs import hub_flags, request_hub_maintenance
+from ide_research_core.kb.hubs import hub_flags
 from ide_research_core.kb.index import write_generated
 from ide_research_core.kb.lint import analyze
-from ide_research_core.kb.staleness import mark_stale, pending_reverification, renew_code_citations
+from ide_research_core.kb.staleness import mark_stale, renew_code_citations
 from ide_research_core.paths import Layout
 from ide_research_core.records.cli import _ok, _run
 from ide_research_core.records.store import RecordStore
@@ -89,26 +85,20 @@ def _renew(args, store: RecordStore) -> int:
         current_version=args.version,
         now=_now(),
     )
-    return _ok({"renewed": report.renewed, "requested": report.requested})
+    return _ok({"renewed": report.renewed, "reverify": report.reverify})
 
 
 def _compact(args, store: RecordStore) -> int:
-    archived = compact(store.layout, _now(), pending_reverify=pending_reverification(store.layout))
+    archived = compact(store.layout, _now())
     return _ok({"archived": archived})
 
 
 def _hubs(args, store: RecordStore) -> int:
     findings = hub_flags(store.layout, args.size_limit_tokens)
-    data = {"findings": [asdict(finding) for finding in findings]}
-    if args.request:
-        data["requested"] = request_hub_maintenance(store.layout, findings)
-    return _ok(data)
+    return _ok({"findings": [asdict(finding) for finding in findings]})
 
 
 # --- parser ---
-
-
-RUNTIME_ONLY = "[operator/runtime only, not for cards] "
 
 
 def setup(parser: argparse.ArgumentParser) -> None:
@@ -122,15 +112,15 @@ def setup(parser: argparse.ArgumentParser) -> None:
         return sub
 
     command("lint", _lint, "report knowledge-base findings (writes nothing)")
-    command("apply", _apply, RUNTIME_ONLY + "lint, then apply the fixes the linter may make")
-    sub = command("index", _index, RUNTIME_ONLY + "regenerate kb/index.md and kb/_generated/*")
+    command("apply", _apply, "lint, then apply the fixes the linter may make")
+    sub = command("index", _index, "regenerate kb/index.md and kb/_generated/*")
     sub.add_argument("--token-budget", type=int, default=6000)
     sub = command(
-        "stale", _stale, RUNTIME_ONLY + "mark claims checked against an older game version stale"
+        "stale", _stale, "mark claims checked against an older game version stale"
     )
     sub.add_argument("--version", required=True, help="current game version")
     sub = command(
-        "renew", _renew, RUNTIME_ONLY + "renew claims whose cited game code did not change"
+        "renew", _renew, "renew claims whose cited game code did not change"
     )
     sub.add_argument("--game-repo", required=True, help="path to the game git repository")
     sub.add_argument("--old", required=True, help="previous game commit")
@@ -139,11 +129,10 @@ def setup(parser: argparse.ArgumentParser) -> None:
     command(
         "compact",
         _compact,
-        RUNTIME_ONLY + "archive the longest-stale claims when too many are stale",
+        "archive the longest-stale claims when too many are stale",
     )
     sub = command("hubs", _hubs, "hub health flags")
     sub.add_argument("--size-limit-tokens", type=int, default=2000)
-    sub.add_argument("--request", action="store_true", help="write maintenance card requests")
 
 
 register_group("kb", setup)

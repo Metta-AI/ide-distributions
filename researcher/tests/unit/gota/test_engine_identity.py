@@ -28,7 +28,7 @@ def test_live_resolution_fail_closed(tmp_path, monkeypatch, change):
     path = tmp_path / 'manifest.json'
     current = manifest('b' * 40)
     path.write_text(json.dumps(current))
-    monkeypatch.setenv('AUTORESEARCH_CLI', '/fake/shared')
+    monkeypatch.setenv('RESEARCH_CLI', '/fake/shared')
     def run(argv, **kwargs):
         assert argv == ['/fake/shared', 'softmax', 'game-version']
         if change == 'auth':

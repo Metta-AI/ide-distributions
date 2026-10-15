@@ -11,7 +11,7 @@ Files under the workspace root:
 - ``stats/metric-noise.yaml``: the noise record (``stats noise``).
 - ``stats design <E> --request-file F [--planned-pairs N]`` freezes the experiment's
   ``evaluation_design`` (``stats.freeze.freeze_design``) from the request, the game contract
-  (``--game`` or ``AUTORESEARCH_GAME``) and the noise record for the league's current game
+  (``--game`` or ``RESEARCH_GAME``) and the noise record for the league's current game
   version (``Softmax.game_version``, so it needs a profile context). It stores the request as
   ``evaluation_design_request``. The experiment must be ``designed``, the request's
   ``baseline_version`` must be the current champion (``check_baseline``: the policy the
@@ -36,9 +36,9 @@ Files under the workspace root:
   (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
   detect a stale outcome by recomputing both hashes.
 
-The champion for ``stats evaluate`` comes from ``runtime.promotion.current_champion`` (the
+The champion for ``stats evaluate`` comes from ``Softmax.leaderboard_champion`` (the
 policy the game's league shows competing for our player, A9) when the command runs inside a
-profile (``HERMES_HOME`` and ``AUTORESEARCH_GAME`` set); ``--champion`` must then agree with
+profile (``HERMES_HOME`` and ``RESEARCH_GAME`` set); ``--champion`` must then agree with
 it. Outside a profile, or when the league shows no champion, ``--champion`` is required.
 """
 
@@ -51,18 +51,17 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ide_research_core import runctx
+from ide_research_core import promotion, runctx
 from ide_research_core.cli import register_group
 from ide_research_core.games.loader import GameError, load_game
 from ide_research_core.io.docs import _atomic_write_text
 from ide_research_core.paths import Layout
 from ide_research_core.records.cli import BadArguments, _check_id, _ok, _run
 from ide_research_core.records.store import RecordStore
-from ide_research_core.runtime.promotion import baseline_problem, current_champion
 from ide_research_core.softmax_tool.identity import identity_problems
 from ide_research_core.softmax_tool.protocol import from_env as softmax_from_env
 from ide_research_core.stats.decision_rule import evaluate
-from ide_research_core.stats.design import DesignError, EvaluationDesign
+from ide_research_core.stats.design import DesignError, EvaluationDesign, design_sha256
 from ide_research_core.stats.freeze import freeze_design
 from ide_research_core.stats.ingest import EpisodeRow, ingest, ingest_rows, pair
 from ide_research_core.stats.noise import (
@@ -77,8 +76,8 @@ from ide_research_core.stats.opponents import DEFAULT_EPISODES, league_snapshot,
 # games/ lives at the autoresearch project root, next to schemas/.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAMPION_UNKNOWN = "champion unknown: pass --champion"
-GAME_ENV = "AUTORESEARCH_GAME"
-PLAYER_ENV = "AUTORESEARCH_PLAYER_ID"
+GAME_ENV = "RESEARCH_GAME"
+PLAYER_ENV = "RESEARCH_PLAYER_ID"
 # A league id becomes a file name under stats/rows/, so no path separators or leading dots.
 _LEAGUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -133,11 +132,6 @@ def _load_design(store: RecordStore, experiment: str) -> tuple[dict, EvaluationD
     if not meta.get("evaluation_design"):
         raise ValueError(f"{experiment} has no frozen evaluation_design")
     return meta, EvaluationDesign.from_dict(meta["evaluation_design"])
-
-
-def _design_sha256(design: EvaluationDesign) -> str:
-    canonical = json.dumps(design.to_dict(), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class Refusal(ValueError):
@@ -289,7 +283,9 @@ def check_baseline(baseline: str | None, league_id: str) -> None:
         )
         if problems:
             raise Refusal("identity", "; ".join(problems))
-        problem = baseline_problem(ctx, sm, league_id, baseline)
+        problem = promotion.baseline_problem(
+            ctx.canonical, sm, league_id, os.environ.get(PLAYER_ENV, ""), baseline
+        )
     except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
         raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
     if problem is not None:
@@ -334,6 +330,11 @@ def _json_object_file(path: str) -> dict:
     return value
 
 
+def current_champion(sm, league_id: str) -> str | None:
+    """The policy the league shows competing for our player: the champion (A9)."""
+    return sm.leaderboard_champion(sm.whoami().player_id, league_id)
+
+
 def _confirmed_champion() -> str | None:
     """The league's champion for our player inside a profile (None when it shows none, A9);
     None outside a profile."""
@@ -350,7 +351,7 @@ def _confirmed_champion() -> str | None:
         raise BadArguments(str(error)) from None
     try:
         sm = softmax_from_env(os.environ, ctx.canonical)
-        return current_champion(ctx, sm, game.league_id)
+        return current_champion(sm, game.league_id)
     except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)
         raise ValueError(f"cannot confirm the champion with Softmax: {error}") from None
 
@@ -391,7 +392,7 @@ def _evaluate(args, store: RecordStore) -> int:
         "candidate_platform_id": candidate,
         "noise_rev": design.noise_rev,
         "rows_sha256": hashlib.sha256(rows_bytes).hexdigest(),
-        "design_sha256": _design_sha256(design),
+        "design_sha256": design_sha256(design),
         **outcome.to_dict(),
     }
     _atomic_write_text(

@@ -7,9 +7,9 @@ from records.fixtures import EXP_DESIGNED
 
 from ide_research_core.cli import main
 from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
-from ide_research_core.runtime.pause import pause_path
 from ide_research_core.softmax_tool.fake import FakeSoftmax
 from ide_research_core.stats.noise import write_noise
 
@@ -40,16 +40,23 @@ def noise_record(version=VERSION):
 def ws(tmp_path, monkeypatch):
     root = tmp_path / "ws"
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(root))
-    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
-    monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
-    monkeypatch.setenv("AUTORESEARCH_PLAYER_ID", "ply_fake")  # FakeSoftmax's default player
+    monkeypatch.setenv("RESEARCH_WORKSPACE", str(root))
+    monkeypatch.setenv("RESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("RESEARCH_SOFTMAX", "fake")
+    monkeypatch.setenv("RESEARCH_PLAYER_ID", "ply_fake")  # FakeSoftmax's default player
     for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
         monkeypatch.delenv(name, raising=False)
     root.mkdir()
     gitops.git(root, "init", "-q", "-b", "main")
     gitops.commit_all(root, "empty canonical", allow_empty=True)
     FakeSoftmax(root, {}).submit(CHAMPION, "fake-league")
+    # The loop's record of that champion, as ``promotion accept`` or a published promotion
+    # leaves it; without it the league and the loop would disagree (a champion conflict).
+    write_json(
+        root / "promotions" / "P-01K0000000000000000000000A.json",
+        {"id": "P-01K0000000000000000000000A", "kind": "accepted", "version_id": None,
+         "platform_policy_version_id": CHAMPION, "league_id": "fake-league", "stage": "published"},
+    )
     return root
 
 
@@ -219,6 +226,8 @@ def test_no_champion_asks_for_the_starter_policy_bootstrap(ws, tmp_path, capsys)
     state = json.loads(state_file.read_text())
     state["submissions"] = []  # a fresh install: the league shows no policy for us
     state_file.write_text(json.dumps(state))
+    for record in (ws / "promotions").glob("*.json"):  # and the loop recorded none
+        record.unlink()
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 1 and env["error"]["reason"] == "champion_unknown"
     assert "bootstrap" in env["error"]["message"]
@@ -228,9 +237,13 @@ def test_no_champion_asks_for_the_starter_policy_bootstrap(ws, tmp_path, capsys)
 def test_an_open_champion_conflict_is_refused(ws, tmp_path, capsys):
     store, exp = new_experiment(ws)
     write_noise(store.layout, noise_record())
-    pause_file = pause_path(ws / ".supervisor" / "ledger")
-    pause_file.parent.mkdir(parents=True, exist_ok=True)
-    pause_file.write_text(json.dumps({"reason": "champion conflict: the league shows X"}))
+    # The loop recorded another policy as its champion than the league shows.
+    record = {
+        "id": "P-01K0000000000000000000000B", "kind": "accepted", "version_id": None,
+        "platform_policy_version_id": "someone-else:v9", "league_id": "fake-league",
+        "stage": "published",
+    }
+    (ws / "promotions" / f"{record['id']}.json").write_text(json.dumps(record))
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 1 and env["error"]["reason"] == "champion_conflict"
     assert "evaluation_design" not in store.load(exp)[0]
@@ -239,7 +252,7 @@ def test_an_open_champion_conflict_is_refused(ws, tmp_path, capsys):
 def test_a_wrong_credential_is_refused_before_the_champion_is_read(ws, tmp_path, capsys, monkeypatch):
     store, exp = new_experiment(ws)
     write_noise(store.layout, noise_record())
-    monkeypatch.setenv("AUTORESEARCH_FAKE_FAULTS", "player=ply_other")
+    monkeypatch.setenv("RESEARCH_FAKE_FAULTS", "player=ply_other")
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 1 and env["error"]["reason"] == "identity"
     assert "evaluation_design" not in store.load(exp)[0]

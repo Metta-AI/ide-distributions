@@ -1,5 +1,7 @@
-"""``autoresearch softmax ...`` through the real entry point (subprocess), with
-AUTORESEARCH_SOFTMAX=fake, the fakegame contract and a FileQueue (Plan 03 Task 3.4)."""
+"""``research softmax ...`` through the real entry point (subprocess), with
+RESEARCH_SOFTMAX=fake and the fakegame contract, on a research board (a bare canonical
+repository and a clone with card worktrees). League submission is ``research promotion``:
+see ``test_promotion.py``."""
 
 import json
 import os
@@ -11,14 +13,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from support.promotion_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, SubmitBoard
+from support.research_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, ResearchBoard
 
 from ide_research_core.cli import main
 from ide_research_core.io.docs import read_json, write_json
-from ide_research_core.paths import Layout
-from ide_research_core.queue.select import FILE_QUEUE_RELATIVE
 from ide_research_core.records.store import RecordStore
-from ide_research_core.runtime.promotion import CHAMPION_PATH, load
 from ide_research_core.softmax_tool import cli as softmax_cli
 from ide_research_core.softmax_tool.fake import FAULTS_ENV
 from ide_research_core.softmax_tool.platform_cli import PlatformCli, ToolMissing
@@ -30,26 +29,20 @@ REPO = Path(__file__).resolve().parents[3]
 
 @pytest.fixture
 def board(tmp_path):
-    queue_dir = tmp_path / "canonical" / ".supervisor" / "runtime" / FILE_QUEUE_RELATIVE
-    return SubmitBoard(tmp_path, queue_dir=queue_dir)
+    return ResearchBoard(tmp_path)
 
 
 def base_env(board, worker=None, **extra) -> dict:
     env = {
         "PATH": os.environ.get("PATH", ""),
         "HERMES_HOME": str(board.tmp_path / "home"),
-        "AUTORESEARCH_WORKSPACE": str(board.canonical),
-        "AUTORESEARCH_SOFTMAX": "fake",
-        "AUTORESEARCH_GAME": "fakegame",
-        "AUTORESEARCH_QUEUE": "file",
-        "AUTORESEARCH_PLAYER_ID": PLAYER,
+        "RESEARCH_WORKSPACE": str(board.canonical),
+        "RESEARCH_SOFTMAX": "fake",
+        "RESEARCH_GAME": "fakegame",
+        "RESEARCH_PLAYER_ID": PLAYER,
     }
     if worker is not None:
-        env.update(
-            HERMES_KANBAN_WORKSPACE=str(worker.worktree),
-            HERMES_KANBAN_TASK=worker.task_id,
-            HERMES_KANBAN_RUN_ID=worker.run_id,
-        )
+        env.update(HERMES_KANBAN_WORKSPACE=str(worker.worktree))
     env.update(extra)
     return env
 
@@ -79,7 +72,7 @@ def uploaded_experiment(store: RecordStore, design: dict) -> str:
 @pytest.fixture
 def launch(board):
     """A launch card's worker with an uploaded, bound experiment in its worktree."""
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     worker = board.admit(mode="experimentation")
     worker.start()
@@ -133,7 +126,7 @@ def test_credits_read_failure_is_unavailable_not_an_error(tmp_path):
 def test_missing_tool_is_exit_3(board, monkeypatch, capsys, tmp_path):
     for name, value in base_env(board).items():
         monkeypatch.setenv(name, value)
-    monkeypatch.delenv("AUTORESEARCH_SOFTMAX")
+    monkeypatch.delenv("RESEARCH_SOFTMAX")
     monkeypatch.setenv(
         "SOFTMAX_PLAYER_CREDENTIAL", '{"token": "t", "expires_at": "2099-01-01T00:00:00+00:00"}'
     )
@@ -171,7 +164,7 @@ def test_no_profile_context_is_exit_2():
 def test_xp_specs_one_seeded_request_per_seed_and_arm():
     """A12: each seed in the batch's slice gets one candidate and one baseline request with
     num_episodes 1 and game_config_overrides.seed; opponents sit in fixed slots."""
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     design = {**design_dict(), "seeds": [11, 12, 13, 14, 15]}  # seats (0, 1)
     binding = {"platform_policy_version_id": PV_A}
@@ -209,7 +202,7 @@ def test_xp_specs_one_seeded_request_per_seed_and_arm():
 
 def test_xp_specs_sampled_lineups_are_per_seed_and_shared_by_the_pair():
     """A12: a design with league-sampled line-ups seats each seed's line-up for both arms."""
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     lineups = {"11": ["a:v1", "b:v2"], "12": ["c:v3", "a:v1"]}
     snapshot = {"league_id": LEAGUE, "taken_at": "t", "basis": "league_episodes", "entries": []}
@@ -236,7 +229,7 @@ def test_xp_specs_sampled_lineups_are_per_seed_and_shared_by_the_pair():
 
 
 def test_xp_specs_opponent_slots_skip_our_seats():
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     design = {**design_dict(), "seats": [1], "opponents": ["opp:v3", "opp:v4"]}
     (_, _, spec), _ = softmax_cli.xp_specs(
@@ -246,7 +239,7 @@ def test_xp_specs_opponent_slots_skip_our_seats():
 
 
 def test_xp_specs_refuses_bad_batches_and_seedless_designs():
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     binding = {"platform_policy_version_id": PV_A}
     with pytest.raises(softmax_cli.BadArguments, match="batch"):
@@ -260,7 +253,7 @@ def test_xp_specs_refuses_bad_batches_and_seedless_designs():
 
 
 def test_design_pairing_is_seed_only_with_selector_opponents():
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     from ide_research_core.stats.design import EvaluationDesign
 
@@ -627,7 +620,7 @@ def test_xp_create_backfills_requests_created_but_never_recorded(board, launch):
 
 
 def test_xp_create_empty_batch_is_refused_without_status_change(board):
-    from support.promotion_board import design_dict
+    from support.research_board import design_dict
 
     worker = board.admit(mode="experimentation")
     worker.start()
@@ -653,7 +646,8 @@ def test_xp_create_refuses_a_baseline_that_is_no_longer_the_champion(board, laun
     """Another policy became champion after the design froze: the experiment can never
     promote, so nothing is launched (no credits spent on it)."""
     worker, experiment = launch
-    board.sm.submit(PV_A, LEAGUE)  # the league now shows another champion
+    board.sm.submit(PV_A, LEAGUE)  # a promotion made PV_A the champion
+    board._accepted(PV_A)
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
     )
@@ -664,12 +658,26 @@ def test_xp_create_refuses_a_baseline_that_is_no_longer_the_champion(board, laun
     assert board.sm.xp_recover(experiment) == []
 
 
+def test_xp_create_refuses_while_the_league_disagrees_with_the_loop(board, launch):
+    """Someone submitted by hand: the league shows a policy the loop never recorded."""
+    worker, experiment = launch
+    board.sm.submit(PV_A, LEAGUE)
+    code, data = softmax(
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
+    )
+    assert code == 1 and data["error"]["reason"] == "champion_conflict"
+    assert board.sm.xp_recover(experiment) == []
+
+
 def test_xp_create_refuses_while_the_league_shows_no_champion(board, launch):
+    """A fresh install: no champion anywhere until the starter-policy bootstrap."""
     worker, experiment = launch
     state_file = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
     state = read_json(state_file)
     state["submissions"] = []
     write_json(state_file, state)
+    for record in (board.canonical / "promotions").glob("*.json"):
+        record.unlink()
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
     )
@@ -697,7 +705,7 @@ def test_xp_create_needs_a_binding(board):
     assert code == 1 and data["error"]["reason"] == "no_binding"
 
 
-# --- upload, submit, leaderboard ---
+# --- upload, leaderboard ---
 
 
 # --- per-experiment lock (two relaunchers at the same moment) ---
@@ -725,7 +733,7 @@ def _hold_lock_in_another_process(path, holder_record=None):
 
 
 def _lock_path(board, experiment):
-    return board.canonical / ".supervisor" / "runtime" / "locks" / f"xp-{experiment}.lock"
+    return board.origin / "locks" / f"xp-{experiment}.lock"
 
 
 @pytest.mark.parametrize(
@@ -733,14 +741,13 @@ def _lock_path(board, experiment):
     [
         ["xp", "create", "{E}", "--batch", "1", "--attempt", "1"],
         ["upload", "{E}", "--build-dir", "/nonexistent"],
-        ["submit", "{E}"],
     ],
-    ids=["xp-create", "upload", "submit"],
+    ids=["xp-create", "upload"],
 )
 def test_mutations_refuse_busy_while_another_card_holds_the_experiment(
     board, launch, monkeypatch, capsys, argv
 ):
-    """``xp create``, ``upload`` and ``submit`` of one experiment take one cross-process lock
+    """``xp create`` and ``upload`` of one experiment take one cross-process lock
     first: a second process waits a bounded time, then refuses with ``busy``, names the
     holder, and does nothing."""
     worker, experiment = launch
@@ -748,8 +755,8 @@ def test_mutations_refuse_busy_while_another_card_holds_the_experiment(
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(softmax_cli, "LOCK_WAIT_S", 0.2)
     argv = [word.format(E=experiment) for word in argv]
-    record = {"task_id": "t_peer", "run_id": "41", "pid": 999, "command": "xp create",
-              "started_at": "2026-10-08T12:00:00+00:00"}
+    record = {"worker": "/host/researcher-2/workspace/.worktrees/t_peer", "profile": "researcher-2",
+              "pid": 999, "command": "xp create", "started_at": "2026-10-08T12:00:00+00:00"}
     holder = _hold_lock_in_another_process(_lock_path(board, experiment), record)
     try:
         code = main(["softmax", *argv])
@@ -757,8 +764,8 @@ def test_mutations_refuse_busy_while_another_card_holds_the_experiment(
         error = payload["error"]
         assert code == 1 and error["reason"] == "busy", payload
         assert error["details"] == {"holder": record, "own_run": False}
-        assert experiment in error["message"] and "t_peer" in error["message"]
-        assert "queue list --state claimed" in error["message"]
+        assert experiment in error["message"] and "researcher-2" in error["message"]
+        assert "orchestrator" in error["message"]
         assert worker.store.load(experiment)[0].get("xp_requests") in (None, [])
     finally:
         holder.stdin.close()
@@ -773,7 +780,7 @@ def test_busy_on_your_own_runs_lock_says_wait_for_that_command(board, launch, mo
     for name, value in base_env(board, worker).items():
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(softmax_cli, "LOCK_WAIT_S", 0.2)
-    record = {"task_id": worker.task_id, "run_id": worker.run_id, "pid": 999,
+    record = {"worker": str(worker.worktree), "profile": "home", "pid": 999,
               "command": "xp create", "started_at": "2026-10-08T12:00:00+00:00"}
     holder = _hold_lock_in_another_process(_lock_path(board, experiment), record)
     try:
@@ -797,7 +804,7 @@ def test_the_holder_is_recorded_while_held_and_cleared_after(board, launch, monk
     with softmax_cli.experiment_lock(ctx, experiment, "upload"):
         record = json.loads(lock.read_text())
         assert record.pop("started_at")
-        assert record == {"task_id": worker.task_id, "run_id": worker.run_id,
+        assert record == {"worker": str(worker.worktree), "profile": "home",
                           "pid": os.getpid(), "command": "upload"}
     assert lock.read_text() == ""
 
@@ -849,7 +856,7 @@ def test_an_experiment_id_that_is_not_an_e_id_is_a_bad_argument(board, launch):
         base_env(board, worker), "xp", "create", "../../x", "--batch", "1", "--attempt", "1"
     )
     assert code == 2 and data["error"]["reason"] == "bad_arguments"
-    assert not (board.canonical / ".supervisor" / "runtime" / "locks").exists()
+    assert not (board.origin / "locks").exists()
 
 
 def test_upload_from_fakegame_build(board):
@@ -899,65 +906,33 @@ def test_upload_failed_gates_is_refused(board):
     assert code == 1 and data["error"]["reason"] == "gates_failed"
 
 
-def test_submit_end_to_end(board):
-    experiment, version = board.reviewed_experiment()
-    worker = board.promoter(experiment)
-    code, data = softmax(base_env(board, worker), "submit", experiment)
-    assert code == 0, data
-    assert data["data"]["platform_policy_version_id"] == PV_A
-    assert load(board.canonical).stage == "submitted"
-    assert (worker.worktree / CHAMPION_PATH).read_text().startswith("# Candidate")
-    store = RecordStore(Layout(worker.worktree))
-    assert store.find("version_event", version=version, kind="submitted")
 
-
-def test_submit_refusal_is_exit_1_with_reason(board):
-    experiment, _ = board.reviewed_experiment(decision="hold")
-    worker = board.promoter(experiment)
-    code, data = softmax(base_env(board, worker), "submit", experiment)
-    assert code == 1 and data["ok"] is False
-    assert data["error"]["reason"] == "decision_not_promote"
-    assert load(board.canonical) is None
-
-
-def test_submit_identity_fault_is_exit_1(board):
-    experiment, _ = board.reviewed_experiment()
-    worker = board.promoter(experiment)
-    env = base_env(board, worker, **{FAULTS_ENV: "player=ply_other"})
-    code, data = softmax(env, "submit", experiment)
-    assert code == 1 and data["error"]["reason"] == "identity"
-    ledger = board.canonical / ".supervisor" / "ledger" / "promotion.json"
-    assert not ledger.exists() or read_json(ledger)["stage"] != "intent"
-
-
-def test_submit_refused_when_the_profile_identity_changed_since_spawn(board):
+def test_refused_when_the_profile_identity_changed_since_spawn(board):
     """A worker's environment is fixed when Hermes spawns it, but the profile ``.env`` may
-    change while it runs (the operator sets another player id; preflight then pauses). The
+    change while it runs (the operator sets another player id). The
     tool keeps using the spawn-time identity and refuses while the ``.env`` disagrees (C6,
     C7); it never takes identity from the ``.env``, which a worker could write."""
-    experiment, _ = board.reviewed_experiment()
-    worker = board.promoter(experiment)
+    worker = board.admit()
     credential = json.dumps({"token": "t", "expires_at": "2099-01-01T00:00:00Z",
                              "player_id": PLAYER})  # fmt: skip
     home = board.tmp_path / "home"
     home.mkdir()
     env = base_env(board, worker, SOFTMAX_PLAYER_CREDENTIAL=credential)  # spawn-time env
-    (home / ".env").write_text(f"AUTORESEARCH_PLAYER_ID={PLAYER}\nOTHER=1\n")
+    (home / ".env").write_text(f"RESEARCH_PLAYER_ID={PLAYER}\nOTHER=1\n")
     code, data = softmax(env, "whoami")
     assert code == 0, data  # the .env agrees: no refusal
 
-    (home / ".env").write_text("AUTORESEARCH_PLAYER_ID=ply_wrong\nOTHER=1\n")
-    code, data = softmax(env, "submit", experiment)
+    (home / ".env").write_text("RESEARCH_PLAYER_ID=ply_wrong\nOTHER=1\n")
+    code, data = softmax(env, "credits")
     assert code == 1 and data["error"]["reason"] == "identity", data
-    assert "AUTORESEARCH_PLAYER_ID" in data["error"]["message"]
+    assert "RESEARCH_PLAYER_ID" in data["error"]["message"]
     assert "t" not in data["error"]["message"].split()  # no value is printed
-    assert load(board.canonical) is None  # refused before the promotion lock
 
     # A worker that rewrites the .env to another credential gains nothing: refused too.
     forged = json.dumps({"token": "x", "expires_at": "2099-01-01T00:00:00Z",
                          "player_id": "ply_other"})  # fmt: skip
     (home / ".env").write_text(f"SOFTMAX_PLAYER_CREDENTIAL='{forged}'\n")
-    code, data = softmax(env, "submit", experiment)
+    code, data = softmax(env, "credits")
     assert code == 1 and data["error"]["reason"] == "identity", data
 
 
@@ -967,13 +942,42 @@ def test_leaderboard(board):
     assert data["data"] == {
         "league_id": LEAGUE,
         "player_id": PLAYER,
-        "leaderboard_champion": BASELINE_PV,
         "current_champion": BASELINE_PV,
-        "note": "",
         "conflict": None,
-        "submission": None,
     }
 
 
 def test_xp_tag_round_trip():
     assert parse_tag("ar:E-1:b2:a3:s1:candidate") == ("E-1", 2, 3, 1, "candidate")
+
+
+# --- xp evidence (what the review card runs) ---
+
+
+def test_xp_evidence_writes_rows_a_review_can_ingest(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker)
+    code, created = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and len(created["data"]["created"]) == 4, created
+
+    code, collected = softmax(env, "xp", "evidence", experiment)
+
+    assert code == 0, collected
+    data = collected["data"]
+    assert len(data["collected"]) == 4 and data["pending"] == [] and data["complete"] is True
+    assert len(data["rows"]) == 4
+    for request_id in data["collected"]:
+        meta = read_json(worker.worktree / "evidence/xp" / experiment / request_id / "meta.json")
+        index = worker.store.load(meta["evidence"])[0]
+        assert index["kind"] == "xp-result" and index["source_ids"]["xreq"] == request_id
+    again = softmax(env, "xp", "evidence", experiment)[1]["data"]
+    assert again["collected"] == [] and sorted(again["already"]) == sorted(data["collected"])
+    rows = "".join((worker.worktree / path).read_text() for path in data["rows"])
+    combined = board.tmp_path / "rows.jsonl"
+    combined.write_text(rows)
+    ingest = subprocess.run(
+        [sys.executable, "-m", "ide_research_core", "stats", "ingest", "--experiment",
+         experiment, "--rows", str(combined), "--root", str(worker.worktree)],
+        capture_output=True, text=True, env=env, check=False,
+    )  # fmt: skip
+    assert json.loads(ingest.stdout)["ok"], ingest.stdout + ingest.stderr

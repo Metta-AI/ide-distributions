@@ -101,10 +101,10 @@ def test_build_requires_candidate_and_output():
 
 
 def test_upload_requires_shared_cli(monkeypatch):
-    monkeypatch.delenv('AUTORESEARCH_CLI', raising=False)
+    monkeypatch.delenv('RESEARCH_CLI', raising=False)
     result = binding('upload')
     assert result.returncode == 2
-    assert 'AUTORESEARCH_CLI' in result.stdout
+    assert 'RESEARCH_CLI' in result.stdout
 
 
 def test_segment_resolver(tmp_path):

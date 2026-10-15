@@ -22,16 +22,10 @@ GROUP_MODULES = (
     "ide_research_core.records.cli",
     "ide_research_core.stats.cli",
     "ide_research_core.kb.cli",
-    "ide_research_core.runtime.card_cli",
-    "ide_research_core.comms.cli",
-    "ide_research_core.queue.cli",
-    "ide_research_core.runtime.promotion_cli",
-    "ide_research_core.runtime.provenance_cli",
     "ide_research_core.softmax_tool.cli",
     "ide_research_core.games.cli",
-    "ide_research_core.runtime.status_cli",
-    "ide_research_core.runtime.report_cli",
     "ide_research_core.workspace_cli",
+    "ide_research_core.promotion_cli",
 )
 
 
@@ -42,8 +36,8 @@ def register_group(name: str, setup_fn: GroupSetup) -> None:
 def build_parser() -> argparse.ArgumentParser:
     for module in GROUP_MODULES:
         importlib.import_module(module)
-    parser = argparse.ArgumentParser(prog="autoresearch")
-    parser.add_argument("--version", action="version", version=f"autoresearch {__version__}")
+    parser = argparse.ArgumentParser(prog="research")
+    parser.add_argument("--version", action="version", version=f"research {__version__}")
     subparsers = parser.add_subparsers(dest="group", metavar="GROUP")
     for name, setup_fn in _GROUPS.items():
         setup_fn(subparsers.add_parser(name))

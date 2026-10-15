@@ -270,7 +270,7 @@ def test_upload_delegates_only_to_shared_cli(monkeypatch):
     upload_spec = importlib.util.spec_from_file_location('gota_upload_binding', ROOT / 'games/gota/tools/upload.py')
     upload = importlib.util.module_from_spec(upload_spec)
     upload_spec.loader.exec_module(upload)
-    monkeypatch.setenv('AUTORESEARCH_CLI', '/fake/shared-cli')
+    monkeypatch.setenv('RESEARCH_CLI', '/fake/shared-cli')
     monkeypatch.setattr(sys, 'argv', ['upload.py', 'E', '--build-dir', '/builds/E'])
     def fake_process(argv, **kwargs):
         assert argv == ['/fake/shared-cli', 'softmax', 'upload', 'E', '--build-dir', '/builds/E']

@@ -1,10 +1,10 @@
 import dataclasses
+import json
 
 import pytest
 from jsonschema import ValidationError, validate
 
-from ide_research_core.queue.requests import load_schema
-from ide_research_core.stats.design import DesignError, EvaluationDesign, MetricSpec
+from ide_research_core.stats.design import _SCHEMA_PATH, DesignError, EvaluationDesign, MetricSpec
 
 DESIGN = EvaluationDesign(
     game_version="65",
@@ -30,14 +30,14 @@ def test_round_trip_and_json_types():
 
 
 def test_to_dict_matches_schema():
-    validate(DESIGN.to_dict(), load_schema("evaluation_design.json"))
+    validate(DESIGN.to_dict(), json.loads(_SCHEMA_PATH.read_text()))
 
 
 def test_schema_rejects_bad_direction():
     data = DESIGN.to_dict()
     data["metrics"][0]["direction"] = "sideways"
     with pytest.raises(ValidationError):
-        validate(data, load_schema("evaluation_design.json"))
+        validate(data, json.loads(_SCHEMA_PATH.read_text()))
 
 
 @pytest.mark.parametrize(
@@ -87,7 +87,7 @@ def test_design_without_primary_metric_is_rejected():
     with pytest.raises(DesignError):
         EvaluationDesign.from_dict(data)
     with pytest.raises(ValidationError):
-        validate(data, load_schema("evaluation_design.json"))
+        validate(data, json.loads(_SCHEMA_PATH.read_text()))
 
 
 def test_duplicate_seeds_are_rejected():

@@ -1,6 +1,5 @@
-"""The profile ``.env`` as Hermes loads it. STDLIB ONLY: the Hermes plugin imports this
-(``plugin.coach`` builds the coach tools' environment from it); preflight uses it for the
-workers' environment."""
+"""The profile ``.env`` as Hermes loads it, and small helpers to read and set its lines.
+STDLIB ONLY."""
 
 import re
 from collections.abc import Mapping
@@ -76,3 +75,14 @@ def set_env_lines(path: Path, values: dict[str, str]) -> bool:
     path.write_text("\n".join(updated) + "\n", encoding="utf-8")
     path.chmod(0o600)
     return True
+
+
+def env_file_value(path: Path, name: str) -> str | None:
+    """The value of ``name`` in the dotenv file at ``path`` (quotes stripped), or None."""
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == name:
+            return value.strip().strip("'\"") or None
+    return None

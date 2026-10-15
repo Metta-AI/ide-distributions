@@ -1,8 +1,9 @@
-"""Stdlib-only launcher for cron scripts.
+"""Stdlib-only launcher: the way into the research CLI before the profile venv exists.
 
-Keeps `$HERMES_HOME/local/venv` in sync with `uv.lock`, then replaces the process with
-`python -m ide_research_core.runtime.<job>` from that venv. Must import only the standard library
-because it runs before the venv exists.
+Hermes installs a distribution by copying it and never runs ``uv sync``. This keeps
+``$HERMES_HOME/local/venv`` in sync with the distribution's ``uv.lock``, then replaces the
+process with ``python -m ide_research_core <args>`` from that venv. Scripts under
+``scripts/`` call it (``scripts/bootstrap.py``). Must import only the standard library.
 """
 
 import fcntl
@@ -51,20 +52,20 @@ def ensure_venv(hermes_home: Path, run=subprocess.run) -> bool:
         return True
 
 
-def main(job: str, argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     hermes_home = Path(os.environ.get("HERMES_HOME") or Path(__file__).resolve().parents[2])
     try:
         ensure_venv(hermes_home)
     except LaunchError as error:
-        print(f"autoresearch launcher: {error}", file=sys.stderr)
+        print(f"research launcher: {error}", file=sys.stderr)
         return 1
     python = str(hermes_home / "local" / "venv" / "bin" / "python")
     if not Path(python).exists():
         print(
-            f"autoresearch launcher: venv python missing at {python}; "
+            f"research launcher: venv python missing at {python}; "
             "delete local/venv and .lock-sha, then rerun to resync",
             file=sys.stderr,
         )
         return 1
     args = sys.argv[1:] if argv is None else argv
-    os.execv(python, [python, "-m", f"ide_research_core.runtime.{job}", *args])
+    os.execv(python, [python, "-m", "ide_research_core", *args])

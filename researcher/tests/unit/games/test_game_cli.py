@@ -11,7 +11,7 @@ def show(capsys, *argv):
 
 
 def test_show_named_game(capsys, monkeypatch):
-    monkeypatch.delenv("AUTORESEARCH_GAME", raising=False)
+    monkeypatch.delenv("RESEARCH_GAME", raising=False)
     code, env = show(capsys, "--name", "fakegame")
     assert code == 0
     data = env["data"]
@@ -27,13 +27,13 @@ def test_show_named_game(capsys, monkeypatch):
 
 
 def test_show_defaults_to_the_profile_game(capsys, monkeypatch):
-    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("RESEARCH_GAME", "fakegame")
     code, env = show(capsys)
     assert code == 0 and env["data"]["name"] == "fakegame"
 
 
 def test_unknown_or_unnamed_game(capsys, monkeypatch):
-    monkeypatch.delenv("AUTORESEARCH_GAME", raising=False)
+    monkeypatch.delenv("RESEARCH_GAME", raising=False)
     assert show(capsys)[0] == 2
     code, env = show(capsys, "--name", "nope")
     assert code == 1 and "not found" in env["error"]["message"]

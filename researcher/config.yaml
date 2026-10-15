@@ -1,5 +1,7 @@
-# Shipped defaults. Hermes keeps this file on update; bootstrap re-applies the
-# "always" rows of contract C9 with `hermes config set`.
+# Shipped defaults. Hermes keeps this file on `hermes profile update` (--force-config resets it).
+# A researcher is a Kanban worker profile: the orchestrator assigns it cards on the
+# `autoresearch` board and the gateway's dispatcher runs them (design: ide-distributions
+# docs/designs/orchestrator-design-2026-10-15.html).
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
@@ -7,19 +9,11 @@ fallback_providers:
   - provider: openrouter
     model: z-ai/glm-5.3
 
-# These rows govern `hermes -p <profile> kanban dispatch` and profile tools only.
-# The host gateway runs one dispatcher with the host default profile's kanban.*
-# config (amendment A3); queue-keeper preflight checks that config.
-kanban:
-  max_in_progress: 2
-  auto_decompose: false
-  review_dispatch: false
-  auto_subscribe_on_create: false
-
+# Knowledge lives in the canonical workspace, not in profile memory: N researchers share one
+# game, and unprovenanced memory would diverge between them.
 memory:
-  memory_enabled: true
+  memory_enabled: false
   user_profile_enabled: false
-  write_approval: false
 
 auxiliary:
   background_review:
@@ -35,9 +29,8 @@ agent:
 approvals:
   mode: "off"
   # Hermes matches these over the whole command and over each command word's tail
-  # (tools/approval_detection.py _deny_command_variants), before mode and not
-  # overridable. Anchor to a command start so text that only mentions a phrase
-  # (a commit message, a summary) is not blocked.
+  # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
+  # Promotion and league submission belong to the orchestrator.
   deny:
     - "coworld player use*"
     - "coworld submit*"
@@ -51,94 +44,44 @@ approvals:
     - "hermes kanban link*"
     - "hermes kanban --board * create*"
     - "hermes kanban --board * link*"
-    - "*promotion accept-champion"
-    - "*promotion accept-champion *"
-    - "*runtime accept-commits"
-    - "*runtime accept-commits *"
+    - "*promotion submit"
+    - "*promotion submit *"
+    - "*promotion bootstrap"
+    - "*promotion bootstrap *"
+    - "*promotion accept"
+    - "*promotion accept *"
 
 terminal:
-  # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground
-  # timeout. Skills wait on long commands with one wait instead of polling (queue skill).
+  # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.
   timeout: 1800
   env_passthrough:
     - SOFTMAX_PLAYER_CREDENTIAL
-    - AUTORESEARCH_PLAYER_ID
-    - AUTORESEARCH_WORKSPACE
-    - AUTORESEARCH_WORKSPACE_REMOTE
-    - AUTORESEARCH_GAME
-    - AUTORESEARCH_SOFTMAX
-    - AUTORESEARCH_CLI
-    - OPENROUTER_MODEL
-    - AUTORESEARCH_INBOX_WRITERS
-    - AUTORESEARCH_CHAMPION_GRACE_MINUTES
     - COGAMES_API_URL
-    - AUTORESEARCH_CARD_MODELS
-    - AUTORESEARCH_MAX_CARD_RUNS
-    - AUTORESEARCH_MAX_CARD_USD
-    - AUTORESEARCH_DAILY_BUDGET_USD
-    - AUTORESEARCH_FALLBACK_PRICES
-    - AUTORESEARCH_RELAUNCH_MIN_CREDITS
-    - AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD
-    - AUTORESEARCH_AUTONOMY
-    - AUTORESEARCH_CHAT_DAILY_USD
+    - RESEARCH_PLAYER_ID
+    - RESEARCH_GAME
+    - RESEARCH_WORKSPACE
+    - RESEARCH_CANONICAL
+    - RESEARCH_CLI
+    - RESEARCH_SOFTMAX
+    - OPENROUTER_MODEL
     - TMPDIR
     - GOTA_G2_RUNNER
 
 # Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
-# process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin; the
-# run budget (5400) still bounds a whole card. concurrent_batch is set too: sequential_call
-# falls back to it, and a wait can arrive in a parallel batch.
+# process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin.
 timeouts:
   tools:
     sequential_call: 1900
     concurrent_batch: 1900
 
-# The IDE coach chat arrives through Hermes's API server (platform api_server). It gets only
-# the plugin's coach toolset (read tools and propose_inbound; no terminal, file or code tools)
-# and none of the research skills. Kanban workers (platform cli) keep their toolset; listing
-# the coach toolset as known for cli keeps it off there (coach-chat-role.md §2.2).
-platform_toolsets:
-  api_server:
-    - autoresearch_coach
-known_plugin_toolsets:
-  cli:
-    - autoresearch_coach
-skills:
-  platform_disabled:
-    api_server:
-      - ab
-      - ab-compare
-      - build-upload
-      - calibrate-noise
-      - communicate
-      - complete-card
-      - diagnose
-      - diagnosis
-      - eval-design
-      - experiment
-      - fetch-artifacts
-      - groom-queue
-      - kb-maintenance
-      - league-watch
-      - lessons
-      - meta-recon
-      - opponent-profile
-      - queue
-      - replay-diagnosis
-      - replay-inspection
-      - review-xp
-      - submit
-      - survey
-      - xp-request
-
 plugins:
   enabled:
-    - autoresearch
+    - researcher_guard
 
-# Hermes has no auto-update; this turns off its passive update check (C9).
+# Hermes has no auto-update; this turns off its passive update check.
 updates:
   check: false
 
-# Shipped skills are never curator-managed; this pins built-in pruning off (C9).
+# Shipped skills are never curator-managed; this pins built-in pruning off.
 curator:
   prune_builtins: false

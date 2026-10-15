@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autoresearch/entity/version.json",
+  "title": "Version: one built policy and its provenance (System Design 3.1 #8). Immutable; upload and submission are version_event records.",
+  "type": "object",
+  "required": [
+    "id",
+    "parents",
+    "strategy_sha256",
+    "source_commit",
+    "artifact_sha256",
+    "policy_name"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^V-[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "parents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "strategy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_commit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "policy_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "gates": {
+      "type": "object"
+    },
+    "experiment": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "player_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

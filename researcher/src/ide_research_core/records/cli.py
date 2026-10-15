@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ide_research_core import runctx
 from ide_research_core.cli import register_group
+from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.registry import REGISTRY, entity_of_id
 from ide_research_core.records.store import RecordNotFound, RecordProblems, RecordStore
@@ -36,7 +37,7 @@ def _ok(data) -> int:
 
 
 def _fail(message: str, code: int, problems=None) -> int:
-    error = {"message": message}
+    error = {"reason": "records", "message": message}
     if problems is not None:
         error["problems"] = problems
     _emit({"ok": False, "error": error})
@@ -142,6 +143,55 @@ def _find(args, store: RecordStore) -> int:
     return _ok({"ids": store.find(args.entity, **eq)})
 
 
+def _summary(args, store: RecordStore) -> int:
+    """Topic and experiment ids by status, the loop's champion and when the plan last changed:
+    what the orchestrator's ``status`` tool reads from the workspace."""
+    from ide_research_core import promotion  # the records group loads without the platform
+
+    def by_status(entity: str) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for id_ in store.find(entity):
+            grouped.setdefault(store.load(id_)[0].get("status", "?"), []).append(id_)
+        return grouped
+
+    root = store.layout.root
+    champion = promotion.latest_champion(root)
+    try:
+        plan_updated = gitops.git(root, "log", "-1", "--format=%cI", "--", "plan.md") or None
+    except gitops.GitError:
+        plan_updated = None
+    return _ok(
+        {
+            "topics": by_status("topic"),
+            "experiments": by_status("experiment"),
+            "champion": champion.to_dict() if champion else None,
+            "plan_updated": plan_updated,
+        }
+    )
+
+
+def _resolve(args, store: RecordStore) -> int:
+    """The content an ``ar://`` reference names, at a workspace commit."""
+    import base64
+
+    from ide_research_core.games.loader import GameError, load_game
+    from ide_research_core.refs import resolve
+
+    game = None
+    if args.game:
+        try:
+            game = load_game(Path(__file__).resolve().parents[3], args.game)
+        except GameError as error:
+            raise BadArguments(str(error)) from None
+    resolved = resolve(store.layout.root, args.uri, args.rev, game=game)
+    data = {"uri": args.uri, "path": resolved.path, "rev": resolved.rev}
+    try:
+        data["content"] = resolved.content.decode("utf-8")
+    except UnicodeDecodeError:
+        data["content_base64"] = base64.b64encode(resolved.content).decode("ascii")
+    return _ok(data)
+
+
 def _validate(args, store: RecordStore) -> int:
     if args.all == (args.id is not None):
         raise BadArguments("give exactly one of an id or --all")
@@ -166,7 +216,7 @@ def _run(handler):
             return _fail(str(error), EXIT_FAILURE)
         except RecordProblems as error:
             return _fail(str(error), EXIT_FAILURE, error.problems)
-        except (ValueError, OSError) as error:
+        except (ValueError, OSError, LookupError) as error:
             return _fail(str(error), EXIT_FAILURE)
 
     return run
@@ -225,6 +275,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("entity", choices=entities)
     sub.add_argument("--where", action="append", default=[], metavar="FIELD=VALUE")
 
+    command("summary", _summary, "topics and experiments by status, champion, plan age")
+    sub = command("resolve", _resolve, "print the content an ar:// reference names")
+    sub.add_argument("uri")
+    sub.add_argument("--rev", help="workspace commit (default: HEAD)")
+    sub.add_argument("--game", help="game under games/ whose reference types to add")
     sub = command("validate", _validate, "validate one record or --all records")
     sub.add_argument("id", nargs="?")
     sub.add_argument("--all", action="store_true")

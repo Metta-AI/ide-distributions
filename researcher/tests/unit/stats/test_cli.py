@@ -181,7 +181,7 @@ def test_ingest_experiment_then_evaluate(tmp_path, experiment):
 
 
 def test_evaluate_without_champion_outside_a_profile(tmp_path, experiment, monkeypatch):
-    monkeypatch.delenv("AUTORESEARCH_GAME", raising=False)
+    monkeypatch.delenv("RESEARCH_GAME", raising=False)
     root = tmp_path / "ws"
     write_rows(tmp_path / "rows.jsonl", experiment_rows())
     stats(root, "ingest", "--rows", str(tmp_path / "rows.jsonl"), "--experiment", experiment)
@@ -283,14 +283,14 @@ def promotion(monkeypatch, tmp_path):
     ids ``current_champion`` was asked about."""
     asked = []
 
-    def champion(ctx, sm, league_id):
+    def champion(sm, league_id):
         asked.append(league_id)
         return BASE
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(tmp_path / "ws"))
-    monkeypatch.setenv("AUTORESEARCH_GAME", "fakegame")
-    monkeypatch.setenv("AUTORESEARCH_SOFTMAX", "fake")
+    monkeypatch.setenv("RESEARCH_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("RESEARCH_GAME", "fakegame")
+    monkeypatch.setenv("RESEARCH_SOFTMAX", "fake")
     monkeypatch.setattr(stats_cli, "current_champion", champion)
     return asked
 
@@ -330,7 +330,7 @@ def test_champion_override_needed_when_the_league_shows_none(
     tmp_path, experiment, promotion, capsys, monkeypatch
 ):
     root = _ingested(tmp_path, capsys, experiment)
-    monkeypatch.setattr(stats_cli, "current_champion", lambda ctx, sm, league_id: None)
+    monkeypatch.setattr(stats_cli, "current_champion", lambda sm, league_id: None)
     code, env = run_in_process(capsys, root, "evaluate", experiment)
     assert code == 2 and "pass --champion" in env["error"]["message"]
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
@@ -342,7 +342,7 @@ def test_softmax_failure_while_confirming_the_champion_is_exit_1(
 ):
     root = _ingested(tmp_path, capsys, experiment)
 
-    def broken(ctx, sm, league_id):
+    def broken(sm, league_id):
         raise RuntimeError("whoami failed: token expired")
 
     monkeypatch.setattr(stats_cli, "current_champion", broken)

@@ -8,11 +8,11 @@ from ide_research_core.records.store import RecordStore
 from ide_research_core.stats.design import EvaluationDesign, MetricSpec
 from ide_research_core.stats.ingest import EpisodeRow, ingest, pair
 
-AUTORESEARCH_DIR = Path(__file__).resolve().parents[3]
+DISTRIBUTION_DIR = Path(__file__).resolve().parents[3]
 
 
 def test_preregister_bind_ingest_pair_leaves_design_frozen(tmp_path):
-    game = load_game(AUTORESEARCH_DIR, "fakegame")
+    game = load_game(DISTRIBUTION_DIR, "fakegame")
     directions = {m.name: m.direction for m in game.outcome_metrics}
     metrics = tuple(
         MetricSpec(name, directions[name], "performance", None, None)

@@ -1,4 +1,4 @@
-"""The README's shell commands lint: each executable exists and each ``$AUTORESEARCH_CLI``
+"""The README's shell commands lint: each executable exists and each ``$RESEARCH_CLI``
 command is real (Plan 03 Task 5.2)."""
 
 import argparse
@@ -17,7 +17,7 @@ README = (DISTRIBUTION / "README.md").read_text(encoding="utf-8")
 SHELL_FENCE = re.compile(r"^```(?:sh|bash)\n(.*?)^```", re.MULTILINE | re.DOTALL)
 BUILTINS = {"cd", "mkdir", "cp", "export", "set", "."}
 OPTIONAL_TOOLS = {"nim"}  # skipped when absent from the machine
-CLI_VARIABLE = "$AUTORESEARCH_CLI"
+CLI_VARIABLE = "$RESEARCH_CLI"
 
 
 def shell_commands() -> list[list[str]]:
@@ -68,7 +68,7 @@ def test_every_cli_command_in_the_readme_exists():
     assert used, "README shows no CLI commands"
     for group, subcommand in used:
         assert group in available, group
-        if available[group]:  # a group without subcommands (``status``) takes only options
+        if available[group]:
             assert subcommand in available[group], f"{group} {subcommand}"
 
 
@@ -93,7 +93,7 @@ def test_operator_shell_setup_precedes_cli_examples():
 
 
 def test_bootstrap_commands_load_the_profile_env():
-    lines = [line for line in README.splitlines() if "scripts/queue_keeper.py" in line]
+    lines = [line for line in README.splitlines() if "scripts/bootstrap.py" in line]
     assert lines
     for line in lines:
         assert '. "$PROFILE/.env"' in line, line

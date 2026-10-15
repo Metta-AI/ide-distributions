@@ -93,8 +93,8 @@ class SubmissionState:
     - ``competing``: admitted; ``is_champion`` says whether it is our champion (an admitted
       membership becomes champion by default and earlier ones are ``benched``);
     - ``rejected``: the submission was rejected or withdrawn, or the membership disqualified;
-    - ``unknown``: neither list names it, or it has a status we do not know (logged by
-      queue-keeper; the grace from the submit then applies).
+    - ``unknown``: neither list names it, or it has a status we do not know (the promotion
+      stays ``submitted`` and is read again).
 
     ``detail`` is the platform's status and substatus, for messages and logs."""
 
@@ -215,8 +215,8 @@ def read_credits(sm: Softmax) -> float | None:
 
 
 def from_env(env: Mapping[str, str], canonical: Path) -> Softmax:
-    """AUTORESEARCH_SOFTMAX=fake selects the persistent fake; anything else is the real client."""
-    if env.get("AUTORESEARCH_SOFTMAX") == "fake":
+    """RESEARCH_SOFTMAX=fake selects the persistent fake; anything else is the real client."""
+    if env.get("RESEARCH_SOFTMAX") == "fake":
         from ide_research_core.softmax_tool.fake import FakeSoftmax
 
         return FakeSoftmax(canonical, env)

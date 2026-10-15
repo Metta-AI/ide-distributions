@@ -62,7 +62,7 @@ approximately 55 minutes, measured on the autoresearch EC2 test box
 model generation. Host speed, policy, cache reuse and compiler repair rounds
 can change the total. See
 [gate durations](gates/README.md#durations-and-waiting) for the scope.
-Follow the shared `queue` skill's **Long commands** procedure: start each build
+Follow the core `card` skill's **Long commands** procedure: start each build
 or full local check with the terminal tool's `background: true`, keep its
 `session_id`, then call `process_manage` with `action: "wait"`, that `session_id`
 and `timeout: 1800`. Repeat `wait` only on `status: "timeout"`; do nothing else
@@ -239,12 +239,12 @@ compiler scratch. The compiler uses Hermes's native command approval checks;
 no separate scanner is required. Output paths, Git refs and the index are checked
 after generation before accepting the build. Host provisioning
 and credentials remain the installer's responsibility. The front matter's
-`host_requirements` lists the variables and tools workers need; queue-keeper sends
-one help request when one of them is missing from what workers see.
+`host_requirements` lists the variables and tools workers need; a worker that finds one
+missing blocks its card with a `help_request:` reason.
 
-Online builds resolve the current league through `"$AUTORESEARCH_CLI" softmax
+Online builds resolve the current league through `"$RESEARCH_CLI" softmax
 game-version` and the shared credential-preserving platform transport. Set
-`AUTORESEARCH_GAME=gota`, `AUTORESEARCH_CLI`, `HERMES_HOME`, and the profile's
+`RESEARCH_GAME=gota`, `RESEARCH_CLI`, `HERMES_HOME`, and the profile's
 `SOFTMAX_PLAYER_CREDENTIAL` before building. The canonical Coworld manifest is
 fetched and retained as `BUILD_DIRECTORY/coworld_manifest.json`. The receipt in
 `version.json.engine` records the Coworld version/id, runnable source URL, full
@@ -267,13 +267,13 @@ uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/
 ```
 
 `evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
-per seat with the real integer seed. xp-poll keeps only the design's seats and
+per seat with the real integer seed. `softmax xp evidence` keeps only the design's seats and
 reduces them by the arithmetic mean, one row per episode (`games/_template/GAME.md`).
 The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 --seat N` retains the local metric-object form.
 
 `upload E --build-dir BUILD_DIRECTORY` delegates to
-`"$AUTORESEARCH_CLI" softmax upload E --build-dir BUILD_DIRECTORY`. Set the variable
+`"$RESEARCH_CLI" softmax upload E --build-dir BUILD_DIRECTORY`. Set the variable
 to the installed shared CLI executable. That shared tool performs the C6 identity
 check immediately before mutation; this wrapper has no alternate upload route.
 
@@ -315,22 +315,22 @@ establish fixture-free operation of the full compiler profile.
 The installed distribution includes the byte-identical original at
 `games/gota/baselines/submitted-v13.bas`, with its historical origin in the
 adjacent provenance file. On a fresh install, use this shipped input to make
-v13-live, the first champion. Work inside the admitted card's worktree; the
+v13-live, the first champion. Work inside the card's worktree; the
 bootstrap candidate has no experiment id. Resolve the installed environment and
 keep output in the card's scratch space:
 
 ```sh
-AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
-AR_PYTHON="$AR_HOME/local/venv/bin/python"
+PROFILE_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+PROFILE_PYTHON="$PROFILE_HOME/local/venv/bin/python"
 CARD_WORKTREE="$PWD"
 CANDIDATE="$CARD_WORKTREE/strategy/candidates/bootstrap"
 BUILD="$CARD_WORKTREE/.scratch/build/champion"
 CHECK="$CARD_WORKTREE/.scratch/check/champion"
 mkdir -p "$CANDIDATE"
-cp "$AR_HOME/games/gota/baselines/submitted-v13.bas" "$CANDIDATE/submitted-v13.bas"
+cp "$PROFILE_HOME/games/gota/baselines/submitted-v13.bas" "$CANDIDATE/submitted-v13.bas"
 git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/submitted-v13.bas
 git -C "$CARD_WORKTREE" commit -m "Record exact submitted v13 bootstrap input"
-(cd "$AR_HOME" && "$AR_PYTHON" games/gota/tools/make_v13_live.py "$CANDIDATE/submitted-v13.bas" "$CANDIDATE/v13-live.bas")
+(cd "$PROFILE_HOME" && "$PROFILE_PYTHON" games/gota/tools/make_v13_live.py "$CANDIDATE/submitted-v13.bas" "$CANDIDATE/v13-live.bas")
 git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/v13-live.bas strategy/candidates/bootstrap/v13-live.provenance.json
 git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidate"
 ```
@@ -346,11 +346,11 @@ loops. Each long-command block below sets its own paths for a fresh shell;
 start it from the card's worktree.
 
 ```sh
-AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
-AR_PYTHON="$AR_HOME/local/venv/bin/python"
+PROFILE_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+PROFILE_PYTHON="$PROFILE_HOME/local/venv/bin/python"
 CANDIDATE="$PWD/strategy/candidates/bootstrap"
 BUILD="$PWD/.scratch/build/champion"
-(cd "$AR_HOME" && "$AR_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
+(cd "$PROFILE_HOME" && "$PROFILE_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
 ```
 
 After exit, read the command JSON, `$BUILD/report.json`, `$BUILD/report.md`,
@@ -374,11 +374,11 @@ new `session_id`, and use `process_manage` action `wait`, `timeout: 1800` as
 above, repeating only on `status: "timeout"`:
 
 ```sh
-AR_HOME="$(dirname "$(dirname "$AUTORESEARCH_CLI")")"
-AR_PYTHON="$AR_HOME/local/venv/bin/python"
+PROFILE_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+PROFILE_PYTHON="$PROFILE_HOME/local/venv/bin/python"
 BUILD="$PWD/.scratch/build/champion"
 CHECK="$PWD/.scratch/check/champion"
-(cd "$AR_HOME" && "$AR_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
+(cd "$PROFILE_HOME" && "$PROFILE_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
 ```
 
 After exit, read `$CHECK/gates.json`, `$CHECK/engine_identity.json`,
@@ -386,28 +386,23 @@ After exit, read `$CHECK/gates.json`, `$CHECK/engine_identity.json`,
 the G2 episode results/logs named by `summary.episode_dir`. Check blocking
 outcomes and any tool errors before the bootstrap handoff.
 
-After successful build and local_check, follow the core `submit` skill's
-"Bootstrap card" procedure. Check that no champion or promotion in flight exists,
-then run:
+After successful build and local_check, follow the core `candidate` skill's
+"Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
+no promotion in flight exist. Upload the starter build:
 
 ```sh
-"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir "$BUILD"
+"$RESEARCH_CLI" softmax upload-bootstrap --build-dir "$BUILD"
 ```
 
-The first champion is uploaded and submitted by `softmax bootstrap-champion`,
-never by `softmax upload`. It needs no experiment, frozen evaluation design,
-evaluation outcome or decision. The first league submission is v13-live,
-unevaluated; local checks do not establish competitive strength. The command
-checks C6 identity and the build, uploads the exact artifact, takes the normal
-promotion lock and submits it. Its response includes `data.version_id`,
-`data.platform_policy_version_id`, `data.promotion_id` and `data.submission_id`.
-The immutable version retains the prebuilt provenance and has `experiment: null`.
-Record these ids in the journal's Decisions and send the core `submit` highlight.
-Finish this card with `complete-card`, outcome `done`; its merge publishes the
-promotion. The shipped `strategy/STRATEGY.md` remains the champion strategy source.
-If this card started to design an experiment, request a follow-up through core
-`experiment` step 3 before finishing; that card designs against the published
-champion. Read refusals and recovery instructions in the core `submit` skill.
+The first champion's version is uploaded by `softmax upload-bootstrap`, never by
+`softmax upload`. It needs no experiment, frozen evaluation design, evaluation outcome or
+decision. The first league submission is v13-live, unevaluated; local checks do not establish
+competitive strength. The command checks C6 identity and the build, uploads the exact artifact
+and records a version with `experiment: null` that keeps the prebuilt provenance. Its response
+includes `data.version_id` and `data.platform_policy_version_id`. Record them in the journal's
+Decisions and in the handoff metadata, run `workspace integrate`, and complete the card. The
+orchestrator then submits the version with `promotion bootstrap` and records the champion. The
+shipped `strategy/STRATEGY.md` remains the champion strategy source.
 
 ## Qualification scope
 

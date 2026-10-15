@@ -32,6 +32,10 @@ git clone https://github.com/Metta-AI/ide-distributions.git ~/ide-distributions
 hermes profile install ~/ide-distributions/researcher --name researcher-1 --yes
 ```
 
+Each distribution's README covers what follows the install: the profile `.env`, the one-time
+bootstrap (`scripts/bootstrap.py`, which syncs the profile venv and creates or clones the
+shared canonical workspace) and the host's Kanban dispatcher settings.
+
 ## Update
 
 `hermes profile update` re-reads the recorded source path, so pull the clone first. The

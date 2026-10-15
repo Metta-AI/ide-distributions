@@ -1,7 +1,7 @@
 name: researcher
-version: 0.1.0
-description: Autonomous research agent that improves game policies and reports through a file-based comms interface.
-hermes_requires: ">=0.21.5"
+version: 0.2.0
+description: Research worker for the Softmax IDE. Works Kanban cards from the orchestrator on one game, in its own clone of the shared canonical workspace.
+hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
     required: true
@@ -13,12 +13,22 @@ env_requires:
       token (what Softmax hosting provisions; it does not expire), or a Player session
       as JSON {"token": "ply_...", "expires_at": "<ISO 8601>"} (one entry of
       player_sessions.<server>.cache written by `coworld player use <ply_id>`).
-  - name: AUTORESEARCH_PLAYER_ID
+  - name: RESEARCH_PLAYER_ID
     required: true
     description: Id of that Softmax player.
-  - name: AUTORESEARCH_WORKSPACE_REMOTE
+  - name: RESEARCH_CANONICAL
     required: true
-    description: Git remote URL of the canonical workspace repository.
+    description: >-
+      Path of the bare canonical repository of the game, shared by every profile on the
+      host (for example <hermes root>/canonical-gota.git). `scripts/bootstrap.py` creates
+      and seeds it when it does not exist yet.
+  - name: RESEARCH_WORKSPACE
+    required: false
+    description: This profile's clone of the canonical repository. Default is $HERMES_HOME/workspace.
+  - name: RESEARCH_GAME
+    required: false
+    default: gota
+    description: Game to research. A directory name under games/.
   - name: COGAMES_API_URL
     required: false
     default: https://softmax.com/api
@@ -29,99 +39,21 @@ env_requires:
     required: false
     default: moonshotai/kimi-k3
     description: Model id on OpenRouter. Overrides the model in config.yaml.
-  - name: AUTORESEARCH_GAME
-    required: false
-    default: gota
-    description: Game to research. A directory name under games/.
-  - name: AUTORESEARCH_WORKSPACE
-    required: false
-    description: Path of the canonical workspace. Default is $HERMES_HOME/workspace.
-  - name: AUTORESEARCH_INBOX_WRITERS
-    required: false
-    description: >-
-      Comma-separated uids or user names allowed to write comms/inbox/ directly (an
-      external agent such as the Softmax IDE bridge, run as its own user). When set, only
-      inbox files they own are adopted. When unset, any valid file is adopted and
-      queue-keeper logs that direct writes are unauthenticated.
-  - name: AUTORESEARCH_CARD_MODELS
-    required: false
-    default: planning=z-ai/glm-5.3,scouting=z-ai/glm-5.3,maintenance=z-ai/glm-5.3
-    description: >-
-      Model per card mode, as mode=model pairs. queue-keeper creates each card with that
-      model (Hermes per-task model override); modes not listed, or set to "default", use
-      model.default. "none" puts every mode on model.default.
-  - name: AUTORESEARCH_MAX_CARD_RUNS
-    required: false
-    default: "4"
-    description: >-
-      Runs per card before queue-keeper stops it (blocks it with a help_request; never
-      requeued). Unblocking a stopped card gives it this many runs again. 0 turns it off.
-  - name: AUTORESEARCH_MAX_CARD_USD
-    required: false
-    default: "4"
-    description: >-
-      Estimated model spend (USD, Hermes' estimate in state.db) per card before
-      queue-keeper stops it. 0 turns it off.
-  - name: AUTORESEARCH_DAILY_BUDGET_USD
-    required: false
-    default: "100"
-    description: >-
-      Estimated model spend per UTC day of the research sessions of this profile (every
-      session but the IDE coach chat's; see AUTORESEARCH_CHAT_DAILY_USD). At the budget
-      queue-keeper pauses dispatch with a help_request; it resumes the next UTC day. 0 turns
-      it off.
-  - name: AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD
-    required: false
-    default: "10"
-    description: >-
-      OpenRouter key credit (USD, the key's limit_remaining) below which preflight pauses
-      the agent with a help_request. Set it lower when the key itself is small. A value that
-      is not a non-negative number uses the default.
-  - name: AUTORESEARCH_AUTONOMY
-    required: false
-    default: always
-    description: >-
-      "always": the agent plans its own research. "on-request": it plans nothing until the
-      coach's first task arrives (hosted Softmax, where any user can click Start). A
-      convenience, not a security control. An unknown value runs as "always" with a
-      help_request.
-  - name: AUTORESEARCH_CHAT_DAILY_USD
-    required: false
-    default: "3"
-    description: >-
-      Estimated model spend (USD per UTC day) of the IDE coach chat. Over it, the chat's
-      tools refuse (except status) and the chat says its budget is spent. Counted apart from
-      the research budget, which never includes chat sessions. 0 turns it off.
   - name: TMPDIR
     required: false
     description: >-
       Scratch directory for builds and episodes. Set by Softmax hosting (/opt/data/tmp, because
-      the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS. It is
-      on terminal.env_passthrough so cron scripts and workers see it.
-  - name: AUTORESEARCH_FALLBACK_PRICES
-    required: false
-    default: input=3,output=12,cache_read=0.75,cache_write=3
-    description: >-
-      USD per million tokens for a session Hermes could not price (no estimate), as
-      kind=price pairs over the defaults.
-  - name: AUTORESEARCH_CHAMPION_GRACE_MINUTES
-    required: false
-    default: "30"
-    description: Minutes the league may take to make our admitted submission the champion (from the submit when its membership cannot be found) before queue-keeper pauses the agent for a champion conflict.
-  - name: AUTORESEARCH_RELAUNCH_MIN_CREDITS
-    required: false
-    default: "100"
-    description: Credits an experiment refused for credits needs before it is relaunched, when the cost per XP episode cannot be estimated from recent requests.
-  - name: AUTORESEARCH_CREDIT_BACKOFF_MINUTES
-    required: false
-    default: "30"
-    description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
+      the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS.
   - name: GOTA_G2_RUNNER
     required: false
     default: native
     description: >-
       GotA G2 episode runner. "native" runs the pinned native match binary and needs no
       Docker; "docker" runs pinned coworld run-episode (needs Docker).
-  - name: AUTORESEARCH_SOFTMAX
+  - name: RESEARCH_CREDIT_BACKOFF_MINUTES
+    required: false
+    default: "30"
+    description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
+  - name: RESEARCH_SOFTMAX
     required: false
     description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.

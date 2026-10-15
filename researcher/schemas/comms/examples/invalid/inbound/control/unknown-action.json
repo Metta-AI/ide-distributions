@@ -1,9 +1,0 @@
-{
-  "_why": "action: must be one of pause, resume",
-  "schema": "ar-comms/0",
-  "id": "I-01K6Z3V8QX0000000000000008",
-  "kind": "control",
-  "author": "coach:ply_x",
-  "received_at": "2026-10-09T20:05:00+00:00",
-  "action": "stop"
-}

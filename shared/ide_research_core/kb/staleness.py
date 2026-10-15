@@ -10,9 +10,8 @@ game commits. A claim whose cited lines all stayed the same gets ``last_checked_
 renewed. A ``mechanism`` claim that was stale only because of the version change also gets
 its previous status back; other kinds keep ``stale`` for lint/apply and agents to judge, since
 unchanged source does not show unchanged behaviour. A claim with any changed cited line, or a
-cited file absent at either commit, gets a P2 maintenance re-verification card request; its
-``why`` carries ``[reverify <old_sha>..<new_sha>]``, and a re-run that finds such a request for
-the claim writes no second one.
+cited file absent at either commit, is reported in ``RenewalReport.reverify`` for a
+re-verification card.
 
 Code citations are tier-S evidence entries whose ``ref`` is one of:
 
@@ -34,10 +33,7 @@ from pathlib import Path
 from ide_research_core.io import gitops
 from ide_research_core.kb.apply import write_log
 from ide_research_core.kb.lint import load_records
-from ide_research_core.kb.requests import bracketed, has_marker, iter_request_specs
 from ide_research_core.paths import Layout
-from ide_research_core.queue.card import CardSpec
-from ide_research_core.queue.requests import write_request
 from ide_research_core.records.store import RecordStore
 
 STALE = "STALE"
@@ -48,14 +44,13 @@ _NOT_RENEWABLE = {"superseded", "refuted"}
 
 _SPEC_CITATION = re.compile(r"(?P<path>[^:@#\s]+):(?P<a>\d+)(?:-(?P<b>\d+))?@\S+")
 _SRC_CITATION = re.compile(r"src:(?P<path>[^#\s]+)#L(?P<a>\d+)(?:-L(?P<b>\d+))?")
-_REVERIFY_MARKER = re.compile(r"\[reverify [^\]\s]+\.\.[^\]\s]+\]")
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? ", re.MULTILINE)
 
 
 @dataclass
 class RenewalReport:
     renewed: list[str] = field(default_factory=list)
-    requested: list[str] = field(default_factory=list)
+    reverify: list[str] = field(default_factory=list)  # cited game code changed
 
 
 def version_older(version: str, current: str) -> bool:
@@ -130,7 +125,7 @@ def renew_code_citations(
     now: datetime.datetime,
 ) -> RenewalReport:
     """Renew claims whose cited game source lines did not change from ``old_sha`` to
-    ``new_sha``; request re-verification for claims whose cited lines changed."""
+    ``new_sha``; report the claims whose cited lines changed, for a re-verification card."""
     store = RecordStore(layout)
     at = now.isoformat()
     report = RenewalReport()
@@ -144,16 +139,14 @@ def renew_code_citations(
             if path not in changed_ranges:
                 changed_ranges[path] = _changed_old_ranges(game_repo, old_sha, new_sha, path)
         if any(_range_changed(changed_ranges[p], first, last) for p, first, last in citations):
-            if not _reverification_requested(layout, claim.id, old_sha, new_sha):
-                _request_reverification(layout, claim.id, old_sha, new_sha)
-                report.requested.append(claim.id)
+            report.reverify.append(claim.id)
         elif _renew(store, meta, current_version, at):
             write_log(
                 layout, at, RENEWED, claim.id, meta.get("last_checked_version"), current_version
             )
             report.renewed.append(claim.id)
     report.renewed.sort()
-    report.requested.sort()
+    report.reverify.sort()
     return report
 
 
@@ -214,45 +207,3 @@ def _status_patch(meta: dict, status: str, reason: str, at: str) -> dict:
         "status_ref": None,
         "status_history": [*(meta.get("status_history") or []), entry],
     }
-
-
-def _reverify_marker(old_sha: str, new_sha: str) -> str:
-    return f"reverify {old_sha}..{new_sha}"
-
-
-def _reverification_requested(layout: Layout, claim_id: str, old_sha: str, new_sha: str) -> bool:
-    """True if ``cards/requests`` already holds a create request for this claim and diff."""
-    marker, ref = _reverify_marker(old_sha, new_sha), f"ar://claim/{claim_id}"
-    return any(
-        ref in spec.get("refs", []) and has_marker(spec, marker)
-        for spec in iter_request_specs(layout)
-    )
-
-
-def pending_reverification(layout: Layout) -> set[str]:
-    """Claim ids that a re-verification request in ``cards/requests`` names."""
-    pending: set[str] = set()
-    for spec in iter_request_specs(layout):
-        if _REVERIFY_MARKER.search(spec.get("why", "")):
-            pending |= {
-                ref.removeprefix("ar://claim/")
-                for ref in spec.get("refs", [])
-                if ref.startswith("ar://claim/")
-            }
-    return pending
-
-
-def _request_reverification(layout: Layout, claim_id: str, old_sha: str, new_sha: str) -> str:
-    spec = CardSpec(
-        request_id="",  # write_request assigns the id
-        title=f"Re-verify claim {claim_id}",
-        mode="maintenance",
-        why=(
-            f"Game source lines cited by claim {claim_id} changed ("
-            f"{bracketed(_reverify_marker(old_sha, new_sha))})."
-        ),
-        refs=[f"ar://claim/{claim_id}"],
-        created_by="kb-staleness",
-        priority="P2",
-    )
-    return write_request(layout, "create", spec=spec)

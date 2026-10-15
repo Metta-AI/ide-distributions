@@ -51,5 +51,4 @@ def test_second_lock_holder_times_out(tmp_path):
 def test_layout_paths(tmp_path):
     layout = Layout(tmp_path)
     assert layout.claims == tmp_path / "kb/claims"
-    assert layout.ledger == tmp_path / ".supervisor/ledger"
     assert layout.plan == tmp_path / "plan.md"

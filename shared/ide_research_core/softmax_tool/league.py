@@ -1,7 +1,7 @@
 """Map league episodes (``Softmax.league_episodes``) to ``EpisodeRow``s for noise calibration.
 
 Each episode's raw ``results`` is written to a file and read by the game's evaluate binding
-(``<evaluate> --results <file> --json``, the same call xp-poll makes). The binding returns one
+(``<evaluate> --results <file> --json``, the same call ``softmax xp evidence`` makes). The binding returns one
 entry per (episode, seat) with ``metrics``; an entry names its ``seat`` (participant position),
 which may be left out only when the episode has a single seat. Each entry becomes one row:
 

@@ -15,6 +15,7 @@ when the design is frozen (``stats.freeze``); designs frozen before A12's revisi
 hash (``design_sha256``).
 """
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -22,7 +23,7 @@ from typing import Literal
 
 import jsonschema
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "evaluation_design.json"
+_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "evaluation_design.json"
 
 
 def _schema() -> dict:
@@ -167,3 +168,10 @@ class EvaluationDesign:
 def signed(value: float, spec: MetricSpec) -> float:
     """Direction-normalise: "down" metrics are negated so larger is always better."""
     return -value if spec.direction == "down" else value
+
+
+def design_sha256(design: EvaluationDesign) -> str:
+    """The hash ``stats evaluate`` stores with an outcome, so a promotion can tell that the
+    outcome was computed for the frozen design it is about to submit."""
+    canonical = json.dumps(design.to_dict(), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

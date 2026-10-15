@@ -10,7 +10,7 @@ Credential handling (C6, A4). ``SOFTMAX_PLAYER_CREDENTIAL`` holds one of two Pla
 - A Player session: JSON ``{"token": "ply_...", "expires_at": "<ISO 8601>"}``, the same shape
   as one entry of ``player_sessions[<server>].cache`` in the file that ``coworld player use
   <ply_id>`` writes. It lasts about 24 hours, and the server's ``/whoami`` does not report the
-  expiry, so the credential must carry it for preflight's expiry checks. It is written as the
+  expiry, so the credential must carry it for the identity expiry checks. It is written as the
   active player session, with ``tokens`` empty: with no user token in the file, an expired
   session makes the CLI report "Not authenticated" instead of silently acting as a user.
 

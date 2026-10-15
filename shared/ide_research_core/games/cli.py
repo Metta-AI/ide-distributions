@@ -4,7 +4,7 @@ Prints ``{"ok": true, "data": {name, bindings, reference_types, outcome_metrics,
 performance_guardrails, min_episodes_floor, league_id, noise_source, layers, compiler,
 path}}``: the validated ``GAME.md`` front matter (``games.loader.load_game``) and the file's
 path. The guide body is not printed; read ``path`` for it. ``--name`` defaults to
-``AUTORESEARCH_GAME``. Exit 1 when the contract is missing or invalid, 2 when no game is named.
+``RESEARCH_GAME``. Exit 1 when the contract is missing or invalid, 2 when no game is named.
 """
 
 import argparse
@@ -16,7 +16,7 @@ from pathlib import Path
 from ide_research_core.cli import register_group
 from ide_research_core.games.loader import GameError, load_game
 
-GAME_ENV = "AUTORESEARCH_GAME"
+GAME_ENV = "RESEARCH_GAME"
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project root
 
 

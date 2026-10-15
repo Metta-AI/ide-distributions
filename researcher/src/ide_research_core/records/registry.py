@@ -15,7 +15,7 @@ record keeps its id and file name; lookups (``path_for``, ``parse_record_path``,
 ``iter_record_files``) search both locations, and new records go to the primary one. The move
 itself is ``RecordStore.archive``; ``mutability.move_problems`` judges it.
 
-Schemas live in ``schemas/entity/<name>.json`` (draft 2020-12). There is no ``lever`` entity:
+Schemas live in the package, ``ide_research_core/schemas/entity/<name>.json`` (draft 2020-12). There is no ``lever`` entity:
 a closed lever is a refuted mechanism claim.
 """
 
@@ -33,7 +33,7 @@ from ide_research_core.paths import Layout
 
 Doc = tuple[dict, str]
 
-SCHEMA_DIR = Path(__file__).resolve().parents[3] / "schemas" / "entity"
+SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas" / "entity"
 SLUG_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _ULID = r"[0-9A-HJKMNP-TV-Z]{26}"
 

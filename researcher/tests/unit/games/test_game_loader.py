@@ -38,7 +38,7 @@ def test_template_has_every_field():
 
 def test_starter_policy_section_is_required_and_present():
     """Every game ships a starter policy, the first champion when the league shows none for
-    our player (A14); ``softmax bootstrap-champion`` follows its ``## Starter policy``."""
+    our player (A14); a bootstrap card follows its ``## Starter policy``."""
     _, template = read_doc(REPO_ROOT / "games" / "_template" / "GAME.md")
     _, fakegame = read_doc(REPO_ROOT / "games" / "fakegame" / "GAME.md")
     assert "`## Starter policy` section" in template

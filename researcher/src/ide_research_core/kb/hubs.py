@@ -1,4 +1,4 @@
-"""Hub health flags and the maintenance cards they produce (System Design §3.5).
+"""Hub health flags (System Design §3.5).
 
 ``hub_flags`` is pure. Codes (``Finding.entity`` is the hub id; for ``HUB_OVERLAP`` it is the
 two hub ids, sorted and comma-joined):
@@ -9,19 +9,15 @@ two hub ids, sorted and comma-joined):
   hub covers more than one subject, split it.
 - ``HUB_OVERLAP``: two hubs' cited-claim sets have Jaccard similarity of at least 0.6 -- merge them.
 
-``request_hub_maintenance`` writes one P2 maintenance card request per finding. The request's
-``why`` carries a marker ``[hub:<code>:<entity>]``; a finding whose marker is already in
-``cards/requests`` gets no second request.
+The findings are data: the kb-maintenance skill reports them to the orchestrator, which
+decides whether a maintenance card splits or merges hubs.
 """
 
 from itertools import combinations
 
 from ide_research_core.kb.index import estimate_tokens
 from ide_research_core.kb.lint import Finding, cited_claims, load_records
-from ide_research_core.kb.requests import bracketed, has_marker, iter_request_specs
 from ide_research_core.paths import Layout
-from ide_research_core.queue.card import CardSpec
-from ide_research_core.queue.requests import write_request
 from ide_research_core.records.registry import path_for
 
 HUB_TOO_LARGE = "HUB_TOO_LARGE"
@@ -93,28 +89,3 @@ def _component_sizes(nodes: set[str], links: dict[str, set[str]]) -> list[int]:
                 stack.append(other)
         sizes.append(size)
     return sorted(sizes, reverse=True)
-
-
-def _marker(finding: Finding) -> str:
-    return f"hub:{finding.code}:{finding.entity}"
-
-
-def request_hub_maintenance(layout: Layout, findings: list[Finding]) -> list[str]:
-    """Write a P2 maintenance request per hub finding not yet requested; return the Q ids."""
-    request_ids = []
-    for finding in findings:
-        marker = _marker(finding)
-        if any(has_marker(spec, marker) for spec in iter_request_specs(layout)):
-            continue
-        hub_ids = finding.entity.split(",")
-        spec = CardSpec(
-            request_id="",  # write_request assigns the id
-            title=f"{_ACTION[finding.code]} hub {' and '.join(hub_ids)}",
-            mode="maintenance",
-            why=f"{finding.code}: {finding.message} {bracketed(marker)}",
-            refs=[f"ar://hub/{hub_id}" for hub_id in hub_ids],
-            created_by="kb-hub-check",
-            priority="P2",
-        )
-        request_ids.append(write_request(layout, "create", spec=spec))
-    return request_ids

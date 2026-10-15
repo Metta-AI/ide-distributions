@@ -7,9 +7,9 @@ import sys
 
 
 def main():
-    executable = os.environ.get('AUTORESEARCH_CLI')
+    executable = os.environ.get('RESEARCH_CLI')
     if not executable:
-        print(json.dumps({'ok': False, 'error': 'set AUTORESEARCH_CLI to the installed shared CLI'}))
+        print(json.dumps({'ok': False, 'error': 'set RESEARCH_CLI to the installed shared CLI'}))
         return 2
     return subprocess.run([executable, 'softmax', 'upload', *sys.argv[1:]], check=False).returncode
 

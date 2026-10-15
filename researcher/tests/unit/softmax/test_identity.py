@@ -120,7 +120,7 @@ def test_require_player_rejects_expired_credential(env, runner):
 
 
 def test_require_player_rejects_missing_expected_id(env, runner):
-    with pytest.raises(IdentityError, match="AUTORESEARCH_PLAYER_ID"):
+    with pytest.raises(IdentityError, match="RESEARCH_PLAYER_ID"):
         require_player(make_cli(env, runner), "", datetime.now(UTC))
 
 
@@ -132,7 +132,7 @@ def test_identity_problems_is_the_single_predicate():
     problems = identity_problems(bad, PLAYER_ID, now)
     assert len(problems) == 3
     assert any("'user'" in p for p in problems) and any("expired" in p for p in problems)
-    assert identity_problems(good, "", now) == ["AUTORESEARCH_PLAYER_ID is not set"]
+    assert identity_problems(good, "", now) == ["RESEARCH_PLAYER_ID is not set"]
 
 
 # --- cga_ agent tokens (the Softmax hosting runtime's player credential) ---

@@ -147,7 +147,7 @@ def test_validate_requires_target(capsys, root):
 
 def test_root_from_run_context(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("AUTORESEARCH_WORKSPACE", str(tmp_path / "canonical"))
+    monkeypatch.setenv("RESEARCH_WORKSPACE", str(tmp_path / "canonical"))
     monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(tmp_path / "worker"))
     monkeypatch.setenv("HERMES_KANBAN_TASK", "t_1")
     code, env = run(capsys, "new", "hypothesis", "--meta", json.dumps(HYP))

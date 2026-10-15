@@ -1,3 +1,6 @@
+"""The shipped distribution: manifest, config, cron, the guard plugin and the deny list."""
+
+import importlib.util
 import json
 import subprocess
 import sys
@@ -7,106 +10,100 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+GUARD = ROOT / "plugins/researcher_guard/__init__.py"
 
 
 def test_manifest():
-    m = yaml.safe_load((ROOT / "distribution.yaml").read_text())
-    assert m["name"] == "researcher" and m["hermes_requires"] == ">=0.21.5"
-    assert "distribution_owned" not in m
-    env = {e["name"]: e for e in m["env_requires"]}
-    for k in [
-        "OPENROUTER_API_KEY",
-        "SOFTMAX_PLAYER_CREDENTIAL",
-        "AUTORESEARCH_PLAYER_ID",
-        "AUTORESEARCH_WORKSPACE_REMOTE",
-    ]:
-        assert env[k]["required"] is True
-    assert env["OPENROUTER_MODEL"]["default"] == "moonshotai/kimi-k3"
-    assert env["AUTORESEARCH_GAME"]["default"] == "gota"
-    assert env["AUTORESEARCH_CHAT_DAILY_USD"]["default"] == "3"
-    floor = env["AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD"]
-    assert floor["required"] is False and floor["default"] == "10"
+    manifest = yaml.safe_load((ROOT / "distribution.yaml").read_text())
+    assert manifest["name"] == "researcher" and manifest["hermes_requires"] == ">=0.21.6"
+    env = {entry["name"]: entry for entry in manifest["env_requires"]}
+    for name in ("OPENROUTER_API_KEY", "SOFTMAX_PLAYER_CREDENTIAL", "RESEARCH_PLAYER_ID",
+                 "RESEARCH_CANONICAL"):  # fmt: skip
+        assert env[name]["required"] is True, name
+    assert env["RESEARCH_GAME"]["default"] == "gota"
+    assert not [name for name in env if name.startswith("AUTORESEARCH_")]
+    assert "distribution_owned" not in manifest  # the whole folder is owned
 
 
 def test_config():
-    c = yaml.safe_load((ROOT / "config.yaml").read_text())
-    assert "autoresearch" in c["plugins"]["enabled"]
-    assert c["model"]["default"] == "moonshotai/kimi-k3"
-    assert "z-ai/glm-5.3" in json.dumps(c["fallback_providers"])
-    k = c["kanban"]
-    assert (k["max_in_progress"], k["auto_decompose"], k["review_dispatch"],
-            k["auto_subscribe_on_create"]) == (2, False, False, False)
-    assert "default_assignee" not in k
-    assert c["memory"] == {
-        "memory_enabled": True, "user_profile_enabled": False, "write_approval": False,
-    }
-    # A process_manage wait (terminal.timeout) must fit inside one tool call.
-    assert c["terminal"]["timeout"] == 1800
-    assert c["timeouts"]["tools"] == {"sequential_call": 1900, "concurrent_batch": 1900}
-    assert c["agent"]["run_budget_seconds"] == 5400
-    assert set(c["terminal"]["env_passthrough"]) == {
-        "SOFTMAX_PLAYER_CREDENTIAL", "AUTORESEARCH_PLAYER_ID", "AUTORESEARCH_WORKSPACE",
-        "AUTORESEARCH_WORKSPACE_REMOTE", "AUTORESEARCH_GAME", "AUTORESEARCH_SOFTMAX",
-        "AUTORESEARCH_CLI", "OPENROUTER_MODEL", "AUTORESEARCH_INBOX_WRITERS",
-        "AUTORESEARCH_CHAMPION_GRACE_MINUTES", "COGAMES_API_URL",
-        "AUTORESEARCH_CARD_MODELS", "AUTORESEARCH_MAX_CARD_RUNS", "AUTORESEARCH_MAX_CARD_USD",
-        "AUTORESEARCH_DAILY_BUDGET_USD", "AUTORESEARCH_FALLBACK_PRICES",
-        "AUTORESEARCH_RELAUNCH_MIN_CREDITS", "AUTORESEARCH_MIN_OPENROUTER_CREDIT_USD",
-        "AUTORESEARCH_AUTONOMY", "AUTORESEARCH_CHAT_DAILY_USD", "TMPDIR",
-        "GOTA_G2_RUNNER",
-    }
+    config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    assert config["plugins"]["enabled"] == ["researcher_guard"]
+    assert config["memory"]["memory_enabled"] is False
+    assert "platform_toolsets" not in config and "kanban" not in config
+    passthrough = set(config["terminal"]["env_passthrough"])
+    assert {"RESEARCH_CLI", "RESEARCH_WORKSPACE", "RESEARCH_CANONICAL", "RESEARCH_PLAYER_ID",
+            "RESEARCH_GAME", "SOFTMAX_PLAYER_CREDENTIAL"} <= passthrough  # fmt: skip
+    assert not [name for name in passthrough if name.startswith("AUTORESEARCH_")]
 
 
-def test_cron_jobs():
-    jobs = json.loads((ROOT / "cron/jobs.json").read_text())["jobs"]
-    by = {j["id"]: j for j in jobs}
-    assert set(by) == {"queue-keeper", "xp-poll", "health"}
-    for j in jobs:
-        assert j["no_agent"] is True and j["enabled"] is False and j["state"] == "paused"
-        assert isinstance(j["schedule"], dict)
-        assert (ROOT / "scripts" / j["script"]).is_file()
+def test_no_cron_jobs():
+    assert json.loads((ROOT / "cron/jobs.json").read_text())["jobs"] == []
 
 
-def test_plugin_import_graph_is_stdlib_only():
-    entry = ROOT / "plugins/autoresearch/__init__.py"
-    code = f"import runpy,sys; sys.argv=['x']; runpy.run_path({str(entry)!r})"
-    r = subprocess.run(
-        [sys.executable, "-S", "-I", "-c", code],
-        capture_output=True, text=True, check=False, env={"HERMES_HOME": str(ROOT)},
-    )
-    assert r.returncode == 0, r.stderr
+def test_bootstrap_script_and_doctrine_ship():
+    assert (ROOT / "scripts/bootstrap.py").is_file()
+    assert (ROOT / "doctrine/VERSION").is_file()
 
 
-def test_plugin_stub_registers_six_hooks_and_logs_tool_events(tmp_path, monkeypatch):
-    from ide_research_core.plugin import adapters
+def test_guard_imports_only_the_standard_library():
+    code = f"import runpy; runpy.run_path({str(GUARD)!r})"
+    run = subprocess.run([sys.executable, "-S", "-I", "-c", code],
+                         capture_output=True, text=True, check=False)  # fmt: skip
+    assert run.returncode == 0, run.stderr
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.delenv("AUTORESEARCH_WORKSPACE", raising=False)
-    monkeypatch.setenv("AUTORESEARCH_AGENT_SESSION", "")  # register sets it; restored after
+
+def _guard():
+    spec = importlib.util.spec_from_file_location("researcher_guard", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_guard_registers_one_hook_and_its_manifest_names_it():
     hooks = {}
 
-    class FakeCtx:
+    class Context:
         def register_hook(self, name, callback):
             hooks[name] = callback
 
-        def register_tool(self, **kwargs):
-            tools.append(kwargs["name"])
-
-    tools = []
-    adapters.register(FakeCtx())
-    assert set(hooks) == {
-        "pre_tool_call", "post_tool_call", "on_session_end", "pre_llm_call",
-        "transform_llm_output", "kanban_task_completed",
-    }
-    manifest = yaml.safe_load((ROOT / "plugins/autoresearch/plugin.yaml").read_text())
-    assert set(manifest["provides_hooks"]) == set(hooks)
-    assert manifest["provides_tools"] == tools
-    hooks["post_tool_call"](tool_name="terminal", status="ok", surprise_kwarg=1)
-    log = tmp_path / "workspace/.supervisor/runtime/tool_events.jsonl"
-    assert json.loads(log.read_text())["tool"] == "terminal"
+    _guard().register(Context())
+    assert set(hooks) == {"pre_tool_call"}
+    manifest = yaml.safe_load((GUARD.parent / "plugin.yaml").read_text())
+    assert manifest["name"] == "researcher_guard" and manifest["provides_hooks"] == ["pre_tool_call"]
 
 
-HERMES_SOURCE = Path.home() / "coding/tools/hermes-agent-v2026.9.24"
+@pytest.mark.parametrize("tool", ["kanban_create", "kanban_link", "kanban_schedule"])
+def test_guard_blocks_card_creation(tool):
+    verdict = _guard().pre_tool_call(tool_name=tool, args={})
+    assert verdict["action"] == "block" and "orchestrator" in verdict["message"]
+
+
+@pytest.mark.parametrize(
+    "tool", ["kanban_show", "kanban_comment", "kanban_complete", "kanban_block", "read_file"]
+)
+def test_guard_allows_the_card_lifecycle(tool):
+    assert _guard().pre_tool_call(tool_name=tool, args={}) is None
+
+
+@pytest.mark.parametrize(
+    ("command", "blocked"),
+    [
+        ("git push origin main", True),
+        ("cd /w && git push origin HEAD:main", True),
+        ("GIT_TRACE=1 /usr/bin/git push origin +card/x:refs/heads/main", True),
+        ("git push --all origin", True),
+        ("git -C /w push origin card/t_1", False),
+        ('"$RESEARCH_CLI" workspace integrate', False),
+        ("echo git push origin main is blocked", False),
+        ('git commit -m "never git push origin main"', False),
+    ],
+)
+def test_guard_blocks_pushing_main(command, blocked):
+    verdict = _guard().pre_tool_call(tool_name="terminal", args={"command": command})
+    assert (verdict is not None and verdict["action"] == "block") is blocked
+
+
+HERMES_SOURCE = Path.home() / "coding/tools/hermes-agent-v0.21.6"
 
 
 def _deny_globs() -> list[str]:
@@ -114,7 +111,7 @@ def _deny_globs() -> list[str]:
 
 
 def _is_denied(command: str) -> bool:
-    """Hermes' own variant generator plus its fnmatchcase rule (tools/approval_floors.py:23-42)."""
+    """Hermes' own variant generator plus its fnmatchcase rule (tools/approval_floors.py)."""
     import fnmatch
 
     sys.path.insert(0, str(HERMES_SOURCE))
@@ -134,10 +131,10 @@ def _is_denied(command: str) -> bool:
 @pytest.mark.parametrize(
     ("command", "blocked"),
     [
-        ('"$AUTORESEARCH_CLI" softmax submit E-1', False),
-        ('"$AUTORESEARCH_CLI" softmax xp create E-1', False),
+        ('"$RESEARCH_CLI" softmax xp create E-1', False),
+        ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', False),
+        ('"$RESEARCH_CLI" workspace integrate', False),
         ('git commit -m "avoid coworld submit"', False),
-        ('"$AUTORESEARCH_CLI" card finish --summary "never run coworld player use"', False),
         ("coworld submit pv_1 league_x", True),
         ("cd /tmp && coworld player use ply_1", True),
         ("softmax login", True),
@@ -145,15 +142,12 @@ def _is_denied(command: str) -> bool:
         ("git push --force", True),
         ("git push -f origin main", True),
         ("git push origin --force", True),
-        ("git push origin main", False),
-        ("hermes kanban create x --assignee autoresearch", True),
+        ("hermes kanban create x --assignee researcher-1", True),
         ("hermes kanban --board autoresearch link t_1 t_2", True),
-        ('"$AUTORESEARCH_CLI" promotion accept-champion', True),
-        ("cd /x && autoresearch promotion accept-champion --help", True),
-        ('git commit -m "do not run promotion accept-champion"', False),
-        ('"$AUTORESEARCH_CLI" runtime accept-commits abc1234', True),
-        ("cd /x && autoresearch runtime accept-commits", True),
-        ('git commit -m "do not run runtime accept-commits"', False),
+        ('"$RESEARCH_CLI" promotion submit E-1', True),
+        ('"$RESEARCH_CLI" promotion bootstrap --version V-1', True),
+        ("cd /x && research promotion accept", True),
+        ('git commit -m "the orchestrator runs promotion submit"', False),
         ("cd /tmp && hermes kanban create x", True),
         ("hermes kanban show t_1 --json", False),
         ('git commit -m "no hermes kanban create here"', False),

@@ -65,7 +65,7 @@ def test_main_returns_1_on_launch_error(tmp_path, monkeypatch):
         raise launch.LaunchError("install uv")
 
     monkeypatch.setattr(launch, "ensure_venv", fail)
-    assert launch.main("health", []) == 1
+    assert launch.main([]) == 1
 
 
 def test_main_execs_venv_python(tmp_path, monkeypatch):
@@ -76,11 +76,11 @@ def test_main_execs_venv_python(tmp_path, monkeypatch):
     monkeypatch.setattr(launch, "ensure_venv", lambda home: False)
     calls = []
     monkeypatch.setattr(launch.os, "execv", lambda path, args: calls.append((path, args)))
-    launch.main("health", ["--x"])
-    assert calls == [(str(python), [str(python), "-m", "ide_research_core.runtime.health", "--x"])]
+    launch.main(["--x"])
+    assert calls == [(str(python), [str(python), "-m", "ide_research_core", "--x"])]
 
 
 def test_main_returns_1_when_venv_python_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setattr(launch, "ensure_venv", lambda home: False)
-    assert launch.main("health", []) == 1
+    assert launch.main([]) == 1

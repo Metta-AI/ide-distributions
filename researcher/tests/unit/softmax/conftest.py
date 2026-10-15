@@ -47,7 +47,7 @@ class FakeRunner:
     Every call must end with ``--server <server>`` (``server``: the default API server unless a
     test sets it), or the runner raises ``ServerOptionMissing``; so every test checks that each
     CLI call names its server explicitly. That is a ``BaseException``, so code under test that
-    catches ``Exception`` (preflight, health, queue-keeper steps) cannot swallow it. The
+    catches ``Exception`` (a command's broad error handling) cannot swallow it. The
     recorded argv leaves that pair out, to keep assertions short.
     """
 
@@ -90,7 +90,7 @@ def env(tmp_path) -> dict[str, str]:
     return {
         "HERMES_HOME": str(tmp_path / "hermes"),
         "SOFTMAX_PLAYER_CREDENTIAL": credential_value(),
-        "AUTORESEARCH_PLAYER_ID": PLAYER_ID,
-        "AUTORESEARCH_SOFTMAX": "real",
+        "RESEARCH_PLAYER_ID": PLAYER_ID,
+        "RESEARCH_SOFTMAX": "real",
     }
 

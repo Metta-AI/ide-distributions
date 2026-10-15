@@ -60,7 +60,7 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> str | None:
 class PreparedCommit:
     """A commit object that no branch points at yet (``prepare_*``). ``land`` moves HEAD to
     it; ``settle`` then brings the real index in line. Building the commit before moving the
-    branch lets a caller record its exact sha first (``runtime.provenance``)."""
+    branch lets a caller record its exact sha first."""
 
     sha: str
     parent: str | None  # HEAD when it was prepared; None in an empty repository

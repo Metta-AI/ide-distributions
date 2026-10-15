@@ -1,8 +1,0 @@
-{
-  "id": "coach:cancel:example",
-  "kind": "control",
-  "author": "coach",
-  "created": "2026-10-14T00:00:00Z",
-  "action": "cancel",
-  "task": "coach:task:example"
-}

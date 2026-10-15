@@ -2,7 +2,7 @@
 
 Every mutating method (``upload``, ``xp_create``, ``submit``) runs ``whoami`` with the same
 credential immediately before acting and raises ``IdentityError`` unless it is a Player whose id
-is ``AUTORESEARCH_PLAYER_ID`` with an unexpired token (C6). Nothing about identity is cached.
+is ``RESEARCH_PLAYER_ID`` with an unexpired token (C6). Nothing about identity is cached.
 
 Policy identifiers: ``upload-policy`` prints only ``Upload complete: <name>:v<N>`` and ``submit``
 takes ``<name>:v<N>`` (coworld 0.1.58 has no ``--json`` for either). The ``policy_version_id`` this
@@ -100,7 +100,7 @@ class SoftmaxClient:
         http_get: HttpGet | None = None,
     ):
         self._cli = PlatformCli(env, run=run, bin_dir=bin_dir, http_get=http_get)
-        self._expected_player = env.get("AUTORESEARCH_PLAYER_ID", "")
+        self._expected_player = env.get("RESEARCH_PLAYER_ID", "")
         self._clock = clock
 
     def _require_player(self) -> Identity:

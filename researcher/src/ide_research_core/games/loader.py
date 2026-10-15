@@ -11,7 +11,7 @@ from ide_research_core.io.docs import read_doc
 BINDING_NAMES = ("build", "local_check", "upload", "evaluate", "replay_inspect")
 COMPILERS = ("pw", "basic", "none")
 DIRECTIONS = ("up", "down")
-# How queue-keeper reads the game source commit the current game version runs.
+# How a maintenance card reads the game source commit the current game version runs.
 # ``coworld_manifest``: ``Softmax.game_source_pin`` (the commit in the Coworld manifest).
 PIN_SOURCES = ("coworld_manifest",)
 
@@ -43,12 +43,12 @@ class Game:
     - compiler: ``pw``, ``basic`` or ``none``.
     - source: optional ``{repo, pin}``: the game source repository (git URL or local path) and
       how to read the commit the current game version runs (one of ``PIN_SOURCES``). With it,
-      queue-keeper renews code citations when the commit changes; without it, claims only go
+      a maintenance card renews code citations when the commit changes; without it, claims only go
       stale on a version change.
     - host_env, host_tools: optional ``host_requirements: {env: [...], tools: [...]}``: the
       environment variables and executables (on PATH) a worker needs for the bindings, such as
-      a build. Queue-keeper checks them against what workers see
-      (``preflight.host_requirement_problems``) and warns once when one is missing.
+      a build. A worker checks them before a long build and blocks its card with a
+      ``help_request:`` reason when one is missing.
     """
 
     name: str

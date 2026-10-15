@@ -3,7 +3,7 @@
 ``binding_evaluate(game)`` is the ``evaluate`` binding in hosted-results mode:
 ``<evaluate> --results <results.json> --json``, run from the repo root. It returns the
 binding's ``data.episodes``: one entry per (episode, seat), ``[{episode, seat, metrics,
-status?, seed?}]`` (contract in ``games/_template/GAME.md``). xp-poll uses it on XP results and
+status?, seed?}]`` (contract in ``games/_template/GAME.md``). ``softmax xp evidence`` uses it on XP results and
 reduces our seats by the mean; ``softmax league-episodes`` on league episode results, one row
 per seat.
 """

@@ -37,9 +37,9 @@ def resolve(path: Path | None = None, *, offline=False):
             raise ValueError('offline manifest differs from historical engine pin')
         identity['manifest'] = manifest
         return identity
-    cli = os.environ.get('AUTORESEARCH_CLI')
+    cli = os.environ.get('RESEARCH_CLI')
     if not cli:
-        raise OSError('set AUTORESEARCH_CLI to resolve the live GotA engine; use --offline only for historical builds')
+        raise OSError('set RESEARCH_CLI to resolve the live GotA engine; use --offline only for historical builds')
     result = subprocess.run([cli, 'softmax', 'game-version'], capture_output=True,
                             text=True, check=True, timeout=60)
     envelope = json.loads(result.stdout)

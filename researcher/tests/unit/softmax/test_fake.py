@@ -32,7 +32,7 @@ def test_state_persists_across_processes(tmp_path):
 
 
 def test_default_identity_and_env_player(tmp_path):
-    ident = make(tmp_path, AUTORESEARCH_PLAYER_ID="ply_x").whoami()
+    ident = make(tmp_path, RESEARCH_PLAYER_ID="ply_x").whoami()
     assert (ident.subject_type, ident.player_id) == ("player", "ply_x")
     assert ident.expires_at > datetime.now(UTC) + timedelta(hours=23)
     assert make(tmp_path / "b").whoami().player_id == "ply_fake"
@@ -40,32 +40,32 @@ def test_default_identity_and_env_player(tmp_path):
 
 def test_whoami_answers_for_the_credential_not_the_expected_player(tmp_path):
     """A fake credential that names its player (``player_id``) is who whoami reports, so a
-    wrong ``AUTORESEARCH_PLAYER_ID`` is caught (C6) as it is on the real platform."""
+    wrong ``RESEARCH_PLAYER_ID`` is caught (C6) as it is on the real platform."""
     credential = json.dumps({"token": "t", "expires_at": "2099-01-01T00:00:00Z",
                              "player_id": "ply_a"})  # fmt: skip
-    sm = make(tmp_path, AUTORESEARCH_PLAYER_ID="ply_wrong", SOFTMAX_PLAYER_CREDENTIAL=credential)
+    sm = make(tmp_path, RESEARCH_PLAYER_ID="ply_wrong", SOFTMAX_PLAYER_CREDENTIAL=credential)
     assert sm.whoami().player_id == "ply_a"
     with pytest.raises(IdentityError, match="ply_wrong"):
         sm.submit("pv_1", "lg_1")
-    plain = make(tmp_path / "b", AUTORESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="fake")
+    plain = make(tmp_path / "b", RESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="fake")
     assert plain.whoami().player_id == "ply_x"  # no player in the credential: the expected one
 
 
 def test_agent_token_credential_has_no_expiry(tmp_path):
-    sm = make(tmp_path, AUTORESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="cga_abc")
+    sm = make(tmp_path, RESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="cga_abc")
     assert sm.whoami().expires_at is None
     sm.submit("pv_1", "lg_1")  # the C6 check passes: a non-expiring Player
 
 
 def test_identity_faults(tmp_path):
-    sm = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="identity=user;player=ply_other;expires_in=60")
+    sm = make(tmp_path, RESEARCH_FAKE_FAULTS="identity=user;player=ply_other;expires_in=60")
     ident = sm.whoami()
     assert (ident.subject_type, ident.player_id) == ("user", "ply_other")
     assert ident.expires_at < datetime.now(UTC) + timedelta(seconds=120)
 
 
 def test_credits_fault_denies_xp(tmp_path):
-    sm = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="credits=0")
+    sm = make(tmp_path, RESEARCH_FAKE_FAULTS="credits=0")
     assert sm.credits() == 0
     assert isinstance(sm.xp_create("E-1", 1, 1, SPEC), CreditDenied)
 
@@ -144,7 +144,7 @@ def test_seeded_results_follow_the_uploaded_parameters(tmp_path):
 
 
 def test_fail_after_persists_then_raises(tmp_path):
-    sm = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="fail_after=submit")
+    sm = make(tmp_path, RESEARCH_FAKE_FAULTS="fail_after=submit")
     pv = sm.upload(tmp_path / "a", "a")
     with pytest.raises(RuntimeError, match="injected fault after submit"):
         sm.submit(pv, "lg_1")
@@ -166,7 +166,7 @@ def test_game_version_default(tmp_path):
 
 
 def test_from_env(tmp_path):
-    assert isinstance(from_env({"AUTORESEARCH_SOFTMAX": "fake"}, tmp_path), FakeSoftmax)
+    assert isinstance(from_env({"RESEARCH_SOFTMAX": "fake"}, tmp_path), FakeSoftmax)
 
 
 def test_xp_create_idempotent_single_charge(tmp_path):
@@ -179,7 +179,7 @@ def test_xp_create_idempotent_single_charge(tmp_path):
 
 
 def test_xp_create_retry_after_fail_after_not_double_charged(tmp_path):
-    crashing = make(tmp_path, AUTORESEARCH_FAKE_FAULTS="fail_after=xp_create")
+    crashing = make(tmp_path, RESEARCH_FAKE_FAULTS="fail_after=xp_create")
     before = crashing.credits()
     with pytest.raises(RuntimeError):
         crashing.xp_create("E-1", 1, 1, SPEC)

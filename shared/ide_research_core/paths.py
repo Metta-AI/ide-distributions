@@ -10,9 +10,8 @@ class Layout:
 
     kb/claims, kb/hubs, kb/archive, kb/log (one ``<ULID>.md`` per entry), kb/_generated;
     topics, hypotheses, experiments, results, versions (``<V-id>/version.json`` + events/);
-    evidence/index (``<EV-id>.json``); journal; lessons; comms/{outbox,staged,inbox};
-    cards/requests; strategy; candidates; stats; plan.md; AGENTS.md;
-    .supervisor/ledger (durable, tracked).
+    evidence/index (``<EV-id>.json``); journal; lessons; strategy; candidates; stats; plan.md;
+    AGENTS.md. The orchestrator also writes ``control/`` and ``promotions/`` (see ``workspace``).
     """
 
     root: Path
@@ -76,21 +75,9 @@ class Layout:
     def lessons(self) -> Path:
         return self._sub("lessons")
 
-    @property
-    def comms_outbox(self) -> Path:
-        return self._sub("comms/outbox")
 
-    @property
-    def comms_staged(self) -> Path:
-        return self._sub("comms/staged")
 
-    @property
-    def comms_inbox(self) -> Path:
-        return self._sub("comms/inbox")
 
-    @property
-    def card_requests(self) -> Path:
-        return self._sub("cards/requests")
 
     @property
     def strategy(self) -> Path:
@@ -111,7 +98,3 @@ class Layout:
     @property
     def agents_md(self) -> Path:
         return self._sub("AGENTS.md")
-
-    @property
-    def ledger(self) -> Path:
-        return self._sub(".supervisor/ledger")

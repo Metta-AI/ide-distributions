@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fake resolver for the ``replay`` reference type: ``ar://replay/<seed>:<tick>``. Stdlib only.
 
-Called as ``fake_ref.py <id>`` with ``AUTORESEARCH_WORKSPACE`` and ``AUTORESEARCH_REV`` set
+Called as ``fake_ref.py <id>`` with ``RESEARCH_WORKSPACE`` and ``RESEARCH_REV`` set
 (see ``ide_research_core.comms.resolver``). Prints one deterministic tick summary as JSON; exits 1
 for an id that is not ``<seed>:<tick>``.
 """
@@ -19,7 +19,7 @@ def main(argv: list[str]) -> int:
     segment = {
         "seed": int(seed),
         "tick": int(tick),
-        "rev": os.environ.get("AUTORESEARCH_REV"),
+        "rev": os.environ.get("RESEARCH_REV"),
         "events": [f"tick {tick} of seed {seed}"],
     }
     print(json.dumps(segment, sort_keys=True))

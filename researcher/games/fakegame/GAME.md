@@ -21,7 +21,7 @@ compiler: none
 # Fake game
 
 Test-only game used by protocol tests and the fake research cycle. It runs on the fake Softmax
-platform (`AUTORESEARCH_SOFTMAX=fake`), never on a real league.
+platform (`RESEARCH_SOFTMAX=fake`), never on a real league.
 
 ## Seats and opponents
 
@@ -57,9 +57,9 @@ Run each binding from `"$AR_HOME"` with absolute paths.
   parameters) and `version.json` in the build directory. Its one gate, `local_check`, always
   passes.
 - `local_check`: `python3 games/fakegame/tools/fake_build.py --check <candidate> --json`.
-- `upload`: not used by agents; `"$AUTORESEARCH_CLI" softmax upload` uploads.
+- `upload`: not used by agents; `"$RESEARCH_CLI" softmax upload` uploads.
 - `evaluate`: `python3 games/fakegame/tools/fake_eval.py --results <results.json> --json`
-  (used by xp-poll and `softmax league-episodes`). `--policy <id> --seed <n>` is a local run
+  (used by `softmax xp evidence` and `softmax league-episodes`). `--policy <id> --seed <n>` is a local run
   for debugging only: it scores by a hash of the policy id and does **not** follow the
   Mechanics above, so never use it as evidence (D-04).
 - `replay_inspect`: `python3 games/fakegame/tools/fake_eval.py --replay --policy <id> --seed
@@ -71,4 +71,5 @@ The starter policy is the champion STRATEGY at install, `<worktree>/strategy/STR
 seed strategy). Build it with the `build` binding:
 `python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/starter --json`,
 check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
-then submit it as the first champion with `"$AUTORESEARCH_CLI" softmax bootstrap-champion --build-dir <worktree>/.scratch/build/starter`.
+then upload it with `"$RESEARCH_CLI" softmax upload-bootstrap --build-dir <worktree>/.scratch/build/starter`;
+the orchestrator submits it as the first champion.

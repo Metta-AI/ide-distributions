@@ -3,7 +3,7 @@
 State lives in ``<canonical>/.supervisor/runtime/fake_softmax.json``; every operation is a
 read-modify-write under a file lock, so separate processes share one fake platform.
 
-Faults come from ``AUTORESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value``):
+Faults come from ``RESEARCH_FAKE_FAULTS`` (semicolon-separated ``name=value``):
 ``credits=N``, ``identity=user``, ``identity=rejected`` (``whoami`` raises
 ``CredentialRejected``, as for a revoked token), ``player=<id>``, ``expires_in=<seconds>``,
 ``fail_after=<op>`` (raise right after that op's state change is saved), ``xp_limit=N``
@@ -23,7 +23,7 @@ entry has ``"failed": true`` (tests set it in the state file) reports status ``f
 
 ``whoami`` answers for the credential, like the platform: when ``SOFTMAX_PLAYER_CREDENTIAL`` is
 JSON with a ``player_id`` (a fake-only field), that is the player; otherwise the credential is
-taken to belong to ``AUTORESEARCH_PLAYER_ID``. So a wrong ``AUTORESEARCH_PLAYER_ID`` with a
+taken to belong to ``RESEARCH_PLAYER_ID``. So a wrong ``RESEARCH_PLAYER_ID`` with a
 credential that names its player fails the C6 check, as on the real platform. A credential
 starting ``cga_`` (an agent token) has no expiry, as on the real platform, and ignores
 ``expires_in``.
@@ -86,7 +86,7 @@ from ide_research_core.softmax_tool.protocol import (
 )
 from ide_research_core.softmax_tool.xp import handle_order
 
-FAULTS_ENV = "AUTORESEARCH_FAKE_FAULTS"
+FAULTS_ENV = "RESEARCH_FAKE_FAULTS"
 CREDENTIAL_ENV = "SOFTMAX_PLAYER_CREDENTIAL"
 DEFAULT_PLAYER_ID = "ply_fake"
 DEFAULT_CREDITS = 100
@@ -213,7 +213,7 @@ class FakeSoftmax:
         runtime_dir = Path(canonical) / ".supervisor" / "runtime"
         self._state_path = runtime_dir / "fake_softmax.json"
         self._lock_path = runtime_dir / "fake_softmax.lock"
-        self._player_id = env.get("AUTORESEARCH_PLAYER_ID") or DEFAULT_PLAYER_ID
+        self._player_id = env.get("RESEARCH_PLAYER_ID") or DEFAULT_PLAYER_ID
         self._credential_player = credential_player(env) or self._player_id
         self._agent_token = (env.get(CREDENTIAL_ENV) or "").startswith("cga_")
         self._faults = parse_faults(env)

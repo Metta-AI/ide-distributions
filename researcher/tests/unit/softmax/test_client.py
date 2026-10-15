@@ -58,7 +58,7 @@ def with_mutations(runner):
 
 
 def test_from_env_selects_fake_or_real(env, tmp_path):
-    assert isinstance(from_env({**env, "AUTORESEARCH_SOFTMAX": "fake"}, tmp_path), FakeSoftmax)
+    assert isinstance(from_env({**env, "RESEARCH_SOFTMAX": "fake"}, tmp_path), FakeSoftmax)
     assert isinstance(from_env(env, tmp_path), SoftmaxClient)
 
 
@@ -83,7 +83,7 @@ def test_wrong_identity_refuses_before_any_mutating_call(
 ):
     runner.on("softmax", "status", response=completed((FIXTURES / status_fixture).read_text()))
     with_mutations(runner)
-    env["AUTORESEARCH_PLAYER_ID"] = expected_player
+    env["RESEARCH_PLAYER_ID"] = expected_player
     with pytest.raises(IdentityError):
         action(make(env, runner, tmp_path), tmp_path)
     assert not saw_mutation(runner)

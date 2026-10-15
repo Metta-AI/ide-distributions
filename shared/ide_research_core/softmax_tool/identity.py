@@ -14,8 +14,8 @@ plain explanation and without the CLI's own advice ("Run softmax login" is not o
 Preflight pauses on it at once. Output holding a Python traceback is never a rejection: it is an
 uncaught error (connection refused, TLS, read timeout), and softmax-cli's traceback quotes
 source lines, including its own "Not authenticated." message. Any other failure (network error, 5xx, unreadable output) is
-an ordinary ``IdentityError`` ("whoami failed"): it says nothing about the credential, so
-preflight only pauses after several in a row, while mutating calls still refuse (C6).
+an ordinary ``IdentityError`` ("whoami failed"): it says nothing about the credential, and
+mutating calls still refuse (C6).
 """
 
 import re
@@ -92,13 +92,13 @@ def whoami(cli: PlatformCli) -> Identity:
 def identity_problems(identity: Identity, expected_player_id: str, now: datetime) -> list[str]:
     """Why ``identity`` may not act as ``expected_player_id`` now; empty when it may (C6).
 
-    The single source of these checks: ``require_player`` and preflight both use it.
+    The single source of these checks: ``require_player`` and the promotion guards use it.
     """
     problems = []
     if identity.subject_type != "player":
         problems.append(f"credential is a {identity.subject_type!r}, not a player")
     if not expected_player_id:
-        problems.append("AUTORESEARCH_PLAYER_ID is not set")
+        problems.append("RESEARCH_PLAYER_ID is not set")
     elif identity.player_id != expected_player_id:
         problems.append(
             f"credential player {identity.player_id!r} does not match expected {expected_player_id!r}"
@@ -112,7 +112,7 @@ def require_player(cli: PlatformCli, expected_player_id: str, now: datetime) -> 
     """``whoami`` and refuse unless it is ``expected_player_id`` as a Player with a live token
     (a ``cga_`` agent token never expires)."""
     if not expected_player_id:
-        raise IdentityError("AUTORESEARCH_PLAYER_ID is not set")
+        raise IdentityError("RESEARCH_PLAYER_ID is not set")
     identity = whoami(cli)
     problems = identity_problems(identity, expected_player_id, now)
     if problems:

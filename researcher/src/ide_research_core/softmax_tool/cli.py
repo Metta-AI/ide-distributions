@@ -1,11 +1,14 @@
-"""``autoresearch softmax ...``: every platform action a card worker takes (Plan 03 Task 3.4).
+"""``research softmax ...``: the platform actions of a researcher, and the reads both profiles use.
 
-Commands (the Softmax backend comes from ``AUTORESEARCH_SOFTMAX``: ``fake`` or the real client;
-the game, for its league, from ``AUTORESEARCH_GAME``):
+League submission is not here: the orchestrator submits through ``research promotion``
+(``ide_research_core.promotion``), and the researcher's deny list blocks that group.
+
+Commands (the Softmax backend comes from ``RESEARCH_SOFTMAX``: ``fake`` or the real client;
+the game, for its league, from ``RESEARCH_GAME``):
 
 - ``whoami``: the credential's identity (``expires_at`` is null for a ``cga_`` agent token,
   which does not expire); exit 1 (``identity``) unless it is the expected
-  (``AUTORESEARCH_PLAYER_ID``) unexpired Player.
+  (``RESEARCH_PLAYER_ID``) unexpired Player.
 - ``credits``: ``{available: true, credits}`` (the account's XP credit balance, readable with
   the Player credential, amendment A10), or ``{available: false, reason}`` when the read fails.
 - ``xp create <E> --batch N --attempt N [--batches K]``: launch batch N of a paired evaluation:
@@ -25,14 +28,13 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   with exit 0 and ``credit_denied: true``: requests already created stay (and are
   recorded), ``missing`` lists the (seed, arm) pairs not created, the experiment goes
   ``awaiting-credits`` (from ``uploaded|evaluating|awaiting-permit``) and ``lifecycle.next_launch_after`` is set
-  by ``protocol.retry_backoff`` (A10; base 30 minutes, or ``AUTORESEARCH_CREDIT_BACKOFF_MINUTES`` from
+  by ``protocol.retry_backoff`` (A10; base 30 minutes, or ``RESEARCH_CREDIT_BACKOFF_MINUTES`` from
   the worker's environment, read before any request is created; it is read in worker terminals
   only, which see the whole profile ``.env``, so it is deliberately not on
   ``terminal.env_passthrough``: a cron job would not get it); ``lifecycle.credit_denials``
   counts consecutive denials and ``lifecycle.credits_at_denial`` is the balance read right
-  after the denial (null when unreadable). xp-poll relaunches when the balance covers the
-  remaining requests and is above that value, else after the backoff
-  (``runtime.xp_poll.relaunch_due``). The coach's refusals (Softmax hosting) end with exit 0
+  after the denial (null when unreadable). The orchestrator's supervisor watches the balance
+  and has a researcher relaunch when it covers the remaining requests. The coach's refusals (Softmax hosting) end with exit 0
   too, and the experiment goes ``awaiting-permit`` (from ``uploaded|evaluating|awaiting-credits``)
   with ``lifecycle.permit_wait`` = ``{kind, batch, attempt, batches, league_id, reason, asks,
   announced, refusals, since, retry_minutes, not_before, credits_short}``. A permit refusal (the
@@ -48,9 +50,9 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   new ask. Any open ask keeps the experiment ``awaiting-permit``: a credit denial in the same
   run (``credit_denied: true`` too) is recorded as ``permit_wait.credits_short`` = ``{reason,
   credit_denials, credits_at_denial, next_launch_after}`` and does not change the status; only
-  a batch with no open ask goes ``awaiting-credits``. xp-poll reads each ask's answer and
-  relaunches once all are yes and, with ``credits_short``, the credits cover it
-  (``runtime.xp_poll``); the relaunch sends the same body and idempotency key, so the server
+  a batch with no open ask goes ``awaiting-credits``. The orchestrator's supervisor reads each
+  ask's answer and has a researcher relaunch once all are yes and, with ``credits_short``, the
+  credits cover it; the relaunch sends the same body and idempotency key, so the server
   decides it against the same ask. ``lifecycle.next_launch_after`` is the fallback for when
   the answers cannot be read (and for a league refusal): the credit backoff, counted by
   ``refusals`` of the same asks only. A ``stopped`` (the coach declined it) or ``reviewed``
@@ -72,30 +74,17 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
   created. Not covered: a ``--batches`` change between runs.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
+- ``xp evidence <E>``: evidence and episode rows for every finished request that has none
+  yet, written into this worktree (``softmax_tool.evidence``). Prints ``{experiment,
+  collected, already, pending, failed, complete, rows}``; ``complete`` means the review can
+  run ``stats ingest`` on ``rows``.
 - ``upload <E> --build-dir D``: ``softmax_tool.upload``.
-- ``submit <E>``: ``softmax_tool.submit``, the only path to a real league submission of an
-  experiment's candidate. The coach's refusals are ``permit_required`` and
-  ``league_not_chosen`` (exit 1): the promotion stays at ``intent`` and the runtime asks the
-  coach and retries the same submit (``runtime.promotion``, "Waiting for the coach").
-  ``coach_declined`` (exit 1) refuses an experiment or version whose promotion the coach
-  already declined, before anything is acquired or sent.
-- ``bootstrap-champion --build-dir D``: ``softmax_tool.submit.bootstrap_champion``, the
-  first champion on a fresh install (A14): with no champion (the league shows no policy
-  competing for our player, A9), upload the game's starter policy build and promote it through the C8
-  promotion as a ``bootstrap`` promotion (no experiment). Prints ``{version_id,
-  platform_policy_version_id, promotion_id, submission_id, champion_path}``. Refusals:
-  ``champion_exists``, ``champion_conflict``, ``promotion_in_flight``, ``not_shipped_strategy``,
-  ``promotion_refused``, ``permit_required``, ``league_not_chosen`` (as for ``submit``; the
-  upload stands), ``identity`` and the build reader's
-  ``gates_failed``/``bad_build``/``artifact_mismatch``.
-- ``leaderboard``: ``{league_id, player_id, leaderboard_champion, current_champion, note,
-  conflict}``. The champion is the policy the league shows competing for our player (A9);
-  ``leaderboard_champion`` and ``current_champion`` are both that policy (null: none, and
-  ``note`` says so). ``conflict`` is null, or ``{expected, shown, detail, waited_out}`` when
-  what the loop expects differs from the league (``promotion.league_check``; queue-keeper
-  pauses the agent for it). ``submission`` is null, or ``{stage, is_champion, detail}``: where
-  the latest promotion's submission stands when the league does not show it (``pending``,
-  ``competing``, ``rejected``, ``unknown``). A malformed grace setting warns on stderr.
+- ``upload-bootstrap --build-dir D``: upload the game's starter policy build as a version with
+  no experiment (A14); prints ``{version_id, platform_policy_version_id}``. The bootstrap card
+  integrates the version record, then the orchestrator submits it with ``promotion bootstrap``.
+- ``leaderboard``: ``{league_id, player_id, current_champion, conflict}``. The champion is the
+  policy the league shows competing for our player (A9; null: none). ``conflict`` is null, or
+  why the league and the loop's recorded champion disagree (``promotion.conflict``).
 - ``game-version``: ``{league_id, game_version}``, the league's current game version
   (``Softmax.game_version``; the version noise records and designs must match, C10).
 - ``standings``: ``{league_id, rows}``, the league standings (``Softmax.standings``), read-only.
@@ -109,24 +98,24 @@ the game, for its league, from ``AUTORESEARCH_GAME``):
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
-Experiment lock. ``xp create``, ``upload`` and ``submit`` hold a per-experiment lock for the
-whole command: ``fcntl.flock`` on ``.supervisor/runtime/locks/xp-<E>.lock`` in the canonical
-workspace, shared by every worker on the host. The holder writes ``{task_id, run_id, pid,
-command, started_at}`` into the file while it holds the lock and empties it before release. A
+Experiment lock. ``xp create`` and ``upload`` hold a per-experiment lock for the whole
+command: ``fcntl.flock`` on ``locks/xp-<E>.lock`` in the bare canonical repository, shared by
+every researcher on the host. The holder writes ``{worker, profile, pid, command,
+started_at}`` into the file while it holds the lock and empties it before release. A
 second command for the same experiment waits up to ``LOCK_WAIT_S`` (60 s; below Hermes'
 180 s foreground terminal timeout), then refuses with ``busy`` and does nothing; ``details``
-carries ``holder`` and ``own_run`` (the holder is this card's own run, for example an earlier
-call still running in the background: wait for it, do not give up the card). The kernel
+carries ``holder`` and ``own_run`` (the holder is this worktree, for example an earlier call
+still running in the background: wait for it, do not give up the card). The kernel
 releases the lock when the process exits, so a crashed worker never leaves it held. Do not
-delete ``runtime/locks/`` while workers run: a new file would let a second holder in. The
+delete ``locks/`` while workers run: a new file would let a second holder in. The
 experiment argument must be an ``E-`` id (``bad_arguments`` otherwise), because it names the
 lock file.
 
 Identity is the spawn-time one (C6, C7). Each command uses the credential and expected player
 id in its own environment (what Hermes gave the worker when it started) for ``whoami`` and the
 mutating call. The profile ``.env`` is read only to refuse: when it sets ``IDENTITY_ENV`` names
-to other values (the operator changed the player since this worker started, and the next
-preflight pauses the agent), every command fails with ``identity``. The ``.env`` is never a
+to other values (the operator changed the player since this worker started), every command
+fails with ``identity``. The ``.env`` is never a
 source of identity, because a worker could write it.
 
 Prints one JSON envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false, "error": {"reason",
@@ -152,7 +141,7 @@ from pathlib import Path
 
 import frontmatter
 
-from ide_research_core import runctx
+from ide_research_core import promotion, runctx, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.games.bindings import binding_evaluate
 from ide_research_core.games.loader import GameError, load_game
@@ -161,18 +150,10 @@ from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_text
 from ide_research_core.io.locks import LockTimeout, file_lock
 from ide_research_core.paths import Layout
-from ide_research_core.queue.select import queue_from_env
 from ide_research_core.records.registry import path_for
-from ide_research_core.records.store import RecordNotFound, RecordProblems
-from ide_research_core.runtime.preflight import env_file_value
-from ide_research_core.runtime.promotion import (
-    DEFAULT_CHAMPION_GRACE,
-    PromotionError,
-    baseline_problem,
-    champion_grace,
-    champion_status,
-    league_check,
-)
+from ide_research_core.records.store import RecordNotFound, RecordProblems, RecordStore
+from ide_research_core.io.dotenv import env_file_value
+from ide_research_core.softmax_tool import evidence
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
 from ide_research_core.softmax_tool.league import episode_rows
 from ide_research_core.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
@@ -189,17 +170,16 @@ from ide_research_core.softmax_tool.protocol import (
     retry_backoff,
 )
 from ide_research_core.softmax_tool.protocol import from_env as softmax_from_env
-from ide_research_core.softmax_tool.submit import bootstrap_champion, submit
-from ide_research_core.softmax_tool.upload import upload, worker_store
+from ide_research_core.softmax_tool.upload import upload, upload_bootstrap, worker_store
 from ide_research_core.softmax_tool.xp import ARMS, ArtifactsIncomplete, tag
 from ide_research_core.stats.design import DesignError, EvaluationDesign
 
 EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS, EXIT_TOOL_MISSING = 0, 1, 2, 3
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project root
-GAME_ENV = "AUTORESEARCH_GAME"
-PLAYER_ENV = "AUTORESEARCH_PLAYER_ID"
+GAME_ENV = "RESEARCH_GAME"
+PLAYER_ENV = "RESEARCH_PLAYER_ID"
 IDENTITY_ENV = ("SOFTMAX_PLAYER_CREDENTIAL", PLAYER_ENV)
-BACKOFF_ENV = "AUTORESEARCH_CREDIT_BACKOFF_MINUTES"
+BACKOFF_ENV = "RESEARCH_CREDIT_BACKOFF_MINUTES"
 LOCK_WAIT_S = 60.0  # how long a command waits for another process's experiment lock
 # Statuses whose evaluation is over: ``xp create`` refuses them (``experiment_closed``).
 CLOSED_EXPERIMENT = ("stopped", "reviewed")
@@ -259,8 +239,6 @@ def _run(handler):
             return _fail("tool_missing", str(error), EXIT_TOOL_MISSING)
         except ArtifactsIncomplete as error:
             return _fail("artifacts_incomplete", str(error), EXIT_FAILED)
-        except PromotionError as error:
-            return _fail("promotion", str(error), EXIT_FAILED)
         except (RecordNotFound, RecordProblems, DesignError) as error:
             return _fail("records", str(error), EXIT_FAILED)
         except (SoftmaxCliError, RuntimeError, OSError, ValueError) as error:
@@ -282,15 +260,16 @@ def experiment_lock(ctx, experiment: str, command: str) -> Iterator[None]:
         prefix = None
     if prefix != "E":
         raise BadArguments(f"{experiment!r} is not an experiment id (E-<ULID>)")
-    path = runctx.runtime_dir(ctx) / "locks" / f"xp-{experiment}.lock"
+    # In the bare repository, so it holds across every researcher's clone on this host.
+    path = workspace.canonical_of(ctx.canonical) / "locks" / f"xp-{experiment}.lock"
     with ExitStack() as held:
         try:  # only the acquisition: a LockTimeout from the command itself is not "busy"
             handle = held.enter_context(file_lock(path, timeout_s=LOCK_WAIT_S))
         except LockTimeout:
             raise _busy(ctx, experiment, _read_holder(path)) from None
         record = {
-            "task_id": ctx.card_id,
-            "run_id": ctx.run_id,
+            "worker": str(ctx.worker) if ctx.worker else None,
+            "profile": ctx.profile,
             "pid": os.getpid(),
             "command": command,
             "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -313,15 +292,12 @@ def _read_holder(path: Path) -> dict | None:
 
 
 def _busy(ctx, experiment: str, holder: dict | None) -> Refused:
-    own_run = bool(
-        holder and ctx.card_id and holder.get("task_id") == ctx.card_id
-        and str(holder.get("run_id")) == str(ctx.run_id)
-    )
+    own_run = bool(holder and ctx.worker and holder.get("worker") == str(ctx.worker))
     if holder is None:
         who = "another process (holder not recorded yet)"
     else:
         who = (
-            f"card {holder.get('task_id')} run {holder.get('run_id')} "
+            f"{holder.get('profile')} in {holder.get('worker')} "
             f"(pid {holder.get('pid')}, {holder.get('command')} since {holder.get('started_at')})"
         )
     if own_run:
@@ -332,8 +308,8 @@ def _busy(ctx, experiment: str, holder: dict | None) -> Refused:
         )
     else:
         advice = (
-            'See the running cards: "$AUTORESEARCH_CLI" queue list --state claimed. Do not '
-            "duplicate that card's work; rerun later only if it is still needed"
+            "Another card works on this experiment. Do not duplicate its work; ask the "
+            "orchestrator with a question: comment on your card"
         )
     return Refused(
         "busy",
@@ -675,7 +651,7 @@ def _check_permit_wait(experiment: str, meta: dict, args, league_id: str) -> Non
     part of each request body and of the ask's identity, so the game's configured league
     (``league_id``) must still be the saved ``permit_wait.league_id``; a changed configuration is
     refused (``permit_league_changed``) instead of sending other bodies under the same keys. A
-    wait with a declined ask is final (``experiment_closed``): xp-poll stops the experiment."""
+    wait with a declined ask is final (``experiment_closed``): the orchestrator stops the experiment."""
     wait = (meta.get("lifecycle") or {}).get("permit_wait") or {}
     if not wait.get("asks") or meta.get("status") != "awaiting-permit":
         return
@@ -709,7 +685,7 @@ def _check_permit_wait(experiment: str, meta: dict, args, league_id: str) -> Non
 
 def _closed_in_canonical(ctx, experiment: str) -> str | None:
     """The experiment's status as committed in canonical when it is closed (``stopped``,
-    ``reviewed``), else None. xp-poll stops an experiment in canonical, not in this worker's
+    ``reviewed``), else None. The orchestrator stops an experiment in canonical, not in this worker's
     worktree, so the worktree copy cannot tell a running relaunch that the coach said no."""
     canonical = Path(ctx.canonical)
     rel = path_for(Layout(canonical), experiment).relative_to(canonical).as_posix()
@@ -769,7 +745,9 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         problems = identity_problems(sm.whoami(), expected, datetime.now(UTC))
         if problems:
             raise IdentityError("; ".join(problems))
-        problem = baseline_problem(ctx, sm, _league_id(), design["baseline_version"])
+        problem = promotion.baseline_problem(
+            ctx.canonical, sm, _league_id(), expected, design["baseline_version"]
+        )
         if problem is not None:
             raise Refused(*problem)
     created: list[dict] = []
@@ -790,7 +768,7 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     for seed, arm, spec in planned:
         if (seed, arm) in existing:
             continue
-        # Before each request: the coach may have said no since this run began (xp-poll then
+        # Before each request: the coach may have said no since this run began (the orchestrator then
         # stops the experiment in canonical). Nothing more is sent: no credits spent on the
         # approved requests, and no new ask filed for the declined one.
         closed = _closed_in_canonical(ctx, experiment)
@@ -806,7 +784,7 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         if isinstance(result, PermitRequired):
             # Each request has its own ask: file them all in this run, so the coach sees the
             # whole batch at once. A refused request holds no credits. A no ends the batch at
-            # once (H2): nothing more is submitted, and the wait records it, so xp-poll stops
+            # once (H2): nothing more is submitted, and the wait records it, so the orchestrator stops
             # the experiment and ``xp create`` refuses it from now on.
             request = tag(experiment, args.batch, args.attempt, seed, arm)
             fresh.append(
@@ -912,6 +890,23 @@ def _xp_status(ctx, sm, args) -> list[dict]:
     return rows
 
 
+def _xp_evidence(ctx, sm, args) -> dict:
+    root = ctx.worker or ctx.canonical
+    store = RecordStore(Layout(root))
+    meta, _ = store.load(args.experiment)
+    game = _game()
+    with experiment_lock(ctx, args.experiment, "xp evidence"):
+        return evidence.collect(
+            root,
+            sm,
+            {**meta, "id": args.experiment},
+            binding_evaluate(game, _REPO_ROOT),
+            lambda: str(sm.game_version(game.league_id)).strip(),
+            runctx.runtime_dir(ctx) / "xp",
+            datetime.now(UTC),
+        )
+
+
 def _xp_artifacts(ctx, sm, args) -> dict:
     dest = Path(args.dest)
     downloaded = {}
@@ -938,40 +933,21 @@ def _upload(ctx, sm, args) -> dict:
     }
 
 
-def _submit(ctx, sm, args) -> dict:
-    queue = queue_from_env(os.environ, ctx)
-    player = os.environ.get(PLAYER_ENV, "")
-    league_id = _league_id()
-    with experiment_lock(ctx, args.experiment, "submit"):
-        return submit(
-            ctx, queue, sm, args.experiment, league_id, player, candidate=args.candidate_path
-        )
-
-
-def _bootstrap_champion(ctx, sm, args) -> dict:
-    queue = queue_from_env(os.environ, ctx)
-    player = os.environ.get(PLAYER_ENV, "")
-    return bootstrap_champion(ctx, queue, sm, Path(args.build_dir), _league_id(), player)
+def _upload_bootstrap(ctx, sm, args) -> dict:
+    player = os.environ.get(PLAYER_ENV) or None
+    version_id, platform_id = upload_bootstrap(ctx, sm, Path(args.build_dir), player)
+    return {"version_id": version_id, "platform_policy_version_id": platform_id}
 
 
 def _leaderboard(ctx, sm, args) -> dict:
     league_id = _league_id()
     player_id = sm.whoami().player_id
-    current, note = champion_status(ctx, sm, league_id)
-    try:
-        grace = champion_grace(os.environ)
-    except ValueError as error:  # a read-only command: warn and use the default
-        print(f"warning: {error}; using {DEFAULT_CHAMPION_GRACE}", file=sys.stderr)
-        grace = DEFAULT_CHAMPION_GRACE
-    check = league_check(ctx, sm, league_id, datetime.now(UTC), grace)
+    current = sm.leaderboard_champion(player_id, league_id)
     return {
         "league_id": league_id,
         "player_id": player_id,
-        "leaderboard_champion": current,
         "current_champion": current,
-        "note": note,
-        "conflict": None if check.conflict is None else asdict(check.conflict),
-        "submission": None if check.submission is None else asdict(check.submission),
+        "conflict": promotion.conflict(ctx.canonical, sm, league_id, player_id),
     }
 
 
@@ -1056,6 +1032,14 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("experiment")
     sub = command(xp_commands, "recover", _xp_recover, "list the experiment's existing requests")
     sub.add_argument("experiment")
+    sub = command(
+        xp_commands,
+        "evidence",
+        _xp_evidence,
+        "turn finished requests into evidence and episode rows in this worktree",
+    )
+    sub.add_argument("experiment")
+
     sub = command(xp_commands, "artifacts", _xp_artifacts, "download and verify results")
     sub.add_argument("experiment")
     sub.add_argument("--dest", required=True)
@@ -1066,19 +1050,12 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("experiment")
     sub.add_argument("--build-dir", required=True)
 
-    sub = command(commands, "submit", _submit, "submit the promoted candidate (guarded, C8)")
-    sub.add_argument("experiment")
-    sub.add_argument(
-        "--candidate-path",
-        help="candidate STRATEGY path on this card's branch "
-        "(default strategy/candidates/<E>/STRATEGY.md)",
-    )
 
     sub = command(
         commands,
-        "bootstrap-champion",
-        _bootstrap_champion,
-        "fresh install: upload the game's starter policy and promote it as the first champion",
+        "upload-bootstrap",
+        _upload_bootstrap,
+        "upload the game's starter policy build as the first champion's version",
     )
     sub.add_argument("--build-dir", required=True)
 

@@ -1,6 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "message.json",
-  "title": "Alias of comms/envelope.outbound.json, the outbound message envelope (ar-comms/0), kept at this path for existing references. Resolve it with the schemas under comms/ registered by their $id.",
-  "$ref": "comms/envelope.outbound.json"
-}

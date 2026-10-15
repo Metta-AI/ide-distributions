@@ -49,7 +49,7 @@ EXPERIMENT_TRANSITIONS: dict[str, frozenset[str]] = {
     "evaluating": frozenset({"reviewed", "awaiting-credits", "awaiting-permit"}),
     "awaiting-credits": frozenset({"evaluating", "awaiting-permit"}),
     # Open permit asks always mean awaiting-permit (a credit shortfall of the same batch is
-    # recorded inside its wait). The coach answered no to one (xp-poll): the evaluation ends,
+    # recorded inside its wait). The coach answered no to one: the evaluation ends,
     # unreviewed.
     "awaiting-permit": frozenset({"evaluating", "awaiting-credits", "stopped"}),
     "stopped": frozenset(),

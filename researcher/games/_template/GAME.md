@@ -34,14 +34,14 @@ silent fallback. Core code never names a game.
   "completed"|"failed", "seed"?}]}}`: **one entry per seat** of each episode in that file,
   opponents included, each naming its `seat` (the participant position). The binding does
   not know which seats are ours; its callers decide:
-  - xp-poll (XP requests) keeps the entries whose `seat` is in the design's `seats`, requires
+  - `softmax xp evidence` (XP requests) keeps the entries whose `seat` is in the design's `seats`, requires
     all of them (a missing or failed own seat records the episode as failed, with a reason),
     and **reduces our seats by the arithmetic mean** of each metric: one row per episode.
   - `softmax league-episodes` (league episodes, for noise) **keeps one row per seat**. It
     accepts an entry without `seat` only when the episode has a single seat.
 - `reference_types`: extra reference types (`ar://<type>/<id>`), each mapped to a resolver
-  command run from the repo root as `<command> <id>`, with `AUTORESEARCH_WORKSPACE` and
-  `AUTORESEARCH_REV` set. Exit 0 with the content on stdout, or non-zero if not found. A type
+  command run from the repo root as `<command> <id>`, with `RESEARCH_WORKSPACE` and
+  `RESEARCH_REV` set. Exit 0 with the content on stdout, or non-zero if not found. A type
   never shadows a core type. May be `{}`.
 - `outcome_metrics`: list of `{name, direction}`; direction is `up` (higher is better) or `down`.
 - `performance_guardrails`: metric names that must not regress. Each must be in `outcome_metrics`.
@@ -53,17 +53,16 @@ silent fallback. Core code never names a game.
 - `source` (optional): `{repo, pin}`. `repo` is the game source repository (a git URL or a
   local path) that claims cite as `<path>:<a>-<b>@<sha>`. `pin` says how to read the commit
   the current game version runs; the only value is `coworld_manifest`: the commit in the
-  `source_url` of the game runnable in the Coworld manifest. When the pin changes,
-  queue-keeper fetches `repo` into `$HERMES_HOME/local/game-source/<game>/` and renews
-  claims whose cited lines did not change (and requests re-verification for the others).
-  Without `source`, claims only go stale on a game-version change.
+  `source_url` of the game runnable in the Coworld manifest. When the pin changes, a
+  maintenance card fetches `repo` and runs `kb renew --game-repo <clone> --old <previous
+  commit> --new <pin>`: claims whose cited lines did not change are renewed, the others are
+  reported for re-verification. Without `source`, claims only go stale on a game-version
+  change.
 - `host_requirements` (optional): `{env: [<VAR>, …], tools: [<executable>, …]}`, what a
-  worker needs on the host to run the bindings (for example a build). Queue-keeper checks
-  them every run against what workers see (the profile `.env` over the job's environment,
-  and its `PATH`): a variable must be set (and, when its value is an absolute path, that
-  path must exist), and a tool must be on that `PATH`. Missing ones are logged and reported
-  in one runtime `help_request` per distinct set, instead of each card discovering them
-  through a failing build.
+  worker needs on the host to run the bindings (for example a build): a variable must be set
+  (and, when its value is an absolute path, that path must exist), and a tool must be on the
+  worker's `PATH`. A worker that finds one missing blocks its card with a `help_request:`
+  reason naming them, instead of failing a long build.
 
 The body must have a `## Seats and opponents` section: how many seats an episode has, which
 slots our policy fills (`seats` in a design), any team rules (which slots play together), and
@@ -72,8 +71,8 @@ opponents from the league per seed (amendment A12, `stats design`); core never k
 count, so this section is where the agent reads it.
 
 The body must have a `## Starter policy` section: how to build the game's starter policy
-with the `build` binding (arguments, input, output directory) so `softmax bootstrap-champion`
-can submit it, unevaluated, as the first champion when the league shows no policy competing
+with the `build` binding (arguments, input, output directory) so a bootstrap card can upload
+it with `softmax upload-bootstrap` and the orchestrator can submit it, unevaluated, as the first champion when the league shows no policy competing
 for our player (amendments A9, A14). Every game ships a starter policy. The build writes the same
 `version.json` as any build; every non-advisory gate must pass. A build compiled from a
 `STRATEGY.md` should name it in `source_hashes` (the bootstrap refuses one whose hash is not

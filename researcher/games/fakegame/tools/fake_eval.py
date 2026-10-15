@@ -5,7 +5,7 @@
 gets a fixed mean shift in score (-2..+2) so a statistical test can tell policies apart.
 
 ``--results <results.json>`` is the evaluate binding's hosted mode: it reads one XP
-request's ``results.json`` (xp-poll) or a league episode's raw results (``softmax
+request's ``results.json`` (``softmax xp evidence``) or a league episode's raw results (``softmax
 league-episodes``), both in the fake platform's format ``{seed?, episodes: [{episode, seat,
 score, errors, seed?}]}``, and prints one entry per (episode, seat) with its ``seat``, as the
 GAME.md evaluate contract requires.

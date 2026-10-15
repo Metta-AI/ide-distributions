@@ -1,7 +1,7 @@
 """Generated knowledge-base views: ``kb/index.md`` and ``kb/_generated/*`` (System Design §3.5).
 
 ``write_generated`` is pure in its inputs: the same workspace always gives byte-identical
-files (sorted keys, stable ordering, no timestamps), so queue-keeper can regenerate after
+files (sorted keys, stable ordering, no timestamps), so integrate can regenerate after
 every merge and git shows only real changes.
 
 Files:
