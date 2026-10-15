@@ -30,6 +30,9 @@ CLAIM = {
     "last_checked_version": "65",
 }
 
+DROPPED = {"VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "PYTHONHOME", "PYTHONPATH",
+           "SOFTMAX_PLAYER_CREDENTIAL"}  # fmt: skip
+
 pytestmark = pytest.mark.hermes
 
 
@@ -38,8 +41,7 @@ def clean_env(**extra):
         k: v
         for k, v in os.environ.items()
         if not k.startswith(("HERMES_", "RESEARCH_", "AUTORESEARCH_", "OPENROUTER_"))
-        and k not in {"VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "PYTHONHOME", "PYTHONPATH",
-                      "SOFTMAX_PLAYER_CREDENTIAL"}  # fmt: skip
+        and k not in DROPPED
     }
     return {**env, **extra}
 
@@ -130,7 +132,7 @@ def orchestrator(profiles, *args):
 
 
 def test_one_card_from_creation_to_the_orchestrators_view(host):
-    root, profiles = host
+    _, profiles = host
     researcher_home, researcher_env = profiles["researcher-1"]
     clone = researcher_home / "workspace"
     orchestrator_clone = profiles["orchestrator"][0] / "workspace"
@@ -145,8 +147,23 @@ def test_one_card_from_creation_to_the_orchestrators_view(host):
         researcher_env)  # fmt: skip
     cli = str(researcher_home / "bin" / "research")
     worker_env = {**researcher_env, "HERMES_KANBAN_WORKSPACE": str(worktree)}
-    claim = envelope(run([cli, "records", "new", "claim", "--meta", json.dumps(CLAIM),
-                          "--body", "Damage is 10.", "--root", str(worktree)], worker_env))["id"]
+    claim = envelope(
+        run(
+            [
+                cli,
+                "records",
+                "new",
+                "claim",
+                "--meta",
+                json.dumps(CLAIM),
+                "--body",
+                "Damage is 10.",
+                "--root",
+                str(worktree),
+            ],
+            worker_env,
+        )
+    )["id"]
     merged = envelope(run([cli, "workspace", "integrate"], worker_env, cwd=worktree))
     orchestrator(profiles, "complete", card["id"], json.dumps(merged))
 
