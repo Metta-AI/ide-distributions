@@ -5,7 +5,8 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 
 | Folder | What it is |
 |---|---|
-| [`researcher/`](researcher/README.md) | The autonomous research agent (formerly `autoresearch`), moved here from `Metta-AI/ide-mvp` with its full history. |
+| [`orchestrator/`](orchestrator/README.md) | The research lead: the IDE chat's agent. Plans research, assigns Kanban cards to researchers, answers them, promotes champions and tells the user what happened. |
+| [`researcher/`](researcher/README.md) | A research worker (formerly `autoresearch`, moved here from `Metta-AI/ide-mvp` with its full history). Install it once per researcher (`researcher-1`, `researcher-2`, ...). |
 
 Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
 into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py), because
@@ -16,8 +17,10 @@ generated: edit `shared/` or `ontology/`, run `python3 tools/sync_shared.py`, an
 source and the copies together.
 
 The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
-browser) describes the design: a new `orchestrator/` distribution sits between the IDE chat
-and the researchers.
+browser) describes how they work together on one host: one Kanban board, one bare canonical
+git repository per game, the orchestrator between the IDE chat and the researchers.
+[Implementation notes](docs/designs/orchestrator-implementation-notes.md) record where the
+code differs from it.
 
 ## Install
 
@@ -32,6 +35,7 @@ either fails the install or ships with it. Keep a separate clone for development
 ```bash
 git clone https://github.com/Metta-AI/ide-distributions.git ~/ide-distributions
 hermes profile install ~/ide-distributions/researcher --name researcher-1 --yes
+hermes profile install ~/ide-distributions/orchestrator --name orchestrator --yes
 ```
 
 Each distribution's README covers what follows the install: the profile `.env`, the one-time

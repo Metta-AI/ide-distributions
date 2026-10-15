@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distribution: [researcher]
+        distribution: [researcher, orchestrator]
     defaults:
       run:
         working-directory: ${{ matrix.distribution }}
