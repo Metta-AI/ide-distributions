@@ -78,6 +78,7 @@ FORGED_COMMIT = {
 
 # Arguments for each builder, every id-carrying argument filled with an id.
 FIXTURES = {
+    "task_cancelled": [{"state": state} for state in ("unknown", "closed", "requested")],
     "task_acknowledgement": [
         {
             "task_title": "Scout andre's opening",

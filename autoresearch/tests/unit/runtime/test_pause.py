@@ -129,3 +129,22 @@ def test_releasing_a_hold_under_a_pause_leaves_its_cards_to_the_pause(canonical,
     assert not _tracked(canonical, ".supervisor/ledger/coach-hold.json")
     assert resume(queue, ledger) == [task]
     assert queue.get(task).assignee == "autoresearch"
+
+
+def test_resume_never_reassigns_a_cancelled_request(canonical, queue):
+    from autoresearch.io.docs import write_json
+
+    ledger = canonical.layout.ledger
+    cancelled = _create(queue, "autoresearch")
+    other = _create(queue, "autoresearch")
+    pause(queue, ledger, "credit check")
+    request = queue.get(cancelled).spec.request_id
+    write_json(ledger / "requests" / f"{request}.json", {
+        "request_id": request, "state": "dropped", "history": [],
+        "cancelled_by": "coach:cancel:example",
+    })
+    gitops.commit_all(canonical.root, "cancel while paused")
+
+    assert resume(queue, ledger) == [other]
+    assert queue.get(cancelled).assignee is None
+    assert queue.get(other).assignee == "autoresearch"

@@ -28,12 +28,14 @@ writes nothing. Flat JSON: the envelope fields and the kind's fields together.
 | `created` | ISO 8601, UTC |
 | `author` | `coach:<player_id>` |
 | `on_behalf_of` | `human` (a coach action in the IDE; work the coach confirms in the chat is sent by the profile plugin, not by the bridge) |
-| `kind` | `task` or `steer` |
+| `kind` | `task` or `control` |
 
 A `task` carries `title` (the IDE task text, at most 500 chars), `mode` (one of the five research modes, from the IDE
 task's `area`), `why` (the task's prediction and done-when, or the title when both are empty), `refs` (always `[]`
-for now) and `priority` (always `P2` for now). A `steer` carries `text` (`Stop task <inbound task id>: <title>`) and
-`urgency` `now`; it is sent when the coach cancels a task that was forwarded.
+for now) and `priority` (always `P2` for now). A cancellation `control` carries `action: cancel` and
+`task: <original inbound task id>`; it is sent when the coach cancels a forwarded task.
+The profile requests native shutdown and prevents that request from being admitted or requeued.
+Its note confirms the stop request, not worker process exit.
 
 Not sent yet: `reply` and `seen`. The IDE has no surface for answering a `question` or marking messages read.
 

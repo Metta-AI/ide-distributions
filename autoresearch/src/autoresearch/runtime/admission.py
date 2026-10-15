@@ -290,9 +290,10 @@ def admit_and_create(
     elif receipt["state"] == "rejected":
         return AdmissionResult(ok=False, reasons=[receipt["reason"]])
 
-    task_id = receipt["tasks"][-1]["task_id"]
     if receipt["state"] != "admitted":
-        return AdmissionResult(ok=True, task_id=task_id)  # handed off or later: nothing to do
+        tasks = receipt.get("tasks", [])
+        return AdmissionResult(ok=True, task_id=tasks[-1]["task_id"] if tasks else None)
+    task_id = receipt["tasks"][-1]["task_id"]
     if receipt["tasks"][-1]["board_epoch"] != board_epoch(ledger):
         return AdmissionResult(ok=False, task_id=task_id, reasons=[STALE_EPOCH])
     card = queue.get(task_id)

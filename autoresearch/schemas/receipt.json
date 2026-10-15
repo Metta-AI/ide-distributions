@@ -24,6 +24,7 @@
     "merge_sha": {"type": "string"},
     "superseded_by": {"type": "string"},
     "reason": {"type": "string"},
+    "cancelled_by": {"type": "string", "minLength": 1, "description": "Inbound cancellation control. Prevents recovery, reassignment and late handoff publication."},
     "history": {
       "type": "array",
       "items": {

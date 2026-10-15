@@ -334,3 +334,17 @@ def test_briefing_inputs_may_depend_on_the_task_id(canonical, ctx, queue, game):
     assert seen == [result.task_id]
     briefing = canonical.root / ".supervisor" / "runtime" / "briefings" / f"{result.task_id}.md"
     assert f"for {result.task_id}" in briefing.read_text()
+
+
+def test_cancelled_request_without_card_is_never_admitted(canonical, ctx, queue, game):
+    spec = make_spec()
+    path = canonical.layout.ledger / "requests" / f"{spec.request_id}.json"
+    write_json(path, {
+        "request_id": spec.request_id, "state": "dropped", "tasks": [],
+        "cancelled_by": "coach:stop:example", "history": [],
+    })
+    gitops.commit_all(canonical.root, "coach cancellation before admission")
+    result = _admit(ctx, queue, spec, game)
+    assert result.ok and result.task_id is None
+    assert queue.list() == []
+    assert _receipt(canonical, spec)["state"] == "dropped"

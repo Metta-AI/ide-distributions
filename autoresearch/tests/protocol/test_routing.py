@@ -1655,3 +1655,77 @@ def test_a_follow_up_candidate_missing_a_field_is_skipped_with_a_log_line(
     assert other.receipt()["state"] == "published"
     assert len(_replies(board, task)) == 1
     assert any("merge_sha" in r.getMessage() and task in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("phase", ["requested", "pending", "claimed", "blocked", "handed_off"])
+def test_cancel_targets_original_task_without_new_work_or_recovery(board, phase):
+    task = _send(
+        board, "task", "ide", title="Scout", mode="scouting", why="W", refs=[], priority="P1"
+    )
+    _route(board)
+    [request] = _requests(board)
+    worker = None
+    if phase != "requested":
+        worker = board.admit_follow_up(request["id"])
+        if phase in ("claimed", "blocked", "handed_off"):
+            worker.start()
+        if phase == "blocked":
+            board.queue.stop(worker.task_id, "needs input")
+        if phase == "handed_off":
+            worker.write_journal()
+            worker.finish()
+    other = board.admit()
+    other.start()
+    before = len(_requests(board))
+    cancel = _send(board, "control", "ide", action="cancel", task=task)
+
+    _route(board)
+
+    receipt = board.committed(board.receipt_path(request["id"]))
+    assert receipt["state"] == "dropped" and receipt["cancelled_by"] == cancel
+    assert _delivery(board, task)["state"] == "acknowledged"
+    assert _delivery(board, cancel)["state"] == "acknowledged"
+    assert len(_requests(board)) == before
+    assert board.queue.get(other.task_id).state == "claimed"
+    if worker is not None:
+        assert board.queue.get(worker.task_id).state in ("blocked", "completed")
+    assert blocked.handle_blocked(board.ctx(), board.queue, allow_no_remote=True) == []
+    assert board.process(publish=local_hook) == []
+    assert _route(board) == []
+    assert len(_requests(board)) == before
+    [note] = [m for m in _outbox(board) if m.get("in_reply_to") == cancel]
+    assert note["title"] == "Task stop requested"
+    _assert_clean(board)
+
+
+def test_cancel_unknown_task_does_not_create_an_investigation(board):
+    cancel = _send(board, "control", "ide", action="cancel", task="missing-task")
+    _route(board)
+    assert _requests(board) == []
+    assert _delivery(board, cancel)["state"] == "acknowledged"
+    assert _outbox(board)[-1]["title"] == "Task not found"
+
+
+def test_cancel_retries_after_note_publication_without_duplicate_or_requeue(board, monkeypatch):
+    task = _send(
+        board, "task", "ide", title="Scout", mode="scouting", why="W", refs=[], priority="P1"
+    )
+    _route(board)
+    [request] = _requests(board)
+    worker = board.admit_follow_up(request["id"])
+    worker.start()
+    cancel = _send(board, "control", "ide", action="cancel", task=task)
+
+    def crash(step):
+        if step == "note_published":
+            raise Crash("after cancellation note")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(routing, "_checkpoint", crash)
+        with pytest.raises(Crash):
+            _route(board)
+    assert board.queue.get(worker.task_id).state == "blocked"
+    _route(board)
+    assert _delivery(board, task)["state"] == "acknowledged"
+    assert len([m for m in _outbox(board) if m.get("in_reply_to") == cancel]) == 1
+    assert blocked.handle_blocked(board.ctx(), board.queue, allow_no_remote=True) == []

@@ -556,7 +556,7 @@ def tool_specs() -> list[tuple[str, dict, object]]:
             "Kinds: reply {in_reply_to (M-id), choice and/or text}; steer {text, urgency (now|"
             "next|whenever), optional proposed_topic {title, objective, metrics, priority}}; "
             "task {title, mode (investigation|scouting|experimentation|maintenance|planning), "
-            "why, refs (ar:// list), priority (P0-P5)}; control {action (pause|resume)}."
+            "why, refs (ar:// list), priority (P0-P5)}; control {action (pause|resume|cancel), task (original inbound task id, required for cancel)}."
         ),
         "parameters": {
             "type": "object",

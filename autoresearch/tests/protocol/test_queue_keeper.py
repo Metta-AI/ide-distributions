@@ -1291,6 +1291,63 @@ def test_a_coach_task_and_a_pause_in_one_run_start_the_agent_and_hold_the_task(h
     assert host.receipt(record["responsible"]["request_id"]) is not None
 
 
+@pytest.mark.parametrize("fault", ["identity=rejected", "fail_after=whoami", "credit"])
+def test_cancellation_runs_while_preflight_blocks_new_work(host, fault):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    original = _send_task(host, "coach:ply_x")
+    host.tick(at(1))
+    worker = host.claim("scouting")
+    record = host.committed(host.ledger / "inbound" / f"{original}.json")
+    request = record["responsible"]["request_id"]
+    waiting = _send_task(host, "coach:ply_x")
+    control = submit_inbound(
+        host.canonical, "control", {"action": "cancel", "task": original}, "coach:ply_x"
+    )
+    tick_options = {}
+    if fault == "credit":
+        host.env["AUTORESEARCH_SKIP_OPENROUTER_CHECK"] = "0"
+        host.env["OPENROUTER_API_KEY"] = "test-only-key"
+        tick_options["http_get"] = lambda _url, _headers: '{"data":{"limit_remaining":0}}'
+    else:
+        host.set_faults(fault)
+
+    run = host.tick(at(2), **tick_options)
+
+    assert not run.preflight.ok and run.failures == {}
+    assert host.queue.get(worker.task_id).state == "blocked"
+    assert host.receipt(request)["state"] == "dropped"
+    assert host.receipt(request)["cancelled_by"] == control
+    assert host.committed(host.ledger / "inbound" / f"{waiting}.json")["state"] == "received"
+    assert run.admitted == []
+    assert len(_replies(host, control)) == 1
+
+    host.tick(at(3), **tick_options)
+    assert len(_replies(host, control)) == 1
+    host.set_faults("")
+    host.env["AUTORESEARCH_SKIP_OPENROUTER_CHECK"] = "1"
+    host.tick(at(4))
+    assert host.queue.get(worker.task_id).state == "blocked"
+    assert host.receipt(request)["state"] == "dropped"
+
+
+def test_cancel_before_first_routing_never_starts_research(host):
+    host.env["AUTORESEARCH_AUTONOMY"] = "on-request"
+    host.tick(at(0))
+    original = _send_task(host, "coach:ply_x")
+    control = submit_inbound(
+        host.canonical, "control", {"action": "cancel", "task": original}, "coach:ply_x"
+    )
+
+    run = host.tick(at(1))
+
+    assert run.failures == {} and run.admitted == []
+    assert host.requests() == [] and host.queue.list() == []
+    assert _started(host) is None
+    assert host.committed(host.ledger / "inbound" / f"{original}.json")["state"] == "acknowledged"
+    assert len(_replies(host, control)) == 1
+
+
 def _held_card(host: Host) -> str:
     """Tick until a planning card is pending and assigned, then hold research; return it."""
     host.tick(at(0))

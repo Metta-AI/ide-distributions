@@ -2,7 +2,7 @@
 compatibility notes in ``docs/integrations/softmax-ide-bridge-compat.md``).
 
 The bridge's messages are the published examples ``schemas/comms/examples/inbound/task/
-ide-bridge-task.json`` and ``.../steer/ide-bridge-stop.json``: the exact bytes its ``deliver()``
+ide-bridge-task.json`` and ``.../control/ide-bridge-stop.json``: the exact bytes its ``deliver()``
 writes (provenance in ``schemas/comms/README.md``).
 
 The bridge is an L0 file adapter (Runtime 9.2): it writes ``comms/inbox/<id>.json`` itself,
@@ -35,7 +35,7 @@ from autoresearch.runtime.routing import route_all
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
 EXAMPLES = COMMS_SCHEMAS / "examples" / "inbound"
 TASK_BYTES = (EXAMPLES / "task" / "ide-bridge-task.json").read_bytes()
-STOP_BYTES = (EXAMPLES / "steer" / "ide-bridge-stop.json").read_bytes()
+STOP_BYTES = (EXAMPLES / "control" / "ide-bridge-stop.json").read_bytes()
 PLAYER = "ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1"
 TASK_ID = f"{PLAYER}:task:tsk_42"
 STOP_ID = f"{PLAYER}:stop:tsk_42"
@@ -160,20 +160,21 @@ def test_bridge_task_becomes_a_card_and_its_note_closes_the_ide_task(board):
     assert gitops.git(board.canonical, "status", "--porcelain") == ""
 
 
-def test_bridge_stop_steer_gets_an_urgent_card_that_must_answer_it(board):
+def test_bridge_stop_cancels_original_request_without_an_urgent_card(board):
     bridge_write(board, TASK_BYTES)
     _route(board)
+    [request] = _requests(board)
     bridge_write(board, STOP_BYTES)
 
     _route(board)
 
-    stop_requests = [r for r in _requests(board) if r["spec"]["created_by"] == STOP_ID]
-    [request] = stop_requests
-    assert request["spec"]["priority"] == "P0"
-    _finish_card_for(board, request["id"], ack_for=STOP_ID)
+    assert len(_requests(board)) == 1
+    receipt = board.committed(board.ledger / "requests" / f"{request['id']}.json")
+    assert receipt["state"] == "dropped" and receipt["cancelled_by"] == STOP_ID
     [ack] = [m for _, m in _outbox_files(board) if m.get("in_reply_to") == STOP_ID]
-    assert ack["kind"] == "note"
+    assert ack["kind"] == "note" and ack["title"] == "Task stop requested"
     assert _delivery(board, STOP_ID)["state"] == "acknowledged"
+    assert _delivery(board, TASK_ID)["state"] == "acknowledged"
 
 
 def test_an_invalid_bridge_task_is_answered_once_and_never_committed(board):
