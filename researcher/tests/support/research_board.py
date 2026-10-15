@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from records.fixtures import HYP, JOURNAL, JOURNAL_BODY
+from unit.records.fixtures import HYP, JOURNAL, JOURNAL_BODY
 from ulid import ULID
 
 from ide_research_core.io import gitops

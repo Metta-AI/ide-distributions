@@ -253,6 +253,8 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     input_commit = gitops.head(worker.worktree)
     real_run = subprocess.run
     def recorded_process(argv, **kwargs):
+        if argv[:4] == [sys.executable, '-m', 'ide_research_core', 'promotion']:
+            return real_run(argv, **kwargs)  # the orchestrator's submit, below
         if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'upload-bootstrap']:
             assert kwargs['env']['RESEARCH_SOFTMAX'] == 'fake'
             assert kwargs['env']['RESEARCH_GAME'] == 'gota'

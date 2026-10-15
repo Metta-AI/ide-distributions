@@ -230,18 +230,18 @@ def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys, de
         destination = temporary / original.relative_to(root.parent)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, destination)
-    lab = temporary / 'autoresearch/games/gota/compiler'
+    lab = temporary / 'researcher/games/gota/compiler'
     source = lab.parent / 'seed/strategy/STRATEGY.md'
     monkeypatch.setattr(sb, 'LAB', lab)
     monkeypatch.setattr(sb, 'COMPILER', lab / 'strategy/compiler')
     monkeypatch.setattr(sb, 'STAGING', lab / 'strategy/.staging')
     monkeypatch.setattr(sb, 'BUILDS', lab / 'strategy/compiled')
     import gota_host
-    monkeypatch.setattr(gota_host, 'BASELINE', temporary / 'autoresearch/tests/fixtures/gota/v13-live.bas')
+    monkeypatch.setattr(gota_host, 'BASELINE', temporary / 'researcher/tests/fixtures/gota/v13-live.bas')
     original_git = sb.git
     monkeypatch.setattr(sb, 'git', lambda *args, **kwargs: original_git(*args, root=temporary))
     sb.git('init')
-    sb.git('add', 'autoresearch')
+    sb.git('add', 'researcher')
     sb.git('-c', 'user.name=Test', '-c', 'user.email=test@invalid', 'commit', '-m', 'fixture inputs')
     monkeypatch.setenv('FAKE_UNIT_ROOT', str(root / 'tests/fixtures/gota/v13_units'))
     if default_agent:
