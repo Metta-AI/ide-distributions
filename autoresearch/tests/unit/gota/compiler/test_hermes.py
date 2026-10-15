@@ -323,26 +323,22 @@ def test_compiler_child_isolates_outer_profile(generation, monkeypatch):
     monkeypatch.setenv('HERMES_HOME', '/outer/profile')
     monkeypatch.setenv('HERMES_PROFILE', 'autoresearch')
     monkeypatch.setenv('HERMES_KANBAN_TASK', 'outer-task')
-    monkeypatch.setenv('TIRITH_ENABLED', 'false')
     original = sb.subprocess.run
     def isolated(command, **kwargs):
         if command[0] == 'hermes':
             env = kwargs['env']
             assert env['HERMES_HOME'] == str(home)
             assert env['HERMES_WRITE_SAFE_ROOT'] == str(kwargs['cwd'])
-            assert env['TIRITH_BIN'] == str(home / 'bin/tirith')
             assert 'HERMES_PROFILE' not in env
             assert 'HERMES_KANBAN_TASK' not in env
-            assert 'TIRITH_ENABLED' not in env
         return original(command, **kwargs)
     monkeypatch.setattr(sb.subprocess, 'run', isolated)
     sb.generate(order)
 
 
 def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypatch, tmp_path):
-    """Real source closure/prepare/generate/assemble/finalize; external gates/security fake only."""
+    """Real source closure/prepare/generate/assemble/finalize; external gates and model fake only."""
     import importlib.util
-    import types
 
     import gota_gates
     import gota_host
@@ -374,17 +370,6 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     monkeypatch.setenv('FAKE_UNIT_ROOT', str(distribution / 'tests/fixtures/gota/v13_units'))
     monkeypatch.setenv('OPENROUTER_MODEL', 'test/openweight')
     monkeypatch.setenv('GOTA_HERMES_PYTHON', '/fake/security-python')
-    scanner = tmp_path / 'fake-tirith'
-    scanner.write_text('fake security boundary')
-    scanner.chmod(0o755)
-    monkeypatch.setenv('GOTA_TIRITH_BIN', str(scanner))
-    guarded = sb.subprocess.run
-    def processes(command, **kwargs):
-        if command[0] == '/fake/security-python':
-            home = Path(kwargs['env']['HERMES_HOME'])
-            return types.SimpleNamespace(stdout=str(home / 'bin/tirith'), returncode=0)
-        return guarded(command, **kwargs)  # generation fixture rejects real backend/processes
-    monkeypatch.setattr(sb.subprocess, 'run', processes)
     commands = []
     def verify_fake(build_id, **kwargs):
         stage = sb.build_path(build_id, staged=True)

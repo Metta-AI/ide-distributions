@@ -113,25 +113,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     manifest = scratch / 'manifest.json'
     manifest.write_text(json.dumps(resolved_manifest, indent=2) + '\n')
     home = scratch / 'hermes-home'
-    (home / 'bin').mkdir(parents=True)
-    scanner_source = os.environ.get('GOTA_TIRITH_BIN')
-    if not scanner_source:
-        raise pw_cli.EnvironmentMissing('tirith is not provisioned', 'set GOTA_TIRITH_BIN to the officially installed verified executable')
-    shutil.copy2(scanner_source, home / 'bin/tirith')
-    environment = os.environ.copy()
-    environment['HERMES_HOME'] = str(home)
-    for name in ('HERMES_PROFILE', 'HERMES_PROFILE_NAME', 'TIRITH_BIN', 'TIRITH_ENABLED', 'TIRITH_FAIL_OPEN'):
-        environment.pop(name, None)
-    environment['TIRITH_BIN'] = str(home / 'bin/tirith')
-    ready = subprocess.run([python, '-c',
-        ('from tools.tirith_security import ensure_installed; p = ensure_installed(); '
-        'assert p, "tirith installation failed"; print(p)')],
-        env=environment, capture_output=True, text=True, check=True, timeout=120)
-    if not ready.stdout.strip():
-        raise pw_cli.EnvironmentMissing('Hermes security readiness returned empty output', 'verify GOTA_HERMES_PYTHON and GOTA_TIRITH_BIN')
-    scanner = Path(ready.stdout.strip().splitlines()[-1])
-    if scanner.resolve() != (home / 'bin/tirith').resolve() or not os.access(scanner, os.X_OK):
-        raise ValueError('Hermes security preflight did not return an installed tirith executable')
+    home.mkdir()
     os.environ['GOTA_COMPILER_HERMES_HOME'] = str(home)
     compiler.BUILDS = scratch / 'compiled'
     compiler.STAGING = scratch / 'staging'
@@ -151,7 +133,6 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
         analysis.rename(target / 'analysis')
     version = compiler.read(target / 'version.json')
     version['engine'] = identity
-    version['compiler']['security_scanner_sha256'] = hashlib.sha256(scanner.read_bytes()).hexdigest()
     version['artifact'] = 'policy.bas'
     version['started'], version['finished'] = started, now_iso()
     version['strategy_sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()

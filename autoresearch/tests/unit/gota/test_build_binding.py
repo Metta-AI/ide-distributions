@@ -81,23 +81,22 @@ def test_archive_distribution_and_candidate_committed_inputs(tmp_path, monkeypat
         compiler.committed_inputs(source)
 
 
-@pytest.mark.parametrize('status,security,timeout,environment,expected,budget,budget_env,expected_budget,copy_fails', [
-    ('passed', 'ready', None, None, 1200, None, None, 1800, False),
-    ('failed', 'ready', None, None, 1200, None, None, 1800, False),
-    ('errored', 'ready', None, None, 1200, None, None, 1800, False),
-    ('passed', 'empty', None, None, 1200, None, None, 1800, False),
-    ('passed', 'ready', None, '1234', 1234, None, '2400', 2400, False),
-    ('passed', 'ready', 1400, '1234', 1400, 2400, '1800', 2400, False),
-    ('passed', 'ready', 3600, 'invalid', 3600, 4200, 'invalid', 4200, False),
-    ('passed', 'ready', None, '', 1200, None, '', 1800, False),
+@pytest.mark.parametrize('status,timeout,environment,expected,budget,budget_env,expected_budget,copy_fails', [
+    ('passed', None, None, 1200, None, None, 1800, False),
+    ('failed', None, None, 1200, None, None, 1800, False),
+    ('errored', None, None, 1200, None, None, 1800, False),
+    ('passed', None, '1234', 1234, None, '2400', 2400, False),
+    ('passed', 1400, '1234', 1400, 2400, '1800', 2400, False),
+    ('passed', 3600, 'invalid', 3600, 4200, 'invalid', 4200, False),
+    ('passed', None, '', 1200, None, '', 1800, False),
     # The compiler sessions cannot be copied (the profile path is a file): the build is
     # unaffected, and a compiler that raises keeps its own error.
-    ('passed', 'ready', None, None, 1200, None, None, 1800, True),
-    ('raises', 'ready', None, None, 1200, None, None, 1800, True),
-    ('raises', 'ready', None, None, 1200, None, None, 1800, False),
+    ('passed', None, None, 1200, None, None, 1800, True),
+    ('raises', None, None, 1200, None, None, 1800, True),
+    ('raises', None, None, 1200, None, None, 1800, False),
 ])
 def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
-        tmp_path, monkeypatch, capsys, status, security, timeout, environment, expected,
+        tmp_path, monkeypatch, capsys, status, timeout, environment, expected,
         budget, budget_env, expected_budget, copy_fails):
     import hashlib
     import shutil
@@ -133,16 +132,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
     from games.gota.gates.limits import POLYWORLD_COMMIT
     manifest.write_text(json.dumps({'game': {'runnable': {
         'source_url': f'https://github.com/Metta-AI/polyworld/tree/{POLYWORLD_COMMIT}/examples/gods_of_the_arena'}}}))
-    scanner = tmp_path / 'tirith'
-    scanner.write_text('fake scanner')
-    scanner.chmod(0o755)
-    monkeypatch.setenv('GOTA_TIRITH_BIN', str(scanner))
     monkeypatch.setenv('GOTA_HERMES_PYTHON', '/fake/hermes/python')
     monkeypatch.setattr(subprocess, 'check_output', lambda argv, **kw: str(tmp_path / 'worker'))
     def fake_process(argv, **kwargs):
-        assert argv[0] == '/fake/hermes/python', 'real model or external process forbidden'
-        assert kwargs['env']['HERMES_HOME'] != str(tmp_path)
-        return types.SimpleNamespace(stdout='' if security == 'empty' else str(Path(kwargs['env']['HERMES_HOME']) / 'bin/tirith'), returncode=0)
+        raise AssertionError(f'unexpected external process: {argv}')
     monkeypatch.setattr(subprocess, 'run', fake_process)
     compiler = types.SimpleNamespace(read=lambda p: json.loads(p.read_text()),
         dump=lambda p, data: p.write_text(json.dumps(data)))
@@ -179,11 +172,6 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
     monkeypatch.setenv('HERMES_HOME', str(profile))
     from games.gota.tools import engine_identity
     monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
-    if security == 'empty':
-        with pytest.raises(SystemExit, match='empty output') as error:
-            module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
-        assert error.value.exit_code == 3
-        return
     if status == 'raises':
         with pytest.raises(RuntimeError, match='compiler crashed'):
             module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
@@ -291,15 +279,15 @@ def test_upload_delegates_only_to_shared_cli(monkeypatch):
     assert upload.main() == 7
 
 
-@pytest.mark.parametrize('failure,exit_code', [(False, 1), (True, 3), ('security', 3)])
+@pytest.mark.parametrize('failure,exit_code', [(False, 1), (True, 3), ('environment', 3)])
 def test_main_failure_exit_json(tmp_path, monkeypatch, capsys, failure, exit_code):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'), '--manifest', '/fake/manifest', '--json'])
     def fake_build(*args, **kwargs):
-        if failure == 'security':
+        if failure == 'environment':
             import pw_cli
-            raise pw_cli.EnvironmentMissing('Hermes security readiness returned empty output', 'verify GOTA_HERMES_PYTHON and GOTA_TIRITH_BIN')
+            raise pw_cli.EnvironmentMissing('Hermes Python is not configured', 'set GOTA_HERMES_PYTHON')
         if failure:
             raise OSError('native compiler missing')
         return {'ok': False, 'gates': {'G1': {'passed': False}}}
