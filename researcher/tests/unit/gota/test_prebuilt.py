@@ -499,14 +499,14 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     assert 'strategy/candidates/bootstrap' in section
     assert '.scratch/build/champion' in section
     assert 'git -C "$CARD_WORKTREE"' in section
-    assert '"$PROFILE_PYTHON"' in section and 'cd "$PROFILE_HOME"' in section
+    assert '"$RESEARCH_PYTHON"' in section and 'cd "$RESEARCH_HOME"' in section
     assert 'data.platform_policy_version_id' in section
     assert 'unevaluated' in section and 'promotion bootstrap' in section
     assert '/workspace/versions/' not in section
     skill = (ROOT / 'skills/gota/eval-design/SKILL.md').read_text()
-    assert 'softmax bootstrap-champion' in skill
+    assert 'softmax upload-bootstrap' in skill
     assert 'strategy/candidates/bootstrap' in skill and '.scratch/build/champion' in skill
-    assert 'complete-card' in skill and 'merge publishes' in skill
+    assert 'integrate' in skill and 'never submits' in skill
     for path in (ROOT / 'skills/gota').glob('*/SKILL.md'):
         assert 'upload-baseline' not in path.read_text()
         assert 'handoff is pending' not in path.read_text()

@@ -320,17 +320,17 @@ bootstrap candidate has no experiment id. Resolve the installed environment and
 keep output in the card's scratch space:
 
 ```sh
-PROFILE_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
-PROFILE_PYTHON="$PROFILE_HOME/local/venv/bin/python"
+RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
 CARD_WORKTREE="$PWD"
 CANDIDATE="$CARD_WORKTREE/strategy/candidates/bootstrap"
 BUILD="$CARD_WORKTREE/.scratch/build/champion"
 CHECK="$CARD_WORKTREE/.scratch/check/champion"
 mkdir -p "$CANDIDATE"
-cp "$PROFILE_HOME/games/gota/baselines/submitted-v13.bas" "$CANDIDATE/submitted-v13.bas"
+cp "$RESEARCH_HOME/games/gota/baselines/submitted-v13.bas" "$CANDIDATE/submitted-v13.bas"
 git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/submitted-v13.bas
 git -C "$CARD_WORKTREE" commit -m "Record exact submitted v13 bootstrap input"
-(cd "$PROFILE_HOME" && "$PROFILE_PYTHON" games/gota/tools/make_v13_live.py "$CANDIDATE/submitted-v13.bas" "$CANDIDATE/v13-live.bas")
+(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/make_v13_live.py "$CANDIDATE/submitted-v13.bas" "$CANDIDATE/v13-live.bas")
 git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/v13-live.bas strategy/candidates/bootstrap/v13-live.provenance.json
 git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidate"
 ```
@@ -346,11 +346,11 @@ loops. Each long-command block below sets its own paths for a fresh shell;
 start it from the card's worktree.
 
 ```sh
-PROFILE_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
-PROFILE_PYTHON="$PROFILE_HOME/local/venv/bin/python"
+RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
 CANDIDATE="$PWD/strategy/candidates/bootstrap"
 BUILD="$PWD/.scratch/build/champion"
-(cd "$PROFILE_HOME" && "$PROFILE_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
+(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
 ```
 
 After exit, read the command JSON, `$BUILD/report.json`, `$BUILD/report.md`,
@@ -374,11 +374,11 @@ new `session_id`, and use `process_manage` action `wait`, `timeout: 1800` as
 above, repeating only on `status: "timeout"`:
 
 ```sh
-PROFILE_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
-PROFILE_PYTHON="$PROFILE_HOME/local/venv/bin/python"
+RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
 BUILD="$PWD/.scratch/build/champion"
 CHECK="$PWD/.scratch/check/champion"
-(cd "$PROFILE_HOME" && "$PROFILE_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
+(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
 ```
 
 After exit, read `$CHECK/gates.json`, `$CHECK/engine_identity.json`,

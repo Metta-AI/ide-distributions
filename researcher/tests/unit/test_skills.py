@@ -108,6 +108,7 @@ COMMAND_FLAGS = {
     "softmax xp status": "",
     "softmax xp recover": "",
     "softmax xp artifacts": "--dest --batch --attempt",
+    "softmax xp evidence": "",
     "softmax upload": "--build-dir",
     "softmax upload-bootstrap": "--build-dir",
     "softmax leaderboard": "",
@@ -338,3 +339,25 @@ def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap()
         "explicitly assigned a bootstrap card",
     ):
         assert required in text
+
+
+def _subparsers(parser):
+    import argparse
+
+    found = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
+    return found[0].choices if found else {}
+
+
+def test_the_contract_matches_the_real_cli():
+    """The table above is the researcher's allowed subset; every command and flag in it must
+    exist in the shared CLI, so a renamed command fails here instead of in a worker."""
+    from ide_research_core.cli import build_parser
+
+    groups = _subparsers(build_parser())
+    for command, flags in COMMAND_FLAGS.items():
+        parser = groups[command.split()[0]]
+        for word in command.split()[1:]:
+            parser = _subparsers(parser)[word]
+        known = {option for action in parser._actions for option in action.option_strings}
+        for flag in flags.split():
+            assert flag in known, f"{command}: {flag} is not a flag of the real CLI"
