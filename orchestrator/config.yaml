@@ -1,0 +1,27 @@
+model:
+  default: moonshotai/kimi-k3
+  provider: openrouter
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  write_approval: false
+agent:
+  max_turns: 40
+platform_toolsets:
+  api_server: [orchestrator]
+  cron: [orchestrator]
+terminal:
+  env_passthrough:
+    - SOFTMAX_PLAYER_CREDENTIAL
+    - COGAMES_API_URL
+    - RESEARCH_PLAYER_ID
+    - RESEARCH_GAME
+    - RESEARCH_WORKSPACE
+    - RESEARCH_CANONICAL
+    - TMPDIR
+plugins:
+  enabled: [orchestrator]
+updates:
+  check: false
+curator:
+  prune_builtins: false

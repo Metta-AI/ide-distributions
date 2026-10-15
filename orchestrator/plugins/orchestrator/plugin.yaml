@@ -1,0 +1,27 @@
+name: orchestrator
+version: 0.1.0
+description: Research lead tools for the native autoresearch board and shared research CLI.
+author: ide-distributions
+provides_tools:
+  - ide_say
+  - ide_task_update
+  - card_create
+  - card_show
+  - card_list
+  - card_comment
+  - card_answer
+  - card_close
+  - board_reconcile
+  - event_ack
+  - status
+  - records_find
+  - records_show
+  - plan_write
+  - control_write
+  - promotion_submit
+  - bootstrap_champion
+  - accept_champion
+  - workspace_integrate
+  - xp_status
+  - credits
+  - leaderboard
