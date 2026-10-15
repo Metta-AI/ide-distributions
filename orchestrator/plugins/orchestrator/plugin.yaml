@@ -20,6 +20,7 @@ provides_tools:
   - control_write
   - promotion_submit
   - bootstrap_champion
+  - accept_champion
   - workspace_integrate
   - xp_status
   - credits

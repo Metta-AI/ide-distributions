@@ -4,9 +4,23 @@ import sqlite3
 from contextlib import closing
 
 TABLES = ("task_events", "task_comments", "task_runs")
+# Hermes gateway/kanban_watchers_notifier.py:_WAKE_KINDS. The gate runs without Hermes.
+WAKE_KINDS = {
+    "completed",
+    "gave_up",
+    "crashed",
+    "timed_out",
+    "blocked",
+    "review_requested",
+    "changes_requested",
+    "block_loop_detected",
+}
 
 
 def prepare(conn):
+    # A gate read must not wait for card_create's write lock during its Git fetch.
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='handled'").fetchone():
+        return conn
     conn.execute(
         'CREATE TABLE IF NOT EXISTS handled ("table" TEXT NOT NULL, '
         'rowid INTEGER NOT NULL, PRIMARY KEY ("table", rowid))'
@@ -50,6 +64,10 @@ def snapshot(context):
         events = []
         for table in ("task_events", "task_comments"):
             for row in conn.execute(f"SELECT * FROM {table} ORDER BY id"):
+                if table == "task_events" and row["kind"] not in WAKE_KINDS:
+                    continue
+                if table == "task_comments" and row["author"] == "orchestrator":
+                    continue
                 if (table, row["id"]) not in handled:
                     events.append({"table": table, **dict(row)})
         runs = [

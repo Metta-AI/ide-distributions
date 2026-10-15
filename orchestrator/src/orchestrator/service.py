@@ -1,7 +1,6 @@
 """Compose board facts with canonical records for the model's two overview tools."""
 
 import json
-import subprocess
 
 from .board import Board
 from .gate import transitions
@@ -19,8 +18,13 @@ class Service:
         state = snapshot(self.context)
         pending = transitions(state, self.research, IDE(self.context), True)
         branches = []
+        actionable_cards = {event["task_id"] for event in state["events"]}
         for card in state["cards"]:
-            if card["branch_name"] and card["status"] in {"done", "blocked", "ready"}:
+            if (
+                card["id"] in actionable_cards
+                and card["branch_name"]
+                and card["status"] in {"done", "blocked", "ready"}
+            ):
                 merged = self.research.call("workspace", "merged", "--branch", card["branch_name"])
                 # An untouched queued branch is also an ancestor of main. It is not completed work.
                 marker = "\n\nCard context:\n```json\n"
@@ -48,28 +52,9 @@ class Service:
         by_state = {}
         for card in cards:
             by_state.setdefault(card["status"], []).append(card["id"])
-        canonical = self.context.env["RESEARCH_CANONICAL"]
-        present = subprocess.run(
-            ["git", "--git-dir", canonical, "ls-tree", "--name-only", "main", "control/pause.json"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.strip()
-        pause = (
-            subprocess.run(
-                ["git", "--git-dir", canonical, "show", "main:control/pause.json"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if present
-            else None
-        )
         return {
             "cards": by_state,
             "research": self.research.call("records", "summary"),
             "promotion": self.research.call("promotion", "status"),
-            "control": json.loads(pause.stdout) if pause else None,
+            "control": self.research.control_read(),
         }

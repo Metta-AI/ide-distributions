@@ -5,8 +5,12 @@ import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
+from unittest.mock import patch
 
+from gateway.kanban_watchers_notifier import _WAKE_KINDS
 from gateway.session_context import clear_session_vars, set_session_vars
 from hermes_cli import kanban_db as kb
 from hermes_cli.kanban_db_boards import create_board
@@ -14,8 +18,10 @@ from hermes_cli.kanban_db_notify import list_notify_subs
 from hermes_state import SessionDB
 
 from orchestrator.board import Board, connection
+from orchestrator.board import git as board_git
 from orchestrator.context import Context
-from orchestrator.storage import snapshot
+from orchestrator.gate import evaluate
+from orchestrator.storage import WAKE_KINDS, snapshot
 
 
 def git(path, *args):
@@ -25,6 +31,7 @@ def git(path, *args):
 
 
 def main():
+    assert WAKE_KINDS == set(_WAKE_KINDS)
     home = Path(os.environ["HERMES_HOME"])
     root = home.parent.parent
     root.mkdir(parents=True, exist_ok=True)
@@ -66,9 +73,27 @@ def main():
         "max_runtime_seconds": 7200,
         "session_id": "persisted-origin",
     }
-    # Two independent native connections and plugin-db locks, as in two gateway sessions.
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: board.card_create(**args), range(2)))
+    # A gate read must finish while create holds its lock around a slow Git fetch.
+    fetching, release_fetch = Event(), Event()
+
+    def slow_fetch(clone, *args):
+        if args == ("fetch", "origin"):
+            fetching.set()
+            assert release_fetch.wait(10)
+        return board_git(clone, *args)
+
+    with (
+        patch("orchestrator.board.git", side_effect=slow_fetch),
+        ThreadPoolExecutor(max_workers=3) as pool,
+    ):
+        creates = [pool.submit(board.card_create, **args) for _ in range(2)]
+        try:
+            assert fetching.wait(10)
+            gate = pool.submit(evaluate, context, now=datetime(2026, 10, 15, 12, 1, tzinfo=UTC))
+            assert gate.result(timeout=2) == {"wakeAgent": False}
+        finally:
+            release_fetch.set()
+        results = [future.result() for future in creates]
     task_id = results[0]["card"]["id"]
     assert results[1]["card"]["id"] == task_id
     assert len(board.card_list()) == 1
@@ -107,7 +132,12 @@ def main():
     assert board.card_close(task_id, "done", summary="Completed with local evidence.")["changed"]
     late = board.card_comment(task_id, "highlight: late evidence")
     events = snapshot(context)["events"]
-    assert any(e["table"] == late["table"] and e["id"] == late["id"] for e in events)
+    assert not any(e["table"] == late["table"] and e["id"] == late["id"] for e in events)
+    assert not any(e["table"] == "task_comments" for e in events)
+    with closing(connection()) as conn:
+        worker_comment = kb.add_comment(conn, task_id, "researcher-1", "highlight: late finding")
+    events = snapshot(context)["events"]
+    assert any(e["table"] == "task_comments" and e["id"] == worker_comment for e in events)
     assert snapshot(context)["events"] == events
     board.event_ack(events)
     assert snapshot(context)["events"] == []

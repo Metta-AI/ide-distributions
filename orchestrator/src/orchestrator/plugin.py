@@ -173,7 +173,13 @@ TOOLS = {
     ),
     "bootstrap_champion": (
         Research,
-        "Bootstrap only when the shared workflow finds no champion.",
+        "Submit an integrated starter-policy version (V-...) only when no champion exists.",
+        {"version": S},
+        ["version"],
+    ),
+    "accept_champion": (
+        Research,
+        "Record the league's current champion as the loop's, only after the user confirms.",
         {},
         [],
     ),

@@ -18,12 +18,18 @@ QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
 
 class Platform:
-    def __init__(self, *, xp=None, credits=0, answer=None, conflict=False, in_flight=None):
+    def __init__(
+        self, *, xp=None, credits=0, answer=None, conflict=None, in_flight=None, paused=False
+    ):
         self.xp = xp or []
         self.balance = credits
         self.answer = answer
         self.conflict = conflict
         self.in_flight = in_flight
+        self.paused = paused
+
+    def control_read(self):
+        return {"paused": self.paused}
 
     def xp_status(self, experiment):
         assert experiment == "E-1"
@@ -46,7 +52,9 @@ class Platform:
 def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
     with sqlite3.connect(board_file) as conn:
-        conn.execute("INSERT INTO task_comments VALUES (1, 'card-1', 'question: why?')")
+        conn.execute(
+            "INSERT INTO task_comments VALUES (1, 'card-1', 'researcher-1', 'question: why?')"
+        )
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', 'completed')")
     first = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
     assert first["wakeAgent"] is True
@@ -88,12 +96,21 @@ def test_unresolved_wait_does_not_wake(context, board_file, awaiting):
     assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
 
 
-def test_champion_conflict_and_inflight_on_tenth_minute(context, board_file):
+def test_unchanged_promotion_waits_stay_quiet_and_pausing_quiets_conflict(context, board_file):
     now = QUIET_MINUTE.replace(minute=10)
-    for platform in (Platform(conflict=True), Platform(in_flight={"stage": "submitted"})):
-        result = evaluate(context, platform, platform, now)
-        assert result["context"]["pending"][0]["kind"] == "promotion"
-        assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    for stage in ("submitted", "awaiting-permit"):
+        platform = Platform(in_flight={"stage": stage})
+        for minute in (10, 20):
+            assert evaluate(context, platform, platform, now.replace(minute=minute)) == {
+                "wakeAgent": False
+            }
+    platform = Platform(conflict="league champion was not recorded")
+    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    assert (
+        evaluate(context, platform, platform, now)["context"]["pending"][0]["kind"] == "promotion"
+    )
+    platform.paused = True
+    assert evaluate(context, platform, platform, now.replace(minute=20)) == {"wakeAgent": False}
     assert evaluate(context, Platform(), Platform(), now) == {"wakeAgent": False}
 
 
@@ -145,3 +162,70 @@ def test_finished_promotion_wakes_even_when_inflight_clears(context, board_file)
     result = evaluate(context, platform, platform, QUIET_MINUTE.replace(minute=10))
     assert result["wakeAgent"]
     assert result["context"]["pending"][0]["status"]["champion"] == {"version": "new"}
+    assert evaluate(context, platform, platform, QUIET_MINUTE.replace(minute=20)) == {
+        "wakeAgent": False
+    }
+
+
+def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_file):
+    with sqlite3.connect(board_file) as conn:
+        conn.executemany(
+            "INSERT INTO task_events (task_id, kind) VALUES ('card-1', ?)",
+            [
+                (kind,)
+                for kind in (
+                    "created",
+                    "claimed",
+                    "spawned",
+                    "worker_registered",
+                    "edited",
+                    "linked",
+                    "attached",
+                    "reprioritized",
+                    "status",
+                    "archived",
+                    "unblocked",
+                    "commented",
+                )
+            ],
+        )
+        conn.execute("INSERT INTO task_comments VALUES (1, 'card-1', 'orchestrator', 'Answer')")
+    for _ in range(2):
+        assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    with closing(open_storage(context.storage_path)) as store:
+        assert store.execute("SELECT * FROM handled").fetchall() == []
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "completed",
+        "gave_up",
+        "crashed",
+        "timed_out",
+        "blocked",
+        "review_requested",
+        "changes_requested",
+        "block_loop_detected",
+    ],
+)
+def test_native_decision_events_need_explicit_ack(context, board_file, kind):
+    with sqlite3.connect(board_file) as conn:
+        conn.execute("INSERT INTO task_events VALUES (1, 'card-1', ?)", (kind,))
+    result = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
+    assert result["context"]["events"][0]["kind"] == kind
+    with closing(open_storage(context.storage_path)) as store:
+        ack(store, result["context"]["events"])
+    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+
+
+@pytest.mark.parametrize("experiment", [None, {}, {"id": None}])
+def test_bad_xp_handoff_is_reported_and_acknowledgeable(context, board_file, experiment):
+    add_wait(board_file, {"xp": ["xp-1"]}, experiment)
+    event = evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"][0]
+    assert event["kind"] == "bad_handoff"
+    assert event["table"] == "task_runs" and event["id"] == 1
+    assert event["card"] == "card-1"
+    with closing(open_storage(context.storage_path)) as store:
+        ack(store, [event])
+    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}

@@ -66,6 +66,27 @@ class Research:
             f"Research {action}: {reason}",
         )
 
+    def control_read(self):
+        """Read the published pause, not an uncommitted file in this profile's clone."""
+        canonical = self.context.env["RESEARCH_CANONICAL"]
+        present = subprocess.run(
+            ["git", "--git-dir", canonical, "ls-tree", "--name-only", "main", "control/pause.json"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        if not present:
+            return None
+        pause = subprocess.run(
+            ["git", "--git-dir", canonical, "show", "main:control/pause.json"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return json.loads(pause.stdout)
+
     def _publish(self, path, text, message):
         target = self.context.workspace / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -75,8 +96,11 @@ class Research:
     def promotion_submit(self, experiment):
         return self.call("promotion", "submit", experiment)
 
-    def bootstrap_champion(self):
-        return self.call("promotion", "bootstrap")
+    def bootstrap_champion(self, version):
+        return self.call("promotion", "bootstrap", "--version", version)
+
+    def accept_champion(self):
+        return self.call("promotion", "accept")
 
     def workspace_integrate(self, branch):
         return self.call("workspace", "integrate", "--branch", branch)

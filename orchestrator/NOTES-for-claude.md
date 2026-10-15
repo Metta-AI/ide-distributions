@@ -105,3 +105,41 @@ work well. The installed Hermes interpreter lagged the pinned source's Python 3.
 so testing needed a separately provisioned environment; no production workaround was added.
 
 CODEX BUILD 1 DONE
+
+## Round 11 fixes in progress
+
+Read REVIEW-11 and inspected main at d774156 without changing it. Keeping edits on the
+`orchestrator` branch under `orchestrator/`. Confirmed the shared promotion bootstrap now
+requires `--version`, acceptance is `promotion accept`, and the shared softmax CLI still
+has no read for one permit ask: retaining the existing cogents GET.
+
+Addressing wake filtering, promotion quieting against canonical pause, event-scoped branch
+checks, malformed XP handoffs, and the two promotion adapters. Checking the create-lock/gate
+interaction with a concurrent database regression. Using the audit-documentation skill for
+the pre-commit audit; updates will cover the new tools and conflict/bootstrap behavior.
+
+Round 11 implementation and focused validation:
+- Snapshot uses the eight native wake kinds; bookkeeping and orchestrator-authored comments
+  are ignored without acknowledgements. The real-Hermes test checks parity with `_WAKE_KINDS`
+  and confirms a researcher's late comment survives while our own comment/answer does not.
+- Promotion polling still advances recovery, but unchanged in-flight state is quiet. A conflict
+  wakes only until canonical research control is paused; champion changes still wake.
+- Reconciliation fetches only eligible branches whose cards have pending actionable rows.
+  Tests cover untouched bases, moved branches, old done cards and stopping fetches after ack.
+- An XP wait missing experiment.id becomes an acknowledgeable `bad_handoff` task_runs item.
+- Bootstrap now requires a version record; accept_champion calls shared promotion accept.
+  SOUL/doctrine/README require pause + user notification on conflict and confirmation before accept.
+- Fixed the lock concern by skipping schema writes once `handled` exists. A real native
+  card_create was held inside its fetch while a separate gate call completed successfully;
+  concurrent creates still returned the same card. No lock, store, ledger or gate added.
+- Shared single-ask read check: main's softmax parser at d774156 has none. Existing cogents
+  `c/asks/{id}` GET retained.
+
+Pre-commit documentation audit: checked all five requested fixes against code and tests,
+updated tool signatures and bootstrap/conflict operation in README/SOUL/doctrine, and preserved
+historical Build 1 notes above. Default suite: 28 passed (2 Hermes deselected). Native board
+scenario: 1 passed, including the fetch-lock regression. Ruff found one import-order issue,
+now fixed. Clean-install validation exports HEAD, so the full Hermes suite follows the code
+checkpoint to test these changes rather than the earlier commit's 21-tool installation.
+The new accept tool is also in plugin.yaml's discovery list. Added a manifest/schema parity
+check; the default suite is now 29 passing tests. Ruff and formatting checks pass.

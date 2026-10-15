@@ -17,7 +17,12 @@ def transitions(state, research, ide, check_champion):
         event = {"table": "task_runs", "id": run["id"], "card": run["task_id"]}
         if awaiting.get("xp"):
             # xp status takes an experiment ID; handoffs name it separately from request IDs.
-            experiment = metadata["experiment"]["id"]
+            experiment = (metadata.get("experiment") or {}).get("id")
+            if not experiment:
+                pending.append(
+                    {**event, "kind": "bad_handoff", "reason": "awaiting.xp needs experiment.id"}
+                )
+                continue
             rows = research.xp_status(experiment)
             wanted = set(awaiting["xp"])
             rows = [row for row in rows if row["request_id"] in wanted]
@@ -50,7 +55,9 @@ def transitions(state, research, ide, check_champion):
         before = research.call("records", "summary")["champion"]
         promotion = research.call("promotion", "status")
         after = research.call("records", "summary")["champion"]
-        if promotion.get("conflict") or promotion.get("in_flight") or before != after:
+        if before != after or (
+            promotion.get("conflict") and not (research.control_read() or {}).get("paused")
+        ):
             pending.append({"kind": "promotion", "status": promotion})
     return pending
 

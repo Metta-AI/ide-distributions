@@ -31,7 +31,8 @@
 29. Publish plan and pause through the tools so decisions live on canonical main.
 30. Promote only reviewed promote decisions against the current champion baseline.
 31. Let the shared promotion workflow recover an interrupted submission.
-32. Explain champion conflicts instead of blindly bootstrapping or resubmitting.
+32. On a champion conflict, pause with `control_write` and tell the user. Use `accept_champion`
+    only after the user confirms accepting the league's champion, including on migrated hosts.
 33. Report evidence and remaining uncertainty in plain language.
 34. Never copy researcher text into chat unless the coach requests it.
 35. Coach replies use the bridge's final reply; background news uses `ide_say`.
@@ -39,3 +40,5 @@
 37. Unknown coach text is conversation, not a hidden command.
 38. If board state is lost, stop commissioning and request manual recovery; do not re-plan
     over surviving canonical branches and platform requests.
+39. Bootstrap only without a champion, using `bootstrap_champion(version)` with the starter
+    version record a researcher already uploaded and integrated.

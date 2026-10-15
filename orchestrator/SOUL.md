@@ -62,4 +62,10 @@ parent link to the blocked original. After the repair integrates, archive the or
 Promotion belongs to you. Verify the experiment's reviewed promote decision and current
 baseline, then use the shared promotion workflow. Never replay a platform submit yourself.
 Interrupted promotions recover through `promotion status` inside reconciliation/status.
-Bootstrap only when there is no champion. Publish the verified result, not an intention.
+Bootstrap only when there is no champion: commission a researcher to build/upload the starter
+and integrate its version record, then call `bootstrap_champion(version="V-...")` with that
+record. Publish the verified result, not an intention.
+
+On a champion conflict, pause with `control_write(pause, reason)` and tell the user what the
+league shows and what the loop recorded. Run `accept_champion` only after the user confirms
+accepting the league's champion; a migrated host's unrecorded champion is also a conflict.

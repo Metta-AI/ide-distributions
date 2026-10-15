@@ -1,8 +1,17 @@
 import json
+import subprocess
+from pathlib import Path
 
 import pytest
+import yaml
 
+from orchestrator.plugin import TOOLS
 from orchestrator.research import Research, ResearchError
+
+
+def test_manifest_advertises_registered_tools():
+    manifest = Path(__file__).resolve().parents[1] / "plugins/orchestrator/plugin.yaml"
+    assert set(yaml.safe_load(manifest.read_text())["provides_tools"]) == set(TOOLS)
 
 
 def test_subprocess_contract_and_refusal(shared_fixture):
@@ -19,6 +28,17 @@ def test_subprocess_contract_and_refusal(shared_fixture):
     with pytest.raises(ResearchError) as error:
         research.promotion_submit("refuse")
     assert error.value.envelope["error"]["reason"] == "baseline_not_champion"
+    assert research.bootstrap_champion("V-starter")["args"] == [
+        "promotion",
+        "bootstrap",
+        "--version",
+        "V-starter",
+    ]
+    assert TOOLS["bootstrap_champion"][3] == ["version"]
+    with pytest.raises(TypeError):
+        research.bootstrap_champion()
+    assert research.accept_champion()["args"] == ["promotion", "accept"]
+    assert TOOLS["accept_champion"][2:] == ({}, [])
 
 
 def test_publish_writes_exact_contract_files(shared_fixture):
@@ -38,3 +58,31 @@ def test_publish_writes_exact_contract_files(shared_fixture):
     assert (
         json.loads((shared_fixture.workspace / "control/pause.json").read_text())["paused"] is False
     )
+
+
+def test_control_read_uses_canonical_main(context):
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(context.workspace), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    git("init", "-b", "main")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.invalid")
+    git("commit", "--allow-empty", "-m", "Initial")
+    canonical = context.home / "canonical.git"
+    git("clone", "--bare", str(context.workspace), str(canonical))
+    context.env["RESEARCH_CANONICAL"] = str(canonical)
+    research = Research(context)
+    assert research.control_read() is None
+    pause = context.workspace / "control/pause.json"
+    pause.parent.mkdir()
+    pause.write_text('{"paused": true}')
+    git("add", "control/pause.json")
+    git("commit", "-m", "Pause")
+    git("push", str(canonical), "main")
+    pause.write_text('{"paused": false}')
+    assert research.control_read() == {"paused": True}

@@ -60,7 +60,8 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `status` | Cards by state, canonical record summary, durable pause and promotion state. |
 | `records_find`, `records_show` | Shared canonical record reads. |
 | `plan_write`, `control_write` | Publish plan.md or pause/resume through shared workspace publish. |
-| `promotion_submit`, `bootstrap_champion` | Shared guarded promotion workflow. |
+| `promotion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow; bootstrap requires the integrated starter version record (`V-...`). |
+| `accept_champion()` | Record the league's current champion after the user confirms. |
 | `workspace_integrate(branch)` | Shared integration of a pushed card/repair branch. |
 | `xp_status(experiment)`, `credits`, `leaderboard` | Shared platform reads. |
 
@@ -78,16 +79,33 @@ in the body. The assignee's `.env` can override its clone with `RESEARCH_WORKSPA
 its `workspace/` is used. Existing orphan branches from an interrupted create are reused.
 
 The only plugin table is `handled`, keyed by table and row ID. Events/comments are never
-acknowledged on observation. Pending waits use the latest ended handoff's `task_runs` ID:
+acknowledged on observation. Only Hermes's decision events are surfaced: completed, gave_up,
+crashed, timed_out, blocked, review_requested, changes_requested and block_loop_detected.
+Comments are surfaced only when their author is not the orchestrator. Bookkeeping events and
+the orchestrator's own comments never need an ack. Pending waits use the latest ended handoff's `task_runs` ID:
 `awaiting.xp` holds request IDs with `experiment.id`; `awaiting.credits` is true; or
 `awaiting.permit` is a cogents ask key. Act before acknowledging that run. A lost plugin DB
-replays events; card keys, canonical promotions and git ancestry support recovery.
+replays events; card keys, canonical promotions and git ancestry support recovery. An XP wait
+without `experiment.id` appears as `bad_handoff` with that run ID; fix or arrange the missing
+handoff work, then acknowledge the run.
 
 The gate polls XP terminal status, a positive available credit balance, and permit answers.
-Every wall-clock ten-minute boundary it calls shared `promotion status` for league conflicts
-and promotion recovery, comparing canonical champion summaries before and after recovery. It keeps no tick counter, ledger or deadline. Native errors remain
-errors; the scheduler owns gate-output handling. `board_reconcile` also checks done/unmerged
-and non-running/merged cards. Native live-claim protections remain in effect.
+Permit answers use the cogents `c/asks/{id}` GET because the shared softmax CLI has no
+single-ask read. Every wall-clock ten-minute boundary the gate calls shared `promotion status`,
+which advances an in-flight promotion one step. It wakes only when the canonical champion
+changed during recovery or there is a conflict and canonical `control/pause.json` is not
+already paused. An unchanged in-flight promotion does not wake the model. It keeps no tick
+counter, ledger or deadline. Native errors remain errors; the scheduler owns gate-output
+handling. `board_reconcile` checks done/unmerged and non-running/merged branches only for
+cards with an unacknowledged actionable event or comment in that reconcile. Native live-claim
+protections remain in effect. Once the plugin table exists, gate reads do no schema writes,
+so a card creation holding its write lock during Git fetch does not block the gate.
+
+For a fresh installation, have a researcher upload the starter with `softmax upload-bootstrap`
+and integrate its version record, then call `bootstrap_champion(version="V-...")` to submit it.
+On a champion conflict, pause research with `control_write`, explain the disagreement to the
+user, and call `accept_champion` only after they confirm accepting the league's champion.
+A league champion never recorded by the loop is a conflict, including on migrated hosts.
 
 ## Development and verification
 

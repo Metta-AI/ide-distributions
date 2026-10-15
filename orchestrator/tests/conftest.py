@@ -37,7 +37,7 @@ def board_file(context):
         conn.executescript("""
             CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, branch_name TEXT, body TEXT);
             CREATE TABLE task_events (id INTEGER PRIMARY KEY, task_id TEXT, kind TEXT);
-            CREATE TABLE task_comments (id INTEGER PRIMARY KEY, task_id TEXT, body TEXT);
+            CREATE TABLE task_comments (id INTEGER PRIMARY KEY, task_id TEXT, author TEXT, body TEXT);
             CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,
                                     metadata TEXT);
             INSERT INTO tasks VALUES ('card-1', 'done', 'card/test', '');
@@ -62,7 +62,7 @@ if 'refuse' in args:
                                          'message': 'baseline changed'}}))
     sys.exit(2)
 if args == ['promotion', 'status']:
-    data = {'in_flight': None, 'champion': None, 'conflict': False}
+    data = {'in_flight': None, 'champion': None, 'league_champion': None, 'conflict': None}
 elif args == ['records', 'summary']:
     data = {'champion': None}
 else:
