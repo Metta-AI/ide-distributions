@@ -28,7 +28,10 @@ host_requirements:
 
 Read [mechanics](docs/mechanics.md), [policy surface](docs/policy-surface.md),
 [game guide](docs/game-guide.md), and [replay format](docs/replay-format.md).
-Semantic candidates use the PW compiler. Exact committed BASIC artifacts use
+Semantic candidates use the PW compiler. Its Hermes child resolves the owning
+profile’s OpenRouter credential through the installed Hermes API, then runs
+with a separate scratch home. Provider keys stay out of the worker terminal
+environment and build receipts. Exact committed BASIC artifacts use
 the prebuilt path below. COM is not supported.
 
 ## Seats and opponents

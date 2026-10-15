@@ -300,7 +300,8 @@ def agent_command(agent: str, model: str, directory: Path) -> list[str]:
         return ['claude', '-p', '--model', model, '--safe-mode', '--dangerously-skip-permissions',
                 '--tools', 'Read,Write,Edit,Glob,Grep', '--output-format', 'text']
     if agent == 'hermes':
-        return ['hermes', 'chat', '--oneshot', '--format', 'stream-json',
+        return [os.environ['GOTA_HERMES_PYTHON'], str(LAB / 'tools/hermes_compiler.py'),
+                os.environ['HERMES_HOME'], 'chat', '--oneshot', '--format', 'stream-json',
                 '--query-file', str(directory / 'prompt.txt'), '-t', 'file', '--max-turns', '40',
                 '--model', model, '--provider', 'openrouter']
     if agent != 'codex':

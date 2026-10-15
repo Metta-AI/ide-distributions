@@ -19,9 +19,14 @@ def test_unknown_agent_command_fails_closed(agent, tmp_path):
 
 
 @pytest.mark.parametrize('agent', ['claude', 'codex', 'hermes'])
-def test_supported_agent_command_is_explicit(agent, tmp_path):
+def test_supported_agent_command_is_explicit(agent, tmp_path, monkeypatch):
+    monkeypatch.setenv('GOTA_HERMES_PYTHON', sys.executable)
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     command = sb.agent_command(agent, 'test-model', tmp_path)
-    assert command[0] == agent
+    if agent == 'hermes':
+        assert command[:3] == [sys.executable, str(sb.LAB / 'tools/hermes_compiler.py'), str(tmp_path)]
+    else:
+        assert command[0] == agent
     assert command[command.index('--model') + 1] == 'test-model'
 
 
