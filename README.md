@@ -1,0 +1,49 @@
+# ide-distributions
+
+Hermes Agent profile distributions for the Softmax IDE. Each top-level folder that holds a
+`distribution.yaml` is one distribution, and it installs and tests on its own.
+
+| Folder | What it is |
+|---|---|
+| [`autoresearch/`](autoresearch/README.md) | The autonomous research agent, moved here from `Metta-AI/ide-mvp` with its full history. |
+
+The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
+browser) describes the planned layout: `autoresearch/` becomes `researcher/`, a new
+`orchestrator/` distribution sits between the IDE chat and the researchers, and an
+`ontology/` and a `shared/` package are copied into both.
+
+## Install
+
+Hermes installs a distribution only from a whole local folder: a git URL must hold
+`distribution.yaml` at its root, and there is no syntax for a subfolder or a ref. So clone
+this repository and install each folder by path.
+
+Install from a clean checkout in which nothing has run `uv sync` or tests. The installer
+copies the folder whole and rejects symlinks, so a `.venv` or `__pycache__` in the source
+either fails the install or ships with it. Keep a separate clone for development.
+
+```bash
+git clone https://github.com/Metta-AI/ide-distributions.git ~/ide-distributions
+hermes profile install ~/ide-distributions/autoresearch --name autoresearch --yes
+```
+
+## Update
+
+`hermes profile update` re-reads the recorded source path, so pull the clone first. The
+update keeps the installed `config.yaml`; `--force-config` resets it.
+
+```bash
+git -C ~/ide-distributions pull --ff-only
+hermes profile update autoresearch
+```
+
+## Develop and test
+
+Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job per
+distribution folder.
+
+```bash
+cd autoresearch
+uv sync --frozen
+uv run pytest -q
+```

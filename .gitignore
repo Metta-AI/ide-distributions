@@ -1,0 +1,8 @@
+# Per-distribution tool output. Hermes copies a distribution folder whole, so none of
+# this may exist in a checkout that is installed (see README.md, "Install").
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+local/
+.DS_Store
