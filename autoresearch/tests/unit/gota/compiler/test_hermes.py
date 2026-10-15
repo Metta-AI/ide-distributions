@@ -31,6 +31,8 @@ def generation(tmp_path, monkeypatch):
 import json, os, pathlib, sys, subprocess
 if '--version' in sys.argv:
     print('fake Hermes v0.21.5'); sys.exit()
+assert os.environ['OPENROUTER_API_KEY'] == 'fake-profile-key'
+assert 'GH_TOKEN' not in os.environ
 a = sys.argv[1:]
 assert a[:4] == ['chat', '--oneshot', '--format', 'stream-json']
 assert '--usage-file' not in a
@@ -76,9 +78,24 @@ if mode == 'nonzero': sys.exit(7)
     (binary.parent / 'python3').symlink_to(sys.executable)
     (binary.parent / 'git').symlink_to(shutil.which('git'))
     monkeypatch.setenv('PATH', str(binary.parent))
+    monkeypatch.setenv('GOTA_HERMES_PYTHON', sys.executable)
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'profile'))
+    runtime = tmp_path / 'fake-runtime'
+    package = runtime / 'tools/environments'
+    package.mkdir(parents=True)
+    (runtime / 'tools/__init__.py').touch()
+    (package / '__init__.py').touch()
+    (package / 'local.py').write_text(
+        'def served_profile_child_env(*, target_home, inherit_credentials):\n'
+        '    assert target_home and inherit_credentials\n'
+        '    return {"OPENROUTER_API_KEY": "fake-profile-key", "GH_TOKEN": "not-for-compiler"}\n'
+    )
+    monkeypatch.setenv('PYTHONPATH', str(runtime))
+    monkeypatch.delenv('OPENROUTER_API_KEY', raising=False)
+    monkeypatch.delenv('GH_TOKEN', raising=False)
     run = sb.subprocess.run
     def local_only(command, **kwargs):
-        assert command[0] in ('git', 'hermes', str(binary)), f'forbidden test subprocess: {command[0]}'
+        assert command[0] in ('git', sys.executable, str(binary)), f'forbidden test subprocess: {command[0]}'
         return run(command, **kwargs)
     monkeypatch.setattr(sb.subprocess, 'run', local_only)
     return order, stage
@@ -120,7 +137,7 @@ def test_generation_timeout_retains_errored_build_without_repairs(
     generations, now = [], [0.0]
     monkeypatch.setattr(pw_strategy.time, 'monotonic', lambda: now[0])
     def expire(command, **kwargs):
-        if command[0] == 'hermes':
+        if command[0] == sys.executable:
             generations.append(kwargs['timeout'])
             if len(generations) < failure_round:
                 completed = run(command, **kwargs)
@@ -325,7 +342,7 @@ def test_compiler_child_isolates_outer_profile(generation, monkeypatch):
     monkeypatch.setenv('HERMES_KANBAN_TASK', 'outer-task')
     original = sb.subprocess.run
     def isolated(command, **kwargs):
-        if command[0] == 'hermes':
+        if command[0] == sys.executable:
             env = kwargs['env']
             assert env['HERMES_HOME'] == str(home)
             assert env['HERMES_WRITE_SAFE_ROOT'] == str(kwargs['cwd'])
@@ -369,7 +386,6 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     monkeypatch.setattr(gota_host, 'BASELINE', archive / 'tests/fixtures/gota/v13-live.bas')
     monkeypatch.setenv('FAKE_UNIT_ROOT', str(distribution / 'tests/fixtures/gota/v13_units'))
     monkeypatch.setenv('OPENROUTER_MODEL', 'test/openweight')
-    monkeypatch.setenv('GOTA_HERMES_PYTHON', '/fake/security-python')
     commands = []
     def verify_fake(build_id, **kwargs):
         stage = sb.build_path(build_id, staged=True)
