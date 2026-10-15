@@ -9,13 +9,15 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 
 Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
 into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py), because
-Hermes installs a distribution by copying its one folder. The copies are generated: edit
-`shared/`, run `python3 tools/sync_shared.py`, and commit the source and the copies together.
+Hermes installs a distribution by copying its one folder. The shared vocabulary,
+[`ontology/ONTOLOGY.md`](ontology/ONTOLOGY.md), is embedded by the same script at the end of
+each distribution's `SOUL.md`, so every session of every profile has it. The copies are
+generated: edit `shared/` or `ontology/`, run `python3 tools/sync_shared.py`, and commit the
+source and the copies together.
 
 The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
-browser) describes the planned layout: a new
-`orchestrator/` distribution sits between the IDE chat and the researchers, and a shared
-`ontology/` is copied into both.
+browser) describes the design: a new `orchestrator/` distribution sits between the IDE chat
+and the researchers.
 
 ## Install
 
