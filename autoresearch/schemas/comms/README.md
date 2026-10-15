@@ -140,3 +140,13 @@ that closes a bridge task.
    skill's "Acknowledge each" step.
 5. Run `uv run --locked pytest tests/contract/comms/test_kind_registry.py`. It fails on any
    place that is missing the kind, and on any kind a document lists that has no schema.
+
+## Chat task origin
+
+The coach plugin stamps `origin_session_id` from Hermes's native invocation context on
+confirmed proposals and direct research controls. Model payloads cannot supply this field.
+To associate a child task with a conversation, follow its `responsible_inbound` IDs to the
+immutable inbox envelopes. A task can be responsible for messages from multiple conversations;
+retain that set rather than assigning it to the last reader. Non-chat producers may omit the
+field. The IDE joins native session identity to its own conversation and selected league;
+this field does not change the profile's configured game or grant cancellation authority.

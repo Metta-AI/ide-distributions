@@ -106,6 +106,7 @@ def test_valid_task_becomes_its_own_card_request(board):
         why="Leads.",
         refs=[ref],
         priority="P1",
+        origin_session_id="native-chat-one",
     )
 
     actions = _route(board)
@@ -132,6 +133,10 @@ def test_valid_task_becomes_its_own_card_request(board):
     _route(board)
     assert _delivery(board, task)["responsible"]["task_id"] == worker.task_id
     assert _card_file(board, worker.task_id)["responsible_inbound"] == [task]
+
+    [inbound_id] = _card_file(board, worker.task_id)["responsible_inbound"]
+    envelope = board.committed(board.canonical / "comms" / "inbox" / f"{inbound_id}.json")
+    assert envelope["origin_session_id"] == "native-chat-one"
 
 
 def test_task_is_acknowledged_by_the_runtime_when_its_card_publishes(board):
