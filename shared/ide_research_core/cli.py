@@ -31,6 +31,7 @@ GROUP_MODULES = (
     "ide_research_core.games.cli",
     "ide_research_core.runtime.status_cli",
     "ide_research_core.runtime.report_cli",
+    "ide_research_core.workspace_cli",
 )
 
 

@@ -56,3 +56,23 @@ def worker_env(env: Mapping[str, str], hermes_home: Path | None) -> dict[str, st
     for key, value in dotenv_entries(path):
         found[key] = _DOTENV_REFERENCE.sub(resolve, value)
     return found
+
+
+def set_env_lines(path: Path, values: dict[str, str]) -> bool:
+    """Set ``KEY=value`` lines in a dotenv file: replace a line for the key in place, else
+    append. Other lines are kept as they are. Returns True if the file changed."""
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    remaining = dict(values)
+    updated = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip()
+        if key in remaining:
+            updated.append(f"{key}={remaining.pop(key)}")
+        else:
+            updated.append(line)
+    updated += [f"{key}={value}" for key, value in remaining.items()]
+    if updated == lines:
+        return False
+    path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return True
