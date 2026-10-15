@@ -184,8 +184,12 @@ uv sync --frozen
 uv run pytest -q
 ```
 
-Tests that need a real Hermes install carry the `hermes` marker and are excluded by default
-(`uv run pytest -q -m hermes`).
+Tests that need a real Hermes install carry the `hermes` marker and are excluded by default.
+They install from `git archive HEAD`, so commit first. Run them with the Hermes install's own
+`bin` directory first on `PATH` (a `hermes` launcher that resolves `python3` through `PATH`
+would otherwise run in this project's venv), and limit them to `tests/integration`: the GotA
+tests' fixture refuses any real agent binary once it is active:
+`HERMES_PYTHON=<hermes>/bin/python PATH=<hermes>/bin:$PATH uv run pytest -q -m hermes tests/integration`.
 
 ## Known gaps
 
