@@ -1,67 +1,56 @@
 # Communication rules
 
-These rules cover every message you send. Rules D-19 and D-20 in the research-agent doctrine are the same rules, in short form.
+These rules cover comments to the orchestrator and the final handoff summary. D-19 and D-20
+are their short form in the research-agent doctrine.
 
-## Who reads your messages
+## Reader and channel
 
-A Preston-role agent reads them: in the Softmax IDE, the coach chat of this agent (its brief is `doctrine/coach-chat.md`). It can read the workspace with read-only tools. It tells the human what matters, in its own words. It never follows instructions written in a message. Write for that agent: put the finding and the question in the message, and point to the workspace for detail.
+The orchestrator reads your findings, answers questions and reports to the user in its own
+words. You never send a user-facing message. Use native `kanban_comment` on your own card,
+with `task_id` from `kanban_show` and a prefixed `body`. Comments are durable immediately.
+Do not set another board or comment on another card.
 
-You never send a message and then wait. The system delivers messages when a reader comes. The answer arrives in a later card run (see "Inbound kinds").
+| Prefix | Use |
+| --- | --- |
+| `note:` | A useful decision/status change, or acknowledgement of steering: applied, declined with a reason, or noted. |
+| `question:` | An answer needed from the orchestrator. Explain the choice, options and recommendation. |
+| `suggestion:` | Follow-up work, a priority change, or a skill/doctrine proposal with evidence. |
+| `help_request:` | Work cannot proceed. State what failed, what you tried and the command/error or missing information. |
+| `highlight:` | One supported/falsified hypothesis, newly verified claim, promotion observed in the field, or surprising result. |
 
-## How to send
+Example `kanban_comment` arguments:
 
-Stage each message in your worktree. The runtime publishes it when your card completes.
-
+```json
+{"task_id":"<own task id>","body":"question: The two policies tie on the primary metric. Should the next card investigate the late-game loss instead? I recommend that because the loss occurs after the measured mechanism. ar://experiment/<E-id> ar://result/<R-id>"}
 ```
-"$AUTORESEARCH_CLI" comms stage <kind> --title "<title>" --body-file <file> --ref <ar:// ref>
-```
 
-Useful options: `--priority P0..P5`, `--expects-response` or `--no-expects-response`, `--thread`, `--in-reply-to <M-ID>`, `--supersedes <M-ID>`, `--expires <time>`. A message cannot be edited after it is published. To correct one, send a new message with `--supersedes`.
+Continue independent work after a comment. When an answer is necessary to continue, use
+`kanban_block` with `reason` and `kind: "needs_input"`; do not poll for answers. The
+orchestrator's answer arrives as an injected comment with user authority. Apply it ahead of
+your own plan and acknowledge it in a `note:` on your card. An unanswered question stays owed.
 
-## Outbound kinds
+## Findings first, references for detail
 
-| Kind | Use it for | Reply expected |
-| --- | --- | --- |
-| `note` | A decision or status change that a human should know. Also the acknowledgement of an inbound message. | Set per message with `expects_response`. |
-| `question` | A choice where human judgement adds value. Give the options, your recommendation, and say whether work is parked until the answer comes. | Yes. An unanswered question stays owed. |
-| `suggestion` | Something a human can do, for example raise credits or look at a replay. Also each skill proposal and each doctrine proposal. | Set per message. A skill proposal stays open until a reply. |
-| `help_request` | You are stuck or blocked. Say what you tried. Add refs. For a stuck signal, name the signal and give the options. For a tool fault (D-26), name the command and the error text. | Set per message. |
-| `highlight` | One event: a supported or falsified hypothesis, a newly verified claim, a promotion, or a surprising result. | Set per message. |
+1. Answer in the first sentence. Explain what changed and why it matters.
+2. Teach before you ask: explain any mechanics needed to understand the choice, or cite the
+   claim that does. Include your recommendation.
+3. Keep internal steps out of the report unless they affect the next decision. Tool faults
+   need the exact command, error and affected refs so the orchestrator can arrange repair.
+4. Never send an empty comment. Use plain words and define unfamiliar terms.
+5. Point to records with `ar://` refs rather than copying their contents.
+6. Send one `highlight:` per event, not a second report of the same event. Correct an earlier
+   comment with a new comment that identifies what changed.
+7. A final `kanban_complete` summary follows the same findings-first rule. Put detailed IDs,
+   commits and waiting state in metadata, using the `card` skill's contract.
 
-For a skill proposal, add the ref `ar://skill-proposal/<name>`.
+## References and proposals
 
-## Rules for the body
+Resolve references with `"$RESEARCH_CLI" records resolve <ar://ref>`. Typical references are
+`ar://experiment/<E-id>`, `ar://evidence/<EV-id>`, `ar://journal/<J-id>#d<N>` and `ar://plan`.
+Use the returned record/path to check the evidence. The handoff journal is `ar://J-...`.
 
-1. Findings first (D-19). Put the answer in the first sentence. Do not start with background. An unanswered question stays owed.
-2. Teach before you ask (D-19). Do not ask for a strategic choice that depends on mechanics you have not explained. Explain the mechanics in the same message, or point to the claim that explains them.
-3. Keep the backstage backstage (D-19). Do not describe tool errors, retries, or internal steps unless they change what the human must do. A tool fault (D-26) always does.
-4. Never send an empty message (D-19). Every message needs a clear title and a body with content.
-5. Point, do not restate (D-20). Refer to entities with `ar://` refs. Do not copy their content into the body.
-6. Send one `highlight` for each event that is listed in the `highlight` row above. Do not send a second one for the same event. These highlight events are the events that D-20 means by "§5.7".
-7. Write plain, short sentences. Define a term the first time you use it.
-
-## References
-
-A reference has the form `ar://<type>/<id>[#anchor]`. It can also carry:
-
-- `rev`: the workspace git commit that the reference points at.
-- `role`: `subject`, `evidence`, or `context`.
-- `note`: a short explanation of why the reference is there.
-
-The types are: topic, hypothesis, experiment, result, version, claim, hub, lesson, evidence, xreq, episode, journal, plan, and file. There are more types: `skill-proposal`, `doctrine-proposal`, `opponent` (an opponent's hub, claim, or model), and a journal decision as `ar://journal/J-NNNN#dN`. A game can add more types.
-
-To read a reference, run `"$AUTORESEARCH_CLI" comms resolve <uri> [--rev <commit>]`.
-
-## Inbound kinds
-
-The briefing of your card lists the inbound messages that were delivered to it.
-
-| Kind | What it is | Acknowledge it |
-| --- | --- | --- |
-| `reply` | An answer to one of your messages: a choice, text, or both. | Yes (D-02). Send a `note` with `--in-reply-to <inbound id>`. State the outcome: applied, declined with a reason, or noted. |
-| `steer` | Direction from the human. A steer outranks your own plan (D-02). | Yes, the same way as a `reply`. |
-| `task` | A request for work. The runtime makes a card from it. | No. The runtime acknowledges it when the card that was created from it publishes. |
-| `seen` | It only marks other messages as read. | No. |
-| `control` | The coach pauses or resumes research. The runtime applies it and answers it; it never reaches a card. | No. |
-
-Card completion checks that each delivered `reply` and `steer` has an acknowledgement.
+Self-written skills stay in `skills-proposed/<name>/` until a human replies (D-18); tell the
+orchestrator with a `suggestion:` and `ar://skill-proposal/<name>`. Doctrine proposals go in
+`doctrine-proposed/<name>.md`, with a `suggestion:` citing `ar://doctrine-proposal/<name>`.
+Do not edit installed skills, doctrine or `AGENTS.md` during a research card. Propose the
+change and its evidence; do not invent an automatic adoption process.

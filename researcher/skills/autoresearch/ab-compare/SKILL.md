@@ -15,7 +15,7 @@ Doctrine upheld: D-06, D-09.
 
 - Reads: the episode rows of the baseline and candidate arms, the frozen evaluation design.
 - Writes: `stats/rows/<E-id>.jsonl` and `stats/outcomes/<E-id>.json` (the stored outcome
-  that `softmax submit` checks), and the metrics of the Result.
+  that the orchestrator's promotion workflow checks), and the metrics of the Result.
 
 ## Procedure
 
@@ -23,12 +23,12 @@ Doctrine upheld: D-06, D-09.
    `cat evidence/xp/<E-id>/*/rows.jsonl > .scratch/<E-id>-rows.jsonl`
 2. Ingest them against the frozen design. It drops duplicates, failed episodes, and rows
    with the wrong game version, seats, or seed:
-   `"$AUTORESEARCH_CLI" stats ingest --experiment <E-id> --rows .scratch/<E-id>-rows.jsonl`
+   `"$RESEARCH_CLI" stats ingest --experiment <E-id> --rows .scratch/<E-id>-rows.jsonl`
    Read `data.report`: `kept`, `duplicates`, `failed`, `wrong_version`, `wrong_seats`,
    `wrong_seed`, `missing_metrics`. Many dropped rows can make the Result invalid.
-3. Apply the decision rule. The champion comes from the promotion ledger and the
+3. Apply the decision rule. The champion comes from canonical promotion records and the
    leaderboard; do not pass `--champion` inside a card:
-   `"$AUTORESEARCH_CLI" stats evaluate <E-id>`
+   `"$RESEARCH_CLI" stats evaluate <E-id>`
 4. Read `data`: `promote_eligible`, `failures` (for example `n_short:…`,
    `primary_not_significant:<m>`, `guardrail_breach:<m>`, `performance_slip:<m>`,
    `baseline_not_champion`), and `per_metric` (`mean_signed_diff`, `ci`, `threshold`,
@@ -44,4 +44,4 @@ Doctrine upheld: D-06, D-09.
 - `stats evaluate` exit 1 "champion mismatch" (the league's champion changed), or exit 2
   "champion unknown" (the league shows no champion for us): record it; the review decision
   is `hold` and a re-evaluation against the current champion is the follow-up card.
-- Never edit `stats/rows/` or `stats/outcomes/` by hand. `softmax submit` checks their hashes.
+- Never edit `stats/rows/` or `stats/outcomes/` by hand. The promotion workflow checks their hashes.
