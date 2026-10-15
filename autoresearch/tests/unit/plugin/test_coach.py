@@ -280,7 +280,7 @@ def test_a_proposal_is_shown_in_code_words_and_sent_on_confirm(chat):
     context = _turn(line=f"confirm {pid}\n")
     assert f"Sending {pid}" in context
     _settled()
-    payload = json.dumps(STEER | {"proposed_topic": None})
+    payload = json.dumps(STEER | {"proposed_topic": None, "origin_session_id": "s1"})
     [send] = chat.cli.sends()
     assert send == [CLI, "comms", "inbound", "steer", "--json", payload, "--author", "coach:ply_t"]
     sent_env = next(kw["env"] for argv, kw in chat.cli.calls if argv == send)
@@ -417,7 +417,7 @@ def test_pause_and_resume_lines_send_control(chat, action):
     assert f"Sending /{action}-research" in context
     _settled()
     [send] = chat.cli.sends()
-    assert send == [CLI, "comms", "inbound", "control", "--json", json.dumps({"action": action}),
+    assert send == [CLI, "comms", "inbound", "control", "--json", json.dumps({"action": action, "origin_session_id": "s1"}),
                     "--author", "coach:ply_t"]
     assert f"Sent /{action}-research as I-SENT0." in _reply()
 
@@ -810,3 +810,24 @@ def test_note_text_cannot_form_markup_in_the_plugin_block(chat):
     sending = next(line for line in block.split("\n\n") if line.startswith("Sending"))
     assert not re.search(r"(?<!\\)\[", sending)  # every [ in the note is escaped
     assert model.startswith("[")  # the model's own text: escaped for HTML, a stray link-ref def
+
+
+def test_model_cannot_spoof_origin_session(chat):
+    _turn()
+    result = _propose(payload=STEER | {"origin_session_id": "other-chat"})
+    assert result["ok"] is False
+    assert chat.cli.sends() == []
+
+
+def test_each_conversation_stamps_its_trusted_origin_on_confirmed_task(chat):
+    for session in ("s1", "s2"):
+        _turn(session=session)
+        result = _propose(session=session, kind="task", payload={
+            "title": "Investigate", "mode": "investigation", "why": "Test", "refs": [], "priority": "P2",
+        })
+        assert result["ok"] is True
+        coach.transform(session, "", "turn-" + session)
+        _turn(session=session, line="confirm " + result["proposal"])
+        coach.wait_for_sends()
+    payloads = [json.loads(args[args.index("--json") + 1]) for args in chat.cli.sends()]
+    assert [payload["origin_session_id"] for payload in payloads] == ["s1", "s2"]

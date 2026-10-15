@@ -508,6 +508,8 @@ def propose_inbound(args, session_id=None, **kwargs):
                 "the kind's fields: the coach must see everything that is sent"
             )
         author = _author(env)
+        # Hermes supplies this identity; model arguments cannot choose another chat.
+        payload = {**payload, "origin_session_id": session_id}
     except Refused as refused:
         return _refusal(str(refused))
     checked = run_cli(
@@ -730,7 +732,9 @@ def _control(key: str, action: str) -> str:
         where = profile_env()
     except Refused as refused:
         return f"The coach typed {command}, but nothing can be sent: {refused}. Tell the coach."
-    _send_in_background(key, where, command, "control", {"action": action}, {
+    _send_in_background(key, where, command, "control", {
+        "action": action, "origin_session_id": key.split("\n")[-1],
+    }, {
         "session_id": key.split("\n")[-1], "kind": "control", "action": action,
     })
     effect = (
