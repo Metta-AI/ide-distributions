@@ -681,9 +681,8 @@ def test_xp_create_refuses_while_the_league_shows_no_champion(board, launch):
     records = sorted((board.canonical / "promotions").glob("*.json"))
     for record in records:
         record.unlink()
-    workspace.publish(
-        board.canonical, [r.relative_to(board.canonical).as_posix() for r in records], "drop"
-    )
+    paths = [r.relative_to(board.canonical).as_posix() for r in records]
+    workspace.publish(board.canonical, workspace.read_files(board.canonical, paths), "drop")
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
     )
@@ -999,5 +998,22 @@ def test_the_stop_check_reads_canonical_main_not_a_stale_clone(board, tmp_path):
     stale = tmp_path / "researcher-clone"
     gitops.git(tmp_path, "clone", "-q", str(board.origin), str(stale))
     experiment, _ = board.reviewed_experiment()  # pushed to canonical main after the clone
+
+    assert softmax_cli._closed_in_canonical(SimpleNamespace(canonical=stale), experiment) == "reviewed"
+
+
+def test_the_stop_check_finds_a_slugged_experiment_absent_from_the_clone(board, tmp_path):
+    """The file name is looked up at canonical main, not in the stale clone (Codex R13 #2)."""
+    from types import SimpleNamespace
+
+    from ide_research_core.softmax_tool import cli as softmax_cli
+
+    stale = tmp_path / "researcher-clone"
+    gitops.git(tmp_path, "clone", "-q", str(board.origin), str(stale))
+    experiment, _ = board.reviewed_experiment()
+    path = board.store.path_of(experiment)
+    gitops.git(board.canonical, "mv", str(path), str(path.with_name(f"{experiment}--timing.md")))
+    gitops.commit_all(board.canonical, "slugged")
+    gitops.git(board.canonical, "push", "-q", "origin", "main")
 
     assert softmax_cli._closed_in_canonical(SimpleNamespace(canonical=stale), experiment) == "reviewed"

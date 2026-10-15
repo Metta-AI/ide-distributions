@@ -191,8 +191,10 @@ def _changed_ids(repo: Path, since: str, until: str) -> set[str]:
 def _commit_worktree(worktree: Path, branch: str) -> str:
     # Views a worker regenerated to inspect them (``kb index``) stay out of the card: integrate
     # writes them on main after the merge.
-    gitops.git(worktree, "add", "-A", "--", ".", *(f":!{path}" for path in GENERATED_PREFIXES))
-    if gitops.git(worktree, "status", "--porcelain"):
+    excluded = [f":!{path}" for path in GENERATED_PREFIXES]
+    gitops.git(worktree, "add", "-A", "--", ".", *excluded)
+    gitops._run(worktree, "reset", "-q", "--", *GENERATED_PREFIXES, check=False)  # staged earlier
+    if gitops.git(worktree, "diff", "--cached", "--name-only"):
         gitops.git(worktree, "commit", "-q", "-m", f"{branch}: result")
     return gitops.head(worktree)
 
@@ -279,37 +281,52 @@ def merged(clone: Path, branch: str) -> dict:
     return {"merged": _is_ancestor(clone, card, main), "card_sha": card, "main_sha": main}
 
 
-def _set_aside(clone: Path, paths: list[str]) -> dict[str, bytes | None]:
-    """Read ``paths`` and put them back as committed, so syncing ``main`` cannot refuse or
-    lose them; the caller writes the contents back."""
-    saved = {}
+def publish(clone: Path, files: Mapping[str, bytes | None], message: str) -> dict:
+    """Commit ``files`` (path -> content; None deletes the file) on canonical ``main`` and push.
+
+    The content travels with the call: ``main`` is first brought to canonical (dropping what
+    an interrupted or rejected publish left unpushed), then the files are written, committed
+    and pushed, so a retry publishes them again. On any failure the files are written back
+    into the clone, so the caller's draft is not lost."""
+    paths = list(files)
+    with canonical_lock(canonical_of(clone)):
+        try:
+            for path in paths:  # as committed, so syncing cannot refuse them
+                if gitops.show(clone, "HEAD", path) is None:
+                    (clone / path).unlink(missing_ok=True)
+                else:
+                    gitops.git(clone, "checkout", "-q", "HEAD", "--", path)
+            _fast_forward_main(clone)
+            _write_files(clone, files)
+            gitops.git(clone, "add", "-A", "--", *paths)
+            if gitops.git(clone, "diff", "--cached", "--name-only", "--", *paths):
+                gitops.git(clone, "commit", "-q", "-m", message, "--", *paths)
+                _push_main(clone)
+        except BaseException:
+            _write_files(clone, files)
+            raise
+        return {"main_sha": gitops.head(clone)}
+
+
+def _write_files(clone: Path, files: Mapping[str, bytes | None]) -> None:
+    for path, content in files.items():
+        if content is None:
+            (clone / path).unlink(missing_ok=True)
+        else:
+            (clone / path).parent.mkdir(parents=True, exist_ok=True)
+            (clone / path).write_bytes(content)
+
+
+def read_files(clone: Path, paths: list[str]) -> dict[str, bytes | None]:
+    """The current content of ``paths`` in the clone, for ``publish`` (a missing file is a
+    deletion). Paths name files, not directories."""
+    files = {}
     for path in paths:
         file = clone / path
-        saved[path] = file.read_bytes() if file.exists() else None
-        if gitops.show(clone, "HEAD", path) is None:
-            file.unlink(missing_ok=True)
-        else:
-            gitops.git(clone, "checkout", "-q", "HEAD", "--", path)
-    return saved
-
-
-def publish(clone: Path, paths: list[str], message: str) -> dict:
-    """Commit exactly ``paths`` (already written in the clone) and push ``main``. A retry
-    after an interrupted or rejected publish publishes the files again."""
-    with canonical_lock(canonical_of(clone)):
-        saved = _set_aside(clone, paths)
-        _fast_forward_main(clone)
-        for path, content in saved.items():
-            if content is None:
-                (clone / path).unlink(missing_ok=True)
-            else:
-                (clone / path).parent.mkdir(parents=True, exist_ok=True)
-                (clone / path).write_bytes(content)
-        gitops.git(clone, "add", "-A", "--", *paths)
-        if gitops.git(clone, "diff", "--cached", "--name-only", "--", *paths):
-            gitops.git(clone, "commit", "-q", "-m", message, "--", *paths)
-            _push_main(clone)
-        return {"main_sha": gitops.head(clone)}
+        if file.is_dir():
+            raise WorkspaceError("setup", f"{path} is a directory; publish names files")
+        files[path] = file.read_bytes() if file.exists() else None
+    return files
 
 
 # --- bootstrap ---
@@ -364,8 +381,7 @@ def _reseed_agents_md(clone: Path, root: Path) -> bool:
     current = VERSION_HEADER.match(path.read_text(encoding="utf-8")) if path.exists() else None
     if wanted is None or (current and current.group(1) == wanted):
         return False
-    write_text(path, agents_md(root))
-    publish(clone, ["AGENTS.md"], f"bootstrap: doctrine version {wanted}")
+    publish(clone, {"AGENTS.md": agents_md(root).encode()}, f"bootstrap: doctrine version {wanted}")
     return True
 
 

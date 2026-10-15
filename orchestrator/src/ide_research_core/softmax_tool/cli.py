@@ -141,7 +141,7 @@ from pathlib import Path
 
 import frontmatter
 
-from ide_research_core import promotion, runctx, workspace
+from ide_research_core import promotion, refs, runctx, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.games.bindings import binding_evaluate
 from ide_research_core.games.loader import GameError, load_game
@@ -150,7 +150,6 @@ from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_text
 from ide_research_core.io.locks import LockTimeout, file_lock
 from ide_research_core.paths import Layout
-from ide_research_core.records.registry import path_for
 from ide_research_core.records.store import RecordNotFound, RecordProblems, RecordStore
 from ide_research_core.io.dotenv import env_file_value
 from ide_research_core.softmax_tool import evidence
@@ -687,13 +686,16 @@ def _closed_in_canonical(ctx, experiment: str) -> str | None:
     """The experiment's status as committed in canonical when it is closed (``stopped``,
     ``reviewed``), else None. The orchestrator stops an experiment in canonical, not in this worker's
     worktree, so the worktree copy cannot tell a running relaunch that the coach said no."""
-    canonical = Path(ctx.canonical)
-    rel = path_for(Layout(canonical), experiment).relative_to(canonical).as_posix()
     # The bare repository's main, not this clone's checkout: the clone moves only when it
-    # integrates, and a stop lands on main while a batch runs.
-    content = gitops.show(workspace.canonical_of(canonical), workspace.MAIN, rel)
-    if content is None:  # not merged to canonical yet
+    # integrates, and a stop lands on main while a batch runs. The file name (it may carry a
+    # slug) is looked up at the same commit.
+    bare = workspace.canonical_of(Path(ctx.canonical))
+    main = gitops.git(bare, "rev-parse", workspace.MAIN)
+    try:
+        rel = refs._record_path(bare, main, "experiment", experiment)
+    except refs.ResolveError:  # not merged to canonical yet
         return None
+    content = gitops.show(bare, main, rel)
     status = frontmatter.loads(content.decode("utf-8")).metadata.get("status")
     return status if status in CLOSED_EXPERIMENT else None
 

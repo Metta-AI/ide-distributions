@@ -36,7 +36,7 @@ from ulid import ULID
 
 from ide_research_core import workspace
 from ide_research_core.io import gitops
-from ide_research_core.io.docs import read_json, write_text
+from ide_research_core.io.docs import read_json
 from ide_research_core.io.locks import file_lock
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
@@ -126,10 +126,10 @@ def _move(clone: Path, promotion: Promotion, stage: str, detail: str, extra: tup
     """Record ``stage`` and publish it (with ``extra`` paths) to canonical ``main``."""
     promotion.stage = stage
     promotion.history.append({"stage": stage, "at": _now(), "detail": detail})
-    path = _path(clone, promotion.id)
-    write_text(path, json.dumps(promotion.to_dict(), indent=2, sort_keys=True) + "\n")
-    relative = path.relative_to(clone).as_posix()
-    workspace.publish(clone, [relative, *extra], f"promotion {promotion.id}: {stage}")
+    relative = _path(clone, promotion.id).relative_to(clone).as_posix()
+    content = json.dumps(promotion.to_dict(), indent=2, sort_keys=True) + "\n"
+    files = {relative: content.encode(), **workspace.read_files(clone, list(extra))}
+    workspace.publish(clone, files, f"promotion {promotion.id}: {stage}")
 
 
 # --- the league ---

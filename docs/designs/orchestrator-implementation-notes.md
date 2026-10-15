@@ -44,12 +44,17 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - The experiment lock (`xp create`, `upload`) lives in the bare canonical repository, so it
   holds across every researcher's clone on the host.
 - A clone's checked-out `main` moves only when that profile writes canonical. Checks that
-  must see what another profile published read the bare repository's `main` directly: the
-  experiment stop check in `xp create` and the promotions behind the champion-conflict check.
+  must see what another profile published read the bare repository's `main` directly (path
+  and content at one commit): the experiment stop check in `xp create` and the promotions
+  behind the champion-conflict check.
 - Every locked workspace write (`integrate`, `publish`) starts by resetting the clone's `main`
   to canonical `main` with `git reset --keep`. Commits an interrupted or rejected operation
   left unpushed are dropped and the operation redoes its work, so a retry never reports
   unpublished work as merged; unrelated uncommitted files survive.
+- `workspace.publish` takes the content (path -> bytes, or None to delete), not paths of
+  files already written, so a retry carries what it publishes; on any failure it writes the
+  content back into the clone. The CLI (`workspace publish --path FILE`) reads the named
+  files; it refuses a directory.
 - `integrate` leaves the generated KB views (`kb/index.md`, `kb/_generated/`) out of the card
   commit, so a worker may run `kb index` to inspect them.
 - `researcher_guard` has the two rules of §4, with rule 2 widened from "no push to `main`"

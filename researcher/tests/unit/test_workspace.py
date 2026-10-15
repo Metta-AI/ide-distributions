@@ -150,7 +150,7 @@ def test_publish_commits_only_the_named_paths(tmp_path, bare):
     (orchestrator / "control" / "pause.json").write_text('{"paused": true}\n')
     (orchestrator / "scratch.txt").write_text("not mine to publish\n")
 
-    published = workspace.publish(orchestrator, ["plan.md", "control/pause.json"], "plan")
+    published = workspace.publish(orchestrator, workspace.read_files(orchestrator, ["plan.md", "control/pause.json"]), "plan")
 
     assert published["main_sha"] == gitops.git(bare, "rev-parse", "main")
     tracked = gitops.git(bare, "ls-tree", "-r", "--name-only", "main").splitlines()
@@ -197,10 +197,10 @@ def test_a_publish_retry_after_a_crash_before_the_push_publishes(tmp_path, bare,
     (orchestrator / "plan.md").write_text("new plan\n")
     monkeypatch.setattr(workspace, "_push_main", lambda _clone: 1 / 0)
     with pytest.raises(ZeroDivisionError):
-        workspace.publish(orchestrator, ["plan.md"], "plan")
+        workspace.publish(orchestrator, workspace.read_files(orchestrator, ["plan.md"]), "plan")
     monkeypatch.undo()
 
-    workspace.publish(orchestrator, ["plan.md"], "plan")
+    workspace.publish(orchestrator, workspace.read_files(orchestrator, ["plan.md"]), "plan")
 
     assert gitops.show(bare, "main", "plan.md") == b"new plan\n"
 
@@ -209,7 +209,7 @@ def test_a_rejected_push_keeps_unrelated_uncommitted_changes(tmp_path, bare, mon
     """Rolling back a rejected push must not discard a draft it did not make (R12 #6)."""
     orchestrator = clone_for(tmp_path, bare, "orchestrator")
     (orchestrator / "plan.md").write_text("old plan\n")
-    workspace.publish(orchestrator, ["plan.md"], "plan")
+    workspace.publish(orchestrator, workspace.read_files(orchestrator, ["plan.md"]), "plan")
     (orchestrator / "plan.md").write_text("a draft not yet published\n")
     researcher = clone_for(tmp_path, bare, "researcher-1")
     worktree = card_worktree(researcher, "a")
@@ -240,6 +240,82 @@ def test_views_a_worker_regenerated_stay_out_of_the_card(tmp_path, bare):
     worktree = card_worktree(clone, "a")
     store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
     write_generated(Layout(worktree))
+
+    workspace.integrate(clone, worktree=worktree)
+
+    assert workspace.merged(clone, "card/a")["merged"] is True
+
+
+def publish_files(clone: Path, paths: list[str], message: str) -> dict:
+    """What ``research workspace publish --path ...`` does."""
+    return workspace.publish(clone, workspace.read_files(clone, paths), message)
+
+
+def test_a_refused_publish_keeps_the_draft(tmp_path, bare):
+    """Syncing main refuses (an unrelated local file conflicts); the plan being published
+    stays in the clone (Codex R13 #1)."""
+    orchestrator = clone_for(tmp_path, bare, "orchestrator")
+    other = clone_for(tmp_path, bare, "other")
+    (other / "AGENTS.md").write_text("new remote doctrine\n")
+    publish_files(other, ["AGENTS.md"], "remote update")
+    (orchestrator / "AGENTS.md").write_text("local uncommitted doctrine\n")
+    (orchestrator / "plan.md").write_text("valuable revised plan\n")
+
+    with pytest.raises(WorkspaceError):
+        publish_files(orchestrator, ["plan.md"], "plan")
+
+    assert (orchestrator / "plan.md").read_text() == "valuable revised plan\n"
+
+
+def test_a_rejected_publish_keeps_the_draft_and_the_retry_publishes_it(tmp_path, bare, monkeypatch):
+    orchestrator = clone_for(tmp_path, bare, "orchestrator")
+    (orchestrator / "plan.md").write_text("old plan\n")
+    publish_files(orchestrator, ["plan.md"], "plan")
+    (orchestrator / "plan.md").write_text("new plan\n")
+    monkeypatch.setattr(gitops, "push_with_rejections", lambda *_: (False, ["main"]))
+    with pytest.raises(WorkspaceError, match="rejected"):
+        publish_files(orchestrator, ["plan.md"], "plan")
+    monkeypatch.undo()
+    assert (orchestrator / "plan.md").read_text() == "new plan\n"
+
+    publish_files(orchestrator, ["plan.md"], "plan")
+
+    assert gitops.show(bare, "main", "plan.md") == b"new plan\n"
+
+
+def test_publish_names_files_not_directories(tmp_path, bare):
+    orchestrator = clone_for(tmp_path, bare, "orchestrator")
+    (orchestrator / "control").mkdir()
+    (orchestrator / "control" / "pause.json").write_text('{"paused": true}\n')
+    with pytest.raises(WorkspaceError, match="directory"):
+        workspace.read_files(orchestrator, ["control"])
+
+
+def test_a_card_with_regenerated_views_can_be_integrated_again(tmp_path, bare, monkeypatch):
+    """A retry after a crash, or after success, with only the excluded views dirty (R13 #3)."""
+    from ide_research_core.kb.index import write_generated
+
+    clone = clone_for(tmp_path, bare, "researcher-1")
+    worktree = card_worktree(clone, "a")
+    store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
+    write_generated(Layout(worktree))
+    monkeypatch.setattr(workspace, "_push_main", lambda _clone: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        workspace.integrate(clone, worktree=worktree)
+    monkeypatch.undo()
+
+    assert workspace.integrate(clone, worktree=worktree).already_merged is False
+    assert workspace.integrate(clone, worktree=worktree).already_merged is True
+
+
+def test_views_staged_by_the_worker_stay_out_of_the_card(tmp_path, bare):
+    from ide_research_core.kb.index import write_generated
+
+    clone = clone_for(tmp_path, bare, "researcher-1")
+    worktree = card_worktree(clone, "a")
+    store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
+    write_generated(Layout(worktree))
+    gitops.git(worktree, "add", "-A")
 
     workspace.integrate(clone, worktree=worktree)
 

@@ -109,7 +109,8 @@ class ResearchBoard:
             },
         )
         if gitops.git(self.origin, "branch", "--list", "main"):
-            workspace.publish(self.canonical, [path.relative_to(self.canonical).as_posix()], "accept")
+            relative = path.relative_to(self.canonical).as_posix()
+            workspace.publish(self.canonical, {relative: path.read_bytes()}, "accept")
 
     def admit(self, mode: str = "experimentation", refs=()) -> Worker:
         return Worker(self, f"t_{str(ULID()).lower()[-8:]}")

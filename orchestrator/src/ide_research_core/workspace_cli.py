@@ -61,7 +61,8 @@ def _merged(args) -> dict:
 
 
 def _publish(args) -> dict:
-    return workspace.publish(_clone(args), args.path, args.message)
+    clone = _clone(args)
+    return workspace.publish(clone, workspace.read_files(clone, args.path), args.message)
 
 
 def _bootstrap(args) -> dict:
