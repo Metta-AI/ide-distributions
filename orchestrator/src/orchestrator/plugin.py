@@ -1,0 +1,241 @@
+"""Tool schemas and synchronous handlers loaded in the Hermes process."""
+
+import json
+from urllib.error import HTTPError
+
+from .board import Board
+from .context import profile_context
+from .ide import IDE
+from .research import Research, ResearchError
+from .service import Service
+
+S = {"type": "string"}
+I = {"type": "integer"}
+O = {"type": "object"}
+STRINGS = {"type": "array", "items": S}
+
+# name: (owner, description, parameters, required)
+TOOLS = {
+    "ide_say": (
+        IDE,
+        (
+            "Publish background news once with key say:<table>:<rowid>. Never use "
+            "for a coach chat reply; the bridge publishes that reply."
+        ),
+        {"text": S, "key": S, "goal_id": S},
+        ["text", "key"],
+    ),
+    "ide_task_update": (
+        IDE,
+        (
+            "Update an IDE task. patch is the bridge shape: set (changed body "
+            "fields), base_rev (observed revision), idempotency_key (stable for this patch)."
+        ),
+        {
+            "task_id": S,
+            "patch": {
+                "type": "object",
+                "properties": {"set": O, "base_rev": I, "idempotency_key": S},
+                "required": ["set", "base_rev", "idempotency_key"],
+            },
+        },
+        ["task_id", "patch"],
+    ),
+    "card_create": (
+        Board,
+        (
+            "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
+            "Refuse another open card on entity. Repair uses its own entity and failed "
+            "card_sha, without parents. priority is native Hermes (higher goes first)."
+        ),
+        {
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "investigation",
+                    "scouting",
+                    "experimentation",
+                    "maintenance",
+                    "planning",
+                    "review",
+                    "repair",
+                ],
+            },
+            "entity": S,
+            "attempt": {"type": "integer", "minimum": 1},
+            "assignee": S,
+            "title": S,
+            "body": S,
+            "refs": STRINGS,
+            "priority": I,
+            "skills": STRINGS,
+            "max_runtime_seconds": I,
+            "failure_limit": I,
+            "parents": STRINGS,
+            "card_sha": S,
+        },
+        ["kind", "entity", "assignee", "title", "body"],
+    ),
+    "card_show": (Board, "Read a card, comments and handoff runs.", {"id": S}, ["id"]),
+    "card_list": (
+        Board,
+        (
+            "List cards; filters accept native status, assignee, include_archived, "
+            "session_id, tenant, limit and order_by."
+        ),
+        {"filters": O},
+        [],
+    ),
+    "card_comment": (
+        Board,
+        "Comment durably; steers a running worker.",
+        {"id": S, "body": S},
+        ["id", "body"],
+    ),
+    "card_answer": (
+        Board,
+        "Save the answer as a comment, then unblock the card.",
+        {"id": S, "text": S},
+        ["id", "text"],
+    ),
+    "card_close": (
+        Board,
+        (
+            "Complete with nonempty evidence (never force a live claim), or archive "
+            "a card superseded by an integrated repair."
+        ),
+        {
+            "id": S,
+            "outcome": {"type": "string", "enum": ["done", "archived"]},
+            "summary": S,
+            "metadata": O,
+        },
+        ["id", "outcome"],
+    ),
+    "board_reconcile": (
+        Service,
+        (
+            "Read unacknowledged board events, platform transitions and "
+            "branches needing recovery. Observation never acknowledges anything."
+        ),
+        {},
+        [],
+    ),
+    "event_ack": (
+        Board,
+        (
+            "Acknowledge only after acting. Use table/id from events or pending. "
+            "Promotion state is canonical, not an acknowledgeable event."
+        ),
+        {
+            "ids": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "table": {
+                            "type": "string",
+                            "enum": ["task_events", "task_comments", "task_runs"],
+                        },
+                        "id": I,
+                    },
+                    "required": ["table", "id"],
+                },
+            }
+        },
+        ["ids"],
+    ),
+    "status": (
+        Service,
+        "Read cards, canonical research summary, pause and promotion state.",
+        {},
+        [],
+    ),
+    "records_find": (
+        Research,
+        "Find canonical records by entity and field=value filters.",
+        {"entity": S, "filters": O},
+        ["entity"],
+    ),
+    "records_show": (Research, "Read a canonical record.", {"id": S}, ["id"]),
+    "plan_write": (Research, "Publish plan.md to canonical main.", {"text": S}, ["text"]),
+    "control_write": (
+        Research,
+        "Publish pause/resume to canonical control/pause.json.",
+        {"action": {"type": "string", "enum": ["pause", "resume"]}, "reason": S},
+        ["action", "reason"],
+    ),
+    "promotion_submit": (
+        Research,
+        ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),
+        {"experiment": S},
+        ["experiment"],
+    ),
+    "bootstrap_champion": (
+        Research,
+        "Bootstrap only when the shared workflow finds no champion.",
+        {},
+        [],
+    ),
+    "workspace_integrate": (
+        Research,
+        ("Integrate a pushed card or repair branch via the shared validator and canonical lock."),
+        {"branch": S},
+        ["branch"],
+    ),
+    "xp_status": (
+        Research,
+        "Read XP requests for an experiment.",
+        {"experiment": S},
+        ["experiment"],
+    ),
+    "credits": (Research, "Read the player's available XP credits.", {}, []),
+    "leaderboard": (Research, "Read the current league leaderboard.", {}, []),
+}
+
+
+def handler(name):
+    owner = TOOLS[name][0]
+
+    def call(args, session_id=None, **kwargs):
+        try:
+            arguments = dict(args)
+            if name == "card_create":
+                arguments["session_id"] = session_id
+            data = getattr(owner(profile_context()), name)(**arguments)
+            return json.dumps({"ok": True, "data": data})
+        except ResearchError as error:
+            return json.dumps(error.envelope)
+        except HTTPError as error:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "reason": "http",
+                        "message": f"cogents API returned HTTP {error.code}",
+                        "details": {"status": error.code},
+                    },
+                }
+            )
+        except Exception as error:  # noqa: BLE001 - tool boundary reports native failures
+            return json.dumps(
+                {"ok": False, "error": {"reason": "orchestrator", "message": str(error)}}
+            )
+
+    return call
+
+
+def register(ctx):
+    for name, (_, description, properties, required) in TOOLS.items():
+        schema = {
+            "name": name,
+            "description": description,
+            "parameters": {"type": "object", "properties": properties, "required": required},
+        }
+        ctx.register_tool(
+            name=name,
+            toolset="orchestrator",
+            schema=schema,
+            handler=handler(name),
+            description=description,
+        )

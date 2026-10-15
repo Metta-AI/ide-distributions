@@ -1,0 +1,32 @@
+name: orchestrator
+version: 0.1.0
+description: Research lead for one player and game, coordinating native Hermes Kanban workers.
+hermes_requires: ">=0.21.6"
+env_requires:
+  - name: OPENROUTER_API_KEY
+    required: true
+    description: OpenRouter API key for the orchestrator model.
+  - name: OPENROUTER_MODEL
+    required: false
+    default: moonshotai/kimi-k3
+    description: Model ID on OpenRouter.
+  - name: SOFTMAX_PLAYER_CREDENTIAL
+    required: true
+    description: Bare player agent token or player-session JSON containing token and expires_at.
+  - name: COGAMES_API_URL
+    required: false
+    default: https://softmax.com/api
+    description: Softmax API server.
+  - name: RESEARCH_PLAYER_ID
+    required: true
+    description: Player ID for this research team.
+  - name: RESEARCH_GAME
+    required: false
+    default: gota
+    description: Game directory name.
+  - name: RESEARCH_WORKSPACE
+    required: true
+    description: Absolute path to this profile's clone of the canonical repository.
+  - name: RESEARCH_CANONICAL
+    required: true
+    description: Absolute path to the shared bare canonical repository.
