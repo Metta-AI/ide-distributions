@@ -126,7 +126,7 @@ Bootstrap writes `AUTORESEARCH_CLI` (the path of the `autoresearch` command) and
 by hand.
 
 A game can declare what its bindings need on the host in the `host_requirements` of its
-`GAME.md` (GotA: `GOTA_HERMES_PYTHON`, `GOTA_TIRITH_BIN` and `nim` on `PATH`; see
+`GAME.md` (GotA: `GOTA_HERMES_PYTHON` and `nim` on `PATH`; see
 `games/gota/GAME.md`, "Build and upload"). Put those in the profile `.env`, which worker
 terminals read (for Nim, a `PATH=/path/to/nim/bin:${PATH}` line extends the PATH workers
 start with; the braces are required, Hermes leaves a bare `$PATH` as literal text). The EC2 shim's provisioning writes them for GotA. Each run, queue-keeper
@@ -134,7 +134,7 @@ checks them as workers see them and, when one is missing, logs it and sends one 
 per distinct set; it does not pause.
 
 The GotA `build` binding also needs `GOTA_HERMES_PYTHON` (the Python of the installed
-Hermes) and `GOTA_TIRITH_BIN` (an officially installed tirith scanner), plus the GotA native
+Hermes), plus the GotA native
 helpers prepared once on the host. Details: [games/gota/GAME.md](games/gota/GAME.md),
 "Build and upload".
 

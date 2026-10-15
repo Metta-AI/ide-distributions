@@ -230,5 +230,5 @@ def test_gota_declares_its_build_host_requirements():
     """On the box, GotA builds failed fast on workers for want of these (GAME.md documents
     them as host requirements)."""
     gota = load_game(Path(__file__).resolve().parents[3], "gota")
-    assert set(gota.host_env) == {"GOTA_HERMES_PYTHON", "GOTA_TIRITH_BIN"}
+    assert set(gota.host_env) == {"GOTA_HERMES_PYTHON"}
     assert gota.host_tools == ("nim",)

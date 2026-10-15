@@ -21,7 +21,7 @@ league_id: league_3c60897b-25cf-4b37-9d1a-8554c1198f28
 noise_source: league_episodes
 layers: [P,K,S,SK,C,G,ST,A]
 host_requirements:
-  env: [GOTA_HERMES_PYTHON, GOTA_TIRITH_BIN]
+  env: [GOTA_HERMES_PYTHON]
   tools: [nim]
 ---
 # Gods of the Arena
@@ -229,11 +229,12 @@ reliable idle detection would require supervising the process and its output.
 
 The host must install the locked Python dependencies, Nim 2.2.10 and the native
 helpers using [native preparation](tools/native_build.py), and install Hermes
-v0.21.5. Set `GOTA_HERMES_PYTHON` to that Hermes installation's Python executable,
-`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `GOTA_TIRITH_BIN` to an officially
-installed, verified executable tirith scanner. The adapter creates a separate compiler
-Hermes home, copies that scanner into its fresh home and synchronously verifies readiness before
-model execution, and restricts child writes to compiler scratch. Host provisioning
+with its built-in command protections. Set `GOTA_HERMES_PYTHON` to that Hermes
+installation's Python executable, `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL`.
+The adapter creates a separate compiler Hermes home and restricts child writes to
+compiler scratch. The compiler uses Hermes's native command approval checks;
+no separate scanner is required. Output paths, Git refs and the index are checked
+after generation before accepting the build. Host provisioning
 and credentials remain the installer's responsibility. The front matter's
 `host_requirements` lists the variables and tools workers need; queue-keeper sends
 one help request when one of them is missing from what workers see.

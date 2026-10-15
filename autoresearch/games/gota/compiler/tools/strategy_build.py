@@ -425,9 +425,6 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
                 for name in list(environment):
                     if name.startswith('HERMES_KANBAN_') or name in ('HERMES_PROFILE', 'HERMES_PROFILE_NAME'):
                         environment.pop(name)
-                environment['TIRITH_BIN'] = str(Path(environment['HERMES_HOME']) / 'bin/tirith')
-                environment.pop('TIRITH_ENABLED', None)
-                environment.pop('TIRITH_FAIL_OPEN', None)
 
         stream_path = stage / f'hermes-stream-{root.name}.jsonl'
         with (stage / 'agent.log').open('a') as log, (stream_path.open('w') if hermes else nullcontext(log)) as stream:
