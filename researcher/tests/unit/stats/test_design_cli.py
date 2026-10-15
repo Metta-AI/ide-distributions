@@ -46,9 +46,12 @@ def ws(tmp_path, monkeypatch):
     monkeypatch.setenv("RESEARCH_PLAYER_ID", "ply_fake")  # FakeSoftmax's default player
     for name in ("HERMES_KANBAN_WORKSPACE", "HERMES_KANBAN_TASK", "HERMES_KANBAN_RUN_ID"):
         monkeypatch.delenv(name, raising=False)
+    # A clone of a bare canonical repository: promotions are read from its ``main``.
+    bare = tmp_path / "canonical.git"
+    gitops.git(tmp_path, "init", "-q", "--bare", "-b", "main", str(bare))
     root.mkdir()
     gitops.git(root, "init", "-q", "-b", "main")
-    gitops.commit_all(root, "empty canonical", allow_empty=True)
+    gitops.git(root, "remote", "add", "origin", str(bare))
     FakeSoftmax(root, {}).submit(CHAMPION, "fake-league")
     # The loop's record of that champion, as ``promotion accept`` or a published promotion
     # leaves it; without it the league and the loop would disagree (a champion conflict).
@@ -57,7 +60,17 @@ def ws(tmp_path, monkeypatch):
         {"id": "P-01K0000000000000000000000A", "kind": "accepted", "version_id": None,
          "platform_policy_version_id": CHAMPION, "league_id": "fake-league", "stage": "published"},
     )
+    (root / ".gitignore").write_text(".supervisor/runtime/\n")
+    gitops.commit_all(root, "canonical")
+    gitops.git(root, "push", "-q", "origin", "main")
     return root
+
+
+def publish_promotions(root):
+    """Publish the working tree's ``promotions/`` (writes and deletions) to canonical main."""
+    gitops.git(root, "add", "-A", "promotions")
+    gitops.git(root, "commit", "-q", "-m", "promotions")
+    gitops.git(root, "push", "-q", "origin", "main")
 
 
 def new_experiment(root, status="designed", version=VERSION):
@@ -228,6 +241,7 @@ def test_no_champion_asks_for_the_starter_policy_bootstrap(ws, tmp_path, capsys)
     state_file.write_text(json.dumps(state))
     for record in (ws / "promotions").glob("*.json"):  # and the loop recorded none
         record.unlink()
+    publish_promotions(ws)
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 1 and env["error"]["reason"] == "champion_unknown"
     assert "bootstrap" in env["error"]["message"]
@@ -244,6 +258,7 @@ def test_an_open_champion_conflict_is_refused(ws, tmp_path, capsys):
         "stage": "published",
     }
     (ws / "promotions" / f"{record['id']}.json").write_text(json.dumps(record))
+    publish_promotions(ws)
     code, env = design(capsys, ws, tmp_path, exp)
     assert code == 1 and env["error"]["reason"] == "champion_conflict"
     assert "evaluation_design" not in store.load(exp)[0]

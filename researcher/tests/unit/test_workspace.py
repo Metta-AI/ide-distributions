@@ -169,3 +169,78 @@ def test_the_cli_reports_a_refusal_as_json(tmp_path, bare):
     )
     assert run.returncode == 1
     assert '"reason": "validate"' in run.stdout
+
+
+def test_a_retry_after_a_crash_before_the_push_reaches_canonical(tmp_path, bare, monkeypatch):
+    """The process died between the local merge and the push: the retry must not report the
+    unpushed local merge as merged (Codex R12 #1)."""
+    clone = clone_for(tmp_path, bare, "researcher-1")
+    worktree = card_worktree(clone, "a")
+    store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
+
+    def crash(_clone):
+        raise RuntimeError("died before the push")
+
+    monkeypatch.setattr(workspace, "_push_main", crash)
+    with pytest.raises(RuntimeError):
+        workspace.integrate(clone, worktree=worktree)
+    monkeypatch.undo()
+
+    retry = workspace.integrate(clone, worktree=worktree)
+
+    assert retry.already_merged is False
+    assert workspace.merged(clone, "card/a")["merged"] is True
+
+
+def test_a_publish_retry_after_a_crash_before_the_push_publishes(tmp_path, bare, monkeypatch):
+    orchestrator = clone_for(tmp_path, bare, "orchestrator")
+    (orchestrator / "plan.md").write_text("new plan\n")
+    monkeypatch.setattr(workspace, "_push_main", lambda _clone: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        workspace.publish(orchestrator, ["plan.md"], "plan")
+    monkeypatch.undo()
+
+    workspace.publish(orchestrator, ["plan.md"], "plan")
+
+    assert gitops.show(bare, "main", "plan.md") == b"new plan\n"
+
+
+def test_a_rejected_push_keeps_unrelated_uncommitted_changes(tmp_path, bare, monkeypatch):
+    """Rolling back a rejected push must not discard a draft it did not make (R12 #6)."""
+    orchestrator = clone_for(tmp_path, bare, "orchestrator")
+    (orchestrator / "plan.md").write_text("old plan\n")
+    workspace.publish(orchestrator, ["plan.md"], "plan")
+    (orchestrator / "plan.md").write_text("a draft not yet published\n")
+    researcher = clone_for(tmp_path, bare, "researcher-1")
+    worktree = card_worktree(researcher, "a")
+    store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
+    gitops.git(worktree, "add", "-A")
+    gitops.git(worktree, "commit", "-q", "-m", "card")
+    gitops.git(worktree, "push", "-q", "origin", "card/a")
+    real = gitops.push_with_rejections
+    monkeypatch.setattr(
+        gitops, "push_with_rejections",
+        lambda repo, remote, refs: (False, refs) if refs == ["main:main"] else real(repo, remote, refs),
+    )  # fmt: skip
+
+    with pytest.raises(WorkspaceError, match="rejected"):
+        workspace.integrate(orchestrator, branch="card/a")
+
+    assert (orchestrator / "plan.md").read_text() == "a draft not yet published\n"
+    monkeypatch.undo()
+    assert workspace.integrate(orchestrator, branch="card/a").already_merged is False
+
+
+def test_views_a_worker_regenerated_stay_out_of_the_card(tmp_path, bare):
+    """``kb index`` in a card worktree writes the generated views; integrate still merges the
+    card and writes the views itself on main (R12 #8)."""
+    from ide_research_core.kb.index import write_generated
+
+    clone = clone_for(tmp_path, bare, "researcher-1")
+    worktree = card_worktree(clone, "a")
+    store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
+    write_generated(Layout(worktree))
+
+    workspace.integrate(clone, worktree=worktree)
+
+    assert workspace.merged(clone, "card/a")["merged"] is True

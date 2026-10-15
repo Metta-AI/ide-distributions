@@ -27,6 +27,8 @@ league's current champion as the loop's when a human says so.
 import datetime
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -35,11 +37,13 @@ from ulid import ULID
 from ide_research_core import workspace
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import read_json, write_text
+from ide_research_core.io.locks import file_lock
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
 from ide_research_core.softmax_tool.identity import identity_problems
 from ide_research_core.softmax_tool.protocol import (
     ANSWER_NO,
+    ANSWER_USED,
     ANSWER_WAITING,
     LeagueNotChosen,
     PermitRequired,
@@ -50,6 +54,7 @@ from ide_research_core.stats.design import EvaluationDesign, design_sha256
 
 PROMOTIONS_DIR = "promotions"
 CHAMPION_PATH = "strategy/STRATEGY.md"
+PROMOTION_LOCK = "promotion.lock"
 IN_FLIGHT = ("intent", "submitted", "recorded")
 CHAMPIONS = ("published",)  # the stage that makes a promotion's policy the loop's champion
 
@@ -85,10 +90,26 @@ def _path(clone: Path, promotion_id: str) -> Path:
 
 
 def load_all(clone: Path) -> list[Promotion]:
-    """Every promotion, oldest first (ids are ULIDs)."""
-    directory = clone / PROMOTIONS_DIR
-    files = sorted(directory.glob("P-*.json")) if directory.is_dir() else []
-    return [Promotion(**read_json(path)) for path in files]
+    """Every promotion on canonical ``main``, oldest first (ids are ULIDs). Read from the bare
+    repository, not the clone's checkout: a researcher's clone moves only when it integrates,
+    and the orchestrator publishes promotions from its own clone."""
+    bare = workspace.canonical_of(clone)
+    listed = gitops._run(bare, "ls-tree", "--name-only", workspace.MAIN, f"{PROMOTIONS_DIR}/")
+    paths = sorted(
+        path for path in listed.stdout.decode().split() if Path(path).name.startswith("P-")
+    )
+    return [Promotion(**json.loads(gitops.show(bare, workspace.MAIN, path))) for path in paths]
+
+
+@contextmanager
+def _one_at_a_time(clone: Path) -> Iterator[None]:
+    """Hold the host's promotion lock (a file in the bare repository) from the checks to the
+    recorded platform result. The orchestrator's chat turn and its supervisor both reach this
+    code; without the lock two submits could both pass the busy check, and a ``status`` between
+    a submit's ``intent`` and its send would abort a live submit."""
+    with file_lock(workspace.canonical_of(clone) / PROMOTION_LOCK, timeout_s=workspace.LOCK_TIMEOUT_S):
+        workspace.sync(clone)
+        yield
 
 
 def in_flight(clone: Path) -> Promotion | None:
@@ -237,7 +258,11 @@ def _new(kind: str, version_id: str | None, platform_id: str | None, league_id: 
 
 def submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id: str) -> dict:
     """Run the guards, record ``intent``, then submit (``_send``)."""
-    workspace._fast_forward_main(clone)
+    with _one_at_a_time(clone):
+        return _submit(clone, sm, experiment, league_id, player_id)
+
+
+def _submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id: str) -> dict:
     _refuse_if_busy(clone)
     store = RecordStore(Layout(clone))
     meta, _ = store.load(experiment)
@@ -273,7 +298,11 @@ def submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id:
 
 def bootstrap(clone: Path, sm: Softmax, version_id: str, league_id: str, player_id: str) -> dict:
     """Submit the uploaded starter-policy version as the first champion (fresh install)."""
-    workspace._fast_forward_main(clone)
+    with _one_at_a_time(clone):
+        return _bootstrap(clone, sm, version_id, league_id, player_id)
+
+
+def _bootstrap(clone: Path, sm: Softmax, version_id: str, league_id: str, player_id: str) -> dict:
     _refuse_if_busy(clone)
     if latest_champion(clone) is not None:
         raise Refused(
@@ -341,7 +370,11 @@ def _send(clone: Path, sm: Softmax, promotion: Promotion) -> dict:
 
 def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     """Record the league's current champion as the loop's (a human said so)."""
-    workspace._fast_forward_main(clone)
+    with _one_at_a_time(clone):
+        return _accept(clone, sm, league_id, player_id)
+
+
+def _accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     _refuse_if_busy(clone)
     shown = sm.leaderboard_champion(player_id, league_id)
     promotion = _new("accepted", None, shown, league_id)
@@ -354,6 +387,7 @@ def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
 
 def _advance_intent(clone: Path, sm: Softmax, promotion: Promotion, player_id: str) -> None:
     waiting = promotion.waiting or {}
+    answer = None
     if waiting.get("reason") == "permit_required" and waiting.get("ask"):
         answer = sm.permit_answer(waiting["ask"])
         if answer in (None, ANSWER_WAITING):
@@ -361,7 +395,12 @@ def _advance_intent(clone: Path, sm: Softmax, promotion: Promotion, player_id: s
         if answer == ANSWER_NO:
             _move(clone, promotion, "aborted", "the coach declined the submission")
             return
-    if waiting:
+    # Clear the wait on main before sending again, so a send that dies after the platform
+    # accepted it is recovered by the submissions lookup below, not asked for again. A yes
+    # already used means such a send happened: look it up now.
+    promotion.waiting = None
+    if waiting and answer != ANSWER_USED:
+        _move(clone, promotion, "intent", "sending again")
         try:
             _send(clone, sm, promotion)
         except Refused:
@@ -402,7 +441,11 @@ def _advance_recorded(clone: Path, promotion: Promotion) -> None:
 
 def status(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     """Advance the promotion in flight by one step, then report."""
-    workspace._fast_forward_main(clone)
+    with _one_at_a_time(clone):
+        return _status(clone, sm, league_id, player_id)
+
+
+def _status(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     promotion = in_flight(clone)
     if promotion is not None and promotion.stage == "intent":
         _advance_intent(clone, sm, promotion, player_id)

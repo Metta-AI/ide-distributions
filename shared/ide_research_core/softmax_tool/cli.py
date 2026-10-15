@@ -689,7 +689,9 @@ def _closed_in_canonical(ctx, experiment: str) -> str | None:
     worktree, so the worktree copy cannot tell a running relaunch that the coach said no."""
     canonical = Path(ctx.canonical)
     rel = path_for(Layout(canonical), experiment).relative_to(canonical).as_posix()
-    content = gitops.show(canonical, "HEAD", rel)
+    # The bare repository's main, not this clone's checkout: the clone moves only when it
+    # integrates, and a stop lands on main while a batch runs.
+    content = gitops.show(workspace.canonical_of(canonical), workspace.MAIN, rel)
     if content is None:  # not merged to canonical yet
         return None
     status = frontmatter.loads(content.decode("utf-8")).metadata.get("status")

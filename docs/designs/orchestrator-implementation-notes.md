@@ -43,12 +43,29 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   accepted with the queue-keeper's removal).
 - The experiment lock (`xp create`, `upload`) lives in the bare canonical repository, so it
   holds across every researcher's clone on the host.
-- `researcher_guard` has the two rules of §4; it is about 70 lines.
+- A clone's checked-out `main` moves only when that profile writes canonical. Checks that
+  must see what another profile published read the bare repository's `main` directly: the
+  experiment stop check in `xp create` and the promotions behind the champion-conflict check.
+- Every locked workspace write (`integrate`, `publish`) starts by resetting the clone's `main`
+  to canonical `main` with `git reset --keep`. Commits an interrupted or rejected operation
+  left unpushed are dropped and the operation redoes its work, so a retry never reports
+  unpublished work as merged; unrelated uncommitted files survive.
+- `integrate` leaves the generated KB views (`kb/index.md`, `kb/_generated/`) out of the card
+  commit, so a worker may run `kb index` to inspect them.
+- `researcher_guard` has the two rules of §4, with rule 2 widened from "no push to `main`"
+  to "no terminal `git push`": integrate does every push, and a ref check missed implicit
+  pushes (`git push` from the clone). About 60 lines.
 - The researcher's deny list blocks `research promotion submit|bootstrap|accept`; the
   commands themselves stay in the shared CLI (one vendored package for both profiles).
 
 ## Promotion (§9)
 
+- **`promotion.lock`** (a file in the bare repository) is held by each promotion command
+  from its checks to the recorded platform result: the orchestrator's chat turn and its
+  supervisor both run promotion commands, and a `status` between a submit's `intent` and its
+  send would otherwise abort a live submit.
+- Before a resend after the coach's answer, the `waiting` field is cleared on `main`, so a
+  send that dies after the platform accepted it is found by the submissions lookup.
 - Stages are as designed; `status` advances at most one step per call (permit answer read,
   resend after a yes, submitted -> recorded -> published). An `intent` with no recorded
   outcome is `aborted` when the platform has no submission, never resent blindly.

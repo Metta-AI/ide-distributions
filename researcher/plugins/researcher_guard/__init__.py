@@ -4,10 +4,10 @@
    ``kanban`` toolset, including ``kanban_create``, ``kanban_link`` and ``kanban_schedule``,
    and the YAML deny list matches shell commands, not these tools. A card a researcher made
    would bypass the orchestrator's plan.
-2. Only ``workspace integrate`` pushes canonical ``main``. A worker committing canonical by
-   hand broke the workspace once (2026-10-09); the deny list blocks force pushes but not an
-   ordinary ``git push origin main``. Integrate pushes from its own process, which this hook
-   never sees.
+2. Only ``workspace integrate`` pushes. A worker committing canonical by hand broke the
+   workspace once (2026-10-09). Integrate pushes the card branch and ``main`` from its own
+   process, which this hook never sees, so a worker never needs ``git push``; blocking every
+   terminal push also covers the implicit ones (``git push`` from the clone, ``origin HEAD``).
 
 Everything else the old 1,641-line policy did is gone on purpose (design J-H). A script that
 pushes ``main`` from Python is not caught here; the next integrate's overlap check notices
@@ -22,14 +22,13 @@ BLOCKED_TOOLS = {
     "kanban_link": "only the orchestrator links cards",
     "kanban_schedule": "only the orchestrator schedules cards",
 }
-PROTECTED_REFS = {"main", "refs/heads/main"}
 _SEGMENT = re.compile(r"&&|\|\||[;|\n]")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 
 
-def pushes_main(command: str) -> bool:
-    """Whether a shell command line runs a ``git push`` that writes ``main``."""
+def runs_git_push(command: str) -> bool:
+    """Whether a shell command line runs ``git push`` (as a command, not a mention)."""
     for segment in _SEGMENT.split(command):
         try:
             words = shlex.split(segment)
@@ -42,15 +41,8 @@ def pushes_main(command: str) -> bool:
         rest = words[1:]
         while rest and rest[0].startswith("-"):
             rest = rest[2:] if rest[0] in _GIT_OPTIONS_WITH_VALUE else rest[1:]
-        if not rest or rest[0] != "push":
-            continue
-        options = [word for word in rest[1:] if word.startswith("-")]
-        operands = [word for word in rest[1:] if not word.startswith("-")]
-        if {"--all", "--mirror"} & {option.split("=")[0] for option in options}:
+        if rest and rest[0] == "push":
             return True
-        for refspec in operands[1:]:
-            if refspec.lstrip("+").split(":")[-1] in PROTECTED_REFS:
-                return True
     return False
 
 
@@ -63,11 +55,11 @@ def pre_tool_call(tool_name=None, args=None, **kwargs):
             "handoff's `next` or as a `suggestion:` comment on your own card.",
         }
     command = (args or {}).get("command") if tool_name == "terminal" else None
-    if isinstance(command, str) and pushes_main(command):
+    if isinstance(command, str) and runs_git_push(command):
         return {
             "action": "block",
-            "message": "pushing main is blocked: run `\"$RESEARCH_CLI\" workspace integrate`, "
-            "which validates, merges and pushes for you.",
+            "message": "git push is blocked: run `\"$RESEARCH_CLI\" workspace integrate`, "
+            "which commits, pushes the card branch, validates, merges and pushes main for you.",
         }
     return None
 

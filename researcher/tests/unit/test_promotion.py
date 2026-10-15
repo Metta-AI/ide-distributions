@@ -200,3 +200,75 @@ def test_the_cli_prints_the_envelope(board):
     )
     assert run.returncode == 0, run.stdout + run.stderr
     assert json.loads(run.stdout)["data"]["stage"] == "submitted"
+
+
+def test_a_send_that_dies_after_an_approved_permit_is_recovered_not_asked_again(board):
+    """The coach said yes, the platform took the submission, the process died before saving
+    ``submitted``: the next status finds the submission instead of asking again (R12 #4)."""
+    experiment, _ = board.reviewed_experiment()
+    sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
+    with pytest.raises(Refused):
+        promotion.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
+    state = fake_state(board)
+    state["answers"] = {promotion.in_flight(board.canonical).waiting["ask"]: "yes"}
+    write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
+    real_submit = sm.submit
+
+    def accepted_then_died(*args):
+        real_submit(*args)
+        raise RuntimeError("died after the platform accepted")
+
+    sm.submit = accepted_then_died
+    with pytest.raises(RuntimeError):
+        promotion.status(board.canonical, sm, LEAGUE, PLAYER)
+    sm.submit = real_submit
+
+    report = promotion.status(board.canonical, sm, LEAGUE, PLAYER)
+
+    assert report["in_flight"]["stage"] == "submitted" and report["in_flight"]["waiting"] is None
+    assert len([s for s in sm.submissions(PLAYER) if s["policy_version_id"] == PV_A]) == 1
+
+
+def test_status_waits_for_a_live_submit_instead_of_aborting_it(board):
+    """The supervisor's status and a chat turn's submit overlap (R12 #3)."""
+    import threading
+
+    experiment, _ = board.reviewed_experiment()
+    sending, release = threading.Event(), threading.Event()
+    real_submit = board.sm.submit
+
+    def slow_submit(*args):
+        sending.set()
+        release.wait(10)
+        return real_submit(*args)
+
+    board.sm.submit = slow_submit
+    submitter = threading.Thread(
+        target=promotion.submit, args=(board.canonical, board.sm, experiment, LEAGUE, PLAYER)
+    )
+    submitter.start()
+    assert sending.wait(10)
+    checker = threading.Thread(
+        target=promotion.status, args=(board.canonical, board.sm, LEAGUE, PLAYER)
+    )
+    checker.start()
+    checker.join(1)
+    assert checker.is_alive()  # waiting for the promotion lock
+    release.set()
+    submitter.join(10)
+    checker.join(10)
+
+    [record] = [p for p in promotion.load_all(board.canonical) if p.kind == "experiment"]
+    assert "aborted" not in [entry["stage"] for entry in record.history]
+
+
+def test_a_researchers_stale_clone_sees_the_published_champion(board, tmp_path):
+    """A researcher's clone moves only when it integrates; the conflict check reads canonical
+    ``main`` (R12 #2)."""
+    researcher = tmp_path / "researcher"
+    gitops.git(tmp_path, "clone", "-q", str(board.origin), str(researcher))
+    experiment, _ = board.reviewed_experiment()
+    promotion.submit(board.canonical, board.sm, experiment, LEAGUE, PLAYER)
+    promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
+
+    assert promotion.baseline_problem(researcher, board.sm, LEAGUE, PLAYER, PV_A) is None

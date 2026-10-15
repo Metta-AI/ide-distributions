@@ -13,6 +13,7 @@ from pathlib import Path
 from unit.records.fixtures import HYP, JOURNAL, JOURNAL_BODY
 from ulid import ULID
 
+from ide_research_core import workspace
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_json
 from ide_research_core.paths import Layout
@@ -96,15 +97,19 @@ class ResearchBoard:
         gitops.git(root, "branch", "-q", "--set-upstream-to=origin/main", "main")
 
     def _accepted(self, policy: str) -> None:
-        """What ``promotion accept`` records on a host whose league already has our champion."""
+        """What ``promotion accept`` records on a host whose league already has our champion:
+        written into the seed, or published to canonical ``main`` after it."""
         promotion = f"P-{ULID()}"
+        path = self.canonical / PROMOTIONS_DIR / f"{promotion}.json"
         write_json(
-            self.canonical / PROMOTIONS_DIR / f"{promotion}.json",
+            path,
             {
                 "id": promotion, "kind": "accepted", "version_id": None,
                 "platform_policy_version_id": policy, "league_id": LEAGUE, "stage": "published",
             },
         )
+        if gitops.git(self.origin, "branch", "--list", "main"):
+            workspace.publish(self.canonical, [path.relative_to(self.canonical).as_posix()], "accept")
 
     def admit(self, mode: str = "experimentation", refs=()) -> Worker:
         return Worker(self, f"t_{str(ULID()).lower()[-8:]}")

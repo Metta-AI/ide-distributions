@@ -38,7 +38,7 @@ What a researcher may and may not do:
 | Upload builds, launch and read XP, write records, KB and stats in its worktree | yes | |
 | Submit to the league, bootstrap or accept a champion (`promotion ...`) | no | `approvals.deny` in `config.yaml` |
 | Create, link or schedule cards | no | the `researcher_guard` plugin |
-| Push canonical `main` itself | no, only through `workspace integrate` | the `researcher_guard` plugin |
+| Run `git push` (any branch) | no, `workspace integrate` pushes the card branch and `main` | the `researcher_guard` plugin |
 | Change `strategy/STRATEGY.md`, `control/`, `promotions/` | no | `workspace integrate` refuses |
 | Force pushes, `coworld` platform mutations, `softmax login`, `player use` | no | `approvals.deny` |
 

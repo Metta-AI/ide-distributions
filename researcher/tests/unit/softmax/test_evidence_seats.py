@@ -92,3 +92,28 @@ def test_several_results_files_keep_episode_ids_unique():
 def test_design_without_seats_fails_rather_than_divides_by_zero():
     [row] = _map(_entries(0), design=dataclasses.replace(DESIGN, seats=()))
     assert row.status == "failed" and "no seats" in row.reason
+
+
+def test_collect_returns_only_the_latest_attempts_rows(tmp_path):
+    """A retried request's earlier evidence stays on disk but leaves the review input: the
+    pairing would otherwise pick the superseded episode (Codex R12 #5)."""
+    import datetime
+    from types import SimpleNamespace
+
+    from ide_research_core.softmax_tool import evidence
+
+    handles = [XpHandle("old", "E-1", 0, 1, 1, "candidate"), XpHandle("new", "E-1", 0, 2, 1, "candidate")]
+    for handle in handles:
+        directory = evidence.request_dir(tmp_path, "E-1", handle.request_id)
+        directory.mkdir(parents=True)
+        (directory / "meta.json").write_text("{}")
+        (directory / "rows.jsonl").write_text("{}\n")
+    sm = SimpleNamespace(
+        xp_recover=lambda _e: handles, xp_status=lambda _h: SimpleNamespace(state="completed")
+    )
+
+    result = evidence.collect(
+        tmp_path, sm, {"id": "E-1"}, None, None, tmp_path, datetime.datetime.now(datetime.UTC)
+    )
+
+    assert result["rows"] == ["evidence/xp/E-1/new/rows.jsonl"]

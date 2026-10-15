@@ -105,11 +105,12 @@ class Board:
                         and task.status not in {"done", "archived"}
                     ):
                         raise ValueError(f"entity {entity} already has open card {task.id}")
+                # Branch from canonical main as fetched; the researcher's checked-out main is
+                # its integrate's business and may be mid-merge.
                 git(clone, "fetch", "origin")
-                git(clone, "merge", "--ff-only", "origin/main")
                 if kind == "repair" and not card_sha:
                     raise ValueError("repair requires the failed pushed card_sha")
-                base = git(clone, "rev-parse", card_sha if kind == "repair" else "HEAD")
+                base = git(clone, "rev-parse", card_sha if kind == "repair" else "origin/main")
                 # A crash after branch creation is replayable without a reservation table.
                 found = subprocess.run(
                     [

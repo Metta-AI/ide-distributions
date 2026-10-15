@@ -92,13 +92,16 @@ def test_guard_allows_the_card_lifecycle(tool):
         ("cd /w && git push origin HEAD:main", True),
         ("GIT_TRACE=1 /usr/bin/git push origin +card/x:refs/heads/main", True),
         ("git push --all origin", True),
-        ("git -C /w push origin card/t_1", False),
+        ('git -C "$RESEARCH_WORKSPACE" push', True),
+        ("git push origin HEAD", True),
+        ("git -C /w push origin card/t_1", True),
+        ("git -C /w status", False),
         ('"$RESEARCH_CLI" workspace integrate', False),
         ("echo git push origin main is blocked", False),
         ('git commit -m "never git push origin main"', False),
     ],
 )
-def test_guard_blocks_pushing_main(command, blocked):
+def test_guard_blocks_every_terminal_push(command, blocked):
     verdict = _guard().pre_tool_call(tool_name="terminal", args={"command": command})
     assert (verdict is not None and verdict["action"] == "block") is blocked
 

@@ -109,10 +109,24 @@ def _is_ancestor(repo: Path, ancestor: str, sha: str) -> bool:
 
 
 def _fast_forward_main(clone: Path) -> str:
-    """Bring the clone's checked-out ``main`` to canonical ``main``; return its sha."""
+    """Make the clone's checked-out ``main`` equal canonical ``main``; return its sha.
+
+    Local commits that never reached canonical (an operation that died between its commit and
+    its push, or a rejected push) are dropped: the caller redoes its work from canonical, so
+    nothing unpublished is reported as done. ``reset --keep`` keeps uncommitted changes to
+    other files and refuses, rather than overwrite, a changed file it would have to replace."""
     gitops.git(clone, "fetch", "-q", REMOTE, MAIN)
-    gitops.git(clone, "merge", "-q", "--ff-only", f"{REMOTE}/{MAIN}")
+    reset = gitops._run(clone, "reset", "-q", "--keep", f"{REMOTE}/{MAIN}", check=False)
+    if reset.returncode != 0:
+        error = reset.stderr.decode(errors="replace").strip()
+        raise WorkspaceError("git", f"cannot bring {clone} main to canonical main: {error}")
     return gitops.head(clone)
+
+
+def sync(clone: Path) -> str:
+    """``_fast_forward_main`` under the lock, for a command that reads the clone's ``main``."""
+    with canonical_lock(canonical_of(clone)):
+        return _fast_forward_main(clone)
 
 
 # --- validation ---
@@ -175,7 +189,9 @@ def _changed_ids(repo: Path, since: str, until: str) -> set[str]:
 
 
 def _commit_worktree(worktree: Path, branch: str) -> str:
-    gitops.git(worktree, "add", "-A")
+    # Views a worker regenerated to inspect them (``kb index``) stay out of the card: integrate
+    # writes them on main after the merge.
+    gitops.git(worktree, "add", "-A", "--", ".", *(f":!{path}" for path in GENERATED_PREFIXES))
     if gitops.git(worktree, "status", "--porcelain"):
         gitops.git(worktree, "commit", "-q", "-m", f"{branch}: result")
     return gitops.head(worktree)
@@ -245,7 +261,9 @@ def _regenerate_views(clone: Path) -> None:
 def _push_main(clone: Path) -> None:
     pushed, rejected = gitops.push_with_rejections(clone, REMOTE, [f"{MAIN}:{MAIN}"])
     if not pushed:
-        gitops.git(clone, "reset", "-q", "--hard", f"{REMOTE}/{MAIN}")
+        # Drop this operation's commits, keeping unrelated uncommitted changes; if that is
+        # refused, the next operation's _fast_forward_main drops them.
+        gitops._run(clone, "reset", "-q", "--keep", f"{REMOTE}/{MAIN}", check=False)
         raise WorkspaceError("push", "push of main was rejected", {"rejected": rejected})
 
 
@@ -261,11 +279,33 @@ def merged(clone: Path, branch: str) -> dict:
     return {"merged": _is_ancestor(clone, card, main), "card_sha": card, "main_sha": main}
 
 
+def _set_aside(clone: Path, paths: list[str]) -> dict[str, bytes | None]:
+    """Read ``paths`` and put them back as committed, so syncing ``main`` cannot refuse or
+    lose them; the caller writes the contents back."""
+    saved = {}
+    for path in paths:
+        file = clone / path
+        saved[path] = file.read_bytes() if file.exists() else None
+        if gitops.show(clone, "HEAD", path) is None:
+            file.unlink(missing_ok=True)
+        else:
+            gitops.git(clone, "checkout", "-q", "HEAD", "--", path)
+    return saved
+
+
 def publish(clone: Path, paths: list[str], message: str) -> dict:
-    """Commit exactly ``paths`` (already written in the clone) and push ``main``."""
+    """Commit exactly ``paths`` (already written in the clone) and push ``main``. A retry
+    after an interrupted or rejected publish publishes the files again."""
     with canonical_lock(canonical_of(clone)):
+        saved = _set_aside(clone, paths)
         _fast_forward_main(clone)
-        gitops.git(clone, "add", "--", *paths)
+        for path, content in saved.items():
+            if content is None:
+                (clone / path).unlink(missing_ok=True)
+            else:
+                (clone / path).parent.mkdir(parents=True, exist_ok=True)
+                (clone / path).write_bytes(content)
+        gitops.git(clone, "add", "-A", "--", *paths)
         if gitops.git(clone, "diff", "--cached", "--name-only", "--", *paths):
             gitops.git(clone, "commit", "-q", "-m", message, "--", *paths)
             _push_main(clone)

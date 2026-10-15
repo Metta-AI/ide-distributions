@@ -15,7 +15,9 @@ from pathlib import Path
 import pytest
 from support.research_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, ResearchBoard
 
+from ide_research_core import workspace
 from ide_research_core.cli import main
+from ide_research_core.io import gitops
 from ide_research_core.io.docs import read_json, write_json
 from ide_research_core.records.store import RecordStore
 from ide_research_core.softmax_tool import cli as softmax_cli
@@ -676,8 +678,12 @@ def test_xp_create_refuses_while_the_league_shows_no_champion(board, launch):
     state = read_json(state_file)
     state["submissions"] = []
     write_json(state_file, state)
-    for record in (board.canonical / "promotions").glob("*.json"):
+    records = sorted((board.canonical / "promotions").glob("*.json"))
+    for record in records:
         record.unlink()
+    workspace.publish(
+        board.canonical, [r.relative_to(board.canonical).as_posix() for r in records], "drop"
+    )
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
     )
@@ -981,3 +987,17 @@ def test_xp_evidence_writes_rows_a_review_can_ingest(board, launch):
         capture_output=True, text=True, env=env, check=False,
     )  # fmt: skip
     assert json.loads(ingest.stdout)["ok"], ingest.stdout + ingest.stderr
+
+
+def test_the_stop_check_reads_canonical_main_not_a_stale_clone(board, tmp_path):
+    """The orchestrator closes an experiment on canonical ``main``; a researcher's clone has not
+    moved since it last integrated (Codex R12 #2)."""
+    from types import SimpleNamespace
+
+    from ide_research_core.softmax_tool import cli as softmax_cli
+
+    stale = tmp_path / "researcher-clone"
+    gitops.git(tmp_path, "clone", "-q", str(board.origin), str(stale))
+    experiment, _ = board.reviewed_experiment()  # pushed to canonical main after the clone
+
+    assert softmax_cli._closed_in_canonical(SimpleNamespace(canonical=stale), experiment) == "reviewed"

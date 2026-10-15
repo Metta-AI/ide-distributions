@@ -259,6 +259,8 @@ def collect(
     evidence: the review can ingest the rows."""
     experiment_id = experiment["id"]
     collected, already, pending, failed = [], [], [], []
+    # Rows come from the latest attempts only: a superseded attempt's evidence stays on disk
+    # as history but must not enter the paired comparison.
     for handle in latest_handles(sm.xp_recover(experiment_id)):
         state = sm.xp_status(handle).state
         if state == "failed":
@@ -272,8 +274,8 @@ def collect(
             write_evidence(root, experiment_id, fetched, now)
             collected.append(handle.request_id)
     rows = sorted(
-        path.relative_to(root).as_posix()
-        for path in (Path(root) / EVIDENCE_XP_DIR / experiment_id).glob("*/rows.jsonl")
+        (request_dir(root, experiment_id, request_id) / "rows.jsonl").relative_to(root).as_posix()
+        for request_id in collected + already
     )
     return {
         "experiment": experiment_id,
