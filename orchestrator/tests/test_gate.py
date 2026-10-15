@@ -1,8 +1,9 @@
 import json
-import os
+import shutil
 import sqlite3
 import subprocess
 import sys
+import venv
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -97,16 +98,30 @@ def test_champion_conflict_and_inflight_on_tenth_minute(context, board_file):
 
 
 def test_gate_process_with_sanitized_passthrough(shared_fixture, board_file):
-    # Keep only the scheduler's environment contract plus import locations for this test fixture.
-    source = Path(__file__).resolve().parents[1] / "src"
-    env = {
-        **shared_fixture.env,
-        "PYTHONPATH": os.pathsep.join([str(source), shared_fixture.env["PYTHONPATH"]]),
-    }
+    # Exercise the real script/exec boundary, with no PYTHONPATH or inherited credentials.
+    source = Path(__file__).resolve().parents[1]
+    scripts = shared_fixture.home / "scripts"
+    scripts.mkdir()
+    shutil.copy(source / "scripts/supervisor_gate.py", scripts)
+    shutil.copytree(
+        source / "src/orchestrator",
+        shared_fixture.home / "src/orchestrator",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    venv_dir = shared_fixture.home / "local/venv"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(venv_dir)
+    site = venv_dir / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    shutil.copytree(
+        source / "src/orchestrator",
+        site / "orchestrator",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    shutil.copytree(shared_fixture.home / "fixture/ide_research_core", site / "ide_research_core")
+    env = {k: v for k, v in shared_fixture.env.items() if k != "PYTHONPATH"}
     result = subprocess.run(
-        [sys.executable, "-m", "orchestrator.gate"],
+        [sys.executable, str(scripts / "supervisor_gate.py")],
         env=env,
-        cwd=shared_fixture.home,
+        cwd=scripts,
         capture_output=True,
         text=True,
         check=True,

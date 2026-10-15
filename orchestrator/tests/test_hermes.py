@@ -98,3 +98,29 @@ print(json.dumps({'ok': True}))
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+    # Provision the installed distribution using its real frozen lock, independent of the source tree.
+    bootstrap = """
+import sys
+from pathlib import Path
+home = Path(sys.argv[1])
+sys.path.insert(0, str(home / 'src'))
+from orchestrator.launch import ensure_venv
+assert ensure_venv(home)
+assert not ensure_venv(home)
+"""
+    result = subprocess.run(
+        [hermes_python(), "-c", bootstrap, str(profile)],
+        env={**env, "HERMES_HOME": str(profile)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    subprocess.run(
+        [str(profile / "local/venv/bin/python"), "-c", "import orchestrator.gate"],
+        cwd=profile,
+        env={**env, "HERMES_HOME": str(profile)},
+        check=True,
+    )
