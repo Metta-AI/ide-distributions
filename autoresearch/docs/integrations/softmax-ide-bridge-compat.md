@@ -1,5 +1,10 @@
 # Softmax IDE bridge: compatibility with the autoresearch distribution
 
+> Historical compatibility audit. The stop-steer behavior described below is superseded by
+> the targeted cancellation contract in [the current bridge spec](softmax-ide-bridge.md).
+> Metta PR #27807 sends `control/cancel`; do not deploy it with an older profile.
+
+
 Checked on 2026-10-08 against `autoresearch/docs/integrations/softmax-ide-bridge.md` as merged on
 `main` in PR #4 (commit `35c0000`), System Design §7 and Runtime §9.2. The contract test is
 [`tests/protocol/test_bridge_contract.py`](../../tests/protocol/test_bridge_contract.py): it writes

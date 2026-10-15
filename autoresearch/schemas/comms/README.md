@@ -105,15 +105,12 @@ at its own path, with that property's `x-message` (or `required`).
 
 ## The Softmax IDE bridge examples
 
-`examples/inbound/task/ide-bridge-task.json` and `examples/inbound/steer/ide-bridge-stop.json`
+`examples/inbound/task/ide-bridge-task.json` and `examples/inbound/control/ide-bridge-stop.json`
 (and `examples/inbound/task/ide-bridge-task-fractional-seconds.json`, a `created` with
 microseconds as the bridge's default `datetime.now(UTC)` gives) are the exact bytes the bridge's
 `deliver()` writes: `InboundTask(...).model_dump_json()` and
-`InboundSteer(...).model_dump_json()`, made with pydantic 2.12.3 (the version in metta's
-`uv.lock`) from `packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py` at
-metta main `86b1a3c5e0348b3e72980fa6230f005318e634fa`. The bridge file last changed in
-`e76aa6a21784cc87812b991ccb1dff5b848f91aa`; its message models and `deliver()` are the same as at
-`8b6042dbfece760f1e00af5a00be0b9b6ab4d82e`. The inputs were player
+`InboundCancel(...).model_dump_json()`, from `packages/observatory-hosted-worker/src/observatory_hosted_worker/bridge.py` at
+metta cancellation branch commit `73046a8c98a2ecc83cff7d32849d2b383f046181` (PR #27807). The inputs were player
 `ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1`, task key `tsk_42`, `created` 2026-10-08T20:00:00Z, and
 mode `scouting`. `tests/protocol/test_bridge_contract.py` writes these files into the inbox and
 routes them.

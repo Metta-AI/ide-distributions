@@ -752,12 +752,15 @@ def route_all(
     allow_no_remote: bool = False,
     inbox_writers: frozenset[int] | None = None,
     adopt: bool = True,
+    cancel_only: bool = False,
 ) -> list[Action]:
     """Receive, route and resolve every inbound message (C11); see the module docstring.
     Takes the canonical lock: the caller must not hold it. Idempotent; safe to rerun after
     a crash at any point. ``allow_no_remote`` is for runtime notes (tests, local runs);
     ``inbox_writers`` restricts adoption to files those uids own (``comms.inbound``);
-    ``adopt=False`` skips adoption (the writer list could not be resolved)."""
+    ``adopt=False`` skips adoption (the writer list could not be resolved).
+    ``cancel_only`` receives messages but only applies cancellation, without starting or
+    resolving work. Queue-keeper uses this before checks that gate new research."""
     canonical = ctx.canonical
     actions: list[Action] = []
     with canonical_lock(canonical):
@@ -770,8 +773,12 @@ def route_all(
         actions += [Action("unreadable", path) for path in skipped]
         actions += _receive(canonical, inbox)
         for record in _routing_order(delivery.records(canonical), inbox):
-            actions += _route_one(ctx, queue, record, inbox[record["id"]], allow_no_remote)
-        actions += _resolve(ctx, queue, inbox, allow_no_remote)
+            message = inbox[record["id"]]
+            if cancel_only and not (message["kind"] == "control" and message["action"] == "cancel"):
+                continue
+            actions += _route_one(ctx, queue, record, message, allow_no_remote)
+        if not cancel_only:
+            actions += _resolve(ctx, queue, inbox, allow_no_remote)
     return actions
 
 

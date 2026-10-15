@@ -418,13 +418,14 @@ To cancel one research task, send an inbound `control` with `{"action": "cancel"
 The runtime closes that request against new admission, recovery, and late result publication, and requests shutdown through the existing queue.
 Its reply says **stop requested**: native worker cleanup can take a few minutes. This does not stop the VM or gateway.
 It preserves canonical work and unrelated cards. Cancelling a planning-backlog item withdraws that item without stopping a shared planning card.
-As with pause/resume below, routing requires the queue-keeper preflight to pass.
+Cancellation is processed before credit and identity preflight, so those failures do not prevent stopping work.
+Canonical provenance checks and inbox-writer validation still apply; pause/resume and new work remain gated by preflight.
 
 A coach pauses and resumes research from the IDE chat with the exact lines
 `/pause-research` and `/resume-research`, for which the plugin sends an inbound `control` message
 (`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with
 `"$AUTORESEARCH_CLI" comms inbound control --json '{"action": "pause"}' --author coach:<player id>`.
-queue-keeper applies it on its next run, when it routes inbound. Routing runs only after the preflight check passes, so a `control` sent while preflight is failing (for example, the key is out of credit) is applied, and answered with its note, only on the first run whose preflight passes. A pause sets the coach hold,
+Queue-keeper applies pause/resume on its next run after preflight passes. A pause/resume control sent while preflight is failing (for example, the key is out of credit) is applied, and answered with its note, only on the first run whose preflight passes. A pause sets the coach hold,
 `.supervisor/ledger/coach-hold.json` (`{"held_at", "by", "tasks"}`: `by` is the message's
 author, `tasks` the pending cards it unassigned and their assignees): no card is admitted, no
 pending card is dispatched, and the agent plans nothing; running cards finish their work
@@ -666,7 +667,7 @@ depends on it, it says "per the plan", and you should check the deployed metta v
   asks whenever you want to approve more.
 - **Research starts when you ask.** With `AUTORESEARCH_AUTONOMY=on-request` (the hosted setting) the agent plans
   nothing until your first accepted `task`. After that it plans on its own, permanently
-  (`.supervisor/ledger/started.json`). A `steer` (what cancelling a task produces) does not start it.
+  (`.supervisor/ledger/started.json`). A `steer` or task-cancellation control does not start it.
 - **Ask the chat what is going on.** The chat reads the workspace (`status`, `baseline_report`,
   cards, records, messages; see "IDE coach chat" above). It cannot change anything by itself.
 - **Send work with a proposal.** Ask the chat for a `task`, `steer`, `reply` or `control`. The plugin shows

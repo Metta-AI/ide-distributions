@@ -16,7 +16,8 @@ Order of one run (Overview C1-C12; Plan 01 Task 3.9):
    escalates after 5 runs like any other). A journal failure in any later step fails closed
    the same way. Every push of ``main`` (here, in bootstrap, xp-poll, health, promotion and the
    publisher) goes through ``provenance.push_main``, which holds it while a violation stands.
-2. ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
+2. Receive inbound and apply targeted cancellations, without admitting or resolving other
+   work. Then ``preflight`` (C6, A3, A5, A10), then the game's ``host_requirements`` as workers see
    them (``preflight.host_requirement_problems``: the profile ``.env`` over this job's
    environment): missing ones are logged and get one runtime ``help_request`` per distinct
    set, and the run goes on. On preflight failure, including a preflight that raises: pause
@@ -279,7 +280,13 @@ INBOX_WRITERS_STEP = "inbox_writers"
 
 
 def _routing_step(
-    run: KeeperRun, ctx: RunContext, queue: Queue, env: Mapping[str, str], allow_no_remote: bool
+    run: KeeperRun,
+    ctx: RunContext,
+    queue: Queue,
+    env: Mapping[str, str],
+    allow_no_remote: bool,
+    *,
+    cancel_only: bool = False,
 ):
     """Route inbound (C11). Direct inbox writes are adopted only from the users in
     ``AUTORESEARCH_INBOX_WRITERS`` when it is set. When it names an unknown user, adoption is
@@ -295,7 +302,12 @@ def _routing_step(
         run.failures[INBOX_WRITERS_STEP] = f"ValueError: {error}"
         _log(ctx, f"step {INBOX_WRITERS_STEP} failed: {error}; direct inbox writes are not adopted")
     actions = route_all(
-        ctx, queue, allow_no_remote=allow_no_remote, inbox_writers=writers, adopt=adopt
+        ctx,
+        queue,
+        allow_no_remote=allow_no_remote,
+        inbox_writers=writers,
+        adopt=adopt,
+        cancel_only=cancel_only,
     )
     if adopt and writers is None and any(a.kind in ("adopted", "write_rejected") for a in actions):
         _log(
@@ -960,6 +972,18 @@ def _run_steps(
         # Running cards keep running while paused: the caps still apply to them.
         _spend_steps(run, ctx, queue, env, now, allow_no_remote)
         return
+    _step(
+        run,
+        ctx,
+        "cancellation",
+        _routing_step,
+        run,
+        ctx,
+        queue,
+        env,
+        allow_no_remote,
+        cancel_only=True,
+    )
     try:
         run.preflight = preflight(env, sm, canonical, now, **preflight_kwargs)
     except Exception as error:  # noqa: BLE001 - a preflight that cannot finish has failed
