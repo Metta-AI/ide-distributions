@@ -4,8 +4,8 @@ from collections import Counter
 
 import pytest
 
-from autoresearch.stats.design import DesignError
-from autoresearch.stats.opponents import OUT_OF_DIVISION_WEIGHT, league_snapshot, sample_lineups
+from ide_research_core.stats.design import DesignError
+from ide_research_core.stats.opponents import OUT_OF_DIVISION_WEIGHT, league_snapshot, sample_lineups
 
 US, OUR_POLICY = "ply_us", "us:v3"
 AT = "2026-10-09T12:00:00+00:00"

@@ -6,10 +6,10 @@ import datetime
 import pytest
 from support.board import Board
 
-from autoresearch.comms import delivery
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.runtime.planning import planning_request
+from ide_research_core.comms import delivery
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.runtime.planning import planning_request
 
 NOW = datetime.datetime(2026, 10, 7, 13, 5, tzinfo=datetime.UTC)
 LATER = NOW + datetime.timedelta(hours=2)
@@ -133,7 +133,7 @@ def _request_ids(board: Board) -> list[str]:
 
 
 def test_crash_before_commit_reuses_the_written_request(board, monkeypatch):
-    from autoresearch.runtime import planning
+    from ide_research_core.runtime import planning
 
     def crash(*args, **kwargs):
         raise RuntimeError("crash before commit")

@@ -26,7 +26,7 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from autoresearch.cli import build_parser
+from ide_research_core.cli import build_parser
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS = ROOT / "skills" / "autoresearch"

@@ -2,7 +2,7 @@
 
 import json
 
-from autoresearch.cli import main
+from ide_research_core.cli import main
 
 
 def show(capsys, *argv):

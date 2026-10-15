@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from autoresearch.plugin import adapters, policy
+from ide_research_core.plugin import adapters, policy
 
 
 @pytest.fixture

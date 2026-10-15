@@ -1,7 +1,7 @@
 """MEMORY.md snapshot into canonical (Plan 03 Task 5.2)."""
 
-from autoresearch.io import gitops
-from autoresearch.runtime.memory_snapshot import SNAPSHOT_RELATIVE, snapshot_memory
+from ide_research_core.io import gitops
+from ide_research_core.runtime.memory_snapshot import SNAPSHOT_RELATIVE, snapshot_memory
 
 
 def write_memory(ctx, text):

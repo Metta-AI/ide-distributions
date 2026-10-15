@@ -1,6 +1,6 @@
 import pytest
 
-from autoresearch import launch
+from ide_research_core import launch
 
 
 def test_sync_runs_once_per_lock(tmp_path):
@@ -77,7 +77,7 @@ def test_main_execs_venv_python(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(launch.os, "execv", lambda path, args: calls.append((path, args)))
     launch.main("health", ["--x"])
-    assert calls == [(str(python), [str(python), "-m", "autoresearch.runtime.health", "--x"])]
+    assert calls == [(str(python), [str(python), "-m", "ide_research_core.runtime.health", "--x"])]
 
 
 def test_main_returns_1_when_venv_python_missing(tmp_path, monkeypatch):

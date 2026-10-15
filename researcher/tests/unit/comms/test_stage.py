@@ -2,11 +2,11 @@
 
 import pytest
 
-from autoresearch.comms.envelope import KINDS, MessageProblems, build_message, message_problems
-from autoresearch.comms.stage import Ref, stage
-from autoresearch.ids import new_id
-from autoresearch.io.docs import read_json
-from autoresearch.paths import Layout
+from ide_research_core.comms.envelope import KINDS, MessageProblems, build_message, message_problems
+from ide_research_core.comms.stage import Ref, stage
+from ide_research_core.ids import new_id
+from ide_research_core.io.docs import read_json
+from ide_research_core.paths import Layout
 
 
 def test_stage_writes_a_valid_message(tmp_path):

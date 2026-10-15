@@ -5,8 +5,8 @@ import json
 import pytest
 from support.board import Board
 
-from autoresearch.cli import main
-from autoresearch.comms.inbound import submit_inbound
+from ide_research_core.cli import main
+from ide_research_core.comms.inbound import submit_inbound
 
 
 @pytest.fixture

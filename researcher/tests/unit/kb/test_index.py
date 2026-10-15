@@ -1,8 +1,8 @@
 import json
 
-from autoresearch.io.docs import write_doc
-from autoresearch.kb.index import estimate_tokens, write_generated
-from autoresearch.records.store import RecordStore
+from ide_research_core.io.docs import write_doc
+from ide_research_core.kb.index import estimate_tokens, write_generated
+from ide_research_core.records.store import RecordStore
 
 from .conftest import C_CONTRA, C_GOOD, C_ORPHAN, HUB, kb_id
 
@@ -120,7 +120,7 @@ def survivors(layout, budget):
 
 
 def test_truncation_order_across_grades_and_ids(tmp_path):
-    from autoresearch.paths import Layout
+    from ide_research_core.paths import Layout
 
     layout = Layout(tmp_path)
     # Ids 100..107, two per grade, assigned so id order differs from grade order.

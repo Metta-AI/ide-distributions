@@ -1,10 +1,10 @@
 import jsonschema
 import pytest
 
-from autoresearch.io import gitops
-from autoresearch.paths import Layout
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.requests import read_requests, write_request
+from ide_research_core.io import gitops
+from ide_research_core.paths import Layout
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.requests import read_requests, write_request
 
 SPEC = CardSpec("", "Look at X", "investigation", "because", ["T-1"], "worker", "P2")
 TARGET = "Q-01K6Z3V8QXABCDEFGHJKMNPQRS"

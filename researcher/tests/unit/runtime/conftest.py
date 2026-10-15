@@ -2,9 +2,9 @@
 
 import pytest
 
-from autoresearch.games.loader import load_game
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.runctx import RunContext
+from ide_research_core.games.loader import load_game
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.runctx import RunContext
 from runtime.workspace import AUTORESEARCH_DIR, Canonical
 
 

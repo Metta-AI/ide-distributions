@@ -13,10 +13,10 @@ from pathlib import Path
 import pytest
 from support.board import Board
 
-from autoresearch.comms import runtime_messages as rm
-from autoresearch.comms.publisher import publish_message
-from autoresearch.comms.reader import read_since
-from autoresearch.runtime.ledger import canonical_lock
+from ide_research_core.comms import runtime_messages as rm
+from ide_research_core.comms.publisher import publish_message
+from ide_research_core.comms.reader import read_since
+from ide_research_core.runtime.ledger import canonical_lock
 
 SRC = Path(rm.__file__).resolve().parents[1]
 INBOUND = "I-01M4EJ7ABV097KEMKSBV76N9T9"

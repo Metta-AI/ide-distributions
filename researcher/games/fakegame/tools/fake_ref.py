@@ -2,7 +2,7 @@
 """Fake resolver for the ``replay`` reference type: ``ar://replay/<seed>:<tick>``. Stdlib only.
 
 Called as ``fake_ref.py <id>`` with ``AUTORESEARCH_WORKSPACE`` and ``AUTORESEARCH_REV`` set
-(see ``autoresearch.comms.resolver``). Prints one deterministic tick summary as JSON; exits 1
+(see ``ide_research_core.comms.resolver``). Prints one deterministic tick summary as JSON; exits 1
 for an id that is not ``<seed>:<tick>``.
 """
 

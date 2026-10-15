@@ -2,8 +2,8 @@ import multiprocessing
 
 import pytest
 
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.file_queue import FileQueue
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.file_queue import FileQueue
 
 
 def make_spec(n: int, priority="P2", order=0) -> CardSpec:
@@ -153,8 +153,8 @@ def test_current_run_is_the_claimed_run(queue, tmp_path):
 
 
 def test_stop_ends_the_open_run_of_a_claimed_card(tmp_path):
-    from autoresearch.queue.card import CardSpec
-    from autoresearch.queue.file_queue import FileQueue
+    from ide_research_core.queue.card import CardSpec
+    from ide_research_core.queue.file_queue import FileQueue
 
     queue = FileQueue(tmp_path / "fq")
     spec = CardSpec("Q-1", "t", "investigation", "w", [], "x", "P2")

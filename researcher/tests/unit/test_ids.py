@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from autoresearch.ids import ENTITY_PREFIXES, new_id, parse_id, short
+from ide_research_core.ids import ENTITY_PREFIXES, new_id, parse_id, short
 
 
 def test_new_id_has_prefix_and_ulid_length():

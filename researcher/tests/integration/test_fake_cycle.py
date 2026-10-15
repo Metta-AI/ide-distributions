@@ -54,14 +54,14 @@ import pytest
 import yaml
 from test_protocol_slice import Slice, committed, committed_dir, openrouter_usage
 
-from autoresearch.comms.inbound import submit_inbound
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.io.locks import file_lock
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.runtime.preflight import env_file_value
-from autoresearch.runtime.promotion import CHAMPION_PATH
+from ide_research_core.comms.inbound import submit_inbound
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.io.locks import file_lock
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runtime.preflight import env_file_value
+from ide_research_core.runtime.promotion import CHAMPION_PATH
 
 pytestmark = pytest.mark.hermes
 

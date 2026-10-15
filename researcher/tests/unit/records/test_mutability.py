@@ -1,6 +1,6 @@
 import pytest
 
-from autoresearch.records.mutability import check_change
+from ide_research_core.records.mutability import check_change
 
 from .fixtures import CLAIM, EXP_DESIGNED, HYP, JOURNAL, JOURNAL_BODY, TOPIC
 
@@ -293,7 +293,7 @@ def test_store_status_change_needs_fresh_reason_and_ref(store):
 
 
 def test_validate_change_rejects_reused_reason(store, layout):
-    from autoresearch.records.registry import path_for
+    from ide_research_core.records.registry import path_for
 
     hid = store.create("hypothesis", HYP)
     store.set_status(hid, "under-test", reason="E-1 registered", ref="E-1")

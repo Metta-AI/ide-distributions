@@ -360,7 +360,7 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     import gota_gates
     import gota_host
 
-    from autoresearch.softmax_tool.upload import _read_build
+    from ide_research_core.softmax_tool.upload import _read_build
 
     _, _ = generation
     distribution = Path(__file__).resolve().parents[4]

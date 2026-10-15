@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.games.loader import Game, GameError, GameMetric, load_game
-from autoresearch.io.docs import read_doc, write_doc
+from ide_research_core.games.loader import Game, GameError, GameMetric, load_game
+from ide_research_core.io.docs import read_doc, write_doc
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FAKE_TOOLS = REPO_ROOT / "games" / "fakegame" / "tools"

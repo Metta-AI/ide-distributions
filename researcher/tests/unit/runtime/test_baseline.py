@@ -6,10 +6,10 @@ import json
 from support.state_db import add_session, record_session_start
 from ulid import ULID
 
-from autoresearch import cli
-from autoresearch.io.docs import write_doc, write_json
-from autoresearch.runtime import baseline
-from autoresearch.runtime.handoff import handoff_path
+from ide_research_core import cli
+from ide_research_core.io.docs import write_doc, write_json
+from ide_research_core.runtime import baseline
+from ide_research_core.runtime.handoff import handoff_path
 from runtime.workspace import make_spec
 
 UTC = datetime.UTC

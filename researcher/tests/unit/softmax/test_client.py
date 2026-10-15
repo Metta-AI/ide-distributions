@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.softmax_tool.client import CREDITS_PATH, SoftmaxClient
-from autoresearch.softmax_tool.fake import FakeSoftmax
-from autoresearch.softmax_tool.identity import IdentityError
-from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, SERVER_ENV, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import LeagueNotChosen, PermitRequired, from_env
+from ide_research_core.softmax_tool.client import CREDITS_PATH, SoftmaxClient
+from ide_research_core.softmax_tool.fake import FakeSoftmax
+from ide_research_core.softmax_tool.identity import IdentityError
+from ide_research_core.softmax_tool.platform_cli import DEFAULT_SERVER, SERVER_ENV, SoftmaxCliError
+from ide_research_core.softmax_tool.protocol import LeagueNotChosen, PermitRequired, from_env
 
 from .conftest import (
     AGENT_TOKEN,

@@ -78,7 +78,7 @@ def test_plugin_import_graph_is_stdlib_only():
 
 
 def test_plugin_stub_registers_six_hooks_and_logs_tool_events(tmp_path, monkeypatch):
-    from autoresearch.plugin import adapters
+    from ide_research_core.plugin import adapters
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv("AUTORESEARCH_WORKSPACE", raising=False)

@@ -3,10 +3,10 @@ import json
 import subprocess
 import sys
 
-from autoresearch.paths import Layout
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.requests import write_request
-from autoresearch.records.store import RecordStore
+from ide_research_core.paths import Layout
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.requests import write_request
+from ide_research_core.records.store import RecordStore
 
 from .conftest import C_GOOD, C_GRADE, C_VERIF, HUB, kb_id
 from .test_staleness import _commit, game_repo  # noqa: F401  (pytest fixture)
@@ -16,7 +16,7 @@ from .test_staleness import _commit, game_repo  # noqa: F401  (pytest fixture)
 
 def run_kb(root, *args):
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "kb", *args, "--root", str(root)],
+        [sys.executable, "-m", "ide_research_core", "kb", *args, "--root", str(root)],
         capture_output=True,
         text=True,
         check=False,
@@ -86,7 +86,7 @@ def test_renew_with_unreadable_repo_is_a_business_failure(kb_layout, tmp_path):
 
 def test_bad_arguments_exit_2(kb_layout):
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "kb", "stale", "--root", str(kb_layout.root)],
+        [sys.executable, "-m", "ide_research_core", "kb", "stale", "--root", str(kb_layout.root)],
         capture_output=True,
         text=True,
         check=False,
@@ -157,8 +157,8 @@ def test_compact_skips_claim_with_pending_reverification(tmp_path):
 def test_mutating_kb_commands_are_marked_runtime_only():
     import argparse
 
-    from autoresearch.cli import build_parser
-    from autoresearch.kb.cli import RUNTIME_ONLY
+    from ide_research_core.cli import build_parser
+    from ide_research_core.kb.cli import RUNTIME_ONLY
 
     parser = build_parser()
     group = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))

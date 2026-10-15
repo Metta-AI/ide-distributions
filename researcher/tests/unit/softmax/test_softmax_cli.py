@@ -13,17 +13,17 @@ from pathlib import Path
 import pytest
 from support.promotion_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, SubmitBoard
 
-from autoresearch.cli import main
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.paths import Layout
-from autoresearch.queue.select import FILE_QUEUE_RELATIVE
-from autoresearch.records.store import RecordStore
-from autoresearch.runtime.promotion import CHAMPION_PATH, load
-from autoresearch.softmax_tool import cli as softmax_cli
-from autoresearch.softmax_tool.fake import FAULTS_ENV
-from autoresearch.softmax_tool.platform_cli import PlatformCli, ToolMissing
-from autoresearch.softmax_tool.protocol import retry_backoff
-from autoresearch.softmax_tool.xp import parse_tag
+from ide_research_core.cli import main
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.paths import Layout
+from ide_research_core.queue.select import FILE_QUEUE_RELATIVE
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runtime.promotion import CHAMPION_PATH, load
+from ide_research_core.softmax_tool import cli as softmax_cli
+from ide_research_core.softmax_tool.fake import FAULTS_ENV
+from ide_research_core.softmax_tool.platform_cli import PlatformCli, ToolMissing
+from ide_research_core.softmax_tool.protocol import retry_backoff
+from ide_research_core.softmax_tool.xp import parse_tag
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -56,7 +56,7 @@ def base_env(board, worker=None, **extra) -> dict:
 
 def softmax(env, *argv):
     proc = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "softmax", *argv],
+        [sys.executable, "-m", "ide_research_core", "softmax", *argv],
         capture_output=True,
         text=True,
         check=False,
@@ -115,7 +115,7 @@ def test_credits_fake(board):
 
 
 def test_credits_read_failure_is_unavailable_not_an_error(tmp_path):
-    from autoresearch.softmax_tool.client import SoftmaxClient
+    from ide_research_core.softmax_tool.client import SoftmaxClient
 
     def http_get(url, headers):
         raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)
@@ -262,7 +262,7 @@ def test_xp_specs_refuses_bad_batches_and_seedless_designs():
 def test_design_pairing_is_seed_only_with_selector_opponents():
     from support.promotion_board import design_dict
 
-    from autoresearch.stats.design import EvaluationDesign
+    from ide_research_core.stats.design import EvaluationDesign
 
     assert EvaluationDesign.from_dict(design_dict()).pairing == "seed_only"
     pinned = {**design_dict(), "opponents": ["opp:v3"]}
@@ -342,8 +342,8 @@ def test_xp_create_records_request_and_starts_evaluating(board, launch):
 
 
 def _set_fake_credits(board, credits: int) -> None:
-    from autoresearch.io.docs import write_json
-    from autoresearch.softmax_tool.fake import FakeSoftmax
+    from ide_research_core.io.docs import write_json
+    from ide_research_core.softmax_tool.fake import FakeSoftmax
 
     fake = FakeSoftmax(board.canonical, {})
     path = board.canonical / ".supervisor" / "runtime" / "fake_softmax.json"
@@ -704,7 +704,7 @@ def test_xp_create_needs_a_binding(board):
 
 HOLD_LOCK = """
 import sys
-from autoresearch.io.locks import file_lock
+from ide_research_core.io.locks import file_lock
 with file_lock(sys.argv[1], timeout_s=10) as handle:
     if len(sys.argv) > 2:  # the holder record, as experiment_lock writes it
         handle.write(sys.argv[2])
@@ -790,7 +790,7 @@ def test_the_holder_is_recorded_while_held_and_cleared_after(board, launch, monk
     worker, experiment = launch
     for name, value in base_env(board, worker).items():
         monkeypatch.setenv(name, value)
-    from autoresearch import runctx
+    from ide_research_core import runctx
 
     ctx = runctx.from_env()
     lock = _lock_path(board, experiment)
@@ -805,7 +805,7 @@ def test_the_holder_is_recorded_while_held_and_cleared_after(board, launch, monk
 def test_xp_create_waits_for_the_other_process_then_runs(board, launch, monkeypatch, capsys):
     import threading
 
-    from autoresearch.io.locks import file_lock
+    from ide_research_core.io.locks import file_lock
 
     worker, experiment = launch
     for name, value in base_env(board, worker).items():
@@ -830,7 +830,7 @@ def test_two_concurrent_launches_create_one_set_of_requests(board, launch):
     """The headline guarantee: two relaunchers at the same moment, one set of requests."""
     worker, experiment = launch
     env = base_env(board, worker)
-    argv = [sys.executable, "-m", "autoresearch", "softmax", "xp", "create", experiment,
+    argv = [sys.executable, "-m", "ide_research_core", "softmax", "xp", "create", experiment,
             "--batch", "1", "--attempt", "1"]
     procs = [
         subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER
+from ide_research_core.softmax_tool.platform_cli import DEFAULT_SERVER
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "softmax"
 RECORDED = FIXTURES / "recorded"

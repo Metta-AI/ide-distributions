@@ -7,10 +7,15 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 |---|---|
 | [`researcher/`](researcher/README.md) | The autonomous research agent (formerly `autoresearch`), moved here from `Metta-AI/ide-mvp` with its full history. |
 
+Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
+into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py), because
+Hermes installs a distribution by copying its one folder. The copies are generated: edit
+`shared/`, run `python3 tools/sync_shared.py`, and commit the source and the copies together.
+
 The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
 browser) describes the planned layout: a new
-`orchestrator/` distribution sits between the IDE chat and the researchers, and an
-`ontology/` and a `shared/` package are copied into both.
+`orchestrator/` distribution sits between the IDE chat and the researchers, and a shared
+`ontology/` is copied into both.
 
 ## Install
 
@@ -40,7 +45,8 @@ hermes profile update researcher-1
 ## Develop and test
 
 Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job per
-distribution folder.
+distribution folder. The tests of the shared package run in `researcher/`, against its copy,
+so run the sync script before testing a change under `shared/`.
 
 ```bash
 cd researcher

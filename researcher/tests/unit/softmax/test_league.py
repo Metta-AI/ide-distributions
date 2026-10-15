@@ -10,10 +10,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from autoresearch.cli import main
-from autoresearch.softmax_tool.client import LEAGUE_FETCH_WORKERS, SoftmaxClient
-from autoresearch.softmax_tool.fake import LEAGUE_HOUSE, LEAGUE_POLICIES, FakeSoftmax
-from autoresearch.softmax_tool.league import episode_rows
+from ide_research_core.cli import main
+from ide_research_core.softmax_tool.client import LEAGUE_FETCH_WORKERS, SoftmaxClient
+from ide_research_core.softmax_tool.fake import LEAGUE_HOUSE, LEAGUE_POLICIES, FakeSoftmax
+from ide_research_core.softmax_tool.league import episode_rows
 
 from .conftest import LEAGUE_ID, completed, synthetic
 

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.io.docs import read_doc
-from autoresearch.kb.lint import analyze
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
+from ide_research_core.io.docs import read_doc
+from ide_research_core.kb.lint import analyze
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
 
 SEED = Path(__file__).resolve().parents[3] / "games/gota/seed"
 ENGINE = "02eda3d34d0e7cc3ae1986d2ab57482a04cbe08a"

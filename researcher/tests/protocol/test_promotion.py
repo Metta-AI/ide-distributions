@@ -11,14 +11,14 @@ import jsonschema
 import pytest
 from support.board import Board, Worker
 
-from autoresearch.cli import main
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import promotion
-from autoresearch.runtime.ledger import canonical_lock, commit
-from autoresearch.runtime.merge import find_orphan_done
-from autoresearch.runtime.promotion import (
+from ide_research_core.cli import main
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.runtime import promotion
+from ide_research_core.runtime.ledger import canonical_lock, commit
+from ide_research_core.runtime.merge import find_orphan_done
+from ide_research_core.runtime.promotion import (
     CHAMPION_PATH,
     PromotionError,
     accept_champion,
@@ -32,8 +32,8 @@ from autoresearch.runtime.promotion import (
     stage_champion,
     submit_promotion,
 )
-from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
-from autoresearch.softmax_tool.protocol import SubmissionState
+from ide_research_core.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
+from ide_research_core.softmax_tool.protocol import SubmissionState
 
 LEAGUE = "league_fake"
 # Platform policy version ids are opaque labels (the real client uses ``name:vN``).
@@ -894,7 +894,7 @@ def test_accept_champion_through_the_promotion_cli(board, capsys, monkeypatch, t
 
 def _status_champion(board, now, grace=datetime.timedelta(minutes=30)):
     """The ``status`` champion section, read from this board's fake league."""
-    from autoresearch.runtime import status
+    from ide_research_core.runtime import status
 
     def check(at, window):
         return promotion.league_check(board.ctx(), board.sm, LEAGUE, at, window)

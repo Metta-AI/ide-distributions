@@ -7,15 +7,15 @@ import pytest
 from support.keeper_host import evaluating_experiment
 from support.state_db import add_session
 
-from autoresearch import cli
-from autoresearch.comms import runtime_messages
-from autoresearch.comms.publisher import publish_message
-from autoresearch.io.docs import write_json
-from autoresearch.records.store import RecordStore
-from autoresearch.runtime import promotion, status
-from autoresearch.runtime.ledger import commit
-from autoresearch.runtime.pause import pause
-from autoresearch.runtime.promotion import ChampionConflict, LeagueCheck
+from ide_research_core import cli
+from ide_research_core.comms import runtime_messages
+from ide_research_core.comms.publisher import publish_message
+from ide_research_core.io.docs import write_json
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runtime import promotion, status
+from ide_research_core.runtime.ledger import commit
+from ide_research_core.runtime.pause import pause
+from ide_research_core.runtime.promotion import ChampionConflict, LeagueCheck
 from runtime.workspace import make_spec
 
 NOW = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.UTC)

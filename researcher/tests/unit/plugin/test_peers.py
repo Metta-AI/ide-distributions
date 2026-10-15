@@ -6,9 +6,9 @@ from dataclasses import asdict
 
 import pytest
 
-from autoresearch.plugin import peers
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.kanban_queue import KanbanError
+from ide_research_core.plugin import peers
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.kanban_queue import KanbanError
 
 NOW = 1_000_000
 

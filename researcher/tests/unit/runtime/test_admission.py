@@ -3,11 +3,11 @@ import json
 import jsonschema
 import pytest
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.queue.requests import load_schema
-from autoresearch.runtime.admission import admit, admit_and_create
-from autoresearch.runtime.briefing import BriefingInputs
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.runtime.admission import admit, admit_and_create
+from ide_research_core.runtime.briefing import BriefingInputs
 from runtime.workspace import GAME_VERSION, make_spec
 
 PROFILE = "autoresearch"

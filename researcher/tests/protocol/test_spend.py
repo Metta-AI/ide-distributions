@@ -8,9 +8,9 @@ import pytest
 from support.keeper_host import PROFILE, Host
 from support.state_db import add_session, record_session_start
 
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.runtime import health, spend
-from autoresearch.runtime.pause import is_paused
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.runtime import health, spend
+from ide_research_core.runtime.pause import is_paused
 
 T0 = datetime.datetime.now(datetime.UTC).replace(hour=12, minute=0, second=0, microsecond=0)
 
@@ -309,7 +309,7 @@ def test_a_stop_that_cannot_be_recorded_does_not_end_enforcement(host, monkeypat
 def test_a_journal_failure_recording_a_stop_caps_first_then_fails_closed(host, monkeypatch):
     """Codex review of PR #24 round 4: a JournalError while recording a stop is kept typed;
     the card is still stopped and the budget checked, then the run pauses."""
-    from autoresearch.runtime import provenance
+    from ide_research_core.runtime import provenance
 
     task_id = _runs(host, 5, end_claimed=True)
 

@@ -48,18 +48,18 @@ import yaml
 from support.hermes_python import hermes_python
 from support.promotion_board import BASELINE_PV, LEAGUE, PV_A, VERSION, design_dict, design_sha256
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.io.locks import file_lock
-from autoresearch.paths import Layout
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.requests import write_request
-from autoresearch.records.store import RecordStore
-from autoresearch.runtime.bootstrap import set_env_lines
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.preflight import env_file_value
-from autoresearch.runtime.promotion import CHAMPION_PATH
-from autoresearch.softmax_tool.fake import FakeSoftmax
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.io.locks import file_lock
+from ide_research_core.paths import Layout
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.requests import write_request
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runtime.bootstrap import set_env_lines
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.runtime.preflight import env_file_value
+from ide_research_core.runtime.promotion import CHAMPION_PATH
+from ide_research_core.softmax_tool.fake import FakeSoftmax
 
 pytestmark = pytest.mark.hermes
 

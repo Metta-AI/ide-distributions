@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from autoresearch.plugin.policy import command_signature, exit_program, tool_policy
+from ide_research_core.plugin.policy import command_signature, exit_program, tool_policy
 
 WORKING = {"mode": "investigation", "finished": False}
 FINISHED = {"mode": "investigation", "finished": True}
@@ -681,17 +681,17 @@ PROVENANCE_ACCESS = [
     ("read_file", {"path": "{canon}/.git/autoresearch/provenance.key"}),
     ("search_files", {"pattern": "mac", "path": "{canon}/.git/autoresearch"}),
     ("write_file", {"path": "{canon}/.git/autoresearch/provenance.jsonl", "content": "{{}}"}),
-    ("execute_code", {"code": "import os\nfrom autoresearch.runtime import provenance as p\n"
+    ("execute_code", {"code": "import os\nfrom ide_research_core.runtime import provenance as p\n"
                       "p.accept(os.getcwd().split('/.worktrees')[0], 'HEAD')"}),
-    ("execute_code", {"code": "import autoresearch.runtime.provenance as p; p.record('.', 'x', 'y')"}),
-    ("terminal", {"command": "python3 -c 'from autoresearch.runtime import ledger, provenance'"}),
+    ("execute_code", {"code": "import ide_research_core.runtime.provenance as p; p.record('.', 'x', 'y')"}),
+    ("terminal", {"command": "python3 -c 'from ide_research_core.runtime import ledger, provenance'"}),
     # review R2-M3: globs, cd + relative, searches under canonical's .git, the ledger route
     ("terminal", {"command": "cat {canon}/.git/autor*/prov*.key"}),
     ("terminal", {"command": "cd {canon}/.git && cat autoresearch/*"}),
     ("terminal", {"command": "find {canon}/.git -name '*.key' -exec cat {{}} \\;"}),
     ("terminal", {"command": "grep -r . {canon}/.git"}),
     ("search_files", {"pattern": "mac", "path": "{canon}/.git"}),
-    ("execute_code", {"code": "from autoresearch.runtime import ledger\n"
+    ("execute_code", {"code": "from ide_research_core.runtime import ledger\n"
                       "ledger.provenance.accept('.', 'HEAD')"}),
 ]
 

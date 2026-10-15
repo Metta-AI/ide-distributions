@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from support.hermes_python import hermes_python
 
-from autoresearch.runctx import BOARD
+from ide_research_core.runctx import BOARD
 
 DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # .../autoresearch
 REPO_ROOT = DISTRIBUTION_ROOT.parent

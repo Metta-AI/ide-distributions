@@ -8,8 +8,8 @@ import sys
 
 import pytest
 
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.file_queue import FileQueue
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.file_queue import FileQueue
 
 CARD_ID = "K-CURRENT"
 
@@ -36,7 +36,7 @@ def worker_env(tmp_path):
 
 def run_cli(env, *args):
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "queue", *args],
+        [sys.executable, "-m", "ide_research_core", "queue", *args],
         env=env,
         capture_output=True,
         text=True,

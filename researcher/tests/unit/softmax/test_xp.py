@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.softmax_tool import xp
-from autoresearch.softmax_tool.client import SoftmaxClient
-from autoresearch.softmax_tool.platform_cli import (
+from ide_research_core.softmax_tool import xp
+from ide_research_core.softmax_tool.client import SoftmaxClient
+from ide_research_core.softmax_tool.platform_cli import (
     PlatformCli,
     SoftmaxCliError,
     coach_refusal,
     permit_state,
 )
-from autoresearch.softmax_tool.protocol import (
+from ide_research_core.softmax_tool.protocol import (
     PERMIT_DECLINED,
     PERMIT_OVER_CAP,
     PERMIT_WAITING,

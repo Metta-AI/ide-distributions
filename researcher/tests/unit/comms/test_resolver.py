@@ -6,12 +6,12 @@ from dataclasses import replace
 import pytest
 from runtime.workspace import AUTORESEARCH_DIR, Canonical
 
-from autoresearch.comms import resolver
-from autoresearch.comms.resolver import CORE_TYPES, ResolveError, resolve
-from autoresearch.games.loader import load_game
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_doc, write_json
+from ide_research_core.comms import resolver
+from ide_research_core.comms.resolver import CORE_TYPES, ResolveError, resolve
+from ide_research_core.games.loader import load_game
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_doc, write_json
 
 XREQ = "xreq_b0c4ff36-2d9e-4ddb-8224-9ba8fa0c2fd5"
 EPISODE = "ep_7f1c"

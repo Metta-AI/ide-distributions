@@ -7,12 +7,12 @@ import json
 import pytest
 from fake_preston import CommsError, run_comms
 
-from autoresearch.comms.publisher import publish_hook, publish_runtime
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.routing import route_all
+from ide_research_core.comms.publisher import publish_hook, publish_runtime
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.runtime.routing import route_all
 
 # The canonical repos here have no remote.
 local_hook = functools.partial(publish_hook, allow_no_remote=True)

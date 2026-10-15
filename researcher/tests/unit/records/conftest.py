@@ -1,7 +1,7 @@
 import pytest
 
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
 
 
 @pytest.fixture

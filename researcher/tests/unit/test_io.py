@@ -3,9 +3,9 @@ import time
 
 import pytest
 
-from autoresearch.io.docs import read_doc, read_json, write_doc, write_json
-from autoresearch.io.locks import LockTimeout, file_lock
-from autoresearch.paths import Layout
+from ide_research_core.io.docs import read_doc, read_json, write_doc, write_json
+from ide_research_core.io.locks import LockTimeout, file_lock
+from ide_research_core.paths import Layout
 
 
 def test_doc_roundtrip_and_no_temp_file(tmp_path):

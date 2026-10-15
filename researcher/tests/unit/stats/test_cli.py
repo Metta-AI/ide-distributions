@@ -10,19 +10,19 @@ import pytest
 import yaml
 from records.fixtures import EXP_DESIGNED
 
-from autoresearch.cli import main
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.stats import cli as stats_cli
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
-from autoresearch.stats.ingest import EpisodeRow
+from ide_research_core.cli import main
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.stats import cli as stats_cli
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec
+from ide_research_core.stats.ingest import EpisodeRow
 
 BASE, CAND = "pv-base", "pv-cand"
 
 
 def stats(root, *argv):
     proc = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "stats", *argv, "--root", str(root)],
+        [sys.executable, "-m", "ide_research_core", "stats", *argv, "--root", str(root)],
         capture_output=True,
         text=True,
         check=False,
@@ -201,7 +201,7 @@ def test_ingest_needs_exactly_one_target(tmp_path):
         [
             sys.executable,
             "-m",
-            "autoresearch",
+            "ide_research_core",
             "stats",
             "ingest",
             "--rows",

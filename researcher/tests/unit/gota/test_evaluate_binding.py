@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.games.bindings import binding_evaluate
-from autoresearch.games.loader import load_game
-from autoresearch.softmax_tool.league import episode_rows
+from ide_research_core.games.bindings import binding_evaluate
+from ide_research_core.games.loader import load_game
+from ide_research_core.softmax_tool.league import episode_rows
 
 ROOT = Path(__file__).resolve().parents[3]
 

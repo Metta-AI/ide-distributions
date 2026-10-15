@@ -13,12 +13,12 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
-from autoresearch.comms import inbound, kinds
-from autoresearch.comms.publisher import publish_runtime
-from autoresearch.comms.reader import read_since
-from autoresearch.runtime.handoff import ACK_REQUIRED_KINDS
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.routing import HANDLERS
+from ide_research_core.comms import inbound, kinds
+from ide_research_core.comms.publisher import publish_runtime
+from ide_research_core.comms.reader import read_since
+from ide_research_core.runtime.handoff import ACK_REQUIRED_KINDS
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.runtime.routing import HANDLERS
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = kinds.COMMS_SCHEMAS / "examples"

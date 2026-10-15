@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from autoresearch.io import gitops
+from ide_research_core.io import gitops
 
 
 @pytest.fixture

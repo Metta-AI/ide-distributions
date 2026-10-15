@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from autoresearch.softmax_tool.identity import (
+from ide_research_core.softmax_tool.identity import (
     CredentialRejected,
     IdentityError,
     identity_problems,
     require_player,
     whoami,
 )
-from autoresearch.softmax_tool.platform_cli import DEFAULT_SERVER, PlatformCli, SoftmaxCliError
-from autoresearch.softmax_tool.protocol import Identity
+from ide_research_core.softmax_tool.platform_cli import DEFAULT_SERVER, PlatformCli, SoftmaxCliError
+from ide_research_core.softmax_tool.protocol import Identity
 
 from .conftest import (
     AGENT_TOKEN,

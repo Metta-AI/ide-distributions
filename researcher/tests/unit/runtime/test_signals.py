@@ -9,17 +9,17 @@ import pytest
 from support.board import Board
 from ulid import ULID
 
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.runtime.preflight import PreflightResult, preflight
-from autoresearch.runtime.signals import (
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.runtime.preflight import PreflightResult, preflight
+from ide_research_core.runtime.signals import (
     SignalConfig,
     compute_signals,
     escalation_marker_path,
     signals_state_path,
 )
-from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
+from ide_research_core.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
 
 NOW = datetime.datetime(2026, 10, 7, 12, 0, tzinfo=datetime.UTC)
 LEVER = "SK.last_hit"

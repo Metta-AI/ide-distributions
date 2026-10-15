@@ -12,18 +12,18 @@ import yaml
 from support.board import ForeignBoard
 from support.keeper_host import GAME_VERSION, PROFILE, Host, evaluating_experiment, launch_all
 
-from autoresearch.comms.inbound import InboundProblems, submit_inbound
-from autoresearch.comms.publisher import PublishResult, publish_runtime
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import promotion, proposals, provenance, queue_keeper, xp_poll
-from autoresearch.runtime.foreign import report_foreign_cards
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.markers import review_marker
-from autoresearch.runtime.queue_keeper import report_skipped
-from autoresearch.runtime.signals import KEEPER_STEP_FAILED
-from autoresearch.softmax_tool.protocol import SubmissionState
+from ide_research_core.comms.inbound import InboundProblems, submit_inbound
+from ide_research_core.comms.publisher import PublishResult, publish_runtime
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.runtime import promotion, proposals, provenance, queue_keeper, xp_poll
+from ide_research_core.runtime.foreign import report_foreign_cards
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.runtime.markers import review_marker
+from ide_research_core.runtime.queue_keeper import report_skipped
+from ide_research_core.runtime.signals import KEEPER_STEP_FAILED
+from ide_research_core.softmax_tool.protocol import SubmissionState
 
 T0 = datetime.datetime.now(datetime.UTC).replace(minute=5, second=0, microsecond=0)
 
@@ -533,7 +533,7 @@ def test_bootstrap_only_stops_after_bootstrap(host):
 
 
 def test_a_second_concurrent_run_is_skipped(host):
-    from autoresearch.io.locks import file_lock
+    from ide_research_core.io.locks import file_lock
 
     lock = host.canonical / ".supervisor" / "runtime" / queue_keeper.RUN_LOCK
     with file_lock(lock):
@@ -612,7 +612,7 @@ def test_a_failing_op_is_contained_retried_then_given_up_once(host, monkeypatch)
 
 
 def test_a_give_up_whose_marker_commit_fails_is_not_reported_twice(host, monkeypatch):
-    from autoresearch.runtime import queue_ops
+    from ide_research_core.runtime import queue_ops
 
     host.tick(at(0))
     stuck = host.runtime_request(spec=_spec("Stuck child"))
@@ -678,7 +678,7 @@ def test_a_given_up_drop_is_recorded_once_a_human_archives_the_card(host, monkey
 def test_a_crash_between_the_archive_and_its_commit_settles_without_a_rebuild(host, monkeypatch):
     from support.archiving_queue import ArchivingQueue
 
-    from autoresearch.runtime import queue_ops
+    from ide_research_core.runtime import queue_ops
 
     host.queue = ArchivingQueue(host.queue)
     host.tick(at(0))
@@ -960,7 +960,7 @@ def test_tool_fault_sequence_publishes_the_agents_help_request_and_keeps_the_car
 def test_main_builds_the_run_from_the_environment(host, monkeypatch, capsys):
     import json
 
-    from autoresearch.runtime import config_migrations
+    from ide_research_core.runtime import config_migrations
 
     for name, value in host.env.items():
         monkeypatch.setenv(name, value)
@@ -1112,8 +1112,8 @@ def _set_fake(host: Host, **values) -> None:
 
 
 def test_a_renewal_failure_keeps_the_pin_and_still_runs_the_kb_step(host, tmp_path, monkeypatch):
-    from autoresearch.paths import Layout
-    from autoresearch.runtime.game_source import PinUpdate
+    from ide_research_core.paths import Layout
+    from ide_research_core.runtime.game_source import PinUpdate
 
     host.tick(at(0))
     claim = _claim(host, GAME_VERSION)

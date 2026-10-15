@@ -10,20 +10,20 @@ import pytest
 from support.board import Board
 from support.state_db import add_session
 
-from autoresearch.comms import publisher, runtime_messages
-from autoresearch.comms.inbound import derived_status, submit_inbound
-from autoresearch.comms.publisher import publish_hook, publish_runtime
-from autoresearch.comms.reader import read_since, seen_path
-from autoresearch.comms.stage import stage
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.paths import Layout
-from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import blocked, routing, spend
-from autoresearch.runtime.briefing import BriefingInputs, build_briefing
-from autoresearch.runtime.handoff import card_spec
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.routing import (
+from ide_research_core.comms import publisher, runtime_messages
+from ide_research_core.comms.inbound import derived_status, submit_inbound
+from ide_research_core.comms.publisher import publish_hook, publish_runtime
+from ide_research_core.comms.reader import read_since, seen_path
+from ide_research_core.comms.stage import stage
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.paths import Layout
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.runtime import blocked, routing, spend
+from ide_research_core.runtime.briefing import BriefingInputs, build_briefing
+from ide_research_core.runtime.handoff import card_spec
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.runtime.routing import (
     _routing_order,
     inbound_for_briefing,
     planning_backlog,
@@ -1325,7 +1325,7 @@ def test_a_taken_topic_is_released_when_its_planning_card_is_dropped(board):
 
 
 def test_a_planning_request_in_the_backlog_is_shown_to_the_next_planning_card(board):
-    from autoresearch.queue.card import CardSpec
+    from ide_research_core.queue.card import CardSpec
 
     spec = CardSpec("Q-01K00000000000000000000000", "Plan jungle", "planning", "Jungle.", [],
                     "planner", "P2")  # fmt: skip
@@ -1351,7 +1351,7 @@ def test_a_hold_applied_while_health_requeues_a_blocked_card_still_holds_it(boar
     card pending and assigned, so dispatchable, under the hold."""
     import threading
 
-    from autoresearch.runtime import pause
+    from ide_research_core.runtime import pause
 
     worker = board.admit()
     worker.start()
@@ -1498,7 +1498,7 @@ def test_a_published_receipt_with_an_unreadable_handoff_is_logged_not_repaired(b
     gitops.git(board.canonical, "commit", "-q", "-m", "lose the handoff")
     outbox_before = len(_outbox(board))
 
-    with caplog.at_level("WARNING", logger="autoresearch.runtime.blocked"):
+    with caplog.at_level("WARNING", logger="ide_research_core.runtime.blocked"):
         assert _handle_blocked(board) == []
 
     [line] = [r.getMessage() for r in caplog.records if worker.task_id in r.getMessage()]
@@ -1591,7 +1591,7 @@ def test_a_repair_whose_handoff_merge_conflicts_is_finished_by_its_reconcile_car
 
 
 def test_a_repair_that_leaves_no_handoff_is_finished_by_its_missing_handoff_repair(board):
-    from autoresearch.runtime.merge import find_orphan_done
+    from ide_research_core.runtime.merge import find_orphan_done
 
     task, first, repair = _blocked_task_with_repair_card(board)
     repair.end_run("done")  # completed without card finish
@@ -1649,7 +1649,7 @@ def test_a_follow_up_candidate_missing_a_field_is_skipped_with_a_log_line(
     other.write_journal()
     other.finish()
 
-    with caplog.at_level("WARNING", logger="autoresearch.comms.publisher"):
+    with caplog.at_level("WARNING", logger="ide_research_core.comms.publisher"):
         board.process(publish=local_hook)
 
     assert other.receipt()["state"] == "published"

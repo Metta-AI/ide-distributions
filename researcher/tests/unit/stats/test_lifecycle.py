@@ -2,11 +2,11 @@ from pathlib import Path
 
 from records.fixtures import EXP_DESIGNED
 
-from autoresearch.games.loader import load_game
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
-from autoresearch.stats.ingest import EpisodeRow, ingest, pair
+from ide_research_core.games.loader import load_game
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec
+from ide_research_core.stats.ingest import EpisodeRow, ingest, pair
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[3]
 

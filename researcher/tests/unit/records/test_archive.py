@@ -4,8 +4,8 @@ import datetime
 
 import pytest
 
-from autoresearch.records.registry import entity_of_path, path_for
-from autoresearch.records.store import RecordProblems
+from ide_research_core.records.registry import entity_of_path, path_for
+from ide_research_core.records.store import RecordProblems
 
 from .fixtures import CLAIM, TOPIC
 

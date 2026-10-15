@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 from support.hermes_python import hermes_python
 
-from autoresearch.plugin import coach
-from autoresearch.runctx import BOARD
+from ide_research_core.plugin import coach
+from ide_research_core.runctx import BOARD
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = "ar-plugin-it"

@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from autoresearch import runctx
-from autoresearch.runctx import from_env, ledger_dir, record_worker_identity, runtime_dir
+from ide_research_core import runctx
+from ide_research_core.runctx import from_env, ledger_dir, record_worker_identity, runtime_dir
 
 
 def test_defaults_canonical_under_hermes_home(tmp_path):

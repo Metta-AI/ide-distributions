@@ -6,15 +6,15 @@ import json
 import pytest
 from support.promotion_board import BASELINE_PV, LEAGUE, PLAYER, PV_A, SubmitBoard
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.runtime import promotion
-from autoresearch.runtime.merge import find_orphan_done
-from autoresearch.runtime.promotion import CHAMPION_PATH, PROMOTION_FILE_REL, load
-from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
-from autoresearch.softmax_tool.platform_cli import IdentityError
-from autoresearch.softmax_tool.protocol import Refused
-from autoresearch.softmax_tool.submit import submit
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.runtime import promotion
+from ide_research_core.runtime.merge import find_orphan_done
+from ide_research_core.runtime.promotion import CHAMPION_PATH, PROMOTION_FILE_REL, load
+from ide_research_core.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
+from ide_research_core.softmax_tool.platform_cli import IdentityError
+from ide_research_core.softmax_tool.protocol import Refused
+from ide_research_core.softmax_tool.submit import submit
 
 
 @pytest.fixture

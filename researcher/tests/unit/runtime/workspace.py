@@ -4,11 +4,11 @@ from pathlib import Path
 
 import yaml
 
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_doc
-from autoresearch.paths import Layout
-from autoresearch.queue.card import CardSpec
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_doc
+from ide_research_core.paths import Layout
+from ide_research_core.queue.card import CardSpec
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[3]
 GAME_VERSION = "65"

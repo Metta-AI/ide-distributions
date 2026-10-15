@@ -1,6 +1,6 @@
-from autoresearch.io.docs import read_doc, write_doc
-from autoresearch.kb.lint import Finding, analyze
-from autoresearch.paths import Layout
+from ide_research_core.io.docs import read_doc, write_doc
+from ide_research_core.kb.lint import Finding, analyze
+from ide_research_core.paths import Layout
 
 from .conftest import (
     C_ARCH,

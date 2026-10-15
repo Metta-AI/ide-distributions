@@ -1,6 +1,6 @@
 import pytest
 
-from autoresearch.kb.grading import (
+from ide_research_core.kb.grading import (
     Ev,
     effective_tier,
     grade,

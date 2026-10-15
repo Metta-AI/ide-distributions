@@ -2,7 +2,7 @@
 
 import yaml
 
-from autoresearch.runtime import config_migrations as cm
+from ide_research_core.runtime import config_migrations as cm
 
 EXPECTED_PASSTHROUGH = [
     "SOFTMAX_PLAYER_CREDENTIAL",

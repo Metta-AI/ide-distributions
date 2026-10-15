@@ -3,15 +3,15 @@ import json
 
 import pytest
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_doc
-from autoresearch.kb.staleness import (
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_doc
+from ide_research_core.kb.staleness import (
     code_citations,
     mark_stale,
     renew_code_citations,
     version_older,
 )
-from autoresearch.records.store import RecordStore
+from ide_research_core.records.store import RecordStore
 
 from .conftest import C_ARCH, C_CONTRA, C_GOOD, C_GRADE, C_ORPHAN, C_REFUTED, C_VERIF
 

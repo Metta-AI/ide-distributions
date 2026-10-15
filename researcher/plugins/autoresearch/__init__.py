@@ -1,7 +1,7 @@
 """Hermes plugin entry. STDLIB ONLY: this runs inside the Hermes process.
 
 It puts `<distribution root>/src` on sys.path and delegates to
-`autoresearch.plugin.adapters`.
+`ide_research_core.plugin.adapters`.
 """
 
 import os
@@ -28,6 +28,6 @@ _src = str(_distribution_root() / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
-from autoresearch.plugin.adapters import register
+from ide_research_core.plugin.adapters import register
 
 __all__ = ["register"]

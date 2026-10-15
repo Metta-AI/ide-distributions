@@ -1,9 +1,9 @@
 import datetime
 
-from autoresearch.io.docs import read_doc
-from autoresearch.kb.apply import apply
-from autoresearch.kb.lint import analyze
-from autoresearch.records.store import RecordStore
+from ide_research_core.io.docs import read_doc
+from ide_research_core.kb.apply import apply
+from ide_research_core.kb.lint import analyze
+from ide_research_core.records.store import RecordStore
 
 from .conftest import C_GRADE, C_VERIF
 

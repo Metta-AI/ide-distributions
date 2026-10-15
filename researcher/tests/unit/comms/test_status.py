@@ -5,10 +5,10 @@ import datetime
 import pytest
 from support.board import Board
 
-from autoresearch.comms.inbound import StatusInfo, derived_status, submit_inbound
-from autoresearch.comms.publisher import publish_runtime
-from autoresearch.comms.reader import read_since
-from autoresearch.runtime.ledger import canonical_lock
+from ide_research_core.comms.inbound import StatusInfo, derived_status, submit_inbound
+from ide_research_core.comms.publisher import publish_runtime
+from ide_research_core.comms.reader import read_since
+from ide_research_core.runtime.ledger import canonical_lock
 
 NOW = datetime.datetime(2026, 10, 7, 12, tzinfo=datetime.UTC)
 PAST = "2026-10-07T00:00:00+00:00"

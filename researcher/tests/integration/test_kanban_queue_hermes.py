@@ -7,8 +7,8 @@ import subprocess
 
 import pytest
 
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.kanban_queue import KanbanQueue
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.kanban_queue import KanbanQueue
 
 pytestmark = [
     pytest.mark.hermes,

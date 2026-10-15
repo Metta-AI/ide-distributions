@@ -3,9 +3,9 @@
 Metric names here are fixture names only; core code takes every name from the design.
 """
 
-from autoresearch.stats.decision_rule import evaluate
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
-from autoresearch.stats.ingest import EpisodeRow
+from ide_research_core.stats.decision_rule import evaluate
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec
+from ide_research_core.stats.ingest import EpisodeRow
 
 BASE, CAND, CHAMPION = "pv-base", "pv-cand", "pv-base"
 BASE_VALUES = {

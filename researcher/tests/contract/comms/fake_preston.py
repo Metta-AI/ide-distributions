@@ -20,7 +20,7 @@ class CommsError(RuntimeError):
 def run_comms(env: dict[str, str], *args: str) -> dict:
     """Run ``autoresearch comms <args>`` and return the ``data`` of its JSON envelope."""
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "comms", *args],
+        [sys.executable, "-m", "ide_research_core", "comms", *args],
         capture_output=True,
         text=True,
         env=env,

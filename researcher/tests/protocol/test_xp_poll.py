@@ -20,15 +20,15 @@ from support.keeper_host import (
     launch_all,
 )
 
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.runctx import RunContext
-from autoresearch.runtime import rebuild, xp_poll
-from autoresearch.runtime.markers import relaunch_marker
-from autoresearch.softmax_tool import cli as softmax_cli
-from autoresearch.softmax_tool import xp
-from autoresearch.softmax_tool.protocol import XpStatus
-from autoresearch.softmax_tool.xp import ArtifactsIncomplete
-from autoresearch.stats.ingest import EpisodeRow, ingest, pair
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.runctx import RunContext
+from ide_research_core.runtime import rebuild, xp_poll
+from ide_research_core.runtime.markers import relaunch_marker
+from ide_research_core.softmax_tool import cli as softmax_cli
+from ide_research_core.softmax_tool import xp
+from ide_research_core.softmax_tool.protocol import XpStatus
+from ide_research_core.softmax_tool.xp import ArtifactsIncomplete
+from ide_research_core.stats.ingest import EpisodeRow, ingest, pair
 
 T0 = datetime.datetime.now(datetime.UTC)
 TOPIC = {

@@ -46,7 +46,7 @@ def resolve(path: Path | None = None, *, offline=False):
     if not isinstance(envelope, dict) or envelope.get('ok') is not True or not isinstance(envelope.get('data'), dict):
         raise ValueError('shared game-version failed or returned an invalid envelope')
     live = envelope['data']
-    from autoresearch.softmax_tool.platform_cli import PlatformCli
+    from ide_research_core.softmax_tool.platform_cli import PlatformCli
     transport = PlatformCli(os.environ)
     league = transport.run_json('coworld', ['leagues', live['league_id']])
     game = league['game']

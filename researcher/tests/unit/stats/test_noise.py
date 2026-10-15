@@ -4,16 +4,16 @@ import pytest
 import yaml
 from records.fixtures import EXP_DESIGNED
 
-from autoresearch.games.loader import Game, GameMetric
-from autoresearch.io.gitops import git
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.stats.bootstrap import paired_bootstrap_ci
-from autoresearch.stats.design import DesignError, EvaluationDesign
-from autoresearch.stats.freeze import freeze_design
-from autoresearch.stats.ingest import EpisodeRow
-from autoresearch.stats.noise import NoiseError, compute_noise, load_noise, sd_for, write_noise
-from autoresearch.stats.power import delta, min_episodes
+from ide_research_core.games.loader import Game, GameMetric
+from ide_research_core.io.gitops import git
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.stats.bootstrap import paired_bootstrap_ci
+from ide_research_core.stats.design import DesignError, EvaluationDesign
+from ide_research_core.stats.freeze import freeze_design
+from ide_research_core.stats.ingest import EpisodeRow
+from ide_research_core.stats.noise import NoiseError, compute_noise, load_noise, sd_for, write_noise
+from ide_research_core.stats.power import delta, min_episodes
 
 
 def row(episode_id, policy, seed, value, version="65", other=0.0):

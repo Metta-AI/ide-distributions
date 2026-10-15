@@ -1,14 +1,14 @@
 import json
 
-from autoresearch.io.docs import write_doc
-from autoresearch.kb.hubs import (
+from ide_research_core.io.docs import write_doc
+from ide_research_core.kb.hubs import (
     HUB_DRIFT,
     HUB_OVERLAP,
     HUB_TOO_LARGE,
     hub_flags,
     request_hub_maintenance,
 )
-from autoresearch.kb.lint import Finding
+from ide_research_core.kb.lint import Finding
 
 from .conftest import HUB, kb_id
 

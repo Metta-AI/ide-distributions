@@ -7,14 +7,14 @@ from pathlib import Path
 
 import yaml
 
-from autoresearch.comms.inbound import adopt_direct_writes
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.runctx import RunContext
-from autoresearch.runtime import config_migrations
-from autoresearch.runtime.bootstrap import bootstrap
-from autoresearch.runtime.ledger import canonical_lock
+from ide_research_core.comms.inbound import adopt_direct_writes
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.runctx import RunContext
+from ide_research_core.runtime import config_migrations
+from ide_research_core.runtime.bootstrap import bootstrap
+from ide_research_core.runtime.ledger import canonical_lock
 from runtime.workspace import AUTORESEARCH_DIR
 
 GAME = "fakegame"

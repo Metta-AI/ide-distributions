@@ -9,23 +9,23 @@ from collections import namedtuple
 from pathlib import Path
 from unittest import mock
 
-from autoresearch.comms.stage import stage
-from autoresearch.games.loader import load_game
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.paths import Layout
-from autoresearch.queue.card import Card, CardSpec
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.queue.requests import write_request
-from autoresearch.records.store import RecordStore
-from autoresearch.runctx import RunContext
-from autoresearch.runtime import card_finish, provenance, queue_keeper
-from autoresearch.runtime.admission import board_epoch
-from autoresearch.runtime.card_finish import finish
-from autoresearch.softmax_tool import cli as softmax_cli
-from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
+from ide_research_core.comms.stage import stage
+from ide_research_core.games.loader import load_game
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.paths import Layout
+from ide_research_core.queue.card import Card, CardSpec
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.queue.requests import write_request
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runctx import RunContext
+from ide_research_core.runtime import card_finish, provenance, queue_keeper
+from ide_research_core.runtime.admission import board_epoch
+from ide_research_core.runtime.card_finish import finish
+from ide_research_core.softmax_tool import cli as softmax_cli
+from ide_research_core.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[2]
 PROFILE = "autoresearch"

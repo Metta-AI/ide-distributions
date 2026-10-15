@@ -14,13 +14,13 @@ import sys
 import pytest
 from support.promotion_board import LEAGUE, PLAYER, SubmitBoard
 
-from autoresearch.comms.resolver import resolve
-from autoresearch.io import gitops
-from autoresearch.paths import Layout
-from autoresearch.queue.select import FILE_QUEUE_RELATIVE
-from autoresearch.records.store import RecordStore
-from autoresearch.runtime import promotion
-from autoresearch.runtime.promotion import (
+from ide_research_core.comms.resolver import resolve
+from ide_research_core.io import gitops
+from ide_research_core.paths import Layout
+from ide_research_core.queue.select import FILE_QUEUE_RELATIVE
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runtime import promotion
+from ide_research_core.runtime.promotion import (
     CHAMPION_PATH,
     adopt,
     champion_status,
@@ -28,9 +28,9 @@ from autoresearch.runtime.promotion import (
     reconcile,
     stage_champion,
 )
-from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
-from autoresearch.softmax_tool.submit import bootstrap_champion
-from autoresearch.softmax_tool.upload import policy_name, upload_bootstrap
+from ide_research_core.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
+from ide_research_core.softmax_tool.submit import bootstrap_champion
+from ide_research_core.softmax_tool.upload import policy_name, upload_bootstrap
 from softmax.test_softmax_cli import REPO, base_env, softmax
 
 FAKE_BUILD = REPO / "games" / "fakegame" / "tools" / "fake_build.py"
@@ -84,7 +84,7 @@ def bootstrap_cli(board, worker, build, **extra):
 
 def cli(env, group, *argv):
     proc = subprocess.run(
-        [sys.executable, "-m", "autoresearch", group, *argv],
+        [sys.executable, "-m", "ide_research_core", group, *argv],
         capture_output=True,
         text=True,
         check=False,

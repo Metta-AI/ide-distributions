@@ -20,17 +20,17 @@ import jsonschema
 import pytest
 from support.board import Board
 
-from autoresearch.comms.inbound import InboundProblems, submit_inbound
-from autoresearch.comms.kinds import COMMS_SCHEMAS
-from autoresearch.comms.publisher import publish_hook, publish_runtime
-from autoresearch.comms.reader import read_since
-from autoresearch.comms.stage import stage
-from autoresearch.io import gitops
-from autoresearch.paths import Layout
-from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import queue_keeper
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.runtime.routing import route_all
+from ide_research_core.comms.inbound import InboundProblems, submit_inbound
+from ide_research_core.comms.kinds import COMMS_SCHEMAS
+from ide_research_core.comms.publisher import publish_hook, publish_runtime
+from ide_research_core.comms.reader import read_since
+from ide_research_core.comms.stage import stage
+from ide_research_core.io import gitops
+from ide_research_core.paths import Layout
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.runtime import queue_keeper
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.runtime.routing import route_all
 
 local_hook = functools.partial(publish_hook, allow_no_remote=True)
 EXAMPLES = COMMS_SCHEMAS / "examples" / "inbound"

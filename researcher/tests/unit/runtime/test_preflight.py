@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 import yaml
 
-from autoresearch.runtime.preflight import preflight
-from autoresearch.softmax_tool.client import SoftmaxClient
-from autoresearch.softmax_tool.fake import FakeSoftmax
+from ide_research_core.runtime.preflight import preflight
+from ide_research_core.softmax_tool.client import SoftmaxClient
+from ide_research_core.softmax_tool.fake import FakeSoftmax
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
 Usage = namedtuple("Usage", "total used free")
@@ -358,7 +358,7 @@ def _executable(path):
 
 
 def test_host_requirements_met_through_the_profile_env(tmp_path):
-    from autoresearch.runtime.preflight import host_requirement_problems
+    from ide_research_core.runtime.preflight import host_requirement_problems
 
     nim_bin = _executable(tmp_path / "opt" / "nim" / "bin" / "nim").parent
     python = _executable(tmp_path / "hermes" / "python")
@@ -374,7 +374,7 @@ def test_host_requirements_met_through_the_profile_env(tmp_path):
 
 
 def test_host_requirements_missing_are_named_plainly(tmp_path):
-    from autoresearch.runtime.preflight import host_requirement_problems
+    from ide_research_core.runtime.preflight import host_requirement_problems
 
     home = _profile_env(tmp_path, f"GOTA_TIRITH_BIN={tmp_path}/gone/tirith\n")
     problems = host_requirement_problems(
@@ -390,7 +390,7 @@ def test_host_requirements_missing_are_named_plainly(tmp_path):
 def test_worker_env_follows_hermes_dotenv_rules(tmp_path):
     """Hermes expands ${VAR} (and ${VAR:-default}) in every value, single-quoted included,
     and never a bare $VAR (hermes_cli/env_loader.py with python-dotenv's parser)."""
-    from autoresearch.runtime.preflight import worker_env
+    from ide_research_core.runtime.preflight import worker_env
 
     home = _profile_env(
         tmp_path,
@@ -409,7 +409,7 @@ def test_worker_env_follows_hermes_dotenv_rules(tmp_path):
 
 
 def test_a_bare_dollar_path_is_reported_as_a_literal_and_flagged(tmp_path):
-    from autoresearch.runtime.preflight import host_requirement_problems, worker_env
+    from ide_research_core.runtime.preflight import host_requirement_problems, worker_env
 
     nim_bin = _executable(tmp_path / "nim" / "bin" / "nim").parent
     home = _profile_env(tmp_path, f"PATH={nim_bin}:$PATH\n")

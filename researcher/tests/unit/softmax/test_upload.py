@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 from records.fixtures import EXP_DESIGNED
 
-from autoresearch.io import gitops
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.runctx import RunContext
-from autoresearch.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
-from autoresearch.softmax_tool.platform_cli import IdentityError
-from autoresearch.softmax_tool.protocol import Refused
-from autoresearch.softmax_tool.upload import artifact_sha256, policy_name, upload
+from ide_research_core.io import gitops
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runctx import RunContext
+from ide_research_core.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
+from ide_research_core.softmax_tool.platform_cli import IdentityError
+from ide_research_core.softmax_tool.protocol import Refused
+from ide_research_core.softmax_tool.upload import artifact_sha256, policy_name, upload
 
 REPO = Path(__file__).resolve().parents[3]
 STRATEGY_SHA = "a" * 64
@@ -291,7 +291,7 @@ def test_advisory_error_rejected_even_with_passed_build_status(tmp_path, name):
 
 @pytest.mark.parametrize('name', ['G4', 'G5'])
 def test_advisory_failure_upload_reader_accepts(tmp_path, name):
-    from autoresearch.softmax_tool.upload import _read_build
+    from ide_research_core.softmax_tool.upload import _read_build
     ws = Workspace(tmp_path)
     ws.write_build(status='passed', gates={name: {'outcome': 'failed', 'passed': False,
                                                 'advisory': True}})

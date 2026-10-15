@@ -2,11 +2,11 @@ import datetime
 
 import pytest
 
-from autoresearch.io.docs import write_doc
-from autoresearch.kb.compaction import compact
-from autoresearch.paths import Layout
-from autoresearch.records.registry import path_for
-from autoresearch.records.store import RecordStore
+from ide_research_core.io.docs import write_doc
+from ide_research_core.kb.compaction import compact
+from ide_research_core.paths import Layout
+from ide_research_core.records.registry import path_for
+from ide_research_core.records.store import RecordStore
 
 NOW = datetime.datetime(2026, 10, 7, 12, tzinfo=datetime.UTC)
 

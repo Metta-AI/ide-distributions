@@ -5,13 +5,13 @@ import json
 import pytest
 from records.fixtures import EXP_DESIGNED
 
-from autoresearch.cli import main
-from autoresearch.io import gitops
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.runtime.pause import pause_path
-from autoresearch.softmax_tool.fake import FakeSoftmax
-from autoresearch.stats.noise import write_noise
+from ide_research_core.cli import main
+from ide_research_core.io import gitops
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runtime.pause import pause_path
+from ide_research_core.softmax_tool.fake import FakeSoftmax
+from ide_research_core.stats.noise import write_noise
 
 VERSION = "fake-1"  # FakeSoftmax's default game version
 CHAMPION = "pv-base"  # the policy the fake league shows competing for us (A9)

@@ -39,7 +39,7 @@ def test_live_resolution_fail_closed(tmp_path, monkeypatch, change):
             return SimpleNamespace(stdout='[]')
         return SimpleNamespace(stdout=json.dumps({'ok': True, 'data': {'league_id': 'league-test', 'game_version': '2026.10.8.1'}}))
     monkeypatch.setattr(subprocess, 'run', run)
-    from autoresearch.softmax_tool import platform_cli
+    from ide_research_core.softmax_tool import platform_cli
     class FakeTransport:
         def __init__(self, env):
             pass

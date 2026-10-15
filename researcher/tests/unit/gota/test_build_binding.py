@@ -14,7 +14,7 @@ import sys
 
 import pytest
 
-from autoresearch.softmax_tool.upload import _read_build
+from ide_research_core.softmax_tool.upload import _read_build
 
 
 def test_missing_manifest_launches_no_agent(tmp_path, monkeypatch):

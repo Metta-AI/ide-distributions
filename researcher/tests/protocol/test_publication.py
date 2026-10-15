@@ -9,16 +9,16 @@ import shutil
 import pytest
 from support.board import Board, new_hypothesis
 
-from autoresearch import cli
-from autoresearch.comms import publisher, reader
-from autoresearch.comms.envelope import FROM_AGENT, build_message
-from autoresearch.comms.publisher import PublishError, publish_hook, publish_runtime, publish_staged
-from autoresearch.comms.reader import advance, read_since
-from autoresearch.comms.resolver import ResolveError, resolve
-from autoresearch.comms.stage import Ref, stage
-from autoresearch.io import gitops
-from autoresearch.paths import Layout
-from autoresearch.runtime.ledger import canonical_lock
+from ide_research_core import cli
+from ide_research_core.comms import publisher, reader
+from ide_research_core.comms.envelope import FROM_AGENT, build_message
+from ide_research_core.comms.publisher import PublishError, publish_hook, publish_runtime, publish_staged
+from ide_research_core.comms.reader import advance, read_since
+from ide_research_core.comms.resolver import ResolveError, resolve
+from ide_research_core.comms.stage import Ref, stage
+from ide_research_core.io import gitops
+from ide_research_core.paths import Layout
+from ide_research_core.runtime.ledger import canonical_lock
 
 CRASH_STEPS = (
     "outbox_written",

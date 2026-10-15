@@ -5,12 +5,12 @@ import jsonschema
 import pytest
 from support.board import HYPOTHESIS_BODY, Board, ForeignBoard, new_hypothesis
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.queue.kanban_queue import KanbanError
-from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import merge
-from autoresearch.runtime.merge import find_orphan_done
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.queue.kanban_queue import KanbanError
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.runtime import merge
+from ide_research_core.runtime.merge import find_orphan_done
 
 
 @pytest.fixture
@@ -319,7 +319,7 @@ def test_done_task_without_handoff_gets_one_repair_request(board):
     _assert_clean(board)
 
     # The missing-handoff ref resolves (to the marker), so admission can admit the request.
-    from autoresearch.comms.resolver import resolve
+    from ide_research_core.comms.resolver import resolve
 
     assert resolve(board.canonical, spec["refs"][-1]).path.endswith(
         f"orphans/{a.task_id}-{a.run_id}.json"

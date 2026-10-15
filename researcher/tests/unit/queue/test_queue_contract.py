@@ -4,9 +4,9 @@ import stat
 
 import pytest
 
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.queue.kanban_queue import KanbanQueue
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.queue.kanban_queue import KanbanQueue
 
 # A small in-memory-on-disk imitation of the Hermes Kanban commands KanbanQueue uses.
 STATEFUL_FAKE_HERMES = """#!/usr/bin/env python3

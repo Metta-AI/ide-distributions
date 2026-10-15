@@ -5,9 +5,9 @@ import datetime
 import pytest
 from support.state_db import add_session, record_session_start
 
-from autoresearch.queue.card import Card, CardSpec, RunInfo
-from autoresearch.runctx import RunContext
-from autoresearch.runtime import spend, state_db
+from ide_research_core.queue.card import Card, CardSpec, RunInfo
+from ide_research_core.runctx import RunContext
+from ide_research_core.runtime import spend, state_db
 
 PRICES = spend.DEFAULT_FALLBACK_PRICES
 

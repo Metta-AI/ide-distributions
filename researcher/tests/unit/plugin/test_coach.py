@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 from support.state_db import add_session
 
-from autoresearch.comms.inbound import InboundProblems, check_inbound
-from autoresearch.plugin import adapters, coach, proposals
+from ide_research_core.comms.inbound import InboundProblems, check_inbound
+from ide_research_core.plugin import adapters, coach, proposals
 
 CLI = "/x/bin/autoresearch"
 STEER = {"text": "Stop kill-steals", "urgency": "now"}

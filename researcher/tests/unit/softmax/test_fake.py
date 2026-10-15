@@ -5,9 +5,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from autoresearch.softmax_tool.fake import FakeSoftmax
-from autoresearch.softmax_tool.identity import IdentityError
-from autoresearch.softmax_tool.protocol import CreditDenied, XpHandle, from_env
+from ide_research_core.softmax_tool.fake import FakeSoftmax
+from ide_research_core.softmax_tool.identity import IdentityError
+from ide_research_core.softmax_tool.protocol import CreditDenied, XpHandle, from_env
 
 SPEC = {"episodes": 3}
 
@@ -18,7 +18,7 @@ def make(tmp_path, **env):
 
 def test_state_persists_across_processes(tmp_path):
     code = (
-        "import sys; from pathlib import Path; from autoresearch.softmax_tool.fake import FakeSoftmax;"
+        "import sys; from pathlib import Path; from ide_research_core.softmax_tool.fake import FakeSoftmax;"
         "sm = FakeSoftmax(Path(sys.argv[1]), {}); pv = sm.upload(Path('a.bin'), 'a');"
         "sm.submit(pv, 'lg_1'); print(pv)"
     )

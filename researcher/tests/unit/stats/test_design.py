@@ -3,8 +3,8 @@ import dataclasses
 import pytest
 from jsonschema import ValidationError, validate
 
-from autoresearch.queue.requests import load_schema
-from autoresearch.stats.design import DesignError, EvaluationDesign, MetricSpec
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.stats.design import DesignError, EvaluationDesign, MetricSpec
 
 DESIGN = EvaluationDesign(
     game_version="65",

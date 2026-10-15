@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from autoresearch.plugin import proposals
+from ide_research_core.plugin import proposals
 
 STEER = {"text": "Stop kill-steals", "urgency": "now"}
 

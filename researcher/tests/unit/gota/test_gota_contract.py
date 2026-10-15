@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.games.loader import GameError, load_game
+from ide_research_core.games.loader import GameError, load_game
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / 'tests/fixtures/gota/probe_full.results.json'

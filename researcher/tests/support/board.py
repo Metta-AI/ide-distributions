@@ -7,18 +7,18 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.paths import Layout
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.queue.kanban_queue import FOREIGN_CREATOR, ForeignCardError
-from autoresearch.records.store import RecordStore
-from autoresearch.runctx import RunContext
-from autoresearch.runtime import card_finish
-from autoresearch.runtime.card_finish import finish
-from autoresearch.runtime.merge import process_handoffs
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.paths import Layout
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.queue.kanban_queue import FOREIGN_CREATOR, ForeignCardError
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runctx import RunContext
+from ide_research_core.runtime import card_finish
+from ide_research_core.runtime.card_finish import finish
+from ide_research_core.runtime.merge import process_handoffs
 
 HYPOTHESIS = {
     "statement": "Heroes attack before the creep is in kill range.",

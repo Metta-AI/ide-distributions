@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.softmax_tool.upload import _read_build
+from ide_research_core.softmax_tool.upload import _read_build
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
@@ -221,10 +221,10 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     from support.promotion_board import PLAYER, SubmitBoard
     from unit.softmax.test_softmax_cli import base_env, softmax
 
-    from autoresearch.io import gitops
-    from autoresearch.queue.select import FILE_QUEUE_RELATIVE
-    from autoresearch.runtime.promotion import CHAMPION_PATH, champion_status, load
-    from autoresearch.softmax_tool.upload import policy_name
+    from ide_research_core.io import gitops
+    from ide_research_core.queue.select import FILE_QUEUE_RELATIVE
+    from ide_research_core.runtime.promotion import CHAMPION_PATH, champion_status, load
+    from ide_research_core.softmax_tool.upload import policy_name
     from games.gota.gates import g2_episode, g3_budget, g4_screen
     from games.gota.gates.limits import POLYWORLD_COMMIT
     from games.gota.tools import native_build
@@ -252,7 +252,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     input_commit = gitops.head(worker.worktree)
     real_run = subprocess.run
     def recorded_process(argv, **kwargs):
-        if argv[:5] == [sys.executable, '-m', 'autoresearch', 'softmax', 'bootstrap-champion']:
+        if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'bootstrap-champion']:
             assert kwargs['env']['AUTORESEARCH_SOFTMAX'] == 'fake'
             assert kwargs['env']['AUTORESEARCH_GAME'] == 'gota'
             assert argv[5:] == ['--build-dir', str(out)]
@@ -354,7 +354,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
 
 
 def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monkeypatch):
-    from autoresearch.softmax_tool import upload
+    from ide_research_core.softmax_tool import upload
     directory, artifact = candidate
     fake_gates(monkeypatch)
     out = tmp_path / 'build'

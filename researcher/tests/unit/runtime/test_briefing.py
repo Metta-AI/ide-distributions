@@ -1,4 +1,4 @@
-from autoresearch.runtime.briefing import BriefingInputs, build_briefing
+from ide_research_core.runtime.briefing import BriefingInputs, build_briefing
 from runtime.workspace import make_spec
 
 TASK = "K-01"

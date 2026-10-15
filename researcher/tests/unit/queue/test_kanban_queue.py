@@ -13,8 +13,8 @@ from dataclasses import asdict
 
 import pytest
 
-from autoresearch.queue.card import CardSpec
-from autoresearch.queue.kanban_queue import (
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.queue.kanban_queue import (
     FOREIGN_CREATOR,
     ForeignCardError,
     KanbanError,
@@ -640,7 +640,7 @@ def test_create_pins_the_model_of_the_card_mode(fake, tmp_path):
 
 
 def test_card_models_default_and_override():
-    from autoresearch.queue.select import DEFAULT_CARD_MODELS, card_models
+    from ide_research_core.queue.select import DEFAULT_CARD_MODELS, card_models
 
     assert card_models({}) == DEFAULT_CARD_MODELS == {
         "planning": "z-ai/glm-5.3",
@@ -655,7 +655,7 @@ def test_card_models_default_and_override():
 
 def test_bad_card_model_entries_are_skipped_never_raised():
     """A typo must not stop queue-keeper, health or submit (they all build the queue)."""
-    from autoresearch.queue.select import card_models, parse_card_models
+    from ide_research_core.queue.select import card_models, parse_card_models
 
     models, problems = parse_card_models("planing=a/b, scouting, maintenance=c/d")
     assert models == {"maintenance": "c/d"}
@@ -664,8 +664,8 @@ def test_bad_card_model_entries_are_skipped_never_raised():
 
 
 def test_queue_from_env_gives_the_kanban_queue_the_model_map(tmp_path):
-    from autoresearch.queue.select import queue_from_env
-    from autoresearch.runctx import RunContext
+    from ide_research_core.queue.select import queue_from_env
+    from ide_research_core.runctx import RunContext
 
     ctx = RunContext(tmp_path / "autoresearch", tmp_path / "ws", None, None, None)
     queue = queue_from_env({"AUTORESEARCH_CARD_MODELS": "planning=x/y"}, ctx)

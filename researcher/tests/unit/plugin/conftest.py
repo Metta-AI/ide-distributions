@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.runctx import RunContext
+from ide_research_core.runctx import RunContext
 
 
 @dataclass

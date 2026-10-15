@@ -1,0 +1,234 @@
+"""File-backed Queue: the test double for the Kanban backend (protocol tests, and CLI tests
+that run the real entry point select it with ``AUTORESEARCH_QUEUE=file``, see
+``queue.select``). No shipped job runs its cards (amendment A13).
+
+One JSON file per card under ``<directory>/cards/`` plus ``index.json`` (idempotency keys
+and a creation counter). Every mutation runs under ``<directory>/queue.lock``.
+"""
+
+import os
+import time
+from dataclasses import asdict
+from pathlib import Path
+
+from ulid import ULID
+
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.io.locks import file_lock
+from ide_research_core.queue.card import Card, CardSpec, Priority, RunInfo, kanban_priority
+
+
+class FileQueue:
+    def __init__(self, directory: Path):
+        self.directory = Path(directory)
+        self._cards_dir = self.directory / "cards"
+        self._index_path = self.directory / "index.json"
+        self._lock_path = self.directory / "queue.lock"
+
+    # -- storage helpers (call under the lock when mutating) --
+
+    def _card_path(self, task_id: str) -> Path:
+        return self._cards_dir / f"{task_id}.json"
+
+    def _load_record(self, task_id: str) -> dict:
+        path = self._card_path(task_id)
+        if not path.exists():
+            raise KeyError(f"unknown card: {task_id}")
+        return read_json(path)
+
+    def _save_record(self, record: dict) -> None:
+        for run in record["runs"]:
+            if run["terminal"] and run.get("ended_at") is None:
+                run["ended_at"] = time.time()
+        write_json(self._card_path(record["task_id"]), record)
+
+    def _load_index(self) -> dict:
+        if self._index_path.exists():
+            return read_json(self._index_path)
+        return {"keys": {}, "next_seq": 0}
+
+    @staticmethod
+    def _to_card(record: dict) -> Card:
+        return Card(
+            task_id=record["task_id"],
+            spec=CardSpec(**record["spec"]),
+            state=record["state"],
+            assignee=record["assignee"],
+            runs=[RunInfo(**run) for run in record["runs"]],
+            block_reason=record.get("block_reason"),
+            block_run_id=record.get("block_run_id"),
+            current_run_id=next(
+                (run["run_id"] for run in record["runs"] if not run["terminal"]), None
+            ),
+        )
+
+    # -- Queue protocol --
+
+    def create_unassigned(
+        self, spec: CardSpec, branch: str, worktree: Path, idempotency_key: str | None = None
+    ) -> str:
+        key = idempotency_key or f"req:{spec.request_id}"
+        with file_lock(self._lock_path):
+            index = self._load_index()
+            if key in index["keys"]:
+                return index["keys"][key]
+            task_id = f"K-{ULID()}"
+            record = {
+                "task_id": task_id,
+                "seq": index["next_seq"],
+                "spec": asdict(spec),
+                "state": "pending",
+                "assignee": None,
+                "runs": [],
+                "branch": branch,
+                "worktree": str(worktree),
+            }
+            self._save_record(record)
+            index["keys"][key] = task_id
+            index["next_seq"] += 1
+            write_json(self._index_path, index)
+            return task_id
+
+    def assign(self, task_id: str, assignee: str | None) -> None:
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            record["assignee"] = assignee
+            self._save_record(record)
+
+    def get(self, task_id: str) -> Card:
+        return self._to_card(self._load_record(task_id))
+
+    def foreign_cards(self) -> list[Card]:
+        """Every card here came from ``create_unassigned``: none is foreign."""
+        return []
+
+    def list(self, state: str | None = None) -> list[Card]:
+        records = [read_json(path) for path in self._cards_dir.glob("K-*.json")]
+        records.sort(key=lambda record: record["seq"])
+        return [self._to_card(r) for r in records if state is None or r["state"] == state]
+
+    def reprioritize(self, task_id: str, priority: Priority, order: int = 0) -> None:
+        kanban_priority(priority, order)  # validates the order range
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            self._require_pending(record, "reprioritize")
+            record["spec"]["priority"] = priority
+            record["spec"]["order"] = order
+            self._save_record(record)
+
+    def drop(self, task_id: str, reason: str) -> None:
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            self._require_pending(record, "drop")
+            record["state"] = "completed"
+            record["drop_reason"] = reason
+            record["runs"].append(asdict(RunInfo(f"r-{ULID()}", True, "dropped")))
+            self._save_record(record)
+
+    def requeue(self, task_id: str, reason: str) -> None:
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            if record["state"] not in ("blocked", "claimed"):
+                raise ValueError(f"cannot requeue a {record['state']} card")
+            for run in record["runs"]:
+                if not run["terminal"]:
+                    run["terminal"] = True
+                    run["outcome"] = f"requeued: {reason}"
+            record["state"] = "pending"
+            self._save_record(record)
+
+    def stop(self, task_id: str, reason: str) -> str:
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            if record["state"] not in ("pending", "claimed"):
+                raise ValueError(f"cannot stop a {record['state']} card")
+            run = next((r for r in record["runs"] if not r["terminal"]), None)
+            if run is None:  # never claimed: a zero-length run carries the block, as in Hermes
+                run = asdict(RunInfo(f"r-{ULID()}", False, None))
+                record["runs"].append(run)
+            run.update(terminal=True, outcome="blocked", summary=reason)
+            record.update(state="blocked", block_reason=reason, block_run_id=run["run_id"])
+            self._save_record(record)
+        return "blocked"
+
+    # -- board (C12: "board missing" is a missing queue directory) --
+
+    def board_exists(self) -> bool:
+        return self.directory.is_dir()
+
+    def ensure_board(self) -> None:
+        self._cards_dir.mkdir(parents=True, exist_ok=True)
+
+    # -- FileQueue extras --
+
+    def claim_next(self, worker: str) -> Card | None:
+        """Claim the highest-priority, then oldest, pending card assigned to ``worker``."""
+        with file_lock(self._lock_path):
+            candidates = [read_json(path) for path in self._cards_dir.glob("K-*.json")]
+            candidates = [
+                r for r in candidates if r["state"] == "pending" and r["assignee"] == worker
+            ]
+            if not candidates:
+                return None
+            best = max(
+                candidates,
+                key=lambda r: (
+                    kanban_priority(r["spec"]["priority"], r["spec"]["order"]),
+                    -r["seq"],
+                ),
+            )
+            best["state"] = "claimed"
+            run = RunInfo(
+                f"r-{ULID()}", False, None, worker_pid=os.getpid(), worker_started_at="spawn"
+            )
+            best["runs"].append(asdict(run))
+            self._save_record(best)
+            return self._to_card(best)
+
+    def reap_workers(self) -> None:
+        """Forget the worker of every ended run, as the Hermes dispatcher does once the
+        process is gone. Until then an ended run keeps its ``worker_pid``. As in Hermes, a run
+        without ``worker_started_at`` is never cleared."""
+        with file_lock(self._lock_path):
+            for path in self._cards_dir.glob("K-*.json"):
+                record = read_json(path)
+                for run in record["runs"]:
+                    if run["terminal"] and run.get("worker_started_at") is not None:
+                        run["worker_pid"] = None
+                self._save_record(record)
+
+    def finish(self, task_id: str, run_id: str, outcome: str, summary: str | None = None) -> None:
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            run = next((r for r in record["runs"] if r["run_id"] == run_id), None)
+            if run is None:
+                raise ValueError(f"card {task_id} has no run {run_id}")
+            if run["terminal"]:
+                if run["outcome"] == outcome and record["state"] == "completed":
+                    return
+                raise ValueError(f"run {run_id} already finished with outcome {run['outcome']!r}")
+            run["terminal"] = True
+            run["outcome"] = outcome
+            run["summary"] = summary
+            record["state"] = "completed"
+            self._save_record(record)
+
+    def block(self, task_id: str, run_id: str, reason: str) -> None:
+        """Block the card as a worker's ``kanban_block`` does: the run ends with outcome
+        ``blocked`` and the card keeps the reason and the run id."""
+        with file_lock(self._lock_path):
+            record = self._load_record(task_id)
+            run = next((r for r in record["runs"] if r["run_id"] == run_id), None)
+            if run is None or run["terminal"]:
+                raise ValueError(f"card {task_id} has no running run {run_id}")
+            run["terminal"] = True
+            run["outcome"] = "blocked"
+            record["state"] = "blocked"
+            record["block_reason"] = reason
+            record["block_run_id"] = run_id
+            self._save_record(record)
+
+    @staticmethod
+    def _require_pending(record: dict, action: str) -> None:
+        if record["state"] != "pending":
+            raise ValueError(f"cannot {action} a {record['state']} card; only pending cards")

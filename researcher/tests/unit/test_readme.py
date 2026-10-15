@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch import cli
+from ide_research_core import cli
 
 DISTRIBUTION = Path(__file__).resolve().parents[2]
 README = (DISTRIBUTION / "README.md").read_text(encoding="utf-8")

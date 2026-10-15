@@ -1,6 +1,6 @@
 import pytest
 
-from autoresearch.queue.card import kanban_priority
+from ide_research_core.queue.card import kanban_priority
 
 
 @pytest.mark.parametrize(

@@ -14,22 +14,22 @@ from support.board import Board, ForeignBoard, Worker, new_hypothesis
 from support.keeper_host import PLENTY, no_hermes
 from support.promotion_board import design_dict
 
-from autoresearch.cli import main as cli_main
-from autoresearch.games.loader import load_game
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.paths import Layout
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.queue.requests import load_schema
-from autoresearch.records.store import RecordStore
-from autoresearch.runctx import RunContext
-from autoresearch.runtime import promotion, queue_keeper
-from autoresearch.runtime.admission import STALE_EPOCH, admit_and_create, board_epoch
-from autoresearch.runtime.briefing import BriefingInputs
-from autoresearch.runtime.promotion import CHAMPION_PATH, adopt, stage_champion, submit_promotion
-from autoresearch.runtime.rebuild import needs_rebuild, rebuild
-from autoresearch.softmax_tool import cli as softmax_cli
-from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FAULTS_ENV, FakeSoftmax
+from ide_research_core.cli import main as cli_main
+from ide_research_core.games.loader import load_game
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.paths import Layout
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runctx import RunContext
+from ide_research_core.runtime import promotion, queue_keeper
+from ide_research_core.runtime.admission import STALE_EPOCH, admit_and_create, board_epoch
+from ide_research_core.runtime.briefing import BriefingInputs
+from ide_research_core.runtime.promotion import CHAMPION_PATH, adopt, stage_champion, submit_promotion
+from ide_research_core.runtime.rebuild import needs_rebuild, rebuild
+from ide_research_core.softmax_tool import cli as softmax_cli
+from ide_research_core.softmax_tool.fake import DEFAULT_PLAYER_ID, FAULTS_ENV, FakeSoftmax
 
 AUTORESEARCH_DIR = Path(__file__).resolve().parents[2]
 GAME_VERSION = "fake-1"  # FakeSoftmax's game version
@@ -360,7 +360,7 @@ def test_rebuild_without_calibration_when_noise_is_current(host):
 def test_rebuild_after_a_crash_resumes_the_same_epoch(host, tmp_path, monkeypatch):
     admitted = host.admit_requested()
     queue = _lose_board(host, tmp_path)
-    from autoresearch.runtime import rebuild as rebuild_module
+    from ide_research_core.runtime import rebuild as rebuild_module
 
     def crash(*args, **kwargs):
         raise RuntimeError("crash during rebuild")

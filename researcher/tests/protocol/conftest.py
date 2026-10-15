@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 from ulid import ULID
 
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_doc, write_json
-from autoresearch.paths import Layout
-from autoresearch.records.store import RecordStore
-from autoresearch.runctx import RunContext
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_doc, write_json
+from ide_research_core.paths import Layout
+from ide_research_core.records.store import RecordStore
+from ide_research_core.runctx import RunContext
 
 HYPOTHESIS = {
     "statement": "Heroes attack before the creep is in kill range.",

@@ -1,7 +1,7 @@
 import pytest
 
-from autoresearch.stats.design import EvaluationDesign, MetricSpec, signed
-from autoresearch.stats.ingest import EpisodeRow, ingest, ingest_rows, pair
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec, signed
+from ide_research_core.stats.ingest import EpisodeRow, ingest, ingest_rows, pair
 
 UP = MetricSpec("score", "up", "primary", 0.5, None)
 DOWN = MetricSpec("errors", "down", "agent_guardrail", None, 0.1)

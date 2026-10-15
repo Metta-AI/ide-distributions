@@ -8,12 +8,12 @@ import hashlib
 import json
 from pathlib import Path
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.queue.file_queue import FileQueue
-from autoresearch.runtime.promotion import CHAMPION_PATH
-from autoresearch.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.queue.file_queue import FileQueue
+from ide_research_core.runtime.promotion import CHAMPION_PATH
+from ide_research_core.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec
 from support.board import Board, Worker
 
 LEAGUE = "fake-league"  # games/fakegame league_id

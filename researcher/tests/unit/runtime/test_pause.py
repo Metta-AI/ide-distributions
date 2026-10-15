@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json
-from autoresearch.runtime.pause import hold, is_held, is_paused, pause, release_hold, resume
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json
+from ide_research_core.runtime.pause import hold, is_held, is_paused, pause, release_hold, resume
 from runtime.workspace import make_spec
 
 
@@ -75,7 +75,7 @@ def test_resume_without_pause_is_a_noop(canonical, queue):
 
 
 def test_resume_skips_a_recorded_task_that_is_gone(canonical, queue, tmp_path):
-    from autoresearch.queue.file_queue import FileQueue
+    from ide_research_core.queue.file_queue import FileQueue
 
     ledger = canonical.layout.ledger
     kept = _create(queue, "autoresearch")
@@ -132,7 +132,7 @@ def test_releasing_a_hold_under_a_pause_leaves_its_cards_to_the_pause(canonical,
 
 
 def test_resume_never_reassigns_a_cancelled_request(canonical, queue):
-    from autoresearch.io.docs import write_json
+    from ide_research_core.io.docs import write_json
 
     ledger = canonical.layout.ledger
     cancelled = _create(queue, "autoresearch")

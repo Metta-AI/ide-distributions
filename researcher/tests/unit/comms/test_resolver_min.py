@@ -1,9 +1,9 @@
 import pytest
 from runtime.workspace import Canonical
 
-from autoresearch.comms.resolver import ResolveError, resolve
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_doc, write_json
+from ide_research_core.comms.resolver import ResolveError, resolve
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_doc, write_json
 
 
 @pytest.fixture

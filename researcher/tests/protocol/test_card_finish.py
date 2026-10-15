@@ -5,14 +5,14 @@ import shutil
 import jsonschema
 import pytest
 
-from autoresearch import cli
-from autoresearch.ids import new_id
-from autoresearch.io import gitops
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.queue.requests import load_schema
-from autoresearch.runtime import card_finish
-from autoresearch.runtime.card_finish import FinishUsageError, finish
-from autoresearch.runtime.handoff import card_spec, validate_at
+from ide_research_core import cli
+from ide_research_core.ids import new_id
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.queue.requests import load_schema
+from ide_research_core.runtime import card_finish
+from ide_research_core.runtime.card_finish import FinishUsageError, finish
+from ide_research_core.runtime.handoff import card_spec, validate_at
 
 
 def _finish_cli(card, monkeypatch, outcome="done", run_id="run-1"):

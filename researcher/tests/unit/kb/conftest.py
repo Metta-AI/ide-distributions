@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.paths import Layout
+from ide_research_core.paths import Layout
 
 KB_SMALL = Path(__file__).resolve().parents[2] / "fixtures" / "workspaces" / "kb_small"
 

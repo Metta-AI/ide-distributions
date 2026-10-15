@@ -5,9 +5,9 @@ import dataclasses
 
 import pytest
 
-from autoresearch.runtime.xp_poll import _rows
-from autoresearch.softmax_tool.protocol import XpHandle
-from autoresearch.stats.design import EvaluationDesign, MetricSpec
+from ide_research_core.runtime.xp_poll import _rows
+from ide_research_core.softmax_tool.protocol import XpHandle
+from ide_research_core.stats.design import EvaluationDesign, MetricSpec
 
 DESIGN = EvaluationDesign(
     "1.0",

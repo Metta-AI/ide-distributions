@@ -1,7 +1,7 @@
 import pytest
 
-from autoresearch.records.registry import REGISTRY, entity_of_path, path_for
-from autoresearch.records.store import RecordNotFound
+from ide_research_core.records.registry import REGISTRY, entity_of_path, path_for
+from ide_research_core.records.store import RecordNotFound
 
 from .fixtures import CLAIM, HYP, JOURNAL, JOURNAL_BODY, RESULT, TOPIC, VERSION
 

@@ -3,7 +3,7 @@
 import pytest
 from integration.test_install import bootstrap
 
-from autoresearch.runtime import config_migrations
+from ide_research_core.runtime import config_migrations
 
 pytestmark = pytest.mark.hermes
 

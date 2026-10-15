@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from autoresearch.cli import main
+from ide_research_core.cli import main
 
 from .fixtures import CLAIM, EXP_DESIGNED, HYP, RESULT
 
@@ -157,7 +157,7 @@ def test_root_from_run_context(capsys, tmp_path, monkeypatch):
 
 def test_python_m_entry_point(tmp_path):
     proc = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "records", "find", "claim", "--root", str(tmp_path)],
+        [sys.executable, "-m", "ide_research_core", "records", "find", "claim", "--root", str(tmp_path)],
         capture_output=True,
         text=True,
         check=False,

@@ -3,8 +3,8 @@
 
 import pytest
 
-from autoresearch.paths import Layout
-from autoresearch.stats.noise import load_noise
+from ide_research_core.paths import Layout
+from ide_research_core.stats.noise import load_noise
 
 
 @pytest.mark.parametrize("written", ["65", "'65'"])

@@ -6,12 +6,12 @@ import datetime
 import pytest
 from support.keeper_host import Host, Usage
 
-from autoresearch.comms.publisher import publish_runtime
-from autoresearch.io.docs import read_json, write_json
-from autoresearch.queue.card import CardSpec
-from autoresearch.runtime import health
-from autoresearch.runtime.ledger import canonical_lock
-from autoresearch.softmax_tool.protocol import Identity
+from ide_research_core.comms.publisher import publish_runtime
+from ide_research_core.io.docs import read_json, write_json
+from ide_research_core.queue.card import CardSpec
+from ide_research_core.runtime import health
+from ide_research_core.runtime.ledger import canonical_lock
+from ide_research_core.softmax_tool.protocol import Identity
 
 T0 = datetime.datetime.now(datetime.UTC)
 GB = 1024**3

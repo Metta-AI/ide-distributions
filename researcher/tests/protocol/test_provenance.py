@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 from support.keeper_host import PROFILE, Host
 
-from autoresearch.cli import main
-from autoresearch.io import gitops
-from autoresearch.io.docs import write_json
-from autoresearch.io.locks import file_lock
-from autoresearch.runtime import provenance
+from ide_research_core.cli import main
+from ide_research_core.io import gitops
+from ide_research_core.io.docs import write_json
+from ide_research_core.io.locks import file_lock
+from ide_research_core.runtime import provenance
 
 T0 = datetime.datetime(2026, 10, 9, 0, 0, tzinfo=datetime.UTC)
 FORGED_REQUEST = "Q-01M4F299EGSMT20DGKFKYS1QZV"
@@ -772,7 +772,7 @@ def test_a_read_only_journal_fails_closed_even_when_the_check_only_reads(host):
 def test_a_journal_failure_in_a_later_step_fails_closed(host, monkeypatch):
     """Item 2: a JournalError after the provenance step is not an ordinary step failure:
     the run pauses (pending cards unassigned) and the spend caps still run."""
-    from autoresearch.runtime import queue_keeper
+    from ide_research_core.runtime import queue_keeper
 
     host.tick(at(1))
     assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]
@@ -807,8 +807,8 @@ def test_appends_reuse_the_verified_journal_instead_of_rereading_it(host, monkey
 def test_a_journal_failure_inside_blocked_card_handling_fails_closed(host, monkeypatch):
     """Codex review of PR #24 round 4: handle_blocked collects per-card failures; a
     JournalError among them must stay typed so the run pauses (cards unassigned)."""
-    from autoresearch.queue.card import CardSpec
-    from autoresearch.runtime import blocked
+    from ide_research_core.queue.card import CardSpec
+    from ide_research_core.runtime import blocked
 
     host.tick(at(1))  # admits the planning card
     planning = host.claim()
@@ -833,7 +833,7 @@ def test_a_journal_failure_inside_blocked_card_handling_fails_closed(host, monke
 def test_a_journal_failure_publishing_an_escalation_fails_closed(host, monkeypatch):
     """Codex review of PR #24 round 5: the step-failure help_request is published after
     the steps; a JournalError there must still pause the run (cards unassigned)."""
-    from autoresearch.runtime import queue_keeper
+    from ide_research_core.runtime import queue_keeper
 
     host.tick(at(1))
     assert [card.assignee for card in host.queue.list("pending")] == [PROFILE]

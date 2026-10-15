@@ -173,7 +173,7 @@ def test_worker_shell_finds_cli(worker_run):
 
 
 def test_plugin_loads_in_worker(worker_run):
-    # Contract of the committed post_tool_call stub (autoresearch.plugin.adapters): one JSON
+    # Contract of the committed post_tool_call stub (ide_research_core.plugin.adapters): one JSON
     # line per tool call with key "tool", in runtime_dir(ctx) / TOOL_EVENTS_FILE.
     # TODO(Task 4.1): re-check the file and field names when the real policy replaces the stub.
     events = worker_run["canonical"] / ".supervisor" / "runtime" / "tool_events.jsonl"

@@ -14,10 +14,10 @@ import pytest
 import yaml
 from support import keeper_host
 
-from autoresearch.plugin import peers
-from autoresearch.queue.select import queue_from_env
-from autoresearch.runctx import BOARD, RunContext
-from autoresearch.runtime.preflight import host_config_problems
+from ide_research_core.plugin import peers
+from ide_research_core.queue.select import queue_from_env
+from ide_research_core.runctx import BOARD, RunContext
+from ide_research_core.runtime.preflight import host_config_problems
 
 DISTRIBUTION = Path(__file__).resolve().parents[2]
 INSTALL_NAME = "optimizer"
