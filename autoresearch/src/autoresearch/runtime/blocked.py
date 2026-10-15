@@ -399,6 +399,9 @@ def _handle_one(
     spend_config: spend.SpendConfig | None,
 ) -> BlockedAction | None:
     canonical = ctx.canonical
+    receipt = committed_json(canonical, receipt_path(ledger_of(canonical), card.spec.request_id))
+    if receipt is not None and receipt.get("cancelled_by"):
+        return None
     if card.block_reason == RERUN_AFTER_PUBLISH:  # a stopped rerun, repaired here
         outcome = _published_outcome(canonical, card)
         return _repair_rerun(canonical, card, outcome, allow_no_remote)

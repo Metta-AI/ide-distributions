@@ -414,6 +414,12 @@ The runtime reads the coach's answers itself, every run, with the agent token
   submissions, doubling, at most 8 hours. A retried submission that fails waits for the next
   step too.
 
+To cancel one research task, send an inbound `control` with `{"action": "cancel", "task": "<original inbound task id>"}`.
+The runtime closes that request against new admission, recovery, and late result publication, and requests shutdown through the existing queue.
+Its reply says **stop requested**: native worker cleanup can take a few minutes. This does not stop the VM or gateway.
+It preserves canonical work and unrelated cards. Cancelling a planning-backlog item withdraws that item without stopping a shared planning card.
+As with pause/resume below, routing requires the queue-keeper preflight to pass.
+
 A coach pauses and resumes research from the IDE chat with the exact lines
 `/pause-research` and `/resume-research`, for which the plugin sends an inbound `control` message
 (`{"action": "pause"}` or `{"action": "resume"}`); an operator can send the same with

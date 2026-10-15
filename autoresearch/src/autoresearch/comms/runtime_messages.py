@@ -1199,3 +1199,23 @@ def proposal_still_open(message: dict, rev: str) -> RuntimeMessage:
     refs = [ref | {"rev": rev} for ref in message["refs"]]
     title = plain_ids(_LEGACY_HASH.sub("", message["title"]))
     return RuntimeMessage("suggestion", _title("Still open", title), body, refs)
+
+
+def task_cancelled(state: str) -> RuntimeMessage:
+    """Receipt for cancelling one inbound task; no promise of immediate process exit."""
+    title, body = {
+        "unknown": ("Task not found", "No matching research task was found. No work was stopped."),
+        "closed": (
+            "Task already closed",
+            "This task is already closed. Its results and history are unchanged.",
+        ),
+        "requested": (
+            "Task stop requested",
+            (
+                "No further work will be scheduled for this task. Any running worker has been "
+                "asked to stop; shutdown may take a few minutes. The agent stays available "
+                "for other tasks, and saved work is retained."
+            ),
+        ),
+    }[state]
+    return RuntimeMessage("note", title, body)

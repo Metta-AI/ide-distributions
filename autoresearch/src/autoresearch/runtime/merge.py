@@ -452,6 +452,9 @@ def _ready(
     """``(ready, run summary)``: whether ``process_handoffs`` should advance this handoff now.
     A foreign handoff is recorded (``runtime.foreign``) and is never ready."""
     canonical = ctx.canonical
+    receipt = committed_json(canonical, receipt_path(ledger_of(canonical), record["request_id"]))
+    if receipt is not None and receipt.get("cancelled_by"):
+        return False, None
     if admitted_spec(canonical, record["request_id"]) is None:
         title = _board_title(queue, record["card"])
         record_foreign(

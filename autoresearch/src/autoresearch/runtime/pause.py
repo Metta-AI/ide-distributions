@@ -24,7 +24,13 @@ from pathlib import Path
 from autoresearch.io import gitops
 from autoresearch.io.docs import read_json, write_json
 from autoresearch.queue.base import Queue
-from autoresearch.runtime.ledger import canonical_lock, canonical_of, commit, now_iso
+from autoresearch.runtime.ledger import (
+    canonical_lock,
+    canonical_of,
+    commit,
+    committed_json,
+    now_iso,
+)
 
 PAUSE_FILE = "pause.json"
 HOLD_FILE = "coach-hold.json"
@@ -62,7 +68,7 @@ def _record_assignees(path: Path, fresh: dict, assigned: dict[str, str]) -> dict
     return record
 
 
-def _reassign(queue: Queue, tasks: dict[str, str]) -> list[str]:
+def _reassign(queue: Queue, tasks: dict[str, str], ledger: Path) -> list[str]:
     """Reassign exactly the recorded cards that are still pending and unassigned. A recorded
     card that is no longer on the board (a lost board) is skipped."""
     on_board = {card.task_id: card for card in queue.list()}
@@ -70,6 +76,11 @@ def _reassign(queue: Queue, tasks: dict[str, str]) -> list[str]:
     for task_id, assignee in tasks.items():
         card = on_board.get(task_id)
         if card is None:
+            continue
+        receipt = committed_json(
+            canonical_of(ledger), ledger / "requests" / f"{card.spec.request_id}.json"
+        )
+        if receipt is not None and receipt.get("cancelled_by"):
             continue
         if card.state == "pending" and card.assignee is None:
             queue.assign(task_id, assignee)
@@ -107,7 +118,7 @@ def resume(queue: Queue, ledger: Path) -> list[str]:
     path = pause_path(ledger)
     if not path.exists():
         return []
-    reassigned = _reassign(queue, read_json(path)["tasks"])
+    reassigned = _reassign(queue, read_json(path)["tasks"], ledger)
     with canonical_lock(canonical):
         committed = gitops.show(canonical, "HEAD", path.relative_to(canonical).as_posix())
         path.unlink()
@@ -146,7 +157,7 @@ def release_hold(queue: Queue, ledger: Path) -> list[str]:
         path.unlink()
         commit(canonical, [paused, path], "coach resume: cards wait for the pause")
         return []
-    reassigned = _reassign(queue, tasks)
+    reassigned = _reassign(queue, tasks, ledger)
     path.unlink()
     commit(canonical, [path], "coach resume")
     return reassigned

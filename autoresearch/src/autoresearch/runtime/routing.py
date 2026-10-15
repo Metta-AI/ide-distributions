@@ -529,6 +529,10 @@ def _route_control(
     """Apply a coach pause or resume (the coach hold, ``runtime.pause``) and answer it with a
     runtime note. The note is built from the state before the change and published first, so
     a rerun after a crash reuses it and only redoes the change, which is idempotent."""
+    if message["action"] == "cancel":
+        from autoresearch.runtime.cancellation import cancel_task
+
+        return cancel_task(ctx, queue, record, message, allow_no_remote)
     canonical, ledger = ctx.canonical, ledger_of(ctx.canonical)
     if message["action"] == "pause":
         note = runtime_messages.research_paused(already=is_held(ledger))
