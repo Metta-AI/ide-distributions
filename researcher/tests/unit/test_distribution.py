@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_manifest():
     m = yaml.safe_load((ROOT / "distribution.yaml").read_text())
-    assert m["name"] == "autoresearch" and m["hermes_requires"] == ">=0.21.5"
+    assert m["name"] == "researcher" and m["hermes_requires"] == ">=0.21.5"
     assert "distribution_owned" not in m
     env = {e["name"]: e for e in m["env_requires"]}
     for k in [

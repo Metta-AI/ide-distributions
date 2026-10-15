@@ -5,10 +5,10 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 
 | Folder | What it is |
 |---|---|
-| [`autoresearch/`](autoresearch/README.md) | The autonomous research agent, moved here from `Metta-AI/ide-mvp` with its full history. |
+| [`researcher/`](researcher/README.md) | The autonomous research agent (formerly `autoresearch`), moved here from `Metta-AI/ide-mvp` with its full history. |
 
 The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
-browser) describes the planned layout: `autoresearch/` becomes `researcher/`, a new
+browser) describes the planned layout: a new
 `orchestrator/` distribution sits between the IDE chat and the researchers, and an
 `ontology/` and a `shared/` package are copied into both.
 
@@ -24,7 +24,7 @@ either fails the install or ships with it. Keep a separate clone for development
 
 ```bash
 git clone https://github.com/Metta-AI/ide-distributions.git ~/ide-distributions
-hermes profile install ~/ide-distributions/autoresearch --name autoresearch --yes
+hermes profile install ~/ide-distributions/researcher --name researcher-1 --yes
 ```
 
 ## Update
@@ -34,7 +34,7 @@ update keeps the installed `config.yaml`; `--force-config` resets it.
 
 ```bash
 git -C ~/ide-distributions pull --ff-only
-hermes profile update autoresearch
+hermes profile update researcher-1
 ```
 
 ## Develop and test
@@ -43,7 +43,7 @@ Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job pe
 distribution folder.
 
 ```bash
-cd autoresearch
+cd researcher
 uv sync --frozen
 uv run pytest -q
 ```

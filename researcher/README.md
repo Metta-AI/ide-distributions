@@ -5,7 +5,7 @@ GotA) without human approval, and reports to a "Preston-role" interface agent th
 file-based communication interface. In the Softmax IDE that agent is the profile's own coach
 chat ("IDE coach chat" below); elsewhere it is an external agent.
 
-`autoresearch/` is the root of a Hermes Agent profile distribution. Install it with
+`researcher/` (formerly `autoresearch/`) is the root of a Hermes Agent profile distribution. Install it with
 `hermes profile install`. This file is the operations guide: install, configure, run,
 restore, update.
 
@@ -55,7 +55,7 @@ Or use the official `install.sh` from the Hermes repository on a host.
 
 ```sh
 export PROFILE_NAME=autoresearch
-hermes profile install /path/to/ide-mvp/autoresearch --name "$PROFILE_NAME"
+hermes profile install /path/to/ide-distributions/researcher --name "$PROFILE_NAME"
 ```
 
 The profile works under any install name. Below, `<profile>` (the shell variable

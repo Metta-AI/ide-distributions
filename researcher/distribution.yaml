@@ -1,4 +1,4 @@
-name: autoresearch
+name: researcher
 version: 0.1.0
 description: Autonomous research agent that improves game policies and reports through a file-based comms interface.
 hermes_requires: ">=0.21.5"

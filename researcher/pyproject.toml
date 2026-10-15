@@ -1,5 +1,5 @@
 [project]
-name = "autoresearch"
+name = "researcher"
 version = "0.1.0"
 description = "Autoresearch v0: a Hermes Agent profile distribution"
 requires-python = ">=3.12,<3.13"
