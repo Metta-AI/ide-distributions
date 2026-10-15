@@ -272,3 +272,29 @@ def test_a_researchers_stale_clone_sees_the_published_champion(board, tmp_path):
     promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
 
     assert promotion.baseline_problem(researcher, board.sm, LEAGUE, PLAYER, PV_A) is None
+
+
+def test_a_rejected_champion_publish_is_redone_with_the_strategy(board, monkeypatch):
+    """The push of ``published`` and the champion strategy was rejected; the retry must still
+    publish the strategy, though the clone already holds it (Codex R14)."""
+    from ide_research_core import workspace
+
+    experiment, _ = board.reviewed_experiment()
+    promotion.submit(board.canonical, board.sm, experiment, LEAGUE, PLAYER)
+    real_publish = workspace.publish
+
+    def reject_published(clone, files, message):
+        if message.endswith(": published"):
+            monkeypatch.setattr(gitops, "push_with_rejections", lambda *_: (False, ["main"]))
+        return real_publish(clone, files, message)
+
+    monkeypatch.setattr(workspace, "publish", reject_published)
+    with pytest.raises(workspace.WorkspaceError):
+        promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
+    monkeypatch.undo()
+
+    report = promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
+
+    assert report["in_flight"] is None
+    champion = gitops.show(board.origin, "main", promotion.CHAMPION_PATH)
+    assert champion.strip() == f"# Candidate for {experiment}".encode()

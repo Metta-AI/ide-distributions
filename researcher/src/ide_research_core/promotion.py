@@ -431,11 +431,10 @@ def _advance_submitted(clone: Path, sm: Softmax, promotion: Promotion, player_id
 def _advance_recorded(clone: Path, promotion: Promotion) -> None:
     extra: tuple[str, ...] = ()
     if promotion.kind == "experiment":
-        candidate = (clone / candidate_path(promotion.experiment)).read_bytes()
-        champion = clone / CHAMPION_PATH
-        if not champion.is_file() or champion.read_bytes() != candidate:
-            champion.write_bytes(candidate)
-            extra = (CHAMPION_PATH,)
+        # Always published: a local copy that already matches (a failed publish writes its
+        # content back) says nothing about canonical main.
+        (clone / CHAMPION_PATH).write_bytes((clone / candidate_path(promotion.experiment)).read_bytes())
+        extra = (CHAMPION_PATH,)
     _move(clone, promotion, "published", "champion recorded on main", extra)
 
 
