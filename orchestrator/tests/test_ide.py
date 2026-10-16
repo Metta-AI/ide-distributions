@@ -45,11 +45,11 @@ def test_bridge_request_shapes(context, credential):
         assert seen == [
             (
                 "POST",
-                "/api/v2/cogents/ply_test/say",
+                "/api/observatory/v2/cogents/ply_test/say",
                 "Bearer cga_fake",
                 {"text": "Finished", "idempotency_key": "say:task_events:3", "goal_id": "goal-1"},
             ),
-            ("PATCH", "/api/v2/cogents/ply_test/c/tasks/task%2F1", "Bearer cga_fake", patch),
+            ("PATCH", "/api/observatory/v2/cogents/ply_test/c/tasks/task%2F1", "Bearer cga_fake", patch),
         ]
     finally:
         server.shutdown()

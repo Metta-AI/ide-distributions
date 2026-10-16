@@ -17,7 +17,7 @@ class IDE:
 
     def request(self, method, path, payload=None):
         request = Request(
-            f"{self.base}/v2/cogents/{self.player}/{path}",
+            f"{self.base}/observatory/v2/cogents/{self.player}/{path}",
             method=method,
             data=json.dumps(payload).encode() if payload is not None else None,
             headers={
