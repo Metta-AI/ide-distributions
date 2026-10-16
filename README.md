@@ -22,6 +22,9 @@ git repository per game, the orchestrator between the IDE chat and the researche
 [Implementation notes](docs/designs/orchestrator-implementation-notes.md) record where the
 code differs from it.
 
+Softmax hosting runs these distributions in its sandboxes. The metta changes it needs are in
+the [hosting handoff](docs/hosting.md).
+
 ## Install
 
 Hermes installs a distribution only from a whole local folder: a git URL must hold

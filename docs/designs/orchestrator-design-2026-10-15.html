@@ -1254,6 +1254,10 @@ hermes profile update researcher-1 &amp;&amp; hermes profile update researcher-2
   <!-- ============ 13 Hosting ============ -->
   <section id="hosting">
     <h2>13 · Hosting Changes for Rohit</h2>
+    <div class="callout callout-warn">
+      <span class="callout-label">Superseded by docs/hosting.md</span>
+      <p>The current hosting handoff is <a href="../hosting.md">docs/hosting.md</a>, checked against the code. The table below keeps the design's reasoning, but some details changed in the implementation: the environment variables are <code>RESEARCH_*</code> for every profile, each profile's <code>scripts/bootstrap.py</code> does the preparation (researchers first), and every profile shares one <code>&lt;root&gt;/canonical-&lt;game&gt;.git</code>.</p>
+    </div>
     <ul class="key-points">
       <li>Six items, all in metta: four changes (R-1 to R-4) and two verifications (R-5, R-6).</li>
       <li>The largest is a profiles list. Today a hosted runtime definition holds exactly one application profile.</li>
