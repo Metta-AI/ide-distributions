@@ -1,5 +1,11 @@
 # GotA seed workspace (Task 1.3)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Bootstrap applies the seed only to new workspaces. It has an empty priority list,
 three hubs, six claims, six tentative lessons, two indexed evidence snapshots,
 and an empty stats directory (Git placeholder only). C10 must obtain a

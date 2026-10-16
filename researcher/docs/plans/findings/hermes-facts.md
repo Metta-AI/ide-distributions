@@ -1,5 +1,11 @@
 # Finding: Hermes v0.21.5 facts (Plan 01 Task 0.2)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 **Result: 9 PASS, 1 FAIL (item 5: config location), 1 PARTIAL (item 11: kimi-k3 UNVERIFIED), plus Step 1 FAIL-with-workaround and one C1 command FAIL.** 2026-10-07, run by Claude for James.
 
 **Update 2026-10-08:** item 11 is now PASS (kimi-k3 re-run with a funded key), so the result is 10 PASS, 1 FAIL. Item 6 was corrected (Kanban task and run ids do not reach worker terminals).

@@ -14,8 +14,10 @@ batch, preserve its state and complete without waiting for the platform.
 
 ## Procedure
 
-1. Read `"$RESEARCH_CLI" records show <E-id>`. Use the attempt named on the launch card;
-   otherwise use `lifecycle.launch_attempts + 1`. Never increment that field yourself.
+1. Read `"$RESEARCH_CLI" records show <E-id>`. Use the attempt named on the launch card.
+   Otherwise read the batch's attempts in `xp_requests`: use 1 for a first launch, the latest
+   attempt to fill its missing requests, and the latest attempt + 1 only to relaunch after a
+   failed request. `xp create` refuses a wrong new attempt (see Failure handling).
 2. Recover existing requests first:
    `"$RESEARCH_CLI" softmax xp recover <E-id>`
    Existing handles are work already launched, not a reason to create another attempt.

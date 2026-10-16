@@ -37,7 +37,7 @@ remain available separately from comment/whitespace-compacted `policy.bas`.
 
 ## Compiler and Hermes
 
-From `autoresearch/`, with the locked dependencies installed:
+From `researcher/`, with the locked dependencies installed:
 
 ```sh
 uv run --locked --offline python games/gota/compiler/tools/pw_strategy.py lint --json
@@ -109,8 +109,8 @@ per-round timeout remains 900 seconds.
 Provider requests/retries and tokens are not a hard spend cap. The 3600-second
 example allowance is informed by the primary lab's observed 3–25 minute
 28-unit generations and 2–4 minute gates; this two-unit source has no promised
-latency. It is not the autoresearch build binding's default or a card budget.
-The autoresearch binding defaults to 1200 seconds per round and 1800 seconds overall.
+latency. It is not the GotA `build` binding's default or a card budget.
+The `build` binding defaults to 1200 seconds per round and 1800 seconds overall.
 Both are configurable with its `--agent-timeout` / `GOTA_AGENT_TIMEOUT_S` and
 `--agent-budget` / `GOTA_AGENT_BUDGET_S`; flags override environment values and empty
 environment values use defaults. For validation, JSON error reporting and the soft

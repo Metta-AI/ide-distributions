@@ -1,5 +1,11 @@
 # Compiler goal layer: Task 2.2 findings and rulings
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Base: `03bba60` (Task 2.1); compiler source pin remains
 `personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84`.
 

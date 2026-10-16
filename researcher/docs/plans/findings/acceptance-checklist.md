@@ -1,5 +1,11 @@
 # Acceptance and hosting handoff checklist (draft)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Status: DRAFT, written 2026-10-07 at commit `6f0affa` (branch `jboggs/autoresearch-v0-impl`). Plan 03 Task 6.2. Updated 2026-10-08 by a documentation audit on branch `jboggs/autoresearch-v0` (base `9b84cc8`) to the evidence in the findings files.
 
 Rule for this file: every item that nobody has checked is marked **UNVERIFIED**. An item without that mark has evidence, and the evidence is named next to it.

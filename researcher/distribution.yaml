@@ -44,6 +44,11 @@ env_requires:
     description: >-
       Scratch directory for builds and episodes. Set by Softmax hosting (/opt/data/tmp, because
       the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS.
+  - name: GOTA_HERMES_PYTHON
+    required: false
+    description: >-
+      Python of the Hermes install, for GotA builds (games/gota/GAME.md host_requirements).
+      Softmax hosting sets /opt/hermes/.venv/bin/python.
   - name: GOTA_G2_RUNNER
     required: false
     default: native

@@ -315,7 +315,7 @@ def test_completion_example_carries_the_native_handoff():
         "awaiting",
         "next",
     }
-    assert handoff["journal"].startswith("ar://J-")
+    assert handoff["journal"].startswith("ar://journal/J-")
     assert set(handoff["merged"]) == {"card_sha", "main_sha"}
     assert set(handoff["experiment"]) == {"id", "status", "decision"}
     assert set(handoff["awaiting"]) == {"xp"}

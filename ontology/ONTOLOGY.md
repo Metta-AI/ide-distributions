@@ -1,8 +1,9 @@
 # Research ontology
 
 The shared vocabulary of the `orchestrator` and every `researcher-<i>`. Both profiles load
-this file; `tools/sync_shared.py` copies it into each distribution. The machine-readable
-form is the record schemas in `ide_research_core/schemas/` (validated by `research records`);
+this file: `tools/sync_shared.py` embeds it at the end of each distribution's `SOUL.md`. The
+machine-readable form is the record schemas in `ide_research_core/schemas/` (validated by
+`research records`);
 the research method that uses these terms is in the researcher's `doctrine/` and the
 [System Design](../researcher/docs/designs/autoresearch-system-design-2026-10-06.html) §3.
 

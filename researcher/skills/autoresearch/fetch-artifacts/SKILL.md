@@ -37,8 +37,8 @@ Doctrine upheld: D-04, D-05, D-06, D-09.
 ## Failure handling
 
 - `complete: false` (a request still pending), or `artifacts_incomplete`: complete `partial`
-  with the pending request ids in `awaiting.xp`, so the orchestrator can return to review. Do
-  not wait in the card.
+  with the pending request ids in `awaiting.xp` and the experiment in `experiment.id`, so the
+  orchestrator can return to review. Do not wait in the card.
 - `softmax xp evidence` exits 1 (a binding error, an unknown arm, a missing binding): that is
   a tool fault (D-26 in `card`), not a measurement; never patch rows by hand.
 - Failed episodes are worker/platform failures, not measurements of policy behavior. Count

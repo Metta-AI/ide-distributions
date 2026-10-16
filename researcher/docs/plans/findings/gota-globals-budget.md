@@ -1,5 +1,11 @@
 # GotA globals budget and submitted baseline
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Plan 02 Task 0.1, 2026-10-07. **Verdict: FITS WITH PACKING** for storage,
 under the concrete Phase C assumptions below. The unchanged PW runtime **DOES NOT FIT**.
 This is a storage estimate, not a compiled-policy or full G3 pass.

@@ -8,7 +8,7 @@ exceptions, missing tools/files, subprocess failures and broken harness invarian
 are `errored`, retaining exception type, message and a traceback summary under
 `details.error`. Raw exceptions from a gate or its import are caught at the
 runner boundary too. An errored result immediately stops later gates.
-Import the context and result from `games.gota.gates` with `autoresearch/` on
+Import the context and result from `games.gota.gates` with `researcher/` on
 Python's import path. Both legacy baseline and structured compiler policies are
 accepted; the marker selects the native host's corresponding limits.
 
@@ -21,7 +21,7 @@ context = GateContext(work_dir=Path('/tmp/gota-check'), baseline=Path('baseline.
 result = g1_lint.run(Path('candidate.bas'), context)
 ```
 
-From `autoresearch/`, run all five gates with the locked Python environment:
+From `researcher/`, run all five gates with the locked Python environment:
 
 ```sh
 uv run --locked --python 3.12 python -m games.gota.gates tests/fixtures/gota/v13-live.bas --baseline tests/fixtures/gota/v13-live.bas --work-dir /tmp/gota-gates-new
@@ -70,7 +70,7 @@ and reruns the workload; do not assume the preceding build's in-memory cache
 survives. Short G3 samples prove only their reported `sample_ticks` and do not
 establish a full gate duration.
 
-Use the shared `queue` skill's **Long commands** procedure for build/full gate
+Use the core `card` skill's **Long commands** procedure for build/full gate
 runs: terminal `background: true`, then `process_manage` with `action: "wait"`,
 the returned `session_id`, and `timeout: 1800`. Repeat only if it returns
 `status: "timeout"`; do nothing between waits. No polling, repeated log calls
@@ -161,7 +161,7 @@ one newline event and one byte. Tests measure all three through actual engine
 callbacks. Failed VMs fail the gate even if they stopped before emitting all text.
 
 Native build requires Nim 2.2.10 and Git. Populate pinned engine and dependency
-sources explicitly before building (commands from `autoresearch/`):
+sources explicitly before building (commands from `researcher/`):
 
 ```sh
 uv run --locked python games/gota/tools/native_build.py prepare 801749e509e888b423ba44ee2188946c22e3ba85
@@ -188,7 +188,7 @@ and recorded engine pins; the latter also builds the current helpers with Nim
 build historical helpers offline after source preparation. Pure Python tests,
 including seed, evaluate-binding and mocked compiler tests, need neither Nim nor
 source preparation. The real-agent process guard remains autouse for every GotA
-test. For example, from `autoresearch/`, this needs only the locked Python environment:
+test. For example, from `researcher/`, this needs only the locked Python environment:
 
 ```sh
 uv run --locked --offline pytest tests/unit/gota/test_seed.py tests/unit/gota/test_evaluate_binding.py tests/unit/gota/test_native_build.py -q

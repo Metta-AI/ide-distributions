@@ -1,5 +1,11 @@
 # Task 2.5 bindings and host prerequisites
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 The M1-qualified compiler remains the only build path. This task changes source
 root handling and adds adapters; it does not rerun M1 or alter its immutable inputs.
 The installed distribution can be a Git archive separate from the worker worktree.

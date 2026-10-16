@@ -450,6 +450,11 @@
     <p class="context">How the autoresearch system is packaged, run, configured, connected, built, tested, and scheduled. It runs on the Hermes Agent harness and ships as a Hermes profile distribution. Companion to <a href="autoresearch-system-design-2026-10-06.html">Autoresearch System Design</a>, which describes the research agent itself. Author: James Boggs, with Claude. Repo: <code>autoresearch/</code>, today a subdirectory of Metta-AI/ide-mvp. Target: live on softmax.com by Fri 2026-10-09.</p>
   </header>
 
+  <div class="callout callout-warn">
+    <span class="callout-label">Historical record</span>
+    This document records the <code>autoresearch</code> harness in <code>Metta-AI/ide-mvp</code>. The native-Kanban researcher and orchestrator in this repository supersede it, so its paths, commands, environment variables and mechanisms (for example the comms inbox and outbox, the queue-keeper and other cron jobs, spend management) may no longer exist. For the current design, see <a href="../../../docs/designs/orchestrator-implementation-notes.md">orchestrator-implementation-notes.md</a>.
+  </div>
+
   <div class="legend">
     <span class="eyebrow">How to read the status labels</span>
     <dl>

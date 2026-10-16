@@ -53,8 +53,9 @@ why those policies answer the question.
 
 ## Commands
 
-Run bindings from the `autoresearch/` distribution root with the project environment.
-Append the arguments below to the exact front-matter command.
+Run bindings from `"$RESEARCH_HOME"` (the installed profile directory) with
+`"$RESEARCH_PYTHON"` in place of `python3`, as the core `card` skill sets them, and
+absolute worktree paths. Append the arguments below to the exact front-matter command.
 
 Treat `build` and `local_check` as long commands: their G3/G4 workload takes
 approximately 55 minutes, measured on the autoresearch EC2 test box
@@ -93,10 +94,10 @@ in `version.json` records `seconds` (wall time), and a completed build records
 `started` and `finished` (ISO UTC); a startup fault's error report has neither. A
 compiler build copies its compiler child's Hermes `state.db` (passed, failed, or
 raised) to `$HERMES_HOME/gota-compiler/<build id>-<scratch suffix>/state.db`, so
-the baseline report can count compiler spend after the build's scratch directory
+the compiler session can still be read after the build's scratch directory
 is deleted; a copy that fails is a warning on stderr, never a build failure. The
-copies are not pruned yet: disk use grows by one full `state.db` (transcripts
-included) per compiler build, and `report baseline` scans them all. A local check
+copies are not pruned: disk use grows by one full `state.db` (transcripts
+included) per compiler build. A local check
 writes `OUTPUT/gates.json`, `engine_identity.json`, `coworld_manifest.json` and
 hashed native measurement JSON files containing `native_build` receipts.
 Follow G2's `summary.episode_dir` to the episode results and logs; build locators
@@ -209,7 +210,9 @@ when some budget remains. Prebuilt builds ignore both settings because they run 
 compiler agent.
 
 The card's configured 5400-second run budget is soft: Hermes injects a wrap-up notice
-at 80%, or 4320 seconds, rather than enforcing a build deadline. The documented G3/G4
+at 80%, or 4320 seconds, rather than enforcing a build deadline. The card's runtime cap
+is hard: the orchestrator creates cards with `max_runtime_seconds` 7200 by default, and
+the Hermes dispatcher then stops the worker and re-queues the card. The documented G3/G4
 workload takes about 3300 seconds on the test box. The default 1800-second cumulative
 generation allowance plus that estimate totals 5100 seconds, leaving about 300 seconds
 for other work but exceeding the wrap-up threshold. A repair after a G3 failure repeats
@@ -262,8 +265,8 @@ The direct `local_check` command follows the same rules and writes its identity
 and fetched manifest into its fresh work directory.
 
 ```sh
-uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/E --out /workspace/versions/new --json
-uv run --locked python games/gota/tools/build.py /workspace/strategy/candidates/E --out /workspace/versions/historical-new --offline --manifest /path/to/2026.10.7.2-manifest.json --json
+(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/build.py "$PWD/strategy/candidates/E" --out "$PWD/.scratch/build/E" --json)
+(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/build.py "$PWD/strategy/candidates/E" --out "$PWD/.scratch/build/E-historical" --offline --manifest /path/to/2026.10.7.2-manifest.json --json)
 ```
 
 `evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
@@ -400,7 +403,7 @@ decision. The first league submission is v13-live, unevaluated; local checks do 
 competitive strength. The command checks C6 identity and the build, uploads the exact artifact
 and records a version with `experiment: null` that keeps the prebuilt provenance. Its response
 includes `data.version_id` and `data.platform_policy_version_id`. Record them in the journal's
-Decisions and in the handoff metadata, run `workspace integrate`, and complete the card. The
+Decisions and in the `kanban_complete` metadata, run `workspace integrate`, and complete the card. The
 orchestrator then submits the version with `promotion bootstrap` and records the champion. The
 shipped `strategy/STRATEGY.md` remains the champion strategy source.
 

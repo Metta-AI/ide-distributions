@@ -49,7 +49,8 @@ episodes (`softmax league-episodes`) come from three house policies and measure 
 
 ## Bindings
 
-Run each binding from `"$AR_HOME"` with absolute paths.
+Run each binding from `"$RESEARCH_HOME"` (the profile directory; see the `card` skill) with
+absolute paths.
 
 - `build`: `python3 games/fakegame/tools/fake_build.py <candidate> --out <build dir> --json`.
   `<candidate>` is the candidate `STRATEGY.md`, or its directory
@@ -69,7 +70,7 @@ Run each binding from `"$AR_HOME"` with absolute paths.
 
 The starter policy is the champion STRATEGY at install, `<worktree>/strategy/STRATEGY.md` (the
 seed strategy). Build it with the `build` binding:
-`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/starter --json`,
+`python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/champion --json`,
 check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
-then upload it with `"$RESEARCH_CLI" softmax upload-bootstrap --build-dir <worktree>/.scratch/build/starter`;
+then upload it with `"$RESEARCH_CLI" softmax upload-bootstrap --build-dir <worktree>/.scratch/build/champion`;
 the orchestrator submits it as the first champion.

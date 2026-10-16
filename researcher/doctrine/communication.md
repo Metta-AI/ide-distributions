@@ -47,7 +47,7 @@ your own plan and acknowledge it in a `note:` on your card. An unanswered questi
 
 Resolve references with `"$RESEARCH_CLI" records resolve <ar://ref>`. Typical references are
 `ar://experiment/<E-id>`, `ar://evidence/<EV-id>`, `ar://journal/<J-id>#d<N>` and `ar://plan`.
-Use the returned record/path to check the evidence. The handoff journal is `ar://J-...`.
+Use the returned record/path to check the evidence. The handoff journal is `ar://journal/J-...`.
 
 Self-written skills stay in `skills-proposed/<name>/` until a human replies (D-18); tell the
 orchestrator with a `suggestion:` and `ar://skill-proposal/<name>`. Doctrine proposals go in

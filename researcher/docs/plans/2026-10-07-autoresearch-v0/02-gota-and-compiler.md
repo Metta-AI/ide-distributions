@@ -1,5 +1,11 @@
 # Plan 02 — GotA Extension and Compiler Port
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Read `00-overview.md` first.
 
 **Goal:** A working GotA game extension (contract, toolkit, seed workspace, game skills) and a `build` binding that turns a candidate `STRATEGY.md` into a verified GotA BASIC policy through the ported Paintbot PW semantic↔policy compiler, including the Goal (G) layer and goal-labelled decision tracing. This is the only build path (James, 2026-10-07: no BASIC fallback).

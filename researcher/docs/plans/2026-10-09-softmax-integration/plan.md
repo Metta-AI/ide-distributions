@@ -1,5 +1,11 @@
 # Autoresearch on Softmax-Hosted Hermes: Integration Plan
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A coach who clicks **Start Hermes** in the Softmax IDE gets the autoresearch agent (not Rohit's `optimizer` profile) in their always-on EC2 workspace. It runs its research loop there, answers in the IDE chat, takes work from the IDE research buttons, and can be paused and resumed by the coach.

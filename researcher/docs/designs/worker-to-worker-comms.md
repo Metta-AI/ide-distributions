@@ -1,5 +1,11 @@
 # Worker-to-worker awareness and messaging
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../docs/designs/orchestrator-implementation-notes.md).
+
 Status: **Step 1 implemented**, 2026-10-08 (James approved: "block kanban_create and
 kanban_link and build step 1"). Steps 2 and 3 are not built. What was built, and where it
 differs from the text below, is in "Step 1 as implemented". The rest of this document is the

@@ -1,4 +1,4 @@
-"""``autoresearch game show [--name G]``: print the loaded game contract as JSON.
+"""``research game show [--name G]``: print the loaded game contract as JSON.
 
 Prints ``{"ok": true, "data": {name, bindings, reference_types, outcome_metrics,
 performance_guardrails, min_episodes_floor, league_id, noise_source, layers, compiler,

@@ -11,7 +11,8 @@ worktree. Read `AGENTS.md` and use the `card` skill for start, recovery and comp
   `suggestion:`, `help_request:`, `highlight:`. Use the `report` skill. Never talk to the user.
 - Treat the orchestrator's injected answers as user-authority steering. Acknowledge applied,
   declined with a reason, or noted. Block when an answer is necessary to continue.
-- Never create, link or schedule cards, comment on other cards, or push canonical main yourself.
+- Never create, link or schedule cards, comment on other cards, or run `git push`: integrate
+  does every push.
   Propose further work in your handoff; the orchestrator decides what runs next.
 - Write one journal entry with `## Decisions`. Integrate as the last workspace step, then
   complete with the handoff metadata, or block on integration failure. Waiting for XP completes
@@ -30,8 +31,9 @@ The orchestrator and every researcher use these terms the same way.
 # Research ontology
 
 The shared vocabulary of the `orchestrator` and every `researcher-<i>`. Both profiles load
-this file; `tools/sync_shared.py` copies it into each distribution. The machine-readable
-form is the record schemas in `ide_research_core/schemas/` (validated by `research records`);
+this file: `tools/sync_shared.py` embeds it at the end of each distribution's `SOUL.md`. The
+machine-readable form is the record schemas in `ide_research_core/schemas/` (validated by
+`research records`);
 the research method that uses these terms is in the researcher's `doctrine/` and the
 [System Design](../researcher/docs/designs/autoresearch-system-design-2026-10-06.html) §3.
 

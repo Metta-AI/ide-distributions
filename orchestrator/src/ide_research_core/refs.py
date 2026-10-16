@@ -81,7 +81,7 @@ DECISIONS_HEADING = "## Decisions"
 GAME_ENV_WORKSPACE = "RESEARCH_WORKSPACE"
 GAME_ENV_REV = "RESEARCH_REV"
 GAME_RESOLVER_TIMEOUT_S = 30
-# Game resolver commands are relative to the autoresearch repo root (where games/ lives).
+# Game resolver commands are relative to the distribution root (where games/ lives).
 _REPO_ROOT = Path(__file__).resolve().parents[2]  # the distribution root: games/ lives here
 _DECISION_ANCHOR = re.compile(r"d(?P<n>[1-9][0-9]*)")
 _LESSON_ID = re.compile(r"L-[0-9A-HJKMNP-TV-Z]{26}")

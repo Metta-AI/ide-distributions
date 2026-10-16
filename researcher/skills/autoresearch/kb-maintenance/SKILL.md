@@ -14,8 +14,9 @@ hand or modify the profile's main clone.
 
 ## Procedure
 
-1. Read findings with `"$RESEARCH_CLI" kb lint`: evidence grades, stale claims, contradictions,
-   orphans and uncited hub sentences. Apply deterministic fixes within the assigned
+1. Read findings with `"$RESEARCH_CLI" kb lint`: evidence-grade mismatches, unresolved links
+   and contradictions, orphan claims, uncited hub sentences and archived claims still cited.
+   Apply deterministic fixes (grades, demotions) within the assigned
    maintenance scope with `"$RESEARCH_CLI" kb apply`.
 2. For a game-version update, read `"$RESEARCH_CLI" softmax game-version`, then mark old claims
    with `"$RESEARCH_CLI" kb stale --version <game-version>`.

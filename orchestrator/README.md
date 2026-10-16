@@ -2,8 +2,9 @@
 
 A Hermes profile that leads research for one player/game and delegates implementation to
 native Kanban researchers on the explicitly named `autoresearch` board. API chat and cron
-turns expose only the `orchestrator` toolset. The supervisor is an agent cron job whose
-minute preflight skips the model when nothing needs attention.
+turns expose only the `orchestrator` toolset. The supervisor is an agent cron job
+(`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
+skips the model when nothing needs attention.
 
 ## Install and configure
 
@@ -11,7 +12,8 @@ Requires Hermes v0.21.6, Python 3.12 for this distribution, uv and Git.
 The pinned Hermes runtime itself uses Python 3.14; use its provisioned interpreter for
 the `hermes` tests, independently of this profile's Python 3.12 venv. Hosting prepares the bare canonical
 repository, this profile's main clone, researcher profiles/clones, the board and native
-dispatcher. Clone origins must point to that local bare repository. Use a clean export,
+dispatcher ([docs/hosting.md](../docs/hosting.md) lists the metta changes). Clone origins must
+point to that local bare repository. Use a clean export,
 not a checkout containing `.venv`, when installing:
 
 ```sh
@@ -123,14 +125,15 @@ A league champion never recorded by the loop is a conflict, including on migrate
 ```sh
 cd orchestrator
 uv run pytest -q
-uv run pytest -q -m hermes
+HERMES_PYTHON=<hermes>/bin/python PATH=<hermes>/bin:$PATH uv run pytest -q -m hermes
 uv run ruff check .
 ```
 
 Default tests use local Git repositories, a local HTTP server and a subprocess CLI fixture;
 no model or platform credentials are required. Hermes tests use its installed interpreter,
-a temporary host root and real native board APIs. Set `HERMES_PYTHON` if Hermes's launcher
-does not identify its interpreter. The clean-install test exports committed HEAD, so commit
+a temporary host root and real native board APIs. Put the Hermes install's own `bin`
+directory first on `PATH`: a `hermes` launcher that resolves `python3` through `PATH` would
+otherwise run in this project's venv, which lacks Hermes's dependencies. The clean-install test exports committed HEAD, so commit
 before running those tests. `tests/test_end_to_end.py` installs a researcher and this profile
 on one host and plays one card from `card_create` through a scripted worker to the gate,
 `board_reconcile` and `status`, with no model and the fake platform. Hosted bridge delivery is

@@ -1,5 +1,11 @@
 # Plan 01 — Foundation and Protocol Slice
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Read `00-overview.md` first: contracts C1–C12 are binding.
 
 **Goal:** A fresh install of the autoresearch profile on local Hermes v0.21.5 admits cards, runs two concurrent card workers through the real Kanban dispatcher, and processes their results with durable finish, entity-aware merge, ordered outbox publication, promotion state, pause, and rebuild — proven with scripted card bodies and recovery tests.

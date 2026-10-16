@@ -1,5 +1,11 @@
 # GotA skills — Plan 02 Task 1.5
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Five game bindings supply replay inspection, evaluation design, diagnosis, A/B
 review and batch survey. They reuse `skills/autoresearch/` procedures and records;
 no separate research system or submission route is added.

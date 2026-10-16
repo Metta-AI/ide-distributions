@@ -1,5 +1,11 @@
 # Task 2.4: unintended agent dispatch and containment
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Status: **STOPPED; ruling required before resuming Task 2.4.**
 Base: `8a2e9e740b4d3ee5e56f7199a70bd9bf0fdbbeda`.
 Date: 2026-10-07. Times below are Pacific Time.

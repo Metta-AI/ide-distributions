@@ -1,5 +1,14 @@
 # Softmax IDE bridge: the external agent on `comms/`
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../docs/designs/orchestrator-implementation-notes.md).
+>
+> For the hosting changes, read [hosting.md](../../../docs/hosting.md). Where this document and that
+> file disagree, that file is current.
+
 The Softmax IDE reaches autoresearch through one process on the Hermes box: the **bridge** sidecar in
 [`packages/observatory-hosted-worker`](https://github.com/Metta-AI/metta/tree/main/packages/observatory-hosted-worker)
 of the metta repo (PR [#26790](https://github.com/Metta-AI/metta/pull/26790)). It is the "external agent" of the

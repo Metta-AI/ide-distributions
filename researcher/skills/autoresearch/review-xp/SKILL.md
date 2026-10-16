@@ -63,7 +63,8 @@ Doctrine upheld: D-01, D-06, D-09, D-14, D-15, D-17, D-20, D-22, D-23.
 - Some requests failed or rows were dropped so N is short: the decision is `invalid` or
   `hold` per the rule. To finish the evaluation, recommend a "Launch E-…" card to the orchestrator only if the
   experiment can still take requests; otherwise recommend a new experiment.
-- `stats evaluate` refuses (no champion in the league, or the champion changed): decide
-  `hold`, and suggest a card to the orchestrator to re-evaluate the candidate against the current champion.
+- `stats evaluate` exits 2 (no champion in the league), or its `failures` contain
+  `baseline_not_champion` (the champion changed): decide `hold`, and suggest a card to the
+  orchestrator to re-evaluate the candidate against the current champion.
 - `records update` exit 1 on `decision`: the decision is set once and cannot change. Do not
   try to rewrite it.

@@ -1,5 +1,11 @@
 # Comms kinds: one definition per kind, one published contract
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../docs/designs/orchestrator-implementation-notes.md).
+
 Status: **implemented**, 2026-10-08 (proposed the same day). Applies to `ar-comms/0` and does not change the
 wire format. Where the implementation differs from the design below, see "Deviations" at the end.
 

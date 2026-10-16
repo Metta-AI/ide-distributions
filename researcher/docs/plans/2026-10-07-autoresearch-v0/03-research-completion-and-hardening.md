@@ -1,5 +1,11 @@
 # Plan 03 — Research Completion and Hardening
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Read `00-overview.md` first.
 
 **Goal:** Complete everything the research agent needs beyond the Plan 01 skeleton: the knowledge base with its deterministic maintenance, statistics and noise calibration, the full softmax tool, doctrine and skills, operational configuration, and a real GotA research cycle with an acceptance checklist.

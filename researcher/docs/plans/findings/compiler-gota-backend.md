@@ -1,5 +1,11 @@
 # Task 2.3: GotA backend and packing
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 The pinned Paintbot compiler remains the pipeline source. The inspected untracked
 GotA partial port was useful for its whitespace/comment compaction pattern, but
 its structured-host storage limits, telemetry, missing local driver and starter

@@ -1,5 +1,11 @@
 # Coach chat role in the autoresearch profile
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../docs/designs/orchestrator-implementation-notes.md).
+
 Status: built for sections 1, 2 and 4 (plan Task 5, 2026-10-09; README "IDE coach chat";
 `src/autoresearch/plugin/coach.py`, `plugin/proposals.py`). Section 3 (bridge changes) and the
 shim switch in section 5 are not built. Where the build differs from this text:

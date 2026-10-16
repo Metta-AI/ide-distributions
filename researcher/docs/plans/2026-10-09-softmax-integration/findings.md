@@ -1,5 +1,11 @@
 # Survey findings for the Softmax integration plan (2026-10-09)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 This file is the evidence appendix for [plan.md](plan.md). It was checked against metta `62ab977a58` and ide-mvp
 `origin/main` `36f5d16`. Paths below are in metta unless they say ide-mvp.
 

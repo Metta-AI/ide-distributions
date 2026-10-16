@@ -1,5 +1,11 @@
 # Finding: full research cycle on the fake game (Plan 03 Task 6.0)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 **Verdict: PASS.** Runs 1 and 3 passed every assertion (run 3 with both product fixes of the run, before review fix round 1); run 2 reached every stage, including a published promotion, but failed the no-duplicate-XP assertion, which found bug 2. Each passing cycle took about 30 minutes of the 90-minute budget.
 2026-10-08, run by Claude for James.
 

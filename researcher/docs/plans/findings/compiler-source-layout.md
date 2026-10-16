@@ -1,5 +1,11 @@
 # Task 2.1: pinned compiler source differs from Plan 02
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Initial status: blocked before vendoring; resolved by VERDICT-C1 amendment below. Inspected on 2026-10-07 against committed
 `personal_labs_paintbot_pw@6b0bffa5085ffc4bf94ecaa8baee463e55599c84`.
 Autoresearch base: `91071d0b7761febd11ed37172f35627e7a216e9b`.

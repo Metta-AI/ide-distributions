@@ -1,5 +1,11 @@
 # Assessment of the untracked GotA compiler port
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Provenance: **personal_labs_gota working tree, untracked, 2026-10-07**.
 Source root: `gods_of_the_arena_lab/`. Inspection only; no source checkout files changed.
 This is the assessment requested by VERDICT-A item 2 and VERDICT-A2, not Phase C implementation.

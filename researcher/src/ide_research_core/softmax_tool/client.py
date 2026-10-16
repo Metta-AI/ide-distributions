@@ -19,7 +19,7 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
   ``position`` and the ``<name>:v<N>`` ``label``) and ``coworld episode-results <ereq>``
   (prints the raw results JSON; it has no ``--json`` flag). There is no league-wide episode
   listing, so episodes are reached through rounds. A Player credential can read all of these
-  for other players' league episodes (live probe, ``docs/plans/findings/softmax-client.md``).
+  for other players' league episodes (live probe, ``researcher/docs/plans/findings/softmax-client.md``).
 - Seed: the per-episode seed is ``results["seed"]``. The detail row's top-level ``seed`` was
   null live, and ``game_config.seed`` is a config value, not the episode's seed.
 - Game version: the detail's ``coworld_version``; only when it is missing,

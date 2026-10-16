@@ -1,5 +1,14 @@
 # Questions and proposals for the Hermes hosting work (from the autoresearch side)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../docs/designs/orchestrator-implementation-notes.md).
+>
+> For the hosting changes, read [hosting.md](../../../docs/hosting.md). Where this document and that
+> file disagree, that file is current.
+
 **For:** Rohit Mukherjee and agents working for him in `Metta-AI/metta`.
 **From:** James Boggs (autoresearch). Written 2026-10-08.
 

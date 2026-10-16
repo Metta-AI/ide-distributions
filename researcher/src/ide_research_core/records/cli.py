@@ -1,4 +1,4 @@
-"""``autoresearch records ...``: a thin JSON CLI over RecordStore.
+"""``research records ...``: a thin JSON CLI over RecordStore.
 
 Every command prints one JSON envelope to stdout: ``{"ok": true, "data": ...}`` or
 ``{"ok": false, "error": {"message": ..., "problems": [...]}}``. Exit codes: 0 ok,

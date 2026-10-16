@@ -24,6 +24,8 @@ Doctrine upheld: D-14, D-17, D-18.
 2. For each pattern that recurs (the same mistake, the same surprise, the same cost), find
    the lesson that covers it. If one exists, add the new instance:
    `"$RESEARCH_CLI" records update <L-id> --patch '{"recurrences": {"count": <n>, "refs": ["ar://…", "…"]}}'`
+   The patch replaces the whole `recurrences` object: give the complete `refs` list, not
+   only the new ref.
    If none exists, create a tentative lesson:
    `"$RESEARCH_CLI" records new lesson --meta-file .scratch/lesson.json --body-file .scratch/lesson.md`
    with `{"lesson": "<imperative sentence>", "status": "tentative", "scar": ["<incident and its ar:// ref>"], "recurrences": {"count": 1, "refs": ["ar://…"]}}`.
@@ -42,7 +44,5 @@ Doctrine upheld: D-14, D-17, D-18.
 
 ## Failure handling
 
-- `records update` exit 1 on `recurrences`: give the whole `recurrences` object with the
-  complete `refs` list, not only the new ref.
 - Changing an existing lesson needs the card to name it (D-23). When it does not, suggest
   maintenance to the orchestrator with the lesson ref (`ar://lesson/<L-id>`).

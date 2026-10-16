@@ -106,6 +106,12 @@ profile `.env`:
 
 ## Host configuration
 
+The board is created once per host:
+
+```sh
+hermes kanban boards create autoresearch
+```
+
 The dispatcher runs in the gateway and reads `kanban.*` from the host's default profile.
 Allow only the researchers to claim cards, one card each at a time:
 
@@ -117,7 +123,8 @@ hermes config set kanban.dispatch_in_gateway true
 ```
 
 The `orchestrator` profile creates the cards; without it, a researcher only runs cards
-created by hand with the Kanban CLI.
+created by hand with the Kanban CLI. Softmax hosting does all of this in its prepare step; the
+metta changes it needs are in [docs/hosting.md](../docs/hosting.md).
 
 ## Operate
 
@@ -142,10 +149,10 @@ Then, for example:
 | Group | Commands | Notes |
 |---|---|---|
 | `records` | `new`, `show`, `update`, `status`, `link`, `find`, `validate`, `summary`, `resolve` | the ontology's records; `resolve` reads an `ar://` ref at a commit |
-| `stats` | design, noise, ingest, evaluate and the rest | pre-registered evaluation and the decision rule |
+| `stats` | `design`, `noise`, `ingest`, `evaluate` | pre-registered evaluation and the decision rule |
 | `kb` | `lint`, `apply`, `index`, `stale`, `renew`, `compact`, `hubs` | maintenance cards run `apply`/`stale`/`renew`/`compact` in their worktree |
 | `game` | `show` | the game contract |
-| `softmax` | `whoami`, `credits`, `xp create/status/recover/artifacts`, `upload`, `upload-bootstrap`, `leaderboard`, `game-version`, `standings`, `league-episodes` | every platform action of a researcher |
+| `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-bootstrap`, `leaderboard`, `game-version`, `standings`, `league-episodes` | every platform action of a researcher |
 | `workspace` | `integrate`, `merged`, `publish`, `bootstrap` | `publish` is the orchestrator's |
 | `promotion` | `submit`, `bootstrap`, `status`, `accept` | the orchestrator's; denied to researchers |
 
@@ -171,7 +178,8 @@ All research state is in the canonical repository: records, plan, strategy, prom
 and every pushed `card/*` branch. Keep a copy of the bare repository (`RESEARCH_CANONICAL`).
 On a new host, put that copy at `RESEARCH_CANONICAL`, install each profile, write its `.env`
 and run the bootstrap: it clones the existing history instead of seeding. The Kanban board is
-not restored; the orchestrator re-plans from the workspace.
+not restored. The orchestrator's doctrine then stops new work until an operator confirms the
+recovery, so it does not re-plan over surviving card branches and platform requests.
 
 ## Develop and test
 

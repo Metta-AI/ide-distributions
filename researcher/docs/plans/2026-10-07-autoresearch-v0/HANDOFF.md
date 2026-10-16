@@ -1,5 +1,11 @@
 # Handoff prompt: implement autoresearch v0
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Paste everything below the line into a new Claude Code session started in `~/coding/ide-mvp`.
 
 > **Status 2026-10-08:** historical. This prompt started the v0 implementation; it is kept as written. Where it differs, `00-overview.md` (amendments A1-A13 and the outcomes under "Dates and decisions") is current: Hermes installs from a clone of tag `v2026.9.24` (A1; the `uv tool install git+...` command below fails), the Kanban slice passed so the serial fallback was not built, and the compiler passed M1.

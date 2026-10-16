@@ -1,5 +1,11 @@
 # M1: Hermes CLI dispatch correction
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 The first C3-authorized flash compile on `afc8ab0` failed before generation.
 Immutable failed build `afc8ab06-1` records three built-in attempts, each rejected
 by argparse: top-level `-z/--oneshot` requires a prompt argument. No units were

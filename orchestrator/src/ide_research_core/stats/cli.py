@@ -1,6 +1,6 @@
-"""``autoresearch stats ...``: ingest episode rows, calibrate noise, apply the decision rule.
+"""``research stats ...``: ingest episode rows, calibrate noise, apply the decision rule.
 
-Same envelope, exit codes and root resolution as ``autoresearch records`` (see
+Same envelope, exit codes and root resolution as ``research records`` (see
 ``ide_research_core.records.cli``). A blocked decision is still ``ok: true`` with
 ``promote_eligible: false``; exit 1 is reserved for failures such as a missing record or rows.
 
@@ -18,8 +18,9 @@ Files under the workspace root:
   league shows competing for our player, A9, because a promotion requires champion ==
   baseline), and its ``environment.game_version`` must be the current version. A refusal is
   exit 1 with ``error.reason``: ``not_designed``; ``identity`` (the credential is not the
-  expected Player, checked first because the champion read is per player); ``champion_conflict`` (the league and the
-  loop disagree, or the agent is paused for it: ``promotion.open_conflict``);
+  expected Player, checked first because the champion read is per player);
+  ``champion_conflict`` (the league shows a champion the loop did not record:
+  ``promotion.conflict``);
   ``champion_unknown`` (the league shows no champion: run the starter-policy bootstrap first,
   A14); ``baseline_not_champion`` (any other policy, such as a leftover uploaded version);
   ``version_mismatch``; ``needs_calibration`` (no noise record for the current version); or
@@ -73,7 +74,7 @@ from ide_research_core.stats.noise import (
 )
 from ide_research_core.stats.opponents import DEFAULT_EPISODES, league_snapshot, sample_lineups
 
-# games/ lives at the autoresearch project root, next to schemas/.
+# games/ lives at the distribution root.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAMPION_UNKNOWN = "champion unknown: pass --champion"
 GAME_ENV = "RESEARCH_GAME"

@@ -1,5 +1,11 @@
 # GotA toolkit drift: Task 1.2 adaptation
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Checked on 2026-10-07 with coworld 0.1.57 and softmax-cli 0.26.38.
 The toolkit was copied from `personal_labs@07dc6f94760fae3cf2de36877e0b6186cfd1dc63`
 and `co-gas@6742feb` using committed files only.

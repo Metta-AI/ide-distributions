@@ -1,5 +1,11 @@
 # GotA live engine following (2026-10-08)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Online build and direct gate commands resolve the shared `softmax game-version`
 envelope, then use public `PlatformCli` league/show reads to obtain the canonical
 Coworld row. Versions must agree. The runnable URL must carry a complete Polyworld

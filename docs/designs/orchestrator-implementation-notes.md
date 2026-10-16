@@ -18,6 +18,8 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - The ontology is **embedded at the end of each `SOUL.md`** by `tools/sync_shared.py`, not
   copied to `<distribution>/ontology/`. Hermes loads `SOUL.md` in every session, cron
   included, and the orchestrator has no file tools to read a separate file.
+- For the same reason the orchestrator's doctrine is the `## Doctrine` section of its
+  `SOUL.md`, not a separate `doctrine/orchestrator.md` (which nothing loaded).
 - `tools/sync_shared.py` also copies `researcher/games/*/GAME.md` into `orchestrator/games/`:
   the shared package reads the league id from the game contract under the distribution root.
 - There is **no CI equality check** on the generated copies (design v4.4 cut it); the script
@@ -63,6 +65,9 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - The researcher's deny list blocks `research promotion submit|bootstrap|accept`; the
   commands themselves stay in the shared CLI (one vendored package for both profiles).
 
+- The handoff's `journal` is `ar://journal/J-...`; the design's `ar://J-...` does not resolve
+  with `research records resolve`.
+
 ## Promotion (§9)
 
 - **`promotion.lock`** (a file in the bare repository) is held by each promotion command
@@ -83,10 +88,11 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   conflict, outcome champion == league champion, one promotion at a time, the candidate
   strategy on `main`.
 
-## Hosting (§11)
+## Hosting (§13)
 
-Unchanged: R-1 to R-6 are metta changes (Rohit). The prepare step runs
-`HERMES_HOME=<profile> python3 <profile>/scripts/bootstrap.py` once per profile. **Order:
-researchers first.** The first researcher creates and seeds the bare canonical repository
-from its `games/<game>/seed`; the orchestrator ships no seed, so its bootstrap only clones
-(on an empty canonical it fails with "no seed for game").
+The metta changes R-1 to R-6 are in [docs/hosting.md](../hosting.md), updated for this
+implementation: one `RESEARCH_*` environment for every profile, each profile's
+`scripts/bootstrap.py` as the prepare step (researchers first: the first researcher creates
+and seeds the bare canonical repository; the orchestrator ships no seed, so on an empty
+canonical repository its bootstrap fails with "no seed for game"), the board created once,
+and the supervisor resumed once.

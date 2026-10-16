@@ -111,7 +111,7 @@ evaluators and engine qualification requirements remain in force.
 
 ## Local validation
 
-From `autoresearch/`:
+From `researcher/`:
 
 ```bash
 uv run --locked --offline pytest tests/unit/gota/compiler/test_goal_layer.py -q

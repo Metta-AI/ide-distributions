@@ -1,5 +1,11 @@
 # Finding: autoresearch on the pinned EC2 Hermes image
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 **Status:** the fixes on branch `jboggs/autoresearch-hermes-0216` address recommendations 3-5 (`kanban_schedule` block, `hermes_python()`, README `cron run`). One correction: `hermes cron run` already ran the job at once in v0.21.5; the README was wrong for both versions. Recommendations 1, 2, 6 and 7 are open.
 
 **Date:** 2026-10-09. Run by Claude for James.

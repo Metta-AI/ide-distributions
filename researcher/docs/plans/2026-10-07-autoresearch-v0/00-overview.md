@@ -1,5 +1,11 @@
 # Autoresearch v0 — Implementation Overview
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 > **For agentic workers:** This file is not executed task by task. It fixes the cross-cutting contracts that the three executable plans (`01-…`, `02-…`, `03-…`) rely on. Read it before any plan. Each executable plan uses superpowers:subagent-driven-development or superpowers:executing-plans.
 
 **Goal:** Build the autoresearch Hermes profile distribution so that it runs a complete research cycle (investigate → design experiment → build → XP → review → promote/submit) on a local Hermes install, ready to hand to Rohit for hosting.

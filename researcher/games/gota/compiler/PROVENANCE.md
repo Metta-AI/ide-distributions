@@ -34,10 +34,10 @@ Approved C1 mechanical corrections: destination test imports point to the vendor
 | `strategy/compiler/runtime/main.bas` | `strategy/compiler/runtime/main.bas` | `735c59e4033a60229b3d8ae3d3128a26d8aac9563873999e0f5db71111a30527` |
 | `docs/policy-surface.md` | `docs/policy-surface.md` | `b5fce6e48e24edecd5d29a7913c6652e598340df8bb61f5a42ad3d8bd3a1361d` |
 | `reference/base-bassy-28030de6.bas` | `reference/base-bassy-28030de6.bas` | `8c81b016a92a4bde2d8420e793633b79ef4f1f8e834e7bf3cd2baf6cc9e4775b` |
-| `autoresearch/tests/unit/gota/compiler/test_strategy_basic.py` | `tools/tests/test_strategy_basic.py` | `b331d2b17e903a5cceed31aa07d3aa93476464bd016169cd9234676125868c7b` |
-| `autoresearch/tests/unit/gota/compiler/test_strategy_format.py` | `tools/tests/test_strategy_format.py` | `41754f8fc124232171aeb8f2050895934684abb61a48dcb236a70d4c49a487f8` |
-| `autoresearch/tests/unit/gota/compiler/test_strategy_build.py` | `tools/tests/test_strategy_build.py` | `2e36b71b370e3cdf473bc47c88138af1130aaea3ec8dff34900c937ea074031a` |
-| `autoresearch/tests/unit/gota/compiler/fixtures/strategy_trivial/STRATEGY.md` | `tools/tests/fixtures/strategy_trivial/STRATEGY.md` | `a8ebe8ec216f62ac7e07f14f3d69ae1c32ec2bc0df19df6a1d462e75958185cf` |
+| `researcher/tests/unit/gota/compiler/test_strategy_basic.py` | `tools/tests/test_strategy_basic.py` | `b331d2b17e903a5cceed31aa07d3aa93476464bd016169cd9234676125868c7b` |
+| `researcher/tests/unit/gota/compiler/test_strategy_format.py` | `tools/tests/test_strategy_format.py` | `41754f8fc124232171aeb8f2050895934684abb61a48dcb236a70d4c49a487f8` |
+| `researcher/tests/unit/gota/compiler/test_strategy_build.py` | `tools/tests/test_strategy_build.py` | `2e36b71b370e3cdf473bc47c88138af1130aaea3ec8dff34900c937ea074031a` |
+| `researcher/tests/unit/gota/compiler/fixtures/strategy_trivial/STRATEGY.md` | `tools/tests/fixtures/strategy_trivial/STRATEGY.md` | `a8ebe8ec216f62ac7e07f14f3d69ae1c32ec2bc0df19df6a1d462e75958185cf` |
 | `tools/pw_scout.py` | `tools/pw_scout.py` | `b62c9ba289d3e38e1939c60c743b5ae99918272a236ff83d9bf78707bab94318` |
 | `tools/pw_fights.py` | `tools/pw_fights.py` | `c63e8448ded5f2c5b9a16edf06a1618a77773ab68f708b546325acc060731973` |
 | `tools/pw_metrics.py` | `tools/pw_metrics.py` | `0f33530405b5997ec303b991e56e77de0a36a3ee8d91f7fc0978779d01940ac8` |

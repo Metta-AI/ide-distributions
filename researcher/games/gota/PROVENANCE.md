@@ -17,8 +17,8 @@ pinned; a future host change requires updating the list and checking it against 
 Run from the repository root:
 
 ```sh
-python3 autoresearch/games/gota/tools/count_globals.py autoresearch/tests/fixtures/gota/submitted-v13.bas
-python3 autoresearch/games/gota/tools/count_globals.py autoresearch/tests/fixtures/gota/submitted-v13.bas --inventory
+python3 researcher/games/gota/tools/count_globals.py researcher/tests/fixtures/gota/submitted-v13.bas
+python3 researcher/games/gota/tools/count_globals.py researcher/tests/fixtures/gota/submitted-v13.bas --inventory
 ```
 
 See `../../docs/plans/findings/gota-globals-budget.md` for submitted identity,
@@ -121,7 +121,7 @@ SHA-256: `728239b80d107a2c2c57ac5fc65be4fabb5763d78abb94d622c842792d5a7a0b`;
 machine-specific paths removed. These generated fixtures carry provenance here
 rather than an in-file header because headers would corrupt binary/JSON formats.
 
-Run from `autoresearch/`:
+Run from `researcher/`:
 
 ```sh
 uv run --locked --python 3.12 pytest tests/unit/gota
@@ -191,7 +191,7 @@ Hard storage, source, routine, static-code and PRINT ceilings come from live
 actual engine tests observe `PRINT "X", 12`: four events/five bytes,
 `PRINT "X"; 12;`: two events/three bytes, empty PRINT: one event/one byte.
 
-Run from `autoresearch/`:
+Run from `researcher/`:
 
 ```sh
 # Generate into a fresh committed-input candidate; see GAME.md bootstrap steps.

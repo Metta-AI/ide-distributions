@@ -19,8 +19,9 @@ artifact hash, that version id is returned without uploading; a version record o
 and the event write uploads again on retry, which creates a second platform version under the
 same name; the binding still names exactly one.)
 
-``upload_bootstrap`` uploads the first champion on a fresh install (amendment A14; called by
-``submit.bootstrap_champion``, which checks the identity and that no champion exists first):
+``upload_bootstrap`` uploads the first champion on a fresh install (amendment A14; a
+researcher's bootstrap card runs it, then the orchestrator submits the version with
+``promotion bootstrap``, which checks the identity and that no champion exists):
 the same build reader, version provenance and retry safety, with ``experiment: null`` and the
 policy name ``policy_name("bootstrap", artifact hash)``. The same build again finds its
 version by that name and does not upload again, within what the card's worktree sees (its own

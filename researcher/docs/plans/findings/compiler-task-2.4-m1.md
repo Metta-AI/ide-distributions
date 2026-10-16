@@ -1,5 +1,11 @@
 # Task 2.4: real Hermes M1 qualification
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 **Completed locally on 2026-10-08.** Real Hermes/Kimi generation produced immutable
 build `00a0bdcc-2`, which passed G1–G5, the full twenty-seed native equivalence
 oracle, and twenty build-bound attribution audits. Task 2.5 had not begun at that

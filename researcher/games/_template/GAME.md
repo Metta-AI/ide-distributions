@@ -55,7 +55,7 @@ silent fallback. Core code never names a game.
   the current game version runs; the only value is `coworld_manifest`: the commit in the
   `source_url` of the game runnable in the Coworld manifest. When the pin changes, a
   maintenance card fetches `repo` and runs `kb renew --game-repo <clone> --old <previous
-  commit> --new <pin>`: claims whose cited lines did not change are renewed, the others are
+  commit> --new <pin> --version <game version>`: claims whose cited lines did not change are renewed, the others are
   reported for re-verification. Without `source`, claims only go stale on a game-version
   change.
 - `host_requirements` (optional): `{env: [<VAR>, …], tools: [<executable>, …]}`, what a

@@ -393,6 +393,11 @@
     <p class="context">This plan puts the autoresearch agent into Rohit's hosted Hermes fleet. As a result, a coach who clicks Start Hermes in the Softmax IDE gets autoresearch. We wrote it for James from plan revision 5 and Rohit's update of 2026-10-09. We checked the metta facts against <code>main</code> at <code>0c0752ed3f</code>.</p>
   </header>
 
+  <div class="callout callout-warn">
+    <span class="callout-label">Historical record</span>
+    This document records the <code>autoresearch</code> harness in <code>Metta-AI/ide-mvp</code>. The native-Kanban researcher and orchestrator in this repository supersede it, so its paths, commands, environment variables and mechanisms (for example the comms inbox and outbox, the queue-keeper and other cron jobs, spend management) may no longer exist. For the current design, see <a href="../../../docs/designs/orchestrator-implementation-notes.md">orchestrator-implementation-notes.md</a>.
+  </div>
+
   <section id="summary">
     <h2>Executive Summary</h2>
     <p>Today a coach who clicks <strong>Start Hermes</strong> in the Softmax IDE gets Rohit's <code>optimizer</code> profile. We want that coach to get the autoresearch agent in a hosted workspace that is always on. In that workspace, the agent does its research loop, answers in IDE chat, and takes work from the IDE research buttons. The coach can also pause and resume it. Autoresearch already works on our own EC2 test box, and it submitted its first league champion there. Rohit made and deployed the hosted system. It is a shared EC2 fleet, and each player gets a Hermes sandbox that connects to the IDE. Today the fleet operates his <code>rohit-optimizer</code> profile on one small host with <code>$10</code> inference keys. Rohit is away for the next few days, thus <strong>we own his code and the deployment for now</strong>. Our agents write and land the metta changes. Aaron, Alex and Richard review them, and James operates the infrastructure.</p>

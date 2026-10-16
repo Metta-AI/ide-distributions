@@ -11,8 +11,9 @@ Doctrine upheld: D-01, D-02, D-11, D-12, D-13, D-21, D-22, D-23, D-24, D-25, D-2
 
 ## Start and recover
 
-1. Read your own card with native `kanban_show`. Read its title, kind, `why` refs, deliverable,
-   completion contract, `base_sha`, branch and per-card skills. Work in the assigned git
+1. Read your own card with native `kanban_show`. Read its title, its body (why, deliverable,
+   completion contract), the `Card context` JSON at the end of the body (`kind`, `entity`,
+   `attempt`, `refs`, `base_sha`, `branch`) and its per-card skills. Work in the assigned git
    worktree, not the profile's main clone. Repair cards use their assigned `repair/<id>` branch.
 2. Before research, check the actual branch named on the card:
    `"$RESEARCH_CLI" workspace merged --branch card/<id>`
@@ -85,7 +86,7 @@ Create it with no `outcome` until the findings are ready, so its body can still 
 Example metadata (replace placeholders):
 
 ```json
-{"iteration": 1, "mode": "experimentation", "card": "<own task id>", "doctrine_version": 12,
+{"iteration": 1, "mode": "experimentation", "card": "<own task id>", "doctrine_version": 13,
  "unit": "<bounded deliverable>", "refs": ["ar://experiment/<E-id>"]}
 ```
 
@@ -119,7 +120,7 @@ After successful integration, use native `kanban_complete` with a nonempty findi
 ```json
 {
   "outcome": "done",
-  "journal": "ar://J-...",
+  "journal": "ar://journal/J-...",
   "records_changed": ["E-...", "R-..."],
   "merged": {"card_sha": "<integration result>", "main_sha": "<integration result>"},
   "experiment": {"id": "E-...", "status": "evaluating", "decision": null},

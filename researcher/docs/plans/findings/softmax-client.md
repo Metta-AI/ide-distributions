@@ -1,5 +1,11 @@
 # Finding: real Softmax client facts (Plan 03 Tasks 3.1–3.2)
 
+> **Historical record.** This document records the `autoresearch` harness in `Metta-AI/ide-mvp`. The
+> native-Kanban researcher and orchestrator in this repository supersede it, so its paths,
+> commands, environment variables and mechanisms (for example the comms inbox and outbox,
+> the queue-keeper and other cron jobs, spend management) may no longer exist. For the
+> current design, see [orchestrator-implementation-notes.md](../../../../docs/designs/orchestrator-implementation-notes.md).
+
 Verified 2026-10-07 against coworld 0.1.57, softmax-cli 0.26.38 (both pinned in `pyproject.toml`) and the live platform, as Player Games Bond (`ply_f39295d0-…`), read-only. Code: `src/autoresearch/softmax_tool/{platform_cli,identity,xp,client}.py`.
 
 **Versions (2026-10-08):** pinned coworld **0.1.58** (bumped from 0.1.57; `uv lock --upgrade-package coworld`, lock diff touched only coworld), softmax-cli **0.26.38** (still the latest on PyPI). The 0.1.57 → 0.1.58 source diff touches none of the commands below except `upload-policy`: new `--llm-endpoint` / `--llm-api-key-env` options, and the *default* policy name when `--name` is omitted (a Player session now uses its player id). The client always passes `--name`, and `Upload complete: <name>:v<N>` (in the unchanged `coworld/upload.py`) is still the output, so no client or fixture change was needed. The `xp-request`, `submit`, `submissions`, `results`, `rounds`, `episodes`, `episode-results`, `show`, `player` and `leagues`/`memberships` commands are defined in unchanged modules (`tournament_cli.py`, `upload.py`, `submit.py`) or in parts of `cli.py` the diff did not touch (its only hunk is `upload-policy`). Other changes (hosted-LLM runner, `CoworldClient.sql_query`, training-trajectory docs) are outside our path. The findings below were recorded against 0.1.57 and still hold.
