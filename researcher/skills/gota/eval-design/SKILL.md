@@ -128,15 +128,12 @@ bindings from `"$RESEARCH_HOME"` with `"$RESEARCH_PYTHON"` as GAME.md shows.
 This resolves the current engine, verifies committed input and transform hashes,
 freezes exact bytes and runs G1–G4 without Hermes, model calls or scanner setup.
 G4 is a baseline mirror screen. G5 is not executed: its advisory report says
-`not applicable: prebuilt`, with `passed: false`. Read the retained reports and
-run the separate G1–G4 `local_check` command in GAME.md before bootstrap.
-Both the build and separate full local check have the approximately 55-minute
-G3/G4 workload reported on EC2 in GAME.md; run each with `background: true`
-and wait on its own `session_id` as **Long commands** says. After each exits,
-read the build's `report.json`, `report.md`, `version.json`, `gates.json` and
-provenance, then the check's `gates.json`, `engine_identity.json`,
-`coworld_manifest.json`, native measurement reports and G2 results/logs before
-bootstrap. An errored build follows **Build tool faults** above.
+`not applicable: prebuilt`, with `passed: false`. A completed build includes local
+validation; do not run G1–G4 again for the same artifact and execution conditions.
+Follow `GAME.md`'s **Local validation** contract: inspect the complete retained
+reports, provenance, native measurements, and G2 episode evidence before upload.
+All required gates and their budgets remain unchanged. An errored build follows
+**Build tool faults** above. A failed or incomplete build does not qualify for reuse.
 
 After the required checks pass, upload the starter:
 

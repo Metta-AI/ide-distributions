@@ -39,9 +39,12 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
    canonical state, send a `help_request:` to the orchestrator and block.
 2. Read the game's `## Starter policy` in `GAME.md` (`card` gives its location). Build that
    starter policy in this worktree through the installed game binding, into
-   `.scratch/build/champion`. Do not substitute an experimental candidate. Run the separate
-   `local_check` binding and retain the reports. Required game checks must pass; these local
-   checks are not competitive evidence (D-04).
+   `.scratch/build/champion`. Do not substitute an experimental candidate. Follow the game's
+   local validation contract: when a completed build includes local validation, review and
+   reuse its complete evidence for the unchanged artifact and execution conditions. Otherwise
+   run the `local_check` binding and retain its reports. Required game checks must pass;
+   missing, incomplete, failed, or errored build evidence does not qualify for reuse.
+   These checks are not competitive evidence (D-04).
 3. Upload only:
    `"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir .scratch/build/champion`
    Choose your own descriptive name in place of `opening-rush` (at most 23 lowercase letters, digits, or hyphens). Reuse it on retries; the CLI appends your full player ID.

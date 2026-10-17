@@ -411,12 +411,20 @@ def test_shared_upload_preserves_prebuilt_provenance_in_existing_experiment(cand
     from unit.softmax.test_upload import Workspace
 
     directory, artifact = candidate
-    fake_gates(monkeypatch)
+    calls = fake_gates(monkeypatch)
     shared = tmp_path / 'shared'
     shared.mkdir()
     workspace = Workspace(shared)
     build.build(directory, workspace.build, offline=True, prebuilt=artifact)
+    from ide_research_core.softmax_tool.upload import checked_build
+    receipt, frozen, artifact_hash = checked_build(workspace.build)
+    assert receipt['status'] == 'passed'
+    assert set(receipt['gates']) == {'G1', 'G2', 'G3', 'G4', 'G5'}
+    assert all(receipt['gates'][name]['passed'] for name in ('G1', 'G2', 'G3', 'G4'))
+    assert receipt['gates']['G5']['applicable'] is False
+    assert frozen.read_bytes() == artifact.read_bytes() and artifact_hash == sha(artifact)
     version_id = workspace.run()
+    assert calls == ['G1', 'G2', 'G3', 'G4']  # Build checks once; upload reuses their receipts.
     meta = workspace.store.load(version_id)[0]
     assert meta['artifact_sha256'] == sha(artifact)
     provenance = json.loads(artifact.with_suffix('.provenance.json').read_text())
@@ -494,10 +502,11 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     game = (ROOT / 'games/gota/GAME.md').read_text()
     assert '\n## Starter policy\n' in game
     section = game.split('\n## Starter policy\n', 1)[1].split('\n## ', 1)[0]
-    commands = ('make_v13_live.py', 'tools/build.py', '-m games.gota.gates',
-                'softmax upload-bootstrap')
+    commands = ('make_v13_live.py', 'tools/build.py', 'softmax upload-bootstrap')
     positions = [section.index(command) for command in commands]
     assert positions == sorted(positions)
+    assert '-m games.gota.gates' not in section
+    assert 'Local validation' in section
     assert 'strategy/candidates/bootstrap' in section
     assert '.scratch/build/champion' in section
     assert 'git -C "$CARD_WORKTREE"' in section
@@ -513,3 +522,21 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
         assert 'upload-baseline' not in path.read_text()
         assert 'handoff is pending' not in path.read_text()
     assert 'handoff is pending' not in game
+
+
+def test_completed_build_validation_contract_preserves_checks_and_fallback():
+    game = (ROOT / 'games/gota/GAME.md').read_text()
+    contract = game.split('## Local validation\n', 1)[1].split('\n## ', 1)[0]
+    for requirement in ('status: passed', 'G1–G3', 'G4', 'G5', 'applicable: false',
+                        'policy_sha256', 'engine', 'manifest', 'runner', 'baseline',
+                        'seeds', 'tick budget', 'native tool identity', 'incomplete',
+                        'errored', 'produce a new build', 'diagnostic reruns'):
+        assert requirement in contract
+    for name in ('build-upload', 'candidate'):
+        skill = (ROOT / f'skills/autoresearch/{name}/SKILL.md').read_text()
+        assert 'completed build includes local validation' in skill
+        assert 'Otherwise' in skill and '`local_check`' in skill
+        assert 'does not qualify for reuse' in skill
+    skill = (ROOT / 'skills/gota/eval-design/SKILL.md').read_text()
+    assert 'do not run G1–G4 again' in skill
+    assert 'run the separate G1–G4' not in skill
