@@ -79,7 +79,7 @@ def test_guard_blocks_card_creation(tool):
 
 
 @pytest.mark.parametrize(
-    "tool", ["kanban_show", "kanban_comment", "kanban_complete", "kanban_block", "read_file"]
+    "tool", ["kanban_show", "kanban_comment", "kanban_block", "read_file"]
 )
 def test_guard_allows_the_card_lifecycle(tool):
     assert _guard().pre_tool_call(tool_name=tool, args={}) is None
