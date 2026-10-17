@@ -378,7 +378,7 @@ def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monke
     monkeypatch.setattr(upload, 'worker_store', lambda ctx: object())
     # Refusal happens before any record or platform call, with no fake identity success.
     with pytest.raises(Exception, match='artifact sha256'):
-        upload.upload(None, None, out, 'E-test')
+        upload.upload(None, None, out, 'E-test', player_id='ply_test')
 
 
 def test_prebuilt_retains_post_gate_source_fault(candidate, tmp_path, monkeypatch):
