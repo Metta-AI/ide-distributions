@@ -48,6 +48,10 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
    `candidate` and the upload-only bootstrap path instead; the orchestrator submits it.
 6. Go on with `xp-request`.
 
+## Rejected build inputs
+
+A build with `status: rejected` and `error.reason: invalid_input` is a correctable input refusal, not a tool fault. Read `error.details.path` and `error.details.action`, correct and commit truthful inputs within the card scope, then retry with a new output directory. Preserve the rejected report; do not overwrite it, invent provenance, or bypass a check. If correction needs unavailable facts or authority, request help and block. This explicit result takes precedence over generic CLI-failure handling.
+
 ## Failure handling
 
 - A gate fails: do not upload. Fix the candidate within the experiment's one change, or

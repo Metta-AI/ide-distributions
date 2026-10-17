@@ -98,6 +98,10 @@ BASIC baseline uses the explicit prebuilt path below;
 local gate success proves mechanism, not hosted strength. Failed/partial evidence
 cannot support a promotion.
 
+## Rejected build inputs
+
+A build with `status: rejected` and `error.reason: invalid_input` is a correctable input refusal, not a tool fault. Read `error.details.path` and `error.details.action`, correct and commit truthful inputs within the card scope, then retry with a new output directory. Preserve the rejected report; do not overwrite it, invent provenance, or bypass a check. If correction needs unavailable facts or authority, request help and block. This explicit result takes precedence over generic CLI-failure handling.
+
 ## Build tool faults
 
 For either compiler or prebuilt builds, read the build JSON and retained reports
