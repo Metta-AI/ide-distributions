@@ -258,7 +258,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
         if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'upload-bootstrap']:
             assert kwargs['env']['RESEARCH_SOFTMAX'] == 'fake'
             assert kwargs['env']['RESEARCH_GAME'] == 'gota'
-            assert argv[5:] == ['--build-dir', str(out)]
+            assert argv[5:] == ['--name', 'opening-rush', '--build-dir', str(out)]
             return real_run(argv, **kwargs)
         if argv[0] != 'uv':
             assert Path(argv[0]).name in ('git', 'nim', f'gota_match-{POLYWORLD_COMMIT[:8]}', f'gate_probe-{POLYWORLD_COMMIT[:8]}'), argv
@@ -378,7 +378,7 @@ def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monke
     monkeypatch.setattr(upload, 'worker_store', lambda ctx: object())
     # Refusal happens before any record or platform call, with no fake identity success.
     with pytest.raises(Exception, match='artifact sha256'):
-        upload.upload(None, None, out, 'E-test')
+        upload.upload(None, None, out, 'E-test', 'ply_fake', 'opening-rush')
 
 
 def test_prebuilt_retains_post_gate_source_fault(candidate, tmp_path, monkeypatch):
