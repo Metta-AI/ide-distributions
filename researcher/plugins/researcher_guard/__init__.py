@@ -87,11 +87,27 @@ def pre_tool_call(tool_name=None, args=None, **kwargs):
     if tool_name == "kanban_complete":
 
         def read_record(record_id):
-            from agent.secret_scope import build_profile_secret_scope
+            from agent.secret_scope import build_profile_secret_scope, current_secret_scope
             from hermes_constants import get_hermes_home
 
             home = get_hermes_home()
-            env = {**os.environ, **build_profile_secret_scope(home), "HERMES_HOME": str(home)}
+            env = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith(("RESEARCH_", "OPENROUTER_"))
+                and key
+                not in {
+                    "SOFTMAX_PLAYER_CREDENTIAL",
+                    "COGAMES_API_URL",
+                    "VIRTUAL_ENV",
+                    "UV_PROJECT_ENVIRONMENT",
+                    "PYTHONPATH",
+                    "PYTHONHOME",
+                }
+            }
+            scope = current_secret_scope()
+            env.update(build_profile_secret_scope(home) if scope is None else scope)
+            env["HERMES_HOME"] = str(home)
             root = env.get("RESEARCH_WORKSPACE", str(home / "workspace"))
             result = subprocess.run(
                 [str(home / "bin/research"), "records", "show", record_id, "--root", root],

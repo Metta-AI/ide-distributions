@@ -72,9 +72,9 @@ PROVENANCE_FIELDS = (
 
 
 def policy_name(experiment: str, artifact_hash: str, player_id: str) -> str:
-    """The platform policy name: ``ar-<player>-<experiment>-<first 12 hex of the artifact sha256>``,
-    lowercase."""
-    return f"ar-{player_id}-{experiment}-{artifact_hash[:12]}".lower()
+    """Player-scoped deterministic name within the platform's 64-character limit."""
+    player_hash = hashlib.sha256(player_id.encode()).hexdigest()[:16]
+    return f"ar-{player_hash}-{experiment}-{artifact_hash[:12]}".lower()
 
 
 def _file_sha256(path: Path) -> str:

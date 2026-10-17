@@ -106,7 +106,7 @@ def test_upload_creates_version_event_and_binding(ws):
 
 def test_policy_name_is_deterministic():
     name = policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "ab" * 32, "ply_fake")
-    assert name == "ar-ply_fake-e-01k6z3v8qxaaaaaaaaaaaaaaaa-abababababab"
+    assert name == policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "ab" * 32, "ply_fake")
     assert name != policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "cd" * 32, "ply_fake")
 
 
@@ -314,3 +314,11 @@ def test_bootstrap_names_are_scoped_to_the_player():
     assert policy_name("bootstrap", artifact, "ply_alice") == policy_name(
         "bootstrap", artifact, "ply_alice"
     )
+
+
+def test_real_player_upload_names_fit_platform_contract():
+    player = "ply_305f0175-65a2-47ca-9566-69991871b743"
+    for experiment in ("bootstrap", "E-01K6Z3V8QXAAAAAAAAAAAAAAAAAA"):
+        name = policy_name(experiment, "ab" * 32, player)
+        assert len(name) <= 64
+        assert name.replace("-", "").isalnum()

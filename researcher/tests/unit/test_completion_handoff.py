@@ -41,3 +41,43 @@ def test_native_completion_tool_blocks_missing_handoff():
         tool_name="kanban_complete", args={"task_id": "t_upload", "summary": "Partial"}
     )
     assert verdict["action"] == "block"
+
+
+def test_completion_reads_routed_profile_workspace(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    home = tmp_path / "researcher"
+    monkeypatch.setenv("RESEARCH_WORKSPACE", "/wrong/orchestrator/workspace")
+    monkeypatch.setenv("PYTHONPATH", "/wrong/python")
+    monkeypatch.setitem(
+        sys.modules,
+        "agent.secret_scope",
+        SimpleNamespace(
+            build_profile_secret_scope=lambda _: {},
+            current_secret_scope=lambda: None,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules, "hermes_constants", SimpleNamespace(get_hermes_home=lambda: home)
+    )
+
+    def run(command, **kwargs):
+        assert command[-1] == str(home / "workspace")
+        assert "PYTHONPATH" not in kwargs["env"]
+        assert "RESEARCH_WORKSPACE" not in kwargs["env"]
+        return SimpleNamespace(
+            stdout='{"ok":true,"data":{"meta":{"card":"t1","outcome":"partial"}}}'
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    assert (
+        module.pre_tool_call(
+            tool_name="kanban_complete",
+            args={
+                "task_id": "t1",
+                "metadata": {"outcome": "partial", "journal": "ar://journal/J-one"},
+            },
+        )
+        is None
+    )
