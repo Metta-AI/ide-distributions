@@ -26,7 +26,7 @@ def test_missing_manifest_launches_no_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'), '--offline', '--json'])
     monkeypatch.delenv('GOTA_MANIFEST', raising=False)
     assert module.main() == 2
-    assert json.loads((tmp_path / 'out/version.json').read_text())['status'] == 'errored'
+    assert json.loads((tmp_path / 'out/version.json').read_text())['status'] == 'rejected'
 
 
 def test_wrong_manifest_pin_launches_no_agent(tmp_path, monkeypatch):
@@ -337,7 +337,7 @@ def test_invalid_agent_limit_flag_retains_json_before_manifest(
                                      flag, value, '--json'])
     assert module.main() == 2
     result = json.loads(capsys.readouterr().out)
-    assert result['status'] == 'errored'
+    assert result['status'] == 'rejected'
     assert flag in result['error']['message']
     assert json.loads((tmp_path / 'out/report.json').read_text()) == result
     assert json.loads((tmp_path / 'out/version.json').read_text()) == result
@@ -355,7 +355,7 @@ def test_invalid_agent_limit_env_retains_error_before_manifest(
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out')])
     assert module.main() == 2
     result = json.loads(capsys.readouterr().out)
-    assert result['status'] == 'errored'
+    assert result['status'] == 'rejected'
     assert setting in result['error']['message']
     assert 'positive integer' in result['error']['message']
     assert json.loads((tmp_path / 'out/report.json').read_text()) == result

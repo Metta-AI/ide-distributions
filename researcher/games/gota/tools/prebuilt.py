@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from games.gota.tools.build_input import InputRejected
 from games.gota.tools.native_build import digest, fingerprint
 
 ENGINE_FIELDS = ('commit', 'coworld_version', 'source_url', 'manifest_sha256')
@@ -25,31 +26,47 @@ def committed_files(candidate, paths):
     for path in paths:
         path = path.resolve()
         if not path.is_relative_to(candidate.resolve()):
-            raise ValueError(f'prebuilt input must be inside candidate: {path}')
+            raise InputRejected(f'prebuilt input must be inside candidate: {path}', path=path,
+                                action='Place the input inside the candidate directory and commit it.')
         relative = path.relative_to(repo).as_posix()
-        blob = subprocess.run(['git', '-C', str(repo), 'show', f'{head}:{relative}'],
-                              check=False, capture_output=True)
-        if blob.returncode or blob.stdout != path.read_bytes():
-            raise ValueError(f'prebuilt input must be committed unchanged: {path}')
+        if not path.is_file():
+            raise InputRejected(f'prebuilt input is missing: {path}', path=path,
+                                action='Restore or create this exact required input from known source and commit it. '
+                                       'For policy.bas the sidecar is policy.provenance.json.')
+        tracked = subprocess.check_output(
+            ['git', '-C', str(repo), 'ls-tree', '-z', head, '--', relative])
+        if not tracked:
+            raise InputRejected(f'prebuilt input must be committed unchanged: {path}', path=path,
+                                action='Commit the candidate input before building.')
+        blob = subprocess.check_output(['git', '-C', str(repo), 'show', f'{head}:{relative}'])
+        if blob != path.read_bytes():
+            raise InputRejected(f'prebuilt input must be committed unchanged: {path}', path=path,
+                                action='Review and commit the intended input bytes before building.')
         hashes[relative] = digest(path)
     return head, hashes
 
 
 def validate_source(candidate, artifact, identity):
     sidecar = artifact.with_suffix('.provenance.json')
+    correction = ('Correct the declared provenance to match the actual committed input and resolved '
+                  'engine; then commit it.')
     head, hashes = committed_files(candidate, [artifact, sidecar])
     provenance = json.loads(sidecar.read_text())
     if provenance.get('schema') != 'gota-prebuilt/1':
-        raise ValueError('prebuilt provenance schema must be gota-prebuilt/1')
+        raise InputRejected('prebuilt provenance schema must be gota-prebuilt/1', path=sidecar,
+                            action=correction)
     if provenance['artifact_sha256'] != digest(artifact):
-        raise ValueError('prebuilt artifact hash differs from provenance')
+        raise InputRejected('prebuilt artifact hash differs from provenance', path=sidecar,
+                            action=correction)
     if provenance['engine'] != {key: identity[key] for key in ENGINE_FIELDS}:
-        raise ValueError('prebuilt engine differs from resolved engine; regenerate provenance')
+        raise InputRejected('prebuilt engine differs from resolved engine; regenerate provenance', path=sidecar,
+                            action=correction)
     source = (sidecar.parent / provenance['input']['path']).resolve()
     _, source_hashes = committed_files(candidate, [source])
     hashes.update(source_hashes)
     if digest(source) != provenance['input']['sha256']:
-        raise ValueError('prebuilt input hash differs from provenance')
+        raise InputRejected('prebuilt input hash differs from provenance', path=sidecar,
+                            action=correction)
     transform = provenance['transform']
     original = source.read_bytes()
     if transform['name'] == 'identity':
@@ -57,12 +74,15 @@ def validate_source(candidate, artifact, identity):
     elif transform['name'] == 'make_v13_live.py':
         from games.gota.tools import make_v13_live
         if transform['sha256'] != digest(Path(make_v13_live.__file__)):
-            raise ValueError('prebuilt transform tool hash differs from installed tool')
+            raise InputRejected('prebuilt transform tool hash differs from installed tool', path=sidecar,
+                            action=correction)
         expected = make_v13_live.make_live(original.decode()).encode()
     else:
-        raise ValueError(f'unsupported prebuilt transform: {transform["name"]}')
+        raise InputRejected(f'unsupported prebuilt transform: {transform["name"]}', path=sidecar,
+                            action=correction)
     if expected != artifact.read_bytes():
-        raise ValueError('prebuilt artifact does not reproduce from declared input and transform')
+        raise InputRejected('prebuilt artifact does not reproduce from declared input and transform', path=sidecar,
+                            action=correction)
     return head, hashes, provenance
 
 

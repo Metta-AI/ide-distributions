@@ -35,9 +35,12 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
    writes `version.json` in the output directory. Every non-advisory gate must pass. A build
    can run for an hour: start it in the background and wait on it as the `card` skill says
    ("Long commands"). Never poll it.
-3. Run the game's `local_check` binding the same way, also in the background with one
-   wait. A local check proves the artifact runs; it is never evidence for a decision
-   (D-04).
+3. Follow the game's local validation contract in `GAME.md`. If it explicitly states that
+   a completed build includes local validation, review the complete retained evidence and
+   reuse it for the unchanged artifact and execution conditions; do not run duplicate gates.
+   Otherwise run the game's `local_check` binding in the background and wait as above.
+   Missing, incomplete, failed, or errored build evidence does not qualify for reuse; follow
+   the game's failure handling. Local validation is never evidence for a decision (D-04).
 4. Mark the experiment built:
    `"$RESEARCH_CLI" records status <E-id> built`
 5. Upload. The tool checks the identity, uploads, creates the version record, and binds it
@@ -47,6 +50,10 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
    uploads the candidate only. For a starter policy on a bootstrap card, use
    `candidate` and the upload-only bootstrap path instead; the orchestrator submits it.
 6. Go on with `xp-request`.
+
+## Rejected build inputs
+
+A build with `status: rejected` and `error.reason: invalid_input` is a correctable input refusal, not a tool fault. Read `error.details.path` and `error.details.action`, correct and commit truthful inputs within the card scope, then retry with a new output directory. Preserve the rejected report; do not overwrite it, invent provenance, or bypass a check. If correction needs unavailable facts or authority, request help and block. This explicit result takes precedence over generic CLI-failure handling.
 
 ## Failure handling
 

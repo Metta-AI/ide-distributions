@@ -8,6 +8,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    container:
+      # Match the supported Hermes runtime used by the hosted worker image.
+      image: nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+      options: --user 0
+    env:
+      GIT_AUTHOR_NAME: IDE CI
+      GIT_AUTHOR_EMAIL: ide-ci@example.invalid
+      GIT_COMMITTER_NAME: IDE CI
+      GIT_COMMITTER_EMAIL: ide-ci@example.invalid
+      HERMES_PYTHON: /opt/hermes/.venv/bin/python
     strategy:
       fail-fast: false
       matrix:
@@ -20,5 +30,17 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
+      - name: Expose the installed Hermes runtime
+        run: echo /opt/hermes/.venv/bin >> "$GITHUB_PATH"
+      - name: Install the supported native toolchain
+        if: matrix.distribution == 'researcher'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gcc g++ make xz-utils curl ca-certificates
+          curl -fsSL https://nim-lang.org/download/nim-2.2.10-linux_x64.tar.xz -o /tmp/nim.tar.xz
+          echo '0a3a38752e97e9d44aa479b3a7b37336dfe0176daf22ee5b5218ad0991ecd211  /tmp/nim.tar.xz' | sha256sum --check
+          mkdir /opt/nim-2.2.10
+          tar -xJf /tmp/nim.tar.xz -C /opt/nim-2.2.10 --strip-components=1
+          echo /opt/nim-2.2.10/bin >> "$GITHUB_PATH"
       - run: uv sync --frozen
       - run: uv run pytest -q

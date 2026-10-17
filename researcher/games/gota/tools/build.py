@@ -14,6 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+from games.gota.tools.build_input import InputRejected
+
 TOOLS = ROOT / 'games/gota/compiler/tools'
 DEFAULT_AGENT_TIMEOUT_S = 1200
 DEFAULT_AGENT_BUDGET_S = 1800
@@ -24,6 +27,9 @@ COMPILER_SESSIONS_DIR = 'gota-compiler'
 
 
 def validate_manifest(path, *, offline=False):
+    if offline and path is None:
+        raise InputRejected('--offline requires --manifest PATH or GOTA_MANIFEST',
+                            path='--manifest', action='Supply the intended historical manifest.')
     from games.gota.tools.engine_identity import resolve
     return resolve(path, offline=offline)
 
@@ -41,7 +47,8 @@ def agent_limit(value, flag, environment, default):
             raise ValueError
         return seconds
     except (TypeError, ValueError):
-        raise ValueError(f'{setting} must be a positive integer number of seconds') from None
+        raise InputRejected(f'{setting} must be a positive integer number of seconds',
+                            path=setting, action='Supply a positive integer number of seconds.') from None
 
 
 def now_iso():
@@ -89,7 +96,8 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     sys.path.insert(0, str(TOOLS))
     identity = validate_manifest(manifest, offline=offline)
     if out.exists():
-        raise ValueError(f'output already exists (immutable): {out}')
+        raise InputRejected(f'output already exists (immutable): {out}', path=out,
+                            action='Preserve the previous attempt and choose a new --out directory.')
     if prebuilt is not None:
         from games.gota.tools import prebuilt as existing
         return existing.build(candidate, out, prebuilt, identity, started=started)
@@ -155,7 +163,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--out', required=True, type=Path)
-    parser.add_argument('--prebuilt', type=Path, help='committed BASIC artifact with adjacent .provenance.json; no model compiler')
+    parser.add_argument('--prebuilt', type=Path, help='committed BASIC artifact; policy.bas requires policy.provenance.json (replace .bas); no model compiler')
     parser.add_argument('--manifest', type=Path, default=None)
     parser.add_argument('--agent-timeout', metavar='SECONDS',
                         help=f'per-generation compiler timeout; overrides GOTA_AGENT_TIMEOUT_S (default: {DEFAULT_AGENT_TIMEOUT_S}s)')
@@ -174,18 +182,20 @@ def main():
         if isinstance(error, SystemExit) and isinstance(error.code, int):
             raise
         from games.gota.gates import exception_summary
-        result = {'ok': False, 'status': 'errored', 'build': str(args.out.resolve()),
-                  'error': exception_summary(error), 'gates': {}}
+        rejected = isinstance(error, InputRejected)
+        status = 'rejected' if rejected else 'errored'
+        result = {'ok': False, 'status': status, 'build': str(args.out.resolve()),
+                  'error': error.to_dict() if rejected else exception_summary(error), 'gates': {}}
         # Never overwrite an existing immutable build, even if the caller reused --out.
         if not args.out.exists():
             args.out.mkdir(parents=True)
             for name in ('report.json', 'version.json'):
                 (args.out / name).write_text(json.dumps(result, indent=2) + '\n')
             (args.out / 'report.md').write_text(
-                '# Build error\n\nStatus: **errored**.\n\n```json\n' +
+                f'# Build error\n\nStatus: **{status}**.\n\n```json\n' +
                 json.dumps(result['error'], indent=2) + '\n```\n')
         print(json.dumps(result))
-        if isinstance(error, (ValueError, KeyError, RuntimeError)):
+        if rejected:
             return 2
         return getattr(error, 'exit_code', 3)
     print(json.dumps(result))

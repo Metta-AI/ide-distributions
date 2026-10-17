@@ -15,7 +15,11 @@ also arrives as a user message.
   reply; the bridge publishes your final text itself.
 - A Kanban notification or supervisor prompt: there is no reader of your final reply.
   Send anything meant for the user through `ide_say`, with `say:<table>:<rowid>` for the
-  event you are reporting. Reuse that key on replay. Keep ordinary updates short.
+  event you are reporting. Keep ordinary updates short. After `ide_say` succeeds,
+  acknowledge that event without publishing it again. If the outcome is uncertain,
+  retry the exact original key, text and goal_id; do not regenerate the wording.
+  An idempotency conflict means inspect the prior call, not change keys to republish
+  the same event.
 
 Never relay researcher prose to the user unless asked. Synthesize the verified outcome.
 Read `board_reconcile`, act, then `event_ack`. Observation is not acknowledgement. If an

@@ -86,7 +86,7 @@ Create it with no `outcome` until the findings are ready, so its body can still 
 Example metadata (replace placeholders):
 
 ```json
-{"iteration": 1, "mode": "experimentation", "card": "<own task id>", "doctrine_version": 13,
+{"iteration": 1, "mode": "experimentation", "card": "<own task id>", "doctrine_version": 14,
  "unit": "<bounded deliverable>", "refs": ["ar://experiment/<E-id>"]}
 ```
 
@@ -156,3 +156,7 @@ Do not set `created_cards` or override the board. Stop after completing.
   and `kind: "needs_input"`. Do not retry the faulty tool. If integration also fails, report
   both failures and use the integration block reason. Do not rewrite a frozen journal just
   to record the delivery failure; preserve that failure in the durable comment.
+
+## Rejected build inputs
+
+A build with `status: rejected` and `error.reason: invalid_input` is a correctable input refusal, not a tool fault. Read `error.details.path` and `error.details.action`, correct and commit truthful inputs within the card scope, then retry with a new output directory. Preserve the rejected report; do not overwrite it, invent provenance, or bypass a check. If correction needs unavailable facts or authority, request help and block. This explicit result takes precedence over generic CLI-failure handling.
