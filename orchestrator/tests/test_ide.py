@@ -170,3 +170,13 @@ def test_say_other_http_errors_keep_status(context, monkeypatch, status, content
     result = plugin.handler("ide_say")({"text": "Finished", "key": "say:task_events:121"})
     assert json.loads(result)["error"]["details"] == {"status": status}
     assert "secret" not in result
+
+
+def test_background_news_retries_keep_the_first_payload(context, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        IDE, "request", lambda self, method, path, payload: sent.append(payload) or {"seq": 123}
+    )
+    IDE(context).ide_say("Upload failed", "say:task_events:54", "gota-starter")
+    IDE(context).ide_say("A different summary from a concurrent wake", "say:task_events:54")
+    assert sent[0] == sent[1]
