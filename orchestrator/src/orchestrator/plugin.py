@@ -20,9 +20,19 @@ TOOLS = {
         IDE,
         (
             "Publish background news once with key say:<table>:<rowid>. Never use "
-            "for a coach chat reply; the bridge publishes that reply."
+            "for a coach chat reply; the bridge publishes that reply. Retry with the same "
+            "key and identical text and goal_id; a changed message needs its own event."
         ),
-        {"text": S, "key": S, "goal_id": S},
+        {
+            "text": {"type": "string", "minLength": 1, "maxLength": 20_000},
+            "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": r"^(?!permit:)[^\x00]*$",
+            },
+            "goal_id": {"type": "string", "maxLength": 200},
+        },
         ["text", "key"],
     ),
     "ide_task_update": (
@@ -213,13 +223,42 @@ def handler(name):
         except ResearchError as error:
             return json.dumps(error.envelope)
         except HTTPError as error:
+            details = {"status": error.code}
+            if error.code == 422 and error.headers.get_content_type() == "application/json":
+                detail = json.loads(error.read())["detail"]
+                if isinstance(detail, list):
+                    # FastAPI includes submitted inputs and validator context; never echo those.
+                    fields = {"text", "idempotency_key", "goal_id"}
+                    kinds = {
+                        "string_too_long",
+                        "string_too_short",
+                        "string_pattern_mismatch",
+                        "string_type",
+                        "missing",
+                        "extra_forbidden",
+                        "value_error",
+                    }
+                    details["validation"] = [
+                        {
+                            "field": issue["loc"][1] if issue["loc"][1] in fields else "other",
+                            "type": issue["type"] if issue["type"] in kinds else "validation_error",
+                        }
+                        for issue in detail
+                        if len(issue["loc"]) == 2 and issue["loc"][0] == "body"
+                    ]
+                elif (
+                    isinstance(detail, str)
+                    and detail.startswith("Idempotency key ")
+                    and detail.endswith(" was already used for a different write")
+                ):
+                    details["kind"] = "idempotency_key_reused"
             return json.dumps(
                 {
                     "ok": False,
                     "error": {
                         "reason": "http",
                         "message": f"cogents API returned HTTP {error.code}",
-                        "details": {"status": error.code},
+                        "details": details,
                     },
                 }
             )
