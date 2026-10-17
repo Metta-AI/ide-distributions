@@ -327,7 +327,8 @@ not applicable: its receipt has `applicable: false`, `passed: false`,
 `outcome`. Failed G1–G3 refuse upload; any tool error stops the build with retained
 evidence and refuses upload. No prebuilt build attempts model repair.
 
-The artifact, adjacent `FILE.provenance.json`, and declared original input must
+For `policy.bas`, the required sidecar is `policy.provenance.json`, not
+`policy.bas.provenance.json`. The artifact, adjacent `FILE.provenance.json`, and declared original input must
 be inside the candidate directory and committed unchanged. The sidecar schema is
 `gota-prebuilt/1`: `artifact_sha256`, `input: {path, sha256}`, `transform`, and
 `engine: {commit, coworld_version, source_url, manifest_sha256}`. Input paths are
@@ -435,3 +436,16 @@ outcomes appear in `report.json` warnings and the Markdown report, while a build
 with passing G1–G3 remains passed. An `errored` outcome from any gate stops the
 build immediately and makes it errored, including advisory gates. Local check
 returns 0 for advisory failures, 1 for blocking failures, and 3 for tool errors.
+
+### Rejected build inputs
+
+Initial caller-input validation returns `status: rejected`, `error.reason: invalid_input`,
+`error.details.path` and `error.details.action`, with exit 2. It runs no gates and
+provides no uploadable artifact. Correct and commit truthful inputs, preserve the
+rejected report, and retry with a new output directory. A rejection is not policy
+evidence. Engine, native receipt, unexpected runtime, and post-start input-integrity
+faults remain `errored` and stop the build; do not retry those as input corrections.
+
+Only explicit input rejections have this recovery contract. Malformed provenance
+JSON or missing schema fields are not classified by this change; unexpected parser
+exceptions still produce `errored`. Do not infer retryability from exception text.

@@ -85,3 +85,7 @@ Output includes evidence refs, before metric, mechanism, pinned source location,
 predicted metric and bounded next step. If observation coverage is missing,
 record the gap and request instrumentation using core `diagnose`; do not claim
 that an unobserved behavior failed or reopen a refuted lever without revise_if evidence.
+
+## Rejected build inputs
+
+A build with `status: rejected` and `error.reason: invalid_input` is a correctable input refusal, not a tool fault. Read `error.details.path` and `error.details.action`, correct and commit truthful inputs within the card scope, then retry with a new output directory. Preserve the rejected report; do not overwrite it, invent provenance, or bypass a check. If correction needs unavailable facts or authority, request help and block. This explicit result takes precedence over generic CLI-failure handling.
