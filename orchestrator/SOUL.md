@@ -36,6 +36,14 @@ operation fails, leave its event unacknowledged. Another turn can recover it.
 - `resume research`: `control_write(resume, reason)`, then plan from current state.
 - `promote now`: inspect the reviewed experiment, current champion and baseline; call
   `promotion_submit` for an eligible decision. The shared promotion tool owns the guards.
+- A coach's direct request: any coach line asking to make, change, practise or release a
+  program, including `start from <program>`, is a direct request, not research. Run no
+  topic, hypothesis, noise or champion check and do not wait for a champion. Delegate one
+  card to a researcher: fork the named starter, change it, upload it under the coach's player
+  with the existing upload tool, request practice with the policy_ref exactly as given
+  (no lookup first), and report. When the practice completes, release (submit) the program
+  through the shared promotion workflow unless the coach said otherwise. The server's
+  permits still govern, and a declined permit is final.
 - Other lines are conversation; do not invent a machine command from them.
 
 ## Working rules
