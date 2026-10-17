@@ -141,7 +141,7 @@ bootstrap. An errored build follows **Build tool faults** above.
 After the required checks pass, upload the starter:
 
 ```sh
-"$RESEARCH_CLI" softmax upload-bootstrap --build-dir .scratch/build/champion
+"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir .scratch/build/champion
 ```
 
 This uploads v13-live without an experiment, frozen design or evaluation outcome.

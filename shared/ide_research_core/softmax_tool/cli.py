@@ -78,8 +78,8 @@ the game, for its league, from ``RESEARCH_GAME``):
   yet, written into this worktree (``softmax_tool.evidence``). Prints ``{experiment,
   collected, already, pending, failed, complete, rows}``; ``complete`` means the review can
   run ``stats ingest`` on ``rows``.
-- ``upload <E> --build-dir D``: ``softmax_tool.upload``.
-- ``upload-bootstrap --build-dir D``: upload the game's starter policy build as a version with
+- ``upload <E> --name NAME --build-dir D``: ``softmax_tool.upload``.
+- ``upload-bootstrap --name NAME --build-dir D``: upload the game's starter policy build as a version with
   no experiment (A14); prints ``{version_id, platform_policy_version_id}``. The bootstrap card
   integrates the version record, then the orchestrator submits it with ``promotion bootstrap``.
 - ``leaderboard``: ``{league_id, player_id, current_champion, conflict}``. The champion is the
@@ -148,10 +148,10 @@ from ide_research_core.games.loader import GameError, load_game
 from ide_research_core.ids import parse_id
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_text
+from ide_research_core.io.dotenv import env_file_value
 from ide_research_core.io.locks import LockTimeout, file_lock
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordNotFound, RecordProblems, RecordStore
-from ide_research_core.io.dotenv import env_file_value
 from ide_research_core.softmax_tool import evidence
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
 from ide_research_core.softmax_tool.league import episode_rows
@@ -928,7 +928,7 @@ def _xp_artifacts(ctx, sm, args) -> dict:
 def _upload(ctx, sm, args) -> dict:
     player = os.environ[PLAYER_ENV]
     with experiment_lock(ctx, args.experiment, "upload"):
-        version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player)
+        version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player, name=args.name)
     binding = worker_store(ctx).load(args.experiment)[0]["candidate_binding"]
     return {
         "experiment": args.experiment,
@@ -939,7 +939,7 @@ def _upload(ctx, sm, args) -> dict:
 
 def _upload_bootstrap(ctx, sm, args) -> dict:
     player = os.environ[PLAYER_ENV]
-    version_id, platform_id = upload_bootstrap(ctx, sm, Path(args.build_dir), player)
+    version_id, platform_id = upload_bootstrap(ctx, sm, Path(args.build_dir), player, args.name)
     return {"version_id": version_id, "platform_policy_version_id": platform_id}
 
 
@@ -1053,6 +1053,10 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub = command(commands, "upload", _upload, "upload a build and bind it to the experiment")
     sub.add_argument("experiment")
     sub.add_argument("--build-dir", required=True)
+    sub.add_argument(
+        "--name", required=True,
+        help="Chosen lowercase policy name; scoped to the player. Reuse on retry.",
+    )
 
 
     sub = command(
@@ -1062,6 +1066,10 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "upload the game's starter policy build as the first champion's version",
     )
     sub.add_argument("--build-dir", required=True)
+    sub.add_argument(
+        "--name", required=True,
+        help="Chosen lowercase policy name; scoped to the player. Reuse on retry.",
+    )
 
     command(commands, "leaderboard", _leaderboard, "our leaderboard and current champion")
     command(commands, "game-version", _game_version, "the league's current game version")

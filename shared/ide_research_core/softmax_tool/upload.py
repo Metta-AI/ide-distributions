@@ -1,32 +1,11 @@
-"""Upload a built candidate and bind it to its experiment (Plan 03 Task 3.3).
+"""Upload checked builds under an agent-chosen, player-scoped policy lineage.
 
-``upload`` runs in a card worker and writes only the worker's worktree:
-
-1. Read ``<build_dir>/version.json`` (written by the game's ``build`` binding) and refuse unless
-   its gates passed.
-2. Create the immutable ``version`` record with the build provenance.
-3. ``Softmax.upload`` the artifact under ``policy_name(experiment, artifact hash)`` (the client
-   re-checks ``whoami`` immediately before, C6). The name uses the artifact hash, not the
-   version id, because the immutable version record must carry its name and the store assigns
-   the id only on creation; experiment + artifact hash is just as deterministic and unique.
-4. Add the version's ``uploaded`` event ``{policy_version_id}``.
-5. Set ``experiment.candidate_binding`` once, moving the experiment ``built -> uploaded`` in the
-   same write when needed (the binding may only be set in status ``uploaded``).
-
-Retries are safe: when the experiment is already bound to a version with this build's
-artifact hash, that version id is returned without uploading; a version record or an
-``uploaded`` event left by a crashed attempt is reused. (A crash between the platform upload
-and the event write uploads again on retry, which creates a second platform version under the
-same name; the binding still names exactly one.)
-
-``upload_bootstrap`` uploads the first champion on a fresh install (amendment A14; a
-researcher's bootstrap card runs it, then the orchestrator submits the version with
-``promotion bootstrap``, which checks the identity and that no champion exists):
-the same build reader, version provenance and retry safety, with ``experiment: null`` and the
-policy name ``policy_name("bootstrap", artifact hash)``. The same build again finds its
-version by that name and does not upload again, within what the card's worktree sees (its own
-records plus canonical's): a card that died unmerged leaves its record invisible to a later
-card, which uploads again under the same name (a second platform version; harmless).
+Both upload commands require a name. The full player id scopes that name globally;
+the artifact hash remains provenance, not a naming input. Version records persist the
+resolved name before upload. Retrying the same build and name reuses that record and
+its uploaded event. Choosing a new name creates a new immutable record, allowing a
+failed legacy name to be recovered without rewriting history. Bound experiments stay
+bound to their original successful version.
 
 ``version.json`` contract (every build binding writes it; ``games/fakegame`` and the GotA
 build both follow it):
@@ -50,6 +29,7 @@ The artifact hash is the sha256 of the file, or for a directory the sha256 of th
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from ide_research_core.io import gitops
@@ -71,10 +51,17 @@ PROVENANCE_FIELDS = (
 )
 
 
-def policy_name(experiment: str, artifact_hash: str, player_id: str) -> str:
-    """Player-scoped deterministic name within the platform's 64-character limit."""
-    player_hash = hashlib.sha256(player_id.encode()).hexdigest()[:16]
-    return f"ar-{player_hash}-{experiment}-{artifact_hash[:12]}".lower()
+def policy_name(name: str, player_id: str) -> str:
+    """A readable lineage scoped by the full player identity, within the platform limit."""
+    if not player_id:
+        raise Refused("bad_arguments", "a player identity is required for policy naming")
+    limit = 64 - len(player_id) - 1
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or len(name) > limit:
+        raise Refused(
+            "bad_arguments",
+            f"policy name must be lowercase words separated by hyphens, at most {limit} characters",
+        )
+    return f"{name}-{player_id}"
 
 
 def _file_sha256(path: Path) -> str:
@@ -171,8 +158,8 @@ def _version_meta(
     }
 
 
-def _existing_version(store: RecordStore, experiment: str, artifact_hash: str) -> str | None:
-    found = store.find("version", experiment=experiment, artifact_sha256=artifact_hash)
+def _existing_version(store: RecordStore, experiment: str, artifact_hash: str, name: str) -> str | None:
+    found = store.find("version", experiment=experiment, artifact_sha256=artifact_hash, policy_name=name)
     return found[0] if found else None
 
 
@@ -199,12 +186,14 @@ def upload(
     build_dir: Path,
     experiment: str,
     player_id: str,
+    name: str,
 ) -> str:
     """Upload the build in ``build_dir`` as ``experiment``'s candidate; return the version id.
     Raises ``Refused`` (nothing uploaded) or the platform's errors (``IdentityError``, ...)."""
     store = worker_store(ctx)
     build_dir = Path(build_dir)
     build, artifact, artifact_hash = checked_build(build_dir)
+    name = policy_name(name, player_id)
     meta, _ = store.load(experiment)
     binding = meta.get("candidate_binding")
     if binding:
@@ -221,9 +210,8 @@ def upload(
             "experiment_status",
             f"{experiment} is {meta['status']}; upload needs status built or uploaded",
         )
-    version_id = _existing_version(store, experiment, artifact_hash)
+    version_id = _existing_version(store, experiment, artifact_hash, name)
     if version_id is None:
-        name = policy_name(experiment, artifact_hash, player_id)
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
     platform_id = _upload_once(store, sm, version_id, artifact)
@@ -236,19 +224,16 @@ def upload(
     return version_id
 
 
-BOOTSTRAP_NAME = "bootstrap"  # policy_name("bootstrap", hash) for the first champion (A14)
-
-
 def upload_bootstrap(
-    ctx: RunContext, sm: Softmax, build_dir: Path, player_id: str
+    ctx: RunContext, sm: Softmax, build_dir: Path, player_id: str, name: str
 ) -> tuple[str, str]:
     """Upload the build in ``build_dir`` as the first champion's version (module docstring);
     return ``(version id, platform policy version id)``. Raises ``Refused`` (nothing
     uploaded) or the platform's errors (``IdentityError``, ...)."""
     store = worker_store(ctx)
     build, artifact, artifact_hash = checked_build(Path(build_dir))
-    name = policy_name(BOOTSTRAP_NAME, artifact_hash, player_id)
-    found = store.find("version", policy_name=name)
+    name = policy_name(name, player_id)
+    found = store.find("version", policy_name=name, artifact_sha256=artifact_hash, experiment=None)
     if found:
         version_id = found[0]  # a retry: reuse the record (and its upload, when recorded)
     else:

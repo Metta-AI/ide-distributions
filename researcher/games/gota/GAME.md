@@ -275,10 +275,14 @@ reduces them by the arithmetic mean, one row per episode (`games/_template/GAME.
 The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 --seat N` retains the local metric-object form.
 
-`upload E --build-dir BUILD_DIRECTORY` delegates to
-`"$RESEARCH_CLI" softmax upload E --build-dir BUILD_DIRECTORY`. Set the variable
+`upload E --name NAME --build-dir BUILD_DIRECTORY` delegates to
+`"$RESEARCH_CLI" softmax upload E --name NAME --build-dir BUILD_DIRECTORY`. Set the variable
 to the installed shared CLI executable. That shared tool performs the C6 identity
 check immediately before mutation; this wrapper has no alternate upload route.
+
+Choose a descriptive `--name` of at most 23 lowercase letters, digits, or hyphens.
+The examples use `opening-rush`; choose a name for your policy and reuse it on retries.
+The uploader appends your full player ID, keeping different players’ names distinct.
 
 ## Starter policy
 
@@ -394,7 +398,7 @@ After successful build and local_check, follow the core `candidate` skill's
 no promotion in flight exist. Upload the starter build:
 
 ```sh
-"$RESEARCH_CLI" softmax upload-bootstrap --build-dir "$BUILD"
+"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir "$BUILD"
 ```
 
 The first champion's version is uploaded by `softmax upload-bootstrap`, never by

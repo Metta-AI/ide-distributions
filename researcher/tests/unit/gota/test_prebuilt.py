@@ -222,13 +222,13 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     from support.research_board import PLAYER, ResearchBoard
     from unit.softmax.test_softmax_cli import base_env, softmax
 
+    from games.gota.gates import g2_episode, g3_budget, g4_screen
+    from games.gota.gates.limits import POLYWORLD_COMMIT
+    from games.gota.tools import native_build
     from ide_research_core import workspace
     from ide_research_core.io import gitops
     from ide_research_core.promotion import CHAMPION_PATH, in_flight, latest_champion
     from ide_research_core.softmax_tool.upload import policy_name
-    from games.gota.gates import g2_episode, g3_budget, g4_screen
-    from games.gota.gates.limits import POLYWORLD_COMMIT
-    from games.gota.tools import native_build
 
     board = ResearchBoard(tmp_path, seed_champion=False)
     (board.canonical / CHAMPION_PATH).write_text((ROOT / 'games/gota/seed/strategy/STRATEGY.md').read_text())
@@ -258,7 +258,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
         if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'upload-bootstrap']:
             assert kwargs['env']['RESEARCH_SOFTMAX'] == 'fake'
             assert kwargs['env']['RESEARCH_GAME'] == 'gota'
-            assert argv[5:] == ['--build-dir', str(out)]
+            assert argv[5:] == ['--name', 'opening-rush', '--build-dir', str(out)]
             return real_run(argv, **kwargs)
         if argv[0] != 'uv':
             assert Path(argv[0]).name in ('git', 'nim', f'gota_match-{POLYWORLD_COMMIT[:8]}', f'gate_probe-{POLYWORLD_COMMIT[:8]}'), argv
@@ -308,7 +308,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     # bootstrap card uploads the starter build and integrates the version record.
     env = base_env(board, worker, RESEARCH_GAME='gota')
     assert worker.store.find('experiment') == []
-    code, response = softmax(env, 'upload-bootstrap', '--build-dir', str(out))
+    code, response = softmax(env, 'upload-bootstrap', '--name', 'opening-rush', '--build-dir', str(out))
     assert code == 0, response
     data = response['data']
     assert data['version_id'].startswith('V-')
@@ -316,7 +316,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert data['version_id'] != data['platform_policy_version_id']
     meta = worker.store.load(data['version_id'])[0]
     assert meta['experiment'] is None and meta['player_id'] == PLAYER
-    assert meta['policy_name'] == policy_name('bootstrap', sha(artifact), PLAYER)
+    assert meta['policy_name'] == policy_name('opening-rush', PLAYER)
     assert meta['artifact_sha256'] == meta['strategy_sha256'] == sha(artifact)
     assert meta['source_commit'] == input_commit
     assert meta['build']['source_path'] == str(artifact.relative_to(worker.worktree))
@@ -378,7 +378,7 @@ def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monke
     monkeypatch.setattr(upload, 'worker_store', lambda ctx: object())
     # Refusal happens before any record or platform call, with no fake identity success.
     with pytest.raises(Exception, match='artifact sha256'):
-        upload.upload(None, None, out, 'E-test', player_id='ply_test')
+        upload.upload(None, None, out, 'E-test', 'ply_fake', 'opening-rush')
 
 
 def test_prebuilt_retains_post_gate_source_fault(candidate, tmp_path, monkeypatch):
