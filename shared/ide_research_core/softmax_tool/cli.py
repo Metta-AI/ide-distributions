@@ -926,7 +926,7 @@ def _xp_artifacts(ctx, sm, args) -> dict:
 
 
 def _upload(ctx, sm, args) -> dict:
-    player = os.environ.get(PLAYER_ENV) or None
+    player = os.environ[PLAYER_ENV]
     with experiment_lock(ctx, args.experiment, "upload"):
         version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player)
     binding = worker_store(ctx).load(args.experiment)[0]["candidate_binding"]
@@ -938,7 +938,7 @@ def _upload(ctx, sm, args) -> dict:
 
 
 def _upload_bootstrap(ctx, sm, args) -> dict:
-    player = os.environ.get(PLAYER_ENV) or None
+    player = os.environ[PLAYER_ENV]
     version_id, platform_id = upload_bootstrap(ctx, sm, Path(args.build_dir), player)
     return {"version_id": version_id, "platform_policy_version_id": platform_id}
 

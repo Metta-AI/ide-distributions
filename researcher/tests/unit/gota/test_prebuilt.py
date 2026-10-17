@@ -316,7 +316,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert data['version_id'] != data['platform_policy_version_id']
     meta = worker.store.load(data['version_id'])[0]
     assert meta['experiment'] is None and meta['player_id'] == PLAYER
-    assert meta['policy_name'] == policy_name('bootstrap', sha(artifact))
+    assert meta['policy_name'] == policy_name('bootstrap', sha(artifact), PLAYER)
     assert meta['artifact_sha256'] == meta['strategy_sha256'] == sha(artifact)
     assert meta['source_commit'] == input_commit
     assert meta['build']['source_path'] == str(artifact.relative_to(worker.worktree))

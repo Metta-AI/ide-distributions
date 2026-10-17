@@ -49,9 +49,24 @@ def test_bridge_request_shapes(context, credential):
                 "Bearer cga_fake",
                 {"text": "Finished", "idempotency_key": "say:task_events:3", "goal_id": "goal-1"},
             ),
-            ("PATCH", "/api/observatory/v2/cogents/ply_test/c/tasks/task%2F1", "Bearer cga_fake", patch),
+            (
+                "PATCH",
+                "/api/observatory/v2/cogents/ply_test/c/tasks/task%2F1",
+                "Bearer cga_fake",
+                patch,
+            ),
         ]
     finally:
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_background_news_retries_keep_the_first_payload(context, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        IDE, "request", lambda self, method, path, payload: sent.append(payload) or {"seq": 123}
+    )
+    IDE(context).ide_say("Upload failed", "say:task_events:54", "gota-starter")
+    IDE(context).ide_say("A different summary from a concurrent wake", "say:task_events:54")
+    assert sent[0] == sent[1]

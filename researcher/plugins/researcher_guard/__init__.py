@@ -1,4 +1,4 @@
-"""Hermes plugin ``researcher_guard``: two rules a researcher worker cannot break. STDLIB ONLY.
+"""Hermes plugin ``researcher_guard``: researcher completion and workspace rules. STDLIB ONLY.
 
 1. Only the orchestrator creates work. Hermes gives every dispatcher-spawned worker the native
    ``kanban`` toolset, including ``kanban_create``, ``kanban_link`` and ``kanban_schedule``,
@@ -14,8 +14,11 @@ pushes ``main`` from Python is not caught here; the next integrate's overlap che
 the unexpected commit (risk K11).
 """
 
+import json
+import os
 import re
 import shlex
+import subprocess
 
 BLOCKED_TOOLS = {
     "kanban_create": "only the orchestrator creates cards",
@@ -46,6 +49,33 @@ def runs_git_push(command: str) -> bool:
     return False
 
 
+def completion_problem(args, read_record):
+    metadata = args.get("metadata")
+    if not isinstance(metadata, dict):
+        return (
+            "Include the card skill's metadata handoff; a summary alone is not completion evidence."
+        )
+    outcome = metadata.get("outcome")
+    if outcome not in {"done", "partial", "dropped", "failed", "blocked"}:
+        return "metadata.outcome must name the research outcome."
+    journal = metadata.get("journal")
+    if not isinstance(journal, str) or not journal.startswith("ar://journal/J-"):
+        return "metadata.journal must reference the integrated journal."
+    record = read_record(journal.removeprefix("ar://journal/"))
+    if not record["ok"]:
+        return "The journal could not be read from canonical. Integrate it before completing."
+    meta = record["data"]["meta"]
+    if meta.get("card") != args.get("task_id") or meta.get("outcome") != outcome:
+        return "The canonical journal must belong to this task and have the same outcome as the handoff."
+    if (
+        outcome == "done"
+        and "version_id" in metadata
+        and not metadata.get("platform_policy_version_id")
+    ):
+        return "A completed upload needs its platform policy version receipt; otherwise report partial or blocked."
+    return None
+
+
 def pre_tool_call(tool_name=None, args=None, **kwargs):
     if tool_name in BLOCKED_TOOLS:
         reason = BLOCKED_TOOLS[tool_name]
@@ -54,11 +84,33 @@ def pre_tool_call(tool_name=None, args=None, **kwargs):
             "message": f"{tool_name} is blocked: {reason}. Propose follow-up work in your "
             "handoff's `next` or as a `suggestion:` comment on your own card.",
         }
+    if tool_name == "kanban_complete":
+
+        def read_record(record_id):
+            from agent.secret_scope import build_profile_secret_scope
+            from hermes_constants import get_hermes_home
+
+            home = get_hermes_home()
+            env = {**os.environ, **build_profile_secret_scope(home), "HERMES_HOME": str(home)}
+            root = env.get("RESEARCH_WORKSPACE", str(home / "workspace"))
+            result = subprocess.run(
+                [str(home / "bin/research"), "records", "show", record_id, "--root", root],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            return json.loads(result.stdout)
+
+        problem = completion_problem(args or {}, read_record)
+        if problem:
+            return {"action": "block", "message": problem}
     command = (args or {}).get("command") if tool_name == "terminal" else None
     if isinstance(command, str) and runs_git_push(command):
         return {
             "action": "block",
-            "message": "git push is blocked: run `\"$RESEARCH_CLI\" workspace integrate`, "
+            "message": 'git push is blocked: run `"$RESEARCH_CLI" workspace integrate`, '
             "which commits, pushes the card branch, validates, merges and pushes main for you.",
         }
     return None

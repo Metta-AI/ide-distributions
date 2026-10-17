@@ -71,10 +71,10 @@ PROVENANCE_FIELDS = (
 )
 
 
-def policy_name(experiment: str, artifact_hash: str) -> str:
-    """The platform policy name: ``ar-<experiment>-<first 12 hex of the artifact sha256>``,
+def policy_name(experiment: str, artifact_hash: str, player_id: str) -> str:
+    """The platform policy name: ``ar-<player>-<experiment>-<first 12 hex of the artifact sha256>``,
     lowercase."""
-    return f"ar-{experiment}-{artifact_hash[:12]}".lower()
+    return f"ar-{player_id}-{experiment}-{artifact_hash[:12]}".lower()
 
 
 def _file_sha256(path: Path) -> str:
@@ -198,7 +198,7 @@ def upload(
     sm: Softmax,
     build_dir: Path,
     experiment: str,
-    player_id: str | None = None,
+    player_id: str,
 ) -> str:
     """Upload the build in ``build_dir`` as ``experiment``'s candidate; return the version id.
     Raises ``Refused`` (nothing uploaded) or the platform's errors (``IdentityError``, ...)."""
@@ -223,7 +223,7 @@ def upload(
         )
     version_id = _existing_version(store, experiment, artifact_hash)
     if version_id is None:
-        name = policy_name(experiment, artifact_hash)
+        name = policy_name(experiment, artifact_hash, player_id)
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
     platform_id = _upload_once(store, sm, version_id, artifact)
@@ -240,14 +240,14 @@ BOOTSTRAP_NAME = "bootstrap"  # policy_name("bootstrap", hash) for the first cha
 
 
 def upload_bootstrap(
-    ctx: RunContext, sm: Softmax, build_dir: Path, player_id: str | None = None
+    ctx: RunContext, sm: Softmax, build_dir: Path, player_id: str
 ) -> tuple[str, str]:
     """Upload the build in ``build_dir`` as the first champion's version (module docstring);
     return ``(version id, platform policy version id)``. Raises ``Refused`` (nothing
     uploaded) or the platform's errors (``IdentityError``, ...)."""
     store = worker_store(ctx)
     build, artifact, artifact_hash = checked_build(Path(build_dir))
-    name = policy_name(BOOTSTRAP_NAME, artifact_hash)
+    name = policy_name(BOOTSTRAP_NAME, artifact_hash, player_id)
     found = store.find("version", policy_name=name)
     if found:
         version_id = found[0]  # a retry: reuse the record (and its upload, when recorded)

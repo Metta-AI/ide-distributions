@@ -83,7 +83,9 @@ def test_upload_creates_version_event_and_binding(ws):
     assert version["artifact_sha256"] == hashlib.sha256(b"policy-bytes").hexdigest()
     assert version["strategy_sha256"] == STRATEGY_SHA
     assert version["source_commit"] == SOURCE_COMMIT
-    assert version["policy_name"] == policy_name(ws.experiment, version["artifact_sha256"])
+    assert version["policy_name"] == policy_name(
+        ws.experiment, version["artifact_sha256"], "ply_fake"
+    )
     assert version["experiment"] == ws.experiment and version["player_id"] == "ply_fake"
     assert version["gates"]["G1"] == {"passed": True}
     assert version["build"]["build_id"] == "build-1"
@@ -103,9 +105,9 @@ def test_upload_creates_version_event_and_binding(ws):
 
 
 def test_policy_name_is_deterministic():
-    name = policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "ab" * 32)
-    assert name == "ar-e-01k6z3v8qxaaaaaaaaaaaaaaaa-abababababab"
-    assert name != policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "cd" * 32)
+    name = policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "ab" * 32, "ply_fake")
+    assert name == "ar-ply_fake-e-01k6z3v8qxaaaaaaaaaaaaaaaa-abababababab"
+    assert name != policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "cd" * 32, "ply_fake")
 
 
 def test_upload_from_status_uploaded_only_sets_binding(tmp_path):
@@ -279,22 +281,36 @@ def test_fakegame_build_output_uploads(ws, tmp_path):
     expected = hashlib.sha256(b"# Candidate\n").hexdigest()
     assert version["strategy_sha256"] == expected
 
-@pytest.mark.parametrize('name', ['G4', 'G5'])
+
+@pytest.mark.parametrize("name", ["G4", "G5"])
 def test_advisory_error_rejected_even_with_passed_build_status(tmp_path, name):
     ws = Workspace(tmp_path)
-    ws.write_build(status='passed', gates={name: {'outcome': 'errored', 'passed': False,
-                                                'advisory': True}})
-    with pytest.raises(Refused, match='build gates did not pass'):
+    ws.write_build(
+        status="passed", gates={name: {"outcome": "errored", "passed": False, "advisory": True}}
+    )
+    with pytest.raises(Refused, match="build gates did not pass"):
         ws.run()
     assert ws.uploads() == {}
 
 
-@pytest.mark.parametrize('name', ['G4', 'G5'])
+@pytest.mark.parametrize("name", ["G4", "G5"])
 def test_advisory_failure_upload_reader_accepts(tmp_path, name):
     from ide_research_core.softmax_tool.upload import _read_build
+
     ws = Workspace(tmp_path)
-    ws.write_build(status='passed', gates={name: {'outcome': 'failed', 'passed': False,
-                                                'advisory': True}})
+    ws.write_build(
+        status="passed", gates={name: {"outcome": "failed", "passed": False, "advisory": True}}
+    )
     metadata, artifact = _read_build(ws.build)
-    assert metadata['status'] == 'passed'
-    assert artifact == ws.build / 'policy.bas'
+    assert metadata["status"] == "passed"
+    assert artifact == ws.build / "policy.bas"
+
+
+def test_bootstrap_names_are_scoped_to_the_player():
+    artifact = "ab" * 32
+    assert policy_name("bootstrap", artifact, "ply_alice") != policy_name(
+        "bootstrap", artifact, "ply_bob"
+    )
+    assert policy_name("bootstrap", artifact, "ply_alice") == policy_name(
+        "bootstrap", artifact, "ply_alice"
+    )
