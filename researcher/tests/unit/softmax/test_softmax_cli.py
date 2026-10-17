@@ -745,7 +745,7 @@ def _lock_path(board, experiment):
     "argv",
     [
         ["xp", "create", "{E}", "--batch", "1", "--attempt", "1"],
-        ["upload", "{E}", "--build-dir", "/nonexistent"],
+        ["upload", "{E}", "--name", "opening-rush", "--build-dir", "/nonexistent"],
     ],
     ids=["xp-create", "upload"],
 )
@@ -880,7 +880,7 @@ def test_upload_from_fakegame_build(board):
         capture_output=True,
     )
     env = base_env(board, worker)
-    code, data = softmax(env, "upload", experiment, "--build-dir", str(build_dir))
+    code, data = softmax(env, "upload", experiment, "--name", "opening-rush", "--build-dir", str(build_dir))
     assert code == 0, data
     meta = worker.store.load(experiment)[0]
     assert meta["status"] == "uploaded"
@@ -906,7 +906,7 @@ def test_upload_failed_gates_is_refused(board):
         )
     )
     code, data = softmax(
-        base_env(board, worker), "upload", experiment, "--build-dir", str(build_dir)
+        base_env(board, worker), "upload", experiment, "--name", "opening-rush", "--build-dir", str(build_dir)
     )
     assert code == 1 and data["error"]["reason"] == "gates_failed"
 
@@ -1017,3 +1017,26 @@ def test_the_stop_check_finds_a_slugged_experiment_absent_from_the_clone(board, 
     gitops.git(board.canonical, "push", "-q", "origin", "main")
 
     assert softmax_cli._closed_in_canonical(SimpleNamespace(canonical=stale), experiment) == "reviewed"
+
+
+def test_named_bootstrap_upload_from_fakegame_build(board):
+    worker = board.admit(mode="experimentation")
+    worker.start()
+    build_dir = board.tmp_path / "bootstrap-build"
+    tool = REPO / "games" / "fakegame" / "tools" / "fake_build.py"
+    subprocess.run(
+        [sys.executable, str(tool), str(worker.worktree), "--out", str(build_dir), "--json"],
+        check=True, capture_output=True,
+    )
+    env = base_env(board, worker)
+    code, result = softmax(
+        env, "upload-bootstrap", "--name", "opening-rush", "--build-dir", str(build_dir)
+    )
+    assert code == 0, result
+    version = worker.store.load(result["data"]["version_id"])[0]
+    assert version["policy_name"] == "opening-rush-" + env["RESEARCH_PLAYER_ID"]
+    assert version["experiment"] is None
+    retry_code, retry = softmax(
+        env, "upload-bootstrap", "--name", "opening-rush", "--build-dir", str(build_dir)
+    )
+    assert retry_code == 0 and retry == result
