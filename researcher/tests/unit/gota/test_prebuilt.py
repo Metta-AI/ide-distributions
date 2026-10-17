@@ -222,13 +222,13 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     from support.research_board import PLAYER, ResearchBoard
     from unit.softmax.test_softmax_cli import base_env, softmax
 
+    from games.gota.gates import g2_episode, g3_budget, g4_screen
+    from games.gota.gates.limits import POLYWORLD_COMMIT
+    from games.gota.tools import native_build
     from ide_research_core import workspace
     from ide_research_core.io import gitops
     from ide_research_core.promotion import CHAMPION_PATH, in_flight, latest_champion
     from ide_research_core.softmax_tool.upload import policy_name
-    from games.gota.gates import g2_episode, g3_budget, g4_screen
-    from games.gota.gates.limits import POLYWORLD_COMMIT
-    from games.gota.tools import native_build
 
     board = ResearchBoard(tmp_path, seed_champion=False)
     (board.canonical / CHAMPION_PATH).write_text((ROOT / 'games/gota/seed/strategy/STRATEGY.md').read_text())
@@ -308,7 +308,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     # bootstrap card uploads the starter build and integrates the version record.
     env = base_env(board, worker, RESEARCH_GAME='gota')
     assert worker.store.find('experiment') == []
-    code, response = softmax(env, 'upload-bootstrap', '--build-dir', str(out))
+    code, response = softmax(env, 'upload-bootstrap', '--name', 'opening-rush', '--build-dir', str(out))
     assert code == 0, response
     data = response['data']
     assert data['version_id'].startswith('V-')
@@ -316,7 +316,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert data['version_id'] != data['platform_policy_version_id']
     meta = worker.store.load(data['version_id'])[0]
     assert meta['experiment'] is None and meta['player_id'] == PLAYER
-    assert meta['policy_name'] == policy_name('bootstrap', sha(artifact))
+    assert meta['policy_name'] == policy_name('opening-rush', PLAYER)
     assert meta['artifact_sha256'] == meta['strategy_sha256'] == sha(artifact)
     assert meta['source_commit'] == input_commit
     assert meta['build']['source_path'] == str(artifact.relative_to(worker.worktree))

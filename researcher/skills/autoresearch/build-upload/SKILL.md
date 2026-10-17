@@ -42,7 +42,7 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
    `"$RESEARCH_CLI" records status <E-id> built`
 5. Upload. The tool checks the identity, uploads, creates the version record, and binds it
    to the experiment (status `uploaded`):
-   `"$RESEARCH_CLI" softmax upload <E-id> --build-dir .scratch/build/<E-id>`
+   `"$RESEARCH_CLI" softmax upload <E-id> --name opening-rush --build-dir .scratch/build/<E-id>`
    Keep `data.version_id` and `data.platform_policy_version_id` for the journal. This
    uploads the candidate only. For a starter policy on a bootstrap card, use
    `candidate` and the upload-only bootstrap path instead; the orchestrator submits it.
@@ -67,3 +67,5 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 - Exit 3 (`tool_missing`): the pinned platform tool is missing. This is a tool fault: follow
   the D-26 sequence (see `card`, "Tool fault").
 - A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `card`, "Tool fault").
+
+Choose a descriptive lowercase `--name` (letters, digits, hyphens; at most 23 characters). Both upload commands append the full player ID. Reuse the name on retry. A new name creates a new immutable version record for an unbound build, including recovery from an old conflicting name. Artifact hashes remain build provenance.

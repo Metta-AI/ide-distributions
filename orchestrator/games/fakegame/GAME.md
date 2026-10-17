@@ -72,5 +72,5 @@ The starter policy is the champion STRATEGY at install, `<worktree>/strategy/STR
 seed strategy). Build it with the `build` binding:
 `python3 games/fakegame/tools/fake_build.py <worktree>/strategy --out <worktree>/.scratch/build/champion --json`,
 check it with `python3 games/fakegame/tools/fake_build.py --check <worktree>/strategy --json`,
-then upload it with `"$RESEARCH_CLI" softmax upload-bootstrap --build-dir <worktree>/.scratch/build/champion`;
+then upload it with `"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir <worktree>/.scratch/build/champion`;
 the orchestrator submits it as the first champion.

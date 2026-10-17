@@ -61,7 +61,7 @@ class Workspace:
         return json.loads(path.read_text())["uploads"] if path.exists() else {}
 
     def run(self, sm=None, player="ply_fake") -> str:
-        return upload(self.ctx, sm or self.sm, self.build, self.experiment, player_id=player)
+        return upload(self.ctx, sm or self.sm, self.build, self.experiment, player_id=player, name="opening-rush")
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ def test_upload_creates_version_event_and_binding(ws):
     assert version["artifact_sha256"] == hashlib.sha256(b"policy-bytes").hexdigest()
     assert version["strategy_sha256"] == STRATEGY_SHA
     assert version["source_commit"] == SOURCE_COMMIT
-    assert version["policy_name"] == policy_name(ws.experiment, version["artifact_sha256"])
+    assert version["policy_name"] == policy_name("opening-rush", "ply_fake")
     assert version["experiment"] == ws.experiment and version["player_id"] == "ply_fake"
     assert version["gates"]["G1"] == {"passed": True}
     assert version["build"]["build_id"] == "build-1"
@@ -102,10 +102,15 @@ def test_upload_creates_version_event_and_binding(ws):
     }
 
 
-def test_policy_name_is_deterministic():
-    name = policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "ab" * 32)
-    assert name == "ar-e-01k6z3v8qxaaaaaaaaaaaaaaaa-abababababab"
-    assert name != policy_name("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", "cd" * 32)
+def test_policy_name_is_player_scoped():
+    assert policy_name("opening-rush", "ply_one") == "opening-rush-ply_one"
+    assert policy_name("opening-rush", "ply_one") != policy_name("opening-rush", "ply_two")
+
+
+@pytest.mark.parametrize("name", ["", "UPPER", "with spaces", "with:colon", "x" * 60])
+def test_invalid_name_is_refused(name):
+    with pytest.raises(Refused, match="policy name"):
+        policy_name(name, "ply_fake")
 
 
 def test_upload_from_status_uploaded_only_sets_binding(tmp_path):
@@ -298,3 +303,48 @@ def test_advisory_failure_upload_reader_accepts(tmp_path, name):
     metadata, artifact = _read_build(ws.build)
     assert metadata['status'] == 'passed'
     assert artifact == ws.build / 'policy.bas'
+
+
+def test_identical_bootstrap_builds_have_distinct_player_names_and_stable_retries(ws):
+    from ide_research_core.softmax_tool.upload import upload_bootstrap
+
+    ws.write_build()
+    first = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    second = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_two", "opening-rush")
+    assert first != second
+    assert {item["name"] for item in ws.uploads().values()} == {
+        "opening-rush-ply_one", "opening-rush-ply_two"
+    }
+    assert upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush") == first
+    assert len(ws.uploads()) == 2
+
+
+def test_bootstrap_new_artifact_keeps_lineage_but_gets_new_version(ws):
+    from ide_research_core.softmax_tool.upload import upload_bootstrap
+
+    ws.write_build()
+    first = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    ws.write_build(artifact=b"changed policy")
+    second = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    assert first != second
+    assert len(ws.uploads()) == 2
+    assert {item["name"] for item in ws.uploads().values()} == {"opening-rush-ply_one"}
+
+
+def test_failed_legacy_record_does_not_force_retry_of_conflicting_name(ws, monkeypatch):
+    ws.write_build()
+    with monkeypatch.context() as patch:
+        patch.setattr("ide_research_core.softmax_tool.upload.policy_name",
+                      lambda name, player: "ar-bootstrap-1637c5604a52")
+        def conflict(artifact, name):
+            raise RuntimeError("409 name taken")
+        patch.setattr(ws.sm, "upload", conflict)
+        with pytest.raises(RuntimeError, match="409"):
+            ws.run()
+    legacy, = ws.store.find("version")
+    recovered = ws.run()
+    assert recovered != legacy
+    assert ws.store.load(legacy)[0]["policy_name"] == "ar-bootstrap-1637c5604a52"
+    assert ws.store.load(recovered)[0]["policy_name"] == "opening-rush-ply_fake"
+    assert ws.run() == recovered
+    assert len(ws.uploads()) == 1

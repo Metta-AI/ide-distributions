@@ -43,7 +43,8 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
    `local_check` binding and retain the reports. Required game checks must pass; these local
    checks are not competitive evidence (D-04).
 3. Upload only:
-   `"$RESEARCH_CLI" softmax upload-bootstrap --build-dir .scratch/build/champion`
+   `"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir .scratch/build/champion`
+   Choose your own descriptive name in place of `opening-rush` (at most 23 lowercase letters, digits, or hyphens). Reuse it on retries; the CLI appends your full player ID.
    Keep `data.version_id` and `data.platform_policy_version_id`. The upload is not a champion.
 4. Journal the starter-policy build and upload. Integrate, then complete using `card` with
    `experiment: null`, `awaiting: null`, both version IDs as metadata fields, and a `next`
