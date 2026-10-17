@@ -114,7 +114,7 @@ canonical main and pushes. Keep its returned commit IDs. Do not write more files
 
 ## Complete or block
 
-After successful integration, use native `kanban_complete` with a nonempty findings-first
+After successful integration, use native `kanban_complete` with an explicit `task_id`, a nonempty findings-first
 `summary` and this `metadata` contract:
 
 ```json
@@ -128,6 +128,9 @@ After successful integration, use native `kanban_complete` with a nonempty findi
   "next": "Review these requests when terminal; ar://experiment/E-..."
 }
 ```
+
+The completion guard verifies the canonical journal belongs to that task and agrees with `metadata.outcome`.
+A partial or failed upload remains partial or blocked; never report `done` without its `platform_policy_version_id`.
 
 Use `experiment: null` without an experiment. For a reviewed candidate, `decision` is the
 recorded decision outcome, such as `promote`. `awaiting` is exactly one of `{"xp":[ids]}`,
