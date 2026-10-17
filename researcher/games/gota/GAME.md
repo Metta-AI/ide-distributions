@@ -143,6 +143,34 @@ Native G2 does not prove:
 
 A Docker G2 on a host with Docker, or a league episode, is the evidence for those.
 
+## Local validation
+
+A completed build includes local validation. The build and `local_check` invoke the
+same shared gate modules. For a successful build, review its retained evidence
+instead of launching a second full `local_check` on the same artifact and execution
+conditions. This applies to experiment candidates and bootstrap builds.
+
+Require `status: passed` and complete applicable receipts in `version.json`: G1–G3
+must pass; G4 must have run without a tool error. Compiler builds also require an
+executed G5 without a tool error. For prebuilt builds only, G5 must explicitly say
+`applicable: false` and `not applicable: prebuilt`. G4/G5 policy failures remain
+advisory and must be reported. Missing, incomplete, failed, or errored build evidence
+does not qualify for reuse. Follow the build failure procedure; a standalone check
+cannot turn a failed build into an uploadable one.
+
+Read `report.json`, `report.md`, `version.json`, the frozen `policy.bas`, manifest,
+native receipts and measurement reports, and the G2 episode results/logs named by
+`summary.episode_dir`. Verify the artifact SHA256 matches `policy_sha256`. Reuse
+applies only to the recorded engine, manifest, runner, baseline, seeds, tick budget,
+and native tool identity. Do not reuse evidence for changed artifact bytes or
+execution conditions: produce a new build for upload. Standalone `local_check`
+remains available for diagnostic reruns or artifacts without completed build evidence;
+use the gate reference for its arguments and retain its reports.
+
+No gate, seed, or budget is reduced. The upload reader checks the build status,
+reported gates and artifact hash; it does not consume a separate local-check directory.
+Local gate success establishes compatibility, not competitive strength or a promotion.
+
 ## Metrics
 
 Each episode observation belongs to one subject seat; repeated copies in one
@@ -333,7 +361,6 @@ RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
 CARD_WORKTREE="$PWD"
 CANDIDATE="$CARD_WORKTREE/strategy/candidates/bootstrap"
 BUILD="$CARD_WORKTREE/.scratch/build/champion"
-CHECK="$CARD_WORKTREE/.scratch/check/champion"
 mkdir -p "$CANDIDATE"
 cp "$RESEARCH_HOME/games/gota/baselines/submitted-v13.bas" "$CANDIDATE/submitted-v13.bas"
 git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/submitted-v13.bas
@@ -345,9 +372,9 @@ git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidat
 
 Run the build below in its own terminal call with `background: true`. The G3/G4
 workload is approximately 55 minutes, measured on the autoresearch EC2 test box
-(m7i.xlarge), 2026-10-08; the separate full `local_check` repeats that workload
-in a fresh context, so budget for both commands. This is not a measured total for every
-host or a separate 55-minute timing for each gate. Keep the build `session_id`
+(m7i.xlarge), 2026-10-08. This is not a measured total for every host or a separate
+55-minute timing for each gate. A completed build includes local validation; do not
+repeat its full gate workload before upload. Keep the build `session_id`
 and call `process_manage` with `action: "wait"`, that `session_id`,
 `timeout: 1800`; repeat only if `status: "timeout"`, with no polling or sleep
 loops. Each long-command block below sets its own paths for a fresh shell;
@@ -365,36 +392,17 @@ After exit, read the command JSON, `$BUILD/report.json`, `$BUILD/report.md`,
 `$BUILD/version.json` and `$BUILD/gates.json`. Check the recorded gate outcomes,
 engine/native receipts, frozen `$BUILD/policy.bas`,
 `$BUILD/prebuilt.provenance.json` and `$BUILD/coworld_manifest.json` before
-starting the separate local check. Preserve error reports if the build stops.
+upload. Apply the **Local validation** evidence requirements above. Preserve error
+reports if the build stops.
 
 Generation resolves the current engine and makes only the authorized
 identifier/division token changes, with no model call. For an explicit historical
 build, append `--offline --manifest PATH` to both generator and build. Existing
 outputs are immutable; use fresh output paths.
 
-The build records G1–G4 local checks. Before bootstrap, run the separate
-`local_check` on the frozen artifact and manifest, selecting only applicable
-gates; G5 compiler coverage does not apply. For a historical local_check,
-append `--offline` as well.
-
-Start this command in another terminal call with `background: true`, keep its
-new `session_id`, and use `process_manage` action `wait`, `timeout: 1800` as
-above, repeating only on `status: "timeout"`:
-
-```sh
-RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
-RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
-BUILD="$PWD/.scratch/build/champion"
-CHECK="$PWD/.scratch/check/champion"
-(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" -m games.gota.gates "$BUILD/policy.bas" --baseline "$BUILD/policy.bas" --manifest "$BUILD/coworld_manifest.json" --work-dir "$CHECK" --gate g1_lint --gate g2_episode --gate g3_budget --gate g4_screen)
-```
-
-After exit, read `$CHECK/gates.json`, `$CHECK/engine_identity.json`,
-`$CHECK/coworld_manifest.json`, the hashed native measurement JSON receipts and
-the G2 episode results/logs named by `summary.episode_dir`. Check blocking
-outcomes and any tool errors before the bootstrap handoff.
-
-After successful build and local_check, follow the core `candidate` skill's
+The build records G1–G4 local checks and retains the full evidence. Review those
+receipts under **Local validation**; G5 compiler coverage does not apply to prebuilt
+artifacts. After a successful build and evidence review, follow the core `candidate` skill's
 "Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
 no promotion in flight exist. Upload the starter build:
 

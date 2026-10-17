@@ -65,9 +65,10 @@ estimate; host speed, policy, early game ends and cache reuse affect the total.
 G3 defaults to ten seeds at up to 31200 ticks. G4 covers those ten seeds on both
 sides; identical policy hashes share mirror measurements, including G3's
 measurements in the same `GateContext`. Different artifacts require candidate
-versus baseline screens. A separate CLI `local_check` creates a fresh context
-and reruns the workload; do not assume the preceding build's in-memory cache
-survives. Short G3 samples prove only their reported `sample_ticks` and do not
+versus baseline screens. A completed build includes local validation: follow
+[the evidence contract](../GAME.md#local-validation) instead of repeating its gates
+before upload. A separately requested diagnostic `local_check` creates a fresh context
+and reruns the workload; the preceding build's in-memory cache does not survive. Short G3 samples prove only their reported `sample_ticks` and do not
 establish a full gate duration.
 
 Use the core `card` skill's **Long commands** procedure for build/full gate
