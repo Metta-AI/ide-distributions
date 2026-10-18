@@ -14,7 +14,7 @@ These instructions work the same for every agent. They describe files and rules 
 | --- | --- |
 | `work_order.json` | `generate`: the component IDs to write. `components[ID]`: the component's exact source text (`compiled_text`), its `text_hash`, and its `contract` (the unit ABI for this component: prefix, required SUBs, constants, what it may read, write, and call). `interfaces`: the declared interface of every component, including those you do not generate. `previous_guesses`: guesses from the previous build. `repair_errors`: diagnostics from a failed earlier round (empty on the first round). |
 | `context/previous/` | Previous files for components you must generate. Use these as the starting point when present, changing only what the source requires. Write each result into `units/`; never edit the reference. |
-| `units/` | Unchanged units, supplied as read-only context. Every requested output is initially absent and must be written. |
+| `units/` | Unchanged units are read-only context. On the first round, requested outputs are absent and must be written. On repair rounds, prior outputs from this build are supplied in place: edit the units needing correction and preserve the others. All requested outputs must exist when finished. |
 | `context/LESSONS.md` | BASIC pitfalls learned on earlier builds. Read it every time. |
 | `context/policy-surface.md` | The BASIC dialect, budgets, failure modes, and every host call. It is the authority for what the engine does. |
 | `context/host_surface.json`, `context/gota-guide.md`, `context/bassy-language.md`, `context/structures.bas` | Verified live host declarations and primary GotA/Bassy references; read alongside the compiler ABI. |
