@@ -152,7 +152,7 @@ Then, for example:
 | `stats` | `design`, `noise`, `ingest`, `evaluate` | pre-registered evaluation and the decision rule |
 | `kb` | `lint`, `apply`, `index`, `stale`, `renew`, `compact`, `hubs` | maintenance cards run `apply`/`stale`/`renew`/`compact` in their worktree |
 | `game` | `show` | the game contract |
-| `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-bootstrap`, `leaderboard`, `game-version`, `standings`, `league-episodes` | every platform action of a researcher |
+| `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-build`, `leaderboard`, `game-version`, `standings`, `league-episodes` | every platform action of a researcher |
 | `workspace` | `integrate`, `merged`, `publish`, `bootstrap` | `publish` is the orchestrator's |
 | `promotion` | `submit`, `bootstrap`, `status`, `accept` | the orchestrator's; denied to researchers |
 

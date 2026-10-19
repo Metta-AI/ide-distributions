@@ -305,27 +305,27 @@ def test_advisory_failure_upload_reader_accepts(tmp_path, name):
     assert artifact == ws.build / 'policy.bas'
 
 
-def test_identical_bootstrap_builds_have_distinct_player_names_and_stable_retries(ws):
-    from ide_research_core.softmax_tool.upload import upload_bootstrap
+def test_identical_unbound_builds_have_distinct_player_names_and_stable_retries(ws):
+    from ide_research_core.softmax_tool.upload import upload_build
 
     ws.write_build()
-    first = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
-    second = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_two", "opening-rush")
+    first = upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    second = upload_build(ws.ctx, ws.sm, ws.build, "ply_two", "opening-rush")
     assert first != second
     assert {item["name"] for item in ws.uploads().values()} == {
         "opening-rush-ply_one", "opening-rush-ply_two"
     }
-    assert upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush") == first
+    assert upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush") == first
     assert len(ws.uploads()) == 2
 
 
-def test_bootstrap_new_artifact_keeps_lineage_but_gets_new_version(ws):
-    from ide_research_core.softmax_tool.upload import upload_bootstrap
+def test_unbound_new_artifact_keeps_lineage_but_gets_new_version(ws):
+    from ide_research_core.softmax_tool.upload import upload_build
 
     ws.write_build()
-    first = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    first = upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
     ws.write_build(artifact=b"changed policy")
-    second = upload_bootstrap(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    second = upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
     assert first != second
     assert len(ws.uploads()) == 2
     assert {item["name"] for item in ws.uploads().values()} == {"opening-rush-ply_one"}
@@ -348,3 +348,19 @@ def test_failed_legacy_record_does_not_force_retry_of_conflicting_name(ws, monke
     assert ws.store.load(recovered)[0]["policy_name"] == "opening-rush-ply_fake"
     assert ws.run() == recovered
     assert len(ws.uploads()) == 1
+
+
+@pytest.mark.parametrize("invalid", [
+    {"status": "failed"},
+    {"status": "rejected"},
+    {"policy_sha256": "0" * 64},
+    {"gates": {"G1": {"passed": False}}},
+])
+def test_upload_build_rejects_unchecked_or_changed_artifact(ws, invalid):
+    from ide_research_core.softmax_tool.upload import upload_build
+
+    ws.write_build(**invalid)
+    with pytest.raises(Refused):
+        upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "requested-change")
+    assert ws.uploads() == {}
+    assert ws.store.find("version") == []

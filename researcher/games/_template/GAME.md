@@ -72,7 +72,7 @@ count, so this section is where the agent reads it.
 
 The body must have a `## Starter policy` section: how to build the game's starter policy
 with the `build` binding (arguments, input, output directory) so a bootstrap card can upload
-it with `softmax upload-bootstrap` and the orchestrator can submit it, unevaluated, as the first champion when the league shows no policy competing
+it with `softmax upload-build` and the orchestrator can submit it, unevaluated, as the first champion when the league shows no policy competing
 for our player (amendments A9, A14). Every game ships a starter policy. The build writes the same
 `version.json` as any build; every non-advisory gate must pass. A build compiled from a
 `STRATEGY.md` should name it in `source_hashes` (the bootstrap refuses one whose hash is not

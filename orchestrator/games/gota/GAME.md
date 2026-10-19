@@ -407,10 +407,10 @@ artifacts. After a successful build and evidence review, follow the core `candid
 no promotion in flight exist. Upload the starter build:
 
 ```sh
-"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir "$BUILD"
+"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir "$BUILD"
 ```
 
-The first champion's version is uploaded by `softmax upload-bootstrap`, never by
+The first champion's version is uploaded by `softmax upload-build`, never by
 `softmax upload`. It needs no experiment, frozen evaluation design, evaluation outcome or
 decision. The first league submission is v13-live, unevaluated; local checks do not establish
 competitive strength. The command checks C6 identity and the build, uploads the exact artifact
