@@ -27,6 +27,7 @@ league's current champion as the loop's when a human says so.
 import datetime
 import hashlib
 import json
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field

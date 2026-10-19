@@ -313,10 +313,11 @@ def test_release_is_refused_outside_core_loop_mode(board, monkeypatch, mode):
     monkeypatch.delenv("SOFTMAX_COGENT_MODE", raising=False)
     if mode is not None:
         monkeypatch.setenv("SOFTMAX_COGENT_MODE", mode)
+    before = board.sm.submissions(PLAYER)
     with pytest.raises(Refused) as refused:
         promotion.release(board.sm, PV_A, LEAGUE, PLAYER)
     assert refused.value.reason == "not_core_loop"
-    assert board.sm.submissions(PLAYER) == []
+    assert board.sm.submissions(PLAYER) == before
 
 
 def test_the_release_cli_is_refused_outside_core_loop_mode(board):

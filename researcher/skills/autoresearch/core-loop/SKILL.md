@@ -21,7 +21,7 @@ one of them, the card is wrong: say so in your report; do not invent it.
 **IDE tools first.** The IDE's tools (MCP server `ide`) are the primary path for upload, practice
 and the container build. Each takes a fresh `request_id` you choose (letters, digits, `-`, `_`);
 keep it for a retry of the same call. `conversation_id` is filled in for you. The shell commands
-below (`"$RESEARCH_CLI" softmax ...`, the host build request) are the fallback, used only when an
+below (the research CLI's `softmax` commands, the host build request) are the fallback, used only when an
 IDE call answers `ide_unreachable`. You never call `enter_league`: the orchestrator releases.
 
 Use `card` for the lifecycle (read the card with `kanban_show`, one short journal with
@@ -47,7 +47,7 @@ every message. The orchestrator tells the user; you never do.
 5. **Check it.** Only the checks the game's section marks as required to produce a valid
    program. Skip all research gates. Never reduce or bypass a required check (D-27).
 6. **Upload it as the cogent's own program.** By the game's player kind:
-   - **File players (GOTA)**: IDE `file_policy_upload` with `name` and the complete file text
+   - **File players** (the game hosts the program itself): IDE `file_policy_upload` with `name` and the complete file text
      as `source`. It returns the version (`id` UUID, `name`, `version`); the label is
      `<name>:v<version>`. No local build is needed for the upload.
    - **Container coworlds**: IDE `container_policy_source` (`action: save`, the complete file
