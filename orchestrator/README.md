@@ -139,6 +139,11 @@ on one host and plays one card from `card_create` through a scripted worker to t
 `board_reconcile` and `status`, with no model and the fake platform. Hosted bridge delivery is
 a separate integration check that these tests do not establish.
 
+Every coach request to make, change, practise or release a program is one card with the
+researcher's `core-loop` skill (`skills: ["core-loop"]`): a plain recipe that uploads the program
+and requests practice, with no champion, hypothesis or seed prerequisite. The orchestrator
+acknowledges it at once, reports in plain words and releases when practice completes.
+
 For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's
 "Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
 without an experiment, evaluation or league submission. Require the intended source change in

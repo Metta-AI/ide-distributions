@@ -368,6 +368,35 @@ def _send(clone: Path, sm: Softmax, promotion: Promotion) -> dict:
     return promotion.to_dict()
 
 
+def release(sm: Softmax, policy_version_id: str, league_id: str, player_id: str) -> dict:
+    """Release a core-loop program: submit the cogent's own uploaded ``<name>:v<N>`` to its league.
+
+    No experiment, no promotion record and no champion check: the platform gates it by the
+    coach's league choice and the ``submit`` permit. Nothing is recorded on canonical ``main``,
+    so asking again is safe: a program the platform already has is reported as released, and a
+    coach refusal comes back as ``released: false`` with its ``state`` and the permit ``ask``
+    (``waiting`` until the coach says yes, then the same call sends it; ``declined`` is final).
+    Only the orchestrator runs it; researchers' deny list blocks ``promotion release``.
+    """
+    _require_identity(sm, player_id)
+    out = {"policy_version_id": policy_version_id, "league_id": league_id, "released": False}
+    found = [
+        row for row in sm.submissions(player_id)
+        if row["policy_version_id"] == policy_version_id and row["league_id"] == league_id
+    ]
+    if found:
+        return {**out, "released": True, "state": "submitted",
+                "submission_id": found[-1]["submission_id"]}
+    result = sm.submit(policy_version_id, league_id)
+    if isinstance(result, PermitRequired):
+        return {**out, "state": result.state, "reason": "permit_required",
+                "ask": result.ask, "detail": result.reason}
+    if isinstance(result, LeagueNotChosen):
+        return {**out, "state": "league_not_chosen", "reason": "league_not_chosen",
+                "detail": result.reason}
+    return {**out, "released": True, "state": "submitted", "submission_id": result}
+
+
 def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     """Record the league's current champion as the loop's (a human said so)."""
     with _one_at_a_time(clone):

@@ -48,6 +48,8 @@ approvals:
     - "*promotion submit *"
     - "*promotion bootstrap"
     - "*promotion bootstrap *"
+    - "*promotion release"
+    - "*promotion release *"
     - "*promotion accept"
     - "*promotion accept *"
 

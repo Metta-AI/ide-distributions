@@ -161,6 +161,13 @@ class Softmax(Protocol):
         known: list[XpHandle] | None = None,
     ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen: ...
     def xp_status(self, handle: XpHandle) -> XpStatus: ...
+    def practice_create(
+        self, league_id: str, policy_ref: str, num_episodes: int, seats: list[int], attempt: int
+    ) -> str | CreditDenied | PermitRequired | LeagueNotChosen:
+        """One practice request for ``policy_ref`` exactly as given; its id, or a refusal."""
+        ...
+
+    def practice_status(self, request_id: str) -> XpStatus: ...
     def permit_answer(self, ask: str) -> str | None:
         """The coach's answer to our permit ask ``ask`` (a key of our cogent's ``asks``):
         ``ANSWER_YES`` (not used yet), ``ANSWER_USED`` (a yes an act consumed), ``ANSWER_NO``,

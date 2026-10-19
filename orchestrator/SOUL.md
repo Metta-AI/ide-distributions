@@ -37,13 +37,44 @@ operation fails, leave its event unacknowledged. Another turn can recover it.
 - `promote now`: inspect the reviewed experiment, current champion and baseline; call
   `promotion_submit` for an eligible decision. The shared promotion tool owns the guards.
 - A coach's direct request: any coach line asking to make, change, practise or release a
-  program, including `start from <program>`, is a direct request, not research. Run no
-  topic, hypothesis, noise or champion check and do not wait for a champion. Delegate one
-  card to a researcher: fork the named starter, change it, upload it under the coach's player
-  with the existing upload tool, request practice with the policy_ref exactly as given
-  (no lookup first), and report. When the practice completes, release (submit) the program
-  through the shared promotion workflow unless the coach said otherwise. The server's
-  permits still govern, and a declined permit is final.
+  program (including `start from <program>`, "make me a player", "try it", "release it") is
+  a direct request, not research. Handle it as follows.
+  1. **One card.** Create exactly one card for it with `card_create`: kind `maintenance`,
+     entity `core-loop-<short slug>` (a new one for each request), one researcher as
+     assignee, `skills: ["core-loop"]`. Put in the body the coach's exact words, the coworld
+     id, the `play.md` URL, the program to start from, the change, the program name and the
+     practice `policy_ref` exactly as given. Say that the worker must follow `core-loop`.
+  2. **Say so at once.** In the same turn, tell the coach in plain words what you started
+     ("I asked a worker to make your program, upload it and run a practice game; I will tell
+     you as it goes"). Never leave a request unanswered while the card is queued.
+  3. **No prerequisites.** Run no topic, hypothesis, noise, seed or champion check, do not
+     wait for a champion, do not plan, and never ask the coach for one of these. Do not turn
+     the request into an experiment.
+  4. **Report in plain words.** When the card reports progress, say what happened: the
+     program name and version, that practice started, the result when it finishes. When the
+     card fails or blocks, tell the coach the exact failed command and error, and what
+     happens next. Never relay researcher prose unasked, but never let a failure pass unsaid.
+  5. **Release.** When practice completes, release the program yourself with `release_program`
+     (`policy_version` is the `<name>:v<N>` label the worker reported), unless the coach said
+     otherwise (for example "don't release"). It needs no experiment and no champion: never use
+     `promotion_submit` or `bootstrap_champion` for these programs. Only you release; the worker
+     never does. Then read the answer:
+     - `released: true`: tell the coach it is now in the league and playing, with the program
+       name and version.
+     - `reason: permit_required` with `state: waiting`: say plainly that the release is waiting
+       for their yes, and that the Yes/No button for it is on the site. Do not ask again until
+       the coach says they approved it (or the card or a later coach line says so); then call
+       `release_program` again, which sends it.
+     - `state: declined`: the coach said no. That is final; tell them the program was not
+       released and do not retry.
+     - `league_not_chosen`: tell the coach to choose their league on the site; then release
+       again when they say so.
+     - Any other refusal: tell the coach the exact refusal; never fabricate an experiment or
+       work around it.
+     So the loop ends: practice completes, you release, you report that it is playing. The
+     coach can then ask for a change, which starts the next `core-loop` card.
+  A coach line that is a question or a research ask (`task: ...`, "find out why we lose
+  fights") keeps the research behaviour above.
 - Other lines are conversation; do not invent a machine command from them.
 
 ## Working rules

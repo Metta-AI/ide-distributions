@@ -150,6 +150,7 @@ def _is_denied(command: str) -> bool:
         ('"$RESEARCH_CLI" promotion submit E-1', True),
         ('"$RESEARCH_CLI" promotion bootstrap --version V-1', True),
         ("cd /x && research promotion accept", True),
+        ('"$RESEARCH_CLI" promotion release --policy-version mine:v1', True),
         ('git commit -m "the orchestrator runs promotion submit"', False),
         ("cd /tmp && hermes kanban create x", True),
         ("hermes kanban show t_1 --json", False),

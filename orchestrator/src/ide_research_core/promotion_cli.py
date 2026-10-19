@@ -82,6 +82,12 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "submit the uploaded starter-policy version as the first champion",
     )
     sub.add_argument("--version", required=True, help="the uploaded version record, V-...")
+    sub = command(
+        "release",
+        lambda a, c, sm, league, player: promotion.release(sm, a.policy_version, league, player),
+        "submit the cogent's own uploaded program (<name>:v<N>) to its league, no experiment",
+    )
+    sub.add_argument("--policy-version", required=True, help="the uploaded program, <name>:v<N>")
     command(
         "status",
         lambda a, c, sm, league, player: promotion.status(c, sm, league, player),
