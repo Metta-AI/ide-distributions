@@ -48,7 +48,7 @@ def staged(tmp_path, monkeypatch):
 
 
 def compile_args(source):
-    return SimpleNamespace(action='compile', source=source, agent_timeout=1, agent_budget=None,
+    return SimpleNamespace(action='compile', full_evaluation=True, source=source, agent_timeout=1, agent_budget=None,
                            agent='hermes', model=None, full=False, milestone=None,
                            previous=None, manifest=source)
 
@@ -65,7 +65,7 @@ def test_shared_gate_unexpected_exception_is_errored(tmp_path, monkeypatch, name
     def broken(*a, **kw):
         raise exception
     if name in ('g1_lint', 'g3_budget', 'g4_screen'):
-        monkeypatch.setattr(module, 'measure', broken)
+        monkeypatch.setattr(module, 'measure_many' if name == 'g4_screen' else 'measure', broken)
     elif name == 'g2_episode':
         monkeypatch.setenv('GOTA_G2_RUNNER', 'docker')
         monkeypatch.setattr(module.subprocess, 'run', broken)
@@ -283,6 +283,7 @@ def test_import_time_fault_retains_build_cli_report(tmp_path, monkeypatch, capsy
 def test_local_check_retains_fault_and_stops(tmp_path, monkeypatch, capsys, where):
     from games.gota.gates import __main__ as check
     from games.gota.tools import engine_identity
+    (tmp_path / 'policy.bas').write_text('x=1')
     monkeypatch.setattr(sys, 'argv', ['check', str(tmp_path / 'policy.bas'),
                                      '--work-dir', str(tmp_path / 'check')])
     calls = []
@@ -291,7 +292,7 @@ def test_local_check_retains_fault_and_stops(tmp_path, monkeypatch, capsys, wher
             raise KeyError('host contract')
         return {'commit': 'a' * 40, 'manifest': {}}
     monkeypatch.setattr(engine_identity, 'resolve', resolve)
-    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
+    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None, {}))
     def load(name):
         calls.append(name)
         if where == 'import':
@@ -413,11 +414,12 @@ def test_blocking_policy_failure_remains_failed(staged, monkeypatch, failed_gate
 def test_local_check_advisory_failures_exit_zero(tmp_path, monkeypatch):
     from games.gota.gates import __main__ as check
     from games.gota.tools import engine_identity
+    (tmp_path / 'policy.bas').write_text('x=1')
     monkeypatch.setattr(sys, 'argv', ['check', str(tmp_path / 'policy.bas'),
                                      '--work-dir', str(tmp_path / 'check')])
     monkeypatch.setattr(engine_identity, 'resolve', lambda *a, **kw:
                         {'commit': 'a' * 40, 'manifest': {}})
-    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
+    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None, {}))
     monkeypatch.setattr(check.importlib, 'import_module', lambda name:
                         SimpleNamespace(run=lambda *a: GateResult(
                             'failed' if name.endswith(('g4_screen', 'g5_telemetry')) else 'passed', {})))

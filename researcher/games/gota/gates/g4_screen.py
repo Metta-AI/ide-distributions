@@ -4,7 +4,7 @@ from pathlib import Path
 
 from . import GateContext, GateResult, gate_run
 from .g2_episode import validate_results
-from .native import NATIVE_MODE, measure
+from .native import NATIVE_MODE, measure_many
 
 
 def metrics(row: dict, slots: range) -> dict:
@@ -26,21 +26,20 @@ def run(artifact: Path, context: GateContext) -> GateResult:
                  == hashlib.sha256(context.baseline.read_bytes()).digest())
     rows = []
     candidate, baseline = [], []
-    for seed in context.seeds:
-        for blue in (False, True):
-            report = measure(artifact, context, seed,
-                             None if identical else context.baseline,
-                             False if identical else blue)
-            if report['outcome'] != 'passed':
-                return GateResult(report['outcome'], report)
-            runtime = report['runtime']
-            candidate_slots = range(5, 10) if blue else range(5)
-            baseline_slots = range(5) if blue else range(5, 10)
-            a, b = metrics(runtime, candidate_slots), metrics(runtime, baseline_slots)
-            candidate.append(a)
-            baseline.append(b)
-            rows.append({'seed': seed, 'candidate_blue': blue,
-                         'candidate': a, 'baseline': b})
+    matches = [(seed, None if identical else context.baseline, False if identical else blue)
+               for seed in context.seeds for blue in (False, True)]
+    reports = measure_many(artifact, context, matches)
+    for (seed, blue), report in zip(((seed, blue) for seed in context.seeds for blue in (False, True)), reports):
+        if report['outcome'] != 'passed':
+            return GateResult(report['outcome'], report)
+        runtime = report['runtime']
+        candidate_slots = range(5, 10) if blue else range(5)
+        baseline_slots = range(5) if blue else range(5, 10)
+        a, b = metrics(runtime, candidate_slots), metrics(runtime, baseline_slots)
+        candidate.append(a)
+        baseline.append(b)
+        rows.append({'seed': seed, 'candidate_blue': blue,
+                     'candidate': a, 'baseline': b})
     averages = {name: sum(row[name] for row in candidate) / len(candidate)
                 for name in ('glory', 'win_rate')}
     reference = {name: sum(row[name] for row in baseline) / len(baseline)

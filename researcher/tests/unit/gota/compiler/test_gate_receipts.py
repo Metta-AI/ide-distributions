@@ -37,6 +37,7 @@ def install_probe(monkeypatch, receipt):
     from games.gota.tools import native_build
     identity = {'inputs': {'dependencies': {'bassy': {'commit': 'b' * 40}}}}
     monkeypatch.setattr(native_build, 'validate', lambda *a, **kw: identity)
+    monkeypatch.setattr(native, 'validate_executable', lambda *a: identity)
     def run(command, **kw):
         data = deepcopy(receipt)
         if command[1] == 'compile':
@@ -103,7 +104,7 @@ def test_malformed_screen_measurement_is_tool_error(tmp_path, monkeypatch, field
     artifact.write_text('x=1')
     row = {'ticks': 10, 'scores': [0] * 10, 'total_xp': [0] * 10, 'decisions': 10}
     row[field] = value
-    monkeypatch.setattr(g4_screen, 'measure', lambda *a: {'outcome': 'passed', 'ok': True, 'runtime': row})
+    monkeypatch.setattr(g4_screen, 'measure_many', lambda a, c, matches: [{'outcome': 'passed', 'ok': True, 'runtime': row} for _ in matches])
     result = g4_screen.run(artifact, GateContext(tmp_path, baseline=artifact))
     assert result.outcome == 'errored'
 
@@ -192,6 +193,7 @@ def test_complete_zero_execution_native_receipt_is_policy_failure(tmp_path, monk
                         {'outcome': 'passed', **{k: v for k, v in receipt.items()
                                                if k not in ('outcome', 'ok', 'runtime')}, 'ok': True}
                         if len(a) == 2 else receipt)
+    monkeypatch.setattr(g3_budget, 'measure_many', lambda *a: [receipt])
     result = g3_budget.run(tmp_path / 'policy.bas', GateContext(tmp_path, seeds=(1,)))
     assert result.outcome == 'failed'
 

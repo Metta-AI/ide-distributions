@@ -83,7 +83,7 @@ def keep_compiler_sessions(home, scratch, profile_home):
         print(f'warning: compiler sessions not kept ({type(error).__name__}: {error})', file=sys.stderr)
 
 
-def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=False, prebuilt=None):
+def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=False, prebuilt=None, full_evaluation=False):
     """Output is new and immutable; failure retains evidence without an upload envelope."""
     started = now_iso()
     profile_home = os.environ.get('HERMES_HOME')
@@ -100,7 +100,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
                             action='Preserve the previous attempt and choose a new --out directory.')
     if prebuilt is not None:
         from games.gota.tools import prebuilt as existing
-        return existing.build(candidate, out, prebuilt, identity, started=started)
+        return existing.build(candidate, out, prebuilt, identity, started=started, full_evaluation=full_evaluation)
     source = candidate / 'STRATEGY.md'
     repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
     os.environ['GOTA_CANDIDATE_REPO'] = repo
@@ -110,7 +110,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
         raise pw_cli.EnvironmentMissing('Hermes Python is not configured', 'set GOTA_HERMES_PYTHON to the installed Hermes Python')
 
     from games.gota.tools.engine_identity import provision
-    identity, _ = provision(identity)
+    identity, _, _ = provision(identity)
     out.parent.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='.gota-build-', dir=out.parent))
     os.environ['GOTA_ANALYSIS_DIR'] = str(scratch / 'analysis')
@@ -127,7 +127,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     compiler.STAGING = scratch / 'staging'
     args = pw_strategy.parser().parse_args(['compile', '--source', str(source), '--agent', 'hermes',
                                            '--manifest', str(manifest), '--agent-timeout', str(timeout),
-                                           '--agent-budget', str(budget)])
+                                           '--agent-budget', str(budget)] + (['--full-evaluation'] if full_evaluation else []))
     report = pw_cli.Report('gota_build', json_mode=True)
     try:
         with contextlib.redirect_stdout(sys.stderr):
@@ -156,6 +156,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     shutil.rmtree(scratch)
     return {'ok': version['status'] == 'passed', 'build_id': version['build_id'],
             'status': version['status'], 'error': result.get('error'), 'build': str(out),
+            'validation_scope': version['validation_scope'], 'evaluation': version['evaluation'],
             'gates': version['gates'], 'artifact': str(out / 'policy.bas')}
 
 
@@ -169,12 +170,13 @@ def main():
                         help=f'per-generation compiler timeout; overrides GOTA_AGENT_TIMEOUT_S (default: {DEFAULT_AGENT_TIMEOUT_S}s)')
     parser.add_argument('--agent-budget', metavar='SECONDS',
                         help=f'cumulative generation budget; overrides GOTA_AGENT_BUDGET_S (default: {DEFAULT_AGENT_BUDGET_S}s)')
+    parser.add_argument('--full-evaluation', action='store_true', help='also run full G2–G5 evaluation; default compiles and checks static host limits only')
     parser.add_argument('--offline', action='store_true', help='explicit historical pinned engine; no live lookup')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     try:
         manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
-        options = {'offline': args.offline, 'timeout': args.agent_timeout, 'budget': args.agent_budget}
+        options = {'offline': args.offline, 'timeout': args.agent_timeout, 'budget': args.agent_budget, 'full_evaluation': args.full_evaluation}
         if args.prebuilt is not None:
             options['prebuilt'] = args.prebuilt.resolve()
         result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, **options)

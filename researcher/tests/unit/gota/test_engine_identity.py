@@ -86,8 +86,9 @@ def test_direct_gate_fetches_manifest_and_propagates_pin(tmp_path, monkeypatch):
     current = manifest('b' * 40)
     identity = {**engine.from_manifest(current, '2026.10.8.1', mode='live'), 'manifest': current}
     monkeypatch.setattr(engine, 'resolve', lambda path, **kwargs: dict(identity))
-    monkeypatch.setattr(engine, 'provision', lambda receipt: (receipt, tmp_path / 'fake-probe'))
-    monkeypatch.setattr(sys, 'argv', ['gates', '/fake/artifact', '--work-dir', str(tmp_path), '--gate', 'g1_lint'])
+    monkeypatch.setattr(engine, 'provision', lambda receipt: (receipt, tmp_path / 'fake-probe', {}))
+    (tmp_path / 'artifact').write_text('x=1')
+    monkeypatch.setattr(sys, 'argv', ['gates', str(tmp_path / 'artifact'), '--work-dir', str(tmp_path), '--gate', 'g1_lint'])
     def run(artifact, context):
         assert context.engine_commit == 'b' * 40
         assert json.loads(context.manifest.read_text()) == current

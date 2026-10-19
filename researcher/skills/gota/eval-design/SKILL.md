@@ -93,7 +93,7 @@ name the roster, not disguise teammate copies as additional N. Diagnose by
 red/blue seat, draft class and opponent composition before pooling.
 
 Continue through core `build-upload` and `xp-request` only within authorized work:
-committed semantic STRATEGY -> PW compiler -> G1–G5 reports; an existing exact
+committed semantic STRATEGY -> PW compiler -> G1 build report (full G1–G5 evaluation is opt-in); an existing exact
 BASIC baseline uses the explicit prebuilt path below;
 local gate success proves mechanism, not hosted strength. Failed/partial evidence
 cannot support a promotion.
@@ -130,13 +130,12 @@ in this worktree. Generate v13-live, commit both `v13-live.bas` and
 bindings from `"$RESEARCH_HOME"` with `"$RESEARCH_PYTHON"` as GAME.md shows.
 
 This resolves the current engine, verifies committed input and transform hashes,
-freezes exact bytes and runs G1–G4 without Hermes, model calls or scanner setup.
-G4 is a baseline mirror screen. G5 is not executed: its advisory report says
-`not applicable: prebuilt`, with `passed: false`. A completed build includes local
-validation; do not run G1–G4 again for the same artifact and execution conditions.
-Follow `GAME.md`'s **Local validation** contract: inspect the complete retained
-reports, provenance, native measurements, and G2 episode evidence before upload.
-All required gates and their budgets remain unchanged. An errored build follows
+freezes exact bytes and runs G1 without Hermes, model calls or scanner setup.
+Default build reports explicitly record evaluation `not_run`; upload does not wait
+for local evaluation. Use `--full-evaluation` or standalone `local_check` only for
+separately requested evaluation. Follow `GAME.md`'s **Local validation** contract.
+Review the build reports, provenance and actual native compile evidence before upload.
+Full evaluation keeps every seed and tick budget unchanged. An errored build follows
 **Build tool faults** above. A failed or incomplete build does not qualify for reuse.
 
 After the required checks pass, upload the starter:

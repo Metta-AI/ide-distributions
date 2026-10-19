@@ -80,13 +80,15 @@ def check_surface(surface, identity):
 
 def provision(identity):
     """Prepare exact pins, validate receipts and reject changed compiler contracts."""
-    from games.gota.tools.native_build import build, prepare, validate
+    from games.gota.tools.native_build import build, prepare, receipt_path, validate
     prepare(identity['commit'])
     receipts = {}
     binaries = {}
     for target in ('gate_probe', 'gota_match'):
         binary = build(target, identity['commit'])
-        receipts[target] = validate(binary, target, identity['commit'])
+        # build() has just validated existing bytes or validated compilation inputs
+        # before and after producing this receipt. Do not repeat its full scan.
+        receipts[target] = json.loads(receipt_path(binary).read_text())
         binaries[target] = binary
     identity = dict(identity)
     identity['bassy_commit'] = receipts['gate_probe']['inputs']['dependencies']['bassy']['commit']
@@ -96,4 +98,4 @@ def provision(identity):
     identity['host_contract_sha256'] = check_surface(json.loads(result.stdout), identity)
     if validate(binaries['gota_match'], 'gota_match', identity['commit']) != receipts['gota_match']:
         raise ValueError('native host identity changed during contract check')
-    return identity, binaries['gate_probe']
+    return identity, binaries['gate_probe'], receipts

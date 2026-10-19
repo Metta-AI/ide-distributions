@@ -160,7 +160,7 @@ def test_generation_timeout_retains_errored_build_without_repairs(
             raise subprocess.TimeoutExpired(command, kwargs['timeout'])
         return run(command, **kwargs)
     monkeypatch.setattr(sb.subprocess, 'run', expire)
-    args = SimpleNamespace(action='compile', source=sb.REPO / order['source_path'],
+    args = SimpleNamespace(action='compile', full_evaluation=True, source=sb.REPO / order['source_path'],
                            agent_timeout=timeout, agent_budget=budget, agent='hermes', model=None, full=False,
                            milestone=None, previous=None, manifest=stage / 'manifest.json')
     result = pw_strategy.run(args, pw_cli.Report('test', json_mode=True))
@@ -270,7 +270,7 @@ def test_fake_prepare_to_verified_goal_audit(generation, monkeypatch, capsys, de
     sb.assemble_build(order['build_id'])
     native_fixture = {'gota_match': {'binary_sha256': 'a' * 64, 'fingerprint': 'b' * 64}}
     sb.dump(sb.build_path(order['build_id'], staged=True) / 'native_provenance.json', native_fixture)
-    build = sb.finalize(order, {f'G{i}': {'passed': True, 'summary': 'test fixture only'} for i in range(1, 6)})
+    build = sb.finalize(order, {f'G{i}': {'passed': True, 'summary': 'test fixture only'} for i in range(1, 6)}, full_evaluation=True)
     _, version, mapping, _ = strategy_audit.load_build(order['build_id'])
     assert version['artifact_hashes']['native_provenance.json'] == sb.digest(build / 'native_provenance.json')
     assert version['native_builds'] == native_fixture
@@ -367,8 +367,8 @@ def test_compiler_child_isolates_outer_profile(generation, monkeypatch):
     sb.generate(order)
 
 
-@pytest.mark.parametrize('repair,reject_repair', [(False, False), (True, False), (True, True)])
-def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypatch, tmp_path, repair, reject_repair):
+@pytest.mark.parametrize('repair,reject_repair,full_evaluation', [(False, False, False), (False, False, True), (True, False, True), (True, True, True)])
+def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypatch, tmp_path, repair, reject_repair, full_evaluation):
     """Real source closure/prepare/generate/assemble/finalize; external gates and model fake only."""
     import importlib.util
 
@@ -410,8 +410,8 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
         verified_farm_units.append((stage / 'units/C.farm.bas').read_bytes())
         (episode / 'results.json').write_text('{}')
         commands[:] = ['coworld', '--output-dir', str(episode)]
-        gates = {f'G{i}': {'outcome': 'passed', 'passed': True, 'summary': {}} for i in range(1, 6)}
-        for name in ('G2', 'G5'):
+        gates = {f'G{i}': {'outcome': 'passed', 'passed': True, 'summary': {}} for i in (range(1, 6) if full_evaluation else (1,))}
+        for name in (('G2', 'G5') if full_evaluation else ()):
             gates[name]['summary'] = {'episode_dir': str(episode), 'command': list(commands)}
         if repair and (len(verified_policies) == 1 or reject_repair):
             gates['G1'] = {'outcome': 'failed', 'passed': False, 'summary': {'diagnostic': 'fixture repair'}}
@@ -434,8 +434,8 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
         f'https://github.com/Metta-AI/polyworld/tree/{gota_host.POLYWORLD_COMMIT}/examples/gods_of_the_arena'}}}))
     out = tmp_path / 'separate-build-output'
     from games.gota.tools import engine_identity
-    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
-    result = binding.build(candidate, out, manifest, offline=True)
+    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None, {}))
+    result = binding.build(candidate, out, manifest, offline=True, full_evaluation=full_evaluation)
     if reject_repair:
         assert not result['ok'] and result['status'] == 'failed'
         assert len(verified_policies) == 3
@@ -458,8 +458,10 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     surfaces = [result, version, sb.read(out / 'report.json'),
                 {'gates': sb.read(out / 'gates.json')},
                 {'gates': sb.read(out / 'verify/attempt-fake/gates.json')}]
+    assert version['validation_scope'] == ('full' if full_evaluation else 'build')
+    assert version['evaluation']['status'] == ('passed' if full_evaluation else 'not_run')
     for surface in surfaces:
-        for name in ('G2', 'G5'):
+        for name in (('G2', 'G5') if full_evaluation else ()):
             summary = surface['gates'][name]['summary']
             assert (out / summary['episode_dir'] / 'results.json').is_file()
             assert summary['command'] == commands

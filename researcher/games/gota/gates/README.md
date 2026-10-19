@@ -33,7 +33,9 @@ startup fails. Exit 0 means selected blocking gates passed; exit 1 means a
 policy failed a blocking gate; exit 3 means a tool or harness errored. Gates omitted
 after an error were not run. G4/G5 policy failures are advisory and do not change the exit
 status; tool errors always do. Use a fresh work directory for G2.
-The explicit `build --prebuilt FILE.bas` binding runs G1–G4 with this contract.
+Default builds run G1 only and record evaluation `not_run`; they do not require
+full local evaluation before upload. `build --full-evaluation --prebuilt FILE.bas`
+runs G1–G4 with this contract.
 Its G5 receipt is not an executed GateResult: it records `applicable: false`,
 `passed: false`, `advisory: true`, and `not applicable: prebuilt`, without an
 `outcome`. The artifact is its own G4 baseline mirror. See [bootstrap](../GAME.md#starter-policy)
@@ -48,6 +50,17 @@ The Docker runner uses the project lockfile for coworld and softmax-cli through 
 the same `uv run --project PROJECT --locked --offline --python 3.12` invocation,
 with the project directory resolved from the script rather than the caller's
 working directory. Cache the locked dependencies before either command.
+
+## Concurrency and integrity
+
+G3/G4 independent native matches run with two workers by default. `local_check
+--jobs 1` selects serial execution; `--jobs 4` permits four. Workers are capped at
+four, CPU affinity and cgroup CPU quota. Results retain seed/side order; identical
+matches share one measurement. Every seed and full tick budget is unchanged.
+Complete source, dependency and toolchain validation brackets each batch. Each
+probe also checks executable and receipt hashes before and after running, and
+checks artifact/opponent bytes after execution. A mutation invalidates the batch.
+No persistent validation cache bypasses these checks.
 
 ## Durations and waiting
 
@@ -65,7 +78,7 @@ estimate; host speed, policy, early game ends and cache reuse affect the total.
 G3 defaults to ten seeds at up to 31200 ticks. G4 covers those ten seeds on both
 sides; identical policy hashes share mirror measurements, including G3's
 measurements in the same `GateContext`. Different artifacts require candidate
-versus baseline screens. A completed build includes local validation: follow
+versus baseline screens. A full-evaluation build includes these measurements: follow
 [the evidence contract](../GAME.md#local-validation) instead of repeating its gates
 before upload. A separately requested diagnostic `local_check` creates a fresh context
 and reruns the workload; the preceding build's in-memory cache does not survive. Short G3 samples prove only their reported `sample_ticks` and do not

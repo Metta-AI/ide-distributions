@@ -1,7 +1,9 @@
 """Use the pinned engine compiler and VM counters, not lexical budget estimates."""
 import hashlib
 import json
+import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import GateContext
@@ -69,7 +71,8 @@ def validate_measurement(result: dict, *, simulated: bool) -> None:
 
 
 def measure(artifact: Path, context: GateContext, seed: int | None = None,
-            opponent: Path | None = None, blue: bool = False) -> dict:
+            opponent: Path | None = None, blue: bool = False, *, identity: dict | None = None) -> dict:
+    batched = identity is not None
     commit = context.engine_commit or POLYWORLD_COMMIT
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     opponent_digest = hashlib.sha256(opponent.read_bytes()).hexdigest() if opponent else None
@@ -83,7 +86,7 @@ def measure(artifact: Path, context: GateContext, seed: int | None = None,
         binary = Path(build.stdout.strip().splitlines()[-1])
         context.native_binary = binary
     from games.gota.tools.native_build import validate
-    identity = validate(binary, 'gate_probe', commit)
+    identity = validate(binary, 'gate_probe', commit) if identity is None else validate_executable(binary, identity)
     if key in context.measurements:
         if context.measurements[key]['native_build'] != identity:
             raise ValueError('native identity changed during verification')
@@ -97,9 +100,13 @@ def measure(artifact: Path, context: GateContext, seed: int | None = None,
     subprocess.run(command, capture_output=True, text=True, check=True, timeout=context.timeout)
     result = json.loads(report.read_text())
     validate_measurement(result, simulated=seed is not None)
-    after = validate(binary, 'gate_probe', commit)
+    after = validate_executable(binary, identity)
+    if hashlib.sha256(artifact.read_bytes()).hexdigest() != digest or (opponent and hashlib.sha256(opponent.read_bytes()).hexdigest() != opponent_digest):
+        raise ValueError('policy changed during native measurement')
     if identity != after or result.get('engine') != commit or result.get('bassy') != identity['inputs']['dependencies']['bassy']['commit']:
         raise ValueError('native gate identity mismatch')
+    if not batched and validate(binary, 'gate_probe', commit) != identity:
+        raise ValueError('native inputs changed during measurement')
     result['native_build'] = identity
     result['artifact_sha256'] = digest
     result['polyworld_commit'] = commit
@@ -108,3 +115,58 @@ def measure(artifact: Path, context: GateContext, seed: int | None = None,
     report.write_text(json.dumps(result, indent=2) + '\n')
     context.measurements[key] = result
     return result
+
+
+def measure_many(artifact: Path, context: GateContext, matches: list[tuple[int, Path | None, bool]]) -> list[dict]:
+    """Bound independent probes; retain input validation at both batch boundaries."""
+    from games.gota.tools.native_build import validate
+
+    if context.jobs < 1:
+        raise ValueError('native jobs must be positive')
+    commit = context.engine_commit or POLYWORLD_COMMIT
+    # G1/G3 compilation establishes the binary before concurrent simulation starts.
+    if context.native_binary is None:
+        measure(artifact, context)
+    identity = validate(context.native_binary, 'gate_probe', commit)
+    unique = list(dict.fromkeys(matches))
+    policies = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in {artifact, *(opponent for _, opponent, _ in matches if opponent)}}
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1)
+    quota = Path('/sys/fs/cgroup/cpu.max')
+    if quota.is_file():
+        allowance, period = quota.read_text().split()
+        if allowance != 'max':
+            cpus = min(cpus, max(1, int(allowance) // int(period)))
+    else:
+        for group in ('cpu', 'cpu,cpuacct'):
+            quota_v1 = Path('/sys/fs/cgroup') / group / 'cpu.cfs_quota_us'
+            if quota_v1.is_file():
+                allowance = int(quota_v1.read_text())
+                if allowance > 0:
+                    period = int(quota_v1.with_name('cpu.cfs_period_us').read_text())
+                    cpus = min(cpus, max(1, allowance // period))
+    workers = min(context.jobs, cpus, 4)
+    def run(match):
+        seed, opponent, blue = match
+        if any(hashlib.sha256(path.read_bytes()).hexdigest() != expected for path, expected in policies.items()):
+            raise ValueError('policy changed during measurement batch')
+        return measure(artifact, context, seed, opponent, blue, identity=identity)
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        results = dict(zip(unique, pool.map(run, unique)))
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+        if any(hashlib.sha256(path.read_bytes()).hexdigest() != expected for path, expected in policies.items()):
+            raise ValueError('policy changed during measurement batch')
+        if validate(context.native_binary, 'gate_probe', commit) != identity:
+            raise ValueError('native inputs changed during measurement batch')
+    return [results[match] for match in matches]
+
+
+def validate_executable(binary: Path, receipt: dict) -> dict:
+    """Check executable bytes and receipt between complete input validation boundaries."""
+    from games.gota.tools.native_build import digest, receipt_path
+    if (json.loads(receipt_path(binary).read_text()) != receipt or
+            digest(binary) != receipt['binary_sha256'] or not os.access(binary, os.X_OK)):
+        raise ValueError(f'native executable or receipt changed: {binary}')
+    return receipt
