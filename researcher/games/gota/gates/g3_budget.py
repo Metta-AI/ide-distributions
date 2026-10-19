@@ -3,7 +3,7 @@ from pathlib import Path
 
 from . import GateContext, GateResult, gate_run
 from .limits import HARD, LEGACY, PRINT, SOFT
-from .native import NATIVE_MODE, measure
+from .native import NATIVE_MODE, measure, measure_many
 
 
 @gate_run
@@ -17,8 +17,8 @@ def run(artifact: Path, context: GateContext) -> GateResult:
     runtime = []
     if not context.seeds or context.max_ticks < 1:
         raise ValueError('Runtime seeds and positive tick count required')
-    for seed in context.seeds:
-        measured = measure(artifact, context, seed)
+    reports = measure_many(artifact, context, [(seed, None, False) for seed in context.seeds])
+    for seed, measured in zip(context.seeds, reports):
         if measured['outcome'] == 'errored' or 'error' in measured:
             return GateResult(measured['outcome'], measured)
         row = measured['runtime']

@@ -40,7 +40,7 @@ def candidate(tmp_path, monkeypatch):
     artifact.with_suffix('.provenance.json').write_text(json.dumps(provenance))
     commit(directory)
     monkeypatch.setattr(build, 'validate_manifest', lambda *a, **kw: dict(identity))
-    monkeypatch.setattr(engine_identity, 'provision', lambda value: (value, Path('/verified/probe')))
+    monkeypatch.setattr(engine_identity, 'provision', lambda value: (value, Path('/verified/probe'), {target: {'fingerprint': target} for target in ('gate_probe', 'gota_match')}))
     from games.gota.tools import native_build
     monkeypatch.setattr(native_build, 'validate', lambda binary, target, engine: {'fingerprint': target})
     for name in ('pw_strategy', 'pw_cli', 'strategy_build'):
@@ -71,7 +71,7 @@ def test_prebuilt_exact_bytes_shared_reader_and_no_compiler(candidate, tmp_path,
     directory, artifact = candidate
     calls = fake_gates(monkeypatch)
     out = tmp_path / 'build'
-    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    result = build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
     assert result['ok'] and calls == ['G1', 'G2', 'G3', 'G4']
     version, frozen = _read_build(out)
     assert frozen.read_bytes() == artifact.read_bytes()
@@ -84,7 +84,7 @@ def test_prebuilt_exact_bytes_shared_reader_and_no_compiler(candidate, tmp_path,
     assert all(version['gates'][name]['seconds'] >= 0 for name in ('G1', 'G2', 'G3', 'G4'))
     assert version['started'] <= version['finished']
     with pytest.raises(ValueError, match='immutable'):
-        build.build(directory, out, offline=True, prebuilt=artifact)
+        build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
 
 
 @pytest.mark.parametrize('boundary', ['before', 'G1', 'G2', 'G3', 'G4'])
@@ -107,7 +107,7 @@ def test_prebuilt_manifest_fault_stops_gates_and_retains_error(candidate, tmp_pa
             return result
         monkeypatch.setattr(module, 'run', mutate)
     out = tmp_path / 'failed-manifest'
-    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    result = build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
     assert result['status'] == 'errored'
     assert calls == ([] if boundary == 'before' else ['G1', 'G2', 'G3', 'G4'][:int(boundary[1])])
     assert result['error']['type'] == 'ValueError'
@@ -133,7 +133,7 @@ def test_prebuilt_episode_locator_survives_output_move(candidate, tmp_path, monk
         return GateResult('passed', {'episode_dir': str(evidence), 'command': list(original_command)})
     monkeypatch.setattr(g2_episode, 'run', episode)
     out = tmp_path / 'unrelated-output/build'
-    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    result = build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
     surfaces = [result, json.loads((out / 'version.json').read_text()),
                 json.loads((out / 'report.json').read_text()), {'gates': json.loads((out / 'gates.json').read_text())}]
     for surface in surfaces:
@@ -173,7 +173,7 @@ def test_prebuilt_rejects_bad_input_before_any_gate(candidate, tmp_path, monkeyp
         sidecar.write_text(json.dumps(value))
         commit(directory)
     with pytest.raises(InputRejected, match=message):
-        build.build(directory, tmp_path / 'bad', offline=True, prebuilt=artifact)
+        build.build(directory, tmp_path / 'bad', offline=True, prebuilt=artifact, full_evaluation=True)
     assert calls == []
 
 
@@ -182,7 +182,7 @@ def test_prebuilt_preserves_failure_and_reader_refuses(candidate, tmp_path, monk
     directory, artifact = candidate
     calls = fake_gates(monkeypatch, fault=fault, blocking=blocking)
     out = tmp_path / 'failed'
-    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    result = build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
     assert result['status'] == status and not result['ok']
     assert (out / 'report.json').is_file() and (out / 'report.md').is_file()
     with pytest.raises(Exception, match='gates did not pass'):
@@ -287,12 +287,12 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
         screen_calls.append((seed, blue))
         return {'outcome': 'passed', 'runtime': {'ticks': 31200, 'scores': [1] * 5 + [0] * 5,
                                                 'total_xp': [10] * 10}}
-    monkeypatch.setattr(g4_screen, 'measure', measured_screen)
+    monkeypatch.setattr(g4_screen, 'measure_many', lambda artifact, context, matches: [measured_screen(artifact, context, *match) for match in matches])
     # Even Python model imports are forbidden on this path.
     for name in ('pw_strategy', 'pw_cli', 'strategy_build'):
         monkeypatch.setitem(sys.modules, name, None)
     out = worker.worktree / '.scratch/build/champion'
-    result = build.build(directory, out, manifest, offline=True, prebuilt=artifact)
+    result = build.build(directory, out, manifest, offline=True, prebuilt=artifact, full_evaluation=True)
     assert result['ok'], result
     version, frozen = _read_build(out)
     assert frozen.read_bytes() == artifact.read_bytes()
@@ -374,7 +374,7 @@ def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monke
     directory, artifact = candidate
     fake_gates(monkeypatch)
     out = tmp_path / 'build'
-    build.build(directory, out, offline=True, prebuilt=artifact)
+    build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
     (out / 'policy.bas').write_text('tampered frozen bytes')
     monkeypatch.setattr(upload, 'worker_store', lambda ctx: object())
     # Refusal happens before any record or platform call, with no fake identity success.
@@ -391,7 +391,7 @@ def test_prebuilt_retains_post_gate_source_fault(candidate, tmp_path, monkeypatc
         return GateResult('passed', {'measured': True})
     monkeypatch.setattr(g4_screen, 'run', mutate)
     out = tmp_path / 'build'
-    result = build.build(directory, out, offline=True, prebuilt=artifact)
+    result = build.build(directory, out, offline=True, prebuilt=artifact, full_evaluation=True)
     assert result['status'] == 'errored'
     assert result['gates']['verification']['summary']['error']['type'] == 'InputRejected'
     assert (out / 'report.json').is_file()
@@ -416,7 +416,7 @@ def test_shared_upload_preserves_prebuilt_provenance_in_existing_experiment(cand
     shared = tmp_path / 'shared'
     shared.mkdir()
     workspace = Workspace(shared)
-    build.build(directory, workspace.build, offline=True, prebuilt=artifact)
+    build.build(directory, workspace.build, offline=True, prebuilt=artifact, full_evaluation=True)
     from ide_research_core.softmax_tool.upload import checked_build
     receipt, frozen, artifact_hash = checked_build(workspace.build)
     assert receipt['status'] == 'passed'
@@ -478,7 +478,7 @@ def test_prebuilt_rejects_wrong_mechanical_tool_hash(candidate, tmp_path, monkey
     sidecar.write_text(json.dumps(provenance))
     commit(directory)
     with pytest.raises(ValueError, match='transform tool hash'):
-        build.build(directory, tmp_path / 'bad', offline=True, prebuilt=artifact)
+        build.build(directory, tmp_path / 'bad', offline=True, prebuilt=artifact, full_evaluation=True)
     assert not calls
 
 
@@ -525,22 +525,17 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     assert 'handoff is pending' not in game
 
 
-def test_completed_build_validation_contract_preserves_checks_and_fallback():
+def test_completed_build_validation_contract_separates_evaluation():
     game = (ROOT / 'games/gota/GAME.md').read_text()
     contract = game.split('## Local validation\n', 1)[1].split('\n## ', 1)[0]
-    for requirement in ('status: passed', 'G1–G3', 'G4', 'G5', 'applicable: false',
-                        'policy_sha256', 'engine', 'manifest', 'runner', 'baseline',
-                        'seeds', 'tick budget', 'native tool identity', 'incomplete',
-                        'errored', 'produce a new build', 'diagnostic reruns'):
+    for requirement in ('status: passed', 'validation_scope: build', 'not_run',
+                        '--full-evaluation', 'G1–G3', 'G4/G5', 'evaluation.json'):
         assert requirement in contract
     for name in ('build-upload', 'candidate'):
         skill = (ROOT / f'skills/autoresearch/{name}/SKILL.md').read_text()
-        assert 'completed build includes local validation' in skill
-        assert 'Otherwise' in skill and '`local_check`' in skill
-        assert 'does not qualify for reuse' in skill
-    skill = (ROOT / 'skills/gota/eval-design/SKILL.md').read_text()
-    assert 'do not run G1–G4 again' in skill
-    assert 'run the separate G1–G4' not in skill
+        assert 'not_run' in skill
+        assert 'local_check' in skill
+
 
 
 def test_wrong_sidecar_name_is_rejected_then_corrected(candidate, tmp_path, monkeypatch, capsys):
@@ -572,8 +567,12 @@ def test_wrong_sidecar_name_is_rejected_then_corrected(candidate, tmp_path, monk
     monkeypatch.setattr(sys, 'argv', [*argv, str(tmp_path / 'corrected')])
     assert build.main() == 0
     assert json.loads(capsys.readouterr().out)['status'] == 'passed'
-    assert calls == ['G1', 'G2', 'G3', 'G4']
-    _read_build(tmp_path / 'corrected')
+    assert calls == ['G1']
+    from ide_research_core.softmax_tool.upload import checked_build
+    version, frozen, checked_hash = checked_build(tmp_path / 'corrected')
+    assert checked_hash == sha(artifact) == sha(frozen)
+    assert version['validation_scope'] == 'build'
+    assert version['evaluation'] == {'status': 'not_run'}
     assert (rejected / 'report.json').read_bytes() == report
 
 
@@ -600,7 +599,7 @@ def test_post_gate_input_rejection_remains_integrity_fault(candidate, tmp_path, 
         artifact.with_suffix('.provenance.json').unlink()
         return GateResult('passed', {})
     monkeypatch.setattr(g1_lint, 'run', remove_input)
-    result = build.build(directory, tmp_path / 'changed', offline=True, prebuilt=artifact)
+    result = build.build(directory, tmp_path / 'changed', offline=True, prebuilt=artifact, full_evaluation=True)
     assert result['status'] == 'errored'
     assert result['gates']['verification']['outcome'] == 'errored'
     with pytest.raises(Exception, match='gates did not pass'):

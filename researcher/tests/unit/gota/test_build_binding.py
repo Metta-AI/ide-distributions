@@ -158,6 +158,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
         target.mkdir(parents=True)
         (target / 'policy.bas').write_text('fake immutable policy')
         data = {'build_id': target.name, 'status': status, 'gates': {'G1': {'passed': status == 'passed'}},
+                'validation_scope': 'build', 'evaluation': {'status': 'not_run'},
                 'compiler': {}, 'source_commit': 'abcdef12', 'source_hashes': {str(ROOT / 'driver'): 'hash'},
                 'policy_sha256': hashlib.sha256((target / 'policy.bas').read_bytes()).hexdigest()}
         compiler.dump(target / 'version.json', data)
@@ -171,7 +172,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
         profile.write_text('a file, not a directory')
     monkeypatch.setenv('HERMES_HOME', str(profile))
     from games.gota.tools import engine_identity
-    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
+    monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None, {}))
     if status == 'raises':
         with pytest.raises(RuntimeError, match='compiler crashed'):
             module.build(candidate, out, manifest, offline=True, timeout=timeout, budget=budget)
@@ -301,11 +302,12 @@ def test_main_defaults_online_without_manifest(tmp_path, monkeypatch):
     spec.loader.exec_module(module)
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'), '--json'])
     monkeypatch.setenv('GOTA_MANIFEST', '/stale/historical-manifest.json')
-    def fake_build(candidate, out, manifest, *, offline, timeout, budget):
+    def fake_build(candidate, out, manifest, *, offline, timeout, budget, full_evaluation):
         assert manifest is None
         assert offline is False
         assert timeout is None
         assert budget is None
+        assert full_evaluation is False
         return {'ok': True}
     monkeypatch.setattr(module, 'build', fake_build)
     assert module.main() == 0
@@ -317,7 +319,7 @@ def test_main_forwards_explicit_agent_limits(tmp_path, monkeypatch):
     monkeypatch.setenv('GOTA_AGENT_TIMEOUT_S', 'invalid')
     monkeypatch.setattr(sys, 'argv', ['build', str(tmp_path), '--out', str(tmp_path / 'out'),
                                      '--agent-timeout', '1400', '--agent-budget', '2400', '--json'])
-    def fake_build(candidate, out, manifest, *, offline, timeout, budget):
+    def fake_build(candidate, out, manifest, *, offline, timeout, budget, full_evaluation):
         assert timeout == '1400'
         assert budget == '2400'
         return {'ok': True}
@@ -379,7 +381,7 @@ def test_prebuilt_ignores_agent_timeout_env(tmp_path, monkeypatch):
     monkeypatch.setenv('GOTA_AGENT_BUDGET_S', 'invalid')
     monkeypatch.setattr(module, 'validate_manifest', lambda *a, **kw: {'identity': 'fixture'})
     from games.gota.tools import prebuilt
-    def fake_build(candidate, out, artifact, identity, *, started):
+    def fake_build(candidate, out, artifact, identity, *, started, full_evaluation):
         assert started
         assert identity == {'identity': 'fixture'}
         return {'ok': True}

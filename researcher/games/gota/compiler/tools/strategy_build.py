@@ -538,7 +538,7 @@ def carry_guesses(order: dict, draft: dict) -> list[dict]:
     return list(guesses.values())
 
 
-def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: dict | None = None) -> Path:
+def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: dict | None = None, full_evaluation: bool = False) -> Path:
     from games.gota.gates import retain_episode_locators
 
     assert_inputs(order)
@@ -562,15 +562,19 @@ def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: 
         status = 'errored'
         error = tool_error or gate_errors[0]
     else:
-        status = 'passed' if not error and len(gates) == 5 and all(gates.get(name, {}).get('passed') is True for name in ('G1', 'G2', 'G3')) else 'failed'
+        required = ('G1', 'G2', 'G3') if full_evaluation else ('G1',)
+        complete = len(gates) == (5 if full_evaluation else 1)
+        status = 'passed' if not error and complete and all(gates.get(name, {}).get('passed') is True for name in required) else 'failed'
     warnings = [{'gate': name, 'summary': gate.get('summary', {})}
                 for name, gate in gates.items()
                 if name in ('G4', 'G5') and gate.get('outcome') == 'failed']
     budget = read(stage / 'budget.json') if (stage / 'budget.json').exists() else {}
     report = {'build_id': order['build_id'], 'status': status, 'units': order['units'],
+              'validation_scope': 'full' if full_evaluation else 'build',
+              'evaluation': {'status': status if full_evaluation else 'not_run'},
               'guesses': guesses, 'gaps': draft['gaps'], 'gates': gates, 'budget': budget, 'error': error, 'warnings': warnings}
     dump(stage / 'report.json', report)
-    lines = [f'# Build {order["build_id"]}', '', f'Status: **{status}**. Intent: {order["intent"]}.', '',
+    lines = [f'# Build {order["build_id"]}', '', f'Status: **{status}**. Intent: {order["intent"]}. Validation: {report["validation_scope"]}; evaluation: {report["evaluation"]["status"]}.', '',
              '| Gate | Outcome | Evidence |', '| --- | --- | --- |']
     unexercised = gates.get("G5", {}).get("coverage", {}).get("unexercised_message_types", [])
     if unexercised:
@@ -592,7 +596,8 @@ def finalize(order: dict, gates: dict, *, error: str | None = None, tool_error: 
     (stage / 'report.md').write_text('\n'.join(lines) + '\n')
     version = {k: order[k] for k in ('build_id', 'source_commit', 'source_path', 'source_hashes',
                                     'previous_build', 'compiler', 'engine', 'created', 'intent')}
-    version.update(backend='gota', status=status, gates=gates, driver={'repo_commit': order['source_commit'], 'dirty': False},
+    version.update(backend='gota', status=status, gates=gates,
+                   validation_scope=report['validation_scope'], evaluation=report['evaluation'], driver={'repo_commit': order['source_commit'], 'dirty': False},
                    policy_sha256=digest(stage / 'policy.bas') if (stage / 'policy.bas').exists() else None)
     version['native_builds'] = read(stage / 'native_provenance.json') if (stage / 'native_provenance.json').exists() else {}
     version['artifact_hashes'] = {str(p.relative_to(stage)): digest(p) for p in stage.rglob('*')

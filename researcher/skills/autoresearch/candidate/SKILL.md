@@ -35,6 +35,8 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 When the coach requests a source change and upload without evaluation or league submission:
 
 1. Build the committed source with the installed game binding and review all required build evidence.
+   GotA defaults to compilation/static checks and records evaluation `not_run`; upload does not
+   require a local evaluation. Request full evaluation separately only when the task calls for it.
    Check the generated artifact implements the requested change before uploading; passed gates alone
    do not prove the intended value changed.
 2. Run `"$RESEARCH_CLI" softmax upload-build --name requested-change --build-dir <completed-build>`.
@@ -54,11 +56,12 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
 2. Read the game's `## Starter policy` in `GAME.md` (`card` gives its location). Build that
    starter policy in this worktree through the installed game binding, into
    `.scratch/build/champion`. Do not substitute an experimental candidate. Follow the game's
-   local validation contract: when a completed build includes local validation, review and
-   reuse its complete evidence for the unchanged artifact and execution conditions. Otherwise
-   run the `local_check` binding and retain its reports. Required game checks must pass;
-   missing, incomplete, failed, or errored build evidence does not qualify for reuse.
-   These checks are not competitive evidence (D-04).
+   build validation contract. GotA defaults to G1 compilation/static checks, with evaluation
+   explicitly `not_run`. Review the successful build receipt and artifact hash; do not start
+   full `local_check` just to upload. Other games follow their declared required build checks.
+   Missing, failed or errored required build evidence is not uploadable. Full evaluation,
+   when separately requested, retains its own complete evidence and is not competitive proof.
+
 3. Upload only:
    `"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir .scratch/build/champion`
    Choose your own descriptive name in place of `opening-rush` (at most 23 lowercase letters, digits, or hyphens). Reuse it on retries; the CLI appends your full player ID.

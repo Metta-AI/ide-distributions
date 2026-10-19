@@ -31,6 +31,7 @@ def parser():
         child.add_argument('--milestone', choices=['m0', 'm1'])
         child.add_argument('--from', dest='previous', help='explicit previous passed build ID')
         if action == 'compile':
+            child.add_argument('--full-evaluation', action='store_true', help='also run full G2–G5 evaluation before finalizing')
             child.add_argument('--agent-timeout', type=int, default=900)
             child.add_argument('--agent-budget', type=int, metavar='SECONDS',
                                help='optional cumulative generation budget across all repair rounds')
@@ -112,7 +113,7 @@ def run(args, report, *, engine_identity=None):
                         generation_elapsed += time.monotonic() - generation_started
                 builds.assemble_build(order['build_id'])
                 from gota_gates import verify
-                gates = verify(order['build_id'], manifest=args.manifest)
+                gates = verify(order['build_id'], manifest=args.manifest, full_evaluation=args.full_evaluation)
                 if any(gate['outcome'] == 'errored' for gate in gates.values()):
                     break
                 errors = [{'gate': name, **gate} for name, gate in gates.items()
@@ -135,7 +136,7 @@ def run(args, report, *, engine_identity=None):
         if errors and not failure and not tool_error and not any(
                 gate['outcome'] == 'errored' for gate in gates.values()):
             failure = f'build failed after round {attempt}: {errors}'
-        target = builds.finalize(order, gates, error=failure, tool_error=tool_error)
+        target = builds.finalize(order, gates, error=failure, tool_error=tool_error, full_evaluation=args.full_evaluation)
         report.output(target)
         result = builds.read(target / 'report.json')
         if result['status'] != 'passed':

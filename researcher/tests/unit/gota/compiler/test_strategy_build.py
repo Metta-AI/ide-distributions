@@ -134,7 +134,7 @@ def test_finalization_is_one_way(tmp_path, monkeypatch):
     order = {'build_id': stage.name, 'source_commit': 'abcdef12', 'source_path': 'STRATEGY.md',
              'source_hashes': {}, 'previous_build': None, 'compiler': {}, 'engine': {},
              'created': 'now', 'intent': 'behavior_change', 'units': {}, 'components': {}}
-    result = sb.finalize(order, {f'G{i}': {'passed': True} for i in range(1, 6)})
+    result = sb.finalize(order, {f'G{i}': {'passed': True} for i in range(1, 6)}, full_evaluation=True)
     assert not stage.exists()
     assert sb.checked_build(result)['status'] == 'passed'
     with pytest.raises(pw_cli.UsageError):
@@ -150,7 +150,7 @@ def test_partial_gate_set_cannot_finalize_as_passed(tmp_path, monkeypatch):
     order = {'build_id': stage.name, 'source_commit': 'abcdef12', 'source_path': 'STRATEGY.md',
              'source_hashes': {}, 'previous_build': None, 'compiler': {}, 'engine': {},
              'created': 'now', 'intent': 'behavior_change', 'units': {}, 'components': {}}
-    result = sb.finalize(order, {'G1': {'passed': True}})
+    result = sb.finalize(order, {'G1': {'passed': True}}, full_evaluation=True)
     assert json.loads((result / 'version.json').read_text())['status'] == 'failed'
 
 
@@ -167,7 +167,7 @@ def test_tested_component_requires_high_guess_resolution(tmp_path, monkeypatch):
              'source_hashes': {}, 'previous_build': None, 'compiler': {}, 'engine': {},
              'created': 'now', 'intent': 'behavior_change', 'units': {'C.idle': 'new'},
              'components': {'C.idle': {'fields': {'Status': 'tested'}}}}
-    result = sb.finalize(order, {f'G{i}': {'passed': True} for i in range(1, 6)})
+    result = sb.finalize(order, {f'G{i}': {'passed': True} for i in range(1, 6)}, full_evaluation=True)
     report = sb.read(result / 'report.json')
     assert report['status'] == 'failed'
     assert 'G-C.idle-1' in report['error']
@@ -253,3 +253,21 @@ def test_agent_context_uses_current_authored_skills(tmp_path):
     assert (root / 'units/SK.added.bas').read_bytes() == added.read_bytes()
     assert not (root / 'units/runtime.lib.bas').exists()
     assert not (root / 'units/generated.tables.bas').exists()
+
+
+def test_default_build_receipt_does_not_claim_evaluation(tmp_path, monkeypatch):
+    monkeypatch.setattr(sb, 'STAGING', tmp_path / 'stage')
+    monkeypatch.setattr(sb, 'BUILDS', tmp_path / 'builds')
+    sb.BUILDS.mkdir()
+    stage = sb.STAGING / 'abcdef12-1'
+    stage.mkdir(parents=True)
+    (stage / 'policy.bas').write_text('x = 1\n')
+    order = {'build_id': stage.name, 'source_commit': 'abcdef12', 'source_path': 'STRATEGY.md',
+             'source_hashes': {}, 'previous_build': None, 'compiler': {}, 'engine': {},
+             'created': 'now', 'intent': 'behavior_change', 'units': {}, 'components': {}}
+    result = sb.finalize(order, {'G1': {'passed': True}})
+    version = sb.checked_build(result)
+    assert version['status'] == 'passed'
+    assert version['validation_scope'] == 'build'
+    assert version['evaluation'] == {'status': 'not_run'}
+    assert list(version['gates']) == ['G1']

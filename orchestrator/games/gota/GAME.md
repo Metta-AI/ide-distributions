@@ -57,20 +57,10 @@ Run bindings from `"$RESEARCH_HOME"` (the installed profile directory) with
 `"$RESEARCH_PYTHON"` in place of `python3`, as the core `card` skill sets them, and
 absolute worktree paths. Append the arguments below to the exact front-matter command.
 
-Treat `build` and `local_check` as long commands: their G3/G4 workload takes
-approximately 55 minutes, measured on the autoresearch EC2 test box
-(m7i.xlarge), 2026-10-08. This is not a separate timing for each gate or for
-model generation. Host speed, policy, cache reuse and compiler repair rounds
-can change the total. See
-[gate durations](gates/README.md#durations-and-waiting) for the scope.
-Follow the core `card` skill's **Long commands** procedure: start each build
-or full local check with the terminal tool's `background: true`, keep its
-`session_id`, then call `process_manage` with `action: "wait"`, that `session_id`
-and `timeout: 1800`. Repeat `wait` only on `status: "timeout"`; do nothing else
-between waits. Do not poll, read logs repeatedly, or use sleep/probing loops.
-Other episode runs, Nim replay-expander builds, `gota_local.py`,
-`gota_episodes.py` and replay inspection use this same pattern unless known to
-fit a foreground terminal `timeout` of at most 600 seconds.
+Default `build` runs compilation/static checks only. Full `local_check` and
+`build --full-evaluation` can take tens of minutes; use the card's long-command
+procedure. Cold native preparation and compiler model generation can also take
+time. See [gate durations](gates/README.md#durations-and-waiting) for measurement scope.
 
 - `local_check ARTIFACT --baseline BASELINE --work-dir OUTPUT`
   runs the existing shared G1–G5 gates. See [gate reference](gates/README.md).
@@ -145,53 +135,30 @@ A Docker G2 on a host with Docker, or a league episode, is the evidence for thos
 
 ## Local validation
 
-A completed build includes local validation. The build and `local_check` invoke the
-same shared gate modules. For a successful build, review its retained evidence
-instead of launching a second full `local_check` on the same artifact and execution
-conditions. This applies to experiment candidates and bootstrap builds.
+A default build runs G1 only: native compilation, host schema, and static storage/source
+ceilings. A successful receipt has `status: passed`, `validation_scope: build`,
+`evaluation: {"status": "not_run"}`, and only its actual G1 result. It is uploadable.
+Do not run full local evaluation merely to satisfy a build/upload-only request.
 
-Require `status: passed` and complete applicable receipts in `version.json`: G1–G3
-must pass; G4 must have run without a tool error. Compiler builds also require an
-executed G5 without a tool error. For prebuilt builds only, G5 must explicitly say
-`applicable: false` and `not applicable: prebuilt`. G4/G5 policy failures remain
-advisory and must be reported. Missing, incomplete, failed, or errored build evidence
-does not qualify for reuse. Follow the build failure procedure; a standalone check
-cannot turn a failed build into an uploadable one.
+Full evaluation is explicit: use `build --full-evaluation` to run G1–G5 before
+finalizing, or run `local_check` separately against the frozen artifact. Full builds
+record `validation_scope: full`; G1–G3 must pass, G4/G5 policy failures are advisory,
+and any tool error fails the full build. Prebuilt full builds mark G5 not applicable.
+Standalone evaluation writes `evaluation.json` and `gates.json`; it never rewrites
+an immutable build or upgrades a failed build into an uploadable one.
 
-Read `report.json`, `report.md`, `version.json`, the frozen `policy.bas`, manifest,
-native receipts and measurement reports, and the G2 episode results/logs named by
-`summary.episode_dir`. Verify the artifact SHA256 matches `policy_sha256`. Reuse
-applies only to the recorded engine, manifest, runner, baseline, seeds, tick budget,
-and native tool identity. Do not reuse evidence for changed artifact bytes or
-execution conditions: produce a new build for upload. Standalone `local_check`
-remains available for diagnostic reruns or artifacts without completed build evidence;
-use the gate reference for its arguments and retain its reports.
-
-No gate, seed, or budget is reduced. The upload reader checks the build status,
-reported gates and artifact hash; it does not consume a separate local-check directory.
-Local gate success establishes compatibility, not competitive strength or a promotion.
-
-## Metrics
-
-Each episode observation belongs to one subject seat; repeated copies in one
-team are not independent observations. `glory` reads that seat's platform `scores`
-value: Emmett's Glory, winning hero lifetime XP per simulated minute, zero on
-loss, draw, or timeout. Do not recompute the score with a guessed tick frequency.
-`win_rate` is the team outcome indicator (0 or 1). `xp_per_1k_ticks` is that seat's
-`total_xp * 1000 / ticks`. `team_xp_lead` is 1 only when that seat has strictly
-more lifetime XP than every teammate; ties are 0.
-
-The extractor requires all ten finite, nonnegative score and XP values, positive
-integer ticks, and a known outcome (`RedTeam`, `BlueTeam`, `draw`, `time_limit`).
-These spellings match Polyworld `801749e5` (the 2026.10.7.2 source);
-`time_limit` is a timeout. It rejects invalid evidence and nonzero scores for nonwinning seats. Missing
-metrics never become guessed zeros. Comparisons require at least 40 episodes;
-calibration can raise that floor.
+Read the build's report, version, artifact hash, manifest and native receipts.
+An evaluation receipt applies only to its artifact, engine, manifest, baseline,
+seeds and ticks. Reuse complete matching evaluation evidence instead of repeating it.
+Neither compilation nor evaluation proves competitive strength or authorizes promotion.
+G3's 80,000 instruction / 200,000 work soft ceilings are local headroom checks;
+the engine enforces its actual runtime limits when executing an uploaded policy.
+No evaluation seeds, tick budgets or native runtime limits are reduced.
 
 ## Build and upload
 
 `build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json`
-compiles the committed `CANDIDATE_DIRECTORY/STRATEGY.md` with Hermes and runs G1–G5.
+compiles the committed `CANDIDATE_DIRECTORY/STRATEGY.md` with Hermes and runs G1. Add `--full-evaluation` for G1–G5.
 The candidate may be `WORKSPACE/strategy/candidates/E` in a worker Git worktree;
 the installed distribution may be a separate Git archive. Commit the candidate
 input closure (strategy, skills, packing, comms) first. Development installations
@@ -317,14 +284,15 @@ The uploader appends your full player ID, keeping different players’ names dis
 The prebuilt `v13-live.bas` is GotA's starter policy and the shipped strategy's policy by construction: `make_v13_live.py` transforms submitted v13, its adjacent provenance file records that relationship, and equivalence to the seed `STRATEGY.md` is shown only by M1 on engine `801749e5`.
 
 `build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json --prebuilt FILE.bas`
-freezes the exact committed artifact bytes and runs the existing G1–G4 gates.
+freezes the exact committed artifact bytes and runs G1. Add `--full-evaluation`
+to run G1–G4 and record G5 as not applicable.
 It skips Hermes, model generation and scanner setup entirely. Native preparation,
 manifest resolution and the host contract check still apply. G4 compares the
 artifact against its own immutable bytes as a baseline mirror; this checks the
 screen machinery, not strength against an incumbent. G5 compiler goal traces are
 not applicable: its receipt has `applicable: false`, `passed: false`,
 `advisory: true`, and summary `not applicable: prebuilt`. It has no executed
-`outcome`. Failed G1–G3 refuse upload; any tool error stops the build with retained
+`outcome`. Failed required checks (G1 by default; G1–G3 for full evaluation) refuse upload; any tool error stops the build with retained
 evidence and refuses upload. No prebuilt build attempts model repair.
 
 For `policy.bas`, the required sidecar is `policy.provenance.json`, not
@@ -370,15 +338,9 @@ git -C "$CARD_WORKTREE" add strategy/candidates/bootstrap/v13-live.bas strategy/
 git -C "$CARD_WORKTREE" commit -m "Record mechanical v13-live bootstrap candidate"
 ```
 
-Run the build below in its own terminal call with `background: true`. The G3/G4
-workload is approximately 55 minutes, measured on the autoresearch EC2 test box
-(m7i.xlarge), 2026-10-08. This is not a measured total for every host or a separate
-55-minute timing for each gate. A completed build includes local validation; do not
-repeat its full gate workload before upload. Keep the build `session_id`
-and call `process_manage` with `action: "wait"`, that `session_id`,
-`timeout: 1800`; repeat only if `status: "timeout"`, with no polling or sleep
-loops. Each long-command block below sets its own paths for a fresh shell;
-start it from the card's worktree.
+Run the build below in its own terminal call. Default compilation does not wait
+for full local evaluation. Cold native preparation may still take time; use the
+card's long-command procedure when needed and retain its session ID.
 
 ```sh
 RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
@@ -400,7 +362,7 @@ identifier/division token changes, with no model call. For an explicit historica
 build, append `--offline --manifest PATH` to both generator and build. Existing
 outputs are immutable; use fresh output paths.
 
-The build records G1–G4 local checks and retains the full evidence. Review those
+The default build records G1 compilation and explicitly marks evaluation not run. Review its
 receipts under **Local validation**; G5 compiler coverage does not apply to prebuilt
 artifacts. After a successful build and evidence review, follow the core `candidate` skill's
 "Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
@@ -430,8 +392,8 @@ prior paid M1 semantic qualification, which remains bound to its immutable
 2026.10.7.2 / `801749e509e888b423ba44ee2188946c22e3ba85` receipts. The historical
 oracle and audit keep those identities; a new engine needs its own qualification.
 
-Only G1–G3 policy failures block a build and may enter compiler repair rounds.
-G4 and G5 still run and carry `advisory: true` in build receipts. Their `failed`
+G1 failures block default builds and may enter compiler repair rounds. With
+`--full-evaluation`, G1–G3 policy failures block the build. G4 and G5 then run and carry `advisory: true` in build receipts. Their `failed`
 outcomes appear in `report.json` warnings and the Markdown report, while a build
 with passing G1–G3 remains passed. An `errored` outcome from any gate stops the
 build immediately and makes it errored, including advisory gates. Local check

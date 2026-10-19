@@ -18,11 +18,11 @@ from games.gota.gates import (
 )
 
 
-def verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None) -> dict:
+def verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None, full_evaluation: bool = True) -> dict:
     import strategy_build as builds
 
     try:
-        return _verify(build_id, context=context, manifest=manifest)
+        return _verify(build_id, context=context, manifest=manifest, full_evaluation=full_evaluation)
     except Exception as error:  # noqa: BLE001 - persist arbitrary tool faults; never repair them.
         result = GateResult.errored(error)
         gates = {'verification': {'outcome': result.outcome, 'passed': False,
@@ -31,7 +31,7 @@ def verify(build_id: str, *, context: GateContext | None = None, manifest: Path 
         return gates
 
 
-def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None) -> dict:
+def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path | None = None, full_evaluation: bool = True) -> dict:
     import strategy_build as builds
     from strategy_format import lint_strategy, parse_strategy
 
@@ -81,9 +81,9 @@ def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path
             raise ValueError('native build changed after engine resolution')
     builds.dump(stage / 'native_provenance.json', native_builds)
     gates = {}
-    for name, module in zip(
-        ("G1", "G2", "G3", "G4", "G5"), (g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry)
-    ):
+    selected = list(zip(("G1", "G2", "G3", "G4", "G5"),
+                        (g1_lint, g2_episode, g3_budget, g4_screen, g5_telemetry)))
+    for name, module in selected if full_evaluation else selected[:1]:
         gate_started = time.monotonic()
         try:
             result = module.run(policy, context)

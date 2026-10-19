@@ -63,6 +63,7 @@ class GateContext:
     seeds: tuple[int, ...] = tuple(range(1, 11))
     max_ticks: int = 31200
     timeout: int = 600
+    jobs: int = 2
     variant: str = 'competition'
     measurements: dict = field(default_factory=dict)
     engine_commit: str | None = None

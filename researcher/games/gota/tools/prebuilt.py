@@ -86,7 +86,7 @@ def validate_source(candidate, artifact, identity):
     return head, hashes, provenance
 
 
-def build(candidate, out, artifact, identity, *, started=None):
+def build(candidate, out, artifact, identity, *, started=None, full_evaluation=False):
     from games.gota.gates import (
         GateContext,
         GateResult,
@@ -101,10 +101,7 @@ def build(candidate, out, artifact, identity, *, started=None):
 
     artifact = artifact.resolve()
     head, hashes, provenance = validate_source(candidate, artifact, identity)
-    identity, binary = provision(identity)
-    native = {'gate_probe': validate(binary, 'gate_probe', identity['commit']),
-              'gota_match': validate(TOOLS / 'bin' / f'gota_match-{identity["commit"][:8]}',
-                                     'gota_match', identity['commit'])}
+    identity, binary, native = provision(identity)
     out.parent.mkdir(parents=True, exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix='.gota-build-', dir=out.parent))
     frozen = scratch / 'policy.bas'
@@ -118,7 +115,8 @@ def build(candidate, out, artifact, identity, *, started=None):
     dump(scratch / 'native_provenance.json', native)
     gates = {}
     error = None
-    for name, module in zip(('G1', 'G2', 'G3', 'G4'), (g1_lint, g2_episode, g3_budget, g4_screen)):
+    selected = list(zip(('G1', 'G2', 'G3', 'G4'), (g1_lint, g2_episode, g3_budget, g4_screen)))
+    for name, module in selected if full_evaluation else selected[:1]:
         gate_started = time.monotonic()
         try:
             if fingerprint(json.loads(manifest.read_text())) != identity['manifest_sha256']:
@@ -141,10 +139,11 @@ def build(candidate, out, artifact, identity, *, started=None):
             break
         if not result.ok and name in ('G1', 'G2'):
             break
-    gates['G5'] = {'applicable': False, 'passed': False, 'advisory': True,
-                   'summary': 'not applicable: prebuilt'}
+    if full_evaluation:
+        gates['G5'] = {'applicable': False, 'passed': False, 'advisory': True,
+                       'summary': 'not applicable: prebuilt'}
     status = 'errored' if error else ('passed' if all(
-        gates.get(name, {}).get('passed') is True for name in ('G1', 'G2', 'G3')) else 'failed')
+        gates.get(name, {}).get('passed') is True for name in (('G1', 'G2', 'G3') if full_evaluation else ('G1',))) else 'failed')
     warnings = [{'gate': name, 'summary': receipt['summary']} for name, receipt in gates.items()
                 if receipt.get('advisory') and receipt.get('outcome') == 'failed']
     # Recheck the committed closure after gates; never publish a stale source receipt.
@@ -164,6 +163,8 @@ def build(candidate, out, artifact, identity, *, started=None):
     driver = {str(path): digest(path) for path in (Path(__file__), Path(__file__).with_name('build.py'))}
     retain_episode_locators(gates, scratch)
     version = {'build_id': out.name, 'backend': 'gota', 'status': status, 'gates': gates,
+               'validation_scope': 'full' if full_evaluation else 'build',
+               'evaluation': {'status': status if full_evaluation else 'not_run'},
                'artifact': 'policy.bas', 'policy_sha256': digest(frozen),
                'source_commit': head, 'source_path': next(iter(hashes)), 'source_hashes': hashes,
                'strategy_sha256': provenance['artifact_sha256'], 'prebuilt': provenance,
@@ -173,10 +174,11 @@ def build(candidate, out, artifact, identity, *, started=None):
                'driver': {'candidate_commit': head, 'installed_commit': None,
                           'installed_source_sha256': hashlib.sha256(json.dumps(driver, sort_keys=True).encode()).hexdigest()}}
     report = {'build_id': out.name, 'status': status, 'gates': gates,
+              'validation_scope': version['validation_scope'], 'evaluation': version['evaluation'],
               'error': error, 'warnings': warnings}
     dump(scratch / 'gates.json', gates)
     dump(scratch / 'report.json', report)
-    lines = [f'# Build {out.name}', '', f'Status: **{status}**. Mode: prebuilt.', '',
+    lines = [f'# Build {out.name}', '', f'Status: **{status}**. Mode: prebuilt. Validation: {version["validation_scope"]}; evaluation: {version["evaluation"]["status"]}.', '',
              '| Gate | Outcome | Evidence |', '| --- | --- | --- |']
     lines.extend(f'| {name} | {receipt.get("outcome", "not executed")} | {receipt["summary"]} |'
                  for name, receipt in gates.items())
@@ -188,4 +190,5 @@ def build(candidate, out, artifact, identity, *, started=None):
     dump(scratch / 'version.json', version)
     scratch.rename(out)
     return {'ok': status == 'passed', 'build_id': out.name, 'status': status,
+            'validation_scope': version['validation_scope'], 'evaluation': version['evaluation'],
             'error': error, 'build': str(out), 'gates': gates, 'artifact': str(out / 'policy.bas')}
