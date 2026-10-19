@@ -79,8 +79,12 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `workspace_integrate(branch)` | Shared integration of a pushed card/repair branch. |
 | `xp_status(experiment)`, `credits`, `leaderboard` | Shared platform reads. |
 
-Call `worker_skills` for the assignee before choosing skills. Unknown selections return
-`invalid_worker_skills` with the available catalog before creating a branch or task.
+Describe the objective, inputs, constraints and completion criteria in the card body.
+Omit `skills` by default: the researcher discovers and loads its own procedures, or reports
+why it cannot complete the task. Task skills are optional preloads, not capability grants.
+When a task requires a specific procedure, call `worker_skills` before requesting that
+preload. Unknown selections return `invalid_worker_skills` with the available catalog
+before creating a branch or task. Cards without preloads do not query the worker catalog.
 
 `card_create` requires `kind`, `entity`, `assignee`, `title`, `body`. Optional `attempt`
 defaults to 1; `refs`, `skills`, `parents` default empty; native priority defaults 0 (higher
