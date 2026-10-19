@@ -114,7 +114,7 @@ cards with an unacknowledged actionable event or comment in that reconcile. Nati
 protections remain in effect. Once the plugin table exists, gate reads do no schema writes,
 so a card creation holding its write lock during Git fetch does not block the gate.
 
-For a fresh installation, have a researcher upload the starter with `softmax upload-bootstrap`
+For a fresh installation, have a researcher upload the starter with `softmax upload-build`
 and integrate its version record, then call `bootstrap_champion(version="V-...")` to submit it.
 On a champion conflict, pause research with `control_write`, explain the disagreement to the
 user, and call `accept_champion` only after they confirm accepting the league's champion.
@@ -138,3 +138,8 @@ before running those tests. `tests/test_end_to_end.py` installs a researcher and
 on one host and plays one card from `card_create` through a scripted worker to the gate,
 `board_reconcile` and `status`, with no model and the fake platform. Hosted bridge delivery is
 a separate integration check that these tests do not establish.
+
+For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's
+"Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
+without an experiment, evaluation or league submission. Require the intended source change in
+the generated artifact and both returned version IDs; promotion remains a separate authorized action.

@@ -1019,24 +1019,31 @@ def test_the_stop_check_finds_a_slugged_experiment_absent_from_the_clone(board, 
     assert softmax_cli._closed_in_canonical(SimpleNamespace(canonical=stale), experiment) == "reviewed"
 
 
-def test_named_bootstrap_upload_from_fakegame_build(board):
+def test_upload_build_without_experiment_does_not_evaluate_or_promote(board):
     worker = board.admit(mode="experimentation")
     worker.start()
-    build_dir = board.tmp_path / "bootstrap-build"
+    build_dir = board.tmp_path / "requested-build"
     tool = REPO / "games" / "fakegame" / "tools" / "fake_build.py"
     subprocess.run(
         [sys.executable, str(tool), str(worker.worktree), "--out", str(build_dir), "--json"],
         check=True, capture_output=True,
     )
     env = base_env(board, worker)
+    before = json.loads((board.canonical / ".supervisor/runtime/fake_softmax.json").read_text())
     code, result = softmax(
-        env, "upload-bootstrap", "--name", "opening-rush", "--build-dir", str(build_dir)
+        env, "upload-build", "--name", "requested-change", "--build-dir", str(build_dir)
     )
     assert code == 0, result
     version = worker.store.load(result["data"]["version_id"])[0]
-    assert version["policy_name"] == "opening-rush-" + env["RESEARCH_PLAYER_ID"]
+    assert version["policy_name"] == "requested-change-" + env["RESEARCH_PLAYER_ID"]
     assert version["experiment"] is None
     retry_code, retry = softmax(
-        env, "upload-bootstrap", "--name", "opening-rush", "--build-dir", str(build_dir)
+        env, "upload-build", "--name", "requested-change", "--build-dir", str(build_dir)
     )
     assert retry_code == 0 and retry == result
+
+    assert worker.store.find("experiment") == []
+    state = json.loads((board.canonical / ".supervisor/runtime/fake_softmax.json").read_text())
+    assert len(state["uploads"]) == 1
+    assert state["submissions"] == before["submissions"]
+    assert state["xp"] == before["xp"]

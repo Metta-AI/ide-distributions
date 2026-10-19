@@ -256,7 +256,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     def recorded_process(argv, **kwargs):
         if argv[:4] == [sys.executable, '-m', 'ide_research_core', 'promotion']:
             return real_run(argv, **kwargs)  # the orchestrator's submit, below
-        if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'upload-bootstrap']:
+        if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'upload-build']:
             assert kwargs['env']['RESEARCH_SOFTMAX'] == 'fake'
             assert kwargs['env']['RESEARCH_GAME'] == 'gota'
             assert argv[5:] == ['--name', 'opening-rush', '--build-dir', str(out)]
@@ -309,7 +309,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     # bootstrap card uploads the starter build and integrates the version record.
     env = base_env(board, worker, RESEARCH_GAME='gota')
     assert worker.store.find('experiment') == []
-    code, response = softmax(env, 'upload-bootstrap', '--name', 'opening-rush', '--build-dir', str(out))
+    code, response = softmax(env, 'upload-build', '--name', 'opening-rush', '--build-dir', str(out))
     assert code == 0, response
     data = response['data']
     assert data['version_id'].startswith('V-')
@@ -503,7 +503,7 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     game = (ROOT / 'games/gota/GAME.md').read_text()
     assert '\n## Starter policy\n' in game
     section = game.split('\n## Starter policy\n', 1)[1].split('\n## ', 1)[0]
-    commands = ('make_v13_live.py', 'tools/build.py', 'softmax upload-bootstrap')
+    commands = ('make_v13_live.py', 'tools/build.py', 'softmax upload-build')
     positions = [section.index(command) for command in commands]
     assert positions == sorted(positions)
     assert '-m games.gota.gates' not in section
@@ -516,7 +516,7 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     assert 'unevaluated' in section and 'promotion bootstrap' in section
     assert '/workspace/versions/' not in section
     skill = (ROOT / 'skills/gota/eval-design/SKILL.md').read_text()
-    assert 'softmax upload-bootstrap' in skill
+    assert 'softmax upload-build' in skill
     assert 'strategy/candidates/bootstrap' in skill and '.scratch/build/champion' in skill
     assert 'integrate' in skill and 'never submits' in skill
     for path in (ROOT / 'skills/gota').glob('*/SKILL.md'):

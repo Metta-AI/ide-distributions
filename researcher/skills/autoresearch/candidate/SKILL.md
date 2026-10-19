@@ -1,6 +1,6 @@
 ---
 name: candidate
-description: Use when preparing a candidate or starter-policy handoff.
+description: Use when uploading builds or handing off candidates.
 ---
 
 # Prepare the candidate for the orchestrator
@@ -30,6 +30,20 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 6. After the review and comments are finished, follow `card` once: journal, integrate as the
    last workspace step, and complete with the prepared metadata.
 
+## Explicit build/upload-only request
+
+When the coach requests a source change and upload without evaluation or league submission:
+
+1. Build the committed source with the installed game binding and review all required build evidence.
+   Check the generated artifact implements the requested change before uploading; passed gates alone
+   do not prove the intended value changed.
+2. Run `"$RESEARCH_CLI" softmax upload-build --name requested-change --build-dir <completed-build>`.
+   Choose a descriptive name and reuse it on retry. This validates the checked build and records a
+   version with `experiment: null`; it does not create an experiment, launch evaluation, or promote.
+3. Keep both returned version IDs, record the artifact hash and build evidence, then follow `card`
+   to journal, integrate and complete with `experiment: null`. Report upload completion only.
+   Do not fabricate an experiment or frozen design to satisfy the experiment-bound `softmax upload`.
+
 ## Bootstrap card: upload the starter policy
 
 When explicitly assigned a bootstrap card for a fresh installation with no champion:
@@ -46,7 +60,7 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
    missing, incomplete, failed, or errored build evidence does not qualify for reuse.
    These checks are not competitive evidence (D-04).
 3. Upload only:
-   `"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir .scratch/build/champion`
+   `"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir .scratch/build/champion`
    Choose your own descriptive name in place of `opening-rush` (at most 23 lowercase letters, digits, or hyphens). Reuse it on retries; the CLI appends your full player ID.
    Keep `data.version_id` and `data.platform_policy_version_id`. The upload is not a champion.
 4. Journal the starter-policy build and upload. Integrate, then complete using `card` with

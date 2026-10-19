@@ -36,7 +36,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   doing it by hand in a skill would risk the paired comparison. The polling half is the
   orchestrator's supervisor gate.
 - **Bootstrap is split**: the researcher's bootstrap card builds the starter policy and runs
-  `softmax upload-bootstrap`; the orchestrator submits that version with
+  `softmax upload-build`; the orchestrator submits that version with
   `promotion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,
   but the build and upload need a researcher's terminal).
 - The KB's hub and staleness checks report findings (`kb hubs`, `kb renew` -> `reverify`)

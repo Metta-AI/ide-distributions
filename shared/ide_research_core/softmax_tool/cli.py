@@ -79,9 +79,9 @@ the game, for its league, from ``RESEARCH_GAME``):
   collected, already, pending, failed, complete, rows}``; ``complete`` means the review can
   run ``stats ingest`` on ``rows``.
 - ``upload <E> --name NAME --build-dir D``: ``softmax_tool.upload``.
-- ``upload-bootstrap --name NAME --build-dir D``: upload the game's starter policy build as a version with
-  no experiment (A14); prints ``{version_id, platform_policy_version_id}``. The bootstrap card
-  integrates the version record, then the orchestrator submits it with ``promotion bootstrap``.
+- ``upload-build --name NAME --build-dir D``: upload a checked build as a version with no experiment;
+  prints ``{version_id, platform_policy_version_id}``. Supports explicit build/upload-only requests
+  and starter builds. It does not evaluate or promote; starter promotion remains explicit.
 - ``leaderboard``: ``{league_id, player_id, current_champion, conflict}``. The champion is the
   policy the league shows competing for our player (A9; null: none). ``conflict`` is null, or
   why the league and the loop's recorded champion disagree (``promotion.conflict``).
@@ -169,7 +169,7 @@ from ide_research_core.softmax_tool.protocol import (
     retry_backoff,
 )
 from ide_research_core.softmax_tool.protocol import from_env as softmax_from_env
-from ide_research_core.softmax_tool.upload import upload, upload_bootstrap, worker_store
+from ide_research_core.softmax_tool.upload import upload, upload_build, worker_store
 from ide_research_core.softmax_tool.xp import ARMS, ArtifactsIncomplete, tag
 from ide_research_core.stats.design import DesignError, EvaluationDesign
 
@@ -937,9 +937,9 @@ def _upload(ctx, sm, args) -> dict:
     }
 
 
-def _upload_bootstrap(ctx, sm, args) -> dict:
+def _upload_build(ctx, sm, args) -> dict:
     player = os.environ[PLAYER_ENV]
-    version_id, platform_id = upload_bootstrap(ctx, sm, Path(args.build_dir), player, args.name)
+    version_id, platform_id = upload_build(ctx, sm, Path(args.build_dir), player, args.name)
     return {"version_id": version_id, "platform_policy_version_id": platform_id}
 
 
@@ -1061,9 +1061,9 @@ def setup(parser: argparse.ArgumentParser) -> None:
 
     sub = command(
         commands,
-        "upload-bootstrap",
-        _upload_bootstrap,
-        "upload the game's starter policy build as the first champion's version",
+        "upload-build",
+        _upload_build,
+        "upload a checked build without an experiment or league submission",
     )
     sub.add_argument("--build-dir", required=True)
     sub.add_argument(

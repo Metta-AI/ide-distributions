@@ -142,7 +142,7 @@ All required gates and their budgets remain unchanged. An errored build follows
 After the required checks pass, upload the starter:
 
 ```sh
-"$RESEARCH_CLI" softmax upload-bootstrap --name opening-rush --build-dir .scratch/build/champion
+"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir .scratch/build/champion
 ```
 
 This uploads v13-live without an experiment, frozen design or evaluation outcome.

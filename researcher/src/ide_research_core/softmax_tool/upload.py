@@ -224,10 +224,10 @@ def upload(
     return version_id
 
 
-def upload_bootstrap(
+def upload_build(
     ctx: RunContext, sm: Softmax, build_dir: Path, player_id: str, name: str
 ) -> tuple[str, str]:
-    """Upload the build in ``build_dir`` as the first champion's version (module docstring);
+    """Upload a checked build without an experiment, evaluation, or league submission;
     return ``(version id, platform policy version id)``. Raises ``Refused`` (nothing
     uploaded) or the platform's errors (``IdentityError``, ...)."""
     store = worker_store(ctx)
