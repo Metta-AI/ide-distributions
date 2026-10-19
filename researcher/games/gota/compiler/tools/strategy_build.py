@@ -337,8 +337,8 @@ def chat_stream_usage(stream: str, model: str) -> dict:
         raise ValueError(f'Hermes chat stream receipt invalid: {exc}') from exc
 
 
-def copy_unit_inputs(stage: Path, root: Path, generated: list[str], authored: dict[str, Path]) -> None:
-    """Keep previous generated units as references; each requested output must be written anew."""
+def copy_unit_inputs(stage: Path, root: Path, generated: list[str], authored: dict[str, Path], *, repair: bool) -> None:
+    """Require fresh initial outputs; seed repairs from this build's staged units."""
     previous = root / 'context/previous'
     previous.mkdir(parents=True)
     for path in (stage / 'units').glob('*.bas'):
@@ -346,6 +346,8 @@ def copy_unit_inputs(stage: Path, root: Path, generated: list[str], authored: di
             continue
         target = previous if path.stem in generated else root / 'units'
         shutil.copyfile(path, target / path.name)
+        if repair and path.stem in generated:
+            shutil.copyfile(path, root / 'units' / path.name)
     for name, path in authored.items():
         shutil.copyfile(path, root / 'units' / f'{name}.bas')
 
@@ -367,7 +369,7 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
         from strategy_format import parse_strategy
         strategy = parse_strategy(REPO / order['source_path'], backend='gota')
         authored = {comp.id: strategy.root / comp.code_path for comp in strategy.of_kind('SK')}
-        copy_unit_inputs(stage, root, generated, authored)
+        copy_unit_inputs(stage, root, generated, authored, repair=bool(errors))
         shutil.copyfile(COMPILER / 'AGENT.md', root / 'AGENTS.md')
         shutil.copyfile(COMPILER / 'LESSONS.md', root / 'context/LESSONS.md')
         shutil.copyfile(LAB / 'docs/policy-surface.md', root / 'context/policy-surface.md')

@@ -46,6 +46,15 @@ u = pathlib.Path('usage.json')
 mode = os.environ.get('FAKE_MODE', '')
 work = json.loads(pathlib.Path('work_order.json').read_text())
 for key in work['generate']:
+    if mode == 'repair_patch':
+        if key == 'C.idle':
+            path = pathlib.Path('units', key+'.bas')
+            if path.exists():
+                path.write_text(path.read_text() + ' repaired')
+        if key == 'K.config':
+            path = pathlib.Path('units', key+'.bas')
+            path.write_text(path.read_text().replace('cfgscanradius = 1200', 'cfgscanradius = 1100'))
+        continue
     assert pathlib.Path('context/specs', key+'.md').read_text() == work['components'][key]['compiled_text']
     fixture = os.environ.get('FAKE_UNIT_ROOT')
     text = pathlib.Path(fixture, key+'.bas').read_text() if fixture else 'fake '+key
@@ -63,7 +72,9 @@ if mode == 'prompt': p.write_text('changed')
 if mode == 'extra': pathlib.Path('unexpected.txt').write_text('changed')
 if mode == 'probe': pathlib.Path('probe_cap.txt').write_text('changed')
 if mode == 'spec': pathlib.Path('context/specs/C.idle.md').write_text('changed')
-if mode == 'index': subprocess.run(['git','add','units'],check=True)
+if mode == 'index':
+    pathlib.Path('units/C.idle.bas').write_text('staged mutation')
+    subprocess.run(['git','add','units'],check=True)
 if mode == 'refs': subprocess.run(['git','branch','bad'],check=True)
 if mode in ('symlink','missing'):
     pathlib.Path('units/C.idle.bas').unlink()
@@ -175,15 +186,18 @@ def test_generation_timeout_retains_errored_build_without_repairs(
     assert len(list(target.glob('hermes-usage-*.json'))) == failure_round - 1
 
 
+@pytest.mark.parametrize('repair', [False, True])
 @pytest.mark.parametrize('mode,match', [('prohibited','write-scope'), ('prompt','write-scope'),
     ('extra','write-scope'), ('probe','write-scope'), ('spec','write-scope'), ('index','write-scope'), ('refs','write-scope'),
     ('symlink','regular output'), ('missing','regular output'),
     ('usage_symlink','write-scope'), ('usage_missing','Hermes chat stream'), ('nonzero','exited 7')])
-def test_fake_hermes_rejects_bad_outputs(generation, monkeypatch, mode, match):
+def test_fake_hermes_rejects_bad_outputs(generation, monkeypatch, mode, match, repair):
+    if repair:
+        sb.generate(generation[0])
     monkeypatch.setenv('FAKE_MODE', mode)
     error_type = ValueError if mode == 'usage_missing' else RuntimeError
     with pytest.raises(error_type, match=match):
-        sb.generate(generation[0])
+        sb.generate(generation[0], errors=[{'message': 'repair'}] if repair else [])
 
 
 def test_unknown_agent_fails_closed(tmp_path):
@@ -353,7 +367,8 @@ def test_compiler_child_isolates_outer_profile(generation, monkeypatch):
     sb.generate(order)
 
 
-def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypatch, tmp_path):
+@pytest.mark.parametrize('repair,reject_repair', [(False, False), (True, False), (True, True)])
+def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypatch, tmp_path, repair, reject_repair):
     """Real source closure/prepare/generate/assemble/finalize; external gates and model fake only."""
     import importlib.util
 
@@ -386,16 +401,21 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     monkeypatch.setattr(gota_host, 'BASELINE', archive / 'tests/fixtures/gota/v13-live.bas')
     monkeypatch.setenv('FAKE_UNIT_ROOT', str(distribution / 'tests/fixtures/gota/v13_units'))
     monkeypatch.setenv('OPENROUTER_MODEL', 'test/openweight')
-    commands = []
+    commands, verified_policies, verified_farm_units = [], [], []
     def verify_fake(build_id, **kwargs):
         stage = sb.build_path(build_id, staged=True)
         episode = stage / 'verify/attempt-fake/episode'
-        episode.mkdir(parents=True)
+        episode.mkdir(parents=True, exist_ok=True)
+        verified_policies.append((stage / 'policy.bas').read_bytes())
+        verified_farm_units.append((stage / 'units/C.farm.bas').read_bytes())
         (episode / 'results.json').write_text('{}')
         commands[:] = ['coworld', '--output-dir', str(episode)]
         gates = {f'G{i}': {'outcome': 'passed', 'passed': True, 'summary': {}} for i in range(1, 6)}
         for name in ('G2', 'G5'):
             gates[name]['summary'] = {'episode_dir': str(episode), 'command': list(commands)}
+        if repair and (len(verified_policies) == 1 or reject_repair):
+            gates['G1'] = {'outcome': 'failed', 'passed': False, 'summary': {'diagnostic': 'fixture repair'}}
+            monkeypatch.setenv('FAKE_MODE', 'repair_patch')
         sb.dump(stage / 'gates.json', gates)
         sb.dump(episode.parent / 'gates.json', gates)
         return gates
@@ -416,7 +436,17 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
     from games.gota.tools import engine_identity
     monkeypatch.setattr(engine_identity, 'provision', lambda identity: (identity, None))
     result = binding.build(candidate, out, manifest, offline=True)
+    if reject_repair:
+        assert not result['ok'] and result['status'] == 'failed'
+        assert len(verified_policies) == 3
+        with pytest.raises(Exception, match='gates did not pass'):
+            _read_build(out)
+        return
     assert result['ok']
+    assert len(verified_policies) == (2 if repair else 1)
+    if repair:
+        assert verified_policies[0] != verified_policies[1]
+        assert (out / 'units/C.farm.bas').read_bytes() == verified_farm_units[0] == verified_farm_units[1]
     version, artifact = _read_build(out)
     assert version['source_commit'] == original_git('rev-parse', 'HEAD', root=worker)
     assert version['source_path'] == 'strategy/candidates/E/STRATEGY.md'
@@ -435,3 +465,14 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
             assert summary['command'] == commands
     assert not Path(commands[-1]).exists()
     sb.checked_build(out)  # All retained receipt bytes match artifact_hashes after both moves.
+
+
+def test_repair_patches_current_round_and_preserves_other_generated_units(generation, monkeypatch):
+    order, stage = generation
+    sb.generate(order)
+    original = (stage / 'units/K.position.bas').read_bytes()
+    monkeypatch.setenv('FAKE_MODE', 'repair_patch')
+    sb.generate(order, errors=[{'message': 'repair C.idle'}])
+    assert (stage / 'units/C.idle.bas').read_text() == 'fake C.idle repaired'
+    assert (stage / 'units/K.position.bas').read_bytes() == original
+    assert len(list(stage.glob('hermes-usage-*.json'))) == 2
