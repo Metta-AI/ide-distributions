@@ -320,3 +320,18 @@ def test_views_staged_by_the_worker_stay_out_of_the_card(tmp_path, bare):
     workspace.integrate(clone, worktree=worktree)
 
     assert workspace.merged(clone, "card/a")["merged"] is True
+
+
+def test_cli_shim_ignores_parent_pythonpath(tmp_path, monkeypatch):
+    """Hermes's Python 3.14 packages must not enter the profile's Python 3.12 CLI."""
+    home = tmp_path / "profile"
+    (home / "local").mkdir(parents=True)
+    (home / "local/venv").symlink_to(sys.prefix, target_is_directory=True)
+    foreign = tmp_path / "hermes-site-packages"
+    foreign.mkdir()
+    (foreign / "jsonschema.py").write_text("raise ModuleNotFoundError('rpds.rpds')\n")
+    monkeypatch.setenv("PYTHONPATH", str(foreign))
+    shim = workspace.write_cli_shim(home)
+    result = subprocess.run([str(shim), "--help"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "usage: research" in result.stdout

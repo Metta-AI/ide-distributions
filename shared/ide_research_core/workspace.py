@@ -421,10 +421,10 @@ SHIM_NAME = "research"
 
 
 def write_cli_shim(home: Path) -> Path:
-    """``$HERMES_HOME/bin/research``: the research CLI from the profile venv."""
+    """``$HERMES_HOME/bin/research``: the research CLI isolated from the parent Python environment."""
     python = home / "local" / "venv" / "bin" / "python"
     path = home / "bin" / SHIM_NAME
-    wanted = f'#!/bin/sh\nexec "{python}" -m ide_research_core "$@"\n'
+    wanted = f'#!/bin/sh\nexec "{python}" -I -m ide_research_core "$@"\n'
     if not path.exists() or path.read_text() != wanted:
         write_text(path, wanted)
     path.chmod(0o755)
