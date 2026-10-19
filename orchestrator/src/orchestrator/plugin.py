@@ -187,6 +187,15 @@ TOOLS = {
         {"version": S},
         ["version"],
     ),
+    "release_program": (
+        Research,
+        (
+            "Release a core-loop program: submit the cogent's own uploaded <name>:v<N> to its "
+            "league. No experiment. Returns released true, or the coach's permit/league wait."
+        ),
+        {"policy_version": S},
+        ["policy_version"],
+    ),
     "accept_champion": (
         Research,
         "Record the league's current champion as the loop's, only after the user confirms.",
