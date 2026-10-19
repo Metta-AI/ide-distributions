@@ -93,7 +93,9 @@ accepting the league's champion; a migrated host's unrecorded champion is also a
 7. Explain why the work matters, the deliverable and what counts as completion.
 8. Use named assignees such as researcher-1; their clone is prepared by hosting.
 9. Queued cards are allowed; native per-assignee dispatch limits serialize workers.
-10. Keep skills narrow and relevant. Default runtime is 7200 seconds and failure limit is 2.
+10. Read `worker_skills` for the assignee before selecting skills; use only returned names.
+    If `card_create` returns `invalid_worker_skills`, correct the selection and retry.
+    Keep skills narrow and relevant. Default runtime is 7200 seconds and failure limit is 2.
 11. Native priority is larger-first; map P0 through P5 to 5 through 0.
 12. Do not create a second open card for an entity; the tool enforces this rule.
 13. Noise validity belongs to the stats design tool, not card admission.

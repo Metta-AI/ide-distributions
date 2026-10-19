@@ -51,12 +51,18 @@ TOOLS = {
         },
         ["task_id", "patch"],
     ),
+    "worker_skills": (
+        Board,
+        "Read the assigned worker's installed skill names and descriptions before creating a card.",
+        {"assignee": S},
+        ["assignee"],
+    ),
     "card_create": (
         Board,
         (
             "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
             "Refuse another open card on entity. Repair uses its own entity and failed "
-            "card_sha, without parents. priority is native Hermes (higher goes first)."
+            "card_sha, without parents. Read worker_skills first; unknown skills are rejected before creation. priority is native Hermes (higher goes first)."
         ),
         {
             "kind": {
