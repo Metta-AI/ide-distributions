@@ -92,7 +92,12 @@ TOOLS = {
         },
         ["kind", "entity", "assignee", "title", "body"],
     ),
-    "card_show": (Board, "Read a card, comments and handoff runs.", {"id": S}, ["id"]),
+    "card_show": (
+        Board,
+        "Read a card, its exact last_failure_error, current status, comments and handoff runs. Read this after every failure notification before reporting or recovering.",
+        {"id": S},
+        ["id"],
+    ),
     "card_list": (
         Board,
         (
@@ -110,7 +115,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save the answer as a comment, then unblock the card.",
+        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, archive the blocked card, and create the next numbered attempt with corrected skills.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
@@ -118,7 +123,7 @@ TOOLS = {
         Board,
         (
             "Complete with nonempty evidence (never force a live claim), or archive "
-            "a card superseded by an integrated repair."
+            "a blocked card whose invalid configuration must be replaced. Read card_show first. Preserve the old ID and failure in the replacement body; increment attempt. Code failures still require an integrated repair."
         ),
         {
             "id": S,
@@ -132,7 +137,8 @@ TOOLS = {
         Service,
         (
             "Read unacknowledged board events, platform transitions and "
-            "branches needing recovery. Observation never acknowledges anything."
+            "branches needing recovery, and the current card state including last_failure_error. "
+            "Current card state overrides historical event labels. Observation never acknowledges anything."
         ),
         {},
         [],

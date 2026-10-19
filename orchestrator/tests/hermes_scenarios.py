@@ -182,6 +182,43 @@ def main():
         assert not conn.execute(
             "SELECT * FROM task_links WHERE child_id=?", (repair["id"],)
         ).fetchall()
+    # A stale installed skill can invalidate an already queued card. Recovery uses
+    # native archive/create, preserving the failed attempt and replaying one new key.
+    from hermes_cli.kanban_db_dispatch import _record_task_failure
+
+    stale = board.card_create(**{**args, "entity": "E-stale"})["card"]["id"]
+    skill.unlink()
+    cause = "Unknown skill(s): experiment"
+    with closing(connection()) as conn:
+        assert kb.claim_task(conn, stale, claimer="test")
+        _record_task_failure(
+            conn, stale, cause, outcome="crashed", force_trip=True, release_claim=True, end_run=True
+        )
+    original = board.card_show(stale)
+    assert original["card"]["status"] == "blocked"
+    assert original["card"]["last_failure_error"] == cause
+    assert "help" in {s["name"] for s in board.worker_skills("researcher-1")["skills"]}
+    assert "experiment" not in {s["name"] for s in board.worker_skills("researcher-1")["skills"]}
+    assert board.card_close(stale, "archived")["changed"]
+    retry_args = {
+        **args,
+        "entity": "E-stale",
+        "attempt": 2,
+        "skills": ["help"],
+        "body": f"Replace {stale}: {cause}. Deliver evidence.",
+    }
+    replacement = board.card_create(**retry_args)["card"]
+    assert replacement["id"] != stale
+    assert replacement["status"] == "ready"
+    assert replacement["skills"] == ["help"], replacement
+    assert stale in replacement["body"]
+    assert board.card_create(**retry_args)["card"]["id"] == replacement["id"]
+    after = board.card_show(stale)
+    assert after["card"]["status"] == "archived"
+    assert after["card"]["last_failure_error"] == cause, after
+    assert [run["id"] for run in after["runs"]] == [run["id"] for run in original["runs"]]
+    assert after["runs"][0]["error"] == cause
+    assert after["runs"][0]["outcome"] == "gave_up"
     print(json.dumps({"ok": True, "cards": len(board.card_list({"include_archived": True}))}))
 
 

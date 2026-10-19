@@ -88,7 +88,10 @@ runs first), runtime 7200 seconds, failure limit 2 (one retry). Its key is
 `<kind>:<entity>:<attempt>`. Entities are record IDs or git-safe keys containing letters,
 digits, underscores and hyphens. The branch is `card/<kind>-<entity>-<attempt>`.
 A replay returns the same card, including an archived card. A new open card for the same
-entity is refused. The per-profile plugin DB serializes creation across sessions.
+entity is refused. For invalid startup configuration, inspect the failure and worker catalog,
+archive the blocked original, then create the next numbered attempt with valid settings.
+Keep the original ID and cause in the replacement body. Replay that same attempt after a lost
+response. `card_answer` only unblocks; it cannot correct configuration. The per-profile plugin DB serializes creation across sessions.
 
 For repairs, use kind `repair`, a distinct repair entity, and the failed pushed `card_sha`;
 the branch prefix is `repair/` and parent links are omitted. Put lineage and failure details
