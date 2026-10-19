@@ -152,19 +152,15 @@ def measure_many(artifact: Path, context: GateContext, matches: list[tuple[int, 
             raise ValueError('policy changed during measurement batch')
         return measure(artifact, context, seed, opponent, blue, identity=identity)
     pool = ThreadPoolExecutor(max_workers=workers)
-    results = {}
     try:
-        for match, result in zip(unique, pool.map(run, unique)):
-            results[match] = result
-            if result['outcome'] == 'errored' or 'error' in result:
-                break
+        results = dict(zip(unique, pool.map(run, unique)))
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
         if any(hashlib.sha256(path.read_bytes()).hexdigest() != expected for path, expected in policies.items()):
             raise ValueError('policy changed during measurement batch')
         if validate(context.native_binary, 'gate_probe', commit) != identity:
             raise ValueError('native inputs changed during measurement batch')
-    return [results[match] for match in matches if match in results]
+    return [results[match] for match in matches]
 
 
 def validate_executable(binary: Path, receipt: dict) -> dict:

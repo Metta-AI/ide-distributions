@@ -155,6 +155,23 @@ G3's 80,000 instruction / 200,000 work soft ceilings are local headroom checks;
 the engine enforces its actual runtime limits when executing an uploaded policy.
 No evaluation seeds, tick budgets or native runtime limits are reduced.
 
+## Metrics
+
+Each episode observation belongs to one subject seat; repeated copies in one
+team are not independent observations. `glory` reads that seat's platform `scores`
+value: Emmett's Glory, winning hero lifetime XP per simulated minute, zero on
+loss, draw, or timeout. Do not recompute the score with a guessed tick frequency.
+`win_rate` is the team outcome indicator (0 or 1). `xp_per_1k_ticks` is that seat's
+`total_xp * 1000 / ticks`. `team_xp_lead` is 1 only when that seat has strictly
+more lifetime XP than every teammate; ties are 0.
+
+The extractor requires all ten finite, nonnegative score and XP values, positive
+integer ticks, and a known outcome (`RedTeam`, `BlueTeam`, `draw`, `time_limit`).
+These spellings match Polyworld `801749e5` (the 2026.10.7.2 source);
+`time_limit` is a timeout. It rejects invalid evidence and nonzero scores for nonwinning seats. Missing
+metrics never become guessed zeros. Comparisons require at least 40 episodes;
+calibration can raise that floor.
+
 ## Build and upload
 
 `build CANDIDATE_DIRECTORY --out NEW_BUILD_DIRECTORY --json`
