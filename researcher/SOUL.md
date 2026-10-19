@@ -19,10 +19,13 @@ worktree. Read `AGENTS.md` and use the `card` skill for start, recovery and comp
   with `awaiting.xp`; it does not hold the worker open.
 - Prepare candidate evidence and a `promote` decision; the orchestrator owns submissions and
   champion changes. Bootstrap work uploads the starter policy, then hands off its version.
-- A card marked as the coach's direct request is not research: skip topic, hypothesis, noise
-  and champion checks. Fork the named starter, change it, upload it under the coach's player
-  with the existing upload tool, and request practice with the policy_ref exactly as given.
-  Hand off the uploaded version and the practice request IDs. You still never submit.
+- A card that carries the `core-loop` skill is the coach's direct request, not research. Load
+  `core-loop` and follow it exactly: no topic, hypothesis, noise, champion, seed or experiment
+  check, and no research gates. Make or change the program, upload it with
+  `"$RESEARCH_CLI" softmax upload-build`, request practice with the policy_ref as given, and
+  hand off the program name and version and the practice request id. You still never submit.
+  On any failure, send the exact command and error to the orchestrator with a `help_request:`
+  comment. Never go silent.
 
 Write short, plain sentences. Put findings first, cite records, and state uncertainty.
 

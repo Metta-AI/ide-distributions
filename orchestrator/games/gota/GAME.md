@@ -420,6 +420,54 @@ Decisions and in the `kanban_complete` metadata, run `workspace integrate`, and 
 orchestrator then submits the version with `promotion bootstrap` and records the champion. The
 shipped `strategy/STRATEGY.md` remains the champion strategy source.
 
+## Core loop: the recommended starter
+
+For a coach's direct request (the `core-loop` skill) the starter is the coworld's published
+player file, not a compiled strategy. Take the coworld id from the card or the coach line, and
+`PLAY_URL` from the same place (it is the coworld's `play.md`).
+
+1. Read `PLAY_URL` (`curl -fsSL "$PLAY_URL"`). It names the recommended player file's sha256.
+2. Fetch it: `GET {server}/v2/coworlds/{coworld_id}/player-files/{sha256}` into
+   `.scratch/starter/` (`{server}` is `${COGAMES_API_URL:-https://softmax.com/api}`; send no
+   credential unless the server answers 401). Verify `sha256sum` of the bytes equals the
+   requested sha256 before using them. A mismatch, a 404, or any other status stops the card:
+   report the exact URL and status.
+3. Put the file at `strategy/candidates/core-loop/<name>.bas` (the requested change applied
+   to the text, or unchanged for a first program) and commit it. These gates are REQUIRED to
+   produce an uploadable program and are the only ones to run: the prebuilt build below runs
+   G1-G4 (G1-G3 block upload). Skip every research gate: no noise record, no stats design,
+   no baseline comparison, no `local_check`, no seeds.
+4. Write the identity provenance sidecar `<name>.provenance.json` (`gota-prebuilt/1`, transform
+   `identity`, the artifact as its own input) and commit it:
+
+```sh
+RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
+RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
+CANDIDATE="$PWD/strategy/candidates/core-loop"
+(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" - "$CANDIDATE" <name> <<'PY'
+import json, sys
+from pathlib import Path
+from games.gota.tools.engine_identity import resolve
+from games.gota.tools.prebuilt import ENGINE_FIELDS, digest, dump
+candidate, name = Path(sys.argv[1]), sys.argv[2]
+artifact = candidate / f"{name}.bas"
+identity = resolve(None, offline=False)
+dump(candidate / f"{name}.provenance.json", {
+    "schema": "gota-prebuilt/1", "artifact_sha256": digest(artifact),
+    "input": {"path": artifact.name, "sha256": digest(artifact)},
+    "transform": {"name": "identity"},
+    "engine": {key: identity[key] for key in ENGINE_FIELDS}})
+PY
+)
+git add strategy/candidates/core-loop && git commit -m "Record core-loop program <name>"
+```
+
+5. Build (a long command, as above; run it in the background and wait):
+   `build "$CANDIDATE" --out "$PWD/.scratch/build/core-loop" --prebuilt "$CANDIDATE/<name>.bas" --json`.
+   Read the exit code and `version.json`; G1-G3 must pass and G4 must have run without a tool
+   error (G4 policy failures are advisory: report them, do not stop). Then upload with
+   `"$RESEARCH_CLI" softmax upload-build --name <name> --build-dir .scratch/build/core-loop`.
+
 ## Qualification scope
 
 Live readback on 2026-10-08 resolved 2026.10.8.1 / Polyworld
