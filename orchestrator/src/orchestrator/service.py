@@ -45,7 +45,12 @@ class Service:
                             **merged,
                         }
                     )
-        return {"events": state["events"], "pending": pending, "branches": branches}
+        return {
+            "events": state["events"],
+            "pending": pending,
+            "branches": branches,
+            "cards": [card for card in state["cards"] if card["id"] in actionable_cards],
+        }
 
     def status(self):
         cards = Board(self.context).card_list()

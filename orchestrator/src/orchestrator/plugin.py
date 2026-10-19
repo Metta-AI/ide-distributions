@@ -61,9 +61,11 @@ TOOLS = {
         Board,
         (
             "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
-            "Refuse another open card on entity. Repair uses its own entity and failed "
-            "card_sha, without parents. Describe the objective, inputs, constraints and completion "
-            "criteria in body. Omit skills by default; the worker selects its own procedures. "
+            "Refuse another open card on entity unless replaces names its blocked preceding attempt. "
+            "Replacement preserves dependency gates before archiving the old card. "
+            "Repair uses its own entity and failed card_sha, without parents. "
+            "Describe the objective, inputs, constraints and completion criteria in body. "
+            "Omit skills by default; the worker selects its own procedures. "
             "Explicit preloads must come from worker_skills. priority is native Hermes "
             "(higher goes first)."
         ),
@@ -95,10 +97,16 @@ TOOLS = {
             "failure_limit": I,
             "parents": STRINGS,
             "card_sha": S,
+            "replaces": S,
         },
         ["kind", "entity", "assignee", "title", "body"],
     ),
-    "card_show": (Board, "Read a card, comments and handoff runs.", {"id": S}, ["id"]),
+    "card_show": (
+        Board,
+        "Read a card, its exact last_failure_error, current status, comments and handoff runs. Read this after every failure notification before reporting or recovering.",
+        {"id": S},
+        ["id"],
+    ),
     "card_list": (
         Board,
         (
@@ -116,7 +124,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save the answer as a comment, then unblock the card.",
+        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
@@ -124,7 +132,7 @@ TOOLS = {
         Board,
         (
             "Complete with nonempty evidence (never force a live claim), or archive "
-            "a card superseded by an integrated repair."
+            "a cancelled card. Configuration recovery uses card_create with replaces, never archive first: archiving releases dependent tasks. Code failures still require an integrated repair."
         ),
         {
             "id": S,
@@ -138,7 +146,8 @@ TOOLS = {
         Service,
         (
             "Read unacknowledged board events, platform transitions and "
-            "branches needing recovery. Observation never acknowledges anything."
+            "branches needing recovery, and the current card state including last_failure_error. "
+            "Current card state overrides historical event labels. Observation never acknowledges anything."
         ),
         {},
         [],
