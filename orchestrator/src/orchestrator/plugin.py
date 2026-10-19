@@ -51,12 +51,21 @@ TOOLS = {
         },
         ["task_id", "patch"],
     ),
+    "worker_skills": (
+        Board,
+        "Discover worker skills only when an explicit procedure preload is needed.",
+        {"assignee": S},
+        ["assignee"],
+    ),
     "card_create": (
         Board,
         (
             "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
             "Refuse another open card on entity. Repair uses its own entity and failed "
-            "card_sha, without parents. priority is native Hermes (higher goes first)."
+            "card_sha, without parents. Describe the objective, inputs, constraints and completion "
+            "criteria in body. Omit skills by default; the worker selects its own procedures. "
+            "Explicit preloads must come from worker_skills. priority is native Hermes "
+            "(higher goes first)."
         ),
         {
             "kind": {
@@ -78,7 +87,10 @@ TOOLS = {
             "body": S,
             "refs": STRINGS,
             "priority": I,
-            "skills": STRINGS,
+            "skills": {
+                **STRINGS,
+                "description": "Optional explicit procedure preloads. Omit by default; the worker chooses skills.",
+            },
             "max_runtime_seconds": I,
             "failure_limit": I,
             "parents": STRINGS,

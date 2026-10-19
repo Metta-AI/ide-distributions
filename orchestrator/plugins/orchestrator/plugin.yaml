@@ -5,6 +5,7 @@ author: ide-distributions
 provides_tools:
   - ide_say
   - ide_task_update
+  - worker_skills
   - card_create
   - card_show
   - card_list

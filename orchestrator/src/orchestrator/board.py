@@ -1,12 +1,15 @@
 """Native Hermes operations on the explicitly named autoresearch board."""
 
 import json
+import os
 import re
 import subprocess
+import sys
 from contextlib import closing
 from dataclasses import asdict
 
 from . import storage
+from .research import ResearchError
 
 BOARD = "autoresearch"
 
@@ -37,6 +40,44 @@ def subscribe(conn, task_id):
 class Board:
     def __init__(self, context):
         self.context = context
+
+    def worker_skills(self, assignee):
+        """Discover skills with the same Hermes interpreter and profile as the worker."""
+        from agent.secret_scope import build_profile_secret_scope
+        from hermes_cli.profiles import get_profile_dir
+
+        profile = get_profile_dir(assignee)
+        scope = build_profile_secret_scope(profile)
+        env = {
+            "PATH": os.environ["PATH"],
+            "PYTHONPATH": os.pathsep.join(sys.path),
+            "HERMES_HOME": str(profile),
+            "HERMES_PROFILE": assignee,
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """import json
+from tools.skills_tool import _skill_catalog, skill_view
+from hermes_cli.plugins import discover_plugins, get_plugin_manager
+skills = [{"name": s["load_name"], "description": s["description"]}
+          for s in _skill_catalog(include_hidden=True) if s["load_name"]]
+discover_plugins()
+skills.extend(get_plugin_manager().list_plugin_skill_metadata())
+print(json.dumps([{"name": s["name"], "description": s["description"]}
+                  for s in skills
+                  if json.loads(skill_view(s["name"], preprocess=False))["success"]]))
+""",
+            ],
+            env=env,
+            cwd=scope.get("RESEARCH_WORKSPACE") or profile / "workspace",
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return {"assignee": assignee, "skills": json.loads(result.stdout)}
 
     def card_create(
         self,
@@ -78,6 +119,25 @@ class Board:
             or attempt < 1
         ):
             raise ValueError("unknown kind or non-positive attempt")
+        if skills:
+            available = self.worker_skills(assignee)["skills"]
+            names = {skill["name"] for skill in available}
+            invalid = sorted(set(skills or []) - names)
+            if invalid:
+                raise ResearchError(
+                    {
+                        "ok": False,
+                        "error": {
+                            "reason": "invalid_worker_skills",
+                            "message": "Select skills from the assigned worker's catalog and retry card_create.",
+                            "details": {
+                                "assignee": assignee,
+                                "invalid": invalid,
+                                "available": available,
+                            },
+                        },
+                    }
+                )
         key = f"{kind}:{entity}:{attempt}"
         slug = f"{kind}-{entity}-{attempt}"
         branch = f"{'repair' if kind == 'repair' else 'card'}/{slug}"

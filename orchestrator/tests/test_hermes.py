@@ -85,7 +85,7 @@ manager = get_plugin_manager()
 manager.discover_and_load()
 plugin = next(p for p in manager.list_plugins() if p['name'] == 'orchestrator')
 assert not plugin['error'], plugin
-assert plugin['enabled'] and plugin['tools'] == 22, plugin
+assert plugin['enabled'] and plugin['tools'] == 23, plugin
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 print(json.dumps({'ok': True}))
 """

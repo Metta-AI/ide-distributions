@@ -48,6 +48,14 @@ def main():
     git(root, "clone", "--bare", str(seed), str(remote))
     researcher = root / "profiles/researcher-1"
     researcher.mkdir()
+    skill = researcher / "skills/experiment/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: experiment\ndescription: Run an experiment.\n---\nRecord evidence.\n"
+    )
+    collision = researcher / "skills/help/SKILL.md"
+    collision.parent.mkdir(parents=True)
+    collision.write_text("---\nname: help\ndescription: A preloadable skill.\n---\nRead me.\n")
     clone = researcher / "workspace"
     git(root, "clone", str(remote), str(clone))
     git(seed, "remote", "add", "origin", str(remote))
@@ -73,6 +81,26 @@ def main():
         "max_runtime_seconds": 7200,
         "session_id": "persisted-origin",
     }
+    from orchestrator.plugin import handler
+
+    for requested in (["policy-editing", "policy-upload", "practice"], ["experiment", "practice"]):
+        rejected = json.loads(handler("card_create")({**args, "skills": requested}))
+        assert not rejected["ok"], rejected
+        assert rejected["error"]["reason"] == "invalid_worker_skills", rejected
+        assert rejected["error"]["details"]["invalid"] == sorted(set(requested) - {"experiment"})
+        assert board.card_list() == []
+        assert git(clone, "branch", "--list", "card/*") == ""
+    catalog = board.worker_skills("researcher-1")
+    assert {"experiment", "help"} <= {s["name"] for s in catalog["skills"]}, catalog
+    # Outcome-only delegation must not depend on skill discovery or explicit preloads.
+    delegated = {k: v for k, v in args.items() if k != "skills"}
+    with patch.object(board, "worker_skills", side_effect=AssertionError("unneeded discovery")):
+        outcome_card = board.card_create(**{**delegated, "entity": "E-outcome"})["card"]
+        empty_card = board.card_create(**{**delegated, "entity": "E-empty", "skills": []})["card"]
+    assert outcome_card["skills"] == empty_card["skills"] == []
+    assert outcome_card["body"].startswith(args["body"])
+    board.card_close(outcome_card["id"], "archived")
+    board.card_close(empty_card["id"], "archived")
     # A gate read must finish while create holds its lock around a slow Git fetch.
     fetching, release_fetch = Event(), Event()
 
