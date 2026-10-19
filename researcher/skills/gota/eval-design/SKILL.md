@@ -131,10 +131,10 @@ bindings from `"$RESEARCH_HOME"` with `"$RESEARCH_PYTHON"` as GAME.md shows.
 
 This resolves the current engine, verifies committed input and transform hashes,
 freezes exact bytes and runs G1 without Hermes, model calls or scanner setup.
-Default build receipts explicitly record evaluation `not_run`; upload does not wait
+Default build reports explicitly record evaluation `not_run`; upload does not wait
 for local evaluation. Use `--full-evaluation` or standalone `local_check` only for
 separately requested evaluation. Follow `GAME.md`'s **Local validation** contract.
-Review the build reports, provenance and actual native compile receipt before upload.
+Review the build reports, provenance and actual native compile evidence before upload.
 Full evaluation keeps every seed and tick budget unchanged. An errored build follows
 **Build tool faults** above. A failed or incomplete build does not qualify for reuse.
 

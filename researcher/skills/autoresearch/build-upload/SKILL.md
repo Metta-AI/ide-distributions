@@ -35,11 +35,10 @@ Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
    writes `version.json` in the output directory. Every non-advisory gate must pass. A build
    can run for an hour: start it in the background and wait on it as the `card` skill says
    ("Long commands"). Never poll it.
-3. Follow the game's build validation contract in `GAME.md`. GotA defaults to G1
-   compilation/static checks and records evaluation `not_run`; upload does not wait for
-   full local evaluation. Review the successful build receipt and artifact hash.
-   Run full `local_check` only when evaluation is separately requested, retaining its own
-   receipts. Other games follow their declared required build checks. Missing, failed or
+3. Follow the game's required build checks in `GAME.md`. Review the successful build
+   evidence and artifact hash. When the game separates build checks from evaluation,
+   preserve evaluation `not_run` and do not start full `local_check` just to upload.
+   Run full evaluation only when separately requested, retaining its own evidence. Missing, failed or
    errored required build evidence is not uploadable. Local checks are not decision evidence (D-04).
 4. Mark the experiment built:
    `"$RESEARCH_CLI" records status <E-id> built`

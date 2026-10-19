@@ -35,8 +35,8 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 When the coach requests a source change and upload without evaluation or league submission:
 
 1. Build the committed source with the installed game binding and review all required build evidence.
-   GotA defaults to compilation/static checks and records evaluation `not_run`; upload does not
-   require a local evaluation. Request full evaluation separately only when the task calls for it.
+   Follow the game's build validation contract in `GAME.md`. When it separates build checks
+   from evaluation, preserve evaluation `not_run`. Request full evaluation only when the task calls for it.
    Check the generated artifact implements the requested change before uploading; passed gates alone
    do not prove the intended value changed.
 2. Run `"$RESEARCH_CLI" softmax upload-build --name requested-change --build-dir <completed-build>`.
@@ -56,9 +56,9 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
 2. Read the game's `## Starter policy` in `GAME.md` (`card` gives its location). Build that
    starter policy in this worktree through the installed game binding, into
    `.scratch/build/champion`. Do not substitute an experimental candidate. Follow the game's
-   build validation contract. GotA defaults to G1 compilation/static checks, with evaluation
-   explicitly `not_run`. Review the successful build receipt and artifact hash; do not start
-   full `local_check` just to upload. Other games follow their declared required build checks.
+   build validation contract. Review the successful build evidence and artifact hash. When the
+   game separates build checks from evaluation, preserve evaluation `not_run`; do not start
+   full `local_check` just to upload.
    Missing, failed or errored required build evidence is not uploadable. Full evaluation,
    when separately requested, retains its own complete evidence and is not competitive proof.
 
