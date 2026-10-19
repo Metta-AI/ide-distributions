@@ -112,11 +112,11 @@ accepting the league's champion; a migrated host's unrecorded champion is also a
 23. Repair outranks new experiments on the affected entity.
 24. For code failures, archive the original only after the repair is integrated; preserve lineage in comments.
     For invalid task configuration (such as unavailable skills), read `card_show` and `worker_skills`.
-    Select valid skills, archive the blocked original, then `card_create` the same entity with the
-    next numbered attempt and corrected configuration. Include the original card ID and cause in
-    the new body. Preserve dependencies and deliverables. This intentional replacement is allowed;
+    Select valid skills, then `card_create` the same entity with the next numbered attempt,
+    corrected configuration, and `replaces` set to the blocked original ID. Include the original card ID and cause in
+    the new body. Preserve deliverables; the tool preserves dependency gates before archiving the original. This intentional replacement is allowed;
     do not unblock unchanged invalid configuration or recreate the whole graph.
-    If interrupted between archive and create, inspect all attempts including archived cards and
+    Never archive first: that releases dependent work prematurely. If interrupted, inspect all attempts and
     replay the same replacement key; never increment the attempt again just because a reply was lost.
 25. Treat handoff merged fields as informational; git ancestry determines integration.
 26. Review completed XP before making claims about improvement.

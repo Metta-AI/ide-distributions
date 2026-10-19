@@ -61,7 +61,7 @@ TOOLS = {
         Board,
         (
             "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
-            "Refuse another open card on entity. Repair uses its own entity and failed "
+            "Refuse another open card on entity unless replaces names its blocked preceding attempt. Replacement preserves dependency gates before archiving the old card. Repair uses its own entity and failed "
             "card_sha, without parents. Read worker_skills first; unknown skills are rejected before creation. priority is native Hermes (higher goes first)."
         ),
         {
@@ -89,6 +89,7 @@ TOOLS = {
             "failure_limit": I,
             "parents": STRINGS,
             "card_sha": S,
+            "replaces": S,
         },
         ["kind", "entity", "assignee", "title", "body"],
     ),
@@ -115,7 +116,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, archive the blocked card, and create the next numbered attempt with corrected skills.",
+        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
@@ -123,7 +124,7 @@ TOOLS = {
         Board,
         (
             "Complete with nonempty evidence (never force a live claim), or archive "
-            "a blocked card whose invalid configuration must be replaced. Read card_show first. Preserve the old ID and failure in the replacement body; increment attempt. Code failures still require an integrated repair."
+            "a cancelled card. Configuration recovery uses card_create with replaces, never archive first: archiving releases dependent tasks. Code failures still require an integrated repair."
         ),
         {
             "id": S,

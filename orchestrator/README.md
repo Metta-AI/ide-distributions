@@ -89,7 +89,10 @@ runs first), runtime 7200 seconds, failure limit 2 (one retry). Its key is
 digits, underscores and hyphens. The branch is `card/<kind>-<entity>-<attempt>`.
 A replay returns the same card, including an archived card. A new open card for the same
 entity is refused. For invalid startup configuration, inspect the failure and worker catalog,
-archive the blocked original, then create the next numbered attempt with valid settings.
+create the next numbered attempt with valid settings and `replaces` set to the blocked original ID.
+The replacement waits behind the original while dependent cards are linked to the replacement;
+only then is the original archived. Replaying after interruption completes this same sequence.
+Never archive first: native archive releases dependent tasks.
 Keep the original ID and cause in the replacement body. Replay that same attempt after a lost
 response. `card_answer` only unblocks; it cannot correct configuration. The per-profile plugin DB serializes creation across sessions.
 

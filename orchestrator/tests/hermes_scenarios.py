@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
+from unittest import TestCase
 from unittest.mock import patch
 
 from gateway.kanban_watchers_notifier import _WAKE_KINDS
@@ -183,10 +184,13 @@ def main():
             "SELECT * FROM task_links WHERE child_id=?", (repair["id"],)
         ).fetchall()
     # A stale installed skill can invalidate an already queued card. Recovery uses
-    # native archive/create, preserving the failed attempt and replaying one new key.
+    # native operations, preserving dependency gates and replaying one new key.
     from hermes_cli.kanban_db_dispatch import _record_task_failure
 
     stale = board.card_create(**{**args, "entity": "E-stale"})["card"]["id"]
+    dependent = board.card_create(
+        **{**args, "entity": "E-dependent", "parents": [stale], "skills": ["help"]}
+    )["card"]["id"]
     skill.unlink()
     cause = "Unknown skill(s): experiment"
     with closing(connection()) as conn:
@@ -199,20 +203,37 @@ def main():
     assert original["card"]["last_failure_error"] == cause
     assert "help" in {s["name"] for s in board.worker_skills("researcher-1")["skills"]}
     assert "experiment" not in {s["name"] for s in board.worker_skills("researcher-1")["skills"]}
-    assert board.card_close(stale, "archived")["changed"]
     retry_args = {
         **args,
         "entity": "E-stale",
         "attempt": 2,
         "skills": ["help"],
         "body": f"Replace {stale}: {cause}. Deliver evidence.",
+        "replaces": stale,
     }
+    # Losing the tool response after links commit must leave both cards gated.
+    with (
+        patch.object(kb, "archive_task", side_effect=RuntimeError("interrupted before archive")),
+        TestCase().assertRaisesRegex(RuntimeError, "interrupted before archive"),
+    ):
+        board.card_create(**retry_args)
+    attempts = [c for c in board.card_list() if c["idempotency_key"] == "experimentation:E-stale:2"]
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "todo"
+    assert board.card_show(dependent)["card"]["status"] == "todo"
     replacement = board.card_create(**retry_args)["card"]
+    assert replacement["id"] == attempts[0]["id"]
     assert replacement["id"] != stale
     assert replacement["status"] == "ready"
     assert replacement["skills"] == ["help"], replacement
+    assert replacement["session_id"] == original["card"]["session_id"]
     assert stale in replacement["body"]
     assert board.card_create(**retry_args)["card"]["id"] == replacement["id"]
+    assert board.card_show(dependent)["card"]["status"] == "todo"
+    with closing(connection()) as conn:
+        assert replacement["id"] in kb.parent_ids(conn, dependent)
+    board.card_close(replacement["id"], "done", summary="Replacement built the policy")
+    assert board.card_show(dependent)["card"]["status"] == "ready"
     after = board.card_show(stale)
     assert after["card"]["status"] == "archived"
     assert after["card"]["last_failure_error"] == cause, after
