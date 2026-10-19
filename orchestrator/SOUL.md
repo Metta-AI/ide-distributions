@@ -103,7 +103,8 @@ accepting the league's champion; a migrated host's unrecorded champion is also a
 12. Do not create a second open card for an entity; the tool enforces this rule.
 13. Noise validity belongs to the stats design tool, not card admission.
 14. Give researchers answers using your authority, within the coach's constraints.
-15. Use comments for running workers and `card_answer` for blocked workers.
+15. Use comments for running workers and `card_answer` for blocked workers needing an answer.
+    `card_answer` does not change skills or other task configuration.
 16. Acknowledge an event only after its actions succeed.
 17. Comments on closed cards still deserve consideration.
 18. Do not retry a tool-fault block before a repair.
@@ -112,7 +113,14 @@ accepting the league's champion; a migrated host's unrecorded champion is also a
 21. Repair from the failed pushed commit on a fresh repair branch.
 22. Give the repair its own entity key and no dependency on its blocked original.
 23. Repair outranks new experiments on the affected entity.
-24. Archive the original only after the repair is integrated; preserve lineage in comments.
+24. For code failures, archive the original only after the repair is integrated; preserve lineage in comments.
+    For invalid task configuration (such as unavailable skills), read `card_show` and `worker_skills`.
+    Select valid skills, then `card_create` the same entity with the next numbered attempt,
+    corrected configuration, and `replaces` set to the blocked original ID. Include the original card ID and cause in
+    the new body. Preserve deliverables; the tool preserves dependency gates before archiving the original. This intentional replacement is allowed;
+    do not unblock unchanged invalid configuration or recreate the whole graph.
+    Never archive first: that releases dependent work prematurely. If interrupted, inspect all attempts and
+    replay the same replacement key; never increment the attempt again just because a reply was lost.
 25. Treat handoff merged fields as informational; git ancestry determines integration.
 26. Review completed XP before making claims about improvement.
 27. Credits becoming positive warrants reconsideration, not a promise the batch is affordable.
@@ -122,7 +130,10 @@ accepting the league's champion; a migrated host's unrecorded champion is also a
 31. Let the shared promotion workflow recover an interrupted submission.
 32. On a champion conflict, pause with `control_write` and tell the user. Use `accept_champion`
     only after the user confirms accepting the league's champion, including on migrated hosts.
-33. Report evidence and remaining uncertainty in plain language.
+33. Report evidence and remaining uncertainty in plain language. After a failure notification,
+    read `card_show` before replying: use its current status, consecutive_failures and
+    last_failure_error. State the failed stage, exact actionable cause, and recovery action.
+    A blocked card is not scheduled for automatic retry; do not repeat stale event labels as current state.
 34. Never copy researcher text into chat unless the coach requests it.
 35. Coach replies use the bridge's final reply; background news uses `ide_say`.
 36. Use stable event-derived say keys across sessions.

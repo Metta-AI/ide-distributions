@@ -95,6 +95,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         parents=None,
         card_sha=None,
         session_id=None,
+        replaces=None,
     ):
         from agent.secret_scope import build_profile_secret_scope
         from gateway.session_context import get_session_env
@@ -154,6 +155,18 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             lock.execute("BEGIN IMMEDIATE")
             tasks = kb.list_tasks(conn, include_archived=True)
             existing = next((t for t in tasks if t.idempotency_key == key), None)
+            if replaces:
+                original = kb.get_task(conn, replaces)
+                if original is None or original.idempotency_key != f"{kind}:{entity}:{attempt - 1}":
+                    raise ValueError("replaces must identify the preceding attempt of this entity")
+                if kind == "repair" or original.status not in {"blocked", "archived"}:
+                    raise ValueError("configuration replacement requires a blocked non-repair card")
+                if original.status == "archived" and not existing:
+                    raise ValueError(
+                        "do not archive before replacement; dependency safety cannot be established"
+                    )
+                if existing and replaces not in kb.parent_ids(conn, existing.id):
+                    raise ValueError("existing attempt was not created as this replacement")
             if existing:
                 task_id = existing.id
             else:
@@ -163,6 +176,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         len(parts) == 3
                         and parts[1] == entity
                         and task.status not in {"done", "archived"}
+                        and task.id != replaces
                     ):
                         raise ValueError(f"entity {entity} already has open card {task.id}")
                 # Branch from canonical main as fetched; the researcher's checked-out main is
@@ -193,6 +207,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                     or _persisted_session_id(_current_origin_session_id())
                     or _persisted_session_id(get_session_env("HERMES_SESSION_ID", ""))
                 )
+                if replaces:
+                    origin_session = original.session_id
                 details = {
                     "kind": kind,
                     "entity": entity,
@@ -217,11 +233,23 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                     max_retries=failure_limit,
                     max_runtime_seconds=max_runtime_seconds,
                     skills=skills or [],
-                    parents=[] if kind == "repair" else (parents or []),
+                    # Hold the replacement behind the blocked original until all
+                    # dependents also wait for the replacement. Each native write
+                    # is durable, so interruption never releases unfinished work.
+                    parents=(
+                        [replaces, *kb.parent_ids(conn, replaces)]
+                        if replaces
+                        else ([] if kind == "repair" else (parents or []))
+                    ),
                     idempotency_key=key,
                     session_id=origin_session,
                     board=BOARD,
                 )
+            if replaces and original.status == "blocked":
+                for child_id in kb.child_ids(conn, replaces):
+                    if child_id != task_id and task_id not in kb.parent_ids(conn, child_id):
+                        kb.link_tasks(conn, task_id, child_id)
+                kb.archive_task(conn, replaces)
             lock.commit()
             # Native wake routing is optional; reconciliation covers turns with no destination.
             try:
