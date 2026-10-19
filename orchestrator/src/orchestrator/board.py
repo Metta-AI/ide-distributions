@@ -120,24 +120,25 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             or attempt < 1
         ):
             raise ValueError("unknown kind or non-positive attempt")
-        available = self.worker_skills(assignee)["skills"]
-        names = {skill["name"] for skill in available}
-        invalid = sorted(set(skills or []) - names)
-        if invalid:
-            raise ResearchError(
-                {
-                    "ok": False,
-                    "error": {
-                        "reason": "invalid_worker_skills",
-                        "message": "Select skills from the assigned worker's catalog and retry card_create.",
-                        "details": {
-                            "assignee": assignee,
-                            "invalid": invalid,
-                            "available": available,
+        if skills:
+            available = self.worker_skills(assignee)["skills"]
+            names = {skill["name"] for skill in available}
+            invalid = sorted(set(skills or []) - names)
+            if invalid:
+                raise ResearchError(
+                    {
+                        "ok": False,
+                        "error": {
+                            "reason": "invalid_worker_skills",
+                            "message": "Select skills from the assigned worker's catalog and retry card_create.",
+                            "details": {
+                                "assignee": assignee,
+                                "invalid": invalid,
+                                "available": available,
+                            },
                         },
-                    },
-                }
-            )
+                    }
+                )
         key = f"{kind}:{entity}:{attempt}"
         slug = f"{kind}-{entity}-{attempt}"
         branch = f"{'repair' if kind == 'repair' else 'card'}/{slug}"

@@ -93,6 +93,15 @@ def main():
         assert git(clone, "branch", "--list", "card/*") == ""
     catalog = board.worker_skills("researcher-1")
     assert {"experiment", "help"} <= {s["name"] for s in catalog["skills"]}, catalog
+    # Outcome-only delegation must not depend on skill discovery or explicit preloads.
+    delegated = {k: v for k, v in args.items() if k != "skills"}
+    with patch.object(board, "worker_skills", side_effect=AssertionError("unneeded discovery")):
+        outcome_card = board.card_create(**{**delegated, "entity": "E-outcome"})["card"]
+        empty_card = board.card_create(**{**delegated, "entity": "E-empty", "skills": []})["card"]
+    assert outcome_card["skills"] == empty_card["skills"] == []
+    assert outcome_card["body"].startswith(args["body"])
+    board.card_close(outcome_card["id"], "archived")
+    board.card_close(empty_card["id"], "archived")
     # A gate read must finish while create holds its lock around a slow Git fetch.
     fetching, release_fetch = Event(), Event()
 

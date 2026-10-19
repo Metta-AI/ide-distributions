@@ -53,7 +53,7 @@ TOOLS = {
     ),
     "worker_skills": (
         Board,
-        "Read the assigned worker's installed skill names and descriptions before creating a card.",
+        "Discover worker skills only when an explicit procedure preload is needed.",
         {"assignee": S},
         ["assignee"],
     ),
@@ -61,8 +61,13 @@ TOOLS = {
         Board,
         (
             "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
-            "Refuse another open card on entity unless replaces names its blocked preceding attempt. Replacement preserves dependency gates before archiving the old card. Repair uses its own entity and failed "
-            "card_sha, without parents. Read worker_skills first; unknown skills are rejected before creation. priority is native Hermes (higher goes first)."
+            "Refuse another open card on entity unless replaces names its blocked preceding attempt. "
+            "Replacement preserves dependency gates before archiving the old card. "
+            "Repair uses its own entity and failed card_sha, without parents. "
+            "Describe the objective, inputs, constraints and completion criteria in body. "
+            "Omit skills by default; the worker selects its own procedures. "
+            "Explicit preloads must come from worker_skills. priority is native Hermes "
+            "(higher goes first)."
         ),
         {
             "kind": {
@@ -84,7 +89,10 @@ TOOLS = {
             "body": S,
             "refs": STRINGS,
             "priority": I,
-            "skills": STRINGS,
+            "skills": {
+                **STRINGS,
+                "description": "Optional explicit procedure preloads. Omit by default; the worker chooses skills.",
+            },
             "max_runtime_seconds": I,
             "failure_limit": I,
             "parents": STRINGS,
