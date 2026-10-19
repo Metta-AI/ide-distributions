@@ -303,7 +303,38 @@ def test_a_rejected_champion_publish_is_redone_with_the_strategy(board, monkeypa
 # --- release: a core-loop program, no experiment ---
 
 
-def test_release_submits_the_uploaded_program_without_an_experiment(board):
+@pytest.fixture
+def core_loop(monkeypatch):
+    monkeypatch.setenv("SOFTMAX_COGENT_MODE", "core-loop")
+
+
+@pytest.mark.parametrize("mode", [None, "", "research"])
+def test_release_is_refused_outside_core_loop_mode(board, monkeypatch, mode):
+    monkeypatch.delenv("SOFTMAX_COGENT_MODE", raising=False)
+    if mode is not None:
+        monkeypatch.setenv("SOFTMAX_COGENT_MODE", mode)
+    with pytest.raises(Refused) as refused:
+        promotion.release(board.sm, PV_A, LEAGUE, PLAYER)
+    assert refused.value.reason == "not_core_loop"
+    assert board.sm.submissions(PLAYER) == []
+
+
+def test_the_release_cli_is_refused_outside_core_loop_mode(board):
+    env = {k: v for k, v in os.environ.items() if k != "SOFTMAX_COGENT_MODE"} | {
+        "HERMES_HOME": str(board.tmp_path / "home"),
+        "RESEARCH_WORKSPACE": str(board.canonical),
+        "RESEARCH_GAME": "fakegame",
+        "RESEARCH_SOFTMAX": "fake",
+        "RESEARCH_PLAYER_ID": PLAYER,
+    }
+    out = subprocess.run(
+        [sys.executable, "-m", "ide_research_core", "promotion", "release", "--policy-version", PV_A],
+        env=env, capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    assert json.loads(out.stdout)["error"]["reason"] == "not_core_loop"
+
+
+def test_release_submits_the_uploaded_program_without_an_experiment(board, core_loop):
     before = promotion.load_all(board.canonical)
     result = promotion.release(board.sm, PV_A, LEAGUE, PLAYER)
     assert result["released"] is True and result["submission_id"]
@@ -313,7 +344,7 @@ def test_release_submits_the_uploaded_program_without_an_experiment(board):
     assert [r["policy_version_id"] for r in board.sm.submissions(PLAYER)].count(PV_A) == 1
 
 
-def test_release_waits_for_the_coachs_yes_then_sends(board):
+def test_release_waits_for_the_coachs_yes_then_sends(board, core_loop):
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
     waiting = promotion.release(sm, PV_A, LEAGUE, PLAYER)
     assert waiting["released"] is False and waiting["reason"] == "permit_required"
@@ -325,20 +356,20 @@ def test_release_waits_for_the_coachs_yes_then_sends(board):
     assert sent["released"] is True and sent["submission_id"]
 
 
-def test_release_reports_a_league_not_chosen(board):
+def test_release_reports_a_league_not_chosen(board, core_loop):
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "league=none"})
     result = promotion.release(sm, PV_A, LEAGUE, PLAYER)
     assert result["released"] is False and result["reason"] == "league_not_chosen"
 
 
-def test_release_refuses_a_wrong_identity(board):
+def test_release_refuses_a_wrong_identity(board, core_loop):
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "player=ply_other"})
     with pytest.raises(Refused) as refused:
         promotion.release(sm, PV_A, LEAGUE, PLAYER)
     assert refused.value.reason == "identity"
 
 
-def test_the_release_cli_prints_the_envelope(board):
+def test_the_release_cli_prints_the_envelope(board, core_loop):
     env = {
         **os.environ,
         "HERMES_HOME": str(board.tmp_path / "home"),

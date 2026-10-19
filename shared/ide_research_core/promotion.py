@@ -377,7 +377,12 @@ def release(sm: Softmax, policy_version_id: str, league_id: str, player_id: str)
     coach refusal comes back as ``released: false`` with its ``state`` and the permit ``ask``
     (``waiting`` until the coach says yes, then the same call sends it; ``declined`` is final).
     Only the orchestrator runs it; researchers' deny list blocks ``promotion release``.
+
+    It exists only for a runtime that opted in to the core loop (``SOFTMAX_COGENT_MODE=core-loop``,
+    autoresearch-next); everywhere else a program reaches the league through ``submit`` after an experiment.
     """
+    if os.environ.get("SOFTMAX_COGENT_MODE") != "core-loop":
+        raise Refused("not_core_loop", "release is for core-loop mode only; promote an experiment instead")
     _require_identity(sm, player_id)
     out = {"policy_version_id": policy_version_id, "league_id": league_id, "released": False}
     found = [

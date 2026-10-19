@@ -8,8 +8,8 @@ memory:
 agent:
   max_turns: 40
 platform_toolsets:
-  api_server: [orchestrator]
-  cron: [orchestrator]
+  api_server: [orchestrator, mcp-ide]
+  cron: [orchestrator, mcp-ide]
 terminal:
   env_passthrough:
     - SOFTMAX_PLAYER_CREDENTIAL
@@ -19,6 +19,23 @@ terminal:
     - RESEARCH_WORKSPACE
     - RESEARCH_CANONICAL
     - TMPDIR
+    - SOFTMAX_COGENT_MODE
+# The IDE's core-loop tools, through the image's stdio proxy (a remote `headers:` entry is static and
+# the loop token lives 15 minutes). The proxy is inert unless SOFTMAX_COGENT_MODE=core-loop, which only
+# the autoresearch-next runtime sets; `${VAR}` placeholders left unresolved are treated as unset.
+mcp_servers:
+  ide:
+    command: /opt/hermes/.venv/bin/python
+    args: ["-m", "observatory_hosted_worker.ide_mcp"]
+    env:
+      PYTHONPATH: /opt/softmax
+      SOFTMAX_COGENT_MODE: ${SOFTMAX_COGENT_MODE}
+      SOFTMAX_PLAYER_CREDENTIAL: ${SOFTMAX_PLAYER_CREDENTIAL}
+      SOFTMAX_PLAYER_ID: ${SOFTMAX_PLAYER_ID}
+      COGAMES_API_URL: ${COGAMES_API_URL}
+    timeout: 400
+    connect_timeout: 30
+
 plugins:
   enabled: [orchestrator]
 updates:

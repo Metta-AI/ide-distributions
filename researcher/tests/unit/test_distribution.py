@@ -36,6 +36,37 @@ def test_config():
     assert not [name for name in passthrough if name.startswith("AUTORESEARCH_")]
 
 
+def _ide_server(distribution):
+    config = yaml.safe_load((ROOT.parent / distribution / "config.yaml").read_text())
+    return config, config["mcp_servers"]["ide"]
+
+
+def test_ide_mcp_server_is_the_images_proxy_gated_on_core_loop_mode():
+    for distribution in ("orchestrator", "researcher"):
+        config, server = _ide_server(distribution)
+        assert server["command"] == "/opt/hermes/.venv/bin/python"
+        assert server["args"] == ["-m", "observatory_hosted_worker.ide_mcp"]
+        assert server["env"]["SOFTMAX_COGENT_MODE"] == "${SOFTMAX_COGENT_MODE}"  # set only by autoresearch-next
+        assert "SOFTMAX_COGENT_MODE" in config["terminal"]["env_passthrough"]
+
+
+def test_only_the_orchestrator_may_enter_a_league_over_the_ide():
+    config, server = _ide_server("orchestrator")
+    assert "mcp-ide" in config["platform_toolsets"]["api_server"]
+    assert "SOFTMAX_IDE_MCP_DENY" not in server["env"] and "tools" not in server
+    _, server = _ide_server("researcher")
+    assert server["env"]["SOFTMAX_IDE_MCP_DENY"] == "enter_league"
+    assert server["tools"] == {"exclude": ["enter_league"]}
+
+
+def test_core_loop_routing_is_opt_in():
+    soul = (ROOT.parent / "orchestrator" / "SOUL.md").read_text()
+    assert 'only when your\n  instructions say "You are in core-loop mode"' in soul
+    skill = (ROOT / "skills/autoresearch/core-loop/SKILL.md").read_text()
+    assert "**Core-loop mode only.**" in skill and "SOFTMAX_COGENT_MODE" in skill
+    assert "`file_policy_upload`" in skill and "`enter_league`" in skill
+
+
 def test_no_cron_jobs():
     assert json.loads((ROOT / "cron/jobs.json").read_text())["jobs"] == []
 
