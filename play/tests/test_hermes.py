@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -36,14 +37,11 @@ def run(argv, env, timeout=120):
 
 @pytest.mark.hermes
 def test_clean_export_registers_exactly_the_play_tools(tmp_path):
+    # A clean export: the folder as committed, without the test run's own tool output (the CI
+    # container's checkout is not a git repository that `git archive` can read).
     exported = tmp_path / "export"
-    exported.mkdir()
-    archive = subprocess.run(
-        ["git", "-C", str(DISTRIBUTION.parent), "archive", "HEAD", "play"],
-        check=True,
-        capture_output=True,
-    ).stdout
-    subprocess.run(["tar", "-x", "-C", str(exported)], input=archive, check=True)
+    ignore = shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".ruff_cache")
+    shutil.copytree(DISTRIBUTION, exported / "play", ignore=ignore)
     home = tmp_path / "host"
     home.mkdir()
     env = clean_env(home)
