@@ -166,13 +166,20 @@ def test_release_submits_once(program, cli):
 
 
 @pytest.mark.parametrize(
-    "stderr, refusal", [(PERMIT_STDERR, "permit_required"), (LEAGUE_STDERR, "league_not_chosen")]
+    "stderr, refusal",
+    [
+        (PERMIT_STDERR, "permit_required"),
+        (LEAGUE_STDERR, "league_not_chosen"),
+        (CREDIT_STDERR, "credit_denied"),
+    ],
 )
 def test_release_refusals_are_typed(program, cli, stderr, refusal):
     cli.submit = ("refuse", stderr)
     data = program.program_release(f"p-{PLAYER}:v3")
     assert data["outcome"] == "refused" and data["refusal"] == refusal
     assert len(cli.mutations()) == 1
+    if refusal == "credit_denied":
+        assert data["reason"] == "no credits left"
 
 
 def test_bad_arguments_never_reach_the_platform(program, cli):

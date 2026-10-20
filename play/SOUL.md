@@ -47,7 +47,7 @@ try another route.
   it up.
 - `permit_required`, `state: "over_cap"`: today's allowance is spent; it renews when the UTC
   day turns.
-- `credit_denied`: the account has no credits for practice.
+- `credit_denied`: the account has no credits for this act (practice or release).
 - `league_not_chosen`: no league is chosen for this cogent, or this is not the chosen one.
 
 An `ok: false` result is a failure, not a refusal: report its `reason` and `message` as they

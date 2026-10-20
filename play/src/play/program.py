@@ -286,7 +286,14 @@ class Program:
                 "submission_id": found[-1]["submission_id"],
                 "already": True,
             }
-        result = self.client.submit(policy_version, league)
+        try:
+            result = self.client.submit(policy_version, league)
+        except SoftmaxCliError as error:
+            # The shared client raises a 402 as a failure; it is the same refusal as practice's.
+            if not xp.CREDIT_DENIAL.search(str(error)):
+                raise
+            stderr = re.split(r" exited -?[0-9]+: ", str(error), maxsplit=1)[-1]
+            return {**out, **refused(CreditDenied(reason=xp._error_detail(stderr)))}
         if isinstance(result, (PermitRequired, LeagueNotChosen)):
             return {**out, **refused(result)}
         return {**out, "outcome": "released", "submission_id": result, "already": False}

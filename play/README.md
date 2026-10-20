@@ -32,6 +32,11 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 A coach refusal (403 `permit_required`, 402 `credit_denied`, `league_not_chosen`) is returned as
 data, `{"outcome": "refused", "refusal": ..., "reason", "state"?, "ask"?}`, and is never retried.
 
+`src/play/program.py` uses private members of the shared `SoftmaxClient` (`_league_coworld`,
+`_cli`, `_require_player`) instead of adding public ones to `shared/`, which would change the IDE
+profiles' copies; `tests/test_program.py` runs every one of those paths through the real client
+with a fake CLI, so a rename in `shared/` fails `test (play)`.
+
 ## Install
 
 From a clean checkout (see the repository README):
