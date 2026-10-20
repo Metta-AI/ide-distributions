@@ -381,20 +381,6 @@ class FakeSoftmax:
 
         return self._operate("xp_create", action)
 
-    def practice_create(
-        self, league_id: str, policy_ref: str, num_episodes: int, seats: list[int], attempt: int
-    ) -> str | CreditDenied | PermitRequired | LeagueNotChosen:
-        spec = {
-            "league_id": league_id,
-            "num_episodes": num_episodes,
-            "roster": [{"slot": s, "player": {"policy_ref": policy_ref}} for s in seats],
-        }
-        handle = self.xp_create("practice", int(_short_hash(policy_ref), 16) % 100000, attempt, spec)
-        return handle if not isinstance(handle, XpHandle) else handle.request_id
-
-    def practice_status(self, request_id: str) -> XpStatus:
-        return self.xp_status(XpHandle(request_id, "practice", 1, 0, None, None))
-
     def xp_status(self, handle: XpHandle) -> XpStatus:
         def action(state: dict) -> XpStatus:
             request = state["xp"][handle.request_id]

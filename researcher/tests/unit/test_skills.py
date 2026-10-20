@@ -34,7 +34,6 @@ CORE_SKILLS = {
     "ab-compare",
     "candidate",
     "lessons",
-    "core-loop",
 }
 # Plan 03 Task 4.2 adds these for System Design §5.6 and C10.
 MAINTENANCE_SKILLS = {"kb-maintenance", "calibrate-noise"}
@@ -112,7 +111,6 @@ COMMAND_FLAGS = {
     "softmax xp evidence": "",
     "softmax upload": "--build-dir --name",
     "softmax upload-build": "--build-dir --name",
-    "softmax practice": "--policy-ref --league --episodes --seats --attempt --status",
     "softmax leaderboard": "",
     "softmax game-version": "",
     "softmax standings": "",
@@ -382,5 +380,4 @@ def test_every_skill_named_in_a_soul_or_game_file_exists():
             names = [match.group(1), match.group(3)]
             names += re.findall(r'"([a-z][a-z0-9-]+)"', match.group(2) or "")
             named |= {name for name in names if name}
-    assert "core-loop" in named
     assert named <= shipped, named - shipped

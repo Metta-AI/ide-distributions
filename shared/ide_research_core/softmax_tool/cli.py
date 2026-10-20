@@ -82,11 +82,6 @@ the game, for its league, from ``RESEARCH_GAME``):
 - ``upload-build --name NAME --build-dir D``: upload a checked build as a version with no experiment;
   prints ``{version_id, platform_policy_version_id}``. Supports explicit build/upload-only requests
   and starter builds. It does not evaluate or promote; starter promotion remains explicit.
-- ``practice --policy-ref REF [--league L] [--episodes N] [--seats 0,1] [--attempt N]``: one
-  private practice request for the program ``REF`` exactly as given (``POST /v2/experience-requests``,
-  no experiment, no lock; the platform fills the other slots). Prints ``{request_id,
-  policy_ref, league_id, credit_denied, permit_required, league_not_chosen, reason?}``; on a
-  refusal ``request_id`` is null. ``practice --status ID`` prints the request's state.
 - ``leaderboard``: ``{league_id, player_id, current_champion, conflict}``. The champion is the
   policy the league shows competing for our player (A9; null: none). ``conflict`` is null, or
   why the league and the loop's recorded champion disagree (``promotion.conflict``).
@@ -867,43 +862,6 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     return {**report, **NOT_REFUSED}
 
 
-def _practice(ctx, sm, args) -> dict:
-    """Request (or, with ``--status``, read) one practice run of a program, no experiment."""
-    if args.status:
-        status = sm.practice_status(args.status)
-        return {
-            "request_id": args.status,
-            "state": status.state,
-            "episodes_completed": status.episodes_completed,
-            "episodes_total": status.episodes_total,
-            "raw_status": status.raw_status,
-            "warning": status.warning,
-        }
-    if not args.policy_ref:
-        raise BadArguments("--policy-ref is required (or --status REQUEST_ID)")
-    if args.episodes < 1:
-        raise BadArguments("--episodes must be positive")
-    seats = [int(seat) for seat in args.seats.split(",") if seat.strip()]
-    if not seats:
-        raise BadArguments("--seats must list at least one slot")
-    league_id = args.league or _league_id()
-    result = sm.practice_create(league_id, args.policy_ref, args.episodes, seats, args.attempt)
-    out = {"policy_ref": args.policy_ref, "league_id": league_id, "request_id": None, **NOT_REFUSED}
-    if isinstance(result, str):
-        return {**out, "request_id": result}
-    if isinstance(result, CreditDenied):
-        return {**out, "credit_denied": True, "reason": result.reason}
-    if isinstance(result, LeagueNotChosen):
-        return {**out, "league_not_chosen": True, "reason": result.reason}
-    return {
-        **out,
-        "permit_required": True,
-        "reason": result.reason,
-        "ask": result.ask,
-        "state": result.state,
-    }
-
-
 def _handle_dict(handle: XpHandle) -> dict:
     return {
         "request_id": handle.request_id,
@@ -1112,19 +1070,6 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "--name", required=True,
         help="Chosen lowercase policy name; scoped to the player. Reuse on retry.",
     )
-
-    sub = command(
-        commands,
-        "practice",
-        _practice,
-        "request practice for one program (no experiment), or read one with --status",
-    )
-    sub.add_argument("--policy-ref", help="the program as given, e.g. name:v3 (no lookup first)")
-    sub.add_argument("--league", help="league id (default: the game's league)")
-    sub.add_argument("--episodes", type=int, default=1, help="episodes to run (default 1)")
-    sub.add_argument("--seats", default="0", help="comma-separated slots it fills (default 0)")
-    sub.add_argument("--attempt", type=int, default=1, help="bump to repeat the same practice")
-    sub.add_argument("--status", help="read this practice request id instead of creating one")
 
     command(commands, "leaderboard", _leaderboard, "our leaderboard and current champion")
     command(commands, "game-version", _game_version, "the league's current game version")
