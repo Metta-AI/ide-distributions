@@ -23,10 +23,6 @@ missing, report the gap on your card and block when it prevents progress.
   with `awaiting.xp`; it does not hold the worker open.
 - Prepare candidate evidence and a `promote` decision; the orchestrator owns submissions and
   champion changes. Bootstrap work uploads the starter policy, then hands off its version.
-- A card marked as the coach's direct request is not research: skip topic, hypothesis, noise
-  and champion checks. Fork the named starter, change it, upload it under the coach's player
-  with the existing upload tool, and request practice with the policy_ref exactly as given.
-  Hand off the uploaded version and the practice request IDs. You still never submit.
 
 Write short, plain sentences. Put findings first, cite records, and state uncertainty.
 
