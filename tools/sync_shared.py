@@ -11,7 +11,8 @@ Sources and their copies:
 - ``shared/ide_research_core/`` -> ``<distribution>/src/ide_research_core/``
 - ``ontology/ONTOLOGY.md``       -> the end of ``<distribution>/SOUL.md``, after the line
   ``ONTOLOGY_MARKER`` (Hermes loads SOUL.md in every session, so every turn has the shared
-  vocabulary; the orchestrator has no file tools to read a separate copy)
+  vocabulary; the orchestrator has no file tools to read a separate copy). Only the research
+  distributions get it: ``play`` uses the package's Softmax tool, not the research vocabulary.
 - ``researcher/games/<game>/GAME.md`` -> ``orchestrator/games/<game>/GAME.md`` (the shared
   package reads the game contract, for example the league id, from the distribution root;
   the game's tools and seed stay in the researcher)
@@ -26,7 +27,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-DISTRIBUTIONS = ("researcher", "orchestrator")
+DISTRIBUTIONS = ("researcher", "orchestrator", "play")
+RESEARCH_DISTRIBUTIONS = ("researcher", "orchestrator")  # the ones that embed the ontology
 PACKAGE = "ide_research_core"
 SKIPPED = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 MARKER = "GENERATED.md"
@@ -103,7 +105,8 @@ def main() -> int:
         if not (distribution / "distribution.yaml").is_file():
             continue
         changes += mirror(REPO / "shared" / PACKAGE, distribution / "src" / PACKAGE)
-        changes += embed_ontology(distribution / "SOUL.md", REPO / "ontology" / "ONTOLOGY.md")
+        if name in RESEARCH_DISTRIBUTIONS:
+            changes += embed_ontology(distribution / "SOUL.md", REPO / "ontology" / "ONTOLOGY.md")
     orchestrator = REPO / "orchestrator"
     if (orchestrator / "distribution.yaml").is_file():
         for contract in sorted((REPO / "researcher" / "games").glob("*/GAME.md")):

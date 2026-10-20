@@ -1,0 +1,29 @@
+# Shipped defaults. Hermes keeps this file on `hermes profile update` (--force-config resets it).
+# The builder is a Kanban worker profile: the play profile assigns it cards and the gateway's
+# dispatcher runs them. Uploading, practice and release belong to the play profile.
+model:
+  default: moonshotai/kimi-k3
+  provider: openrouter
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+agent:
+  max_turns: 60
+approvals:
+  mode: "off"
+  deny:
+    - "coworld player use*"
+    - "coworld submit*"
+    - "coworld upload-policy*"
+    - "coworld xp-request create*"
+    - "softmax login*"
+    - "hermes kanban create*"
+    - "hermes kanban --board * create*"
+terminal:
+  env_passthrough:
+    - PLAY_WORKSPACE
+    - TMPDIR
+updates:
+  check: false
+curator:
+  prune_builtins: false

@@ -7,12 +7,13 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 |---|---|
 | [`orchestrator/`](orchestrator/README.md) | The research lead: the IDE chat's agent. Plans research, assigns Kanban cards to researchers, answers them, promotes champions and tells the user what happened. |
 | [`researcher/`](researcher/README.md) | A research worker (formerly `autoresearch`, moved here from `Metta-AI/ide-mvp` with its full history). Install it once per researcher (`researcher-1`, `researcher-2`, ...). |
+| [`play/`](play/README.md) | Play: the user's own program on one coworld (GotA for now). The `play` profile takes the user's request, has the `builder` profile ([`play/builder/`](play/builder)) change the program through native Kanban, uploads it, practices it and releases it when the user says so. No research machinery. |
 
 Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
 into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py), because
 Hermes installs a distribution by copying its one folder. The shared vocabulary,
 [`ontology/ONTOLOGY.md`](ontology/ONTOLOGY.md), is embedded by the same script at the end of
-each distribution's `SOUL.md`, so every session of every profile has it. The copies are
+each research distribution's `SOUL.md`, so every session of every research profile has it. The copies are
 generated: edit `shared/` or `ontology/`, run `python3 tools/sync_shared.py`, and commit the
 source and the copies together.
 

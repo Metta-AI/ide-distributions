@@ -1,0 +1,27 @@
+name: play
+version: 0.1.0
+description: The user's Softmax cogent on one coworld. Takes the user's request, has the builder change the program, uploads it, practices it and releases it when the user says so.
+hermes_requires: ">=0.21.6"
+env_requires:
+  - name: OPENROUTER_API_KEY
+    required: true
+    description: OpenRouter API key for the play model.
+  - name: OPENROUTER_MODEL
+    required: false
+    default: moonshotai/kimi-k3
+    description: Model ID on OpenRouter.
+  - name: SOFTMAX_PLAYER_CREDENTIAL
+    required: true
+    description: Bare player agent token or player-session JSON containing token and expires_at.
+  - name: COGAMES_API_URL
+    required: false
+    default: https://softmax.com/api
+    description: Softmax API server.
+  - name: RESEARCH_PLAYER_ID
+    required: true
+    description: Id of the Softmax player the credential acts as (the shared softmax tool's name for it).
+  - name: PLAY_WORKSPACE
+    required: true
+    description: >-
+      Absolute path of the program workspace, shared with the builder profile. The play
+      profile passes it to every builder card as the card's directory.

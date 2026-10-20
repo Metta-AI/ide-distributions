@@ -1,0 +1,10 @@
+name: play
+version: 0.1.0
+description: The user's own program on one coworld - starter, upload, private practice and release.
+author: ide-distributions
+provides_tools:
+  - starter_fetch
+  - program_upload
+  - practice_request
+  - practice_status
+  - program_release
