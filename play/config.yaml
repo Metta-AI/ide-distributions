@@ -1,0 +1,25 @@
+# Shipped defaults. Hermes keeps this file on `hermes profile update` (--force-config resets it).
+# The play profile has only its own tools and native Kanban: it never edits files or runs
+# commands; the builder profile does that on a Kanban card.
+model:
+  default: moonshotai/kimi-k3
+  provider: openrouter
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  write_approval: false
+agent:
+  max_turns: 40
+platform_toolsets:
+  api_server: [play, kanban]
+# An upload may take 600 s; Hermes otherwise cuts a tool call after 420 s.
+timeouts:
+  tools:
+    sequential_call: 900
+    concurrent_batch: 900
+plugins:
+  enabled: [play]
+updates:
+  check: false
+curator:
+  prune_builtins: false
