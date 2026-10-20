@@ -197,44 +197,6 @@ def create(
     return XpHandle(request_id, experiment, batch, attempt, seed, arm)
 
 
-def practice_body(league_id: str, policy_ref: str, num_episodes: int, seats: list[int],
-                  attempt: int = 1) -> dict:
-    """The request body for a plain practice run of one program (no experiment): our
-    ``policy_ref`` exactly as given in the listed ``seats``; the platform fills the rest."""
-    key = f"practice:{policy_ref}:a{attempt}"
-    return {
-        "target": {"league_id": league_id},
-        "roster": [{"slot": seat, "player": {"policy_ref": policy_ref}} for seat in seats],
-        "num_episodes": int(num_episodes),
-        "private": True,
-        "title": key,
-        "idempotency_key": key,
-    }
-
-
-def create_practice(cli: PlatformCli, body: dict) -> str | CreditDenied | PermitRequired | LeagueNotChosen:
-    """Create one practice request; return its id, or the credit or coach refusal."""
-    args = ["xp-request", "create", "-", "--json"]
-    result = cli.run("coworld", args, input=json.dumps(body), ok_codes=(0, 1))
-    if result.returncode != 0:
-        if CREDIT_DENIAL.search(result.stderr or ""):
-            return CreditDenied(reason=_error_detail(result.stderr))
-        refusal = coach_refusal(result.stderr or "")
-        if refusal is not None:
-            return refusal
-        raise SoftmaxCliError(describe_failure("coworld", args, result))
-    try:
-        return str(json.loads(result.stdout)["id"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        raise SoftmaxCliError(
-            f"xp-request create printed no request id: {result.stdout.strip()[-500:]!r}"
-        ) from None
-
-
-def practice_status(cli: PlatformCli, request_id: str) -> XpStatus:
-    return status(cli, XpHandle(request_id, "practice", 1, 0, None, None))
-
-
 def _error_detail(stderr: str) -> str:
     first = next((line for line in stderr.splitlines() if line.strip()), stderr)
     return first.removeprefix("Error: ").split(": ", 1)[-1].strip()

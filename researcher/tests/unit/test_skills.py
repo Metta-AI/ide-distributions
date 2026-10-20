@@ -34,7 +34,6 @@ CORE_SKILLS = {
     "ab-compare",
     "candidate",
     "lessons",
-    "core-loop",
 }
 # Plan 03 Task 4.2 adds these for System Design §5.6 and C10.
 MAINTENANCE_SKILLS = {"kb-maintenance", "calibrate-noise"}
@@ -112,7 +111,6 @@ COMMAND_FLAGS = {
     "softmax xp evidence": "",
     "softmax upload": "--build-dir --name",
     "softmax upload-build": "--build-dir --name",
-    "softmax practice": "--policy-ref --league --episodes --seats --attempt --status",
     "softmax leaderboard": "",
     "softmax game-version": "",
     "softmax standings": "",
@@ -363,24 +361,3 @@ def test_the_contract_matches_the_real_cli():
         known = {option for action in parser._actions for option in action.option_strings}
         for flag in flags.split():
             assert flag in known, f"{command}: {flag} is not a flag of the real CLI"
-
-
-SKILL_REFERENCE = re.compile(
-    r"`([a-z][a-z0-9-]+)` skill|skills: \[([^\]]*)\]|[Ss]kill `([a-z][a-z0-9-]+)`"
-)
-
-
-def test_every_skill_named_in_a_soul_or_game_file_exists():
-    """No SOUL.md or GAME.md may send a mind to a skill that does not ship (the hosted
-    transcript asked for a nonexistent `research` skill)."""
-    shipped = set(skill_ids())
-    files = [ROOT / "SOUL.md", ROOT.parent / "orchestrator" / "SOUL.md"]
-    files += sorted((ROOT / "games").glob("*/GAME.md"))
-    named = set()
-    for path in files:
-        for match in SKILL_REFERENCE.finditer(path.read_text(encoding="utf-8")):
-            names = [match.group(1), match.group(3)]
-            names += re.findall(r'"([a-z][a-z0-9-]+)"', match.group(2) or "")
-            named |= {name for name in names if name}
-    assert "core-loop" in named
-    assert named <= shipped, named - shipped

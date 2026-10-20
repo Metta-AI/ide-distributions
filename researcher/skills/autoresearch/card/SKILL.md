@@ -27,8 +27,7 @@ Doctrine upheld: D-01, D-02, D-11, D-12, D-13, D-21, D-22, D-23, D-24, D-25, D-2
    `"$RESEARCH_CLI" records resolve <ar://ref>`. A planning card reads all of `plan.md`.
 4. Apply the orchestrator's injected steering ahead of your own plan. Acknowledge it with
    a `note:` comment on your own card: applied, declined with a reason, or noted (`report`).
-5. Do the card's bounded work. A card with the `core-loop` skill follows that skill and
-   nothing in the research list below. Investigation uses `replay-diagnosis` then `diagnose`; scouting
+5. Do the card's bounded work. Investigation uses `replay-diagnosis` then `diagnose`; scouting
    uses `league-watch`, `opponent-profile`, `meta-recon`; design/build/launch uses `experiment`,
    `build-upload`, `xp-request`; review uses `fetch-artifacts`, `ab-compare`, `review-xp` and,
    for a promote decision, `candidate`; maintenance uses `kb-maintenance`, `lessons` or

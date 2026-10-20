@@ -1047,28 +1047,3 @@ def test_upload_build_without_experiment_does_not_evaluate_or_promote(board):
     assert len(state["uploads"]) == 1
     assert state["submissions"] == before["submissions"]
     assert state["xp"] == before["xp"]
-
-
-# --- practice (no experiment) ---
-
-
-def test_practice_requests_and_reads_a_request_without_an_experiment(board):
-    worker = board.admit(mode="experimentation")
-    worker.start()
-    env = base_env(board, worker)
-    code, data = softmax(env, "practice", "--policy-ref", "mine:v1", "--episodes", "2")
-    assert code == 0, data
-    created = data["data"]
-    assert created["request_id"] and created["credit_denied"] is False
-    assert created["policy_ref"] == "mine:v1"
-    code, status = softmax(env, "practice", "--status", created["request_id"])
-    assert code == 0, status
-    assert status["data"]["episodes_total"] == 2
-
-
-def test_practice_needs_a_policy_ref(board):
-    worker = board.admit(mode="experimentation")
-    worker.start()
-    env = base_env(board, worker)
-    code, data = softmax(env, "practice")
-    assert code == 2 and data["error"]["reason"] == "bad_arguments"

@@ -210,17 +210,6 @@ class SoftmaxClient:
     def xp_status(self, handle: XpHandle) -> XpStatus:
         return xp.status(self._cli, handle)
 
-    def practice_create(
-        self, league_id: str, policy_ref: str, num_episodes: int, seats: list[int], attempt: int
-    ) -> str | CreditDenied | PermitRequired | LeagueNotChosen:
-        """One practice request for ``policy_ref`` as given (no experiment); its id or a refusal."""
-        self._require_player()
-        body = xp.practice_body(league_id, policy_ref, num_episodes, seats, attempt)
-        return xp.create_practice(self._cli, body)
-
-    def practice_status(self, request_id: str) -> XpStatus:
-        return xp.practice_status(self._cli, request_id)
-
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]:
         return xp.artifacts(self._cli, handle, dest)
 
