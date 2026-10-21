@@ -22,6 +22,7 @@ from orchestrator.board import Board, connection
 from orchestrator.board import git as board_git
 from orchestrator.context import Context
 from orchestrator.gate import evaluate
+from orchestrator.research import ResearchError
 from orchestrator.storage import WAKE_KINDS, snapshot
 
 
@@ -249,6 +250,54 @@ def main():
     assert [run["id"] for run in after["runs"]] == [run["id"] for run in original["runs"]]
     assert after["runs"][0]["error"] == cause
     assert after["runs"][0]["outcome"] == "gave_up"
+    # An answered blocker must not dispatch an already integrated branch again.
+    integrated = board.card_create(
+        kind="planning",
+        entity="T-integrated-answer",
+        assignee="researcher-1",
+        title="Choose an experiment threshold",
+        body="Record the missing design choice",
+    )["card"]
+    git(clone, "checkout", integrated["branch_name"])
+    git(clone, "config", "user.name", "Orchestrator test")
+    git(clone, "config", "user.email", "test@example.invalid")
+    (clone / "blocker.md").write_text("Missing prospective threshold\n")
+    git(clone, "add", "blocker.md")
+    git(clone, "commit", "-m", "Integrate blocker evidence")
+    git(clone, "push", "origin", "HEAD:main", integrated["branch_name"])
+    with closing(connection()) as conn:
+        kb.block_task(conn, integrated["id"], reason="Choose a threshold")
+    before_answer = board.card_show(integrated["id"])
+    with TestCase().assertRaises(ResearchError) as rejected:
+        board.card_answer(integrated["id"], "Choose and justify it before seeing results")
+    assert rejected.exception.envelope["error"]["reason"] == "integrated_card_requires_replacement"
+    after_answer = board.card_show(integrated["id"])
+    assert after_answer["card"]["status"] == "blocked"
+    assert after_answer["comments"] == before_answer["comments"]
+    for case in ("unpublished", "published-unmerged", "published-base"):
+        card = board.card_create(
+            kind="planning",
+            entity=f"T-answer-{case}",
+            assignee="researcher-1",
+            title=case,
+            body="Check remote branch semantics",
+        )["card"]
+        git(clone, "checkout", card["branch_name"])
+        if case != "published-base":
+            (clone / f"{case}.md").write_text("Unintegrated work\n")
+            git(clone, "add", f"{case}.md")
+            git(clone, "commit", "-m", case)
+        if case != "unpublished":
+            git(clone, "push", "origin", card["branch_name"])
+        with closing(connection()) as conn:
+            kb.block_task(conn, card["id"], reason="Need an answer")
+        if case == "published-base":
+            with TestCase().assertRaises(ResearchError):
+                board.card_answer(card["id"], "Proceed")
+            assert board.card_show(card["id"])["card"]["status"] == "blocked"
+        else:
+            assert board.card_answer(card["id"], "Proceed")["unblocked"]
+            assert board.card_show(card["id"])["card"]["status"] == "ready"
     print(json.dumps({"ok": True, "cards": len(board.card_list({"include_archived": True}))}))
 
 
