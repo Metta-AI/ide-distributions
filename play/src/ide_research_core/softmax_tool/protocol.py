@@ -184,6 +184,10 @@ class Softmax(Protocol):
         """Where our submission of ``policy_version_id`` stands in the league (read-only)."""
         ...
 
+    def latest_league_result(self, player_id: str, league_id: str) -> dict | None:
+        """Newest recorded league replay and round; None means no replay exists yet."""
+        ...
+
     def league_episodes(self, league_id: str, limit: int) -> Iterable[dict]:
         """Up to ``limit`` completed league episodes, read-only, in listing order (the real
         client yields them as they arrive). Each is a dict::

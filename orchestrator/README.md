@@ -78,6 +78,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `accept_champion()` | Record the league's current champion after the user confirms. |
 | `workspace_integrate(branch)` | Shared integration of a pushed card/repair branch. |
 | `xp_status(experiment)`, `credits`, `leaderboard` | Shared platform reads. |
+| `latest_league_result` | Latest recorded match for this player in the current league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
 
 Describe the objective, inputs, constraints and completion criteria in the card body.
 Omit `skills` by default: the researcher discovers and loads its own procedures, or reports

@@ -30,7 +30,8 @@ Any other shape (a bare ``ply_`` token, JSON without ``expires_at``) is rejected
 - The executables are the ones installed next to the running interpreter (the profile venv), never
   a global binary.
 
-``api_get_json`` is the one read that does not go through a CLI: the XP credit balance
+``api_get_json`` handles reads without a pinned CLI command: latest player league replay,
+permit records, and the XP credit balance
 (``GET /observatory/usage/me/credits``, readable with a Player credential since metta #27052,
 2026-10-08) has no command in coworld 0.1.58 (``coworld credits`` is merged in metta but not
 released). It sends the same credential token as a bearer header to the configured server

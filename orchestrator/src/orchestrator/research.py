@@ -113,3 +113,6 @@ class Research:
 
     def leaderboard(self):
         return self.call("softmax", "leaderboard")
+
+    def latest_league_result(self):
+        return self.call("softmax", "latest-league-result")

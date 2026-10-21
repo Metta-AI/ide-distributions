@@ -955,6 +955,18 @@ def _leaderboard(ctx, sm, args) -> dict:
     }
 
 
+def _latest_league_result(ctx, sm, args) -> dict:
+    league_id = _league_id()
+    player_id = os.environ[PLAYER_ENV]
+    result = sm.latest_league_result(player_id, league_id)
+    return {
+        "league_id": league_id,
+        "player_id": player_id,
+        "available": result is not None,
+        "result": result,
+    }
+
+
 def _game_version(ctx, sm, args) -> dict:
     league_id = _league_id()
     return {"league_id": league_id, "game_version": str(sm.game_version(league_id)).strip()}
@@ -1072,6 +1084,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     )
 
     command(commands, "leaderboard", _leaderboard, "our leaderboard and current champion")
+    command(commands, "latest-league-result", _latest_league_result, "our latest live league episode and round (read-only)")
     command(commands, "game-version", _game_version, "the league's current game version")
     command(commands, "standings", _standings, "league standings (read-only)")
     sub = command(

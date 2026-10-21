@@ -522,6 +522,10 @@ class FakeSoftmax:
 
     # --- league reads ---------------------------------------------------
 
+    def latest_league_result(self, player_id: str, league_id: str) -> dict | None:
+        # The fake backend does not execute league matches.
+        return None
+
     def league_episodes(self, league_id: str, limit: int) -> list[dict]:
         version = self.game_version(league_id)
         return [_league_episode(league_id, index, version) for index in range(limit)]

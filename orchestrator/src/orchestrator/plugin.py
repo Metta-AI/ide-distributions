@@ -228,6 +228,15 @@ TOOLS = {
     ),
     "credits": (Research, "Read the player's available XP credits.", {}, []),
     "leaderboard": (Research, "Read the current league leaderboard.", {}, []),
+    "latest_league_result": (
+        Research,
+        ("Read this player's latest live league match: round and episode identifiers, completion "
+        "status, participating policy versions, scores and replay. available=false means no "
+        "recorded replay yet. Check the policy version and episode status before claiming a "
+        "submitted policy completed a match. This reads the platform, not local research records."),
+        {},
+        [],
+    ),
 }
 
 
