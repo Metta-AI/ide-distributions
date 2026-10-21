@@ -83,8 +83,10 @@ def test_practice_request_is_private_and_idempotent(program, cli):
     assert body == {
         "target": {"league_id": GOTA.league_id},
         "roster": [
-            {"slot": 0, "player": {"policy_ref": f"p-{PLAYER}:v3"}},
-            {"slot": 5, "player": {"policy_ref": f"p-{PLAYER}:v3"}},
+            {"slot": seat, "player": {"policy_ref": f"p-{PLAYER}:v3"}}
+            if seat in (0, 5)
+            else {"slot": seat, "player": {"random": True}}
+            for seat in range(10)
         ],
         "num_episodes": 2,
         "private": True,
@@ -129,6 +131,15 @@ def test_practice_status_downloads_results_once_completed(program, cli, env):
     results = Path(env["PLAY_WORKSPACE"]) / "practice/xreq_1/abc/results.json"
     assert data["results"] == [str(results)]
     assert cli.mutations() == []
+
+
+def test_practice_status_treats_not_produced_as_terminal(program, cli, env):
+    cli.xp_status = "completed"
+    cli.replay_state = "not_produced"
+    data = program.practice_status("xreq_1")
+    assert "results_pending" not in data and len(data["results"]) == 1
+    cli.replay_state = "pending"
+    assert "results_pending" in program.practice_status("xreq_1")
 
 
 def test_release_submits_once(program, cli):

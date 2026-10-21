@@ -12,6 +12,8 @@ Container coworlds are not supported yet.
 
 ## How the work goes
 
+The program workspace is `$PLAY_WORKSPACE`; every file named below lives under it.
+
 1. **The program.** It lives in the program workspace as `program.bas`. If there is none yet,
    call `starter_fetch`; it puts the coworld's starter at `starter/baseline.bas` with its
    sha256 checked.

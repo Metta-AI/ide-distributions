@@ -92,7 +92,12 @@ class FakeCli:
                     "size": len(data),
                     "sha256": hashlib.sha256(data).hexdigest(),
                 }
-                (dest / "manifest.jsonl").write_text(json.dumps(receipt) + "\n")
+                rows = [receipt]
+                if getattr(self, "replay_state", None):
+                    rows.append(
+                        {"kind": "artifact", "state": self.replay_state, "artifact_id": "r1"}
+                    )
+                (dest / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
                 return done()
             case ["coworld", "submissions", "--player", player, "--json"]:
                 assert player == PLAYER
