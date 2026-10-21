@@ -154,3 +154,18 @@ def test_unequal_lineups_are_rejected():
     lineups["1"] = ("pv-a", "pv-b")
     with pytest.raises(DesignError, match="same number"):
         sampled(lineups=lineups).validate()
+
+
+def test_metric_roles_must_agree_on_direction():
+    data = DESIGN.to_dict()
+    data["metrics"].append(
+        {
+            "name": "score",
+            "direction": "down",
+            "role": "agent_guardrail",
+            "min_effect": None,
+            "tolerance": 0.1,
+        }
+    )
+    with pytest.raises(DesignError, match="conflicting directions"):
+        EvaluationDesign.from_dict(data)

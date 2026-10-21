@@ -186,12 +186,27 @@ def test_bad_request_is_refused(ws, tmp_path, capsys):
     request = {k: v for k, v in REQUEST.items() if k != "guardrails"}
     code, env = design(capsys, ws, tmp_path, exp, request=request)
     assert code == 1 and "guardrails" in env["error"]["message"]
+
+
+def test_primary_can_also_be_a_performance_guardrail(ws, tmp_path, capsys):
+    store, exp = new_experiment(ws)
+    write_noise(store.layout, noise_record())
     request = {
         **REQUEST,
+        "seeds": list(range(160)),
         "primary_metrics": [{"name": "score", "direction": "up", "min_effect": 1}],
+        "guardrails": [{"name": "score", "direction": "up", "tolerance": 0.1}],
     }
     code, env = design(capsys, ws, tmp_path, exp, request=request)
-    assert code == 1 and "duplicate metric" in env["error"]["message"]
+    assert code == 0, env
+    frozen = env["data"]["evaluation_design"]
+    assert {(m["name"], m["role"]) for m in frozen["metrics"]} == {
+        ("score", "primary"),
+        ("score", "agent_guardrail"),
+        ("score", "performance"),
+    }
+    assert "score" in frozen["delta"]
+    store.set_status(exp, "built")
 
 
 def test_too_few_seeds_is_refused(ws, tmp_path, capsys):

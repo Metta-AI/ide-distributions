@@ -32,7 +32,7 @@ Doctrine upheld: D-06, D-09.
 4. Read `data`: `promote_eligible`, `failures` (for example `n_short:…`,
    `primary_not_significant:<m>`, `guardrail_breach:<m>`, `performance_slip:<m>`,
    `baseline_not_champion`), and `per_metric` (`mean_signed_diff`, `ci`, `threshold`,
-   `passed` per metric; larger is always better after the sign). Copy `per_metric` and the
+   `passed` per metric and role (`per_metric[name][role]`); larger is always better after the sign). Copy `per_metric` and the
    pair count into the Result metrics, with units.
 5. Report the pairing of the design (`seed_and_opponents` or `seed_only`) in the Result
    analysis.

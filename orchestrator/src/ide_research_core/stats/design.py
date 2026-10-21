@@ -84,16 +84,20 @@ class EvaluationDesign:
         return "seed_and_opponents"
 
     def validate(self) -> None:
-        """Raise DesignError unless there is at least one primary metric, metric names are
+        """Raise DesignError unless there is at least one primary metric, metric name/role pairs are
         unique, every delta key names a performance metric, baseline_version is non-empty, seeds
         are unique, and there are at least ``n_min`` seeds (each seed is one candidate/baseline
         pair of one-episode XP requests, A12, so fewer seeds can never reach N)."""
         problems = []
         if not any(metric.role == "primary" for metric in self.metrics):
             problems.append("no primary metric")
-        names = [metric.name for metric in self.metrics]
-        for name in sorted({n for n in names if names.count(n) > 1}):
-            problems.append(f"duplicate metric name {name!r}")
+        keys = [(metric.name, metric.role) for metric in self.metrics]
+        for name, role in sorted({key for key in keys if keys.count(key) > 1}):
+            problems.append(f"duplicate metric role {name!r}/{role}")
+        for name in sorted({metric.name for metric in self.metrics}):
+            directions = {metric.direction for metric in self.metrics if metric.name == name}
+            if len(directions) != 1:
+                problems.append(f"conflicting directions for metric {name!r}")
         performance = {m.name for m in self.metrics if m.role == "performance"}
         for key in sorted(set(self.delta) - performance):
             problems.append(f"delta key {key!r} is not a performance metric")
