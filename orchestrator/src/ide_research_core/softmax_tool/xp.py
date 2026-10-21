@@ -257,7 +257,13 @@ def artifacts(cli: PlatformCli, handle: XpHandle, dest: Path) -> list[Path]:
     if not manifest.exists():
         raise ArtifactVerificationError(f"XP {handle.request_id} download wrote no {manifest}")
     receipts = latest_receipts(manifest)
-    waiting = sorted(r.get("filename") or r.get("id") for r in receipts if not _completed(r))
+    # ``not_produced`` is terminal, as in the CLI (coworld episode_downloads): the episode never
+    # made that artifact, so waiting for it would never end.
+    waiting = sorted(
+        r.get("filename") or r.get("id")
+        for r in receipts
+        if not _completed(r) and r.get("state") != "not_produced"
+    )
     if result.returncode == DOWNLOAD_INCOMPLETE_EXIT or waiting:
         raise ArtifactsIncomplete(f"XP {handle.request_id} evidence not ready: {waiting}")
     completed = [receipt for receipt in receipts if _completed(receipt)]

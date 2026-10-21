@@ -66,8 +66,8 @@ TOOLS = {
     "practice_request": (
         (
             "Request private practice episodes for an uploaded program in the game's league; "
-            "the platform fills the other seats. Repeating the same arguments returns the same "
-            "request; raise attempt only to run the same practice again. " + REFUSAL
+            "your program plays the chosen seats and random league players fill the rest. "
+            "Repeating the same arguments returns the same request; raise attempt only to run the same practice again. " + REFUSAL
         ),
         {
             "policy_version": POLICY_VERSION,
