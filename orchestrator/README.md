@@ -162,13 +162,13 @@ the generated artifact and both returned version IDs; promotion remains a separa
 
 ## Shared IDE components and draft notes
 
-The `workspace_sdk` tool calls the hosted IDE's MCP server, using the existing player-token exchange.
+The `ide_workspace` tool calls the hosted IDE's MCP server, authenticating directly with the existing scoped player credential.
 Set `SOFTMAX_IDE_URL` to the qualified HTTPS mount (for example `https://softmax.com/ide-final`) in the installed
 profile environment. Until configured it returns `kind: unavailable`; existing research tools are unchanged.
 Deploy the Metta workspace SDK and its database migration before enabling this setting. This change alone does not
 advance Metta's pinned distribution or enable the endpoint on retained hosts.
 
 The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
-revision checks, and draft notes. Use the originating IDE `conversation_id` and retain `request_id` on retries.
-The server derives owner and league from that conversation. Inspect structured MCP results rather than treating
+revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.
+The server derives the owner from the validated player credential and fixes league scope to GoTA. Inspect structured MCP results rather than treating
 an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.

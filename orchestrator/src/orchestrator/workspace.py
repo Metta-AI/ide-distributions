@@ -37,18 +37,15 @@ class Workspace:
         with urlopen(request, timeout=60) as response:
             return None if response.status == 202 else json.load(response)
 
-    def workspace_sdk(self, conversation_id, request_id, operation):
+    def ide_workspace(self, request_id, operation):
         if not self.base:
             return {
                 "kind": "unavailable",
                 "reason": "This profile has no configured SOFTMAX_IDE_URL.",
             }
-        # Refresh through the supported player-token exchange. No owner credential is installed.
-        grant = self.post("/hermes/mcp-token", self.token, {})
-        bearer = grant["token"]
         initialized = self.post(
-            "/hermes/mcp",
-            bearer,
+            "/mcp",
+            self.token,
             {
                 "jsonrpc": "2.0",
                 "id": "initialize",
@@ -62,20 +59,19 @@ class Workspace:
         )
         if "error" in initialized:
             return {"kind": "protocol_error", "error": initialized["error"]}
-        self.post("/hermes/mcp", bearer, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        self.post("/mcp", self.token, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         # Envelope fields cannot be overridden by operation data supplied by the model.
         result = self.post(
-            "/hermes/mcp",
-            bearer,
+            "/mcp",
+            self.token,
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "method": "tools/call",
                 "params": {
-                    "name": "workspace_sdk",
+                    "name": "ide_workspace",
                     "arguments": {
-                        **operation,
-                        "conversation_id": conversation_id,
+                        "operation": operation,
                         "request_id": request_id,
                     },
                 },

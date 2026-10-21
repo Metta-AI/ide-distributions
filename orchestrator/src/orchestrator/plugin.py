@@ -17,11 +17,11 @@ STRINGS = {"type": "array", "items": S}
 
 # name: (owner, description, parameters, required)
 TOOLS = {
-    "workspace_sdk": (
+    "ide_workspace": (
         Workspace,
         (
             "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
-            "Use the conversation_id from the IDE instructions and a stable request_id. "
+            "Use a stable request_id; identity comes from your scoped player credential. "
             "operation.method: components.search (query), components.describe (name), layout.read, "
             "layout.validate (view), layout.save (view, revision), draft.read, "
             "draft.save (title, notes, revision), or league.overview. "
@@ -30,8 +30,8 @@ TOOLS = {
             "Draft notes are project direction, not executable source. This never releases a policy. "
             "Read the MCP result's isError and structured status; transport success is not effect success."
         ),
-        {"conversation_id": S, "request_id": S, "operation": O},
-        ["conversation_id", "request_id", "operation"],
+        {"request_id": S, "operation": O},
+        ["request_id", "operation"],
     ),
     "ide_say": (
         IDE,

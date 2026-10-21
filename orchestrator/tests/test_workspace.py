@@ -17,24 +17,23 @@ def context(credential="cga_fixture"):
     )
 
 
-def test_uses_player_exchange_and_original_mcp_request(monkeypatch):
+def test_uses_player_identity_and_original_mcp_request(monkeypatch):
     calls = []
 
     def post(self, path, token, body):
         calls.append((path, token, body))
-        if path.endswith("mcp-token"):
-            return {"token": "short-lived"}
         return {"result": {"content": [{"type": "text", "text": "receipt"}]}}
 
     monkeypatch.setattr(Workspace, "post", post)
     client = Workspace(context(json.dumps({"token": "cga_fixture", "expires_at": "future"})))
     operation = {"method": "layout.read", "conversation_id": "spoof", "request_id": "spoof"}
-    result = client.workspace_sdk("original-conversation", "original-request", operation)
-    assert calls[0] == ("/hermes/mcp-token", "cga_fixture", {})
-    assert calls[1][2]["method"] == "initialize"
-    assert calls[-1][1] == "short-lived"
+    result = client.ide_workspace("original-request", operation)
+    assert all(path == "/mcp" for path, _, _ in calls)
+    assert calls[0][2]["method"] == "initialize"
+    assert calls[-1][1] == "cga_fixture"
     args = calls[-1][2]["params"]["arguments"]
-    assert args["conversation_id"] == "original-conversation"
+    assert "conversation_id" not in args
+    assert args["operation"] == operation
     assert args["request_id"] == "original-request"
     assert calls[-1][2]["id"] == "original-request"
     assert result["result"]["content"][0]["text"] == "receipt"
@@ -42,8 +41,6 @@ def test_uses_player_exchange_and_original_mcp_request(monkeypatch):
 
 def test_preserves_server_refusals(monkeypatch):
     def post(self, path, token, body):
-        if path.endswith("mcp-token"):
-            return {"token": "short-lived"}
         if body["method"] == "initialize":
             return {"result": {}}
         return {
@@ -54,9 +51,7 @@ def test_preserves_server_refusals(monkeypatch):
         }
 
     monkeypatch.setattr(Workspace, "post", post)
-    result = Workspace(context()).workspace_sdk(
-        "conversation", "request", {"method": "layout.read"}
-    )
+    result = Workspace(context()).ide_workspace("request", {"method": "layout.read"})
     assert result["result"]["isError"] is True
 
 
@@ -78,7 +73,4 @@ def test_rejects_unsafe_endpoint(url):
 def test_unconfigured_endpoint_is_explicit():
     ctx = context()
     del ctx.env["SOFTMAX_IDE_URL"]
-    assert (
-        Workspace(ctx).workspace_sdk("chat", "call", {"method": "layout.read"})["kind"]
-        == "unavailable"
-    )
+    assert Workspace(ctx).ide_workspace("call", {"method": "layout.read"})["kind"] == "unavailable"
