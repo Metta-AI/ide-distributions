@@ -164,3 +164,18 @@ For an explicit coach build/upload-only request, assign the researcher the `cand
 "Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
 without an experiment, evaluation or league submission. Require the intended source change in
 the generated artifact and both returned version IDs; promotion remains a separate authorized action.
+
+
+## Shared IDE components and draft notes
+
+The `ide_workspace` tool calls the hosted IDE's MCP server, authenticating directly with the existing scoped player credential.
+The endpoint is `/ide/mcp` on the existing `COGAMES_API_URL` origin (normally `https://softmax.com`).
+No new profile environment setting or retained-workspace configuration migration is needed.
+Deploy and qualify the Metta workspace SDK, migration and public route before merging this distribution change:
+Metta's `preserve` release workflow polls this repository's main branch, so merging can trigger an image release.
+Running hosts adopt that image through the existing explicit Pause/Resume path, preserving their storage.
+
+The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
+revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.
+The server derives the owner from the validated player credential and fixes league scope to GoTA. Inspect structured MCP results rather than treating
+an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.

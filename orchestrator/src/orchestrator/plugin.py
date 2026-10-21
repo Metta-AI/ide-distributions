@@ -8,6 +8,7 @@ from .context import profile_context
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
+from .workspace import Workspace
 
 S = {"type": "string"}
 I = {"type": "integer"}
@@ -16,6 +17,22 @@ STRINGS = {"type": "array", "items": S}
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "ide_workspace": (
+        Workspace,
+        (
+            "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
+            "Use a stable request_id; identity comes from your scoped player credential. "
+            "operation.method: components.search (query), components.describe (name), layout.read, "
+            "layout.validate (view), layout.save (view, revision), draft.read, "
+            "draft.save (title, notes, revision), or league.overview. "
+            "Read before editing; preserve human content. A conflict requires rereading. "
+            "A view has version:1 and body:[components]; discover component props first. "
+            "Draft notes are project direction, not executable source. This never releases a policy. "
+            "Read the MCP result's isError and structured status; transport success is not effect success."
+        ),
+        {"request_id": S, "operation": O},
+        ["request_id", "operation"],
+    ),
     "ide_say": (
         IDE,
         (
@@ -238,13 +255,15 @@ TOOLS = {
     "leaderboard": (Research, "Read the current league leaderboard.", {}, []),
     "latest_league_result": (
         Research,
-        ("Read this player's latest live league match: round and episode identifiers, completion "
-        "status, participating policy versions, scores and replay. available=false means no "
-        "recorded replay yet. Check the policy version and episode status before claiming a "
-        "submitted policy completed a match. participants[].position is a zero-based roster "
-        "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
-        "a win, loss, draw or rank without an explicit outcome or scoring rule. "
-        "This reads the platform, not local research records."),
+        (
+            "Read this player's latest live league match: round and episode identifiers, completion "
+            "status, participating policy versions, scores and replay. available=false means no "
+            "recorded replay yet. Check the policy version and episode status before claiming a "
+            "submitted policy completed a match. participants[].position is a zero-based roster "
+            "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
+            "a win, loss, draw or rank without an explicit outcome or scoring rule. "
+            "This reads the platform, not local research records."
+        ),
         {},
         [],
     ),
