@@ -233,7 +233,10 @@ TOOLS = {
         ("Read this player's latest live league match: round and episode identifiers, completion "
         "status, participating policy versions, scores and replay. available=false means no "
         "recorded replay yet. Check the policy version and episode status before claiming a "
-        "submitted policy completed a match. This reads the platform, not local research records."),
+        "submitted policy completed a match. participants[].position is a zero-based roster "
+        "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
+        "a win, loss, draw or rank without an explicit outcome or scoring rule. "
+        "This reads the platform, not local research records."),
         {},
         [],
     ),
