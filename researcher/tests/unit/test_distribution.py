@@ -141,6 +141,8 @@ def _is_denied(command: str) -> bool:
         ("hermes kanban create x --assignee researcher-1", True),
         ("hermes kanban --board autoresearch link t_1 t_2", True),
         ('"$RESEARCH_CLI" promotion submit E-1', True),
+        ('"$RESEARCH_CLI" promotion submit-requested --version V-1', True),
+        ('cd /tmp && research promotion submit-requested --version V-1', True),
         ('"$RESEARCH_CLI" promotion bootstrap --version V-1', True),
         ("cd /x && research promotion accept", True),
         ('git commit -m "the orchestrator runs promotion submit"', False),

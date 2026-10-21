@@ -96,6 +96,12 @@ class Research:
     def promotion_submit(self, experiment):
         return self.call("promotion", "submit", experiment)
 
+    def submit_requested_version(self, version, strategy, request):
+        return self.call(
+            "promotion", "submit-requested", "--version", version,
+            "--strategy", strategy, "--request", request,
+        )
+
     def bootstrap_champion(self, version):
         return self.call("promotion", "bootstrap", "--version", version)
 

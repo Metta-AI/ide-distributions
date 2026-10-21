@@ -95,6 +95,8 @@ expected = json.loads(sys.argv[2])
 assert plugin['enabled'] and plugin['tools'] == len(expected), plugin
 assert set(registry.get_tool_names_for_toolset('orchestrator')) == set(expected)
 assert registry.get_schema('ide_workspace')['parameters']['required'] == ['request_id', 'operation']
+schema = registry.get_schema('submit_requested_version')
+assert set(schema['parameters']['required']) == {'version', 'strategy', 'request'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 print(json.dumps({'ok': True}))
 """

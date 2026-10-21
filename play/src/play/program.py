@@ -42,7 +42,6 @@ from .games import GOTA
 SHA256 = re.compile(r"[0-9a-f]{64}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 POLICY_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*:v[0-9]+")
-SEATS = range(10)  # GotA's ten hero seats
 MAX_EPISODES = 20
 FETCH_TIMEOUT_S = 60
 USER_AGENT = "softmax-play"
@@ -200,18 +199,24 @@ class Program:
         seats: list[int] | None = None,
         attempt: int = 1,
     ) -> dict:
-        """One private practice request (``POST /v2/experience-requests``); the platform fills
-        the other seats from the league."""
+        """One private practice request (``POST /v2/experience-requests``). The platform needs the
+        whole roster: the program on ``seats``, a random league champion on every other seat."""
         _check_version(policy_version)
         seats = [0] if seats is None else seats
-        if not seats or len(set(seats)) != len(seats) or not set(seats) <= set(SEATS):
+        if not seats or len(set(seats)) != len(seats) or not set(seats) <= set(range(self.game.seat_count)):
             raise PlayError("bad_arguments", "seats must be distinct GotA seats 0-9")
         if not 1 <= episodes <= MAX_EPISODES or attempt < 1:
             raise PlayError("bad_arguments", f"episodes must be 1-{MAX_EPISODES}; attempt positive")
         key = f"practice:{policy_version}:a{attempt}"
+
+        def player(seat: int) -> dict:
+            return {"policy_ref": policy_version} if seat in seats else {"random": True}
+
         body = {
             "target": {"league_id": self.game.league_id},
-            "roster": [{"slot": seat, "player": {"policy_ref": policy_version}} for seat in seats],
+            "roster": [
+                {"slot": seat, "player": player(seat)} for seat in range(self.game.seat_count)
+            ],
             "num_episodes": episodes,
             "private": True,
             "title": key,
@@ -262,7 +267,13 @@ class Program:
         try:
             files = xp.artifacts(self.client._cli, handle, dest)
         except xp.ArtifactsIncomplete as error:
-            return {**out, "results": None, "results_pending": str(error)}
+            # ``not_produced`` is terminal, as in the CLI (coworld episode_downloads): the episode
+            # never made that artifact, so Play does not wait for it. Kept here so the shared
+            # ``xp`` module the IDE profiles run is unchanged.
+            receipts = xp.latest_receipts(dest / "manifest.jsonl")
+            if any(not xp._completed(r) and r.get("state") != "not_produced" for r in receipts):
+                return {**out, "results": None, "results_pending": str(error)}
+            files = sorted(xp.verify_receipt(dest, r) for r in receipts if xp._completed(r))
         return {**out, "results": [str(path) for path in files if path.name.endswith(".json")]}
 
     # --- release --------------------------------------------------------

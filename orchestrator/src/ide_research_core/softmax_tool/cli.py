@@ -71,7 +71,9 @@ the game, for its league, from ``RESEARCH_GAME``):
   ``failed`` (``attempt_not_needed``; read with ``xp_status``). So no relaunch, however many
   run one after another, repeats a healthy attempt. Two relaunchers at the same moment run
   one after the other (the experiment lock, below), so the second sees what the first
-  created. Not covered: a ``--batches`` change between runs.
+  created. A changed ``--batches`` mapping is refused when it conflicts with recovered
+  requests. New attempts reuse healthy requests across earlier attempts and retry failed
+  requests only; successful evidence remains usable.
 - ``xp status <E>``, ``xp recover <E>``, ``xp artifacts <E> --dest DIR``: over every request
   tagged for the experiment (``Softmax.xp_recover``); artifacts land in ``DIR/<request id>/``.
 - ``xp evidence <E>``: evidence and episode rows for every finished request that has none
@@ -616,15 +618,26 @@ def check_new_attempt(
     is complete, and one of its requests failed (module docstring). ``planned`` is
     ``xp_specs`` for the batch; ``sm`` reads the latest attempt's statuses."""
     attempts = {handle.attempt for handle in recovered if handle.batch == batch}
-    if not attempts or attempt in attempts:
+    if not attempts:
+        if attempt != 1:
+            raise Refused("bad_attempt", "The first attempt must be 1")
         return
     latest = max(attempts)
+    if attempt < latest:
+        raise Refused("stale_attempt", f"Resume the latest attempt {latest}, not {attempt}")
+    if attempt == latest:
+        return
     if attempt != latest + 1:
         raise Refused(
             "bad_attempt",
             f"batch {batch} has attempts {sorted(attempts)}; a new attempt must be {latest + 1}",
         )
-    have = {(h.seed, h.arm) for h in recovered if (h.batch, h.attempt) == (batch, latest)}
+    latest_handles = evidence.latest_handles([h for h in recovered if h.batch == batch])
+    have = {
+        (h.seed, h.arm)
+        for h in latest_handles
+        if h.attempt == latest or sm.xp_status(h).state != "failed"
+    }
     missing = [(seed, arm) for seed, arm, _ in planned if (seed, arm) not in have]
     if missing:
         raise Refused(
@@ -633,7 +646,6 @@ def check_new_attempt(
             f"xp create with --attempt {latest} to create only those (a new attempt would "
             f"repeat every request)",
         )
-    latest_handles = [h for h in recovered if (h.batch, h.attempt) == (batch, latest)]
     if not any(sm.xp_status(handle).state == "failed" for handle in latest_handles):
         raise Refused(
             "attempt_not_needed",
@@ -735,6 +747,14 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
     # Recover once: a relaunch (after a credit denial, a platform error or a crash) creates only
     # what is missing, and requests the platform has but the record lacks are backfilled first.
     recovered = sm.xp_recover(experiment)
+    batch_size = math.ceil(len(design["seeds"]) / args.batches)
+    assignment = {seed: index // batch_size + 1 for index, seed in enumerate(design["seeds"])}
+    if any(h.seed not in assignment or assignment[h.seed] != h.batch for h in recovered):
+        raise Refused(
+            "batch_partition_changed",
+            "The requested batch layout disagrees with existing requests. Use the original "
+            "layout; changing it could evaluate the same seed again under a new request key.",
+        )
     _record_xp(store, experiment, [_xp_entry(h, policies.get(h.arm)) for h in recovered])
     check_new_attempt(sm, recovered, planned, args.batch, args.attempt)
     existing = {
@@ -742,6 +762,13 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         for handle in recovered
         if (handle.batch, handle.attempt) == (args.batch, args.attempt)
     }
+    prior = evidence.latest_handles(
+        [h for h in recovered if h.batch == args.batch and h.attempt < args.attempt]
+    )
+    for handle in prior:
+        key = (handle.seed, handle.arm)
+        if key not in existing and sm.xp_status(handle).state != "failed":
+            existing[key] = handle
     if any((seed, arm) not in existing for seed, arm, _ in planned):
         # Identity first: the champion read is per player, so a wrong credential would
         # otherwise show up as "no champion" (the create re-checks it anyway, C6).
@@ -765,8 +792,17 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         over_cap = any(entry["state"] == PERMIT_OVER_CAP for entry in fresh)
         asks = _merge_asks(open_asks, fresh, done)
         return _awaiting_coach(
-            store, experiment, current, previous_wait, args, league, asks, over_cap,
-            _league_id(), base, shortfall,
+            store,
+            experiment,
+            current,
+            previous_wait,
+            args,
+            league,
+            asks,
+            over_cap,
+            _league_id(),
+            base,
+            shortfall,
         )
 
     for seed, arm, spec in planned:
@@ -783,7 +819,13 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
                 "batch ran); nothing more is sent",
             )
         result = sm.xp_create(
-            experiment, args.batch, args.attempt, spec, seed=seed, arm=arm, known=recovered
+            experiment,
+            args.batch,
+            args.attempt,
+            spec,
+            seed=seed,
+            arm=arm,
+            known=recovered,
         )
         if isinstance(result, PermitRequired):
             # Each request has its own ask: file them all in this run, so the coach sees the
@@ -839,7 +881,10 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         return {**report, **hold(league, shortfall)}
     if credits_out:
         credits = read_credits(sm)
-        return {**report, **_credit_denied(store, experiment, meta, denial.reason, base, credits)}
+        return {
+            **report,
+            **_credit_denied(store, experiment, meta, denial.reason, base, credits),
+        }
 
     patch: dict = {}
     if meta["status"] in ("uploaded", "awaiting-credits", "awaiting-permit"):

@@ -77,6 +77,16 @@ def setup(parser: argparse.ArgumentParser) -> None:
     )
     sub.add_argument("experiment")
     sub = command(
+        "submit-requested",
+        lambda a, c, sm, league, player: promotion.submit_requested(
+            c, sm, a.version, a.strategy, a.request, league, player
+        ),
+        "submit a built version explicitly requested by the user, without an improvement claim",
+    )
+    sub.add_argument("--version", required=True)
+    sub.add_argument("--strategy", required=True, help="canonical strategy matching the uploaded build")
+    sub.add_argument("--request", required=True, help="the user's explicit submission request")
+    sub = command(
         "bootstrap",
         lambda a, c, sm, league, player: promotion.bootstrap(c, sm, a.version, league, player),
         "submit the uploaded starter-policy version as the first champion",

@@ -141,7 +141,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
+        "Save an answer, then unblock the card without changing its configuration. An already integrated card returns integrated_card_requires_replacement; follow the returned recovery instruction (fresh replacement for normal cards, close an integrated repair). For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
@@ -218,6 +218,14 @@ TOOLS = {
         ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),
         {"experiment": S},
         ["experiment"],
+    ),
+    "submit_requested_version": (
+        Research,
+        "Submit an integrated uploaded version only when the user explicitly requested submission. "
+        "Quote that request. This records a requested submission, not statistical improvement. "
+        "For autonomous research promotion use promotion_submit instead. Strategy must match the build.",
+        {"version": S, "strategy": S, "request": S},
+        ["version", "strategy", "request"],
     ),
     "bootstrap_champion": (
         Research,

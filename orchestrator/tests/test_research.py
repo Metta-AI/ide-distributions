@@ -34,6 +34,11 @@ def test_subprocess_contract_and_refusal(shared_fixture):
         "--version",
         "V-starter",
     ]
+    assert research.submit_requested_version("V-1", "strategy/new/STRATEGY.md", "Submit it")["args"] == [
+        "promotion", "submit-requested", "--version", "V-1", "--strategy", "strategy/new/STRATEGY.md",
+        "--request", "Submit it",
+    ]
+    assert TOOLS["submit_requested_version"][3] == ["version", "strategy", "request"]
     assert TOOLS["bootstrap_champion"][3] == ["version"]
     with pytest.raises(TypeError):
         research.bootstrap_champion()

@@ -71,7 +71,7 @@ def _now() -> str:
 @dataclass
 class Promotion:
     id: str
-    kind: str  # experiment | bootstrap | accepted
+    kind: str  # experiment | requested | bootstrap | accepted
     version_id: str | None
     platform_policy_version_id: str | None
     league_id: str
@@ -296,6 +296,44 @@ def _submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id
     return _send(clone, sm, promotion)
 
 
+def submit_requested(
+    clone: Path, sm: Softmax, version: str, strategy: str,
+    request: str, league_id: str, player_id: str,
+) -> dict:
+    """Submit an uploaded version at the user's explicit request, without an improvement claim."""
+    with _one_at_a_time(clone):
+        _refuse_if_busy(clone)
+        if not request.strip():
+            raise Refused("missing_request", "Quote the user's explicit submission request")
+        path = Path(strategy)
+        if path.is_absolute() or ".." in path.parts:
+            raise Refused("bad_strategy_path", "The strategy must be a repository-relative path")
+        store = RecordStore(Layout(clone))
+        meta, _ = store.load(version)
+        platform_id = _uploaded_policy(store, version)
+        if platform_id is None:
+            raise Refused("no_upload", f"{version} has no uploaded event on main")
+        source = gitops.show(clone, "HEAD", strategy)
+        if source is None:
+            raise Refused("no_candidate", f"{strategy} is not on canonical main")
+        hashes = _strategy_source_hashes(meta)
+        if not hashes or set(hashes) != {hashlib.sha256(source).hexdigest()}:
+            raise Refused("strategy_mismatch", "The strategy does not match the uploaded build")
+        _require_identity(sm, player_id)
+        disagreement = conflict(clone, sm, league_id, player_id)
+        if disagreement is not None:
+            raise Refused("champion_conflict", disagreement)
+        current = latest_champion(clone)
+        if current is not None and current.platform_policy_version_id == platform_id:
+            return current.to_dict()
+        record = _new("requested", version, platform_id, league_id)
+        snapshot = f"{PROMOTIONS_DIR}/sources/{record.id}.md"
+        (clone / snapshot).parent.mkdir(parents=True, exist_ok=True)
+        (clone / snapshot).write_bytes(source)
+        _move(clone, record, "intent", f"User requested submission: {request}", (snapshot,))
+        return _send(clone, sm, record)
+
+
 def bootstrap(clone: Path, sm: Softmax, version_id: str, league_id: str, player_id: str) -> dict:
     """Submit the uploaded starter-policy version as the first champion (fresh install)."""
     with _one_at_a_time(clone):
@@ -430,10 +468,19 @@ def _advance_submitted(clone: Path, sm: Softmax, promotion: Promotion, player_id
 
 def _advance_recorded(clone: Path, promotion: Promotion) -> None:
     extra: tuple[str, ...] = ()
-    if promotion.kind == "experiment":
+    if promotion.kind in ("experiment", "requested"):
         # Always published: a local copy that already matches (a failed publish writes its
         # content back) says nothing about canonical main.
-        (clone / CHAMPION_PATH).write_bytes((clone / candidate_path(promotion.experiment)).read_bytes())
+        source = (
+            candidate_path(promotion.experiment) if promotion.kind == "experiment"
+            else f"{PROMOTIONS_DIR}/sources/{promotion.id}.md"
+        )
+        content = (clone / source).read_bytes()
+        if promotion.kind == "requested":
+            meta, _ = RecordStore(Layout(clone)).load(promotion.version_id)
+            if set(_strategy_source_hashes(meta)) != {hashlib.sha256(content).hexdigest()}:
+                raise Refused("strategy_mismatch", "The saved submission source does not match the build")
+        (clone / CHAMPION_PATH).write_bytes(content)
         extra = (CHAMPION_PATH,)
     _move(clone, promotion, "published", "champion recorded on main", extra)
 
