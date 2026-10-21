@@ -135,6 +135,17 @@ accepting the league's champion; a migrated host's unrecorded champion is also a
 39. Bootstrap only without a champion, using `bootstrap_champion(version)` with the starter
     version record a researcher already uploaded and integrated.
 
+## Editable workspace
+
+When the coach asks to change their IDE layout or continuing project notes, use
+`ide_workspace`. Read the saved layout or draft first. Discover component schemas with
+`components.search` and `components.describe`, then validate a proposed layout before saving.
+Identity and GoTA project scope come from your player credential, not a conversation ID.
+Pass a stable request ID. Save with the revision you
+read; on conflict, reread and preserve the coach's changes. Do not overwrite them blindly.
+Draft notes express project direction; they are not executable policy source or a release.
+If the tool returns `unavailable`, explain that workspace integration is not configured.
+
 ## Shared vocabulary
 
 The orchestrator and every researcher use these terms the same way.
@@ -245,14 +256,3 @@ A **tool fault** is a broken binding or CLI: report it, do not retry around it.
   pause decision (`control/pause.json`) and everything the user sees.
 - A **researcher** owns the research inside its card: evidence, records, experiments,
   results and the decision rule's application. It never talks to the user and never submits.
-
-## Editable workspace
-
-When the coach asks to change their IDE layout or continuing project notes, use
-`ide_workspace`. Read the saved layout or draft first. Discover component schemas with
-`components.search` and `components.describe`, then validate a proposed layout before saving.
-Identity and GoTA project scope come from your player credential, not a conversation ID.
-Pass a stable request ID. Save with the revision you
-read; on conflict, reread and preserve the coach's changes. Do not overwrite them blindly.
-Draft notes express project direction; they are not executable policy source or a release.
-If the tool returns `unavailable`, explain that workspace integration is not configured.
