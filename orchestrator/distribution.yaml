@@ -33,4 +33,4 @@ env_requires:
 
   - name: SOFTMAX_IDE_URL
     required: false
-    description: HTTPS IDE mount exposing the shared workspace MCP API, for example https://softmax.com/ide-final. Leave unset until that deployment is qualified.
+    description: HTTPS IDE mount exposing the shared workspace MCP API, for example https://softmax.com/ide. Leave unset until that deployment is qualified.

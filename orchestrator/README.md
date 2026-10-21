@@ -163,10 +163,10 @@ the generated artifact and both returned version IDs; promotion remains a separa
 ## Shared IDE components and draft notes
 
 The `ide_workspace` tool calls the hosted IDE's MCP server, authenticating directly with the existing scoped player credential.
-Set `SOFTMAX_IDE_URL` to the qualified HTTPS mount (for example `https://softmax.com/ide-final`) in the installed
+Set `SOFTMAX_IDE_URL=https://softmax.com/ide` to call the shared `/ide/mcp` endpoint from the installed
 profile environment. Until configured it returns `kind: unavailable`; existing research tools are unchanged.
 Deploy the Metta workspace SDK and its database migration before enabling this setting. This change alone does not
-advance Metta's pinned distribution or enable the endpoint on retained hosts.
+enable the endpoint on retained hosts. Metta's `preserve` release workflow polls this repository's main branch; merging can trigger an image release.
 
 The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
 revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.

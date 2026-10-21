@@ -11,7 +11,7 @@ def context(credential="cga_fixture"):
     return Context(
         Path("/unused"),
         {
-            "SOFTMAX_IDE_URL": "https://softmax.com/ide-final",
+            "SOFTMAX_IDE_URL": "https://softmax.com/ide",
             "SOFTMAX_PLAYER_CREDENTIAL": credential,
         },
     )
@@ -58,9 +58,9 @@ def test_preserves_server_refusals(monkeypatch):
 @pytest.mark.parametrize(
     "url",
     [
-        "http://softmax.com/ide-final",
-        "https://user:pass@softmax.com/ide-final",
-        "https://softmax.com/ide-final?token=x",
+        "http://softmax.com/ide",
+        "https://user:pass@softmax.com/ide",
+        "https://softmax.com/ide?token=x",
     ],
 )
 def test_rejects_unsafe_endpoint(url):
