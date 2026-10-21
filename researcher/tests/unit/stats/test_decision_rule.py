@@ -64,10 +64,10 @@ def pairs(n=20, jitter=0.01, **diffs):
 def test_all_good_is_eligible():
     outcome = evaluate(design(), pairs(xp_per_1k_ticks=2.0, glory=0.3), CAND, CHAMPION)
     assert outcome.promote_eligible and outcome.failures == []
-    primary = outcome.per_metric["xp_per_1k_ticks"]
-    assert primary["role"] == "primary" and primary["passed"]
+    primary = outcome.per_metric["xp_per_1k_ticks"]["primary"]
+    assert primary["passed"]
     assert primary["ci"][0] > 0 and abs(primary["mean_signed_diff"] - 2.0) < 1e-9
-    assert outcome.per_metric["glory"]["ci"] is None
+    assert outcome.per_metric["glory"]["performance"]["ci"] is None
 
 
 def test_glory_up_but_win_rate_down_beyond_delta_is_blocked():
@@ -76,8 +76,8 @@ def test_glory_up_but_win_rate_down_beyond_delta_is_blocked():
     )
     assert not outcome.promote_eligible
     assert outcome.failures == ["performance_slip:win_rate"]
-    assert outcome.per_metric["glory"]["passed"]
-    assert outcome.per_metric["win_rate"]["threshold"] == -0.05
+    assert outcome.per_metric["glory"]["performance"]["passed"]
+    assert outcome.per_metric["win_rate"]["performance"]["threshold"] == -0.05
 
 
 def test_guardrail_breach_is_blocked():
@@ -94,7 +94,7 @@ def test_guardrail_drop_within_tolerance_passes():
 def test_slip_within_delta_with_significant_primary_is_eligible():
     outcome = evaluate(design(), pairs(xp_per_1k_ticks=2.0, win_rate=-0.02), CAND, CHAMPION)
     assert outcome.promote_eligible, outcome.failures
-    assert outcome.per_metric["win_rate"]["mean_signed_diff"] < 0
+    assert outcome.per_metric["win_rate"]["performance"]["mean_signed_diff"] < 0
 
 
 def test_slip_within_delta_without_significant_primary_is_blocked():
@@ -110,7 +110,7 @@ def test_mean_above_min_effect_but_ci_spanning_zero_is_not_significant():
         cand.metrics["xp_per_1k_ticks"] += 30.0 if index % 2 else -30.0
     outcome = evaluate(design(), noisy, CAND, CHAMPION)
     assert outcome.failures == ["primary_not_significant:xp_per_1k_ticks"]
-    low, high = outcome.per_metric["xp_per_1k_ticks"]["ci"]
+    low, high = outcome.per_metric["xp_per_1k_ticks"]["primary"]["ci"]
     assert low < 0 < high
 
 
@@ -118,7 +118,7 @@ def test_lower_is_better_primary():
     lower = design(primary=("deaths_per_1k_ticks", "down", 1.0))
     better = evaluate(lower, pairs(deaths_per_1k_ticks=-2.0), CAND, CHAMPION)
     assert better.promote_eligible, better.failures
-    assert better.per_metric["deaths_per_1k_ticks"]["mean_signed_diff"] > 0
+    assert better.per_metric["deaths_per_1k_ticks"]["primary"]["mean_signed_diff"] > 0
     worse = evaluate(lower, pairs(deaths_per_1k_ticks=2.0), CAND, CHAMPION)
     assert worse.failures == ["primary_not_significant:deaths_per_1k_ticks"]
 
@@ -132,7 +132,7 @@ def test_no_pairs_is_blocked_without_crashing():
     outcome = evaluate(design(), [], CAND, CHAMPION)
     assert not outcome.promote_eligible
     assert "n_short:0<10" in outcome.failures
-    assert outcome.per_metric["glory"]["passed"] is False
+    assert outcome.per_metric["glory"]["performance"]["passed"] is False
 
 
 def test_baseline_not_champion_is_blocked():
@@ -163,7 +163,7 @@ def test_down_direction_guardrail():
     lower = design(guardrail=("deaths_per_1k_ticks", "down", 0.5))
     breach = evaluate(lower, pairs(xp_per_1k_ticks=2.0, deaths_per_1k_ticks=2.0), CAND, CHAMPION)
     assert breach.failures == ["guardrail_breach:deaths_per_1k_ticks"]
-    assert breach.per_metric["deaths_per_1k_ticks"]["mean_signed_diff"] < 0
+    assert breach.per_metric["deaths_per_1k_ticks"]["agent_guardrail"]["mean_signed_diff"] < 0
     fewer = evaluate(lower, pairs(xp_per_1k_ticks=2.0, deaths_per_1k_ticks=-1.0), CAND, CHAMPION)
     assert fewer.promote_eligible, fewer.failures
 
@@ -172,7 +172,7 @@ def test_performance_metric_without_delta_allows_no_slip():
     no_delta = design(delta={"glory": 0.5})
     outcome = evaluate(no_delta, pairs(xp_per_1k_ticks=2.0, win_rate=-0.02), CAND, CHAMPION)
     assert outcome.failures == ["performance_slip:win_rate"]
-    assert outcome.per_metric["win_rate"]["threshold"] == 0.0
+    assert outcome.per_metric["win_rate"]["performance"]["threshold"] == 0.0
     steady = evaluate(no_delta, pairs(xp_per_1k_ticks=2.0), CAND, CHAMPION)
     assert steady.promote_eligible, steady.failures
 
@@ -183,6 +183,24 @@ def test_diffs_equal_to_thresholds_pass():
     exact = pairs(jitter=0.0, xp_per_1k_ticks=1.0, shots_fired=-0.5, glory=-0.5)
     outcome = evaluate(design(), exact, CAND, CHAMPION)
     assert outcome.promote_eligible, outcome.failures
-    assert outcome.per_metric["xp_per_1k_ticks"]["mean_signed_diff"] == 1.0
-    assert outcome.per_metric["shots_fired"]["mean_signed_diff"] == -0.5
-    assert outcome.per_metric["glory"]["mean_signed_diff"] == -0.5
+    assert outcome.per_metric["xp_per_1k_ticks"]["primary"]["mean_signed_diff"] == 1.0
+    assert outcome.per_metric["shots_fired"]["agent_guardrail"]["mean_signed_diff"] == -0.5
+    assert outcome.per_metric["glory"]["performance"]["mean_signed_diff"] == -0.5
+
+
+def test_overlapping_metric_roles_keep_every_check():
+    shared = design(primary=("glory", "up", 1.0), guardrail=("win_rate", "up", 0.01))
+    shared.to_dict()
+    outcome = evaluate(shared, pairs(glory=2.0, win_rate=-0.02), CAND, CHAMPION)
+    assert outcome.failures == ["guardrail_breach:win_rate"]
+    assert outcome.per_metric["glory"]["primary"]["passed"]
+    assert outcome.per_metric["glory"]["performance"]["passed"]
+    assert not outcome.per_metric["win_rate"]["agent_guardrail"]["passed"]
+    assert outcome.per_metric["win_rate"]["performance"]["passed"]
+
+
+def test_overlapping_primary_is_not_overwritten_by_performance():
+    shared = design(primary=("glory", "up", 1.0))
+    outcome = evaluate(shared, pairs(glory=0.2, win_rate=-0.02), CAND, CHAMPION)
+    assert "primary_not_significant:glory" in outcome.failures
+    assert "performance_slip_without_significance:win_rate" in outcome.failures

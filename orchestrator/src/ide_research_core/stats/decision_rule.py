@@ -85,20 +85,21 @@ def evaluate(
         passed = mean is not None and mean >= threshold
         if spec.role == "primary":
             passed = passed and ci[0] > 0
-        per_metric[spec.name] = {
-            "role": spec.role,
+        per_metric.setdefault(spec.name, {})[spec.role] = {
             "mean_signed_diff": mean,
             "ci": ci,
             "threshold": threshold,
             "passed": passed,
         }
 
-    roles = {spec.name: spec.role for spec in design.metrics}
     any_primary_significant = any(
-        entry["passed"] for name, entry in per_metric.items() if roles[name] == "primary"
+        per_metric[spec.name][spec.role]["passed"]
+        for spec in design.metrics
+        if spec.role == "primary"
     )
-    for name, entry in per_metric.items():
-        role = roles[name]
+    for spec in design.metrics:
+        name, role = spec.name, spec.role
+        entry = per_metric[name][role]
         if entry["mean_signed_diff"] is None:
             continue  # no pairs at all: n_short already blocks
         if role == "primary" and not entry["passed"]:
