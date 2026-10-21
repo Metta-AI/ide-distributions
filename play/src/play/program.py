@@ -267,7 +267,13 @@ class Program:
         try:
             files = xp.artifacts(self.client._cli, handle, dest)
         except xp.ArtifactsIncomplete as error:
-            return {**out, "results": None, "results_pending": str(error)}
+            # ``not_produced`` is terminal, as in the CLI (coworld episode_downloads): the episode
+            # never made that artifact, so Play does not wait for it. Kept here so the shared
+            # ``xp`` module the IDE profiles run is unchanged.
+            receipts = xp.latest_receipts(dest / "manifest.jsonl")
+            if any(not xp._completed(r) and r.get("state") != "not_produced" for r in receipts):
+                return {**out, "results": None, "results_pending": str(error)}
+            files = sorted(xp.verify_receipt(dest, r) for r in receipts if xp._completed(r))
         return {**out, "results": [str(path) for path in files if path.name.endswith(".json")]}
 
     # --- release --------------------------------------------------------
