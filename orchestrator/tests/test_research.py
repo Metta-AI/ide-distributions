@@ -19,12 +19,6 @@ def test_subprocess_contract_and_refusal(shared_fixture):
     assert research.records_find("Experiment", {"status": "reviewed"}) == {
         "args": ["records", "find", "Experiment", "status=reviewed"]
     }
-    assert research.workspace_integrate("repair/test")["args"] == [
-        "workspace",
-        "integrate",
-        "--branch",
-        "repair/test",
-    ]
     with pytest.raises(ResearchError) as error:
         research.promotion_submit("refuse")
     assert error.value.envelope["error"]["reason"] == "baseline_not_champion"

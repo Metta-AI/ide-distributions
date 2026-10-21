@@ -1,6 +1,7 @@
 """Tool schemas and synchronous handlers loaded in the Hermes process."""
 
 import json
+from contextlib import closing
 from urllib.error import HTTPError
 
 from .board import Board
@@ -8,6 +9,7 @@ from .context import profile_context
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
+from .storage import open_storage
 
 S = {"type": "string"}
 I = {"type": "integer"}
@@ -60,46 +62,22 @@ TOOLS = {
     "card_create": (
         Board,
         (
-            "Create or replay <kind>:<entity>:<attempt> on autoresearch. "
-            "Refuse another open card on entity unless replaces names its blocked preceding attempt. "
-            "Replacement preserves dependency gates before archiving the old card. "
-            "Repair uses its own entity and failed card_sha, without parents. "
-            "Describe the objective, inputs, constraints and completion criteria in body. "
-            "Omit skills by default; the worker selects its own procedures. "
-            "Explicit preloads must come from worker_skills. priority is native Hermes "
-            "(higher goes first)."
+            "Create native researcher work. command_id identifies this execution command, not a "
+            "topic or task family. Replay identical arguments after a lost response. Choose relevant "
+            "existing tasks before creating new work. Describe objective, inputs, constraints and "
+            "completion evidence in body. Omit skills unless explicit preloads are necessary."
         ),
         {
-            "kind": {
-                "type": "string",
-                "enum": [
-                    "investigation",
-                    "scouting",
-                    "experimentation",
-                    "maintenance",
-                    "planning",
-                    "review",
-                    "repair",
-                ],
-            },
-            "entity": S,
-            "attempt": {"type": "integer", "minimum": 1},
+            "command_id": {"type": "string", "minLength": 1, "maxLength": 200},
             "assignee": S,
             "title": S,
             "body": S,
-            "refs": STRINGS,
             "priority": I,
-            "skills": {
-                **STRINGS,
-                "description": "Optional explicit procedure preloads. Omit by default; the worker chooses skills.",
-            },
+            "skills": STRINGS,
             "max_runtime_seconds": I,
             "failure_limit": I,
-            "parents": STRINGS,
-            "card_sha": S,
-            "replaces": S,
         },
-        ["kind", "entity", "assignee", "title", "body"],
+        ["command_id", "assignee", "title", "body"],
     ),
     "card_show": (
         Board,
@@ -124,7 +102,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save an answer, then unblock the card without changing its configuration. An already integrated card returns integrated_card_requires_replacement; follow the returned recovery instruction (fresh replacement for normal cards, close an integrated repair). For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
+        "Save an answer and resume a blocked native task. Earlier integrated commits do not imply completion. Configuration changes require a new task after cancelling the old task.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
@@ -132,7 +110,7 @@ TOOLS = {
         Board,
         (
             "Complete with nonempty evidence (never force a live claim), or archive "
-            "a cancelled card. Configuration recovery uses card_create with replaces, never archive first: archiving releases dependent tasks. Code failures still require an integrated repair."
+            "a cancelled card. Inspect native termination before reusing its worker slot. Preserve unfinished artifacts before cancellation."
         ),
         {
             "id": S,
@@ -204,9 +182,11 @@ TOOLS = {
     ),
     "submit_requested_version": (
         Research,
-        "Submit an integrated uploaded version only when the user explicitly requested submission. "
-        "Quote that request. This records a requested submission, not statistical improvement. "
-        "For autonomous research promotion use promotion_submit instead. Strategy must match the build.",
+        (
+            "Submit an integrated uploaded version only when the user explicitly requested submission. "
+            "Quote that request. This records a requested submission, not statistical improvement. "
+            "For autonomous research promotion use promotion_submit instead. Strategy must match the build."
+        ),
         {"version": S, "strategy": S, "request": S},
         ["version", "strategy", "request"],
     ),
@@ -223,10 +203,10 @@ TOOLS = {
         [],
     ),
     "workspace_integrate": (
-        Research,
-        ("Integrate a pushed card or repair branch via the shared validator and canonical lock."),
-        {"branch": S},
-        ["branch"],
+        Board,
+        "Accept the exact staged commit from the latest completed native run. Archived tasks cannot publish.",
+        {"id": S, "run_id": {"type": "integer"}, "commit": S},
+        ["id", "run_id", "commit"],
     ),
     "xp_status": (
         Research,
@@ -234,17 +214,28 @@ TOOLS = {
         {"experiment": S},
         ["experiment"],
     ),
+    "budget_limit": (
+        Research,
+        (
+            "Lower the shared workspace episode ceiling to the user's requested limit. Never increases it. "
+            "All researchers and uncertain requests consume this same allowance."
+        ),
+        {"episodes": {"type": "integer", "minimum": 0}},
+        ["episodes"],
+    ),
     "credits": (Research, "Read the player's available XP credits.", {}, []),
     "leaderboard": (Research, "Read the current league leaderboard.", {}, []),
     "latest_league_result": (
         Research,
-        ("Read this player's latest live league match: round and episode identifiers, completion "
-        "status, participating policy versions, scores and replay. available=false means no "
-        "recorded replay yet. Check the policy version and episode status before claiming a "
-        "submitted policy completed a match. participants[].position is a zero-based roster "
-        "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
-        "a win, loss, draw or rank without an explicit outcome or scoring rule. "
-        "This reads the platform, not local research records."),
+        (
+            "Read this player's latest live league match: round and episode identifiers, completion "
+            "status, participating policy versions, scores and replay. available=false means no "
+            "recorded replay yet. Check the policy version and episode status before claiming a "
+            "submitted policy completed a match. participants[].position is a zero-based roster "
+            "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
+            "a win, loss, draw or rank without an explicit outcome or scoring rule. "
+            "This reads the platform, not local research records."
+        ),
         {},
         [],
     ),
@@ -256,10 +247,22 @@ def handler(name):
 
     def call(args, session_id=None, **kwargs):
         try:
+            context = profile_context()
+            if session_id:
+                from tools.kanban_tools import _persisted_session_id
+
+                origin = _persisted_session_id(session_id)
+                if origin:
+                    with closing(open_storage(context.storage_path)) as conn, conn:
+                        conn.execute(
+                            "INSERT INTO coordinator(key,value) VALUES ('session', ?) "
+                            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                            (origin,),
+                        )
             arguments = dict(args)
             if name == "card_create":
                 arguments["session_id"] = session_id
-            data = getattr(owner(profile_context()), name)(**arguments)
+            data = getattr(owner(context), name)(**arguments)
             return json.dumps({"ok": True, "data": data})
         except ResearchError as error:
             return json.dumps(error.envelope)

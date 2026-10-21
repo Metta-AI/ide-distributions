@@ -1,12 +1,17 @@
 """Minute supervisor preflight. Only outstanding work wakes the model."""
 
+import hashlib
 import json
+import time
+from contextlib import closing
 from datetime import UTC, datetime
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from .context import subprocess_context
 from .ide import IDE
 from .research import Research
-from .storage import snapshot
+from .storage import open_storage, snapshot
 
 
 def transitions(state, research, ide, check_champion):
@@ -78,8 +83,69 @@ def evaluate(context, research=None, ide=None, now=None):
     return {"wakeAgent": True, "context": {"events": state["events"], "pending": pending}}
 
 
+def wake(context, state):
+    """Cron submits a replayable wake to the existing coordinator; it never runs a planner."""
+    if not state["wakeAgent"]:
+        return {"wakeAgent": False}
+    binding = json.loads(
+        (Path(context.env["SOFTMAX_BRIDGE_DIRECTORY"]) / "config.json").read_text()
+    )
+    with closing(open_storage(context.storage_path)) as conn:
+        origin = conn.execute("SELECT value FROM coordinator WHERE key='session'").fetchone()
+    if origin is None:
+        return {"wakeAgent": False}
+    prompt = (
+        "Background coordinator wake. Read current status and board_reconcile before acting; "
+        "these source events may already be handled. Reuse event-derived command IDs. "
+        "Send meaningful verified updates with ide_say, then acknowledge handled events.\n"
+        + json.dumps(state["context"], sort_keys=True)
+    )
+    key = "coordinator-wake:" + hashlib.sha256((origin[0] + "\n" + prompt).encode()).hexdigest()
+    url = binding["hermes_url"].rstrip("/")
+    headers = {
+        "Authorization": "Bearer " + binding["service_key"],
+        "Content-Type": "application/json",
+    }
+    with closing(open_storage(context.storage_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        saved = conn.execute("SELECT retry_until, run_id FROM wakes WHERE id=?", (key,)).fetchone()
+        if saved is None:
+            with urlopen(
+                Request(url + "/v1/capabilities", headers=headers), timeout=30
+            ) as response:
+                capability = json.load(response)["features"]["runs_idempotency"]
+            if (
+                not capability["supported"]
+                or not capability["durable"]
+                or capability["retention_seconds"] <= 60
+            ):
+                raise RuntimeError("Coordinator wakes require durable run admission")
+            saved = (time.time() + min(3600, capability["retention_seconds"] - 60), None)
+            conn.execute("INSERT INTO wakes(id, retry_until) VALUES (?, ?)", (key, saved[0]))
+        # Commit intent before the HTTP effect; exact retries share the durable native key.
+        conn.commit()
+        if saved[1] is not None:
+            return {"wakeAgent": False, "run_id": saved[1]}
+        if time.time() >= saved[0]:
+            raise RuntimeError(
+                "Coordinator wake admission is unconfirmed outside its safe retry window; reconcile the saved key "
+                + key
+            )
+        request = Request(
+            url + "/v1/runs",
+            data=json.dumps({"session_id": origin[0], "input": prompt}).encode(),
+            headers={**headers, "Idempotency-Key": key},
+        )
+        with urlopen(request, timeout=30) as response:
+            receipt = json.load(response)
+        with conn:
+            conn.execute("UPDATE wakes SET run_id=? WHERE id=?", (receipt["run_id"], key))
+    return {"wakeAgent": False, "run_id": receipt["run_id"]}
+
+
 def main():
-    print(json.dumps(evaluate(subprocess_context())))
+    context = subprocess_context()
+    print(json.dumps(wake(context, evaluate(context))))
 
 
 if __name__ == "__main__":

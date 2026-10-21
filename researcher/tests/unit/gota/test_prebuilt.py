@@ -330,7 +330,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     [uploaded] = worker.store.find('version_event', version=data['version_id'], kind='uploaded')
     assert worker.store.load(uploaded)[0]['data']['policy_version_id'] == data['platform_policy_version_id']
     worker.write_journal()
-    workspace.integrate(board.canonical, worktree=worker.worktree)
+    workspace.integrate(board.canonical, branch=workspace.stage(worker.worktree)["branch"])
 
     # The orchestrator submits it as the first champion, then reports until it is published.
     league = 'league_3c60897b-25cf-4b37-9d1a-8554c1198f28'

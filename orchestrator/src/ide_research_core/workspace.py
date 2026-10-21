@@ -33,7 +33,12 @@ from ide_research_core.io.docs import write_text
 from ide_research_core.io.locks import file_lock
 from ide_research_core.kb.index import write_generated
 from ide_research_core.paths import Layout
-from ide_research_core.records.registry import REGISTRY, Doc, normalize, parse_record_path
+from ide_research_core.records.registry import (
+    REGISTRY,
+    Doc,
+    normalize,
+    parse_record_path,
+)
 from ide_research_core.records.store import Change, RecordStore
 
 WORKSPACE_ENV = "RESEARCH_WORKSPACE"
@@ -206,23 +211,22 @@ def _current_branch(worktree: Path) -> str:
     return branch
 
 
-def integrate(clone: Path, *, worktree: Path | None = None, branch: str | None = None) -> Integrated:
-    """Integrate a card into canonical ``main``.
+def stage(worktree: Path) -> dict:
+    """Preserve an assignment's output without accepting it into canonical main."""
+    branch = _current_branch(worktree)
+    result = _commit_worktree(worktree, branch)
+    pushed, rejected = gitops.push_with_rejections(worktree, REMOTE, [f"{branch}:{branch}"])
+    if not pushed:
+        raise WorkspaceError("push", f"push of {branch} was rejected", {"rejected": rejected})
+    return {"branch": branch, "card_sha": result}
 
-    A researcher passes its ``worktree`` (the branch is the worktree's); the orchestrator
-    passes ``branch`` to integrate a card branch that is already pushed. Raises
-    ``WorkspaceError`` with reason ``validate``, ``overlap``, ``merge`` or ``push``; the card
-    branch is pushed before any of those can happen."""
-    if (worktree is None) == (branch is None):
-        raise WorkspaceError("setup", "pass exactly one of a worktree or a branch")
-    if worktree is not None:
-        branch = _current_branch(worktree)
-        result = _commit_worktree(worktree, branch)
-        pushed, rejected = gitops.push_with_rejections(worktree, REMOTE, [f"{branch}:{branch}"])
-        if not pushed:
-            raise WorkspaceError("push", f"push of {branch} was rejected", {"rejected": rejected})
+
+def integrate(clone: Path, *, branch: str, commit: str | None = None) -> Integrated:
+    """Validate and integrate a staged branch against the current canonical head."""
     gitops.git(clone, "fetch", "-q", REMOTE, f"+refs/heads/{branch}:refs/remotes/{REMOTE}/{branch}")
     result = gitops.git(clone, "rev-parse", f"{REMOTE}/{branch}")
+    if commit is not None and result != commit:
+        raise WorkspaceError("stale_artifact", "The staged branch changed after artifact review")
     with canonical_lock(canonical_of(clone)):
         main = _fast_forward_main(clone)
         if _is_ancestor(clone, result, main):

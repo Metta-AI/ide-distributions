@@ -24,10 +24,10 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
    propose re-evaluation. Do not rewrite a frozen decision or promote against a different baseline.
 4. Prepare the handoff fields for `card`. Set `experiment` to `{"id":"<E-id>","status":"reviewed","decision":"promote"}`,
    list the changed records, and put the candidate version and Result refs in `next`.
-   The orchestrator receives the integrated decision, stats, binding and candidate strategy.
+   The orchestrator receives the staged decision, stats, binding and candidate strategy.
 5. A `highlight:` reports the supported finding, not a submission that has not happened.
    Leave `strategy/STRATEGY.md`, promotion records and platform submissions to the orchestrator.
-6. After the review and comments are finished, follow `card` once: journal, integrate as the
+6. After the review and comments are finished, follow `card` once: stage artifacts as the
    last workspace step, and complete with the prepared metadata.
 
 ## Explicit build/upload-only request
@@ -43,7 +43,7 @@ When the coach requests a source change and upload without evaluation or league 
    Choose a descriptive name and reuse it on retry. This validates the checked build and records a
    version with `experiment: null`; it does not create an experiment, launch evaluation, or promote.
 3. Keep both returned version IDs, record the artifact hash and build evidence, then follow `card`
-   to journal, integrate and complete with `experiment: null`. Report upload completion only.
+   to stage artifacts and complete with `experiment: null`. Report upload completion only.
    Do not fabricate an experiment or frozen design to satisfy the experiment-bound `softmax upload`.
 
 ## Bootstrap card: upload the starter policy
@@ -66,7 +66,7 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
    `"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir .scratch/build/champion`
    Choose your own descriptive name in place of `opening-rush` (at most 23 lowercase letters, digits, or hyphens). Reuse it on retries; the CLI appends your full player ID.
    Keep `data.version_id` and `data.platform_policy_version_id`. The upload is not a champion.
-4. Journal the starter-policy build and upload. Integrate, then complete using `card` with
+4. Preserve the starter-policy build and upload. Stage, then complete using `card` with
    `experiment: null`, `awaiting: null`, both version IDs as metadata fields, and a `next`
    recommending that the orchestrator submit this starter version before commissioning an
    experiment against it. The first submission is intentionally unevaluated; claim no improvement.
@@ -80,5 +80,5 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
   remains unavailable, preserve what happened and complete `partial` with the needed follow-up.
 - A game check fails: retain the evidence and report the policy/build failure. An `errored`
   check or tooling traceback instead follows D-26 in `card`; do not retry the faulty tool.
-- An integration failure follows `card`'s integration block path. Never claim the candidate
-  is delivered to the orchestrator until integration succeeds.
+- A staging failure must be reported with the retained artifacts. Never claim the candidate
+  is delivered to the orchestrator until the task branch is staged.

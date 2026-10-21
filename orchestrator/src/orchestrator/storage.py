@@ -1,4 +1,4 @@
-"""Acknowledgements only; research decisions stay on the board and in Git."""
+"""Transport receipts and acknowledgements; native Hermes owns task state."""
 
 import sqlite3
 from contextlib import closing
@@ -18,9 +18,13 @@ WAKE_KINDS = {
 
 
 def prepare(conn):
-    # A gate read must not wait for card_create's write lock during its Git fetch.
-    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='handled'").fetchone():
+    # Reads do not wait behind a creation command's Git preparation transaction.
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if {"handled", "commands", "coordinator", "wakes"} <= tables:
         return conn
+    conn.execute("CREATE TABLE IF NOT EXISTS wakes (id TEXT PRIMARY KEY, retry_until REAL NOT NULL, run_id TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS coordinator (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     conn.execute(
         'CREATE TABLE IF NOT EXISTS handled ("table" TEXT NOT NULL, '
         'rowid INTEGER NOT NULL, PRIMARY KEY ("table", rowid))'

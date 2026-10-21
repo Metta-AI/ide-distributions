@@ -3,6 +3,7 @@
 import json
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .context import Context
 from .launch import ensure_venv
@@ -98,8 +99,14 @@ class Research:
 
     def submit_requested_version(self, version, strategy, request):
         return self.call(
-            "promotion", "submit-requested", "--version", version,
-            "--strategy", strategy, "--request", request,
+            "promotion",
+            "submit-requested",
+            "--version",
+            version,
+            "--strategy",
+            strategy,
+            "--request",
+            request,
         )
 
     def bootstrap_champion(self, version):
@@ -108,11 +115,16 @@ class Research:
     def accept_champion(self):
         return self.call("promotion", "accept")
 
-    def workspace_integrate(self, branch):
-        return self.call("workspace", "integrate", "--branch", branch)
-
     def xp_status(self, experiment):
         return self.call("softmax", "xp", "status", experiment)
+
+    def budget_limit(self, episodes):
+        from ide_research_core.budget import EpisodeBudget
+
+        return EpisodeBudget(
+            Path(self.context.env["RESEARCH_CANONICAL"]) / "episode-budget.db",
+            int(self.context.env["RESEARCH_EPISODE_LIMIT"]),
+        ).lower(episodes)
 
     def credits(self):
         return self.call("softmax", "credits")

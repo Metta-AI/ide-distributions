@@ -31,7 +31,7 @@ def test_native_board_behaviour(tmp_path):
     env = clean_env(tmp_path / "host/profiles/orchestrator")
     env["PYTHONPATH"] = str(DISTRIBUTION / "src")
     result = subprocess.run(
-        [hermes_python(), str(DISTRIBUTION / "tests/hermes_scenarios.py")],
+        [hermes_python(), str(DISTRIBUTION / "tests/lifecycle_scenarios.py")],
         env=env,
         capture_output=True,
         text=True,
@@ -76,7 +76,7 @@ def test_clean_export_installs_paused(tmp_path):
     jobs = json.loads((profile / "cron/jobs.json").read_text())["jobs"]
     assert len(jobs) == 1 and jobs[0]["name"] == "supervisor"
     assert not jobs[0]["enabled"] and jobs[0]["state"] == "paused"
-    assert not jobs[0]["no_agent"] and jobs[0]["script"] == "supervisor_gate.py"
+    assert jobs[0]["no_agent"] and jobs[0]["script"] == "supervisor_gate.py"
     # Real discovery/registration in Hermes; no models or API calls.
     code = """
 import json

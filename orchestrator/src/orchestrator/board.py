@@ -2,14 +2,14 @@
 
 import json
 import os
-import re
 import subprocess
 import sys
 from contextlib import closing
 from dataclasses import asdict
+from pathlib import Path
 
 from . import storage
-from .research import ResearchError
+from .research import Research, ResearchError
 
 BOARD = "autoresearch"
 
@@ -81,56 +81,38 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
 
     def card_create(
         self,
-        kind,
-        entity,
+        command_id,
         assignee,
         title,
         body,
-        attempt=1,
-        refs=None,
         priority=0,
         skills=None,
         max_runtime_seconds=7200,
         failure_limit=2,
-        parents=None,
-        card_sha=None,
         session_id=None,
-        replaces=None,
     ):
+        """Replay an execution command; native Hermes owns task and worktree identity."""
         from agent.secret_scope import build_profile_secret_scope
         from gateway.session_context import get_session_env
         from hermes_cli import kanban_db as kb
+        from hermes_cli import projects_db
         from hermes_cli.profiles import get_profile_dir
         from tools.async_delegation import _current_origin_session_id
         from tools.kanban_tools import _persisted_session_id
 
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", entity):
-            raise ValueError("entity must be a record ID or a git-safe repair entity key")
-        if (
-            kind
-            not in {
-                "investigation",
-                "scouting",
-                "experimentation",
-                "maintenance",
-                "planning",
-                "review",
-                "repair",
-            }
-            or attempt < 1
-        ):
-            raise ValueError("unknown kind or non-positive attempt")
+        if not command_id or len(command_id) > 200:
+            raise ValueError("command_id must contain 1-200 characters")
         if skills:
             available = self.worker_skills(assignee)["skills"]
             names = {skill["name"] for skill in available}
-            invalid = sorted(set(skills or []) - names)
+            invalid = sorted(set(skills) - names)
             if invalid:
                 raise ResearchError(
                     {
                         "ok": False,
                         "error": {
                             "reason": "invalid_worker_skills",
-                            "message": "Select skills from the assigned worker's catalog and retry card_create.",
+                            "message": "Select skills from the assigned worker's catalog.",
                             "details": {
                                 "assignee": assignee,
                                 "invalid": invalid,
@@ -139,53 +121,86 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         },
                     }
                 )
-        key = f"{kind}:{entity}:{attempt}"
-        slug = f"{kind}-{entity}-{attempt}"
-        branch = f"{'repair' if kind == 'repair' else 'card'}/{slug}"
         profile = get_profile_dir(assignee)
         env = build_profile_secret_scope(profile)
-        clone = profile / "workspace"
-        if env.get("RESEARCH_WORKSPACE"):
-            from pathlib import Path
-
-            clone = Path(env["RESEARCH_WORKSPACE"])
+        clone = Path(env.get("RESEARCH_WORKSPACE") or profile / "workspace")
+        payload = json.dumps(
+            {
+                "assignee": assignee,
+                "title": title,
+                "body": body,
+                "priority": priority,
+                "skills": skills or [],
+                "max_runtime_seconds": max_runtime_seconds,
+                "failure_limit": failure_limit,
+            },
+            sort_keys=True,
+        )
         with closing(storage.plugin_storage()) as lock, closing(connection()) as conn:
-            # Covers lookup AND creation: Hermes's own idempotency lookup is not atomic.
-            # Only local bare-origin fetch/branch preparation happens inside this transaction.
+            # Persist the command BEFORE the native write. A crash between the two databases
+            # recovers by exact native command key, including archived tasks.
             lock.execute("BEGIN IMMEDIATE")
-            tasks = kb.list_tasks(conn, include_archived=True)
-            existing = next((t for t in tasks if t.idempotency_key == key), None)
-            if replaces:
-                original = kb.get_task(conn, replaces)
-                if original is None or original.idempotency_key != f"{kind}:{entity}:{attempt - 1}":
-                    raise ValueError("replaces must identify the preceding attempt of this entity")
-                if kind == "repair" or original.status not in {"blocked", "archived"}:
-                    raise ValueError("configuration replacement requires a blocked non-repair card")
-                if original.status == "archived" and not existing:
-                    raise ValueError(
-                        "do not archive before replacement; dependency safety cannot be established"
-                    )
-                if existing and replaces not in kb.parent_ids(conn, existing.id):
-                    raise ValueError("existing attempt was not created as this replacement")
+            prior = lock.execute(
+                "SELECT payload FROM commands WHERE id=?", (command_id,)
+            ).fetchone()
+            if prior and prior[0] != payload:
+                raise ValueError("command_id was already used with different arguments")
+            lock.execute(
+                "INSERT OR IGNORE INTO commands(id, payload) VALUES (?, ?)", (command_id, payload)
+            )
+            lock.commit()
+            lock.execute("BEGIN IMMEDIATE")
+            key = f"command:{command_id}"
+            existing = next(
+                (
+                    task
+                    for task in kb.list_tasks(conn, include_archived=True)
+                    if task.idempotency_key == key
+                ),
+                None,
+            )
             if existing:
                 task_id = existing.id
             else:
-                for task in tasks:
-                    parts = (task.idempotency_key or "").split(":")
-                    if (
-                        len(parts) == 3
-                        and parts[1] == entity
-                        and task.status not in {"done", "archived"}
-                        and task.id != replaces
-                    ):
-                        raise ValueError(f"entity {entity} already has open card {task.id}")
-                # Branch from canonical main as fetched; the researcher's checked-out main is
-                # its integrate's business and may be mid-merge.
                 git(clone, "fetch", "origin")
-                if kind == "repair" and not card_sha:
-                    raise ValueError("repair requires the failed pushed card_sha")
-                base = git(clone, "rev-parse", card_sha if kind == "repair" else "origin/main")
-                # A crash after branch creation is replayable without a reservation table.
+                with projects_db.connect_closing() as projects:
+                    project = projects_db.find_by_primary_path(projects, str(clone))
+                    project_id = (
+                        project.id
+                        if project
+                        else projects_db.create_project(
+                            projects,
+                            name=assignee,
+                            primary_path=str(clone),
+                            board_slug=BOARD,
+                        )
+                    )
+                origin_session = (
+                    _persisted_session_id(session_id)
+                    or _persisted_session_id(_current_origin_session_id())
+                    or _persisted_session_id(get_session_env("HERMES_SESSION_ID", ""))
+                )
+                task_id = kb.create_task(
+                    conn,
+                    title=title,
+                    body=body,
+                    assignee=assignee,
+                    created_by="orchestrator",
+                    project_id=project_id,
+                    workspace_kind="worktree",
+                    max_retries=failure_limit,
+                    max_runtime_seconds=max_runtime_seconds,
+                    skills=skills or [],
+                    priority=priority,
+                    idempotency_key=key,
+                    session_id=origin_session,
+                    board=BOARD,
+                    initial_status="blocked",
+                )
+            task = kb.get_task(conn, task_id)
+            if task.status == "blocked" and not kb.list_runs(conn, task_id):
+                # Native creation parks the task until its branch is anchored. Resuming an
+                # already executed task belongs to card_answer, never creation replay.
                 found = subprocess.run(
                     [
                         "git",
@@ -194,73 +209,19 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         "show-ref",
                         "--verify",
                         "--quiet",
-                        f"refs/heads/{branch}",
+                        f"refs/heads/{task.branch_name}",
                     ],
                     check=False,
                 )
-                if found.returncode != 0:
-                    git(clone, "branch", branch, base)
-                else:
-                    base = git(clone, "rev-parse", branch)
-                origin_session = (
-                    _persisted_session_id(session_id)
-                    or _persisted_session_id(_current_origin_session_id())
-                    or _persisted_session_id(get_session_env("HERMES_SESSION_ID", ""))
-                )
-                if replaces:
-                    origin_session = original.session_id
-                details = {
-                    "kind": kind,
-                    "entity": entity,
-                    "attempt": attempt,
-                    "refs": refs or [],
-                    "base_sha": base,
-                    "clone": str(clone),
-                    "branch": branch,
-                }
-                task_id = kb.create_task(
-                    conn,
-                    title=title,
-                    body=body
-                    + "\n\nCard context:\n```json\n"
-                    + json.dumps(details, indent=2)
-                    + "\n```\n",
-                    assignee=assignee,
-                    created_by="orchestrator",
-                    workspace_kind="worktree",
-                    workspace_path=str(clone / ".worktrees" / slug),
-                    branch_name=branch,
-                    max_retries=failure_limit,
-                    max_runtime_seconds=max_runtime_seconds,
-                    skills=skills or [],
-                    # Hold the replacement behind the blocked original until all
-                    # dependents also wait for the replacement. Each native write
-                    # is durable, so interruption never releases unfinished work.
-                    parents=(
-                        [replaces, *kb.parent_ids(conn, replaces)]
-                        if replaces
-                        else ([] if kind == "repair" else (parents or []))
-                    ),
-                    idempotency_key=key,
-                    session_id=origin_session,
-                    board=BOARD,
-                )
-            if replaces and original.status == "blocked":
-                for child_id in kb.child_ids(conn, replaces):
-                    if child_id != task_id and task_id not in kb.parent_ids(conn, child_id):
-                        kb.link_tasks(conn, task_id, child_id)
-                kb.archive_task(conn, replaces)
+                if found.returncode == 1:
+                    git(clone, "branch", task.branch_name, "origin/main")
+                elif found.returncode:
+                    found.check_returncode()
+                kb.unblock_task(conn, task_id)
             lock.commit()
-            # Native wake routing is optional; reconciliation covers turns with no destination.
-            try:
-                subscribed = subscribe(conn, task_id)
-                subscription_error = None
-            except Exception as error:  # noqa: BLE001 - tool boundary reports native failures
-                subscribed, subscription_error = False, str(error)
             return {
                 "card": asdict(kb.get_task(conn, task_id)),
-                "subscribed": subscribed,
-                "subscription_error": subscription_error,
+                "subscribed": subscribe(conn, task_id),
             }
 
     def card_list(self, filters=None):
@@ -289,65 +250,12 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             return {"table": "task_comments", "id": kb.add_comment(conn, id, "orchestrator", body)}
 
     def card_answer(self, id, text):
+        """Answer native blocked work; Git history does not determine task lifecycle."""
         from hermes_cli import kanban_db as kb
 
-        with closing(storage.plugin_storage()) as lock, closing(connection()) as conn:
-            lock.execute("BEGIN IMMEDIATE")
-            task = kb.get_task(conn, id)
-            if task is None:
-                raise ValueError(f"unknown card {id}")
-            if task.status == "blocked":
-                marker = "\n\nCard context:\n```json\n"
-                details = json.loads(task.body.rsplit(marker, 1)[1].split("\n```", 1)[0])
-                clone = details["clone"]
-                git(clone, "fetch", "--prune", "origin")
-                remote_branch = f"refs/remotes/origin/{task.branch_name}"
-                published = subprocess.run(
-                    ["git", "-C", clone, "show-ref", "--verify", "--quiet", remote_branch],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                if published.returncode not in (0, 1):
-                    published.check_returncode()
-                if published.returncode == 0:
-                    card_sha = git(clone, "rev-parse", remote_branch)
-                    ancestry = subprocess.run(
-                        [
-                            "git",
-                            "-C",
-                            clone,
-                            "merge-base",
-                            "--is-ancestor",
-                            card_sha,
-                            "origin/main",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-                    if ancestry.returncode not in (0, 1):
-                        ancestry.check_returncode()
-                    if ancestry.returncode == 0:
-                        next_step = (
-                            "Close the integrated repair with evidence; create fresh work only if further repair is needed."
-                            if details["kind"] == "repair"
-                            else "Create the next numbered attempt with replaces set to this blocked card and include the answer in its body."
-                        )
-                        raise ResearchError(
-                            {
-                                "ok": False,
-                                "error": {
-                                    "reason": "integrated_card_requires_replacement",
-                                    "message": f"This card's pushed work is already integrated. {next_step}",
-                                    "details": {"card": id, "card_sha": card_sha},
-                                },
-                            }
-                        )
+        with closing(connection()) as conn:
             comment = kb.add_comment(conn, id, "orchestrator", text)
-            result = {"comment": comment, "unblocked": kb.unblock_task(conn, id)}
-            lock.commit()
-            return result
+            return {"comment": comment, "unblocked": kb.unblock_task(conn, id)}
 
     def card_close(self, id, outcome, summary=None, metadata=None):
         from hermes_cli import kanban_db as kb
@@ -360,6 +268,21 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             else:
                 raise ValueError("outcome must be done or archived")
             return {"changed": changed}
+
+    def workspace_integrate(self, id, run_id, commit):
+        """Accept one completed native run's exact artifact; archive and admission share a lock."""
+        from hermes_cli import kanban_db as kb
+
+        with closing(connection()) as conn, kb.write_txn(conn):
+            task = kb.get_task(conn, id)
+            runs = kb.list_runs(conn, id)
+            if task.status != "done" or not runs or max(run.id for run in runs) != run_id:
+                raise ValueError("Only the latest completed native run may be integrated")
+            kb._append_event(conn, id, "integration_admitted", {"commit": commit}, run_id=run_id)
+            branch = task.branch_name
+        return Research(self.context).call(
+            "workspace", "integrate", "--branch", branch, "--commit", commit
+        )
 
     def event_ack(self, ids):
         with closing(storage.plugin_storage()) as conn:

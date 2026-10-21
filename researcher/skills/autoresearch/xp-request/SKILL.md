@@ -29,21 +29,12 @@ batch, preserve its state and complete without waiting for the platform.
 4. Read the returned `created`, `existing`, `missing`, `pairing` and refusal fields. Journal
    the attempt, batch, request IDs and what remains. Read the experiment again for its
    durable state; do not hand-edit platform bookkeeping.
-5. Finish through `card`, including integration, with the following handoff:
-
-   | Result | Handoff |
-   | --- | --- |
-   | All requests exist | `outcome: done`, `experiment.id`, and `awaiting: {xp: [request IDs]}`. |
-   | Credit refusal | `outcome: partial`, `awaiting: {credits: true}`; name existing and missing requests in the journal and `next`. |
-   | Permit asks remain open | `outcome: partial`, `awaiting: {permit: <ask ID>}`. Report every `permit_asks` entry, the exact batch/attempt and any credit shortfall to the orchestrator. |
-   | Permit declined | Respect the no. Complete `partial` with the refusal and remaining state; do not launch again or change the request to avoid the decision. |
-   | League not chosen/mismatched | Complete `partial` with the returned reason and a clear `next` for the orchestrator; do not guess a different league. |
-
-   For combined credit/permit waits, report the permit in `awaiting` and the full combination
-   in the experiment and `next`. Do not discard already launched handles.
-6. Never wait for XP inside the card (D-11). The orchestrator watches the platform and
-   commissions a review or another launch card. Only completed, inspected episodes count
-   as evidence (D-06).
+5. Preserve launch receipts with `workspace stage`. If every requested launch was admitted,
+   complete that assignment with the request IDs and pending result status. If the assignment
+   requires results, or requests remain missing, report the exact wait and use native blocking.
+   Credit and permit waits do not require completing a journal. Respect a declined permit.
+6. The coordinator observes platform state and decides when to resume work. Completed,
+   inspected episodes are required before making an improvement claim.
 
 ## Failure handling
 

@@ -3,7 +3,7 @@
 Installs ``researcher-1`` and ``orchestrator`` from ``git archive HEAD`` into a throwaway host
 root, bootstraps them (the researcher seeds the shared canonical repository, the orchestrator
 clones it), then plays one card through: the orchestrator's ``card_create`` makes it, a script
-stands in for the researcher's worker (worktree, a record, ``workspace integrate``, completion),
+stands in for the researcher's worker (worktree, a record, ``workspace stage``, completion),
 and the orchestrator's gate, reconcile and status see the result. The fake Softmax backend
 stands in for the platform.
 """
@@ -105,7 +105,7 @@ context = Context(Path(os.environ["HERMES_HOME"]), dict(os.environ))
 step = sys.argv[1]
 if step == "create":
     out = Board(context).card_create(
-        kind="investigation", entity="T-1", assignee="researcher-1",
+        command_id="user:1:investigate", assignee="researcher-1",
         title="Find the damage rule", body="Record what damage is.")
 elif step == "complete":
     from hermes_cli import kanban_db as kb
@@ -139,9 +139,9 @@ def test_one_card_from_creation_to_the_orchestrators_view(host):
     assert (clone / "AGENTS.md").is_file() and (orchestrator_clone / ".git").is_dir()
 
     card = orchestrator(profiles, "create")["card"]
-    assert card["assignee"] == "researcher-1" and card["branch_name"].startswith("card/")
+    assert card["assignee"] == "researcher-1" and card["id"] in card["branch_name"]
 
-    # The researcher's worker: the dispatcher's worktree, one record, integrate, complete.
+    # The researcher's worker: the dispatcher's worktree, one record, stage, complete.
     worktree = Path(card["workspace_path"])
     run(["git", "-C", str(clone), "worktree", "add", str(worktree), card["branch_name"]],
         researcher_env)  # fmt: skip
@@ -164,8 +164,12 @@ def test_one_card_from_creation_to_the_orchestrators_view(host):
             worker_env,
         )
     )["id"]
-    merged = envelope(run([cli, "workspace", "integrate"], worker_env, cwd=worktree))
-    orchestrator(profiles, "complete", card["id"], json.dumps(merged))
+    staged = envelope(run([cli, "workspace", "stage"], worker_env, cwd=worktree))
+    orchestrator(profiles, "complete", card["id"], json.dumps(staged))
+    coordinator_home, coordinator_env = profiles["orchestrator"]
+    envelope(run([str(coordinator_home / "bin/research"), "workspace", "integrate",
+                  "--branch", staged["branch"], "--commit", staged["card_sha"]], coordinator_env))
+    run(["git", "-C", str(clone), "pull", "--ff-only"], researcher_env)
 
     wake = orchestrator(profiles, "gate")
     assert wake["wakeAgent"] is True
@@ -173,7 +177,7 @@ def test_one_card_from_creation_to_the_orchestrators_view(host):
     assert "completed" in kinds and "claimed" not in kinds
 
     view = orchestrator(profiles, "reconcile")
-    assert view["branches"] == []  # merged: nothing for the safety net to integrate
+    assert view["cards"]  # execution state is independent of commit integration
     status = orchestrator(profiles, "status")
     assert status["cards"] == {"done": [card["id"]]}
     assert status["promotion"]["conflict"] is None  # a fresh fake league, no champion yet

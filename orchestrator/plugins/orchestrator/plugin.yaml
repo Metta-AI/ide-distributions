@@ -25,6 +25,7 @@ provides_tools:
   - accept_champion
   - workspace_integrate
   - xp_status
+  - budget_limit
   - credits
   - leaderboard
   - latest_league_result
