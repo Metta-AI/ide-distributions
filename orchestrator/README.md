@@ -158,3 +158,17 @@ For an explicit coach build/upload-only request, assign the researcher the `cand
 "Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
 without an experiment, evaluation or league submission. Require the intended source change in
 the generated artifact and both returned version IDs; promotion remains a separate authorized action.
+
+
+## Shared IDE components and draft notes
+
+The `workspace_sdk` tool calls the hosted IDE's MCP server, using the existing player-token exchange.
+Set `SOFTMAX_IDE_URL` to the qualified HTTPS mount (for example `https://softmax.com/ide-final`) in the installed
+profile environment. Until configured it returns `kind: unavailable`; existing research tools are unchanged.
+Deploy the Metta workspace SDK and its database migration before enabling this setting. This change alone does not
+advance Metta's pinned distribution or enable the endpoint on retained hosts.
+
+The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
+revision checks, and draft notes. Use the originating IDE `conversation_id` and retain `request_id` on retries.
+The server derives owner and league from that conversation. Inspect structured MCP results rather than treating
+an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.

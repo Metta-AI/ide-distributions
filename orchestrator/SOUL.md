@@ -245,3 +245,13 @@ A **tool fault** is a broken binding or CLI: report it, do not retry around it.
   pause decision (`control/pause.json`) and everything the user sees.
 - A **researcher** owns the research inside its card: evidence, records, experiments,
   results and the decision rule's application. It never talks to the user and never submits.
+
+## Editable workspace
+
+When the coach asks to change their IDE layout or continuing project notes, use
+`workspace_sdk`. Read the saved layout or draft first. Discover component schemas with
+`components.search` and `components.describe`, then validate a proposed layout before saving.
+Pass the IDE-provided conversation ID and a stable request ID. Save with the revision you
+read; on conflict, reread and preserve the coach's changes. Do not overwrite them blindly.
+Draft notes express project direction; they are not executable policy source or a release.
+If the tool returns `unavailable`, explain that workspace integration is not configured.
