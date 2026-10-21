@@ -67,11 +67,11 @@ class Research:
             f"Research {action}: {reason}",
         )
 
-    def control_read(self):
-        """Read the published pause, not an uncommitted file in this profile's clone."""
+    def _canonical_text(self, path):
+        """Shared decisions come from canonical history, never an unfinished local draft."""
         canonical = self.context.env["RESEARCH_CANONICAL"]
         present = subprocess.run(
-            ["git", "--git-dir", canonical, "ls-tree", "--name-only", "main", "control/pause.json"],
+            ["git", "--git-dir", canonical, "ls-tree", "--name-only", "main", path],
             check=True,
             capture_output=True,
             text=True,
@@ -80,13 +80,30 @@ class Research:
         if not present:
             return None
         pause = subprocess.run(
-            ["git", "--git-dir", canonical, "show", "main:control/pause.json"],
+            ["git", "--git-dir", canonical, "show", f"main:{path}"],
             check=True,
             capture_output=True,
             text=True,
             timeout=30,
         )
-        return json.loads(pause.stdout)
+        return pause.stdout
+
+    def control_read(self):
+        text = self._canonical_text("control/pause.json")
+        return json.loads(text) if text is not None else None
+
+    def plan_read(self):
+        return self._canonical_text("plan.md")
+
+    def budget_read(self):
+        from ide_research_core.budget import EpisodeBudget
+
+        if "RESEARCH_EPISODE_LIMIT" not in self.context.env:
+            return None
+        return EpisodeBudget(
+            Path(self.context.env["RESEARCH_CANONICAL"]) / "episode-budget.db",
+            int(self.context.env["RESEARCH_EPISODE_LIMIT"]),
+        ).snapshot()
 
     def _publish(self, path, text, message):
         target = self.context.workspace / path
@@ -96,18 +113,6 @@ class Research:
 
     def promotion_submit(self, experiment):
         return self.call("promotion", "submit", experiment)
-
-    def submit_requested_version(self, version, strategy, request):
-        return self.call(
-            "promotion",
-            "submit-requested",
-            "--version",
-            version,
-            "--strategy",
-            strategy,
-            "--request",
-            request,
-        )
 
     def bootstrap_champion(self, version):
         return self.call("promotion", "bootstrap", "--version", version)

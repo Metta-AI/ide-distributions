@@ -43,6 +43,8 @@ class Platform:
         return {"body": {"kind": "permit", "answer": self.answer}}
 
     def call(self, *args):
+        if args == ("promotion", "pending"):
+            return self.in_flight
         if args == ("records", "summary"):
             return {"champion": None}
         assert args == ("promotion", "status")
@@ -96,21 +98,11 @@ def test_unresolved_wait_does_not_wake(context, board_file, awaiting):
     assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
 
 
-def test_unchanged_promotion_waits_stay_quiet_and_pausing_quiets_conflict(context, board_file):
+def test_cron_only_requests_coordinator_review_of_pending_promotion(context, board_file):
+    platform = Platform(in_flight={"stage": "submitted"})
     now = QUIET_MINUTE.replace(minute=10)
-    for stage in ("submitted", "awaiting-permit"):
-        platform = Platform(in_flight={"stage": stage})
-        for minute in (10, 20):
-            assert evaluate(context, platform, platform, now.replace(minute=minute)) == {
-                "wakeAgent": False
-            }
-    platform = Platform(conflict="league champion was not recorded")
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
-    assert (
-        evaluate(context, platform, platform, now)["context"]["pending"][0]["kind"] == "promotion"
-    )
-    platform.paused = True
-    assert evaluate(context, platform, platform, now.replace(minute=20)) == {"wakeAgent": False}
+    result = evaluate(context, platform, platform, now)
+    assert result["context"]["pending"] == [{"kind": "promotion_poll", "tick": now.isoformat()}]
     assert evaluate(context, Platform(), Platform(), now) == {"wakeAgent": False}
 
 
@@ -144,27 +136,6 @@ def test_gate_process_with_sanitized_passthrough(shared_fixture, board_file):
         check=True,
     )
     assert json.loads(result.stdout.splitlines()[-1]) == {"wakeAgent": False}
-
-
-def test_finished_promotion_wakes_even_when_inflight_clears(context, board_file):
-    class Recovered(Platform):
-        def __init__(self):
-            super().__init__()
-            self.champion = "old"
-
-        def call(self, *args):
-            if args == ("records", "summary"):
-                return {"champion": {"version": self.champion}}
-            self.champion = "new"
-            return {"conflict": False, "in_flight": None, "champion": {"version": "new"}}
-
-    platform = Recovered()
-    result = evaluate(context, platform, platform, QUIET_MINUTE.replace(minute=10))
-    assert result["wakeAgent"]
-    assert result["context"]["pending"][0]["status"]["champion"] == {"version": "new"}
-    assert evaluate(context, platform, platform, QUIET_MINUTE.replace(minute=20)) == {
-        "wakeAgent": False
-    }
 
 
 def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_file):

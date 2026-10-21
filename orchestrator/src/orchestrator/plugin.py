@@ -181,14 +181,14 @@ TOOLS = {
         ["experiment"],
     ),
     "submit_requested_version": (
-        Research,
+        Board,
         (
             "Submit an integrated uploaded version only when the user explicitly requested submission. "
             "Quote that request. This records a requested submission, not statistical improvement. "
             "For autonomous research promotion use promotion_submit instead. Strategy must match the build."
         ),
-        {"version": S, "strategy": S, "request": S},
-        ["version", "strategy", "request"],
+        {"id": S, "run_id": I, "version": S, "strategy": S, "request": S},
+        ["id", "run_id", "version", "strategy", "request"],
     ),
     "bootstrap_champion": (
         Research,

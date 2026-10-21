@@ -269,19 +269,37 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 raise ValueError("outcome must be done or archived")
             return {"changed": changed}
 
-    def workspace_integrate(self, id, run_id, commit):
-        """Accept one completed native run's exact artifact; archive and admission share a lock."""
+    def _admit_effect(self, id, run_id, kind, payload):
+        """Native archive and publication admission use the same transaction boundary."""
         from hermes_cli import kanban_db as kb
 
         with closing(connection()) as conn, kb.write_txn(conn):
             task = kb.get_task(conn, id)
             runs = kb.list_runs(conn, id)
             if task.status != "done" or not runs or max(run.id for run in runs) != run_id:
-                raise ValueError("Only the latest completed native run may be integrated")
-            kb._append_event(conn, id, "integration_admitted", {"commit": commit}, run_id=run_id)
-            branch = task.branch_name
+                raise ValueError("Only the latest completed native run may publish")
+            kb._append_event(conn, id, kind, payload, run_id=run_id)
+            return task
+
+    def workspace_integrate(self, id, run_id, commit):
+        task = self._admit_effect(id, run_id, "integration_admitted", {"commit": commit})
         return Research(self.context).call(
-            "workspace", "integrate", "--branch", branch, "--commit", commit
+            "workspace", "integrate", "--branch", task.branch_name, "--commit", commit
+        )
+
+    def submit_requested_version(self, id, run_id, version, strategy, request):
+        self._admit_effect(
+            id, run_id, "submission_admitted", {"version": version, "request": request}
+        )
+        return Research(self.context).call(
+            "promotion",
+            "submit-requested",
+            "--version",
+            version,
+            "--strategy",
+            strategy,
+            "--request",
+            request,
         )
 
     def event_ack(self, ids):

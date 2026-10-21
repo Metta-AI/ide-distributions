@@ -57,6 +57,9 @@ from pathlib import Path
 args = sys.argv[1:]
 with (Path(os.environ['HERMES_HOME']) / 'calls.jsonl').open('a') as output:
     output.write(json.dumps(args) + '\\n')
+if args == ['promotion', 'pending']:
+    print(json.dumps({'ok': True, 'data': None}))
+    raise SystemExit(0)
 if 'refuse' in args:
     print(json.dumps({'ok': False, 'error': {'reason': 'baseline_not_champion',
                                          'message': 'baseline changed'}}))

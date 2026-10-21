@@ -32,4 +32,6 @@ class Service:
             "research": self.research.call("records", "summary"),
             "promotion": self.research.call("promotion", "status"),
             "control": self.research.control_read(),
+            "plan": self.research.plan_read(),
+            "budget": self.research.budget_read(),
         }

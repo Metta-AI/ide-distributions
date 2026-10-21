@@ -42,10 +42,9 @@ def test_tool_fault_rule_preserves_work_and_blocks():
     rule = text[text.index("\nD-26.") : text.index("\nD-27.")]
     for required in (
         "help_request:",
-        "workspace integrate",
         "kanban_block",
-        "tool-fault:",
-        "integrate:",
+        "Preserve failed reports",
+        "Do not change installed game tools",
     ):
         assert required in rule
 

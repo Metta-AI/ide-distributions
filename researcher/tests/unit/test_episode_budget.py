@@ -33,3 +33,15 @@ def test_restart_and_ambiguous_response_keep_the_reservation(tmp_path):
     assert resumed.lower(1) == {"limit": 1, "reserved": 1, "remaining": 0}
     with pytest.raises(ValueError, match="never raise"):
         resumed.lower(2)
+
+
+def test_restart_keeps_user_limit_but_operator_can_grant_more_without_losing_spend(tmp_path):
+    budget = EpisodeBudget(tmp_path / "budget.db", 10)
+    budget.configure()
+    budget.reserve("first", {"num_episodes": 2})
+    budget.lower(3)
+    budget.configure()
+    assert budget.lower(3)["remaining"] == 1
+    granted = EpisodeBudget(budget.path, 20)
+    granted.configure()
+    assert granted.lower(20) == {"limit": 20, "reserved": 2, "remaining": 18}

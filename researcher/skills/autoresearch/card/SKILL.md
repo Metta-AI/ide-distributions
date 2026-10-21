@@ -1,9 +1,11 @@
 ---
 name: card
-description: Execute, resume and finish one native research assignment.
+description: Use when executing one native research assignment.
 ---
 
 # One native assignment
+
+Apply D-21, D-23, D-25 and D-26.
 
 1. Read your task with `kanban_show`: objective, current instructions, native task/run,
    worktree, branch, inputs, constraints and acceptance evidence.
@@ -30,3 +32,9 @@ and do not bypass provenance checks. Respect budgets and denied permits.
 For explicit build/upload work, use `candidate`'s explicit procedure. Statistical experiments
 are optional objectives. Upload and evaluation receipts survive task retries; task IDs do not
 replace operation identity. Never create/link/schedule other tasks or submit to a league.
+
+A native completion can report an artifact without a canonical journal:
+
+```json
+{"summary":"Requested build completed; coordinator must verify and accept it.","metadata":{"artifacts":["builds/example/report.json"]}}
+```

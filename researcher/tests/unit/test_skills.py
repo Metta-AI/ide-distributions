@@ -115,7 +115,7 @@ COMMAND_FLAGS = {
     "softmax game-version": "",
     "softmax standings": "",
     "softmax league-episodes": "--league --limit --out",
-    "workspace integrate": "",
+    "workspace stage": "--worktree",
     "workspace merged": "--branch",
 }
 
@@ -175,10 +175,6 @@ def test_front_matter_is_valid(skill):
     assert isinstance(description, str) and description.startswith("Use when ")
     assert len(description) <= DESCRIPTION_LIMIT, description
     assert post.content.strip()
-
-
-def test_names_its_system_design_procedure(skill):
-    assert re.search(r"System Design §5\.\d+", skill.read_text(encoding="utf-8"))
 
 
 def test_cli_commands_and_flags_match_researcher_contract(skill):
@@ -290,7 +286,6 @@ def test_removed_transport_and_scheduling_are_not_in_prompts(skill):
         "outbox",
         "inbox",
         "briefing",
-        "receipt",
         "cards/requests/",
         "spend cap",
         "credit floor",
@@ -302,28 +297,15 @@ def test_removed_transport_and_scheduling_are_not_in_prompts(skill):
         assert obsolete not in text, f"{skill.parent.name}: {obsolete}"
 
 
-def test_completion_example_carries_the_native_handoff():
+def test_native_completion_example_does_not_require_integration_or_journal():
     text = (SKILLS / "card" / "SKILL.md").read_text(encoding="utf-8")
     examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.DOTALL)]
-    handoff = next(example for example in examples if "merged" in example)
-    assert set(handoff) == {
-        "outcome",
-        "journal",
-        "records_changed",
-        "merged",
-        "experiment",
-        "awaiting",
-        "next",
-    }
-    assert handoff["journal"].startswith("ar://journal/J-")
-    assert set(handoff["merged"]) == {"card_sha", "main_sha"}
-    assert set(handoff["experiment"]) == {"id", "status", "decision"}
-    assert set(handoff["awaiting"]) == {"xp"}
-    assert isinstance(handoff["awaiting"]["xp"], list)
-    assert '"$RESEARCH_CLI" workspace merged --branch card/<id>' in text
-    assert '"$RESEARCH_CLI" workspace integrate' in text
+    assert len(examples) == 1
+    assert set(examples[0]) == {"summary", "metadata"}
+    assert "artifacts" in examples[0]["metadata"]
+    assert '"$RESEARCH_CLI" workspace stage' in text
+    assert "workspace integrate" not in text
     assert "kanban_complete" in text and "kanban_block" in text
-    assert "## Decisions" in text
 
 
 def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap():

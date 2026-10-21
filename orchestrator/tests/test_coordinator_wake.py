@@ -11,15 +11,29 @@ from orchestrator.gate import wake
 from orchestrator.storage import open_storage
 
 
-def test_wake_replays_lost_admission_without_creating_another_run(context):
+@pytest.mark.parametrize("terminal", ["failed", "interrupted", "cancelled", "completed"])
+def test_wake_replays_lost_admission_without_creating_another_run(context, terminal):
     accepted = {}
     requests = []
+    statuses = {"run_1": "running"}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_GET(self):
+            if self.path == "/v1/coordinator/pending":
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"pending": null}')
+                return
+            if self.path.startswith("/v1/runs/"):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps({"status": statuses[self.path.rsplit("/", 1)[-1]]}).encode()
+                )
+                return
             self.send_response(200)
             self.end_headers()
             self.wfile.write(
@@ -39,7 +53,8 @@ def test_wake_replays_lost_admission_without_creating_another_run(context):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             key = self.headers["Idempotency-Key"]
-            accepted.setdefault(key, {"run_id": "run_1"})
+            accepted.setdefault(key, {"run_id": f"run_{len(accepted) + 1}"})
+            statuses.setdefault(accepted[key]["run_id"], "running")
             requests.append((key, body))
             if len(requests) == 1:
                 self.close_connection = True
@@ -72,6 +87,18 @@ def test_wake_replays_lost_admission_without_creating_another_run(context):
         assert wake(context, event) == {"wakeAgent": False, "run_id": "run_1"}
         assert len(accepted) == 1 and len(requests) == 2
         assert requests[0] == requests[1]
+        statuses["run_1"] = terminal
+        expected = "run_2" if terminal in {"failed", "interrupted"} else "run_1"
+        assert wake(context, event)["run_id"] == expected
+        assert wake(context, event)["run_id"] == expected
+        assert len(accepted) == (2 if expected == "run_2" else 1)
+        if expected == "run_2":
+            statuses["run_2"] = terminal
+            assert wake(context, event)["run_id"] == "run_3"
+            statuses["run_3"] = terminal
+            with pytest.raises(RuntimeError, match="failed three times"):
+                wake(context, event)
+            assert len(accepted) == 3
     finally:
         server.shutdown()
         worker.join()

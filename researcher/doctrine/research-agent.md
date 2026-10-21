@@ -68,6 +68,6 @@ D-24. **Never edit generated files by hand:** `kb/index.md`, backlinks, and cont
 
 D-25. **The coordinator owns integration and submission.** Prepare the requested artifact and evidence. Explicit build/upload work does not require statistical promotion. Use reviewed promotion evidence only for an assigned superiority evaluation.
 
-D-26. **Report tool faults precisely.** Preserve command, error and artifacts. Ask through your task and block when progress needs an answer. Correct invalid inputs without bypassing checks. Preserve failed reports. Do not change installed game tools.
+D-26. **Report tool faults precisely.** Preserve command, error and artifacts. Send a `help_request:` through your task and use `kanban_block` when progress needs an answer. Correct invalid inputs without bypassing checks. Preserve failed reports. Do not change installed game tools.
 
 D-27. **Respect refusals and budget ceilings.** Do not bypass a denied operation through another interpreter, identity or command. Preserve pending request IDs and block on necessary credit, permit or experiment waits. If assigned only to launch requests, completion means launch evidence, not completed experiments.

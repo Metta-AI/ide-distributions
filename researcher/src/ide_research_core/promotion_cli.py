@@ -93,6 +93,13 @@ def setup(parser: argparse.ArgumentParser) -> None:
     )
     sub.add_argument("--version", required=True, help="the uploaded version record, V-...")
     command(
+        "pending",
+        lambda a, c, sm, league, player: next(
+            (p.to_dict() for p in reversed(promotion.load_all(c)) if p.stage in promotion.IN_FLIGHT), None,
+        ),
+        "read an in-flight promotion without advancing or submitting it",
+    )
+    command(
         "status",
         lambda a, c, sm, league, player: promotion.status(c, sm, league, player),
         "advance the promotion in flight one step and report the champion and any conflict",

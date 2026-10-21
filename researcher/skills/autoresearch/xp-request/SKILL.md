@@ -60,3 +60,8 @@ batch, preserve its state and complete without waiting for the platform.
 - A retryable `platform` refusal or interrupted launch can replay the same batch/attempt to
   create only missing requests. If it still fails, preserve the state and complete `partial`.
 - A tooling traceback, an `errored` check or `tool_missing` follows D-26 in `card`. Do not retry it.
+
+For a launch-only assignment completed with pending results, include optional native completion
+metadata naming the domain wait: `{"experiment":{"id":"E-..."},"awaiting":{"xp":["request-id"]}}`.
+The coordinator observes those request IDs. This metadata is a subscription to results, never
+a prerequisite for native completion. A blocked question is delivered through the native task event.

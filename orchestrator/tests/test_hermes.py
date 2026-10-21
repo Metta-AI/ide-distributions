@@ -89,7 +89,7 @@ from orchestrator.plugin import TOOLS
 from tools.registry import registry
 assert plugin['enabled'] and plugin['tools'] == len(TOOLS), plugin
 schema = registry.get_schema('submit_requested_version')
-assert set(schema['parameters']['required']) == {'version', 'strategy', 'request'}, schema
+assert set(schema['parameters']['required']) == {'id', 'run_id', 'version', 'strategy', 'request'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 print(json.dumps({'ok': True}))
 """
@@ -128,3 +128,18 @@ assert not ensure_venv(home)
         env={**env, "HERMES_HOME": str(profile)},
         check=True,
     )
+
+
+@pytest.mark.hermes
+@pytest.mark.parametrize("capacity", [1, 3])
+def test_native_dispatch_capacity(tmp_path, capacity):
+    result = subprocess.run(
+        [hermes_python(), str(DISTRIBUTION / "tests/capacity_scenarios.py"), str(capacity)],
+        env=clean_env(tmp_path / "host"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["ok"]

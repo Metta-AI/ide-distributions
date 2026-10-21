@@ -23,12 +23,33 @@ class EpisodeBudget:
             raise ValueError("episode ceiling must be nonnegative")
         conn = sqlite3.connect(self.path, timeout=60)
         conn.executescript(
-            "CREATE TABLE IF NOT EXISTS limits (id INTEGER PRIMARY KEY CHECK(id=1), episodes INTEGER NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS limits (id INTEGER PRIMARY KEY CHECK(id=1), episodes INTEGER NOT NULL, configured INTEGER NOT NULL);"
             "CREATE TABLE IF NOT EXISTS reservations (key TEXT PRIMARY KEY, episodes INTEGER NOT NULL, spec TEXT NOT NULL);"
         )
-        conn.execute("INSERT OR IGNORE INTO limits VALUES (1, ?)", (self.ceiling,))
+        conn.execute(
+            "INSERT OR IGNORE INTO limits VALUES (1, ?, ?)",
+            (self.ceiling, self.ceiling),
+        )
         conn.commit()
         return conn
+
+    def configure(self) -> None:
+        """Operator startup applies an explicitly changed deployment allowance, retaining spend."""
+        with closing(self.connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            effective, configured = conn.execute(
+                "SELECT episodes, configured FROM limits WHERE id=1"
+            ).fetchone()
+            if self.ceiling != configured:
+                effective = (
+                    self.ceiling
+                    if self.ceiling > configured
+                    else min(effective, self.ceiling)
+                )
+                conn.execute(
+                    "UPDATE limits SET episodes=?, configured=? WHERE id=1",
+                    (effective, self.ceiling),
+                )
 
     def reserve(self, key: str, spec: dict) -> None:
         episodes = spec["num_episodes"]
@@ -66,6 +87,18 @@ class EpisodeBudget:
     def release_refused(self, key: str) -> None:
         with closing(self.connect()) as conn, conn:
             conn.execute("DELETE FROM reservations WHERE key=?", (key,))
+
+    def snapshot(self) -> dict:
+        with closing(self.connect()) as conn, conn:
+            conn.execute("BEGIN")
+            limit = min(
+                self.ceiling,
+                conn.execute("SELECT episodes FROM limits WHERE id=1").fetchone()[0],
+            )
+            used = conn.execute(
+                "SELECT COALESCE(SUM(episodes),0) FROM reservations"
+            ).fetchone()[0]
+            return {"limit": limit, "reserved": used, "remaining": max(0, limit - used)}
 
     def lower(self, episodes: int) -> dict:
         with closing(self.connect()) as conn, conn:
