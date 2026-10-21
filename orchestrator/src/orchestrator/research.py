@@ -111,8 +111,30 @@ class Research:
     def credits(self):
         return self.call("softmax", "credits")
 
-    def leaderboard(self):
-        return self.call("softmax", "leaderboard")
+    def discover_leagues(self, query="", offset=0, limit=20):
+        return self.call(
+            "softmax", "discover-leagues", "--query", query, "--offset", offset, "--limit", limit
+        )
 
-    def latest_league_result(self):
-        return self.call("softmax", "latest-league-result")
+    def league_players(self, league_id, query="", offset=0, limit=20):
+        return self.call(
+            "softmax",
+            "league-players",
+            "--league",
+            league_id,
+            "--query",
+            query,
+            "--offset",
+            offset,
+            "--limit",
+            limit,
+        )
+
+    def game_support(self, league_id):
+        return self.call("softmax", "game-support", "--league", league_id)
+
+    def leaderboard(self, league_id, player_id):
+        return self.call("softmax", "player-champion", "--league", league_id, "--player", player_id)
+
+    def latest_league_result(self, league_id, player_id):
+        return self.call("softmax", "player-result", "--league", league_id, "--player", player_id)

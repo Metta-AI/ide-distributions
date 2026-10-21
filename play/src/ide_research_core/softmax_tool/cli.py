@@ -140,6 +140,7 @@ from datetime import time as dtime
 from pathlib import Path
 
 import frontmatter
+from pydantic import ValidationError
 
 from ide_research_core import promotion, refs, runctx, workspace
 from ide_research_core.cli import register_group
@@ -153,6 +154,7 @@ from ide_research_core.io.locks import LockTimeout, file_lock
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordNotFound, RecordProblems, RecordStore
 from ide_research_core.softmax_tool import evidence
+from ide_research_core.softmax_tool.discovery import Discovery
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
 from ide_research_core.softmax_tool.league import episode_rows
 from ide_research_core.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
@@ -228,7 +230,7 @@ def _run(handler):
             check_identity_unchanged(ctx.hermes_home)
             sm = softmax_from_env(os.environ, ctx.canonical)
             data = handler(ctx, sm, args)
-        except (BadArguments, GameError) as error:
+        except (BadArguments, GameError, ValidationError) as error:
             return _fail("bad_arguments", str(error), EXIT_BAD_ARGS)
         except Refused as error:
             return _fail(error.reason, str(error), EXIT_FAILED, error.details)
@@ -1017,6 +1019,24 @@ def _league_episodes(ctx, sm, args) -> dict:
 # --- parser ---
 
 
+def _discovery(ctx, sm, args) -> dict:
+    # Discovery reads are explicit per operation. They do not load _game(), change
+    # identity, or compare a different league with this workspace's promotion state.
+    discovery = Discovery(os.environ, _REPO_ROOT)
+    match args.command:
+        case "discover-leagues":
+            return discovery.discover_leagues(args.query, args.offset, args.limit)
+        case "league-players":
+            return discovery.league_players(args.league, args.query, args.offset, args.limit)
+        case "game-support":
+            return discovery.game_support(args.league)
+        case "player-champion":
+            return discovery.leaderboard(args.league, args.player)
+        case "player-result":
+            return discovery.latest_league_result(args.league, args.player)
+    raise BadArguments(f"unknown discovery command: {args.command}")
+
+
 def setup(parser: argparse.ArgumentParser) -> None:
     commands = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
@@ -1024,6 +1044,23 @@ def setup(parser: argparse.ArgumentParser) -> None:
         sub = subparsers.add_parser(name, help=help_text)
         sub.set_defaults(func=_run(handler))
         return sub
+
+    for name, help_text in (
+        ("discover-leagues", "find live leagues and games by name or ID"),
+        ("league-players", "find ranked players in an explicit league"),
+        ("game-support", "load live documentation and installed research support for a league"),
+        ("player-champion", "read an explicit player's champion in an explicit league"),
+        ("player-result", "read an explicit player's latest result in an explicit league"),
+    ):
+        sub = command(commands, name, _discovery, help_text)
+        if name != "discover-leagues":
+            sub.add_argument("--league", required=True)
+        if name in ("discover-leagues", "league-players"):
+            sub.add_argument("--query", default="")
+            sub.add_argument("--offset", type=int, default=0)
+            sub.add_argument("--limit", type=int, default=20)
+        if name in ("player-champion", "player-result"):
+            sub.add_argument("--player", required=True)
 
     command(commands, "whoami", _whoami, "the credential's identity (must be our Player)")
     command(commands, "credits", _credits, "credit balance, when readable (A10)")
