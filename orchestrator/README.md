@@ -129,6 +129,12 @@ cards with an unacknowledged actionable event or comment in that reconcile. Nati
 protections remain in effect. Once the plugin table exists, gate reads do no schema writes,
 so a card creation holding its write lock during Git fetch does not block the gate.
 
+Explicit user-requested submissions use `submit_requested_version(version, strategy, request)`
+after a researcher builds, smoke-tests, uploads with `upload-build` and integrates the version
+and strategy. This uses the normal identity, league, permit and recovery workflow, records the
+user's request and verifies the source matches the uploaded build. It claims no statistical
+improvement. Autonomous research continues to require a reviewed promote decision.
+
 For a fresh installation, have a researcher upload the starter with `softmax upload-build`
 and integrate its version record, then call `bootstrap_champion(version="V-...")` to submit it.
 On a champion conflict, pause research with `control_write`, explain the disagreement to the

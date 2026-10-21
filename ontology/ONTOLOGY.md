@@ -57,7 +57,8 @@ until evidence meets its `revise_if`.
 - **Candidate**: an experiment's uploaded build (its candidate binding).
 - **Promotion** `P-`: submitting a candidate, owned by the orchestrator. Stages `intent`,
   `submitted`, `recorded`, `published`; or `aborted`, `rejected`. One at a time. Kinds
-  `experiment`, `bootstrap` (the game's unevaluated starter policy on a fresh install) and
+  `experiment`, `requested` (an explicit user submission without an improvement claim),
+  `bootstrap` (the game's unevaluated starter policy on a fresh install) and
   `accepted` (a human confirmed the league's current champion as the loop's).
 - **Champion conflict**: the league shows a champion the loop did not record. Research that
   depends on the baseline pauses until a human decides.

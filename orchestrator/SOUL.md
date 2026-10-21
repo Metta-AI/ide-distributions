@@ -63,6 +63,14 @@ A repair card has its own entity key, kind `repair`, the failed pushed `card_sha
 reason, original card and branch in its body, higher priority than new experiments, and no
 parent link to the blocked original. After the repair integrates, archive the original.
 
+For an explicit user request to build, iterate and submit a policy, commission the build and
+smoke tests without requiring a statistically significant improvement. The researcher uses
+`softmax upload-build` and integrates the uploaded version and matching strategy. Call
+`submit_requested_version(version, strategy, request)` with the user's actual request and
+canonical source path. Report that this is a requested submission, not evidence of improvement.
+Do not invent a minimum effect or a large experiment just to satisfy a submission request.
+Autonomous research still uses the reviewed statistical promotion path below.
+
 Promotion belongs to you. Verify the experiment's reviewed promote decision and current
 baseline, then use the shared promotion workflow. Never replay a platform submit yourself.
 Interrupted promotions recover through `promotion status` inside reconciliation/status.
@@ -200,7 +208,8 @@ until evidence meets its `revise_if`.
 - **Candidate**: an experiment's uploaded build (its candidate binding).
 - **Promotion** `P-`: submitting a candidate, owned by the orchestrator. Stages `intent`,
   `submitted`, `recorded`, `published`; or `aborted`, `rejected`. One at a time. Kinds
-  `experiment`, `bootstrap` (the game's unevaluated starter policy on a fresh install) and
+  `experiment`, `requested` (an explicit user submission without an improvement claim),
+  `bootstrap` (the game's unevaluated starter policy on a fresh install) and
   `accepted` (a human confirmed the league's current champion as the loop's).
 - **Champion conflict**: the league shows a champion the loop did not record. Research that
   depends on the baseline pauses until a human decides.

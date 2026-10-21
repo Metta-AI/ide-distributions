@@ -85,7 +85,11 @@ manager = get_plugin_manager()
 manager.discover_and_load()
 plugin = next(p for p in manager.list_plugins() if p['name'] == 'orchestrator')
 assert not plugin['error'], plugin
-assert plugin['enabled'] and plugin['tools'] == 23, plugin
+from orchestrator.plugin import TOOLS
+from tools.registry import registry
+assert plugin['enabled'] and plugin['tools'] == len(TOOLS), plugin
+schema = registry.get_schema('submit_requested_version')
+assert set(schema['parameters']['required']) == {'version', 'strategy', 'request'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 print(json.dumps({'ok': True}))
 """
