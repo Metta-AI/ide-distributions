@@ -46,7 +46,9 @@ jobs:
       - run: uv run pytest -q
       - name: Validate real Hermes task admission and profile installation
         if: matrix.distribution == 'orchestrator'
-        run: uv run pytest -q -m hermes tests/test_hermes.py
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          uv run pytest -q -m hermes tests/test_hermes.py
       - name: Validate real Hermes plugin registration
         if: matrix.distribution == 'play'
         run: uv run pytest -q -m hermes tests/test_hermes.py
