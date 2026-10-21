@@ -16,8 +16,11 @@ Container coworlds are not supported yet.
   that return values, or file and network access. `AND` and `OR` evaluate both sides, so nest
   `IF` blocks to guard an array index or a division. The game runs the whole file from the top
   once per hero decision, 24 times a second; globals persist, so write no endless loop. The
-  limits are 64 KiB of source, 20,000 instructions per decision and 256 globals; going past
-  them disables that hero. Only the host calls the starter uses are safe to call.
+  limits are 64 KiB of source, 20,000 compiled and 20,000 executed instructions per decision,
+  a work budget of 50,000 units per decision (`walkTo` costs 800, so about 60 calls), 256
+  globals and 32 arrays holding 4,096 elements in total. A file that is too big or does not
+  compile fails the whole practice episode; a runtime error or an exhausted budget disables
+  that hero. Spell host calls exactly as `starter/baseline.bas` or the host-surface doc does.
 - You cannot run the game, so check the file before you finish: read it once as the compiler
   would (every `IF`, `WHILE` and `SUB` closed, every name and host call spelled as in
   `starter/baseline.bas`), confirm it is under 64 KiB, and diff it against the starter or the
