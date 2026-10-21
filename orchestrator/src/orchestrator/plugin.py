@@ -124,7 +124,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
+        "Save an answer, then unblock the card without changing its configuration. An already integrated card returns integrated_card_requires_replacement; follow the returned recovery instruction (fresh replacement for normal cards, close an integrated repair). For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
