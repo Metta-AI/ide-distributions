@@ -304,6 +304,14 @@ class SoftmaxClient:
 
     # --- league reads (read-only) ----------------------------------------
 
+    def latest_league_result(self, player_id: str, league_id: str) -> dict | None:
+        """Newest recorded league episode for this player, including round and replay evidence."""
+        league = urllib.parse.quote(league_id, safe="")
+        player = urllib.parse.quote(player_id, safe="")
+        return self._cli.api_get_json(
+            f"/observatory/v2/leagues/{league}/players/{player}/latest-replay"
+        )
+
     def league_episodes(self, league_id: str, limit: int) -> Iterator[dict]:
         """Episodes in listing order, as they arrive. Each episode costs two coworld calls
         (about 2 s on the box, mostly CLI start-up), so ``LEAGUE_FETCH_WORKERS`` threads fetch
