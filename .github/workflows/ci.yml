@@ -50,3 +50,6 @@ jobs:
       - name: Validate real Hermes plugin registration
         if: matrix.distribution == 'play'
         run: uv run pytest -q -m hermes tests/test_hermes.py
+      - name: Validate retained researcher completion schema
+        if: matrix.distribution == 'researcher'
+        run: uv run pytest -q -m hermes tests/integration/test_install.py::test_guard_exports_typed_native_completion_after_retained_update

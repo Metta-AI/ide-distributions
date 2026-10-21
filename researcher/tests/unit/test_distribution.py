@@ -59,17 +59,12 @@ def _guard():
     return module
 
 
-def test_guard_registers_one_hook_and_its_manifest_names_it():
-    hooks = {}
-
-    class Context:
-        def register_hook(self, name, callback):
-            hooks[name] = callback
-
-    _guard().register(Context())
-    assert set(hooks) == {"pre_tool_call"}
+def test_guard_manifest_names_its_hook_and_tool():
     manifest = yaml.safe_load((GUARD.parent / "plugin.yaml").read_text())
-    assert manifest["name"] == "researcher_guard" and manifest["provides_hooks"] == ["pre_tool_call"]
+    assert manifest["name"] == "researcher_guard" and manifest["provides_hooks"] == [
+        "pre_tool_call"
+    ]
+    assert manifest["provides_tools"] == ["kanban_complete"]
 
 
 @pytest.mark.parametrize("tool", ["kanban_create", "kanban_link", "kanban_schedule"])
@@ -78,9 +73,7 @@ def test_guard_blocks_card_creation(tool):
     assert verdict["action"] == "block" and "orchestrator" in verdict["message"]
 
 
-@pytest.mark.parametrize(
-    "tool", ["kanban_show", "kanban_comment", "kanban_block", "read_file"]
-)
+@pytest.mark.parametrize("tool", ["kanban_show", "kanban_comment", "kanban_block", "read_file"])
 def test_guard_allows_the_card_lifecycle(tool):
     assert _guard().pre_tool_call(tool_name=tool, args={}) is None
 

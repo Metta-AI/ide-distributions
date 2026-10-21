@@ -14,6 +14,7 @@ pushes ``main`` from Python is not caught here; the next integrate's overlap che
 the unexpected commit (risk K11).
 """
 
+import copy
 import json
 import os
 import re
@@ -57,7 +58,7 @@ def completion_problem(args, read_record):
         )
     outcome = metadata.get("outcome")
     if outcome not in {"done", "partial", "dropped", "failed", "blocked"}:
-        return "metadata.outcome must name the research outcome."
+        return "metadata.outcome must be one of: done, partial, dropped, failed, blocked."
     journal = metadata.get("journal")
     if not isinstance(journal, str) or not journal.startswith("ar://journal/J-"):
         return "metadata.journal must reference the integrated journal."
@@ -69,7 +70,7 @@ def completion_problem(args, read_record):
         return "The canonical journal must belong to this task and have the same outcome as the handoff."
     if (
         outcome == "done"
-        and "version_id" in metadata
+        and metadata.get("version_id")
         and not metadata.get("platform_policy_version_id")
     ):
         return "A completed upload needs its platform policy version receipt; otherwise report partial or blocked."
@@ -133,4 +134,87 @@ def pre_tool_call(tool_name=None, args=None, **kwargs):
 
 
 def register(ctx) -> None:
+    # Keep native ownership, completion, and artifact handling. Only specialize the
+    # model-facing contract through Hermes' supported, profile-scoped override.
+    import tools.kanban_tools  # noqa: F401
+    from tools.registry import registry
+
+    native = registry.get_entry("kanban_complete")
+    schema = copy.deepcopy(native.schema)
+    schema["description"] = (
+        "Complete this research task after integration. Supply a findings-first summary and "
+        "metadata with the canonical journal and matching outcome. Uploaded versions require "
+        "version_id and platform_policy_version_id receipts. Use awaiting for pending experience "
+        "requests, credits, or permits. Native worker ownership and completion checks still apply."
+    )
+    schema["parameters"]["properties"]["metadata"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["outcome", "journal"],
+        "properties": {
+            "outcome": {
+                "type": "string",
+                "enum": ["done", "partial", "dropped", "failed", "blocked"],
+            },
+            "journal": {
+                "type": "string",
+                "description": "Integrated canonical ar://journal/J-... receipt.",
+            },
+            "records_changed": {"type": "array", "items": {"type": "string"}},
+            "merged": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": {"card_sha": {"type": "string"}, "main_sha": {"type": "string"}},
+                "required": ["card_sha", "main_sha"],
+            },
+            "experiment": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "decision": {"type": ["string", "null"]},
+                },
+                "required": ["id", "status", "decision"],
+            },
+            "awaiting": {
+                "anyOf": [
+                    {"type": "null"},
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["xp"],
+                        "properties": {"xp": {"type": "array", "items": {"type": "string"}}},
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["credits"],
+                        "properties": {"credits": {"type": "boolean", "const": True}},
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["permit"],
+                        "properties": {"permit": {"type": "string"}},
+                    },
+                ],
+            },
+            "next": {"type": ["string", "null"]},
+            "version_id": {"type": ["string", "null"]},
+            "platform_policy_version_id": {"type": ["string", "null"]},
+        },
+    }
+    schema["parameters"]["required"] = ["task_id", "summary", "metadata"]
+    ctx.register_tool(
+        name="kanban_complete",
+        toolset=native.toolset,
+        schema=schema,
+        handler=native.handler,
+        check_fn=native.check_fn,
+        override=True,
+        requires_env=native.requires_env,
+        is_async=native.is_async,
+        emoji=native.emoji,
+    )
     ctx.register_hook("pre_tool_call", pre_tool_call)

@@ -86,7 +86,9 @@ def test_a_second_researcher_clones_the_same_canonical(install):
     write_profile_env(second, install.remote)
     data = json.loads(bootstrap(install, second).stdout.strip().splitlines()[-1])["data"]
     assert any("cloned" in action for action in data["actions"]), data
-    assert git(second / "workspace", "rev-parse", "HEAD") == git(install.remote, "rev-parse", "main")
+    assert git(second / "workspace", "rev-parse", "HEAD") == git(
+        install.remote, "rev-parse", "main"
+    )
 
 
 def test_hermes_discovers_the_guard_plugin(install):
@@ -116,3 +118,62 @@ def test_update_preserves(install):
     assert f"RESEARCH_CLI={shim}" in (profile / ".env").read_text().splitlines()
     assert shim.is_file() and os.access(shim, os.X_OK)
     assert FAKE_CREDENTIAL  # the profile .env written by the fixture survives as user state
+
+
+def test_guard_exports_typed_native_completion_after_retained_update(install):
+    profile = install.profile_dir
+    config_path = profile / "config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["plugins"].pop("entries")  # Existing release predates the schema override.
+    config["agent"]["max_turns"] = 77
+    config_path.write_text(yaml.safe_dump(config))
+    (profile / "memories").mkdir(exist_ok=True)
+    (profile / "memories/MEMORY.md").write_text("Retain this memory.\n")
+    (profile / "workspace").mkdir(exist_ok=True)
+    (profile / "workspace/user.txt").write_text("Retain this file.\n")
+    (profile / "sessions").mkdir(exist_ok=True)
+    (profile / "sessions/history.jsonl").write_text('{"role":"user","content":"Retain chat"}\n')
+    install.hermes("profile", "update", install.profile, "-y")
+    assert yaml.safe_load(config_path.read_text()) == config
+    # Hosted preparation applies this managed opt-in, rather than replacing config.
+    install.hermes(
+        "-p",
+        install.profile,
+        "config",
+        "set",
+        "plugins.entries.researcher_guard.allow_tool_override",
+        "true",
+    )
+    code = """
+import json
+import tools.kanban_tools
+from hermes_cli.plugins import get_plugin_manager
+from tools.registry import registry
+native = registry.get_entry('kanban_complete')
+manager = get_plugin_manager()
+manager.discover_and_load()
+plugin = next(p for p in manager.list_plugins() if p['name'] == 'researcher_guard')
+assert not plugin['error'], plugin
+entry = registry.get_entry('kanban_complete')
+assert entry.handler is native.handler and entry.check_fn is native.check_fn
+metadata = entry.schema['parameters']['properties']['metadata']
+assert metadata['properties']['outcome']['enum'] == ['done','partial','dropped','failed','blocked']
+assert set(metadata['required']) == {'outcome', 'journal'}
+assert native.schema['parameters']['properties']['metadata'] != metadata
+print(json.dumps({'ok': True}))
+"""
+    result = subprocess.run(
+        [hermes_python(), "-c", code],
+        env=install.profile_env(HERMES_HOME=str(profile)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert yaml.safe_load(config_path.read_text())["agent"]["max_turns"] == 77
+    assert (profile / "memories/MEMORY.md").read_text() == "Retain this memory.\n"
+    assert (profile / "workspace/user.txt").read_text() == "Retain this file.\n"
+    assert (
+        profile / "sessions/history.jsonl"
+    ).read_text() == '{"role":"user","content":"Retain chat"}\n'

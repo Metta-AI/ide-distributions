@@ -81,3 +81,86 @@ def test_completion_reads_routed_profile_workspace(monkeypatch, tmp_path):
         )
         is None
     )
+
+
+def test_registered_completion_schema_exposes_guard_contract(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import jsonschema
+    import pytest
+
+    # Native free-form metadata cannot describe the researcher's required fields.
+    native = SimpleNamespace(
+        schema={
+            "name": "kanban_complete",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "metadata": {"type": "object"},
+                },
+                "required": [],
+            },
+        },
+        toolset="kanban",
+        handler=object(),
+        check_fn=object(),
+        requires_env=[],
+        is_async=False,
+        emoji="",
+    )
+    monkeypatch.setitem(sys.modules, "tools", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "tools.kanban_tools", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "tools.registry",
+        SimpleNamespace(registry=SimpleNamespace(get_entry=lambda name: native)),
+    )
+    registration = {}
+    hooks = {}
+    ctx = SimpleNamespace(
+        register_tool=lambda **kw: registration.update(kw),
+        register_hook=lambda name, fn: hooks.update({name: fn}),
+    )
+    module.register(ctx)
+    schema = registration["schema"]["parameters"]
+    jsonschema.Draft202012Validator.check_schema(schema)
+    assert registration["handler"] is native.handler
+    assert registration["check_fn"] is native.check_fn
+    assert registration["override"] is True
+    assert hooks["pre_tool_call"] is module.pre_tool_call
+    assert native.schema["parameters"]["properties"]["metadata"] == {"type": "object"}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"task_id": "t_upload", "summary": "Built", "metadata": {}}, schema)
+    handoff = {
+        "task_id": "t_upload",
+        "summary": "Built and uploaded",
+        "metadata": {
+            "outcome": "done",
+            "journal": "ar://journal/J-test",
+            "version_id": "V-local",
+            "platform_policy_version_id": "policy:v1",
+            "experiment": None,
+            "awaiting": None,
+        },
+    }
+    jsonschema.validate(handoff, schema)
+    assert (
+        module.completion_problem(
+            handoff,
+            lambda _: {"ok": True, "data": {"meta": {"card": "t_upload", "outcome": "done"}}},
+        )
+        is None
+    )
+    # Strict providers may emit null for optional upload fields on non-upload tasks.
+    handoff["metadata"].update(version_id=None, platform_policy_version_id=None)
+    jsonschema.validate(handoff, schema)
+    assert (
+        module.completion_problem(
+            handoff,
+            lambda _: {"ok": True, "data": {"meta": {"card": "t_upload", "outcome": "done"}}},
+        )
+        is None
+    )
