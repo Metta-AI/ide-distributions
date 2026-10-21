@@ -163,10 +163,11 @@ the generated artifact and both returned version IDs; promotion remains a separa
 ## Shared IDE components and draft notes
 
 The `ide_workspace` tool calls the hosted IDE's MCP server, authenticating directly with the existing scoped player credential.
-Set `SOFTMAX_IDE_URL=https://softmax.com/ide` to call the shared `/ide/mcp` endpoint from the installed
-profile environment. Until configured it returns `kind: unavailable`; existing research tools are unchanged.
-Deploy the Metta workspace SDK and its database migration before enabling this setting. This change alone does not
-enable the endpoint on retained hosts. Metta's `preserve` release workflow polls this repository's main branch; merging can trigger an image release.
+The endpoint is `/ide/mcp` on the existing `COGAMES_API_URL` origin (normally `https://softmax.com`).
+No new profile environment setting or retained-workspace configuration migration is needed.
+Deploy and qualify the Metta workspace SDK, migration and public route before merging this distribution change:
+Metta's `preserve` release workflow polls this repository's main branch, so merging can trigger an image release.
+Running hosts adopt that image through the existing explicit Pause/Resume path, preserving their storage.
 
 The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
 revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.

@@ -30,7 +30,3 @@ env_requires:
   - name: RESEARCH_CANONICAL
     required: true
     description: Absolute path to the shared bare canonical repository.
-
-  - name: SOFTMAX_IDE_URL
-    required: false
-    description: HTTPS IDE mount exposing the shared workspace MCP API, for example https://softmax.com/ide. Leave unset until that deployment is qualified.

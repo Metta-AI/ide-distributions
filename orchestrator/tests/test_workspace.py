@@ -11,7 +11,7 @@ def context(credential="cga_fixture"):
     return Context(
         Path("/unused"),
         {
-            "SOFTMAX_IDE_URL": "https://softmax.com/ide",
+            "COGAMES_API_URL": "https://softmax.com/api",
             "SOFTMAX_PLAYER_CREDENTIAL": credential,
         },
     )
@@ -65,12 +65,18 @@ def test_preserves_server_refusals(monkeypatch):
 )
 def test_rejects_unsafe_endpoint(url):
     ctx = context()
-    ctx.env["SOFTMAX_IDE_URL"] = url
+    ctx.env["COGAMES_API_URL"] = url
     with pytest.raises(ValueError):
         Workspace(ctx)
 
 
-def test_unconfigured_endpoint_is_explicit():
+def test_endpoint_uses_existing_platform_origin():
     ctx = context()
-    del ctx.env["SOFTMAX_IDE_URL"]
-    assert Workspace(ctx).ide_workspace("call", {"method": "layout.read"})["kind"] == "unavailable"
+    ctx.env["COGAMES_API_URL"] = "https://preview.softmax.com:8443/api/"
+    assert Workspace(ctx).base == "https://preview.softmax.com:8443/ide"
+
+
+def test_default_platform_endpoint():
+    ctx = context()
+    del ctx.env["COGAMES_API_URL"]
+    assert Workspace(ctx).base == "https://softmax.com/ide"

@@ -9,9 +9,8 @@ from .context import Context
 
 class Workspace:
     def __init__(self, context: Context):
-        self.base = context.env.get("SOFTMAX_IDE_URL", "").rstrip("/")
-        url = urlsplit(self.base)
-        if self.base and (
+        url = urlsplit(context.env.get("COGAMES_API_URL", "https://softmax.com/api"))
+        if (
             url.scheme != "https"
             or not url.hostname
             or url.username
@@ -19,7 +18,10 @@ class Workspace:
             or url.query
             or url.fragment
         ):
-            raise ValueError("SOFTMAX_IDE_URL must be an HTTPS application URL")
+            raise ValueError(
+                "COGAMES_API_URL must be an HTTPS URL without credentials, query or fragment"
+            )
+        self.base = f"{url.scheme}://{url.netloc}/ide"
         credential = context.env["SOFTMAX_PLAYER_CREDENTIAL"]
         self.token = json.loads(credential)["token"] if credential.startswith("{") else credential
 
@@ -31,6 +33,7 @@ class Workspace:
                 "Authorization": "Bearer " + token,
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
+                "User-Agent": "ide-orchestrator/0.1",
             },
             method="POST",
         )
@@ -38,11 +41,6 @@ class Workspace:
             return None if response.status == 202 else json.load(response)
 
     def ide_workspace(self, request_id, operation):
-        if not self.base:
-            return {
-                "kind": "unavailable",
-                "reason": "This profile has no configured SOFTMAX_IDE_URL.",
-            }
         initialized = self.post(
             "/mcp",
             self.token,
