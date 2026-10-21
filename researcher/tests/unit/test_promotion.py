@@ -298,3 +298,104 @@ def test_a_rejected_champion_publish_is_redone_with_the_strategy(board, monkeypa
     assert report["in_flight"] is None
     champion = gitops.show(board.origin, "main", promotion.CHAMPION_PATH)
     assert champion.strip() == f"# Candidate for {experiment}".encode()
+
+
+@pytest.mark.parametrize("seed_champion", [False, True])
+@pytest.mark.parametrize("permit", [False, True])
+def test_requested_version_submission_needs_no_experiment_and_preserves_strategy(tmp_path, seed_champion, permit):
+    board = ResearchBoard(tmp_path, seed_champion=seed_champion)
+    version, source_path, source = uploaded_requested_version(board)
+    path = board.canonical / source_path
+    sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"}) if permit else board.sm
+    if permit:
+        with pytest.raises(Refused) as refused:
+            promotion.submit_requested(
+                board.canonical, sm, version, source_path,
+                "Build and submit this policy to my league", LEAGUE, PLAYER,
+            )
+        assert refused.value.reason == "permit_required"
+        waiting = promotion.in_flight(board.canonical)
+        state = fake_state(board)
+        state["answers"] = {waiting.waiting["ask"]: "yes"}
+        write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
+        result = promotion.status(board.canonical, sm, LEAGUE, PLAYER)["in_flight"]
+    else:
+        result = promotion.submit_requested(
+            board.canonical, sm, version, source_path,
+            "Build and submit this policy to my league", LEAGUE, PLAYER,
+        )
+    assert result["kind"] == "requested" and result["stage"] == "submitted"
+    assert result["experiment"] is None
+    path.write_text("# Later edit\n")
+    gitops.commit_all(board.canonical, "later source edit")
+    gitops.git(board.canonical, "push", "-q", "origin", "main")
+    report = promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
+    assert report["champion"]["platform_policy_version_id"] == PV_A
+    assert gitops.show(board.origin, "main", promotion.CHAMPION_PATH) == source
+    assert not board.store.find("experiment")
+    before = board.sm.submissions(PLAYER)
+    repeated = promotion.submit_requested(
+        board.canonical, board.sm, version, f"promotions/sources/{result['id']}.md",
+        "Build and submit this policy to my league", LEAGUE, PLAYER,
+    )
+    assert repeated["id"] == result["id"] and repeated["stage"] == "published"
+    assert board.sm.submissions(PLAYER) == before
+
+
+def uploaded_requested_version(board):
+    import hashlib
+
+    source = b"# Explicitly requested candidate\n"
+    source_path = "strategy/requested/STRATEGY.md"
+    path = board.canonical / source_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(source)
+    version = board.store.create("version", {
+        "parents": [], "strategy_sha256": hashlib.sha256(source).hexdigest(),
+        "source_commit": "2" * 40, "artifact_sha256": "3" * 64,
+        "policy_name": "requested", "build": {"source_path": source_path},
+    })
+    board.store.add_event(version, "uploaded", {"policy_version_id": PV_A})
+    gitops.commit_all(board.canonical, "uploaded requested version")
+    gitops.git(board.canonical, "push", "-q", "origin", "main")
+    return version, source_path, source
+
+
+@pytest.mark.parametrize("fault,reason", [("source", "strategy_mismatch"), ("request", "missing_request")])
+def test_requested_submission_refuses_invalid_provenance_before_platform_write(board, fault, reason):
+    version, source_path, _ = uploaded_requested_version(board)
+    if fault == "source":
+        (board.canonical / source_path).write_text("# Wrong build\n")
+        gitops.commit_all(board.canonical, "wrong source")
+        gitops.git(board.canonical, "push", "-q", "origin", "main")
+    before = board.sm.submissions(PLAYER)
+    with pytest.raises(Refused) as refused:
+        promotion.submit_requested(
+            board.canonical, board.sm, version, source_path,
+            "" if fault == "request" else "Submit this policy", LEAGUE, PLAYER,
+        )
+    assert refused.value.reason == reason
+    assert promotion.in_flight(board.canonical) is None
+    assert board.sm.submissions(PLAYER) == before
+
+
+def test_requested_submission_recovers_lost_response_without_resubmitting(board, monkeypatch):
+    version, source_path, source = uploaded_requested_version(board)
+    send = board.sm.submit
+    before = board.sm.submissions(PLAYER)
+
+    def lost_response(*args):
+        send(*args)
+        raise RuntimeError("connection lost after server accepted submission")
+
+    monkeypatch.setattr(board.sm, "submit", lost_response)
+    with pytest.raises(RuntimeError, match="connection lost"):
+        promotion.submit_requested(
+            board.canonical, board.sm, version, source_path, "Submit this policy", LEAGUE, PLAYER,
+        )
+    assert promotion.in_flight(board.canonical).stage == "intent"
+    promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
+    report = promotion.status(board.canonical, board.sm, LEAGUE, PLAYER)
+    assert report["champion"]["platform_policy_version_id"] == PV_A
+    assert len(board.sm.submissions(PLAYER)) == len(before) + 1
+    assert gitops.show(board.origin, "main", promotion.CHAMPION_PATH) == source

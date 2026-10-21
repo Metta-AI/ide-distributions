@@ -19,6 +19,7 @@ provides_tools:
   - records_show
   - plan_write
   - control_write
+  - submit_requested_version
   - promotion_submit
   - bootstrap_champion
   - accept_champion

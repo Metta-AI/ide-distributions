@@ -44,6 +44,8 @@ approvals:
     - "hermes kanban link*"
     - "hermes kanban --board * create*"
     - "hermes kanban --board * link*"
+    - "*promotion submit-requested"
+    - "*promotion submit-requested *"
     - "*promotion submit"
     - "*promotion submit *"
     - "*promotion bootstrap"
