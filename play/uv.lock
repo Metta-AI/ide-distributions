@@ -449,6 +449,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "coworld" },
+    { name = "pydantic" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
     { name = "softmax-cli" },
@@ -464,6 +465,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coworld", specifier = "==0.1.58" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
     { name = "softmax-cli", specifier = "==0.26.38" },

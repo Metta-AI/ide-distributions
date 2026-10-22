@@ -75,8 +75,12 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `promotion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow; bootstrap requires the integrated starter version record (`V-...`). |
 | `accept_champion()` | Record the league's current champion after the user confirms. |
 | `workspace_integrate(branch)` | Shared integration of a pushed card/repair branch. |
-| `xp_status(experiment)`, `credits`, `leaderboard` | Shared platform reads. |
-| `latest_league_result` | Latest recorded match for this player in the current league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
+| `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
+| `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
+| `game_support(league_id)` | Load the live participation guide, Coworld manifest, and installed research guide for the selected league. |
+| `leaderboard(league_id, player_id)` | Read the selected player's current champion; never defaults to the workspace carrier. |
+| `xp_status(experiment)`, `credits` | Shared research platform reads. |
+| `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
 
 Describe the objective, inputs, constraints and completion criteria in the card body.
 Omit `skills` by default: the researcher discovers and loads its own procedures, or reports
@@ -129,6 +133,41 @@ For an explicit coach build/upload-only request, assign the researcher the `cand
 without an experiment, evaluation or league submission. Require the intended source change in
 the generated artifact and both returned version IDs; promotion remains a separate authorized action.
 
+## Conversation context and game support
+
+Conversation intent takes precedence over current UI and workspace hints. Clients should
+supply owned-player IDs/names and current selections near the start of each turn. They are
+context, not a fixed binding or credential grant. Discovery and match reads take explicit
+IDs and never write profile environment, canonical records or running cards.
+
+`game_support` loads published documentation on demand. An installed contract is matched by
+its declared league or published Coworld name, not by guessed directory paths. Missing bindings are reported separately
+from platform availability. This permits research and match analysis for games without a
+local build/evaluation adapter. The existing automated promotion loop still uses its installed
+game contract and scoped credential; using a different player for writes requires the proper
+credential and authorization, not a prompt override.
+
+Run `tests/test_platform_discovery.py` against a real local Observatory fixture using
+`COGAMES_API_URL` (the frontend proxy), `SOFTMAX_PLAYER_CREDENTIAL`,
+`RESEARCH_TEST_PLAYER`, and two comma-separated `RESEARCH_TEST_LEAGUES`. Use a credential
+player different from the research player. This system test loads both games and switches
+back without an installed default game, creating a workspace, or changing profile settings.
+It is skipped without an explicit fixture and refuses non-loopback servers.
+
+Before rollout, evaluate complete conversations for these cases:
+
+- Empty desktop projects and board, existing hosted policy/matches: discover and cite activity.
+- UI hints name one game; the user asks about another: use the requested game's support.
+- User switches games and then returns: explicit tool targets follow each request.
+- Workspace credential and owned default player differ: resolve the intended player from context.
+- Multiple plausible owned players: ask one focused question after discovery.
+- Published game has no installed research adapter: read its guide and identify the missing operation.
+- Platform read fails: report an unavailable read, never infer no activity or require a new recording.
+
+Score each conversation by correct target, cited live evidence, relevant support, and preserved
+write authority (all four required to pass). Report completed cases, errors and timeouts
+separately. The deterministic platform test verifies tool behavior; it does not measure model
+selection or instruction-following quality. These conversation evaluations remain a rollout gate.
 
 ## Shared IDE components and draft notes
 

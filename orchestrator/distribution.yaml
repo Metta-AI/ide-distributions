@@ -1,6 +1,6 @@
 name: orchestrator
 version: 0.1.0
-description: Research lead for one player and game, coordinating native Hermes Kanban workers.
+description: Conversation-led research and platform discovery, coordinating native Hermes Kanban workers.
 hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
@@ -19,11 +19,11 @@ env_requires:
     description: Softmax API server.
   - name: RESEARCH_PLAYER_ID
     required: true
-    description: Player ID for this research team.
+    description: Credential player for authorized research writes; not the conversation subject.
   - name: RESEARCH_GAME
     required: false
     default: gota
-    description: Game directory name.
+    description: Installed automation default; conversation discovery uses explicit league and player IDs.
   - name: RESEARCH_WORKSPACE
     required: true
     description: Absolute path to this profile's clone of the canonical repository.

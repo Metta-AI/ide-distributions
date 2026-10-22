@@ -27,5 +27,8 @@ provides_tools:
   - xp_status
   - budget_limit
   - credits
+  - discover_leagues
+  - league_players
+  - game_support
   - leaderboard
   - latest_league_result

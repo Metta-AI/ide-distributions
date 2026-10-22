@@ -71,3 +71,20 @@ def test_sync_regenerates_every_copy_identically(tmp_path):
     )
     assert result.stdout.strip() == "copies are up to date"
     assert not (tmp_path / "play/SOUL.md").read_text().count("ontology")
+
+
+def test_play_lead_continues_the_loop_after_the_builder_card():
+    soul = (PROFILES["play"] / "SOUL.md").read_text()
+    for needle in (
+        "$PLAY_WORKSPACE",
+        "word for word",
+        "ready to upload",
+        "subscribed: true",
+        "[kanban] Task",
+        "continue on your own",
+        "practice_status",
+        "program_release",
+    ):
+        assert needle in soul, needle
+    steps = [soul.index(name) for name in ("kanban_show", "program_upload", "practice_request", "practice_status")]
+    assert steps == sorted(steps)
