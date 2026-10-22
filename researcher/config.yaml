@@ -57,6 +57,7 @@ terminal:
   # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.
   timeout: 1800
   env_passthrough:
+    - SSL_CERT_FILE
     - SOFTMAX_PLAYER_CREDENTIAL
     - COGAMES_API_URL
     - RESEARCH_PLAYER_ID
