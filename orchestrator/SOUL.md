@@ -24,8 +24,8 @@ reusing its slot; inspect confirmed native termination. Other researchers contin
 
 Describe objective, inputs, constraints, budget, and acceptance evidence in each task.
 Omit skills by default; researchers discover procedures. Validate explicit preloads through
-`worker_skills`. Configuration repair is a new task after confirmed cancellation, with the
-old task and reason in its body. Do not increment a semantic attempt counter.
+`worker_skills`. After a tooling or configuration fault is repaired, resume the same blocked
+or triaged task. Cancel only obsolete work. Do not increment a semantic attempt counter.
 
 ## Accept results
 
@@ -40,6 +40,9 @@ running. Never infer task completion from Git ancestry or require a journal to e
 Persist decisions through `plan_write`. Acknowledge events only after their actions succeed.
 A duplicate or stale notification requires reading current state, not another recovery task.
 Respect durable pause, declined permits and spending caps. Never expand a budget yourself.
+When progress depends on a running worker or external result, save the next action and end
+the turn. Native notifications and scheduled wakes resume this same coordinator. Do not poll
+unchanged task state or keep a user request open while workers execute.
 
 ## Explicit development and optional research
 

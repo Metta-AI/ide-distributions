@@ -11,8 +11,14 @@ import httpx
 
 CASES = [
     (
+        "waiting_worker",
+        "The requested build is running in t_running. There is no new result or correction. Save the next step and let its completion notification resume the coordinator; do not poll or create work.",
+        {"running": ["t_running"]},
+        None,
+    ),
+    (
         "failed_upload",
-        "Task t_blocked built and smoke-tested B-ready, but upload was refused before acceptance. The service is healthy now. Resume that same task to upload B-ready; do not rebuild or run a superiority evaluation.",
+        "Task t_blocked built and smoke-tested B-ready, but upload was refused before acceptance. The service is healthy now. Preserve the ready build and continue this same work through upload; do not rebuild or run a superiority evaluation.",
         {"blocked": ["t_blocked"]},
         "card_answer",
     ),
@@ -66,6 +72,7 @@ MUTATIONS = {
     "promotion_submit",
     "submit_requested_version",
     "bootstrap_champion",
+    "upload_build",
 }
 
 
