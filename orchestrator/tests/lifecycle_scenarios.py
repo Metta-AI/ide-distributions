@@ -64,11 +64,19 @@ def main():
         TestCase().assertRaisesRegex(RuntimeError, "crash after native creation"),
     ):
         board.card_create(**interrupted)
-    recovered = board.card_create(**interrupted)["card"]
-    assert board.card_create(**interrupted)["card"]["id"] == recovered["id"]
+    source_run = "run_" + "a" * 32
+    with patch("tools.approval_context.get_current_session_key", return_value=source_run):
+        recovered = board.card_create(**interrupted)["card"]
+    with patch("tools.approval_context.get_current_session_key", return_value="run_" + "b" * 32):
+        assert board.card_create(**interrupted)["card"]["id"] == recovered["id"]
     with closing(connection()) as conn:
         assert len(kb.list_tasks(conn)) == 1
-        assert kb.get_task(conn, recovered["id"]).status == "ready"
+        saved = kb.get_task(conn, recovered["id"])
+        assert saved.status == "ready"
+        marker = "\n\nCard context:\n```json\n"
+        original_body, metadata = saved.body.rsplit(marker, 1)
+        assert original_body == interrupted["body"]
+        assert json.loads(metadata.split("\n```", 1)[0]) == {"source_run_id": source_run}
     board.card_close(recovered["id"], "archived")
     triaged = board.card_create(**{**args, "command_id": "triage:resume"})["card"]
     for _ in range(kb.BLOCK_RECURRENCE_LIMIT):

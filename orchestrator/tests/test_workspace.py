@@ -80,3 +80,59 @@ def test_default_platform_endpoint():
     ctx = context()
     del ctx.env["COGAMES_API_URL"]
     assert Workspace(ctx).base == "https://softmax.com/ide"
+
+
+def test_discovers_authenticated_deployed_contract(monkeypatch):
+    calls = []
+    schema = {
+        "jsonrpc": "2.0",
+        "id": "workspace-schema",
+        "result": {
+            "tools": [
+                {
+                    "name": "ide_workspace",
+                    "description": "Deployed instructions",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "operation": {
+                                "type": "object",
+                                "required": ["leagueId"],
+                                "properties": {"method": {"const": "projects.fileUpload"}},
+                            }
+                        },
+                    },
+                }
+            ]
+        },
+    }
+
+    def post(self, path, token, body):
+        calls.append((path, token, body))
+        return schema if body["method"] == "tools/list" else {"result": {}}
+
+    monkeypatch.setattr(Workspace, "post", post)
+    result = Workspace(context()).ide_workspace_schema()
+    assert result == schema
+    assert [body["method"] for _, _, body in calls] == [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+    ]
+    assert all((path, token) == ("/mcp", "cga_fixture") for path, token, _ in calls)
+
+
+@pytest.mark.parametrize("method", ["ide_workspace_schema", "ide_workspace"])
+def test_initialization_failure_stops_request(monkeypatch, method):
+    calls = []
+    error = {"code": -32603, "message": "Identity verification unavailable"}
+
+    def post(self, path, token, body):
+        calls.append(body["method"])
+        return {"error": error}
+
+    monkeypatch.setattr(Workspace, "post", post)
+    client = Workspace(context())
+    args = () if method == "ide_workspace_schema" else ("request", {"method": "layout.read"})
+    assert getattr(client, method)(*args) == {"kind": "protocol_error", "error": error}
+    assert calls == ["initialize"]

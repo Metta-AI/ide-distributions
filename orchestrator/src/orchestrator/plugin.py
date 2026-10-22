@@ -39,7 +39,7 @@ TOOLS = {
             "Identity comes from the credential; leagueId selects the requested workspace, not authority. "
             "Read before editing; preserve human content. A conflict requires rereading. "
             "A view has version:1 and body:[components]; discover component props first. "
-            "Draft notes are project direction, not executable source. This never releases a policy. "
+            "Draft notes are project direction, not executable source. Publication operations require explicit user authorization. "
             "Read the MCP result's isError and structured status; transport success is not effect success."
         ),
         {"request_id": S, "operation": O},

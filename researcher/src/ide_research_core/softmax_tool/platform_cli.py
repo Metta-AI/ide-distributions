@@ -40,7 +40,6 @@ released). It sends the same credential token as a bearer header to the configur
 the ``Authorization`` header to the redirect target). Replace it with ``coworld credits
 --json`` once a coworld release ships that command.
 """
-
 import json
 import os
 import re
@@ -173,7 +172,6 @@ class PlatformCli:
         if not env.get("HERMES_HOME"):
             raise SoftmaxCliError("HERMES_HOME is not set; the softmax tool needs the profile home")
         self._credential_value = env.get(CREDENTIAL_ENV)
-        self._certificate_env = {key: value for key, value in env.items() if key == "SSL_CERT_FILE"}
         self._run = run
         self._http_get = http_get or urllib_get
         self._bin_dir = bin_dir or Path(sys.executable).parent
@@ -202,7 +200,6 @@ class PlatformCli:
 
     def _child_env(self) -> dict[str, str]:
         return {
-            **self._certificate_env,
             "HOME": str(self.home),
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "NO_COLOR": "1",
@@ -235,9 +232,7 @@ class PlatformCli:
                 timeout=timeout,
             )
         except FileNotFoundError:
-            raise ToolMissing(
-                f"{executable} is not installed (reinstall the profile venv)"
-            ) from None
+            raise ToolMissing(f"{executable} is not installed (reinstall the profile venv)") from None
         except subprocess.TimeoutExpired:
             # argv never holds the token (it is only in the credentials file).
             command = " ".join([tool, *args[:3]])
