@@ -121,6 +121,11 @@ journals and experiment records are evidence, not prerequisites for blocking or 
 Comments carry questions and steering. The coordinator verifies deliverables, integrates
 accepted work sequentially, and owns externally visible submission.
 
+A blocked run can record `metadata.awaiting`: `xp` lists request IDs alongside
+`metadata.experiment.id`, `credits` waits for available credit, and `permit` names an ask.
+The gate polls these external conditions and enqueues a stable input when they resolve.
+The native inbox records consumption; no separate acknowledgement is required.
+
 ## Who decides what
 
 - The **orchestrator** owns the plan, the cards, the answers to researchers, promotion, the

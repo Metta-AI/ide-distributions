@@ -1,12 +1,13 @@
 # Coordinator simplification: acceptance evidence
 
-Status: local acceptance passed; production rollout has not been performed.
+Status: original implementation passed the evidence below. Consolidation and review fixes are being revalidated; production rollout has not been performed.
 Updated October 21, 2026. Distribution implementation: f9d016474b3eaa98b9c9b91e93517accbf01f0aa.
 
 ## Architecture
 
 One durable, ordered workspace inbox admits coordinator inputs. Native task/run IDs own
-execution identity. N >= 1 native researchers execute concurrently. Only the coordinator
+execution identity. Inputs may belong to different conversations; continuity comes from
+native tasks and the shared plan, not shared conversation memory. N >= 1 native researchers execute concurrently. Only the coordinator
 publishes artifacts and submissions. Research results, Git integration, and request
 fulfillment remain distinct facts.
 
@@ -117,3 +118,20 @@ Three browser/reference regressions and the IDE typecheck pass. The retained bro
 proof displays the coordinator’s completed round, episode and exact submitted policy.
 Evidence: phase-runs/022f848a-e1b7-4ce1-b63f-67b44c89f84c/coordinator-request.png
 under the retained fixture directory.
+
+## Consolidation review follow-up (October 22)
+
+The native inbox now owns input consumption. Returned failures are terminal and replay
+without execution. Waiting inputs have no arbitrary queue deadline; process death leaves
+the same input recoverable. Native notifications replace the scan and manual event
+acknowledgement. The plugin no longer owns commands, wakes, or handled-event tables.
+Task creation uses native task and event storage in one transaction. Worker ownership
+checks read native state without appending an event per tool call.
+
+Publication admission checks authority; downstream upload, Git integration and promotion
+own their existing idempotency. Retries must preserve arguments. External `awaiting`
+metadata remains documented for experiment, credit and permit waits.
+
+Review verification: 195 targeted researcher tests; real native queue ordering, terminal
+failure replay, next-input progress, parallel workers and dead-owner recovery; browser
+archived-task visibility regression. Full refreshed delivery proof remains pending.

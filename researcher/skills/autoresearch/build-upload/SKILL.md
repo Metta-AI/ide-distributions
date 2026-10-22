@@ -1,6 +1,6 @@
 ---
 name: build-upload
-description: Use when building an experiment candidate for coordinator upload.
+description: Use when building a candidate for coordinator upload.
 ---
 
 # Build and hand off

@@ -299,7 +299,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             return task
 
     def upload_build(self, id, run_id, build_dir, name, experiment=None):
-        """Publish a committed artifact after the native worker has finished."""
+        """Publish a committed artifact. Retry only with identical arguments; upload owns deduplication."""
         from hermes_cli.kanban_db_workspace import resolve_workspace
 
         task = self._admit_effect(
@@ -335,12 +335,14 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         return {**receipt, **staged}
 
     def workspace_integrate(self, id, run_id, commit):
+        """Integrate a completed run. Retry the identical commit; Git owns deduplication."""
         task = self._admit_effect(id, run_id, "integration_admitted", {"commit": commit})
         return Research(self.context).call(
             "workspace", "integrate", "--branch", task.branch_name, "--commit", commit
         )
 
     def submit_requested_version(self, id, run_id, version, strategy, request):
+        """Submit explicit user intent. Retry identical arguments; promotion owns deduplication."""
         self._admit_effect(
             id, run_id, "submission_admitted", {"version": version, "request": request}
         )

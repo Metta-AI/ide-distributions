@@ -41,11 +41,10 @@ def pre_tool_call(tool_name=None, args=None, **kwargs):
         from hermes_cli.kanban_db_connect import connect
 
         run_id = int(os.environ["HERMES_KANBAN_RUN_ID"])
-        with closing(connect()) as conn, kb.write_txn(conn):
+        with closing(connect()) as conn:
             task = kb.get_task(conn, task_id)
             if task.status != "running" or task.current_run_id != run_id:
                 return {"action": "block", "message": "This native run no longer owns the task. Stop."}
-            kb._append_event(conn, task_id, "operation_admitted", {"tool": tool_name}, run_id=run_id)
     if tool_name in BLOCKED_TOOLS:
         reason = BLOCKED_TOOLS[tool_name]
         return {

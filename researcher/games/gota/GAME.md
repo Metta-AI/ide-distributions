@@ -387,21 +387,15 @@ The default build records G1 compilation and explicitly marks evaluation not run
 receipts under **Local validation**; G5 compiler coverage does not apply to prebuilt
 artifacts. After a successful build and evidence review, follow the core `candidate` skill's
 "Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
-no promotion in flight exist. Upload the starter build:
+no promotion in flight exist. Copy the complete passing build into tracked
+`build-evidence/<build-id>`, stage the task branch, and complete with the build path,
+artifact hash and suggested name `opening-rush`. The coordinator calls `upload_build`,
+integrates the receipt commit, and uses `bootstrap_champion` for the first submission.
 
-```sh
-"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir "$BUILD"
-```
-
-The first champion's version is uploaded by `softmax upload-build`, never by
-`softmax upload`. It needs no experiment, frozen evaluation design, evaluation outcome or
-decision. The first league submission is v13-live, unevaluated; local checks do not establish
-competitive strength. The command checks C6 identity and the build, uploads the exact artifact
-and records a version with `experiment: null` that keeps the prebuilt provenance. Its response
-includes `data.version_id` and `data.platform_policy_version_id`. Record them in the journal's
-Decisions and in the `kanban_complete` metadata, run `workspace integrate`, and complete the card. The
-orchestrator then submits the version with `promotion bootstrap` and records the champion. The
-shipped `strategy/STRATEGY.md` remains the champion strategy source.
+The first champion needs no experiment or evaluation decision. It remains unevaluated;
+local checks do not establish competitive strength. Upload records a version with
+`experiment: null` and preserves prebuilt provenance. The shipped
+`strategy/STRATEGY.md` remains the champion strategy source.
 
 ## Qualification scope
 

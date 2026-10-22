@@ -315,9 +315,9 @@ def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap()
         "stats/outcomes/<E-id>.json",
         "strategy/candidates/<E-id>/STRATEGY.md",
         "uploaded candidate binding",
-        "softmax upload-build",
-        "version_id",
-        "platform_policy_version_id",
+        "upload_build",
+        "build-evidence/<build-id>",
+        "artifact hash",
         "explicitly assigned a bootstrap card",
     ):
         assert required in text
