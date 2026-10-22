@@ -28,6 +28,7 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 | `practice_request` | One private `POST /v2/experience-requests` in the game's league, idempotency key `practice:<version>:a<attempt>`. |
 | `practice_status` | The request's state and episode counts; once completed, the results downloaded into `practice/<request id>/`. |
 | `program_release` | `coworld submit <name>:v<N> --league L --player P`, once: an existing submission of that version is reported as released. |
+| `fresh_start` | Only when the user asks to start over: empties the profile's `memories/MEMORY.md` and `memories/USER.md` (the lead's notes about itself and the user) so the next conversation is a first meeting. Needs `confirm: true`; touches nothing else. |
 
 A coach refusal (403 `permit_required`, 402 `credit_denied`, `league_not_chosen`) is returned as
 data, `{"outcome": "refused", "refusal": ..., "reason", "state"?, "ask"?}`, and is never retried.

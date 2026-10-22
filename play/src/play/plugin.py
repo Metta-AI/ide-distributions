@@ -10,6 +10,7 @@ import json
 import subprocess
 
 from .context import Context, profile_context
+from .fresh import clear_notes
 from .launch import ensure_venv
 
 S = {"type": "string"}
@@ -101,6 +102,21 @@ TOOLS = {
         {"policy_version": POLICY_VERSION},
         ["policy_version"],
     ),
+    "fresh_start": (
+        (
+            "Forget this user so that the next conversation is a first meeting: empties your "
+            "own notes and your notes about them. It does not touch the program workspace, "
+            "uploaded programs, credentials or anything else. Call only when the user has "
+            "explicitly asked in this conversation to start over, and never otherwise."
+        ),
+        {
+            "confirm": {
+                "const": True,
+                "description": "True only because the user explicitly asked to start over.",
+            }
+        },
+        ["confirm"],
+    ),
 }
 
 
@@ -126,6 +142,10 @@ def call(context: Context, name: str, arguments: dict) -> dict:
 def handler(name):
     def run(args, **kwargs):
         try:
+            if name == "fresh_start":  # in this process: it only empties two note files
+                if dict(args).get("confirm") is not True:
+                    raise ValueError("fresh_start needs confirm: true")
+                return json.dumps({"ok": True, "data": clear_notes(profile_context().home)})
             return json.dumps(call(profile_context(), name, dict(args)))
         except Exception as error:  # noqa: BLE001 - tool boundary reports native failures
             return json.dumps({"ok": False, "error": {"reason": "play", "message": str(error)}})
