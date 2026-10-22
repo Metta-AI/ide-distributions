@@ -8,7 +8,8 @@ description: Use when designing and pre-registering an experiment.
 This skill implements the design steps of System Design §5.4 (experiment design and
 launch): pick a hypothesis, check refuted levers, pre-register `E-….md` with a frozen
 evaluation design, and make the candidate STRATEGY. It adapts optimizer-seed `experiment`.
-Then use `build-upload` and `xp-request` in the same card.
+Then use `build-upload` to hand off the verified build. The coordinator uploads it before
+assigning any authorized evaluation.
 
 Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 

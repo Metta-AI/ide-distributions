@@ -1,12 +1,12 @@
 ---
 name: candidate
-description: Use when uploading builds or handing off candidates.
+description: Use when preparing builds or handing off candidates.
 ---
 
 # Prepare the candidate for the orchestrator
 
 Implements the researcher's side of System Design §5.5 and design v4.4 §9. The researcher
-prepares evidence and uploads; the orchestrator owns submission and champion changes.
+prepares committed evidence; the coordinator owns upload, submission and champion changes.
 Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 
 ## Reviewed candidate
@@ -39,14 +39,12 @@ When the coach requests a source change and upload without evaluation or league 
    from evaluation, preserve evaluation `not_run`. Request full evaluation only when the task calls for it.
    Check the generated artifact implements the requested change before uploading; passed gates alone
    do not prove the intended value changed.
-2. Run `"$RESEARCH_CLI" softmax upload-build --name requested-change --build-dir <completed-build>`.
-   Choose a descriptive name and reuse it on retry. This validates the checked build and records a
-   version with `experiment: null`; it does not create an experiment, launch evaluation, or promote.
-3. Keep both returned version IDs, record the artifact hash and build evidence, then follow `card`
-   to stage artifacts and complete with `experiment: null`. Report upload completion only.
-   Do not fabricate an experiment or frozen design to satisfy the experiment-bound `softmax upload`.
+2. Copy the complete passing build into tracked `build-evidence/<build-id>`, preserving every file.
+3. Follow `card` to stage artifacts and complete with `experiment: null`. Report the task-relative
+   build directory, suggested upload name, artifact hash and source verification. The coordinator
+   calls `upload_build` after native completion. Do not claim upload completion or invent an experiment.
 
-## Bootstrap card: upload the starter policy
+## Bootstrap card: prepare the starter policy
 
 When explicitly assigned a bootstrap card for a fresh installation with no champion:
 
@@ -62,22 +60,16 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
    Missing, failed or errored required build evidence is not uploadable. Full evaluation,
    when separately requested, retains its own complete evidence and is not competitive proof.
 
-3. Upload only:
-   `"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir .scratch/build/champion`
-   Choose your own descriptive name in place of `opening-rush` (at most 23 lowercase letters, digits, or hyphens). Reuse it on retries; the CLI appends your full player ID.
-   Keep `data.version_id` and `data.platform_policy_version_id`. The upload is not a champion.
-4. Preserve the starter-policy build and upload. Stage, then complete using `card` with
-   `experiment: null`, `awaiting: null`, both version IDs as metadata fields, and a `next`
-   recommending that the orchestrator submit this starter version before commissioning an
-   experiment against it. The first submission is intentionally unevaluated; claim no improvement.
+3. Copy the complete passing build into tracked `build-evidence/<build-id>`.
+4. Stage, then complete using `card` with `experiment: null`, `awaiting: null`, the build path,
+   artifact hash and a suggested upload name. Recommend coordinator upload and starter submission
+   before commissioning an experiment. The starter remains unevaluated; claim no improvement.
 
 ## When the handoff is not ready
 
 - Missing/invalid evaluation or candidate binding: report what is missing and recommend the
   appropriate review/build work. Do not fabricate the promote decision.
 - Identity refusal: report to the orchestrator and block; never change Player.
-- Platform upload failure: a retry of the same build can reuse its artifact binding. If it
-  remains unavailable, preserve what happened and complete `partial` with the needed follow-up.
 - A game check fails: retain the evidence and report the policy/build failure. An `errored`
   check or tooling traceback instead follows D-26 in `card`; do not retry the faulty tool.
 - A staging failure must be reported with the retained artifacts. Never claim the candidate

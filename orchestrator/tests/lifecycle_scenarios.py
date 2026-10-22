@@ -59,9 +59,11 @@ def main():
         raise RuntimeError("crash after native creation")
 
     interrupted = {**args, "command_id": "crash:created"}
-    with patch("hermes_cli.kanban_db.create_task", side_effect=crash_after_creation):
-        with TestCase().assertRaisesRegex(RuntimeError, "crash after native creation"):
-            board.card_create(**interrupted)
+    with (
+        patch("hermes_cli.kanban_db.create_task", side_effect=crash_after_creation),
+        TestCase().assertRaisesRegex(RuntimeError, "crash after native creation"),
+    ):
+        board.card_create(**interrupted)
     recovered = board.card_create(**interrupted)["card"]
     assert board.card_create(**interrupted)["card"]["id"] == recovered["id"]
     with closing(connection()) as conn:
