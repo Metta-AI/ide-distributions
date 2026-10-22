@@ -123,13 +123,16 @@ def test_practice_refusals_are_typed_and_never_retried(program, cli, stderr, exp
 def test_practice_status_downloads_results_once_completed(program, cli, env):
     cli.xp_status = "running"
     data = program.practice_status("xreq_1")
-    assert data["state"] == "running" and "results" not in data
+    assert data["state"] == "running" and "results" not in data and "episodes" not in data
     cli.xp_status = "completed"
     data = program.practice_status("xreq_1")
     assert data["state"] == "completed"
     assert data["episodes_completed"] == data["episodes_total"] == 2
     results = Path(env["PLAY_WORKSPACE"]) / "practice/xreq_1/abc/results.json"
     assert data["results"] == [str(results)]
+    assert data["episodes"] == [
+        {"episode_id": "ep-1", "watch_url": "https://example.invalid/observatory/episodes/ep-1"}
+    ]
     assert cli.mutations() == []
 
 
