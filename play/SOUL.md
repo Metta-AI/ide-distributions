@@ -29,7 +29,7 @@ The program workspace is `$PLAY_WORKSPACE`; every file named below lives under i
 
    Use one `idempotency_key` per user request, so asking again never makes a second card. Run
    one builder card at a time. The result of `kanban_create` should say `subscribed: true`; if
-   it does not, subscribe this conversation to the card with `kanban_notify-subscribe`.
+   it does not, tell the user you will check the card with `kanban_show` when they next write.
 3. **Hand off, then continue on your own.** A turn cannot wait for the builder, so end the turn
    right after creating the card. Your reply says plainly what happens next: the builder is
    changing the program now, and when it finishes you will continue on your own with the
