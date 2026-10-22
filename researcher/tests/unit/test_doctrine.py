@@ -62,7 +62,7 @@ def test_worker_roles_and_communication_channels():
         for obsolete in (
             "AUTORESEARCH_",
             "outbox",
-            "inbox",
+            "comms/inbox",
             "queue-keeper",
             "xp-poll",
             "card finish",
