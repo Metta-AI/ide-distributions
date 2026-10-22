@@ -1,0 +1,192 @@
+{
+  "distribution_commit": "f9d016474b3eaa98b9c9b91e93517accbf01f0aa",
+  "host_commit": "ddc45013fa",
+  "task": "t_ca267c81",
+  "run": 7,
+  "build": "62ee8269-1",
+  "policy_sha256": "93c970e4ec9fa56bf7b36c613d0bcf4b1da84199128f2757a39845621c7f8021",
+  "submission": "sub_fb245b5d-0ef3-4615-bb93-755bc6036081",
+  "round": {
+    "id": "round_0fd879ff-896b-4e94-b910-66f888253acc",
+    "status": "completed",
+    "completed_at": "2026-10-22T01:20:44.638905Z"
+  },
+  "episode": {
+    "id": "0c402354-3a04-4e90-9ec9-caf2a7834e19",
+    "status": "completed",
+    "policy_version_ids": [
+      "3485b6f7-0b93-4bf1-a4c5-3bfffff99d47"
+    ],
+    "participants": [
+      {
+        "position": 0,
+        "kind": "policy",
+        "policy_version_id": "3485b6f7-0b93-4bf1-a4c5-3bfffff99d47",
+        "policy_id": "793fa57d-e7cc-4f66-86f5-7caa551583fb",
+        "policy_name": "gota-retreat40-302-ply_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "version": 1,
+        "player_id": "ply_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "player_name": "Original",
+        "owner_name": "alice",
+        "is_filler": false,
+        "is_seed": false
+      }
+    ]
+  },
+  "replay_bytes": 2545826,
+  "replay_http_status": 200,
+  "cancellation_submission": "sub_b31faead-6df8-4b1c-b5ef-da6d0814c402",
+  "corpus": {
+    "baseline": {
+      "passed": 8,
+      "cases": 9,
+      "calls": 24,
+      "tokens": 136310,
+      "seconds": 126.13
+    },
+    "candidate": {
+      "passed": 9,
+      "cases": 9,
+      "calls": 28,
+      "tokens": 111606,
+      "seconds": 65.03
+    }
+  },
+  "native_state": {
+    "tasks": [
+      {
+        "id": "t_ca267c81",
+        "status": "done",
+        "branch_name": "researcher-1/t_ca267c81-build-verify-and-upload-gota-policy-with",
+        "current_run_id": null,
+        "block_kind": null,
+        "block_recurrences": 0
+      },
+      {
+        "id": "t_94ace0f0",
+        "status": "archived",
+        "branch_name": null,
+        "current_run_id": null,
+        "block_kind": null,
+        "block_recurrences": 0
+      },
+      {
+        "id": "t_1733baf7",
+        "status": "archived",
+        "branch_name": null,
+        "current_run_id": null,
+        "block_kind": null,
+        "block_recurrences": 0
+      },
+      {
+        "id": "t_df58c18e",
+        "status": "archived",
+        "branch_name": null,
+        "current_run_id": null,
+        "block_kind": null,
+        "block_recurrences": 0
+      },
+      {
+        "id": "t_9c969b18",
+        "status": "archived",
+        "branch_name": null,
+        "current_run_id": null,
+        "block_kind": null,
+        "block_recurrences": 0
+      }
+    ],
+    "inbox": [
+      {
+        "sequence": 1,
+        "identity": "api:a62a0a4cda3af3e8c3125b21e6de86c1663730aebf5a4c7e6a80ebcabc3a4e55",
+        "admitted_at": 1792626771.2188945,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 2,
+        "identity": "turn:e5273716db234181a12eaeae484a59a8",
+        "admitted_at": 1792627001.8763497,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 3,
+        "identity": "api:75e92ae0a87c4fe00fe3bb228b298c829b718c446bd8e6737e8bd6299fbee5a1",
+        "admitted_at": 1792627324.8778276,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 4,
+        "identity": "turn:93c4ace678f144f9b6c833a9e910cf3d",
+        "admitted_at": 1792627537.6332562,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 5,
+        "identity": "turn:e265cb04b15d4d02990100496d135ce3",
+        "admitted_at": 1792627687.14274,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 6,
+        "identity": "api:c584ac011864acf3198a906717fc690ec40aee77643025ec4698abc30a472198",
+        "admitted_at": 1792627875.367799,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 7,
+        "identity": "turn:83d320a254e44a80a68cc273e98e03e3",
+        "admitted_at": 1792628159.6129625,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 8,
+        "identity": "turn:f423e8485c7b45e4858434f5d7ffef3e",
+        "admitted_at": 1792628262.458144,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 9,
+        "identity": "api:2b716c5ca9bc0a5ef8cc7bf84c085c33629c908a7dcdeafac04acd85ffe7d960",
+        "admitted_at": 1792629246.1442862,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 10,
+        "identity": "kanban:autoresearch:t_ca267c81:302",
+        "admitted_at": 1792630004.7149487,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 12,
+        "identity": "api:28e1c1ef5105c8e81f6341d7f8151243606b5a5e7a55932d35ddb881ee7568b5",
+        "admitted_at": 1792630188.5127187,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 13,
+        "identity": "api:b46098868b95b090f4e156feeddeceedae1ba358b3e1c31c8ef6d7e2e1065184",
+        "admitted_at": 1792630595.4548635,
+        "owned": 0,
+        "finished": 1
+      },
+      {
+        "sequence": 14,
+        "identity": "api:46f763feecaf0811f9639b036e1cdb86b1272cc3394758fd55122f2018a0f203",
+        "admitted_at": 1792631622.588863,
+        "owned": 0,
+        "finished": 1
+      }
+    ]
+  }
+}
