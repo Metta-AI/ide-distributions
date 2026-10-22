@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from ide_research_core.softmax_tool.identity import (
     CredentialRejected,
     IdentityError,
@@ -309,3 +308,25 @@ def test_missing_server_option_escapes_except_exception():
             swallowed.append(error)
     assert swallowed == []
     assert runner(["/venv/bin/softmax", "status", "--server", DEFAULT_SERVER]).returncode == 0
+
+
+@pytest.mark.parametrize("certificate", [None, "/fixture/local-ca.pem"])
+def test_cli_preserves_only_explicit_certificate_environment(env, runner, monkeypatch, certificate):
+    monkeypatch.setenv("SSL_CERT_FILE", "/ambient/unrelated-ca.pem")
+    env.pop("SSL_CERT_FILE", None)
+    if certificate is not None:
+        env["SSL_CERT_FILE"] = certificate
+    env["UNRELATED_SECRET"] = "must-not-leak"
+    whoami(make_cli(env, runner))
+    _, kwargs = runner.calls[0]
+    child = kwargs["env"]
+    assert "UNRELATED_SECRET" not in child
+    if certificate is None:
+        assert "SSL_CERT_FILE" not in child
+    else:
+        assert child["SSL_CERT_FILE"] == certificate
+
+
+def test_researcher_terminal_forwards_certificate_environment():
+    config = yaml.safe_load((Path(__file__).resolve().parents[3] / "config.yaml").read_text())
+    assert "SSL_CERT_FILE" in config["terminal"]["env_passthrough"]
