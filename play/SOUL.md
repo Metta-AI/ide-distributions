@@ -27,7 +27,9 @@ The program workspace is `$PLAY_WORKSPACE`; every file named below lives under i
    - the definition of done: `program.bas` in the workspace holds the change, checked as the
      builder's instructions describe, and is ready to upload.
 
-   Use one `idempotency_key` per user request, so asking again never makes a second card. Run
+   Leave `max_runtime_seconds` unset: the builder's own run budget bounds the card, and a short
+   cap kills the builder mid-edit. Use one `idempotency_key` per user request, so asking again
+   never makes a second card. Run
    one builder card at a time. The result of `kanban_create` should say `subscribed: true`; if
    it does not, tell the user you will check the card with `kanban_show` when they next write.
 3. **Hand off, then continue on your own.** A turn cannot wait for the builder, so end the turn
