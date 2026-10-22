@@ -40,7 +40,7 @@ class Workspace:
         with urlopen(request, timeout=60) as response:
             return None if response.status == 202 else json.load(response)
 
-    def ide_workspace(self, request_id, operation):
+    def initialized_request(self, request):
         initialized = self.post(
             "/mcp",
             self.token,
@@ -58,10 +58,17 @@ class Workspace:
         if "error" in initialized:
             return {"kind": "protocol_error", "error": initialized["error"]}
         self.post("/mcp", self.token, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return self.post("/mcp", self.token, request)
+
+    def ide_workspace_schema(self):
+        """Discover the deployed SDK contract rather than copying its schemas into this distribution."""
+        return self.initialized_request(
+            {"jsonrpc": "2.0", "id": "workspace-schema", "method": "tools/list"}
+        )
+
+    def ide_workspace(self, request_id, operation):
         # Envelope fields cannot be overridden by operation data supplied by the model.
-        result = self.post(
-            "/mcp",
-            self.token,
+        return self.initialized_request(
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -73,6 +80,5 @@ class Workspace:
                         "request_id": request_id,
                     },
                 },
-            },
+            }
         )
-        return result

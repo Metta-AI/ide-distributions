@@ -4,6 +4,7 @@ description: Research lead tools for the native autoresearch board and shared re
 author: ide-distributions
 provides_tools:
   - ide_workspace
+  - ide_workspace_schema
   - ide_say
   - ide_task_update
   - worker_skills
