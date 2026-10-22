@@ -131,7 +131,7 @@ def test_practice_status_downloads_results_once_completed(program, cli, env):
     results = Path(env["PLAY_WORKSPACE"]) / "practice/xreq_1/abc/results.json"
     assert data["results"] == [str(results)]
     assert data["episodes"] == [
-        {"episode_id": "ep-1", "watch_url": "https://softmax.com/observatory/episodes/ep-1"}
+        {"episode_id": "ep-1", "watch_url": "https://example.invalid/observatory/episodes/ep-1"}
     ]
     assert cli.mutations() == []
 
