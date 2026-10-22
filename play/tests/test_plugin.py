@@ -5,7 +5,7 @@ from pathlib import Path
 import jsonschema
 import yaml
 
-from play import plugin
+from play import fresh, plugin
 from play.context import Context
 from play.launch import lock_sha
 
@@ -16,6 +16,7 @@ PLAY_TOOLS = {
     "practice_request": (["policy_version"], {"policy_version", "episodes", "seats", "attempt"}),
     "practice_status": (["request_id"], {"request_id"}),
     "program_release": (["policy_version"], {"policy_version"}),
+    "fresh_start": (["confirm"], {"confirm"}),
 }
 
 
@@ -70,7 +71,11 @@ def test_manifest_advertises_registered_tools():
     assert manifest["provides_tools"] == list(plugin.TOOLS)
     config = yaml.safe_load((DISTRIBUTION / "config.yaml").read_text())
     assert config["plugins"]["enabled"] == ["play"]
-    assert config["platform_toolsets"]["api_server"] == ["play", "kanban"]
+    assert config["platform_toolsets"]["api_server"] == ["play", "kanban", "memory"]
+    assert config["memory"]["memory_enabled"] is True
+    assert config["memory"]["user_profile_enabled"] is True
+    builder = yaml.safe_load((DISTRIBUTION / "builder/config.yaml").read_text())
+    assert builder["memory"] == {"memory_enabled": False, "user_profile_enabled": False}
 
 
 def test_handler_runs_the_operation_in_the_profile_venv(env, tmp_path):
@@ -91,3 +96,35 @@ def test_handler_runs_the_operation_in_the_profile_venv(env, tmp_path):
     assert envelope["error"]["reason"] == "bad_arguments"
     assert "outside the program workspace" in envelope["error"]["message"]
     assert json.loads(json.dumps(envelope)) == envelope
+
+
+def test_fresh_start_clears_only_the_two_note_files(tmp_path):
+    memories = tmp_path / "memories"
+    memories.mkdir()
+    (memories / "MEMORY.md").write_text("I like short answers.\n")
+    (memories / "USER.md").write_text("Their name is Sam.\n")
+    keep = [tmp_path / "SOUL.md", tmp_path / "config.yaml", memories / "other.md"]
+    for path in keep:
+        path.write_text("keep")
+    assert fresh.clear_notes(tmp_path)["cleared"] == ["MEMORY.md", "USER.md"]
+    assert (memories / "MEMORY.md").read_text() == (memories / "USER.md").read_text() == ""
+    assert all(path.read_text() == "keep" for path in keep)
+    assert fresh.clear_notes(tmp_path)["cleared"] == []
+    assert fresh.clear_notes(tmp_path / "nowhere")["cleared"] == []
+
+
+def test_fresh_start_schema_demands_the_confirmation():
+    validator = jsonschema.Draft202012Validator(plugin.schema("fresh_start")["parameters"])
+    assert validator.is_valid({"confirm": True})
+    assert not validator.is_valid({}) and not validator.is_valid({"confirm": False})
+
+
+def test_fresh_start_handler_refuses_without_confirmation(tmp_path, monkeypatch):
+    memories = tmp_path / "memories"
+    memories.mkdir()
+    (memories / "USER.md").write_text("Their name is Sam.\n")
+    monkeypatch.setattr(plugin, "profile_context", lambda: Context(tmp_path, {}))
+    refused = json.loads(plugin.handler("fresh_start")({"confirm": False}))
+    assert refused["ok"] is False and (memories / "USER.md").read_text()
+    done = json.loads(plugin.handler("fresh_start")({"confirm": True}))
+    assert done["ok"] is True and done["data"]["cleared"] == ["USER.md"]
