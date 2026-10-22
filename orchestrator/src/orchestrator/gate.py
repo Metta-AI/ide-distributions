@@ -1,15 +1,19 @@
 """Minute supervisor preflight. Only outstanding work wakes the model."""
 
+import hashlib
 import json
+from contextlib import closing
 from datetime import UTC, datetime
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from .context import subprocess_context
 from .ide import IDE
 from .research import Research
-from .storage import snapshot
+from .storage import open_storage, snapshot
 
 
-def transitions(state, research, ide, check_champion):
+def transitions(state, research, ide):
     pending = []
     for run in state["awaiting"]:
         metadata = json.loads(run["metadata"])
@@ -50,15 +54,6 @@ def transitions(state, research, ide, check_champion):
                         "answer": body["answer"],
                     }
                 )
-    if check_champion:
-        # The shared command compares league state and recovers interrupted promotions.
-        before = research.call("records", "summary")["champion"]
-        promotion = research.call("promotion", "status")
-        after = research.call("records", "summary")["champion"]
-        if before != after or (
-            promotion.get("conflict") and not (research.control_read() or {}).get("paused")
-        ):
-            pending.append({"kind": "promotion", "status": promotion})
     return pending
 
 
@@ -72,14 +67,70 @@ def evaluate(context, research=None, ide=None, now=None):
         def permit(self, ask):
             return IDE(context).permit(ask)
 
-    pending = transitions(state, research, ide or PermitReader(), now.minute % 10 == 0)
-    if not state["events"] and not pending:
+    pending = transitions(state, research, ide or PermitReader())
+    if now.minute % 10 == 0 and research.call("promotion", "pending") is not None:
+        pending.append(
+            {"kind": "promotion_poll", "tick": now.replace(second=0, microsecond=0).isoformat()}
+        )
+    # Native notifications alone deliver task events; cron only polls external waits.
+    if not pending:
         return {"wakeAgent": False}
-    return {"wakeAgent": True, "context": {"events": state["events"], "pending": pending}}
+    return {"wakeAgent": True, "context": {"pending": pending}}
+
+
+def wake(context, state):
+    """Cron submits a replayable wake to the existing coordinator; it never runs a planner."""
+    directory = context.env.get("SOFTMAX_BRIDGE_DIRECTORY")
+    if directory is None:
+        if state["wakeAgent"]:
+            raise RuntimeError("Coordinator bridge is not configured")
+        return {"wakeAgent": False}
+    binding = json.loads((Path(directory) / "config.json").read_text())
+    url = binding["hermes_url"].rstrip("/")
+    headers = {
+        "Authorization": "Bearer " + binding["service_key"],
+        "Content-Type": "application/json",
+    }
+    if state["wakeAgent"]:
+        with closing(open_storage(context.storage_path)) as conn:
+            origin = conn.execute("SELECT value FROM coordinator WHERE key='session'").fetchone()
+        if origin is not None:
+            prompt = (
+                "Background coordinator wake. Read current status before acting; "
+                "these source events may already be handled. Reuse event-derived command IDs. "
+                "Send meaningful verified updates with ide_say. Queue completion records this input as handled.\n"
+                + json.dumps(state["context"], sort_keys=True)
+            )
+            identity = "wake:" + hashlib.sha256((origin[0] + "\n" + prompt).encode()).hexdigest()
+            request = Request(
+                url + "/v1/coordinator/inputs",
+                data=json.dumps(
+                    {"identity": identity, "request": {"session_id": origin[0], "input": prompt}}
+                ).encode(),
+                headers=headers,
+            )
+            with urlopen(request, timeout=30) as response:
+                json.load(response)
+    # The inbox owns both deduplication and recovery. Each cron tick may launch
+    # the oldest abandoned input; duplicate launches cannot claim it twice.
+    with urlopen(Request(url + "/v1/coordinator/pending", headers=headers), timeout=30) as response:
+        recovery = json.load(response)["pending"]
+    if recovery is None:
+        return {"wakeAgent": False}
+    request = Request(
+        url + "/v1/runs",
+        data=json.dumps(
+            {**recovery["request"], "coordinator_input_id": recovery["identity"]}
+        ).encode(),
+        headers=headers,
+    )
+    with urlopen(request, timeout=30) as response:
+        return {"wakeAgent": False, "run_id": json.load(response)["run_id"]}
 
 
 def main():
-    print(json.dumps(evaluate(subprocess_context())))
+    context = subprocess_context()
+    print(json.dumps(wake(context, evaluate(context))))
 
 
 if __name__ == "__main__":

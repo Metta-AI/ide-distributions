@@ -120,11 +120,11 @@ def test_update_preserves(install):
     assert FAKE_CREDENTIAL  # the profile .env written by the fixture survives as user state
 
 
-def test_guard_exports_typed_native_completion_after_retained_update(install):
+def test_guard_preserves_native_completion_after_retained_update(install):
     profile = install.profile_dir
     config_path = profile / "config.yaml"
     config = yaml.safe_load(config_path.read_text())
-    config["plugins"].pop("entries")  # Existing release predates the schema override.
+    config["plugins"]["entries"] = {"researcher_guard": {"allow_tool_override": True}}
     config["agent"]["max_turns"] = 77
     config_path.write_text(yaml.safe_dump(config))
     (profile / "memories").mkdir(exist_ok=True)
@@ -135,15 +135,6 @@ def test_guard_exports_typed_native_completion_after_retained_update(install):
     (profile / "sessions/history.jsonl").write_text('{"role":"user","content":"Retain chat"}\n')
     install.hermes("profile", "update", install.profile, "-y")
     assert yaml.safe_load(config_path.read_text()) == config
-    # Hosted preparation applies this managed opt-in, rather than replacing config.
-    install.hermes(
-        "-p",
-        install.profile,
-        "config",
-        "set",
-        "plugins.entries.researcher_guard.allow_tool_override",
-        "true",
-    )
     code = """
 import json
 import tools.kanban_tools
@@ -156,10 +147,7 @@ plugin = next(p for p in manager.list_plugins() if p['name'] == 'researcher_guar
 assert not plugin['error'], plugin
 entry = registry.get_entry('kanban_complete')
 assert entry.handler is native.handler and entry.check_fn is native.check_fn
-metadata = entry.schema['parameters']['properties']['metadata']
-assert metadata['properties']['outcome']['enum'] == ['done','partial','dropped','failed','blocked']
-assert set(metadata['required']) == {'outcome', 'journal'}
-assert native.schema['parameters']['properties']['metadata'] != metadata
+assert entry.schema == native.schema
 print(json.dumps({'ok': True}))
 """
     result = subprocess.run(

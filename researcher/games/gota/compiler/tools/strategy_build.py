@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 
 import pw_cli
 import pw_release
+from strategy_basic import BuildError
+from strategy_format import Diagnostic
 
 LAB = pw_release.LAB
 REPO = pw_release.REPO
@@ -465,7 +467,7 @@ def generate(order: dict, *, errors=None, timeout=900) -> None:
 
 def validate_draft(draft: dict, order: dict) -> None:
     if not isinstance(draft, dict) or not isinstance(draft.get('guesses'), list) or not isinstance(draft.get('gaps'), list):
-        raise ValueError('report draft must contain guesses and gaps lists')
+        raise BuildError([Diagnostic('error', 'report-draft', 'report draft must contain guesses and gaps lists')])
     previous = {}
     if order.get('previous_build'):
         previous = {g['id']: g for g in read(build_path(order['previous_build']) / 'report.json').get('guesses', [])}
@@ -473,24 +475,24 @@ def validate_draft(draft: dict, order: dict) -> None:
     for guess in draft['guesses']:
         required = {'id', 'component', 'spec_quote', 'decision', 'why', 'severity', 'state'}
         if not isinstance(guess, dict) or not required <= guess.keys():
-            raise ValueError('guess is missing required report fields')
+            raise BuildError([Diagnostic('error', 'report-draft', 'guess is missing required report fields')])
         component = guess['component']
         if component not in order['components'] or not guess['id'].startswith(f'G-{component}-'):
-            raise ValueError('guess ID must name its component')
+            raise BuildError([Diagnostic('error', 'report-draft', 'guess ID must name its component')])
         if not guess['id'].removeprefix(f'G-{component}-').isdigit() or guess['id'] in seen:
-            raise ValueError('guess IDs must be unique numbered IDs')
+            raise BuildError([Diagnostic('error', 'report-draft', 'guess IDs must be unique numbered IDs')])
         seen.add(guess['id'])
         if guess['severity'] not in ('low', 'medium', 'high') or guess['state'] not in ('open', 'kept', 'resolved'):
-            raise ValueError('invalid guess severity or state')
+            raise BuildError([Diagnostic('error', 'report-draft', 'invalid guess severity or state')])
         text = order['components'][component]['compiled_text']
         old = previous.get(guess['id'])
         if guess['state'] in ('kept', 'resolved'):
             if not old or old['component'] != component or old['spec_quote'] != guess['spec_quote']:
-                raise ValueError('kept/resolved guess must preserve a previous ID and quote')
+                raise BuildError([Diagnostic('error', 'report-draft', 'kept/resolved guess must preserve a previous ID and quote')])
         elif old:
-            raise ValueError('an existing guess ID must be kept or resolved, not reused as new')
+            raise BuildError([Diagnostic('error', 'report-draft', 'an existing guess ID must be kept or resolved, not reused as new')])
         elif not guess['spec_quote'] or guess['spec_quote'] not in text:
-            raise ValueError('guess spec_quote must quote the component exactly')
+            raise BuildError([Diagnostic('error', 'report-draft', f'guess {guess["id"]} spec_quote {guess["spec_quote"]!r} must quote the component exactly', component)])
 
 
 def assemble_build(build_id: str) -> dict:

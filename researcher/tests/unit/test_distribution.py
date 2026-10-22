@@ -59,12 +59,12 @@ def _guard():
     return module
 
 
-def test_guard_manifest_names_its_hook_and_tool():
+def test_guard_manifest_names_its_hook():
     manifest = yaml.safe_load((GUARD.parent / "plugin.yaml").read_text())
     assert manifest["name"] == "researcher_guard" and manifest["provides_hooks"] == [
         "pre_tool_call"
     ]
-    assert manifest["provides_tools"] == ["kanban_complete"]
+    assert "provides_tools" not in manifest
 
 
 @pytest.mark.parametrize("tool", ["kanban_create", "kanban_link", "kanban_schedule"])
@@ -129,7 +129,7 @@ def _is_denied(command: str) -> bool:
     [
         ('"$RESEARCH_CLI" softmax xp create E-1', False),
         ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', False),
-        ('"$RESEARCH_CLI" workspace integrate', False),
+        ('"$RESEARCH_CLI" workspace integrate', True),
         ('git commit -m "avoid coworld submit"', False),
         ("coworld submit pv_1 league_x", True),
         ("cd /tmp && coworld player use ply_1", True),

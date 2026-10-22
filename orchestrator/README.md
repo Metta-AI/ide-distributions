@@ -69,8 +69,6 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `card_show`, `card_list` | Read native cards, runs and comments. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
-| `board_reconcile` | Unhandled events/comments, pending platform transitions and branch recovery work. |
-| `event_ack(ids)` | Mark table/id pairs handled after acting. |
 | `status` | Cards by state, canonical record summary, durable pause and promotion state. |
 | `records_find`, `records_show` | Shared canonical record reads. |
 | `plan_write`, `control_write` | Publish plan.md or pause/resume through shared workspace publish. |
@@ -91,59 +89,26 @@ When a task requires a specific procedure, call `worker_skills` before requestin
 preload. Unknown selections return `invalid_worker_skills` with the available catalog
 before creating a branch or task. Cards without preloads do not query the worker catalog.
 
-`card_create` requires `kind`, `entity`, `assignee`, `title`, `body`. Optional `attempt`
-defaults to 1; `refs`, `skills`, `parents` default empty; native priority defaults 0 (higher
-runs first), runtime 7200 seconds, failure limit 2 (one retry). Its key is
-`<kind>:<entity>:<attempt>`. Entities are record IDs or git-safe keys containing letters,
-digits, underscores and hyphens. The branch is `card/<kind>-<entity>-<attempt>`.
-A replay returns the same card, including an archived card. A new open card for the same
-entity is refused. For invalid startup configuration, inspect the failure and worker catalog,
-create the next numbered attempt with valid settings and `replaces` set to the blocked original ID.
-The replacement waits behind the original while dependent cards are linked to the replacement;
-only then is the original archived. Replaying after interruption completes this same sequence.
-Never archive first: native archive releases dependent tasks.
-Keep the original ID and cause in the replacement body. Replay that same attempt after a lost
-response. `card_answer` only unblocks; it cannot correct configuration. The per-profile plugin DB serializes creation across sessions.
+`card_create` requires `command_id`, `assignee`, `title`, and `body`. Replaying a
+command returns the same native task, including after archive. Reusing its ID with
+different arguments fails. Creation and its immutable arguments commit in one native
+transaction. Serial reconciliation does not serialize the workers themselves.
 
-For repairs, use kind `repair`, a distinct repair entity, and the failed pushed `card_sha`;
-the branch prefix is `repair/` and parent links are omitted. Put lineage and failure details
-in the body. The assignee's `.env` can override its clone with `RESEARCH_WORKSPACE`; otherwise
-its `workspace/` is used. Existing orphan branches from an interrupted create are reused.
+All coordinator inputs enter one durable inbox. Its identity deduplicates delivery;
+its oldest unfinished row owns execution. A failed turn or dead process leaves that
+same row recoverable. Completing the turn acknowledges it automatically. There is no
+separate wake receipt, command ledger, event acknowledgement, or replacement-task graph.
 
-The only plugin table is `handled`, keyed by table and row ID. Events/comments are never
-acknowledged on observation. Only Hermes's decision events are surfaced: completed, gave_up,
-crashed, timed_out, blocked, review_requested, changes_requested and block_loop_detected.
-Comments are surfaced only when their author is not the orchestrator. Bookkeeping events and
-the orchestrator's own comments never need an ack. Pending waits use the latest ended handoff's `task_runs` ID:
-`awaiting.xp` holds request IDs with `experiment.id`; `awaiting.credits` is true; or
-`awaiting.permit` is a cogents ask key. Act before acknowledging that run. A lost plugin DB
-replays events; card keys, canonical promotions and git ancestry support recovery. An XP wait
-without `experiment.id` appears as `bad_handoff` with that run ID; fix or arrange the missing
-handoff work, then acknowledge the run.
+Native notifications alone deliver task events. Cron polls external XP, credit and
+permit waits, and periodically requests promotion review through the same inbox.
+`status` reads native tasks and current external waits. Resume blocked or triaged tasks
+with `card_answer`; task completion never depends on Git ancestry.
 
-The gate polls XP terminal status, a positive available credit balance, and permit answers.
-Permit answers use the cogents `c/asks/{id}` GET because the shared softmax CLI has no
-single-ask read. Every wall-clock ten-minute boundary the gate calls shared `promotion status`,
-which advances an in-flight promotion one step. It wakes only when the canonical champion
-changed during recovery or there is a conflict and canonical `control/pause.json` is not
-already paused. An unchanged in-flight promotion does not wake the model. It keeps no tick
-counter, ledger or deadline. Native errors remain errors; the scheduler owns gate-output
-handling. `board_reconcile` checks done/unmerged and non-running/merged branches only for
-cards with an unacknowledged actionable event or comment in that reconcile. Native live-claim
-protections remain in effect. Once the plugin table exists, gate reads do no schema writes,
-so a card creation holding its write lock during Git fetch does not block the gate.
-
-Explicit user-requested submissions use `submit_requested_version(version, strategy, request)`
-after a researcher builds, smoke-tests, uploads with `upload-build` and integrates the version
-and strategy. This uses the normal identity, league, permit and recovery workflow, records the
-user's request and verifies the source matches the uploaded build. It claims no statistical
-improvement. Autonomous research continues to require a reviewed promote decision.
-
-For a fresh installation, have a researcher upload the starter with `softmax upload-build`
-and integrate its version record, then call `bootstrap_champion(version="V-...")` to submit it.
-On a champion conflict, pause research with `control_write`, explain the disagreement to the
-user, and call `accept_champion` only after they confirm accepting the league's champion.
-A league champion never recorded by the loop is a conflict, including on migrated hosts.
+Researchers build, smoke-test, and commit the complete artifact. The coordinator calls
+`upload_build` on the latest completed native run, integrates its receipt commit, and
+uses `submit_requested_version` for an explicitly requested submission. Cancellation
+revokes publication before stopping the native worker. Requested submission is not
+statistical improvement; autonomous promotion still requires reviewed evidence.
 
 ## Development and verification
 
@@ -160,8 +125,7 @@ a temporary host root and real native board APIs. Put the Hermes install's own `
 directory first on `PATH`: a `hermes` launcher that resolves `python3` through `PATH` would
 otherwise run in this project's venv, which lacks Hermes's dependencies. The clean-install test exports committed HEAD, so commit
 before running those tests. `tests/test_end_to_end.py` installs a researcher and this profile
-on one host and plays one card from `card_create` through a scripted worker to the gate,
-`board_reconcile` and `status`, with no model and the fake platform. Hosted bridge delivery is
+on one host and plays one card from `card_create` through a scripted worker to `status`, with no model and the fake platform. Hosted bridge delivery is
 a separate integration check that these tests do not establish.
 
 For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's

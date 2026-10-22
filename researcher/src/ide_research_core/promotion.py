@@ -316,8 +316,7 @@ def submit_requested(
         source = gitops.show(clone, "HEAD", strategy)
         if source is None:
             raise Refused("no_candidate", f"{strategy} is not on canonical main")
-        hashes = _strategy_source_hashes(meta)
-        if not hashes or set(hashes) != {hashlib.sha256(source).hexdigest()}:
+        if meta["strategy_sha256"] != hashlib.sha256(source).hexdigest():
             raise Refused("strategy_mismatch", "The strategy does not match the uploaded build")
         _require_identity(sm, player_id)
         disagreement = conflict(clone, sm, league_id, player_id)
@@ -478,7 +477,7 @@ def _advance_recorded(clone: Path, promotion: Promotion) -> None:
         content = (clone / source).read_bytes()
         if promotion.kind == "requested":
             meta, _ = RecordStore(Layout(clone)).load(promotion.version_id)
-            if set(_strategy_source_hashes(meta)) != {hashlib.sha256(content).hexdigest()}:
+            if meta["strategy_sha256"] != hashlib.sha256(content).hexdigest():
                 raise Refused("strategy_mismatch", "The saved submission source does not match the build")
         (clone / CHAMPION_PATH).write_bytes(content)
         extra = (CHAMPION_PATH,)

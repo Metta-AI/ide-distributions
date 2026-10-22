@@ -4,7 +4,6 @@ import sqlite3
 import subprocess
 import sys
 import venv
-from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,7 +11,6 @@ import pytest
 from conftest import add_wait
 
 from orchestrator.gate import evaluate
-from orchestrator.storage import ack, open_storage, snapshot
 
 QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
@@ -43,6 +41,8 @@ class Platform:
         return {"body": {"kind": "permit", "answer": self.answer}}
 
     def call(self, *args):
+        if args == ("promotion", "pending"):
+            return self.in_flight
         if args == ("records", "summary"):
             return {"champion": None}
         assert args == ("promotion", "status")
@@ -57,13 +57,7 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
         )
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', 'completed')")
     first = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
-    assert first["wakeAgent"] is True
-    assert len(first["context"]["events"]) == 2
-    assert snapshot(context)["events"] == first["context"]["events"]
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, first["context"]["events"])
-        ack(store, first["context"]["events"])
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    assert first == {"wakeAgent": False}
 
 
 @pytest.mark.parametrize(
@@ -78,15 +72,13 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
         ({"permit": "ask-1"}, Platform(answer={"yes": False, "at": "now"}), "permit_answered"),
     ],
 )
-def test_platform_waits_wake_then_ack(context, board_file, awaiting, platform, kind):
+def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, platform, kind):
     add_wait(board_file, awaiting, {"id": "E-1"})
     result = evaluate(context, platform, platform, QUIET_MINUTE)
     assert result["wakeAgent"] is True
     event = result["context"]["pending"][0]
     assert event["kind"] == kind
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, [event])
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, platform, platform, QUIET_MINUTE) == result
 
 
 @pytest.mark.parametrize("awaiting", [{"xp": ["xp-1"]}, {"credits": True}, {"permit": "ask-1"}])
@@ -96,21 +88,11 @@ def test_unresolved_wait_does_not_wake(context, board_file, awaiting):
     assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
 
 
-def test_unchanged_promotion_waits_stay_quiet_and_pausing_quiets_conflict(context, board_file):
+def test_cron_only_requests_coordinator_review_of_pending_promotion(context, board_file):
+    platform = Platform(in_flight={"stage": "submitted"})
     now = QUIET_MINUTE.replace(minute=10)
-    for stage in ("submitted", "awaiting-permit"):
-        platform = Platform(in_flight={"stage": stage})
-        for minute in (10, 20):
-            assert evaluate(context, platform, platform, now.replace(minute=minute)) == {
-                "wakeAgent": False
-            }
-    platform = Platform(conflict="league champion was not recorded")
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
-    assert (
-        evaluate(context, platform, platform, now)["context"]["pending"][0]["kind"] == "promotion"
-    )
-    platform.paused = True
-    assert evaluate(context, platform, platform, now.replace(minute=20)) == {"wakeAgent": False}
+    result = evaluate(context, platform, platform, now)
+    assert result["context"]["pending"] == [{"kind": "promotion_poll", "tick": now.isoformat()}]
     assert evaluate(context, Platform(), Platform(), now) == {"wakeAgent": False}
 
 
@@ -146,28 +128,7 @@ def test_gate_process_with_sanitized_passthrough(shared_fixture, board_file):
     assert json.loads(result.stdout.splitlines()[-1]) == {"wakeAgent": False}
 
 
-def test_finished_promotion_wakes_even_when_inflight_clears(context, board_file):
-    class Recovered(Platform):
-        def __init__(self):
-            super().__init__()
-            self.champion = "old"
-
-        def call(self, *args):
-            if args == ("records", "summary"):
-                return {"champion": {"version": self.champion}}
-            self.champion = "new"
-            return {"conflict": False, "in_flight": None, "champion": {"version": "new"}}
-
-    platform = Recovered()
-    result = evaluate(context, platform, platform, QUIET_MINUTE.replace(minute=10))
-    assert result["wakeAgent"]
-    assert result["context"]["pending"][0]["status"]["champion"] == {"version": "new"}
-    assert evaluate(context, platform, platform, QUIET_MINUTE.replace(minute=20)) == {
-        "wakeAgent": False
-    }
-
-
-def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_file):
+def test_bookkeeping_and_comments_do_not_wake_cron(context, board_file):
     with sqlite3.connect(board_file) as conn:
         conn.executemany(
             "INSERT INTO task_events (task_id, kind) VALUES ('card-1', ?)",
@@ -192,8 +153,6 @@ def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_fil
         conn.execute("INSERT INTO task_comments VALUES (1, 'card-1', 'orchestrator', 'Answer')")
     for _ in range(2):
         assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
-    with closing(open_storage(context.storage_path)) as store:
-        assert store.execute("SELECT * FROM handled").fetchall() == []
 
 
 @pytest.mark.parametrize(
@@ -209,23 +168,17 @@ def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_fil
         "block_loop_detected",
     ],
 )
-def test_native_decision_events_need_explicit_ack(context, board_file, kind):
+def test_native_decision_events_are_not_requeued_by_cron(context, board_file, kind):
     with sqlite3.connect(board_file) as conn:
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', ?)", (kind,))
-    result = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
-    assert result["context"]["events"][0]["kind"] == kind
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, result["context"]["events"])
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
 @pytest.mark.parametrize("experiment", [None, {}, {"id": None}])
-def test_bad_xp_handoff_is_reported_and_acknowledgeable(context, board_file, experiment):
+def test_bad_xp_handoff_has_stable_queue_input(context, board_file, experiment):
     add_wait(board_file, {"xp": ["xp-1"]}, experiment)
     event = evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"][0]
     assert event["kind"] == "bad_handoff"
     assert event["table"] == "task_runs" and event["id"] == 1
     assert event["card"] == "card-1"
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, [event])
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"] == [event]
