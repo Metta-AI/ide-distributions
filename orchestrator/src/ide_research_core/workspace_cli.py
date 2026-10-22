@@ -7,6 +7,7 @@ Every command prints one JSON object: ``{"ok": true, "data": ...}`` or
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 from ide_research_core import workspace
@@ -25,7 +26,7 @@ def _emit(payload: dict) -> None:
 def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
-            if handler in (_integrate, _publish):
+            if handler in (_integrate, _publish, _presentation):
                 home = Path(os.environ["HERMES_HOME"])
                 if (home / "plugins/researcher_guard").is_dir():
                     raise workspace.WorkspaceError("coordinator_required", "Only the workspace coordinator may publish canonical changes")
@@ -68,7 +69,13 @@ def _merged(args) -> dict:
 
 def _publish(args) -> dict:
     clone = _clone(args)
-    return workspace.publish(clone, workspace.read_files(clone, args.path), args.message)
+    return workspace.publish(clone, workspace.read_files(clone, args.path), args.message, expected_head=args.expected_head)
+
+
+def _presentation(args) -> dict:
+    from ide_research_core.presentation import PresentationRequest, execute
+
+    return execute(_clone(args), PresentationRequest.model_validate_json(sys.stdin.buffer.read(150001)))
 
 
 def _bootstrap(args) -> dict:
@@ -103,6 +110,8 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub = command("publish", _publish, "commit the given paths and push main (orchestrator)")
     sub.add_argument("--message", required=True)
     sub.add_argument("--path", action="append", required=True)
+    sub.add_argument("--expected-head", help="reject publication unless canonical main still has this commit")
+    command("presentation", _presentation, "read or conditionally save UI state from a JSON request on stdin")
     command("bootstrap", _bootstrap, "create or clone this profile's workspace; write the CLI shim")
 
 

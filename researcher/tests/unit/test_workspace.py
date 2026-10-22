@@ -10,13 +10,11 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from ide_research_core import workspace
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
 from ide_research_core.workspace import WorkspaceError
-
 from records.fixtures import CLAIM, RESULT
 
 DISTRIBUTION = Path(__file__).resolve().parents[2]
@@ -176,7 +174,7 @@ def test_the_cli_reports_a_refusal_as_json(tmp_path, bare):
     run = subprocess.run(
         [sys.executable, "-m", "ide_research_core", "workspace", "integrate", "--root", str(clone),
          "--branch", staged["branch"], "--commit", staged["card_sha"]],
-        cwd=worktree, capture_output=True, text=True,
+        cwd=worktree, capture_output=True, text=True, check=False,
         env={**os.environ, "HERMES_HOME": str(tmp_path), "PYTHONPATH": str(DISTRIBUTION / "src")},
     )
     assert run.returncode == 1
@@ -347,3 +345,45 @@ def test_cli_shim_ignores_parent_pythonpath(tmp_path, monkeypatch):
     result = subprocess.run([str(shim), "--help"], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert "usage: research" in result.stdout
+
+
+def test_conditional_publish_preserves_concurrent_profile_edits(tmp_path, bare):
+    first = clone_for(tmp_path, bare, "orchestrator")
+    second = clone_for(tmp_path, bare, "other-session")
+    original = gitops.head(first)
+    published = workspace.publish(first, {"control/layout.json": b'{"tab":"research"}'}, "layout", expected_head=original)
+    (second / "control").mkdir(exist_ok=True)
+    draft = second / "control/layout.json"
+    draft.write_bytes(b'{"tab":"source"}')
+    with pytest.raises(WorkspaceError) as conflict:
+        workspace.publish(second, {"control/layout.json": draft.read_bytes()}, "stale layout", expected_head=original)
+    assert conflict.value.reason == "conflict"
+    assert draft.read_bytes() == b'{"tab":"source"}'
+    assert gitops.git(bare, "show", "main:control/layout.json") == '{"tab":"research"}'
+    assert gitops.git(bare, "rev-parse", "main") == published["main_sha"]
+    workspace.publish(first, {"control/layout.json": b'{"tab":"source"}'}, "updated layout", expected_head=published["main_sha"])
+    fresh = clone_for(tmp_path, bare, "recovered-session")
+    assert (fresh / "control/layout.json").read_bytes() == b'{"tab":"source"}'
+
+
+def test_presentation_is_canonical_and_replays_after_reclone(tmp_path, bare):
+    from ide_research_core.presentation import PresentationRequest, execute
+
+    root = clone_for(tmp_path, bare, "orchestrator")
+    league = "league_11111111-1111-1111-1111-111111111111"
+    first = PresentationRequest(action="save", league_id=league, key="draft", document={"notes": "first"}, request_id="first")
+    saved = execute(root, first)
+    assert saved["revision"] == 1
+    assert execute(root, first) == saved
+    changed = first.model_copy(update={"document": {"notes": "different"}})
+    with pytest.raises(WorkspaceError, match="already names"):
+        execute(root, changed)
+    second = first.model_copy(update={"revision": 1, "document": {"notes": "second"}, "request_id": "second"})
+    assert execute(root, second)["revision"] == 2
+    recovered = clone_for(tmp_path, bare, "recovered")
+    assert execute(recovered, first) == saved
+    read = PresentationRequest(action="read", league_id=league, key="draft")
+    assert execute(recovered, read)["document"] == {"notes": "second"}
+    assert execute(recovered, read.model_copy(update={"league_id": "league_22222222-2222-2222-2222-222222222222"}))["document"] is None
+    with pytest.raises(WorkspaceError, match="changed"):
+        execute(root, first.model_copy(update={"request_id": "stale"}))

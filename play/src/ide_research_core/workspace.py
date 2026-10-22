@@ -285,15 +285,23 @@ def merged(clone: Path, branch: str) -> dict:
     return {"merged": _is_ancestor(clone, card, main), "card_sha": card, "main_sha": main}
 
 
-def publish(clone: Path, files: Mapping[str, bytes | None], message: str) -> dict:
+def publish(
+    clone: Path, files: Mapping[str, bytes | None], message: str, *, expected_head: str | None = None
+) -> dict:
     """Commit ``files`` (path -> content; None deletes the file) on canonical ``main`` and push.
 
     The content travels with the call: ``main`` is first brought to canonical (dropping what
     an interrupted or rejected publish left unpushed), then the files are written, committed
-    and pushed, so a retry publishes them again. On any failure the files are written back
-    into the clone, so the caller's draft is not lost."""
+    and pushed. ``expected_head`` conditionally publishes an edit against its observed
+    canonical revision. A conflict leaves the current files untouched. Publication failures
+    retain the caller's draft in the clone."""
     paths = list(files)
     with canonical_lock(canonical_of(clone)):
+        if expected_head is not None:
+            gitops.git(clone, "fetch", "-q", REMOTE, MAIN)
+            observed = gitops.git(clone, "rev-parse", f"{REMOTE}/{MAIN}")
+            if observed != expected_head:
+                raise WorkspaceError("conflict", "Canonical workspace changed; read its current revision")
         try:
             for path in paths:  # as committed, so syncing cannot refuse them
                 if gitops.show(clone, "HEAD", path) is None:
