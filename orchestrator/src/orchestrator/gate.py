@@ -81,9 +81,10 @@ def evaluate(context, research=None, ide=None, now=None):
         pending.append(
             {"kind": "promotion_poll", "tick": now.replace(second=0, microsecond=0).isoformat()}
         )
-    if not state["events"] and not pending:
+    # Native notifications alone deliver task events; cron only polls external waits.
+    if not pending:
         return {"wakeAgent": False}
-    return {"wakeAgent": True, "context": {"events": state["events"], "pending": pending}}
+    return {"wakeAgent": True, "context": {"pending": pending}}
 
 
 def wake(context, state):

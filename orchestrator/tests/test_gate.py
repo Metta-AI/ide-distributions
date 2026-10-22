@@ -59,12 +59,12 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
         )
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', 'completed')")
     first = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
-    assert first["wakeAgent"] is True
-    assert len(first["context"]["events"]) == 2
-    assert snapshot(context)["events"] == first["context"]["events"]
+    assert first == {"wakeAgent": False}
+    events = snapshot(context)["events"]
+    assert len(events) == 2
     with closing(open_storage(context.storage_path)) as store:
-        ack(store, first["context"]["events"])
-        ack(store, first["context"]["events"])
+        ack(store, events)
+        ack(store, events)
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
@@ -183,10 +183,11 @@ def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_fil
 def test_native_decision_events_need_explicit_ack(context, board_file, kind):
     with sqlite3.connect(board_file) as conn:
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', ?)", (kind,))
-    result = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
-    assert result["context"]["events"][0]["kind"] == kind
+    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    result = snapshot(context)
+    assert result["events"][0]["kind"] == kind
     with closing(open_storage(context.storage_path)) as store:
-        ack(store, result["context"]["events"])
+        ack(store, result["events"])
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
