@@ -10,12 +10,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from records.fixtures import CLAIM, RESULT
+
 from ide_research_core import workspace
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
 from ide_research_core.workspace import WorkspaceError
-from records.fixtures import CLAIM, RESULT
 
 DISTRIBUTION = Path(__file__).resolve().parents[2]
 
@@ -553,11 +554,21 @@ def test_goal_progress_is_native_topic_state_not_host_state(tmp_path, bare):
             "policy_name": "Policy",
             "game": None,
             "neuron_id": "nrn_reward",
-            "target": {"kind": "value", "value": 5, "direction": "at_least"},
+            "target": {"kind": "value", "value": 5},
         },
     )
     baseline = execute(root, create)
     assert baseline["baseline"]["value"] == 1
+    assert baseline["target"]["direction"] == "at_least"
+    assert topic_id in baseline["contract"]["verification"]
+    assert "native research" in baseline["contract"]["constraints"]
+    with pytest.raises(WorkspaceError, match="already names"):
+        execute(
+            root,
+            create.model_copy(
+                update={"payload": {**create.payload, "target": {"kind": "value", "value": 9}}}
+            ),
+        )
     assert execute(root, create) == baseline
     evaluate = GoalsRequest(
         action="evaluate",
@@ -602,3 +613,44 @@ def test_goal_progress_is_native_topic_state_not_host_state(tmp_path, bare):
         len(execute(recovered, GoalsRequest(action="list", **scope))["goals"][goal_id]["rounds"])
         == 1
     )
+
+    # The profile resolves lower-is-better targets and latest comparison readings.
+    store = store_of(recovered)
+    store.update(
+        topic_id,
+        {
+            "game": "native-game",
+            "metrics": [
+                {
+                    "name": "Cost",
+                    "direction": "down",
+                    "readings": [
+                        {"value": 8, "version": 1, "label": "Version 1"},
+                        {"value": 4, "version": 2, "label": "Version 2"},
+                        {"value": 2, "version": None, "label": "Comparator"},
+                        {"value": 5, "version": None, "label": "Comparator"},
+                    ],
+                }
+            ],
+        },
+    )
+    workspace.publish(
+        recovered, {path: (recovered / path).read_bytes()}, "native metric definition"
+    )
+    best_id = "33333333-3333-4333-8333-333333333333"
+    best = execute(
+        recovered,
+        create.model_copy(
+            update={
+                "request_id": "best",
+                "payload": {**create.payload, "id": best_id, "target": {"kind": "best"}},
+            }
+        ),
+    )
+    assert best["target"] == {"kind": "best", "value": None, "direction": "at_most"}
+    assert best["game"] == "native-game"
+    assert "best measured comparison" in best["contract"]["objective"]
+    listed = execute(recovered, GoalsRequest(action="list", **scope))["goals"][best_id]
+    assert listed["observed"]["threshold"] == 5
+    assert listed["observed"]["current"]["value"] == 4
+    assert listed["observed"]["met"] is True

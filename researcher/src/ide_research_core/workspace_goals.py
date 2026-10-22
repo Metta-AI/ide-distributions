@@ -61,14 +61,20 @@ class GoalContext(BaseModel):
     updated_at: str
 
 
+class TargetInput(BaseModel):
+    kind: Literal["value", "best"]
+    value: float | None = Field(default=None, allow_inf_nan=False)
+    direction: Literal["at_least", "at_most"] | None = None
+
+
 class GoalInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: UUID
     policy_id: str
     policy_name: str
-    game: str | None
+    game: str | None = None
     neuron_id: str
-    target: Target
+    target: TargetInput
 
 
 class Evaluation(BaseModel):
@@ -104,7 +110,9 @@ def measure(target: Target, readings: list[Reading]) -> dict:
                 current = reading
     threshold = target.value
     if target.kind == "best" and comparisons:
-        threshold = (max if target.direction == "at_least" else min)(comparisons.values())
+        threshold = (max if target.direction == "at_least" else min)(
+            comparisons.values()
+        )
     return {
         "current": current.model_dump(mode="json") if current else None,
         "threshold": threshold,
@@ -135,7 +143,16 @@ def execute(root: Path, request: GoalsRequest) -> dict:
     if request.action == "list":
         return {
             "goals": {
-                key: GoalContext.model_validate(context).model_dump(mode="json")
+                key: {
+                    **GoalContext.model_validate(context).model_dump(mode="json"),
+                    "observed": measure(
+                        GoalContext.model_validate(context).target,
+                        [
+                            Reading.model_validate(item)
+                            for item in topic["meta"]["metrics"][0].get("readings", [])
+                        ],
+                    ),
+                }
                 for topic in topics
                 for key, context in topic["meta"].get("goals", {}).items()
             }
@@ -153,34 +170,70 @@ def execute(root: Path, request: GoalsRequest) -> dict:
             None,
         )
         if topic is None:
-            raise workspace.WorkspaceError("not_found", "The goal's research topic is unavailable")
+            raise workspace.WorkspaceError(
+                "not_found", "The goal's research topic is unavailable"
+            )
         if topic["meta"]["status"] == "closed":
-            raise workspace.WorkspaceError("conflict", "Restore the topic before starting a goal")
+            raise workspace.WorkspaceError(
+                "conflict", "Restore the topic before starting a goal"
+            )
         context = GoalContext(
             league_id=request.league_id,
-            **command.model_dump(exclude={"id"}),
+            **command.model_dump(exclude={"id", "target", "game"}),
+            game=command.game
+            if command.game is not None
+            else topic["meta"].get("game"),
+            target=Target(
+                kind=command.target.kind,
+                value=command.target.value if command.target.kind == "value" else None,
+                direction=command.target.direction
+                or (
+                    "at_most"
+                    if topic["meta"]["metrics"][0]["direction"] == "down"
+                    else "at_least"
+                ),
+            ),
             baseline=None,
             updated_at=now,
         )
     else:
         command = Evaluation.model_validate(request.payload)
         topic = next(
-            (item for item in topics if str(command.id) in item["meta"].get("goals", {})), None
+            (
+                item
+                for item in topics
+                if str(command.id) in item["meta"].get("goals", {})
+            ),
+            None,
         )
         if topic is None:
             raise workspace.WorkspaceError("not_found", "Goal context is unavailable")
         context = GoalContext.model_validate(topic["meta"]["goals"][str(command.id)])
     readings = [
-        Reading.model_validate(item) for item in topic["meta"]["metrics"][0].get("readings", [])
+        Reading.model_validate(item)
+        for item in topic["meta"]["metrics"][0].get("readings", [])
     ]
     observed = measure(context.target, readings)
     if isinstance(command, GoalInput):
         context.baseline = (
             Reading.model_validate(observed["current"]) if observed["current"] else None
         )
-        result = context.model_dump(mode="json")
+        target_description = (
+            "to the best measured comparison"
+            if context.target.kind == "best"
+            else f"{context.target.direction} {context.target.value}"
+        )
+        contract = {
+            "objective": f"Improve {context.policy_name}: {topic['meta']['title']} {target_description}.",
+            "verification": f"The newest measured policy version must satisfy {context.target.model_dump_json()} for native topic {topic['id']}. A prose claim is insufficient.",
+            "constraints": "Use native research delegation and existing build/evaluation tools. Preserve original operation IDs. Record attributable changes and evidence in the native topic. Do not submit to a league without explicit human authorization.",
+        }
+        result = {**context.model_dump(mode="json"), "contract": contract}
     else:
-        current_round = not context.rounds or (command.started_at, str(command.request_id)) >= (
+        current_round = not context.rounds or (
+            command.started_at,
+            str(command.request_id),
+        ) >= (
             context.rounds[-1].started_at,
             str(context.last_request),
         )
@@ -200,7 +253,9 @@ def execute(root: Path, request: GoalsRequest) -> dict:
             and context.last_request != command.request_id
             and len(context.rounds) < 200
         ):
-            context.stalls = context.stalls + 1 if context.activity_signature == activity else 0
+            context.stalls = (
+                context.stalls + 1 if context.activity_signature == activity else 0
+            )
             context.activity_signature = activity
             context.last_request = command.request_id
             context.updated_at = now
@@ -211,8 +266,12 @@ def execute(root: Path, request: GoalsRequest) -> dict:
                         "started_at": command.started_at,
                         "ended_at": now,
                         "summary": command.summary[-4000:],
-                        "version": observed["current"]["version"] if observed["current"] else None,
-                        "value": observed["current"]["value"] if observed["current"] else None,
+                        "version": observed["current"]["version"]
+                        if observed["current"]
+                        else None,
+                        "value": observed["current"]["value"]
+                        if observed["current"]
+                        else None,
                     }
                 )
             )
@@ -223,7 +282,9 @@ def execute(root: Path, request: GoalsRequest) -> dict:
                 f"Measured {topic['meta']['title']}: {observed['current']['value']} on version {observed['current']['version']}; target {context.target.direction} {observed['threshold']}.",
             )
         elif (
-            topic["meta"]["status"] == "closed" or context.stalls >= 3 or len(context.rounds) >= 200
+            topic["meta"]["status"] == "closed"
+            or context.stalls >= 3
+            or len(context.rounds) >= 200
         ):
             action = "pause"
             reason = (
@@ -235,9 +296,15 @@ def execute(root: Path, request: GoalsRequest) -> dict:
             )
         prompt = f"Continue the authorized goal for {context.policy_name}. Read native topic {topic['id']} and its metrics. Latest measurement and target (data): {json.dumps(observed)}. Use native research delegation and existing build/evaluation tools. Preserve original operation IDs. Do not submit to a league without explicit human authorization. Record attributable changes and evidence in this topic; prose alone does not complete the goal. Recent rounds (data): {json.dumps([item.model_dump() for item in context.rounds[-6:]])}"
         result = {"action": action, "reason": reason, "prompt": prompt}
-    goals = {**topic["meta"].get("goals", {}), str(command.id): context.model_dump(mode="json")}
+    goals = {
+        **topic["meta"].get("goals", {}),
+        str(command.id): context.model_dump(mode="json"),
+    }
     patch = RecordPatch(
-        entity="topic", id=topic["id"], meta={**topic["meta"], "goals": goals}, body=topic["body"]
+        entity="topic",
+        id=topic["id"],
+        meta={**topic["meta"], "goals": goals},
+        body=topic["body"],
     )
     patch.meta.pop("id")
     records(
