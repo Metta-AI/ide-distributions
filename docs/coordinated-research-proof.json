@@ -1,198 +1,189 @@
 {
-  "distribution_commit": "f9d016474b3eaa98b9c9b91e93517accbf01f0aa",
-  "host_commit": "33162787f4",
-  "task": "t_ca267c81",
-  "run": 7,
-  "build": "62ee8269-1",
-  "policy_sha256": "93c970e4ec9fa56bf7b36c613d0bcf4b1da84199128f2757a39845621c7f8021",
-  "submission": "sub_fb245b5d-0ef3-4615-bb93-755bc6036081",
-  "round": {
-    "id": "round_0fd879ff-896b-4e94-b910-66f888253acc",
-    "status": "completed",
-    "completed_at": "2026-10-22T01:20:44.638905Z"
+  "date": "2026-10-22",
+  "scope": "disposable local acceptance; no production rollout",
+  "distribution_commit": "90899586f50513eac2b996e03e9a8df6e6320b30",
+  "host_runtime_source": "1c2e8ade32",
+  "host_retained_test_source": "ac3f9ab4b5",
+  "build": {
+    "task_id": "t_6ca9a8f4",
+    "run_id": 2,
+    "task_status": "done",
+    "build_id": "retreat-health-40-v13live-prebuilt-20261022-01",
+    "artifact_sha256": "54fdae2a67921cd5ba2d5f47249b61816584416cbfb5d59238cc9a7554125f6a",
+    "compile": true,
+    "smoke_status": "passed",
+    "smoke_hash": "54fdae2a67921cd5ba2d5f47249b61816584416cbfb5d59238cc9a7554125f6a",
+    "smoke_seed": 2026,
+    "smoke_ticks": 31200,
+    "active_scripts": 10,
+    "decisions": 288200,
+    "actions": 861497,
+    "source_commit": "71662c2023f04ca71cf2f22a52b1e407a63c6b7d",
+    "build_evidence_commit": "a69018e8f919601e8effd948a9fc5ce75e8f3bed",
+    "receipt_commit": "cea36c88ee0e1516e0a5cd730a0b44c280a94ce3",
+    "integrated_commit": "b56b7276f4b38c3ce279fe76c33aaa60c98bf2c0",
+    "version_id": "V-01M5HDM94P7YJ7WKB1KFM831P8",
+    "platform_version": "retreat-health-40-v1-ply_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:v1"
   },
-  "episode": {
-    "id": "0c402354-3a04-4e90-9ec9-caf2a7834e19",
+  "match": {
+    "round_id": "round_79b9da79-9c2e-4dbf-af86-73fa45d54374",
+    "episode_id": "3584d0f9-1cce-4ed4-ab82-5f7e90fd4230",
+    "episode_request_id": "ereq_a9c0f4c4-2caf-486e-b2c2-bc38af416b70",
+    "policy_version_id": "330a09da-f57c-4e71-b6df-2bdcb1a0d356",
     "status": "completed",
-    "policy_version_ids": [
-      "3485b6f7-0b93-4bf1-a4c5-3bfffff99d47"
-    ],
-    "participants": [
+    "completed_at": "2026-10-22T09:21:30.512060Z",
+    "replay_status": 200,
+    "replay_bytes": 2209211,
+    "replay_sha256": "e66981826b0652933aa6052871b5e8c7b36ba8bd10822c479d1cc55d2f5f00bb",
+    "scores": [
       {
-        "position": 0,
-        "kind": "policy",
-        "policy_version_id": "3485b6f7-0b93-4bf1-a4c5-3bfffff99d47",
-        "policy_id": "793fa57d-e7cc-4f66-86f5-7caa551583fb",
-        "policy_name": "gota-retreat40-302-ply_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "version": 1,
-        "player_id": "ply_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "player_name": "Original",
-        "owner_name": "alice",
-        "is_filler": false,
-        "is_seed": false
+        "policy_version_id": "330a09da-f57c-4e71-b6df-2bdcb1a0d356",
+        "score": 0.0
       }
+    ],
+    "submission_id": "sub_9981bd53-f537-43cb-99b9-0e65b06cc446"
+  },
+  "runtime_upgrade": {
+    "before_image": "sha256:ea1e026cbb2ff9fd958bae754754230cd83d39a8fddb7d86ed19b5adbb187d7b",
+    "after_image": "sha256:6b780e0bd97733a31409084bdfad05111c6a708e45fd87752d86c60346061bf6",
+    "distribution": "90899586f50513eac2b996e03e9a8df6e6320b30",
+    "native_tasks_before": [
+      [
+        "t_6ca9a8f4",
+        "done"
+      ]
+    ],
+    "native_tasks_after": [
+      [
+        "t_6ca9a8f4",
+        "done"
+      ]
+    ],
+    "published_runtime": true
+  },
+  "build_sources_match_final_image": {
+    "/opt/ide-distributions/researcher/games/gota/tools/prebuilt.py": true,
+    "/opt/ide-distributions/researcher/games/gota/tools/build.py": true
+  },
+  "native_state": {
+    "tasks": [
+      [
+        "t_6ca9a8f4",
+        "done",
+        null
+      ]
+    ],
+    "inbox": [
+      [
+        1,
+        "api:9a17e8df5a47c1f943f2d1e11a48de6fc963d1a9e58d79c58e2d35603130b375",
+        1,
+        0
+      ],
+      [
+        2,
+        "kanban:autoresearch:t_6ca9a8f4:11",
+        1,
+        0
+      ],
+      [
+        3,
+        "api:159336a6f06c4f57e8b1ff29521e44f6295080e565edc8aca579804dc5b907ae",
+        1,
+        0
+      ],
+      [
+        5,
+        "api:23bf7c6e834e2ff0ecf3973a9aa1b568d3779d214520ea474b1281274fec1eb2",
+        1,
+        0
+      ],
+      [
+        6,
+        "kanban:autoresearch:t_6ca9a8f4:46",
+        1,
+        0
+      ],
+      [
+        8,
+        "api:e7c08a9dc0fc5584d46fcc8d9f5e79f1e71e7a842a1657469e9eecd804bda6c3",
+        1,
+        0
+      ],
+      [
+        9,
+        "api:f096aff5faf3de987b040b35b9fb5edeb41253594bbc23741941c658b026a370",
+        1,
+        0
+      ]
     ]
   },
-  "replay_bytes": 2545826,
-  "replay_http_status": 200,
-  "cancellation_submission": "sub_b31faead-6df8-4b1c-b5ef-da6d0814c402",
+  "validation": {
+    "host_mac": 205,
+    "host_linux_watcher": 1,
+    "job_completion": 41,
+    "browser_regressions": 4,
+    "focused_researcher": 195,
+    "orchestrator": 54,
+    "native_integration": 5,
+    "promotion": 32,
+    "retained_fifo_recovery": true,
+    "native_chat_after_recovery": true,
+    "browser_completed_match_readback": true
+  },
   "corpus": {
+    "model": "openai/gpt-6-luna",
+    "baseline_commit": "8f937436b78a30fc23e1ab3855e3218ecf084d00",
     "baseline": {
-      "passed": 8,
+      "passed": 9,
       "cases": 9,
-      "calls": 24,
-      "tokens": 136310,
-      "seconds": 126.13
+      "calls": 29,
+      "tokens": 194721,
+      "seconds": 125.26,
+      "case_results": {
+        "waiting_worker": true,
+        "failed_upload": true,
+        "explicit_build": true,
+        "blocked_checkpoint": true,
+        "intentional_repeat": true,
+        "cancelled_then_new": true,
+        "stale_notification": true,
+        "worker_question": true,
+        "budget_exhausted": true
+      }
     },
     "candidate": {
       "passed": 9,
       "cases": 9,
-      "calls": 28,
-      "tokens": 111606,
-      "seconds": 65.03
-    }
-  },
-  "native_state": {
-    "tasks": [
-      {
-        "id": "t_ca267c81",
-        "status": "done",
-        "branch_name": "researcher-1/t_ca267c81-build-verify-and-upload-gota-policy-with",
-        "current_run_id": null,
-        "block_kind": null,
-        "block_recurrences": 0
-      },
-      {
-        "id": "t_94ace0f0",
-        "status": "archived",
-        "branch_name": null,
-        "current_run_id": null,
-        "block_kind": null,
-        "block_recurrences": 0
-      },
-      {
-        "id": "t_1733baf7",
-        "status": "archived",
-        "branch_name": null,
-        "current_run_id": null,
-        "block_kind": null,
-        "block_recurrences": 0
-      },
-      {
-        "id": "t_df58c18e",
-        "status": "archived",
-        "branch_name": null,
-        "current_run_id": null,
-        "block_kind": null,
-        "block_recurrences": 0
-      },
-      {
-        "id": "t_9c969b18",
-        "status": "archived",
-        "branch_name": null,
-        "current_run_id": null,
-        "block_kind": null,
-        "block_recurrences": 0
+      "calls": 31,
+      "tokens": 148665,
+      "seconds": 88.03,
+      "case_results": {
+        "waiting_worker": true,
+        "failed_upload": true,
+        "explicit_build": true,
+        "blocked_checkpoint": true,
+        "intentional_repeat": true,
+        "cancelled_then_new": true,
+        "stale_notification": true,
+        "worker_question": true,
+        "budget_exhausted": true
       }
-    ],
-    "inbox": [
-      {
-        "sequence": 1,
-        "identity": "api:a62a0a4cda3af3e8c3125b21e6de86c1663730aebf5a4c7e6a80ebcabc3a4e55",
-        "admitted_at": 1792626771.2188945,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 2,
-        "identity": "turn:e5273716db234181a12eaeae484a59a8",
-        "admitted_at": 1792627001.8763497,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 3,
-        "identity": "api:75e92ae0a87c4fe00fe3bb228b298c829b718c446bd8e6737e8bd6299fbee5a1",
-        "admitted_at": 1792627324.8778276,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 4,
-        "identity": "turn:93c4ace678f144f9b6c833a9e910cf3d",
-        "admitted_at": 1792627537.6332562,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 5,
-        "identity": "turn:e265cb04b15d4d02990100496d135ce3",
-        "admitted_at": 1792627687.14274,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 6,
-        "identity": "api:c584ac011864acf3198a906717fc690ec40aee77643025ec4698abc30a472198",
-        "admitted_at": 1792627875.367799,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 7,
-        "identity": "turn:83d320a254e44a80a68cc273e98e03e3",
-        "admitted_at": 1792628159.6129625,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 8,
-        "identity": "turn:f423e8485c7b45e4858434f5d7ffef3e",
-        "admitted_at": 1792628262.458144,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 9,
-        "identity": "api:2b716c5ca9bc0a5ef8cc7bf84c085c33629c908a7dcdeafac04acd85ffe7d960",
-        "admitted_at": 1792629246.1442862,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 10,
-        "identity": "kanban:autoresearch:t_ca267c81:302",
-        "admitted_at": 1792630004.7149487,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 12,
-        "identity": "api:28e1c1ef5105c8e81f6341d7f8151243606b5a5e7a55932d35ddb881ee7568b5",
-        "admitted_at": 1792630188.5127187,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 13,
-        "identity": "api:b46098868b95b090f4e156feeddeceedae1ba358b3e1c31c8ef6d7e2e1065184",
-        "admitted_at": 1792630595.4548635,
-        "owned": 0,
-        "finished": 1
-      },
-      {
-        "sequence": 14,
-        "identity": "api:46f763feecaf0811f9639b036e1cdb86b1272cc3394758fd55122f2018a0f203",
-        "admitted_at": 1792631622.588863,
-        "owned": 0,
-        "finished": 1
-      }
-    ]
+    },
+    "limitation": "Single simulated-tool runs; no general judgment or performance improvement claim. The initial incomplete fixture scored 6/9 because discovery received placeholder responses without bound-workspace context; both runs above use the corrected identical context."
   },
-  "browser_proof": {
-    "status": "passed",
-    "screenshot": "/tmp/nix-shell.lkw7dQ/ide-next-ec2-8ozON4/phase-runs/022f848a-e1b7-4ce1-b63f-67b44c89f84c/coordinator-request.png",
-    "native_lifecycle_ui_tests": 3,
-    "typecheck": "passed"
+  "historical_real_http_cancellation": {
+    "submission_id": "sub_b31faead-6df8-4b1c-b5ef-da6d0814c402",
+    "date": "2026-10-22",
+    "scope": "Earlier implementation; accepted response held across native cancellation; subsequent publication rejected. Current native cancellation regressions also pass."
+  },
+  "league_paused": true,
+  "local_episodes": 2,
+  "screenshot": "/tmp/review-final-browser-readback.png",
+  "fixture_manifest": "/tmp/nix-shell.S7dy7V/ide-next-ec2-gWJpto/manifest.json",
+  "production_nonterminal_missing_coworld_id": {
+    "checked_at": "2026-10-22T08:19:45Z",
+    "count": 0,
+    "read_only": true
   }
 }

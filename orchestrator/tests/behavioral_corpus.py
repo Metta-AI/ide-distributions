@@ -100,6 +100,9 @@ def main():
     system = (
         (source / "SOUL.md").read_text()
         + "\nDecision evaluation: use the provided tools. The supplied tool responses are current authoritative workspace facts."
+        + "\nWorkspace fixture: this workspace is already bound to GOTA, league league_eval and player ply_eval."
+        + " Researcher-1 is installed and available. Canonical strategy/STRATEGY.md exists and describes the policy to build."
+        + " The existing tasks in this fixture build that policy with retreat threshold 40."
     )
     results = []
     for name, prompt, cards, expected in CASES:

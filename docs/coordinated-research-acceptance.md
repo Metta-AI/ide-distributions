@@ -1,137 +1,98 @@
 # Coordinator simplification: acceptance evidence
 
-Status: original implementation passed the evidence below. Consolidation and review fixes are being revalidated; production rollout has not been performed.
-Updated October 21, 2026. Distribution implementation: f9d016474b3eaa98b9c9b91e93517accbf01f0aa.
+Updated October 22, 2026. This is local acceptance proof, not a production rollout.
+Runtime distribution: `90899586f50513eac2b996e03e9a8df6e6320b30`.
+Host runtime source: `1c2e8ade32`; retained-input test correction: `ac3f9ab4b5`.
 
-## Architecture
+## Ownership
 
-One durable, ordered workspace inbox admits coordinator inputs. Native task/run IDs own
-execution identity. Inputs may belong to different conversations; continuity comes from
-native tasks and the shared plan, not shared conversation memory. N >= 1 native researchers execute concurrently. Only the coordinator
-publishes artifacts and submissions. Research results, Git integration, and request
-fulfillment remain distinct facts.
+One native durable FIFO inbox admits coordinator inputs. Its persisted result consumes an
+input, including returned failures. Waiting has no arbitrary deadline. Process death leaves
+the original input recoverable. Native notifications enqueue before advancing their cursor.
 
-Removed semantic task/attempt identities, replacement/dependency graphs, ancestry-based
-completion, mandatory research journals, and independent cron planning. Native blocked
-work resumes under its original task identity. Duplicate execution commands replay their
-persisted result, including archived tasks. Stable completion identities enter the inbox
-before notification cursors advance. Restart recovers the oldest unfinished input.
+One native transaction deduplicates task creation. Native tasks and runs own lifecycle;
+blocked work resumes the same task. N researchers execute concurrently outside the serial
+coordinator. Only the coordinator uploads, integrates and submits.
 
-Cancellation revokes publication before stopping native work. All publication paths check
-the latest completed native run. Episode reservations are atomic across researchers.
-Conversion rejects active legacy tasks before changing credentials or installed profiles.
-
-This simplifies ownership and lifecycle semantics. It does not reduce total lines or tool
-count: exposed tools increased from 25 to 27, adding upload_build and budget_limit.
+Removed plugin commands, wakes and handled-event tables, event_ack, board_reconcile,
+historical event scans, the extra workspace lease and per-tool audit writes. Publication
+admission checks native authority; downstream upload, Git and submission retain their
+existing idempotency. Retries preserve arguments. This removes ownership layers, not every
+idempotency mechanism in the services it calls. The whole PR is not net-negative in lines.
 
 ## Acceptance matrix
 
-| Requirement | Observed evidence | Remaining |
-| --- | --- | --- |
-| Ordered coordinator inputs | Native FIFO, dead-owner recovery, admission crash-gap, replay, forged recovery rejection, notification dedupe checks pass in delivery image | No known implementation gap |
-| N=1 and N=3 | Real native dispatchers and OS workers pass capacity, cancellation and replay checks | None at tested capacities |
-| Native lifecycle | Original blocked task resumed; crash-after-create and archived replay pass | Full remote action/effect/acknowledgement proof below |
-| Cancellation | Native stop, late-completion rejection, dirty-work preservation, publication admission fencing pass | None at the tested admission boundary; real API response held while native cancellation committed |
-| Restart | Mixed running/blocked/archived fixture retains IDs, constraints, dirty Git, receipts and three ordered inputs | None for retained fixture |
-| Live completion recovery | Task t_ca267c81 run 7 completion, inbox sequence 10, identity kanban:autoresearch:t_ca267c81:302 recovered after runtime restart and attempted upload | Publication chain below |
-| Integration | Same-base concurrent changes and conflict resolution revalidate the resulting commit | None in integration tests |
-| Budget | Shared atomic episode reservations and operator/user ceilings pass | No cumulative dollar-budget guarantee claimed |
-| Real delivery | Live model built, smoke-tested, uploaded, integrated and explicitly submitted the committed artifact | Completed round, exact policy participation, public replay and coordinator readback verified |
-| Behavior corpus | Same-model simulated-tool first-action cases: baseline 8/9, candidate 9/9 | Single runs; not evidence of general judgment improvement |
+| Requirement | Evidence |
+| --- | --- |
+| Durable ordered input | Real native FIFO, dead-owner recovery, HTTP admission crash-gap, replay and forged-recovery rejection pass. Returned failure replays without execution; the next input proceeds. |
+| Retained input recovery | Image replacement preserves three unfinished user/completion/cron inputs. The native HTTP API recovers them in that order before admitting a new chat. |
+| Parallel workers | Real native N=1 and N=3 dispatcher/OS-worker tests pass capacity, cancellation and replay checks. Automatic decomposition is disabled. |
+| Native lifecycle and dedupe | Crash-after-create, archived-command replay, blocked-task resume and stale-run rejection pass. The live proof ends with exactly one task, done, and no unfinished inbox inputs. |
+| Cancellation | Native stop, stale completion rejection, dirty-work preservation and publication fencing pass. The earlier real-HTTP cancellation proof held an accepted submission response while cancellation committed; its receipt remained reportable and the next effect was refused. |
+| Integration | Same-base changes and conflicting Git changes revalidate the resulting commit. Upload receipt integration passed in the live flow. |
+| Budget | Shared atomic episode reservations and user/operator ceilings pass. No cumulative dollar-budget guarantee is claimed. |
+| Retained state | Conversations, tasks, dispatch state, receipts, dirty Git and configuration survive replacement. Unsupported migration fails before durable mutation. |
+| Delivery | Build, compile, smoke, upload, integration, explicit submission, completed match, replay and coordinator/browser readback pass below. |
 
-## Real build evidence
+## Current live proof
 
-Original task: t_ca267c81, completed run 7. No replacement task was created.
-Four unintended native auto-decomposer children were archived; auto-decomposition is now disabled.
+- Original task `t_6ca9a8f4`, completed run 2. Run 1 blocked; the coordinator resumed the same task.
+- Build `retreat-health-40-v13live-prebuilt-20261022-01` uses the shipped BASIC starter with retreat threshold 40.
+- G1 compile passed. G2 smoke passed: seed 2026, 31,200 ticks, 10 active scripts, 288,200 decisions, 861,497 actions.
+- Artifact SHA-256: `54fdae2a67921cd5ba2d5f47249b61816584416cbfb5d59238cc9a7554125f6a`, matching smoke evidence.
+- Complete build evidence commit: `a69018e8f919601e8effd948a9fc5ce75e8f3bed`.
+- Uploaded record: `V-01M5HDM94P7YJ7WKB1KFM831P8`; server policy: `330a09da-f57c-4e71-b6df-2bdcb1a0d356`.
+- Receipt commit `cea36c88ee0e1516e0a5cd730a0b44c280a94ce3` integrated at `b56b7276f4b38c3ce279fe76c33aaa60c98bf2c0`.
+- Submission: `sub_9981bd53-f537-43cb-99b9-0e65b06cc446`, placed.
+- Round `round_79b9da79-9c2e-4dbf-af86-73fa45d54374` completed.
+- Episode `3584d0f9-1cce-4ed4-ab82-5f7e90fd4230` completed with that exact policy at 09:21:30 UTC.
+- Public replay: HTTP 200, 2,209,211 bytes; SHA-256 `e66981826b0652933aa6052871b5e8c7b36ba8bd10822c479d1cc55d2f5f00bb`.
+- The coordinator independently read `latest_league_result`; browser readback showed the submission, exact policy and completed episode. Score 0.0 is not a superiority claim.
 
-- Commit: 893c4be36bd1bd84a086be30df998456ce865556.
-- Complete build: build-evidence/62ee8269-1.
-- Policy SHA-256: 93c970e4ec9fa56bf7b36c613d0bcf4b1da84199128f2757a39845621c7f8021.
-- Native compile passed; generated retreat threshold is 40 and used by the health comparison.
-- G2 smoke passed: seed 2026, 31,200 ticks, 10 active scripts, 288,200 decisions, 856,045 actions.
-- This is smoke evidence, not a superiority evaluation or champion promotion.
-- Upload name: gota-retreat40-302. Initial upload failed because the fixture advertised
-  container-local localhost for storage. Corrected fixture; the same artifact uploaded successfully.
-- Server policy version: 3485b6f7-0b93-4bf1-a4c5-3bfffff99d47.
-- Upload-request and upload-completion replays each returned that same server version.
-- Receipt commit: df430d5a7db3a7508c69622c1e5cb6dbc761da51.
-- Integrated canonical commit: 696ebaec9409723423c138dc34de7ce8b63c16b7.
-- Explicit submission: sub_fb245b5d-0ef3-4615-bb93-755bc6036081; server status placed.
-- Round: round_63f73dff-9ede-48d7-be28-1a8bb69dd8e0.
-- Episode request: ereq_f3f8450d-a2b7-4476-b296-62e5aec558b1.
-- First real match completed as episode 5d0d6c02-0239-41ea-a118-aade37f9abf0.
-- Replay-enabled proof: round round_0fd879ff-896b-4e94-b910-66f888253acc, episode
-  0c402354-3a04-4e90-9ec9-caf2a7834e19, both completed. The original uploaded policy
-  participated; the public replay returned HTTP 200 with 2,545,826 bytes.
-- Three local episodes total: one G2 smoke and two league matches. No paid XP or
-  statistical superiority evaluation. League scheduling remains paused.
+The build and upload used the reviewed queue implementation before runtime replacement.
+Submission and readback used the final published runtime modules, without source overlays:
+`sha256:6b780e0bd97733a31409084bdfad05111c6a708e45fd87752d86c60346061bf6`.
+The final image's build.py and prebuilt.py hashes exactly match the build's recorded inputs.
+Replacement preserved the completed task and upload; no replacement task or second upload
+was needed. It fixed an explicit-submission check that incorrectly required STRATEGY.md
+instead of verifying the recorded source hash. Semantic and prebuilt provenance now share
+that check; 32 promotion tests cover submission, replay, recovery and altered-source rejection.
 
-The native cancellation scenario was also run with its transport callback replaced by a
-real local API POST, holding the accepted response until native cancellation committed.
-Server submission sub_b31faead-6df8-4b1c-b5ef-da6d0814c402 remained reportable afterward;
-the next publication attempt was rejected without another remote call. This tests native
-admission against a real remote effect, not a full model or CLI response-loss scenario.
-The disposable probe used auto_champion=never and the league was paused to prevent extra rounds.
+The fixture ran one smoke episode and one league match. Scheduling was paused immediately
+after admitting the round. No paid XP experiment or superiority evaluation ran.
 
-## Focused validation
+## Validation and reproduction
 
-- Distribution orchestrator: 54 passed, five native-install cases excluded from that invocation.
-- Delivery-image native lifecycle/capacity: three passed, one deselected.
-- Compiler: 82 passed. Upload/CLI: 97 passed. Workspace integration: 19 passed.
-- Host short-path suite: 204 passed. Linux watcher checks: two passed.
-- Clean and retained delivery-image installation checks passed.
-- Changed-source Ruff and host type checks passed. Scoped migration/runtime Bazel checks passed.
-- Initial Mac runs encountered Unix socket path-length and watcher-platform failures;
-  short-path reruns and Linux watcher checks supplied the relevant passing evidence.
+Researcher CI passed its full suite. Focused review coverage passed 195 researcher tests,
+54 orchestrator tests and five real native integration scenarios. Host coverage passed
+205 tests on Mac and the platform-specific watcher on Linux, plus 41 job-completion tests,
+four browser regressions, IDE typecheck and scoped lint/type checks. Host Bazel, native and
+workspace CI passed. Machine-readable details and decision-corpus results are in
+`coordinated-research-proof.json`.
 
-The delivery image is sha256:688eaa79bc229a79b196076c8751c658197e94176e10449e68ca60f7809bda29.
-The live fixture was verified at http://localhost:51115; it is disposable, not production proof.
-Host implementation commit: 33162787f4. Publish the paired distribution and host changes together;
-drain active legacy tasks before adopting the new profile.
+The same-model decision corpus passed 9/9 for baseline and candidate with identical
+bound-workspace context. The first candidate run scored 6/9 because the fixture omitted
+that context and returned placeholders to discovery tools. These are single simulated-tool
+runs, not evidence of general judgment or performance improvement.
 
+The first retained-chat test left its three deliberately pending inputs ahead of a new
+request while recovery was paused. The corrected harness exercises real recovery before
+new chat admission; it does not delete or fabricate completion of the pending inputs.
 
-## Behavioral comparison and delivery repairs
+Fixture: `http://localhost:53720/ide-next`; manifest
+`/tmp/nix-shell.S7dy7V/ide-next-ec2-gWJpto/manifest.json`.
+Browser flow: send build/upload/submit, resume the blocked original task, then verify the
+completed match. Runner:
+`node packages/softmax-ide/tests/system/ide-next-ec2.mjs phase <manifest> coordinator-request`.
+The normal API, Temporal, round runner, episode runner, job watcher, event processor and
+OrbStack executed the match. Screenshot: `/tmp/review-final-browser-readback.png`.
+Retained test:
+`bash devops/hermes-fleet/applications/autoresearch/check_state.sh ide-coordinator-proof:review-merged ide-coordinator-proof:review-final`.
 
-The nine-case corpus used the same model and simulated tools. Candidate: 9/9, 28 calls,
-111,606 tokens, 65.03 seconds, reported inference cost $0.004096. Baseline: 8/9, 24 calls,
-136,310 tokens, 126.13 seconds, $0.006135. Cache state and single-run sampling limit any
-performance inference. The baseline failed to resume a blocked task after an integrated checkpoint.
+## Rollout boundary
 
-Real delivery required fixture repairs: a storage endpoint reachable from both host and
-containers, the public replay bucket, the normal admission seed, and existing leaderboard
-projection migrations. The API's replay lookup also incorrectly used a manifest display name;
-it now uses the stored Coworld ID. That domain defect is independent of coordinator ordering.
-Existing completion tests passed (41), execution package Bazel tests/typechecks passed, and
-fixture formatting passed. The first match remains preserved; only a second match was run
-for replay-visible readback after the missing public bucket was identified.
-
-The live cancellation transport holds a real accepted HTTP response while cancellation
-commits. It does not simulate arbitrary provider failures. Model-directed semantic deduplication
-is not a deterministic guarantee: input retries and execution commands are deduplicated;
-intentional repeated work remains a coordinator decision.
-
-## Final lifecycle UI verification
-
-The UI now displays native task status directly. A done task reads “Worker finished”;
-missing deliverable metadata cannot turn it into an unverified lifecycle state.
-Three browser/reference regressions and the IDE typecheck pass. The retained browser
-proof displays the coordinator’s completed round, episode and exact submitted policy.
-Evidence: phase-runs/022f848a-e1b7-4ce1-b63f-67b44c89f84c/coordinator-request.png
-under the retained fixture directory.
-
-## Consolidation review follow-up (October 22)
-
-The native inbox now owns input consumption. Returned failures are terminal and replay
-without execution. Waiting inputs have no arbitrary queue deadline; process death leaves
-the same input recoverable. Native notifications replace the scan and manual event
-acknowledgement. The plugin no longer owns commands, wakes, or handled-event tables.
-Task creation uses native task and event storage in one transaction. Worker ownership
-checks read native state without appending an event per tool call.
-
-Publication admission checks authority; downstream upload, Git integration and promotion
-own their existing idempotency. Retries must preserve arguments. External `awaiting`
-metadata remains documented for experiment, credit and permit waits.
-
-Review verification: 195 targeted researcher tests; real native queue ordering, terminal
-failure replay, next-input progress, parallel workers and dead-owner recovery; browser
-archived-task visibility regression. Full refreshed delivery proof remains pending.
+Merge the distribution before the paired host pin. Drain active legacy tasks before profile
+adoption; the hosted-worker README provides preflight and previous-image recovery steps.
+A production read-only check at 08:19 UTC found zero nonterminal episode payloads missing
+coworld_id. No production data was changed. Input retries and execution commands are
+deduplicated; semantic interpretation of two differently worded requests remains a model decision.
