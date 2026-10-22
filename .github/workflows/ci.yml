@@ -56,4 +56,4 @@ jobs:
         if: matrix.distribution == 'researcher'
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          uv run pytest -q -m hermes tests/integration/test_install.py::test_guard_exports_typed_native_completion_after_retained_update
+          uv run pytest -q -m hermes tests/integration/test_install.py::test_guard_preserves_native_completion_after_retained_update
