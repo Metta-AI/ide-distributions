@@ -139,12 +139,11 @@ def main():
                 if tool == "status":
                     data = {
                         "cards": cards,
+                        "pending": [],
                         "research": {"champion": {"version": "V-existing"}},
                         "control": {"paused": False},
                         "promotion": {"in_flight": None},
                     }
-                elif tool == "board_reconcile":
-                    data = {"events": [], "pending": [], "cards": []}
                 elif tool == "card_list":
                     data = [
                         {"id": task, "status": status, "assignee": "researcher-1"}

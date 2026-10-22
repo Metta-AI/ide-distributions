@@ -76,7 +76,7 @@ def test_wake_recovers_without_a_local_receipt(context, lost_path):
             tables = {
                 row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
-        assert tables == {"handled", "coordinator"}
+        assert tables == {"coordinator"}
     finally:
         server.shutdown()
         worker.join()

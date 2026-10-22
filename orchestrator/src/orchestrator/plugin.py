@@ -137,43 +137,9 @@ TOOLS = {
         },
         ["id", "outcome"],
     ),
-    "board_reconcile": (
-        Service,
-        (
-            "Read unacknowledged board events, platform transitions and "
-            "branches needing recovery, and the current card state including last_failure_error. "
-            "Current card state overrides historical event labels. Observation never acknowledges anything."
-        ),
-        {},
-        [],
-    ),
-    "event_ack": (
-        Board,
-        (
-            "Acknowledge only after acting. Use table/id from events or pending. "
-            "Promotion state is canonical, not an acknowledgeable event."
-        ),
-        {
-            "ids": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "table": {
-                            "type": "string",
-                            "enum": ["task_events", "task_comments", "task_runs"],
-                        },
-                        "id": I,
-                    },
-                    "required": ["table", "id"],
-                },
-            }
-        },
-        ["ids"],
-    ),
     "status": (
         Service,
-        "Read cards, canonical research summary, pause and promotion state.",
+        "Read native task state, pending external waits, research summary, pause and promotion state.",
         {},
         [],
     ),

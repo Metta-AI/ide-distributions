@@ -13,8 +13,6 @@ provides_tools:
   - card_comment
   - card_answer
   - card_close
-  - board_reconcile
-  - event_ack
   - status
   - records_find
   - records_show

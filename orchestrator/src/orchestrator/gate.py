@@ -13,7 +13,7 @@ from .research import Research
 from .storage import open_storage, snapshot
 
 
-def transitions(state, research, ide, check_champion):
+def transitions(state, research, ide):
     pending = []
     for run in state["awaiting"]:
         metadata = json.loads(run["metadata"])
@@ -54,15 +54,6 @@ def transitions(state, research, ide, check_champion):
                         "answer": body["answer"],
                     }
                 )
-    if check_champion:
-        # The shared command compares league state and recovers interrupted promotions.
-        before = research.call("records", "summary")["champion"]
-        promotion = research.call("promotion", "status")
-        after = research.call("records", "summary")["champion"]
-        if before != after or (
-            promotion.get("conflict") and not (research.control_read() or {}).get("paused")
-        ):
-            pending.append({"kind": "promotion", "status": promotion})
     return pending
 
 
@@ -76,7 +67,7 @@ def evaluate(context, research=None, ide=None, now=None):
         def permit(self, ask):
             return IDE(context).permit(ask)
 
-    pending = transitions(state, research, ide or PermitReader(), False)
+    pending = transitions(state, research, ide or PermitReader())
     if now.minute % 10 == 0 and research.call("promotion", "pending") is not None:
         pending.append(
             {"kind": "promotion_poll", "tick": now.replace(second=0, microsecond=0).isoformat()}
@@ -105,9 +96,9 @@ def wake(context, state):
             origin = conn.execute("SELECT value FROM coordinator WHERE key='session'").fetchone()
         if origin is not None:
             prompt = (
-                "Background coordinator wake. Read current status and board_reconcile before acting; "
+                "Background coordinator wake. Read current status before acting; "
                 "these source events may already be handled. Reuse event-derived command IDs. "
-                "Send meaningful verified updates with ide_say, then acknowledge handled events.\n"
+                "Send meaningful verified updates with ide_say. Queue completion records this input as handled.\n"
                 + json.dumps(state["context"], sort_keys=True)
             )
             identity = "wake:" + hashlib.sha256((origin[0] + "\n" + prompt).encode()).hexdigest()

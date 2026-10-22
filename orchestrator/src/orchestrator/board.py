@@ -8,7 +8,6 @@ from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
 
-from . import storage
 from .context import Context
 from .research import Research, ResearchError
 
@@ -363,7 +362,3 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
     def bootstrap_champion(self, id, run_id, version):
         self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version})
         return Research(self.context).call("promotion", "bootstrap", "--version", version)
-
-    def event_ack(self, ids):
-        with closing(storage.plugin_storage()) as conn:
-            return storage.ack(conn, ids)

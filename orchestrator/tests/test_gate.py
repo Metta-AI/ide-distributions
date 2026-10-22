@@ -4,7 +4,6 @@ import sqlite3
 import subprocess
 import sys
 import venv
-from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,7 +11,6 @@ import pytest
 from conftest import add_wait
 
 from orchestrator.gate import evaluate
-from orchestrator.storage import ack, open_storage, snapshot
 
 QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
@@ -60,12 +58,6 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', 'completed')")
     first = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
     assert first == {"wakeAgent": False}
-    events = snapshot(context)["events"]
-    assert len(events) == 2
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, events)
-        ack(store, events)
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
 @pytest.mark.parametrize(
@@ -80,15 +72,13 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
         ({"permit": "ask-1"}, Platform(answer={"yes": False, "at": "now"}), "permit_answered"),
     ],
 )
-def test_platform_waits_wake_then_ack(context, board_file, awaiting, platform, kind):
+def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, platform, kind):
     add_wait(board_file, awaiting, {"id": "E-1"})
     result = evaluate(context, platform, platform, QUIET_MINUTE)
     assert result["wakeAgent"] is True
     event = result["context"]["pending"][0]
     assert event["kind"] == kind
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, [event])
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, platform, platform, QUIET_MINUTE) == result
 
 
 @pytest.mark.parametrize("awaiting", [{"xp": ["xp-1"]}, {"credits": True}, {"permit": "ask-1"}])
@@ -138,7 +128,7 @@ def test_gate_process_with_sanitized_passthrough(shared_fixture, board_file):
     assert json.loads(result.stdout.splitlines()[-1]) == {"wakeAgent": False}
 
 
-def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_file):
+def test_bookkeeping_and_comments_do_not_wake_cron(context, board_file):
     with sqlite3.connect(board_file) as conn:
         conn.executemany(
             "INSERT INTO task_events (task_id, kind) VALUES ('card-1', ?)",
@@ -163,8 +153,6 @@ def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_fil
         conn.execute("INSERT INTO task_comments VALUES (1, 'card-1', 'orchestrator', 'Answer')")
     for _ in range(2):
         assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
-    with closing(open_storage(context.storage_path)) as store:
-        assert store.execute("SELECT * FROM handled").fetchall() == []
 
 
 @pytest.mark.parametrize(
@@ -180,24 +168,17 @@ def test_bookkeeping_and_orchestrator_comments_never_need_ack(context, board_fil
         "block_loop_detected",
     ],
 )
-def test_native_decision_events_need_explicit_ack(context, board_file, kind):
+def test_native_decision_events_are_not_requeued_by_cron(context, board_file, kind):
     with sqlite3.connect(board_file) as conn:
         conn.execute("INSERT INTO task_events VALUES (1, 'card-1', ?)", (kind,))
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
-    result = snapshot(context)
-    assert result["events"][0]["kind"] == kind
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, result["events"])
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
 @pytest.mark.parametrize("experiment", [None, {}, {"id": None}])
-def test_bad_xp_handoff_is_reported_and_acknowledgeable(context, board_file, experiment):
+def test_bad_xp_handoff_has_stable_queue_input(context, board_file, experiment):
     add_wait(board_file, {"xp": ["xp-1"]}, experiment)
     event = evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"][0]
     assert event["kind"] == "bad_handoff"
     assert event["table"] == "task_runs" and event["id"] == 1
     assert event["card"] == "card-1"
-    with closing(open_storage(context.storage_path)) as store:
-        ack(store, [event])
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"] == [event]

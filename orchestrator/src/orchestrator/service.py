@@ -12,16 +12,6 @@ class Service:
         self.context = context
         self.research = Research(context)
 
-    def board_reconcile(self):
-        state = snapshot(self.context)
-        pending = transitions(state, self.research, IDE(self.context), True)
-        actionable_cards = {event["task_id"] for event in state["events"]}
-        return {
-            "events": state["events"],
-            "pending": pending,
-            "cards": [card for card in state["cards"] if card["id"] in actionable_cards],
-        }
-
     def status(self):
         cards = Board(self.context).card_list()
         by_state = {}
@@ -29,6 +19,7 @@ class Service:
             by_state.setdefault(card["status"], []).append(card["id"])
         return {
             "cards": by_state,
+            "pending": transitions(snapshot(self.context), self.research, IDE(self.context)),
             "research": self.research.call("records", "summary"),
             "promotion": self.research.call("promotion", "status"),
             "control": self.research.control_read(),

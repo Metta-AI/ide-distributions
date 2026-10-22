@@ -115,12 +115,8 @@ elif step == "complete":
                metadata={"outcome": "done", "merged": json.loads(sys.argv[3])})}
 elif step == "gate":
     out = evaluate(context)
-elif step == "reconcile":
-    out = Service(context).board_reconcile()
 elif step == "status":
     out = Service(context).status()
-elif step == "ack":
-    out = Board(context).event_ack(json.loads(sys.argv[2]))
 print(json.dumps({"ok": True, "data": out}, default=str))
 """
 
@@ -167,23 +163,25 @@ def test_one_card_from_creation_to_the_orchestrators_view(host):
     staged = envelope(run([cli, "workspace", "stage"], worker_env, cwd=worktree))
     orchestrator(profiles, "complete", card["id"], json.dumps(staged))
     coordinator_home, coordinator_env = profiles["orchestrator"]
-    envelope(run([str(coordinator_home / "bin/research"), "workspace", "integrate",
-                  "--branch", staged["branch"], "--commit", staged["card_sha"]], coordinator_env))
+    envelope(
+        run(
+            [
+                str(coordinator_home / "bin/research"),
+                "workspace",
+                "integrate",
+                "--branch",
+                staged["branch"],
+                "--commit",
+                staged["card_sha"],
+            ],
+            coordinator_env,
+        )
+    )
     run(["git", "-C", str(clone), "pull", "--ff-only"], researcher_env)
 
-    wake = orchestrator(profiles, "gate")
-    assert wake["wakeAgent"] is True
-    kinds = {event.get("kind") for event in wake["context"]["events"]}
-    assert "completed" in kinds and "claimed" not in kinds
-
-    view = orchestrator(profiles, "reconcile")
-    assert view["cards"]  # execution state is independent of commit integration
+    assert orchestrator(profiles, "gate") == {"wakeAgent": False}
     status = orchestrator(profiles, "status")
     assert status["cards"] == {"done": [card["id"]]}
     assert status["promotion"]["conflict"] is None  # a fresh fake league, no champion yet
     found = envelope(run([cli, "records", "find", "claim"], researcher_env))["ids"]
     assert claim in found
-
-    orchestrator(profiles, "ack", json.dumps(
-        [{"table": e["table"], "id": e["id"]} for e in view["events"]]))  # fmt: skip
-    assert orchestrator(profiles, "gate") == {"wakeAgent": False}
