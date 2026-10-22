@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import storage
+from .context import Context
 from .research import Research, ResearchError
 
 BOARD = "autoresearch"
@@ -299,6 +300,42 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 raise ValueError("Only the latest completed native run may publish")
             kb._append_event(conn, id, kind, payload, run_id=run_id)
             return task
+
+    def upload_build(self, id, run_id, build_dir, name, experiment=None):
+        """Publish a committed artifact after the native worker has finished."""
+        from hermes_cli.kanban_db_workspace import resolve_workspace
+
+        task = self._admit_effect(
+            id,
+            run_id,
+            "upload_admitted",
+            {"build_dir": build_dir, "name": name, "experiment": experiment},
+        )
+        worktree = resolve_workspace(task, board=BOARD)
+        artifact = (worktree / build_dir).resolve()
+        if Path(build_dir).is_absolute() or not artifact.is_relative_to(worktree.resolve()):
+            raise ValueError("build_dir must be inside the task's committed worktree")
+        git(worktree, "ls-files", "--error-unmatch", "--", str(Path(build_dir) / "version.json"))
+        if git(
+            worktree,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored=matching",
+            "--",
+            build_dir,
+        ):
+            raise ValueError("Stage the entire verified build before upload")
+        # Native cleanup may have removed a clean completed checkout. Its task branch
+        # restores the committed build; version receipts belong to that same branch.
+        context = Context(
+            self.context.home, {**self.context.env, "HERMES_KANBAN_WORKSPACE": str(worktree)}
+        )
+        research = Research(context)
+        command = ("upload", experiment) if experiment else ("upload-build",)
+        receipt = research.call("softmax", *command, "--build-dir", artifact, "--name", name)
+        staged = research.call("workspace", "stage", "--worktree", worktree)
+        return {**receipt, **staged}
 
     def workspace_integrate(self, id, run_id, commit):
         task = self._admit_effect(id, run_id, "integration_admitted", {"commit": commit})

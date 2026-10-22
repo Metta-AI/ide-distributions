@@ -30,6 +30,8 @@ old task and reason in its body. Do not increment a semantic attempt counter.
 ## Accept results
 
 Native completion ends an assignment. It does not prove the user's request is fulfilled.
+Workers stage complete verified builds and finish their native assignments. Use `upload_build`
+to publish a completed run’s committed build and stage its version receipts. Integrate the returned commit.
 Inspect staged commits, build reports, upload/version receipts, and platform results against
 the assigned objective. Integrate accepted branches through `workspace_integrate` in sequence.
 Conflicts require resolution and revalidation against current main. Keep unrelated research

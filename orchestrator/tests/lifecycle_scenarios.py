@@ -4,6 +4,7 @@ import json
 import os
 import runpy
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
@@ -126,6 +127,7 @@ def main():
     with patch("orchestrator.board.Research.call") as effect:
         for operation, arguments in (
             (board.workspace_integrate, (result_commit,)),
+            (board.upload_build, ("build-evidence/verified", "policy")),
             (board.submit_requested_version, ("V-cancelled", "strategy.md", "Submit it")),
             (board.promotion_submit, ("E-cancelled",)),
             (board.bootstrap_champion, ("V-cancelled",)),
@@ -185,6 +187,46 @@ def main():
         retained = kb.get_task(conn, running.id)
         assert retained.status == "archived"
         assert Path(retained.workspace_path) == unfinished
+    # A remote effect admitted before cancellation remains reportable afterward.
+    publishing = board.card_create(**{**args, "command_id": "race:publication"})["card"]
+    with closing(connection()) as conn:
+        publisher = kb.claim_task(conn, publishing["id"])
+        publisher_run = publisher.current_run_id
+        assert kb.complete_task(
+            conn, publisher.id, summary="Build verified", expected_run_id=publisher_run
+        )
+    admitted, release = threading.Event(), threading.Event()
+
+    def accepted_after_cancel(*args):
+        admitted.set()
+        assert release.wait(5)
+        return {"submission_id": "accepted-before-cancellation"}
+
+    with (
+        patch("orchestrator.board.Research.call", side_effect=accepted_after_cancel),
+        ThreadPoolExecutor() as pool,
+    ):
+        response = pool.submit(
+            board.submit_requested_version,
+            publisher.id,
+            publisher_run,
+            "V-ready",
+            "strategy.md",
+            "Submit",
+        )
+        assert admitted.wait(5)
+        board.card_close(publisher.id, "archived")
+        release.set()
+        assert response.result()["submission_id"] == "accepted-before-cancellation"
+    with closing(connection()) as conn:
+        events = [event.kind for event in kb.list_events(conn, publisher.id)]
+        assert events.index("submission_admitted") < events.index("publication_revoked")
+    with patch("orchestrator.board.Research.call") as remote:
+        with TestCase().assertRaises(ValueError):
+            board.submit_requested_version(
+                publisher.id, publisher_run, "V-ready", "strategy.md", "Submit"
+            )
+        remote.assert_not_called()
     # Independent assignments coexist, with native ownership of each run.
     for index in range(1, 4):
         card = board.card_create(

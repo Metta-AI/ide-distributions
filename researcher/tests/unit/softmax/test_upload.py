@@ -364,3 +364,18 @@ def test_upload_build_rejects_unchecked_or_changed_artifact(ws, invalid):
         upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "requested-change")
     assert ws.uploads() == {}
     assert ws.store.find("version") == []
+
+
+@pytest.mark.parametrize("experiment", [False, True])
+def test_research_worker_cannot_upload_directly(ws, experiment):
+    from ide_research_core.softmax_tool.upload import upload_build
+
+    (ws.ctx.hermes_home / "plugins/researcher_guard").mkdir(parents=True)
+    ws.write_build()
+    with pytest.raises(Refused) as error:
+        if experiment:
+            ws.run()
+        else:
+            upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "requested-change")
+    assert error.value.reason == "coordinator_required"
+    assert ws.uploads() == {}

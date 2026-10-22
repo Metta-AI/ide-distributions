@@ -141,6 +141,16 @@ def test_a_text_conflict_is_a_merge_failure(tmp_path, bare):
     assert refused.value.reason == "merge"
     assert refused.value.details["conflicts"] == ["notes.md"]
     assert not (two / ".git" / "MERGE_HEAD").exists()
+    # Resolve against the new canonical head, then review that exact new commit.
+    gitops.git(second, "fetch", "origin")
+    merge = gitops._run(second, "merge", "origin/main", check=False)
+    assert merge.returncode != 0
+    (second / "notes.md").write_text("one\ntwo\n")
+    gitops.git(second, "add", "notes.md")
+    gitops.git(second, "commit", "-m", "Resolve both results against current main")
+    staged = workspace.stage(second)
+    workspace.integrate(two, branch=staged["branch"], commit=staged["card_sha"])
+    assert gitops.git(bare, "show", "main:notes.md") == "one\ntwo"
 
 
 def test_publish_commits_only_the_named_paths(tmp_path, bare):

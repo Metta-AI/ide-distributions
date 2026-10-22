@@ -174,6 +174,12 @@ TOOLS = {
         {"action": {"type": "string", "enum": ["pause", "resume"]}, "reason": S},
         ["action", "reason"],
     ),
+    "upload_build": (
+        Board,
+        "Upload the latest completed task run’s verified build. build_dir is a committed task-relative directory containing policy.bas, version.json and gate evidence. Return upload receipts and the new staged commit for integration. Reuse name on retry. Optional experiment binds a research candidate.",
+        {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S},
+        ["id", "run_id", "build_dir", "name"],
+    ),
     "promotion_submit": (
         Board,
         ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),

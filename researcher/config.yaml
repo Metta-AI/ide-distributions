@@ -37,6 +37,7 @@ approvals:
     - "coworld player use*"
     - "coworld submit*"
     - "coworld upload-policy*"
+    - "*softmax upload*"
     - "coworld xp-request create*"
     - "softmax login*"
     - "git push -f*"

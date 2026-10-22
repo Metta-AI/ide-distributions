@@ -190,6 +190,8 @@ def upload(
 ) -> str:
     """Upload the build in ``build_dir`` as ``experiment``'s candidate; return the version id.
     Raises ``Refused`` (nothing uploaded) or the platform's errors (``IdentityError``, ...)."""
+    if (ctx.hermes_home / "plugins/researcher_guard").is_dir():
+        raise Refused("coordinator_required", "Stage the verified build; the coordinator owns upload")
     store = worker_store(ctx)
     build_dir = Path(build_dir)
     build, artifact, artifact_hash = checked_build(build_dir)
@@ -230,6 +232,8 @@ def upload_build(
     """Upload a checked build without an experiment, evaluation, or league submission;
     return ``(version id, platform policy version id)``. Raises ``Refused`` (nothing
     uploaded) or the platform's errors (``IdentityError``, ...)."""
+    if (ctx.hermes_home / "plugins/researcher_guard").is_dir():
+        raise Refused("coordinator_required", "Stage the verified build; the coordinator owns upload")
     store = worker_store(ctx)
     build, artifact, artifact_hash = checked_build(Path(build_dir))
     name = policy_name(name, player_id)

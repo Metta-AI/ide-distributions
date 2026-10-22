@@ -14,7 +14,10 @@ when their answer is necessary. An earlier merged commit does not mean this task
 Do not create or schedule tasks; propose follow-up work to the coordinator.
 
 Preserve outputs with `"$RESEARCH_CLI" workspace stage`. This commits and pushes your task
-branch without integrating it. The coordinator owns canonical integration and submission.
+branch without integrating it. The coordinator owns upload, canonical integration and submission.
+For a build, copy the complete passing build directory into a tracked task-relative directory
+(for example `build-evidence/<build-id>`), stage it, and report that path. Ignored scratch files
+are not durable handoff artifacts; native completion may remove a clean worktree.
 Use native completion when your assignment is finished, with a factual summary and artifact
 references. A research journal is useful evidence when relevant, not a lifecycle requirement.
 Stop after completion. Do not claim the user's whole request is fulfilled from worker status.
