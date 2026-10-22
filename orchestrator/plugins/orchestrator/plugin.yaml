@@ -27,5 +27,8 @@ provides_tools:
   - workspace_integrate
   - xp_status
   - credits
+  - discover_leagues
+  - league_players
+  - game_support
   - leaderboard
   - latest_league_result

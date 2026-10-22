@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "The user's own program on one coworld: starter, upload, practice, release"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "pydantic>=2",
     "python-frontmatter",
     "PyYAML",
     "coworld==0.1.58",

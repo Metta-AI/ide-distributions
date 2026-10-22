@@ -250,8 +250,8 @@ class PlatformCli:
                 f"{tool} {' '.join(args)} printed non-JSON output: {error}"
             ) from None
 
-    def api_get_json(self, path: str):
-        """``GET <self.server><path>`` as the Player (module docstring); the parsed JSON body.
+    def api_get_text(self, path: str) -> str:
+        """``GET <self.server><path>`` as the Player (module docstring); the response body.
         Errors never include the token."""
         credential = parse_credential(self._credential_value)
         headers = {"Authorization": f"Bearer {credential.token}", "User-Agent": USER_AGENT}
@@ -261,6 +261,10 @@ class PlatformCli:
             raise SoftmaxCliError(f"GET {path} answered HTTP {error.code}") from None
         except (urllib.error.URLError, OSError) as error:
             raise SoftmaxCliError(f"GET {path} failed: {error}") from None
+        return body
+
+    def api_get_json(self, path: str):
+        body = self.api_get_text(path)
         try:
             return json.loads(body)
         except json.JSONDecodeError as error:

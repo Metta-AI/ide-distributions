@@ -5,6 +5,7 @@ description = "Research lead for native Hermes Kanban workers"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "jsonschema",
+    "pydantic>=2",
     "python-frontmatter",
     "numpy",
     "PyYAML",
