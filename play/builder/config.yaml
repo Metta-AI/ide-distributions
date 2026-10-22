@@ -9,7 +9,7 @@ memory:
   user_profile_enabled: false
 agent:
   max_turns: 60
-  # Bounds one builder card; the play profile leaves the card's own runtime cap unset.
+  # Bounds one builder run, inside the 3600 s cap the play profile gives each card.
   run_budget_seconds: 1800
 approvals:
   mode: "off"
