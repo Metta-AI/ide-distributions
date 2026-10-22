@@ -35,6 +35,14 @@ class Page(BaseModel):
     offset: Annotated[int, Field(ge=0)] = 0
     limit: Annotated[int, Field(ge=1, le=50)] = 20
 
+    def result(self, key: str, rows: list[dict]) -> dict:
+        end = self.offset + self.limit
+        return {
+            key: rows[self.offset : end],
+            "total": len(rows),
+            "next_offset": end if end < len(rows) else None,
+        }
+
 
 class Coworld(BaseModel):
     id: str
@@ -89,16 +97,7 @@ class Discovery:
                 league.id,
             )
         )
-        return {
-            "leagues": [
-                league.model_dump()
-                for league in found[page.offset : page.offset + page.limit]
-            ],
-            "total": len(found),
-            "next_offset": page.offset + page.limit
-            if page.offset + page.limit < len(found)
-            else None,
-        }
+        return page.result("leagues", [league.model_dump() for league in found])
 
     def league_players(self, league_id, query="", offset=0, limit=20):
         page = Page(query=query, offset=offset, limit=limit)
@@ -110,11 +109,7 @@ class Discovery:
         ]
         return {
             "league_id": league_id,
-            "players": found[page.offset : page.offset + page.limit],
-            "total": len(found),
-            "next_offset": page.offset + page.limit
-            if page.offset + page.limit < len(found)
-            else None,
+            **page.result("players", found),
             "scope": "ranked players; absence does not establish that a player or policy does not exist",
         }
 
