@@ -84,8 +84,8 @@ The disposable probe used auto_champion=never and the league was paused to preve
   short-path reruns and Linux watcher checks supplied the relevant passing evidence.
 
 The delivery image is sha256:688eaa79bc229a79b196076c8751c658197e94176e10449e68ca60f7809bda29.
-The live fixture runs at http://localhost:51115; it is disposable, not production proof.
-Host implementation commit: ddc45013fa. Publish the paired distribution and host changes together;
+The live fixture was verified at http://localhost:51115; it is disposable, not production proof.
+Host implementation commit: 33162787f4. Publish the paired distribution and host changes together;
 drain active legacy tasks before adopting the new profile.
 
 
@@ -108,3 +108,12 @@ The live cancellation transport holds a real accepted HTTP response while cancel
 commits. It does not simulate arbitrary provider failures. Model-directed semantic deduplication
 is not a deterministic guarantee: input retries and execution commands are deduplicated;
 intentional repeated work remains a coordinator decision.
+
+## Final lifecycle UI verification
+
+The UI now displays native task status directly. A done task reads “Worker finished”;
+missing deliverable metadata cannot turn it into an unverified lifecycle state.
+Three browser/reference regressions and the IDE typecheck pass. The retained browser
+proof displays the coordinator’s completed round, episode and exact submitted policy.
+Evidence: phase-runs/022f848a-e1b7-4ce1-b63f-67b44c89f84c/coordinator-request.png
+under the retained fixture directory.

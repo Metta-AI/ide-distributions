@@ -1,6 +1,6 @@
 {
   "distribution_commit": "f9d016474b3eaa98b9c9b91e93517accbf01f0aa",
-  "host_commit": "ddc45013fa",
+  "host_commit": "33162787f4",
   "task": "t_ca267c81",
   "run": 7,
   "build": "62ee8269-1",
@@ -188,5 +188,11 @@
         "finished": 1
       }
     ]
+  },
+  "browser_proof": {
+    "status": "passed",
+    "screenshot": "/tmp/nix-shell.lkw7dQ/ide-next-ec2-8ozON4/phase-runs/022f848a-e1b7-4ce1-b63f-67b44c89f84c/coordinator-request.png",
+    "native_lifecycle_ui_tests": 3,
+    "typecheck": "passed"
   }
 }
