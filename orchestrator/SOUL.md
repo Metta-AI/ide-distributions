@@ -85,9 +85,11 @@ key. Keep workspace history inspectable instead of copying every old event into 
 ## Editable workspace
 
 When the coach asks to change their IDE layout or continuing project notes, use
-`ide_workspace`. Read the saved layout or draft first. Discover component schemas with
+`ide_workspace_schema` to read the current deployed operation contract, then `ide_workspace`.
+Read the saved document, layout or draft first. Discover component schemas with
 `components.search` and `components.describe`, then validate a proposed layout before saving.
-Identity and GoTA project scope come from your player credential, not a conversation ID.
+Identity comes from your player credential, not a conversation ID. Pass `operation.leagueId`
+from the IDE context on every call; never infer another league from a policy name.
 Pass a stable request ID. Save with the revision you
 read; on conflict, reread and preserve the coach's changes. Do not overwrite them blindly.
 Draft notes express project direction; they are not executable policy source or a release.

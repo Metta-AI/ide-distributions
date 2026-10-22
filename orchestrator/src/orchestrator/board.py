@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from contextlib import closing
@@ -97,6 +98,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         from hermes_cli import kanban_db as kb
         from hermes_cli import projects_db
         from hermes_cli.profiles import get_profile_dir
+        from tools.approval_context import get_current_session_key
         from tools.async_delegation import _current_origin_session_id
         from tools.kanban_tools import _persisted_session_id
 
@@ -176,10 +178,16 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         or _persisted_session_id(_current_origin_session_id())
                         or _persisted_session_id(get_session_env("HERMES_SESSION_ID", ""))
                     )
+                    source_run_id = get_current_session_key("")
+                    if not re.fullmatch(r"run_[0-9a-f]{32}", source_run_id):
+                        source_run_id = None
                     task_id = kb.create_task(
                         conn,
                         title=title,
-                        body=body,
+                        body=body
+                        + "\n\nCard context:\n```json\n"
+                        + json.dumps({"source_run_id": source_run_id})
+                        + "\n```\n",
                         assignee=assignee,
                         created_by="orchestrator",
                         project_id=project_id,

@@ -19,17 +19,27 @@ STRINGS = {"type": "array", "items": S}
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "ide_workspace_schema": (
+        Workspace,
+        (
+            "Read the authenticated IDE MCP tools/list contract. Use the returned ide_workspace inputSchema "
+            "to discover layout, draft, documents and discovery operations before calling ide_workspace. "
+            "This reads schemas only and does not modify the workspace."
+        ),
+        {},
+        [],
+    ),
     "ide_workspace": (
         Workspace,
         (
             "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
             "Use a stable request_id; identity comes from your scoped player credential. "
-            "operation.method: components.search (query), components.describe (name), layout.read, "
-            "layout.validate (view), layout.save (view, revision), draft.read, "
-            "draft.save (title, notes, revision), or league.overview. "
+            "Call ide_workspace_schema first for the deployed operation names, parameters and schemas. "
+            "Pass operation.leagueId from the current IDE context on every call. "
+            "Identity comes from the credential; leagueId selects the requested workspace, not authority. "
             "Read before editing; preserve human content. A conflict requires rereading. "
             "A view has version:1 and body:[components]; discover component props first. "
-            "Draft notes are project direction, not executable source. This never releases a policy. "
+            "Draft notes are project direction, not executable source. Publication operations require explicit user authorization. "
             "Read the MCP result's isError and structured status; transport success is not effect success."
         ),
         {"request_id": S, "operation": O},
@@ -222,7 +232,12 @@ TOOLS = {
     "league_players": (
         Research,
         "Find ranked players in an explicit league by name or ID. Compare against the user's owned-player context; rank never establishes ownership. An absent row does not establish absence of policies or activity.",
-        {"league_id": S, "query": S, "offset": {**I, "minimum": 0}, "limit": {**I, "minimum": 1, "maximum": 50}},
+        {
+            "league_id": S,
+            "query": S,
+            "offset": {**I, "minimum": 0},
+            "limit": {**I, "minimum": 1, "maximum": 50},
+        },
         ["league_id"],
     ),
     "game_support": (
