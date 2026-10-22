@@ -89,6 +89,8 @@ def main():
     task_id = cards[0]["id"]
     assert {card["id"] for card in cards} == {task_id}
     assert task_id in cards[0]["branch_name"]
+    with TestCase().assertRaisesRegex(ValueError, "different arguments"):
+        board.card_create(**{**args, "body": "Different work under the same command"})
     with closing(connection()) as conn:
         assert kb.parent_ids(conn, task_id) == []
         task = kb.claim_task(conn, task_id)

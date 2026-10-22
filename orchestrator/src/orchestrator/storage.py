@@ -20,11 +20,11 @@ WAKE_KINDS = {
 def prepare(conn):
     # Reads do not wait behind a creation command's Git preparation transaction.
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if {"handled", "commands", "coordinator", "wakes"} <= tables:
+    if {"handled", "coordinator"} <= tables:
         return conn
-    conn.execute("CREATE TABLE IF NOT EXISTS wakes (id TEXT PRIMARY KEY, retry_until REAL NOT NULL, run_id TEXT)")
-    conn.execute("CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
-    conn.execute("CREATE TABLE IF NOT EXISTS coordinator (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS coordinator (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
     conn.execute(
         'CREATE TABLE IF NOT EXISTS handled ("table" TEXT NOT NULL, '
         'rowid INTEGER NOT NULL, PRIMARY KEY ("table", rowid))'

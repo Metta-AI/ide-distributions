@@ -137,89 +137,87 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             },
             sort_keys=True,
         )
-        with closing(storage.plugin_storage()) as lock, closing(connection()) as conn:
-            # Persist the command BEFORE the native write. A crash between the two databases
-            # recovers by exact native command key, including archived tasks.
-            lock.execute("BEGIN IMMEDIATE")
-            prior = lock.execute(
-                "SELECT payload FROM commands WHERE id=?", (command_id,)
-            ).fetchone()
-            if prior and prior[0] != payload:
-                raise ValueError("command_id was already used with different arguments")
-            lock.execute(
-                "INSERT OR IGNORE INTO commands(id, payload) VALUES (?, ?)", (command_id, payload)
-            )
-            lock.commit()
-            lock.execute("BEGIN IMMEDIATE")
-            key = f"command:{command_id}"
-            existing = next(
-                (
-                    task
-                    for task in kb.list_tasks(conn, include_archived=True)
-                    if task.idempotency_key == key
-                ),
-                None,
-            )
-            if existing:
-                task_id = existing.id
-            else:
-                git(clone, "fetch", "origin")
-                with projects_db.connect_closing() as projects:
-                    project = projects_db.find_by_primary_path(projects, str(clone))
-                    project_id = (
-                        project.id
-                        if project
-                        else projects_db.create_project(
-                            projects,
-                            name=assignee,
-                            primary_path=str(clone),
-                            board_slug=BOARD,
+        with closing(connection()) as conn:
+            # Serialize lookup and creation in the native task database. The task
+            # and its immutable creation arguments commit together.
+            with kb.write_txn(conn):
+                key = f"command:{command_id}"
+                existing = next(
+                    (
+                        task
+                        for task in kb.list_tasks(conn, include_archived=True)
+                        if task.idempotency_key == key
+                    ),
+                    None,
+                )
+                if existing:
+                    task_id = existing.id
+                    prior = conn.execute(
+                        "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command'",
+                        (task_id,),
+                    ).fetchone()
+                    if json.loads(prior["payload"]) != json.loads(payload):
+                        raise ValueError("command_id was already used with different arguments")
+                else:
+                    git(clone, "fetch", "origin")
+                    with projects_db.connect_closing() as projects:
+                        project = projects_db.find_by_primary_path(projects, str(clone))
+                        project_id = (
+                            project.id
+                            if project
+                            else projects_db.create_project(
+                                projects,
+                                name=assignee,
+                                primary_path=str(clone),
+                                board_slug=BOARD,
+                            )
                         )
+                    origin_session = (
+                        _persisted_session_id(session_id)
+                        or _persisted_session_id(_current_origin_session_id())
+                        or _persisted_session_id(get_session_env("HERMES_SESSION_ID", ""))
                     )
-                origin_session = (
-                    _persisted_session_id(session_id)
-                    or _persisted_session_id(_current_origin_session_id())
-                    or _persisted_session_id(get_session_env("HERMES_SESSION_ID", ""))
-                )
-                task_id = kb.create_task(
-                    conn,
-                    title=title,
-                    body=body,
-                    assignee=assignee,
-                    created_by="orchestrator",
-                    project_id=project_id,
-                    workspace_kind="worktree",
-                    max_retries=failure_limit,
-                    max_runtime_seconds=max_runtime_seconds,
-                    skills=skills or [],
-                    priority=priority,
-                    idempotency_key=key,
-                    session_id=origin_session,
-                    board=BOARD,
-                    initial_status="blocked",
-                )
-            task = kb.get_task(conn, task_id)
+                    task_id = kb.create_task(
+                        conn,
+                        title=title,
+                        body=body,
+                        assignee=assignee,
+                        created_by="orchestrator",
+                        project_id=project_id,
+                        workspace_kind="worktree",
+                        max_retries=failure_limit,
+                        max_runtime_seconds=max_runtime_seconds,
+                        skills=skills or [],
+                        priority=priority,
+                        idempotency_key=key,
+                        session_id=origin_session,
+                        board=BOARD,
+                        initial_status="blocked",
+                    )
+                if not existing:
+                    kb._append_event(conn, task_id, "creation_command", json.loads(payload))
+                task = kb.get_task(conn, task_id)
+                if task.status == "blocked" and not kb.list_runs(conn, task_id):
+                    # Native creation parks the task until its branch is anchored. Resuming an
+                    # already executed task belongs to card_answer, never creation replay.
+                    found = subprocess.run(
+                        [
+                            "git",
+                            "-C",
+                            str(clone),
+                            "show-ref",
+                            "--verify",
+                            "--quiet",
+                            f"refs/heads/{task.branch_name}",
+                        ],
+                        check=False,
+                    )
+                    if found.returncode == 1:
+                        git(clone, "branch", task.branch_name, "origin/main")
+                    elif found.returncode:
+                        found.check_returncode()
             if task.status == "blocked" and not kb.list_runs(conn, task_id):
-                # Native creation parks the task until its branch is anchored. Resuming an
-                # already executed task belongs to card_answer, never creation replay.
-                found = subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(clone),
-                        "show-ref",
-                        "--verify",
-                        "--quiet",
-                        f"refs/heads/{task.branch_name}",
-                    ],
-                    check=False,
-                )
-                if found.returncode == 1:
-                    git(clone, "branch", task.branch_name, "origin/main")
-                elif found.returncode:
-                    found.check_returncode()
                 kb.unblock_task(conn, task_id)
-            lock.commit()
             return {
                 "card": asdict(kb.get_task(conn, task_id)),
                 "subscribed": subscribe(conn, task_id),
