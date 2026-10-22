@@ -427,3 +427,30 @@ def test_local_check_advisory_failures_exit_zero(tmp_path, monkeypatch):
     receipt = json.loads((tmp_path / 'check/gates.json').read_text())
     assert receipt['g5_telemetry']['advisory'] is True
     assert receipt['g5_telemetry']['outcome'] == 'failed'
+
+
+@pytest.mark.parametrize('repair', [True, False])
+def test_generated_report_failure_uses_bounded_repair(staged, monkeypatch, repair):
+    order, _stage, source = staged
+    order['components']['C.idle'] = {'llm': True, 'compiled_text': 'Wait.'}
+    order['units']['C.idle'] = 'new'
+    generations = []
+
+    def generate(order, *, errors, **kw):
+        generations.append(errors)
+        quote = 'Wait.' if repair and len(generations) > 1 else 'Invented quote'
+        builds.validate_draft({'guesses': [{
+            'id': 'G-C.idle-1', 'component': 'C.idle', 'spec_quote': quote,
+            'decision': 'wait', 'why': 'test', 'severity': 'low', 'state': 'open',
+        }], 'gaps': []}, order)
+
+    monkeypatch.setattr(builds, 'generate', generate)
+    monkeypatch.setattr(gota_gates, 'verify', lambda *a, **kw: {
+        f'G{i}': {'outcome': 'passed', 'passed': True, 'summary': {}} for i in range(1, 6)
+    })
+    result = pw_strategy.run(compile_args(source), pw_cli.Report('test', json_mode=True))
+    assert result['status'] == ('passed' if repair else 'failed')
+    assert len(generations) == (2 if repair else 3)
+    assert generations[1][0]['code'] == 'report-draft'
+    assert generations[1][0]['component'] == 'C.idle'
+    assert 'Invented quote' in generations[1][0]['message']

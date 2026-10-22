@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from hermes_cli import kanban_db as kb
 from hermes_cli.kanban_db_boards import create_board
+from hermes_cli.kanban_db_workspace import resolve_workspace, set_workspace_path
 
 from orchestrator.board import Board, connection
 from orchestrator.context import Context
@@ -50,6 +51,35 @@ def main():
         "title": "Continue",
         "body": "Produce the requested change",
     }
+    native_create = kb.create_task
+
+    def crash_after_creation(*args, **kwargs):
+        native_create(*args, **kwargs)
+        raise RuntimeError("crash after native creation")
+
+    interrupted = {**args, "command_id": "crash:created"}
+    with patch("hermes_cli.kanban_db.create_task", side_effect=crash_after_creation):
+        with TestCase().assertRaisesRegex(RuntimeError, "crash after native creation"):
+            board.card_create(**interrupted)
+    recovered = board.card_create(**interrupted)["card"]
+    assert board.card_create(**interrupted)["card"]["id"] == recovered["id"]
+    with closing(connection()) as conn:
+        assert len(kb.list_tasks(conn)) == 1
+        assert kb.get_task(conn, recovered["id"]).status == "ready"
+    board.card_close(recovered["id"], "archived")
+    triaged = board.card_create(**{**args, "command_id": "triage:resume"})["card"]
+    for _ in range(kb.BLOCK_RECURRENCE_LIMIT):
+        with closing(connection()) as conn:
+            assert kb.claim_task(conn, triaged["id"]) is not None
+            assert kb.block_task(conn, triaged["id"], reason="Tool unavailable", kind="needs_input")
+            status = kb.get_task(conn, triaged["id"]).status
+        if status != "triage":
+            assert board.card_answer(triaged["id"], "Repair attempt")["unblocked"]
+    assert status == "triage"
+    assert board.card_answer(triaged["id"], "Tool repaired and verified")["unblocked"]
+    with closing(connection()) as conn:
+        assert kb.claim_task(conn, triaged["id"]) is not None
+    board.card_close(triaged["id"], "archived")
     # Duplicate notifications and racing callers cannot create multiple tasks.
     with ThreadPoolExecutor(max_workers=3) as pool:
         cards = list(pool.map(lambda _: board.card_create(**args)["card"], range(3)))
@@ -129,6 +159,9 @@ def main():
     with closing(connection()) as conn:
         running = kb.claim_task(conn, cancelled_running["id"])
         stale_run = running.current_run_id
+        unfinished = resolve_workspace(running, board="autoresearch")
+        set_workspace_path(conn, running.id, unfinished)
+        (unfinished / "unfinished-policy.bas").write_text("uncommitted policy work\n")
     with patch.dict(
         os.environ,
         {
@@ -147,6 +180,11 @@ def main():
         assert not kb.complete_task(
             conn, running.id, summary="late result", expected_run_id=stale_run
         )
+    assert (unfinished / "unfinished-policy.bas").read_text() == "uncommitted policy work\n"
+    with closing(connection()) as conn:
+        retained = kb.get_task(conn, running.id)
+        assert retained.status == "archived"
+        assert Path(retained.workspace_path) == unfinished
     # Independent assignments coexist, with native ownership of each run.
     for index in range(1, 4):
         card = board.card_create(

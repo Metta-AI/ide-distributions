@@ -255,7 +255,13 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
 
         with closing(connection()) as conn:
             comment = kb.add_comment(conn, id, "orchestrator", text)
-            return {"comment": comment, "unblocked": kb.unblock_task(conn, id)}
+            task = kb.get_task(conn, id)
+            resumed = (
+                kb.specify_triage_task(conn, id, author="orchestrator")
+                if task.status == "triage"
+                else kb.unblock_task(conn, id)
+            )
+            return {"comment": comment, "unblocked": resumed}
 
     def card_close(self, id, outcome, summary=None, metadata=None):
         from hermes_cli import kanban_db as kb

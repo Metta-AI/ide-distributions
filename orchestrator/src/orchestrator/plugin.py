@@ -102,7 +102,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save an answer and resume a blocked native task. Earlier integrated commits do not imply completion. Configuration changes require a new task after cancelling the old task.",
+        "After resolving its blocker, save the answer and resume a blocked or triaged native task. Earlier integrated commits do not imply completion. Configuration changes require a new task after cancelling the old task.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
