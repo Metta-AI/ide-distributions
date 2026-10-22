@@ -66,36 +66,26 @@ until evidence meets its `revise_if`.
   paid for in **credits**. A **permit ask** is the coach's approval the platform requires
   before some acts; the answer arrives later.
 
-## Cards
+## Tasks
 
-A **card** is one bounded unit of work on the Kanban board `autoresearch`, assigned by the
-orchestrator to one researcher. It holds no research state; everything it learns goes to
-records through integrate.
+A task is a bounded native Hermes assignment to one researcher. Its ID and execution status
+come from Hermes. Task meaning is its objective and instructions, not a kind/entity/attempt key.
+Researchers can run concurrently in separate worktrees. The coordinator assigns ready work
+and keeps pending intentions in its plan without constructing dependency graphs.
 
-| Kind | For |
-|---|---|
-| `investigation` | find a cause in replays or data |
-| `scouting` | the league, opponents, the meta |
-| `experimentation` | design, build, upload and launch XP for one experiment |
-| `review` | judge an experiment's finished XP and decide |
-| `maintenance` | knowledge-base upkeep, noise calibration, lessons, bootstrap |
-| `planning` | update topics and the plan (one at a time) |
-| `repair` | make a failed card branch integrate |
+Native completion ends the assignment; it does not prove deliverable acceptance or fulfillment
+of the user's request. Git integration describes commits only. A blocked worker can resume
+and produce new commits after an earlier checkpoint was integrated.
 
-**Handoff**: `kanban_complete(summary, metadata)`. The summary is findings-first prose; the
-metadata is `{outcome, journal, records_changed, merged, experiment, awaiting, next}` where
-`awaiting` is `{xp: [request ids]}`, `{credits: true}` or `{permit: <ask id>}` when the card
-ended waiting on the platform, and `next` proposes follow-up work. A card **blocks**
-(`kanban_block`) when integrate fails (`integrate: <reason>`) or it needs an answer it cannot
-work without.
+Researchers stage their branch and return factual summaries with artifact references. Research
+journals and experiment records are evidence, not prerequisites for blocking or completion.
+Comments carry questions and steering. The coordinator verifies deliverables, integrates
+accepted work sequentially, and owns externally visible submission.
 
-**Comments** carry everything between orchestrator and researcher mid-card. A researcher
-comments only on its own card, with a prefix: `note:` (fact), `question:` (needs an answer),
-`suggestion:` (proposed work), `help_request:` (cannot continue without a human),
-`highlight:` (a notable result). The orchestrator's comment reaches a running worker as a
-steer with the user's authority.
-
-A **tool fault** is a broken binding or CLI: report it, do not retry around it.
+A blocked run can record `metadata.awaiting`: `xp` lists request IDs alongside
+`metadata.experiment.id`, `credits` waits for available credit, and `permit` names an ask.
+The gate polls these external conditions and enqueues a stable input when they resolve.
+The native inbox records consumption; no separate acknowledgement is required.
 
 ## Who decides what
 

@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -330,7 +331,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     [uploaded] = worker.store.find('version_event', version=data['version_id'], kind='uploaded')
     assert worker.store.load(uploaded)[0]['data']['policy_version_id'] == data['platform_policy_version_id']
     worker.write_journal()
-    workspace.integrate(board.canonical, worktree=worker.worktree)
+    workspace.integrate(board.canonical, branch=workspace.stage(worker.worktree)["branch"])
 
     # The orchestrator submits it as the first champion, then reports until it is published.
     league = 'league_3c60897b-25cf-4b37-9d1a-8554c1198f28'
@@ -379,7 +380,7 @@ def test_shared_upload_rejects_tampered_prebuilt_hash(candidate, tmp_path, monke
     monkeypatch.setattr(upload, 'worker_store', lambda ctx: object())
     # Refusal happens before any record or platform call, with no fake identity success.
     with pytest.raises(Exception, match='artifact sha256'):
-        upload.upload(None, None, out, 'E-test', 'ply_fake', 'opening-rush')
+        upload.upload(SimpleNamespace(hermes_home=tmp_path), None, out, 'E-test', 'ply_fake', 'opening-rush')
 
 
 def test_prebuilt_retains_post_gate_source_fault(candidate, tmp_path, monkeypatch):
@@ -503,7 +504,7 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     game = (ROOT / 'games/gota/GAME.md').read_text()
     assert '\n## Starter policy\n' in game
     section = game.split('\n## Starter policy\n', 1)[1].split('\n## ', 1)[0]
-    commands = ('make_v13_live.py', 'tools/build.py', 'softmax upload-build')
+    commands = ('make_v13_live.py', 'tools/build.py', 'upload_build')
     positions = [section.index(command) for command in commands]
     assert positions == sorted(positions)
     assert '-m games.gota.gates' not in section
@@ -512,13 +513,13 @@ def test_starter_policy_contract_matches_the_upload_only_bootstrap():
     assert '.scratch/build/champion' in section
     assert 'git -C "$CARD_WORKTREE"' in section
     assert '"$RESEARCH_PYTHON"' in section and 'cd "$RESEARCH_HOME"' in section
-    assert 'data.platform_policy_version_id' in section
-    assert 'unevaluated' in section and 'promotion bootstrap' in section
+    assert 'build-evidence/<build-id>' in section
+    assert 'unevaluated' in section and 'bootstrap_champion' in section
     assert '/workspace/versions/' not in section
     skill = (ROOT / 'skills/gota/eval-design/SKILL.md').read_text()
-    assert 'softmax upload-build' in skill
+    assert 'coordinator uploads' in skill
     assert 'strategy/candidates/bootstrap' in skill and '.scratch/build/champion' in skill
-    assert 'integrate' in skill and 'never submits' in skill
+    assert 'stage' in skill and 'coordinator uploads and submits' in skill
     for path in (ROOT / 'skills/gota').glob('*/SKILL.md'):
         assert 'upload-baseline' not in path.read_text()
         assert 'handoff is pending' not in path.read_text()

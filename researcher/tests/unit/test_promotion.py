@@ -302,9 +302,10 @@ def test_a_rejected_champion_publish_is_redone_with_the_strategy(board, monkeypa
 
 @pytest.mark.parametrize("seed_champion", [False, True])
 @pytest.mark.parametrize("permit", [False, True])
-def test_requested_version_submission_needs_no_experiment_and_preserves_strategy(tmp_path, seed_champion, permit):
+@pytest.mark.parametrize("source_path", ["strategy/requested/STRATEGY.md", "strategy/requested/policy.bas"])
+def test_requested_version_submission_needs_no_experiment_and_preserves_strategy(tmp_path, seed_champion, permit, source_path):
     board = ResearchBoard(tmp_path, seed_champion=seed_champion)
-    version, source_path, source = uploaded_requested_version(board)
+    version, source_path, source = uploaded_requested_version(board, source_path)
     path = board.canonical / source_path
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"}) if permit else board.sm
     if permit:
@@ -342,11 +343,10 @@ def test_requested_version_submission_needs_no_experiment_and_preserves_strategy
     assert board.sm.submissions(PLAYER) == before
 
 
-def uploaded_requested_version(board):
+def uploaded_requested_version(board, source_path="strategy/requested/STRATEGY.md"):
     import hashlib
 
     source = b"# Explicitly requested candidate\n"
-    source_path = "strategy/requested/STRATEGY.md"
     path = board.canonical / source_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(source)
@@ -362,8 +362,9 @@ def uploaded_requested_version(board):
 
 
 @pytest.mark.parametrize("fault,reason", [("source", "strategy_mismatch"), ("request", "missing_request")])
-def test_requested_submission_refuses_invalid_provenance_before_platform_write(board, fault, reason):
-    version, source_path, _ = uploaded_requested_version(board)
+@pytest.mark.parametrize("source_path", ["strategy/requested/STRATEGY.md", "strategy/requested/policy.bas"])
+def test_requested_submission_refuses_invalid_provenance_before_platform_write(board, fault, reason, source_path):
+    version, source_path, _ = uploaded_requested_version(board, source_path)
     if fault == "source":
         (board.canonical / source_path).write_text("# Wrong build\n")
         gitops.commit_all(board.canonical, "wrong source")

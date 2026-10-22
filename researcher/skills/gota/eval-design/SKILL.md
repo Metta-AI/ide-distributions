@@ -138,16 +138,7 @@ Review the build reports, provenance and actual native compile evidence before u
 Full evaluation keeps every seed and tick budget unchanged. An errored build follows
 **Build tool faults** above. A failed or incomplete build does not qualify for reuse.
 
-After the required checks pass, upload the starter:
-
-```sh
-"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir .scratch/build/champion
-```
-
-This uploads v13-live without an experiment, frozen design or evaluation outcome.
-It is unevaluated and is not yet the champion. Record `data.version_id` and
-`data.platform_policy_version_id` in the journal's Decisions and handoff metadata.
-Follow `candidate` and `card`: integrate, then complete with `experiment: null`
-and recommend the orchestrator submit this starter before commissioning an
-experiment against it. The researcher never submits. Use `candidate`'s failure
-handling if the upload does not succeed.
+After the required checks pass, follow `candidate` and `card`: copy the complete build
+into tracked `build-evidence/<build-id>`, stage it, and complete with `experiment: null`.
+Report the build path and hash. The coordinator uploads and submits the starter before
+commissioning an experiment. The starter is unevaluated; claim no improvement.

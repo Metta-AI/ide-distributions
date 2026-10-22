@@ -14,19 +14,19 @@ provides_tools:
   - card_comment
   - card_answer
   - card_close
-  - board_reconcile
-  - event_ack
   - status
   - records_find
   - records_show
   - plan_write
   - control_write
+  - upload_build
   - submit_requested_version
   - promotion_submit
   - bootstrap_champion
   - accept_champion
   - workspace_integrate
   - xp_status
+  - budget_limit
   - credits
   - discover_leagues
   - league_players

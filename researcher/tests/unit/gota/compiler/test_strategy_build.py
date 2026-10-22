@@ -179,9 +179,11 @@ def test_guess_quote_and_id_are_checked():
              'decision': 'Wait.', 'why': 'No actions.', 'severity': 'low', 'state': 'open'}
     sb.validate_draft({'guesses': [guess], 'gaps': []}, order)
     sb.validate_draft({'guesses': [{**guess, 'spec_quote': 'Spec: Do nothing.'}], 'gaps': []}, order)
-    with pytest.raises(ValueError, match='quote'):
+    with pytest.raises(sb.BuildError, match='quote') as error:
         sb.validate_draft({'guesses': [{**guess, 'spec_quote': 'invented'}], 'gaps': []}, order)
-    with pytest.raises(ValueError, match='unique'):
+    assert error.value.diagnostics[0].component == 'C.idle'
+    assert error.value.diagnostics[0].code == 'report-draft'
+    with pytest.raises(sb.BuildError, match='unique'):
         sb.validate_draft({'guesses': [guess, guess], 'gaps': []}, order)
 
 

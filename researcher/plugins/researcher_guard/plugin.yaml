@@ -4,5 +4,3 @@ description: Researcher workspace and completion rules. Only the orchestrator cr
 author: ide-distributions
 provides_hooks:
   - pre_tool_call
-provides_tools:
-  - kanban_complete

@@ -32,7 +32,7 @@ def test_native_board_behaviour(tmp_path):
     env = clean_env(tmp_path / "host/profiles/orchestrator")
     env["PYTHONPATH"] = str(DISTRIBUTION / "src")
     result = subprocess.run(
-        [hermes_python(), str(DISTRIBUTION / "tests/hermes_scenarios.py")],
+        [hermes_python(), str(DISTRIBUTION / "tests/lifecycle_scenarios.py")],
         env=env,
         capture_output=True,
         text=True,
@@ -77,7 +77,7 @@ def test_clean_export_installs_paused(tmp_path):
     jobs = json.loads((profile / "cron/jobs.json").read_text())["jobs"]
     assert len(jobs) == 1 and jobs[0]["name"] == "supervisor"
     assert not jobs[0]["enabled"] and jobs[0]["state"] == "paused"
-    assert not jobs[0]["no_agent"] and jobs[0]["script"] == "supervisor_gate.py"
+    assert jobs[0]["no_agent"] and jobs[0]["script"] == "supervisor_gate.py"
     expected_tools = yaml.safe_load((profile / "plugins/orchestrator/plugin.yaml").read_text())[
         "provides_tools"
     ]
@@ -96,7 +96,7 @@ assert plugin['enabled'] and plugin['tools'] == len(expected), plugin
 assert set(registry.get_tool_names_for_toolset('orchestrator')) == set(expected)
 assert registry.get_schema('ide_workspace')['parameters']['required'] == ['request_id', 'operation']
 schema = registry.get_schema('submit_requested_version')
-assert set(schema['parameters']['required']) == {'version', 'strategy', 'request'}, schema
+assert set(schema['parameters']['required']) == {'id', 'run_id', 'version', 'strategy', 'request'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 print(json.dumps({'ok': True}))
 """
@@ -135,3 +135,18 @@ assert not ensure_venv(home)
         env={**env, "HERMES_HOME": str(profile)},
         check=True,
     )
+
+
+@pytest.mark.hermes
+@pytest.mark.parametrize("capacity", [1, 3])
+def test_native_dispatch_capacity(tmp_path, capacity):
+    result = subprocess.run(
+        [hermes_python(), str(DISTRIBUTION / "tests/capacity_scenarios.py"), str(capacity)],
+        env=clean_env(tmp_path / "host"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["ok"]

@@ -248,7 +248,11 @@ reliable idle detection would require supervising the process and its output.
 The host must install the locked Python dependencies, Nim 2.2.10 and the native
 helpers using [native preparation](tools/native_build.py), and install Hermes
 with its built-in command protections. Set `GOTA_HERMES_PYTHON` to that Hermes
-installation's Python executable, `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL`.
+installation's Python executable and configure `OPENROUTER_API_KEY` in the Hermes profile, plus `OPENROUTER_MODEL`.
+The compiler launcher resolves its key through Hermes profile secret scope. A missing
+key in the terminal environment is expected; do not expose it there. Invoke the
+installed build entry point before diagnosing a missing compiler dependency.
+`pw_cli` is a private compiler module, not a top-level installed Python package.
 The adapter creates a separate compiler Hermes home and restricts child writes to
 compiler scratch. The compiler uses Hermes's native command approval checks;
 no separate scanner is required. Output paths, Git refs and the index are checked
@@ -277,8 +281,8 @@ The direct `local_check` command follows the same rules and writes its identity
 and fetched manifest into its fresh work directory.
 
 ```sh
-(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/build.py "$PWD/strategy/candidates/E" --out "$PWD/.scratch/build/E" --json)
-(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/build.py "$PWD/strategy/candidates/E" --out "$PWD/.scratch/build/E-historical" --offline --manifest /path/to/2026.10.7.2-manifest.json --json)
+"$HERMES_HOME/local/venv/bin/python" -I "$HERMES_HOME/games/gota/tools/build.py" "$PWD/strategy/candidates/E" --out "$PWD/.scratch/build/E" --json
+"$HERMES_HOME/local/venv/bin/python" -I "$HERMES_HOME/games/gota/tools/build.py" "$PWD/strategy/candidates/E" --out "$PWD/.scratch/build/E-historical" --offline --manifest /path/to/2026.10.7.2-manifest.json --json
 ```
 
 `evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
@@ -364,7 +368,7 @@ RESEARCH_HOME="$(dirname "$(dirname "$RESEARCH_CLI")")"
 RESEARCH_PYTHON="$RESEARCH_HOME/local/venv/bin/python"
 CANDIDATE="$PWD/strategy/candidates/bootstrap"
 BUILD="$PWD/.scratch/build/champion"
-(cd "$RESEARCH_HOME" && "$RESEARCH_PYTHON" games/gota/tools/build.py "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json)
+"$HERMES_HOME/local/venv/bin/python" -I "$HERMES_HOME/games/gota/tools/build.py" "$CANDIDATE" --out "$BUILD" --prebuilt "$CANDIDATE/v13-live.bas" --json
 ```
 
 After exit, read the command JSON, `$BUILD/report.json`, `$BUILD/report.md`,
@@ -383,21 +387,15 @@ The default build records G1 compilation and explicitly marks evaluation not run
 receipts under **Local validation**; G5 compiler coverage does not apply to prebuilt
 artifacts. After a successful build and evidence review, follow the core `candidate` skill's
 "Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
-no promotion in flight exist. Upload the starter build:
+no promotion in flight exist. Copy the complete passing build into tracked
+`build-evidence/<build-id>`, stage the task branch, and complete with the build path,
+artifact hash and suggested name `opening-rush`. The coordinator calls `upload_build`,
+integrates the receipt commit, and uses `bootstrap_champion` for the first submission.
 
-```sh
-"$RESEARCH_CLI" softmax upload-build --name opening-rush --build-dir "$BUILD"
-```
-
-The first champion's version is uploaded by `softmax upload-build`, never by
-`softmax upload`. It needs no experiment, frozen evaluation design, evaluation outcome or
-decision. The first league submission is v13-live, unevaluated; local checks do not establish
-competitive strength. The command checks C6 identity and the build, uploads the exact artifact
-and records a version with `experiment: null` that keeps the prebuilt provenance. Its response
-includes `data.version_id` and `data.platform_policy_version_id`. Record them in the journal's
-Decisions and in the `kanban_complete` metadata, run `workspace integrate`, and complete the card. The
-orchestrator then submits the version with `promotion bootstrap` and records the champion. The
-shipped `strategy/STRATEGY.md` remains the champion strategy source.
+The first champion needs no experiment or evaluation decision. It remains unevaluated;
+local checks do not establish competitive strength. Upload records a version with
+`experiment: null` and preserves prebuilt provenance. The shipped
+`strategy/STRATEGY.md` remains the champion strategy source.
 
 ## Qualification scope
 

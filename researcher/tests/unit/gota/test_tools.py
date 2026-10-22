@@ -120,7 +120,7 @@ doAssert rejected
     binary = tmp_path / 'draw_test'
     import os
     env = dict(os.environ, POLYWORLD_DEPS=str(clone / 'tmp/coworld/deps'))
-    compiled = subprocess.run(['nim', 'c', '--hints:off', '--path:' + str(clone),
+    compiled = subprocess.run(['nim', 'c', '--hints:off', '--nimcache:' + str(tmp_path / 'nimcache'), '--path:' + str(clone),
                     '--path:' + str(clone / 'examples/gods_of_the_arena'),
                     '--path:' + str(clone / 'examples/gods_of_the_arena/tools'), '-o:' + str(binary), str(source)],
                    cwd=clone, env=env, check=False, capture_output=True, text=True)

@@ -19,29 +19,23 @@ def test_subprocess_contract_and_refusal(shared_fixture):
     assert research.records_find("Experiment", {"status": "reviewed"}) == {
         "args": ["records", "find", "Experiment", "status=reviewed"]
     }
-    assert research.workspace_integrate("repair/test")["args"] == [
-        "workspace",
-        "integrate",
-        "--branch",
-        "repair/test",
-    ]
     with pytest.raises(ResearchError) as error:
-        research.promotion_submit("refuse")
+        research.call("promotion", "submit", "refuse")
     assert error.value.envelope["error"]["reason"] == "baseline_not_champion"
-    assert research.bootstrap_champion("V-starter")["args"] == [
+    assert research.call("promotion", "bootstrap", "--version", "V-starter")["args"] == [
         "promotion",
         "bootstrap",
         "--version",
         "V-starter",
     ]
-    assert research.submit_requested_version("V-1", "strategy/new/STRATEGY.md", "Submit it")["args"] == [
-        "promotion", "submit-requested", "--version", "V-1", "--strategy", "strategy/new/STRATEGY.md",
-        "--request", "Submit it",
+    assert TOOLS["submit_requested_version"][3] == [
+        "id",
+        "run_id",
+        "version",
+        "strategy",
+        "request",
     ]
-    assert TOOLS["submit_requested_version"][3] == ["version", "strategy", "request"]
-    assert TOOLS["bootstrap_champion"][3] == ["version"]
-    with pytest.raises(TypeError):
-        research.bootstrap_champion()
+    assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version"]
     assert research.accept_champion()["args"] == ["promotion", "accept"]
     assert TOOLS["accept_champion"][2:] == ({}, [])
 
@@ -91,3 +85,10 @@ def test_control_read_uses_canonical_main(context):
     git("push", str(canonical), "main")
     pause.write_text('{"paused": false}')
     assert research.control_read() == {"paused": True}
+    plan = context.workspace / "plan.md"
+    plan.write_text("User constraint: no statistical promotion.\n")
+    git("add", "plan.md")
+    git("commit", "-m", "Persist user constraint")
+    git("push", str(canonical), "main")
+    plan.write_text("Unpublished draft\n")
+    assert Research(context).plan_read() == "User constraint: no statistical promotion.\n"

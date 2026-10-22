@@ -44,6 +44,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ide_research_core.budget import EpisodeBudget
 from ide_research_core.softmax_tool import xp
 from ide_research_core.softmax_tool.identity import require_player, whoami
 from ide_research_core.softmax_tool.platform_cli import (
@@ -102,6 +103,10 @@ class SoftmaxClient:
         self._cli = PlatformCli(env, run=run, bin_dir=bin_dir, http_get=http_get)
         self._expected_player = env.get("RESEARCH_PLAYER_ID", "")
         self._clock = clock
+        self._budget = (
+            EpisodeBudget(Path(env["RESEARCH_CANONICAL"]) / "episode-budget.db", int(env["RESEARCH_EPISODE_LIMIT"]))
+            if "RESEARCH_EPISODE_LIMIT" in env else None
+        )
 
     def _require_player(self) -> Identity:
         return require_player(self._cli, self._expected_player, self._clock())
@@ -205,7 +210,13 @@ class SoftmaxClient:
             ):
                 return handle
         self._require_player()
-        return xp.create(self._cli, experiment, batch, attempt, spec, seed, arm)
+        key = xp.tag(experiment, batch, attempt, seed, arm)
+        if self._budget is not None:
+            self._budget.reserve(key, spec)
+        result = xp.create(self._cli, experiment, batch, attempt, spec, seed, arm)
+        if self._budget is not None and isinstance(result, (CreditDenied, PermitRequired, LeagueNotChosen)):
+            self._budget.release_refused(key)
+        return result
 
     def xp_status(self, handle: XpHandle) -> XpStatus:
         return xp.status(self._cli, handle)

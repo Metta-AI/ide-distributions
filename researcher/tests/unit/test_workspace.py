@@ -59,7 +59,7 @@ def test_integrate_merges_a_card_and_knows_it_is_merged(tmp_path, bare):
     worktree = card_worktree(clone, "a")
     claim = store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
 
-    done = workspace.integrate(clone, worktree=worktree)
+    done = workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
 
     assert not done.already_merged
     assert workspace.merged(clone, "card/a") == {
@@ -69,7 +69,7 @@ def test_integrate_merges_a_card_and_knows_it_is_merged(tmp_path, bare):
     gitops.git(other, "pull", "-q")
     assert store_of(other).load(claim)[1] == "Damage is 10."
     assert (other / "kb" / "index.md").is_file()  # views regenerated after the merge
-    assert workspace.integrate(clone, worktree=worktree).already_merged
+    assert workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged
 
 
 def test_the_orchestrator_integrates_a_pushed_branch(tmp_path, bare):
@@ -91,13 +91,13 @@ def test_validation_refuses_an_immutable_change_after_pushing_the_branch(tmp_pat
     clone = clone_for(tmp_path, bare, "researcher-1")
     first = card_worktree(clone, "c")
     result = store_of(first).create("result", RESULT, "analysis A")
-    workspace.integrate(clone, worktree=first)
+    workspace.integrate(clone, branch=workspace.stage(first)["branch"])
     second = card_worktree(clone, "d")
     path = store_of(second).path_of(result)
     path.write_text(path.read_text().replace("analysis A", "analysis B"))
 
     with pytest.raises(WorkspaceError) as refused:
-        workspace.integrate(clone, worktree=second)
+        workspace.integrate(clone, branch=workspace.stage(second)["branch"])
     assert refused.value.reason == "validate"
     assert gitops.git(bare, "rev-parse", "card/d")  # recovery is branch-based
 
@@ -107,7 +107,7 @@ def test_a_card_may_not_change_the_champion_or_control(tmp_path, bare):
     worktree = card_worktree(clone, "e")
     (worktree / "strategy" / "STRATEGY.md").write_text("a new champion\n")
     with pytest.raises(WorkspaceError, match="only the orchestrator") as refused:
-        workspace.integrate(clone, worktree=worktree)
+        workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
     assert refused.value.reason == "validate"
 
 
@@ -115,15 +115,15 @@ def test_two_researchers_changing_one_record_overlap(tmp_path, bare):
     one = clone_for(tmp_path, bare, "researcher-1")
     seed_card = card_worktree(one, "f")
     claim = store_of(seed_card).create("claim", CLAIM, "Damage is 10.", slug="damage")
-    workspace.integrate(one, worktree=seed_card)
+    workspace.integrate(one, branch=workspace.stage(seed_card)["branch"])
     two = clone_for(tmp_path, bare, "researcher-2")
     first, second = card_worktree(one, "g"), card_worktree(two, "h")
     store_of(first).update(claim, {}, body="Damage is 10, armor halves it.")
     store_of(second).update(claim, {}, body="Damage is 12.")
 
-    workspace.integrate(one, worktree=first)
+    workspace.integrate(one, branch=workspace.stage(first)["branch"])
     with pytest.raises(WorkspaceError) as refused:
-        workspace.integrate(two, worktree=second)
+        workspace.integrate(two, branch=workspace.stage(second)["branch"])
     assert refused.value.reason == "overlap"
     assert refused.value.details["overlap"] == [claim]
 
@@ -135,12 +135,22 @@ def test_a_text_conflict_is_a_merge_failure(tmp_path, bare):
     (first / "notes.md").write_text("one\n")
     (second / "notes.md").write_text("two\n")
 
-    workspace.integrate(one, worktree=first)
+    workspace.integrate(one, branch=workspace.stage(first)["branch"])
     with pytest.raises(WorkspaceError) as refused:
-        workspace.integrate(two, worktree=second)
+        workspace.integrate(two, branch=workspace.stage(second)["branch"])
     assert refused.value.reason == "merge"
     assert refused.value.details["conflicts"] == ["notes.md"]
     assert not (two / ".git" / "MERGE_HEAD").exists()
+    # Resolve against the new canonical head, then review that exact new commit.
+    gitops.git(second, "fetch", "origin")
+    merge = gitops._run(second, "merge", "origin/main", check=False)
+    assert merge.returncode != 0
+    (second / "notes.md").write_text("one\ntwo\n")
+    gitops.git(second, "add", "notes.md")
+    gitops.git(second, "commit", "-m", "Resolve both results against current main")
+    staged = workspace.stage(second)
+    workspace.integrate(two, branch=staged["branch"], commit=staged["card_sha"])
+    assert gitops.git(bare, "show", "main:notes.md") == "one\ntwo"
 
 
 def test_publish_commits_only_the_named_paths(tmp_path, bare):
@@ -162,10 +172,12 @@ def test_the_cli_reports_a_refusal_as_json(tmp_path, bare):
     worktree = card_worktree(clone, "k")
     (worktree / "control").mkdir()
     (worktree / "control" / "pause.json").write_text("{}\n")
+    staged = workspace.stage(worktree)
     run = subprocess.run(
-        [sys.executable, "-m", "ide_research_core", "workspace", "integrate", "--root", str(clone)],
+        [sys.executable, "-m", "ide_research_core", "workspace", "integrate", "--root", str(clone),
+         "--branch", staged["branch"], "--commit", staged["card_sha"]],
         cwd=worktree, capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(DISTRIBUTION / "src")},
+        env={**os.environ, "HERMES_HOME": str(tmp_path), "PYTHONPATH": str(DISTRIBUTION / "src")},
     )
     assert run.returncode == 1
     assert '"reason": "validate"' in run.stdout
@@ -183,10 +195,10 @@ def test_a_retry_after_a_crash_before_the_push_reaches_canonical(tmp_path, bare,
 
     monkeypatch.setattr(workspace, "_push_main", crash)
     with pytest.raises(RuntimeError):
-        workspace.integrate(clone, worktree=worktree)
+        workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
     monkeypatch.undo()
 
-    retry = workspace.integrate(clone, worktree=worktree)
+    retry = workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
 
     assert retry.already_merged is False
     assert workspace.merged(clone, "card/a")["merged"] is True
@@ -241,7 +253,7 @@ def test_views_a_worker_regenerated_stay_out_of_the_card(tmp_path, bare):
     store_of(worktree).create("claim", CLAIM, "Damage is 10.", slug="damage")
     write_generated(Layout(worktree))
 
-    workspace.integrate(clone, worktree=worktree)
+    workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
 
     assert workspace.merged(clone, "card/a")["merged"] is True
 
@@ -301,11 +313,11 @@ def test_a_card_with_regenerated_views_can_be_integrated_again(tmp_path, bare, m
     write_generated(Layout(worktree))
     monkeypatch.setattr(workspace, "_push_main", lambda _clone: 1 / 0)
     with pytest.raises(ZeroDivisionError):
-        workspace.integrate(clone, worktree=worktree)
+        workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
     monkeypatch.undo()
 
-    assert workspace.integrate(clone, worktree=worktree).already_merged is False
-    assert workspace.integrate(clone, worktree=worktree).already_merged is True
+    assert workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged is False
+    assert workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged is True
 
 
 def test_views_staged_by_the_worker_stay_out_of_the_card(tmp_path, bare):
@@ -317,7 +329,7 @@ def test_views_staged_by_the_worker_stay_out_of_the_card(tmp_path, bare):
     write_generated(Layout(worktree))
     gitops.git(worktree, "add", "-A")
 
-    workspace.integrate(clone, worktree=worktree)
+    workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
 
     assert workspace.merged(clone, "card/a")["merged"] is True
 

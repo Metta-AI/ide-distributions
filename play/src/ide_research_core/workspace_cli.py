@@ -25,6 +25,10 @@ def _emit(payload: dict) -> None:
 def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
+            if handler in (_integrate, _publish):
+                home = Path(os.environ["HERMES_HOME"])
+                if (home / "plugins/researcher_guard").is_dir():
+                    raise workspace.WorkspaceError("coordinator_required", "Only the workspace coordinator may publish canonical changes")
             data = handler(args)
         except workspace.WorkspaceError as error:
             failure = {"reason": error.reason, "message": str(error)}
@@ -50,10 +54,12 @@ def _clone(args) -> Path:
 
 
 def _integrate(args) -> dict:
-    if args.branch:
-        return workspace.integrate(_clone(args), branch=args.branch).to_dict()
+    return workspace.integrate(_clone(args), branch=args.branch, commit=args.commit).to_dict()
+
+
+def _stage(args) -> dict:
     worktree = Path(args.worktree or os.environ.get(WORKTREE_ENV) or Path.cwd())
-    return workspace.integrate(_clone(args), worktree=worktree).to_dict()
+    return workspace.stage(worktree)
 
 
 def _merged(args) -> dict:
@@ -87,10 +93,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
         sub.set_defaults(func=_run(handler))
         return sub
 
-    sub = command("integrate", _integrate, "merge a card into canonical main (the card's last step)")
-    target = sub.add_mutually_exclusive_group()
-    target.add_argument("--worktree", help="the card worktree (default: the current one)")
-    target.add_argument("--branch", help="a pushed card branch, e.g. card/<id> (orchestrator)")
+    sub = command("stage", _stage, "preserve task output without integrating it")
+    sub.add_argument("--worktree", help="assigned worktree (default: current one)")
+    sub = command("integrate", _integrate, "integrate a staged branch after coordinator acceptance")
+    sub.add_argument("--branch", required=True, help="staged native task branch")
+    sub.add_argument("--commit", required=True, help="exact reviewed commit")
     sub = command("merged", _merged, "is a card branch's commit in canonical main")
     sub.add_argument("--branch", required=True)
     sub = command("publish", _publish, "commit the given paths and push main (orchestrator)")

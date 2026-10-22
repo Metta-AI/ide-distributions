@@ -32,9 +32,12 @@ approvals:
   # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
   # Promotion and league submission belong to the orchestrator.
   deny:
+    - "*workspace integrate*"
+    - "*workspace publish*"
     - "coworld player use*"
     - "coworld submit*"
     - "coworld upload-policy*"
+    - "*softmax upload*"
     - "coworld xp-request create*"
     - "softmax login*"
     - "git push -f*"
@@ -64,6 +67,7 @@ terminal:
     - RESEARCH_GAME
     - RESEARCH_WORKSPACE
     - RESEARCH_CANONICAL
+    - RESEARCH_EPISODE_LIMIT
     - RESEARCH_CLI
     - RESEARCH_SOFTMAX
     - OPENROUTER_MODEL
@@ -80,9 +84,6 @@ timeouts:
 plugins:
   enabled:
     - researcher_guard
-  entries:
-    researcher_guard:
-      allow_tool_override: true
 
 # Hermes has no auto-update; this turns off its passive update check.
 updates:
