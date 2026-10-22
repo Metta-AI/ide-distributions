@@ -10,10 +10,13 @@ import os
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from ide_research_core import workspace
 from ide_research_core.cli import register_group
 from ide_research_core.io import gitops
 from ide_research_core.io.dotenv import set_env_lines
+from ide_research_core.records.store import RecordProblems
 
 EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS = 0, 1, 2
 WORKTREE_ENV = "HERMES_KANBAN_WORKSPACE"  # survives into a Kanban worker's terminal commands
@@ -26,7 +29,7 @@ def _emit(payload: dict) -> None:
 def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
-            if handler in (_integrate, _publish, _presentation):
+            if handler in (_integrate, _publish, _presentation, _records, _goals):
                 home = Path(os.environ["HERMES_HOME"])
                 if (home / "plugins/researcher_guard").is_dir():
                     raise workspace.WorkspaceError("coordinator_required", "Only the workspace coordinator may publish canonical changes")
@@ -39,6 +42,9 @@ def _run(handler):
             return EXIT_FAILED
         except gitops.GitError as error:
             _emit({"ok": False, "error": {"reason": "git", "message": str(error)}})
+            return EXIT_FAILED
+        except (ValidationError, RecordProblems) as error:
+            _emit({"ok": False, "error": {"reason": "invalid_request", "message": str(error)}})
             return EXIT_FAILED
         except KeyError as error:
             message = f"{error.args[0]} is not set"
@@ -78,6 +84,18 @@ def _presentation(args) -> dict:
     return execute(_clone(args), PresentationRequest.model_validate_json(sys.stdin.buffer.read(150001)))
 
 
+def _records(args) -> dict:
+    from ide_research_core.workspace_records import RecordsRequest, execute
+
+    return execute(_clone(args), RecordsRequest.model_validate_json(sys.stdin.buffer.read(150001)))
+
+
+def _goals(args) -> dict:
+    from ide_research_core.workspace_goals import GoalsRequest, execute
+
+    return execute(_clone(args), GoalsRequest.model_validate_json(sys.stdin.buffer.read(150001)))
+
+
 def _bootstrap(args) -> dict:
     home = Path(os.environ["HERMES_HOME"])
     clone = _clone(args)
@@ -112,6 +130,8 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--path", action="append", required=True)
     sub.add_argument("--expected-head", help="reject publication unless canonical main still has this commit")
     command("presentation", _presentation, "read or conditionally save UI state from a JSON request on stdin")
+    command("goals", _goals, "read or evaluate native research goal context from JSON on stdin")
+    command("records", _records, "read or update native research records from JSON on stdin")
     command("bootstrap", _bootstrap, "create or clone this profile's workspace; write the CLI shim")
 
 

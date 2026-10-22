@@ -387,3 +387,67 @@ def test_presentation_is_canonical_and_replays_after_reclone(tmp_path, bare):
     assert execute(recovered, read.model_copy(update={"league_id": "league_22222222-2222-2222-2222-222222222222"}))["document"] is None
     with pytest.raises(WorkspaceError, match="changed"):
         execute(root, first.model_copy(update={"request_id": "stale"}))
+
+
+def test_ide_records_are_native_and_replay_across_reclone(tmp_path, bare):
+    from ide_research_core.workspace_records import RecordPatch, RecordsRequest, execute
+
+    root = clone_for(tmp_path, bare, "coordinator")
+    read = RecordsRequest(action="read", league_id="league_11111111-1111-1111-1111-111111111111", owner_id="owner")
+    snapshot = execute(root, read)
+    patch = RecordPatch(entity="topic", id="nrn_metric", meta={
+        "title": "Reward", "objective": "Increase reward", "metrics": [{"name": "Reward", "direction": "up", "readings": []}],
+        "guardrails": [], "origin": {"kind": "human"}, "priority": 0, "status": "active",
+    })
+    save = read.model_copy(update={"action": "save", "revision": snapshot["revision"], "patch": patch, "intent": {"create": "Reward"}, "projection": {"id": "nrn_metric"}, "request_id": "create"})
+    receipt = execute(root, save)
+    native = execute(root, read)["records"][0]
+    assert native["id"].startswith("T-")
+    assert store_of(root).load(native["id"])[0]["metrics"][0]["name"] == "Reward"
+    # Normal research integration changes the same record observed by the IDE.
+    task = card_worktree(root, "measure")
+    store_of(task).update(native["id"], {"metrics": [{"name": "Reward", "direction": "up", "readings": [{"value": 42}]}]})
+    workspace.integrate(root, branch=workspace.stage(task)["branch"])
+    recovered = clone_for(tmp_path, bare, "recovered")
+    assert execute(recovered, read)["records"][0]["meta"]["metrics"][0]["readings"] == [{"value": 42}]
+    assert execute(recovered, save) == receipt
+    assert execute(recovered, read.model_copy(update={"intent": save.intent, "request_id": "create"})) == {"replay": receipt}
+    with pytest.raises(WorkspaceError, match="already names"):
+        execute(recovered, save.model_copy(update={"intent": {"create": "Other"}}))
+    with pytest.raises(WorkspaceError, match="changed"):
+        execute(recovered, save.model_copy(update={"request_id": "stale"}))
+    assert execute(recovered, read.model_copy(update={"owner_id": "other"}))["records"] == []
+    assert execute(recovered, read.model_copy(update={"league_id": "league_22222222-2222-2222-2222-222222222222"}))["records"] == []
+
+
+def test_goal_progress_is_native_topic_state_not_host_state(tmp_path, bare):
+    from ide_research_core.workspace_goals import GoalsRequest, execute
+
+    root = clone_for(tmp_path, bare, "coordinator")
+    store = store_of(root)
+    reading = {"value": 1, "version": 1, "label": "Version 1"}
+    topic_id = store.create("topic", {"title": "Reward", "objective": "Improve reward", "metrics": [{"name": "Reward", "direction": "up", "readings": [reading]}], "guardrails": [], "origin": {"kind": "human"}, "priority": 0, "status": "active", "league_id": "league_11111111-1111-1111-1111-111111111111", "agent_id": "owner", "policy_id": "policy", "ide_id": "nrn_reward"})
+    path = store.path_of(topic_id).relative_to(root).as_posix()
+    workspace.publish(root, {path: (root / path).read_bytes()}, "topic")
+    scope = {"owner_id": "owner", "league_id": "league_11111111-1111-1111-1111-111111111111"}
+    goal_id = "11111111-1111-4111-8111-111111111111"
+    create = GoalsRequest(action="create", **scope, request_id="create", payload={"id": goal_id, "policy_id": "policy", "policy_name": "Policy", "game": None, "neuron_id": "nrn_reward", "target": {"kind": "value", "value": 5, "direction": "at_least"}})
+    baseline = execute(root, create)
+    assert baseline["baseline"]["value"] == 1
+    assert execute(root, create) == baseline
+    evaluate = GoalsRequest(action="evaluate", **scope, request_id="evaluate", payload={"id": goal_id, "request_id": "22222222-2222-4222-8222-222222222222", "started_at": "2026-10-22T00:00:00Z", "summary": "A prose claim of success", "activity": []})
+    assert execute(root, evaluate)["action"] is None
+    # A lost host acknowledgement must not append a second round.
+    execute(root, evaluate.model_copy(update={"request_id": "retry"}))
+    contexts = execute(root, GoalsRequest(action="list", **scope))["goals"]
+    assert len(contexts[goal_id]["rounds"]) == 1
+    assert store.load(topic_id)[0]["goals"][goal_id]["rounds"] == contexts[goal_id]["rounds"]
+    task = card_worktree(root, "improve")
+    store_of(task).update(topic_id, {"metrics": [{"name": "Reward", "direction": "up", "readings": [reading, {"value": 6, "version": 2, "label": "Version 2"}]}]})
+    workspace.integrate(root, branch=workspace.stage(task)["branch"])
+    recovered = clone_for(tmp_path, bare, "recovered")
+    completed = execute(recovered, evaluate.model_copy(update={"request_id": "observed-new-measurement"}))
+    assert completed["action"] == "complete"
+    assert "version 2" in completed["reason"]
+    assert execute(recovered, create) == baseline
+    assert len(execute(recovered, GoalsRequest(action="list", **scope))["goals"][goal_id]["rounds"]) == 1
