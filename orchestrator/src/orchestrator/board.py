@@ -291,9 +291,63 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
     def card_answer(self, id, text):
         from hermes_cli import kanban_db as kb
 
-        with closing(connection()) as conn:
+        with closing(storage.plugin_storage()) as lock, closing(connection()) as conn:
+            lock.execute("BEGIN IMMEDIATE")
+            task = kb.get_task(conn, id)
+            if task is None:
+                raise ValueError(f"unknown card {id}")
+            if task.status == "blocked":
+                marker = "\n\nCard context:\n```json\n"
+                details = json.loads(task.body.rsplit(marker, 1)[1].split("\n```", 1)[0])
+                clone = details["clone"]
+                git(clone, "fetch", "--prune", "origin")
+                remote_branch = f"refs/remotes/origin/{task.branch_name}"
+                published = subprocess.run(
+                    ["git", "-C", clone, "show-ref", "--verify", "--quiet", remote_branch],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                if published.returncode not in (0, 1):
+                    published.check_returncode()
+                if published.returncode == 0:
+                    card_sha = git(clone, "rev-parse", remote_branch)
+                    ancestry = subprocess.run(
+                        [
+                            "git",
+                            "-C",
+                            clone,
+                            "merge-base",
+                            "--is-ancestor",
+                            card_sha,
+                            "origin/main",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    if ancestry.returncode not in (0, 1):
+                        ancestry.check_returncode()
+                    if ancestry.returncode == 0:
+                        next_step = (
+                            "Close the integrated repair with evidence; create fresh work only if further repair is needed."
+                            if details["kind"] == "repair"
+                            else "Create the next numbered attempt with replaces set to this blocked card and include the answer in its body."
+                        )
+                        raise ResearchError(
+                            {
+                                "ok": False,
+                                "error": {
+                                    "reason": "integrated_card_requires_replacement",
+                                    "message": f"This card's pushed work is already integrated. {next_step}",
+                                    "details": {"card": id, "card_sha": card_sha},
+                                },
+                            }
+                        )
             comment = kb.add_comment(conn, id, "orchestrator", text)
-            return {"comment": comment, "unblocked": kb.unblock_task(conn, id)}
+            result = {"comment": comment, "unblocked": kb.unblock_task(conn, id)}
+            lock.commit()
+            return result
 
     def card_close(self, id, outcome, summary=None, metadata=None):
         from hermes_cli import kanban_db as kb

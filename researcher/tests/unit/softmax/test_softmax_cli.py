@@ -531,7 +531,8 @@ def test_xp_create_new_attempt_only_after_a_failed_request(board, launch):
     failed = data_first_request(worker, experiment)
     _fail_fake_request(board, failed)
     code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
-    assert code == 0 and len(data["data"]["created"]) == 4, (failed, data)
+    assert code == 0 and len(data["data"]["created"]) == 1, (failed, data)
+    assert len(data["data"]["existing"]) == 3
     code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
     assert code == 1 and data["error"]["reason"] == "attempt_not_needed", data
 
@@ -556,14 +557,14 @@ def test_xp_create_credit_denied_sets_awaiting_credits_with_backoff(board, launc
     first = meta["lifecycle"]["next_launch_after"]
     assert data["data"]["next_launch_after"] == first
 
-    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    code, data = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
     assert code == 0 and data["data"]["credit_denied"] is True
     meta = worker.store.load(experiment)[0]
     assert meta["status"] == "awaiting-credits" and meta["lifecycle"]["credit_denials"] == 2
     assert meta["lifecycle"]["next_launch_after"] > first
 
     code, data = softmax(
-        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "3"
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
     )
     assert code == 0 and len(data["data"]["created"]) == 4
     meta = worker.store.load(experiment)[0]
@@ -911,7 +912,6 @@ def test_upload_failed_gates_is_refused(board):
     assert code == 1 and data["error"]["reason"] == "gates_failed"
 
 
-
 def test_refused_when_the_profile_identity_changed_since_spawn(board):
     """A worker's environment is fixed when Hermes spawns it, but the profile ``.env`` may
     change while it runs (the operator sets another player id). The
@@ -1047,3 +1047,76 @@ def test_upload_build_without_experiment_does_not_evaluate_or_promote(board):
     assert len(state["uploads"]) == 1
     assert state["submissions"] == before["submissions"]
     assert state["xp"] == before["xp"]
+
+
+def test_changing_batch_partition_does_not_repeat_existing_seeds(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker)
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0 and len(result["data"]["created"]) == 4
+    code, result = softmax(
+        env, "xp", "create", experiment, "--batch", "2", "--batches", "2", "--attempt", "1"
+    )
+    assert code == 1 and result["error"]["reason"] == "batch_partition_changed", result
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 4
+
+
+def test_partial_retry_must_finish_before_starting_another_attempt(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker)
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0
+    for entry in result["data"]["created"][:2]:
+        _fail_fake_request(board, entry["request_id"])
+    _set_fake_credits(board, 1)
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(result["data"]["created"]) == 1
+    _set_fake_credits(board, 100)
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
+    assert code == 1 and result["error"]["reason"] == "attempt_incomplete", result
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 5
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(result["data"]["created"]) == 1
+    assert len(result["data"]["existing"]) == 3
+
+
+def test_old_attempt_cannot_dispatch_after_a_retry(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker)
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0
+    _fail_fake_request(board, result["data"]["created"][0]["request_id"])
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(result["data"]["created"]) == 1
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 1 and result["error"]["reason"] == "stale_attempt", result
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 5
+
+
+def test_first_attempt_must_be_one(board, launch):
+    worker, experiment = launch
+    code, result = softmax(
+        base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "2"
+    )
+    assert code == 1 and result["error"]["reason"] == "bad_attempt", result
+    assert not worker.store.load(experiment)[0].get("xp_requests")
+
+
+def test_reused_request_failing_later_is_retried_in_current_attempt(board, launch):
+    worker, experiment = launch
+    env = base_env(board, worker)
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "1")
+    assert code == 0
+    requests = result["data"]["created"]
+    _fail_fake_request(board, requests[0]["request_id"])
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(result["data"]["created"]) == 1
+    _fail_fake_request(board, requests[1]["request_id"])
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "3")
+    assert code == 1 and result["error"]["reason"] == "attempt_incomplete", result
+    code, result = softmax(env, "xp", "create", experiment, "--batch", "1", "--attempt", "2")
+    assert code == 0 and len(result["data"]["created"]) == 1
+    assert result["data"]["created"][0]["seed"] == requests[1]["seed"]
+    assert result["data"]["created"][0]["arm"] == requests[1]["arm"]
+    assert len(result["data"]["existing"]) == 3
+    assert len(worker.store.load(experiment)[0]["xp_requests"]) == 6

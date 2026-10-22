@@ -8,6 +8,7 @@ from .context import profile_context
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
+from .workspace import Workspace
 
 S = {"type": "string"}
 I = {"type": "integer"}
@@ -16,6 +17,22 @@ STRINGS = {"type": "array", "items": S}
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "ide_workspace": (
+        Workspace,
+        (
+            "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
+            "Use a stable request_id; identity comes from your scoped player credential. "
+            "operation.method: components.search (query), components.describe (name), layout.read, "
+            "layout.validate (view), layout.save (view, revision), draft.read, "
+            "draft.save (title, notes, revision), or league.overview. "
+            "Read before editing; preserve human content. A conflict requires rereading. "
+            "A view has version:1 and body:[components]; discover component props first. "
+            "Draft notes are project direction, not executable source. This never releases a policy. "
+            "Read the MCP result's isError and structured status; transport success is not effect success."
+        ),
+        {"request_id": S, "operation": O},
+        ["request_id", "operation"],
+    ),
     "ide_say": (
         IDE,
         (
@@ -124,7 +141,7 @@ TOOLS = {
     ),
     "card_answer": (
         Board,
-        "Save an answer, then unblock the card without changing its configuration. For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
+        "Save an answer, then unblock the card without changing its configuration. An already integrated card returns integrated_card_requires_replacement; follow the returned recovery instruction (fresh replacement for normal cards, close an integrated repair). For invalid skills, validate corrected names with worker_skills, create the next numbered attempt with corrected skills and replaces set to the blocked card ID.",
         {"id": S, "text": S},
         ["id", "text"],
     ),
@@ -202,6 +219,16 @@ TOOLS = {
         {"experiment": S},
         ["experiment"],
     ),
+    "submit_requested_version": (
+        Research,
+        (
+            "Submit an integrated uploaded version only when the user explicitly requested submission. "
+            "Quote that request. This records a requested submission, not statistical improvement. "
+            "For autonomous research promotion use promotion_submit instead. Strategy must match the build."
+        ),
+        {"version": S, "strategy": S, "request": S},
+        ["version", "strategy", "request"],
+    ),
     "bootstrap_champion": (
         Research,
         "Submit an integrated starter-policy version (V-...) only when no champion exists.",
@@ -253,13 +280,15 @@ TOOLS = {
     ),
     "latest_league_result": (
         Research,
-        ("Read the explicitly selected player's latest live league match: round and episode identifiers, completion "
-        "status, participating policy versions, scores and replay. available=false means no "
-        "recorded replay yet. Check the policy version and episode status before claiming a "
-        "submitted policy completed a match. participants[].position is a zero-based roster "
-        "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
-        "a win, loss, draw or rank without an explicit outcome or scoring rule. "
-        "This reads the platform, not local research records."),
+        (
+            "Read the explicitly selected player's latest live league match: round and episode identifiers, completion "
+            "status, participating policy versions, scores and replay. available=false means no "
+            "recorded replay yet. Check the policy version and episode status before claiming a "
+            "submitted policy completed a match. participants[].position is a zero-based roster "
+            "seat index, never a finishing rank or placement. Scores are game-defined; do not infer "
+            "a win, loss, draw or rank without an explicit outcome or scoring rule. "
+            "This reads the platform, not local research records."
+        ),
         {"league_id": S, "player_id": S},
         ["league_id", "player_id"],
     ),

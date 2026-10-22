@@ -3,6 +3,7 @@ version: 0.2.0
 description: Research lead tools for the native autoresearch board and shared research CLI.
 author: ide-distributions
 provides_tools:
+  - ide_workspace
   - ide_say
   - ide_task_update
   - worker_skills
@@ -19,6 +20,7 @@ provides_tools:
   - records_show
   - plan_write
   - control_write
+  - submit_requested_version
   - promotion_submit
   - bootstrap_champion
   - accept_champion

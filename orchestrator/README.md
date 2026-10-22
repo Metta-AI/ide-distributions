@@ -133,6 +133,12 @@ cards with an unacknowledged actionable event or comment in that reconcile. Nati
 protections remain in effect. Once the plugin table exists, gate reads do no schema writes,
 so a card creation holding its write lock during Git fetch does not block the gate.
 
+Explicit user-requested submissions use `submit_requested_version(version, strategy, request)`
+after a researcher builds, smoke-tests, uploads with `upload-build` and integrates the version
+and strategy. This uses the normal identity, league, permit and recovery workflow, records the
+user's request and verifies the source matches the uploaded build. It claims no statistical
+improvement. Autonomous research continues to require a reviewed promote decision.
+
 For a fresh installation, have a researcher upload the starter with `softmax upload-build`
 and integrate its version record, then call `bootstrap_champion(version="V-...")` to submit it.
 On a champion conflict, pause research with `control_write`, explain the disagreement to the
@@ -198,3 +204,17 @@ Score each conversation by correct target, cited live evidence, relevant support
 write authority (all four required to pass). Report completed cases, errors and timeouts
 separately. The deterministic platform test verifies tool behavior; it does not measure model
 selection or instruction-following quality. These conversation evaluations remain a rollout gate.
+
+## Shared IDE components and draft notes
+
+The `ide_workspace` tool calls the hosted IDE's MCP server, authenticating directly with the existing scoped player credential.
+The endpoint is `/ide/mcp` on the existing `COGAMES_API_URL` origin (normally `https://softmax.com`).
+No new profile environment setting or retained-workspace configuration migration is needed.
+Deploy and qualify the Metta workspace SDK, migration and public route before merging this distribution change:
+Metta's `preserve` release workflow polls this repository's main branch, so merging can trigger an image release.
+Running hosts adopt that image through the existing explicit Pause/Resume path, preserving their storage.
+
+The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
+revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.
+The server derives the owner from the validated player credential and fixes league scope to GoTA. Inspect structured MCP results rather than treating
+an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.
