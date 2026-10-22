@@ -20,9 +20,9 @@ def test_subprocess_contract_and_refusal(shared_fixture):
         "args": ["records", "find", "Experiment", "status=reviewed"]
     }
     with pytest.raises(ResearchError) as error:
-        research.promotion_submit("refuse")
+        research.call("promotion", "submit", "refuse")
     assert error.value.envelope["error"]["reason"] == "baseline_not_champion"
-    assert research.bootstrap_champion("V-starter")["args"] == [
+    assert research.call("promotion", "bootstrap", "--version", "V-starter")["args"] == [
         "promotion",
         "bootstrap",
         "--version",
@@ -35,9 +35,7 @@ def test_subprocess_contract_and_refusal(shared_fixture):
         "strategy",
         "request",
     ]
-    assert TOOLS["bootstrap_champion"][3] == ["version"]
-    with pytest.raises(TypeError):
-        research.bootstrap_champion()
+    assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version"]
     assert research.accept_champion()["args"] == ["promotion", "accept"]
     assert TOOLS["accept_champion"][2:] == ({}, [])
 

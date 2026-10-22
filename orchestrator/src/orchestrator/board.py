@@ -264,6 +264,10 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             if outcome == "done":
                 changed = kb.complete_task(conn, id, summary=summary, metadata=metadata)
             elif outcome == "archived":
+                # Revoke before asking native cancellation to stop the worker. A slow
+                # or unconfirmed stop must not leave publication authority usable.
+                with kb.write_txn(conn):
+                    kb._append_event(conn, id, "publication_revoked", None)
                 changed = kb.archive_task(conn, id)
             else:
                 raise ValueError("outcome must be done or archived")
@@ -276,7 +280,16 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         with closing(connection()) as conn, kb.write_txn(conn):
             task = kb.get_task(conn, id)
             runs = kb.list_runs(conn, id)
-            if task.status != "done" or not runs or max(run.id for run in runs) != run_id:
+            revoked = conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id=? AND kind='publication_revoked' LIMIT 1",
+                (id,),
+            ).fetchone()
+            if (
+                revoked
+                or task.status != "done"
+                or not runs
+                or max(run.id for run in runs) != run_id
+            ):
                 raise ValueError("Only the latest completed native run may publish")
             kb._append_event(conn, id, kind, payload, run_id=run_id)
             return task
@@ -301,6 +314,14 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             "--request",
             request,
         )
+
+    def promotion_submit(self, id, run_id, experiment):
+        self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment})
+        return Research(self.context).call("promotion", "submit", experiment)
+
+    def bootstrap_champion(self, id, run_id, version):
+        self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version})
+        return Research(self.context).call("promotion", "bootstrap", "--version", version)
 
     def event_ack(self, ids):
         with closing(storage.plugin_storage()) as conn:

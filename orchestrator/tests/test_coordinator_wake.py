@@ -11,8 +11,18 @@ from orchestrator.gate import wake
 from orchestrator.storage import open_storage
 
 
+@pytest.mark.parametrize("recovering", [False, True])
 @pytest.mark.parametrize("terminal", ["failed", "interrupted", "cancelled", "completed"])
-def test_wake_replays_lost_admission_without_creating_another_run(context, terminal):
+def test_wake_replays_lost_admission_without_creating_another_run(context, terminal, recovering):
+    pending = (
+        {
+            "sequence": 7,
+            "identity": "original-input",
+            "request": {"session_id": "original-session", "input": "original request"},
+        }
+        if recovering
+        else None
+    )
     accepted = {}
     requests = []
     statuses = {"run_1": "running"}
@@ -25,7 +35,7 @@ def test_wake_replays_lost_admission_without_creating_another_run(context, termi
             if self.path == "/v1/coordinator/pending":
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(b'{"pending": null}')
+                self.wfile.write(json.dumps({"pending": pending}).encode())
                 return
             if self.path.startswith("/v1/runs/"):
                 self.send_response(200)
@@ -81,12 +91,19 @@ def test_wake_replays_lost_admission_without_creating_another_run(context, termi
         with closing(open_storage(context.storage_path)) as conn, conn:
             conn.execute("INSERT INTO coordinator VALUES ('session', 'session-1')")
         event = {"wakeAgent": True, "context": {"events": [{"id": 1}], "pending": []}}
+        if recovering:
+            event = {"wakeAgent": False}
         with pytest.raises(ConnectionError):
             wake(context, event)
         assert wake(context, event) == {"wakeAgent": False, "run_id": "run_1"}
         assert wake(context, event) == {"wakeAgent": False, "run_id": "run_1"}
         assert len(accepted) == 1 and len(requests) == 2
         assert requests[0] == requests[1]
+        if recovering:
+            assert requests[0][1] == {
+                **pending["request"],
+                "coordinator_input_id": "original-input",
+            }
         statuses["run_1"] = terminal
         expected = "run_2" if terminal in {"failed", "interrupted"} else "run_1"
         assert wake(context, event)["run_id"] == expected

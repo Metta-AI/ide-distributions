@@ -90,6 +90,19 @@ def main():
     with patch("orchestrator.board.Research.call", return_value={"accepted": True}) as effect:
         assert board.workspace_integrate(task_id, result_run, result_commit) == {"accepted": True}
         assert effect.call_args.args[-2:] == ("--commit", result_commit)
+    # Even an unconfirmed native stop revokes publication before returning.
+    with patch("hermes_cli.kanban_db.archive_task", return_value=False):
+        assert not board.card_close(task_id, "archived")["changed"]
+    with patch("orchestrator.board.Research.call") as effect:
+        for operation, arguments in (
+            (board.workspace_integrate, (result_commit,)),
+            (board.submit_requested_version, ("V-cancelled", "strategy.md", "Submit it")),
+            (board.promotion_submit, ("E-cancelled",)),
+            (board.bootstrap_champion, ("V-cancelled",)),
+        ):
+            with TestCase().assertRaises(ValueError):
+                operation(task_id, result_run, *arguments)
+        effect.assert_not_called()
     board.card_close(task_id, "archived")
     with patch("orchestrator.board.Research.call") as effect:
         with TestCase().assertRaises(ValueError):

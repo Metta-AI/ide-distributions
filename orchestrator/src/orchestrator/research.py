@@ -111,12 +111,6 @@ class Research:
         target.write_text(text, encoding="utf-8")
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
-    def promotion_submit(self, experiment):
-        return self.call("promotion", "submit", experiment)
-
-    def bootstrap_champion(self, version):
-        return self.call("promotion", "bootstrap", "--version", version)
-
     def accept_champion(self):
         return self.call("promotion", "accept")
 

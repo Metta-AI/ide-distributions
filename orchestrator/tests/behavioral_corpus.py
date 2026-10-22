@@ -11,6 +11,12 @@ import httpx
 
 CASES = [
     (
+        "failed_upload",
+        "Task t_blocked built and smoke-tested B-ready, but upload was refused before acceptance. The service is healthy now. Resume that same task to upload B-ready; do not rebuild or run a superiority evaluation.",
+        {"blocked": ["t_blocked"]},
+        "card_answer",
+    ),
+    (
         "explicit_build",
         "Build, smoke-test, upload and submit a new policy. Do not run a superiority evaluation. Our existing champion remains a statistical baseline only.",
         {},
@@ -68,6 +74,7 @@ def main():
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--hermes-source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--case")
     args = parser.parse_args()
     source = args.root / "orchestrator"
     schema_code = "from orchestrator.plugin import TOOLS; import json; print(json.dumps([{'type':'function','function':{'name':k,'description':v[1],'parameters':{'type':'object','properties':v[2],'required':v[3]}}} for k,v in TOOLS.items()]))"
@@ -89,6 +96,8 @@ def main():
     )
     results = []
     for name, prompt, cards, expected in CASES:
+        if args.case and name != args.case:
+            continue
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
         actions = []
         usage = []

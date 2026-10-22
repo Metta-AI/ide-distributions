@@ -175,10 +175,10 @@ TOOLS = {
         ["action", "reason"],
     ),
     "promotion_submit": (
-        Research,
+        Board,
         ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),
-        {"experiment": S},
-        ["experiment"],
+        {"id": S, "run_id": I, "experiment": S},
+        ["id", "run_id", "experiment"],
     ),
     "submit_requested_version": (
         Board,
@@ -191,10 +191,10 @@ TOOLS = {
         ["id", "run_id", "version", "strategy", "request"],
     ),
     "bootstrap_champion": (
-        Research,
+        Board,
         "Submit an integrated starter-policy version (V-...) only when no champion exists.",
-        {"version": S},
-        ["version"],
+        {"id": S, "run_id": I, "version": S},
+        ["id", "run_id", "version"],
     ),
     "accept_champion": (
         Research,
