@@ -102,6 +102,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         from hermes_cli import kanban_db as kb
         from hermes_cli.profiles import get_profile_dir
         from tools.async_delegation import _current_origin_session_id
+        from tools.approval_context import get_current_session_key
         from tools.kanban_tools import _persisted_session_id
 
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", entity):
@@ -209,7 +210,21 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 )
                 if replaces:
                     origin_session = original.session_id
+                source_run_id = get_current_session_key("")
+                if not re.fullmatch(r"run_[0-9a-f]{32}", source_run_id):
+                    source_run_id = None
+                if replaces:
+                    marker = "\n\nCard context:\n```json\n"
+                    original_context = json.loads(
+                        original.body.rsplit(marker, 1)[1].split("\n```", 1)[0]
+                    )
+                    source_run_id = (
+                        original_context["source_run_id"]
+                        if "source_run_id" in original_context
+                        else None
+                    )
                 details = {
+                    "source_run_id": source_run_id,
                     "kind": kind,
                     "entity": entity,
                     "attempt": attempt,
