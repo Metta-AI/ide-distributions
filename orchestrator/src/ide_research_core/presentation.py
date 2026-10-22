@@ -58,7 +58,7 @@ def execute(root: Path, request: PresentationRequest) -> dict:
         separators=(",", ":"),
     ).encode()
     fingerprint = hashlib.sha256(payload).hexdigest()
-    receipt_path = f"{prefix}/requests/{hashlib.sha256(request.request_id.encode()).hexdigest()}.json"
+    receipt_path = f"control/ide/requests/{hashlib.sha256(request.request_id.encode()).hexdigest()}.json"
     saved = gitops.show(root, revision, receipt_path)
     if saved is not None:
         receipt = PresentationReceipt.model_validate_json(saved)

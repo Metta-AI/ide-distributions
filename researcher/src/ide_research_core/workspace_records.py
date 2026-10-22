@@ -50,9 +50,7 @@ def execute(root: Path, request: RecordsRequest) -> dict:
     head = workspace.sync(root)
     revision = int(gitops.git(root, "rev-list", "--count", head))
     prefix = f"control/ide/{request.league_id}/research"
-    receipt_path = (
-        f"{prefix}/requests/{hashlib.sha256(request.request_id.encode()).hexdigest()}.json"
-    )
+    receipt_path = f"control/ide/requests/{hashlib.sha256(request.request_id.encode()).hexdigest()}.json"
     fingerprint = hashlib.sha256(
         json.dumps(
             [request.owner_id, request.league_id, request.intent],
@@ -68,11 +66,16 @@ def execute(root: Path, request: RecordsRequest) -> dict:
                 raise workspace.WorkspaceError(
                     "request_conflict", "This request already names another record edit"
                 )
-            return {"replay": receipt.result} if request.action == "read" else receipt.result
+            return (
+                {"replay": receipt.result}
+                if request.action == "read"
+                else receipt.result
+            )
     if request.action == "save":
         if not request.request_id or request.patch is None or request.intent is None:
             raise workspace.WorkspaceError(
-                "bad_arguments", "Record saves require a patch, intent and original request ID"
+                "bad_arguments",
+                "Record saves require a patch, intent and original request ID",
             )
         if request.revision != revision:
             raise workspace.WorkspaceError(
@@ -115,9 +118,15 @@ def execute(root: Path, request: RecordsRequest) -> dict:
                     meta.get("league_id") == request.league_id
                     and meta.get("agent_id") == request.owner_id
                 )
-                if entity == "claim" and "league_id" not in meta and "agent_id" not in meta:
+                if (
+                    entity == "claim"
+                    and "league_id" not in meta
+                    and "agent_id" not in meta
+                ):
                     references = meta["topics"]
-                    parents = [scoped_topics[id_] for id_ in references if id_ in scoped_topics]
+                    parents = [
+                        scoped_topics[id_] for id_ in references if id_ in scoped_topics
+                    ]
                     if (
                         parents
                         and len(parents) == len(references)
@@ -129,7 +138,9 @@ def execute(root: Path, request: RecordsRequest) -> dict:
                                 key: parents[0][key]
                                 for key in ("league_id", "agent_id", "policy_id")
                             },
-                            "policy_name": parents[0].get("policy_name", parents[0]["policy_id"]),
+                            "policy_name": parents[0].get(
+                                "policy_name", parents[0]["policy_id"]
+                            ),
                             "game": parents[0].get("game"),
                         }
                         scoped = True
@@ -140,7 +151,9 @@ def execute(root: Path, request: RecordsRequest) -> dict:
                 if not request.include_goals:
                     meta.pop("goals", None)
                 path = store.path_of(native_id).relative_to(snapshot).as_posix()
-                dates = gitops.git(root, "log", "--format=%cI", head, "--", path).splitlines()
+                dates = gitops.git(
+                    root, "log", "--format=%cI", head, "--", path
+                ).splitlines()
                 records.append(
                     RecordView.model_validate(
                         {
@@ -156,12 +169,17 @@ def execute(root: Path, request: RecordsRequest) -> dict:
         for path in sorted((snapshot / prefix / "views").glob("*.json")):
             view = RecordView.model_validate_json(path.read_bytes())
             annotations = view.meta["ide"]
-            if isinstance(annotations, dict) and annotations["agent_id"] == request.owner_id:
+            if (
+                isinstance(annotations, dict)
+                and annotations["agent_id"] == request.owner_id
+            ):
                 records.append(view)
         if request.action == "read":
             return {
                 "revision": revision,
-                "records": [item.model_dump(mode="json", exclude_none=True) for item in records],
+                "records": [
+                    item.model_dump(mode="json", exclude_none=True) for item in records
+                ],
             }
         patch = request.patch
         assert patch is not None
@@ -171,12 +189,21 @@ def execute(root: Path, request: RecordsRequest) -> dict:
             )
         if patch.entity == "presentation":
             annotations = patch.meta["ide"]
-            if not isinstance(annotations, dict) or annotations["agent_id"] != request.owner_id:
-                raise workspace.WorkspaceError("forbidden", "Presentation belongs to another owner")
+            if (
+                not isinstance(annotations, dict)
+                or annotations["agent_id"] != request.owner_id
+            ):
+                raise workspace.WorkspaceError(
+                    "forbidden", "Presentation belongs to another owner"
+                )
             path = f"{prefix}/views/{patch.id}.json"
             content = patch.model_dump_json().encode()
         else:
-            meta = {**patch.meta, "league_id": request.league_id, "agent_id": request.owner_id}
+            meta = {
+                **patch.meta,
+                "league_id": request.league_id,
+                "agent_id": request.owner_id,
+            }
             # Native IDs are retained; client IDs are display aliases only.
             previous = next(
                 (
@@ -188,7 +215,9 @@ def execute(root: Path, request: RecordsRequest) -> dict:
                 None,
             )
             if previous is None:
-                native_id = store.create(patch.entity, {**meta, "ide_id": patch.id}, patch.body)
+                native_id = store.create(
+                    patch.entity, {**meta, "ide_id": patch.id}, patch.body
+                )
             else:
                 native_id = previous.id
                 store.update(native_id, meta, patch.body)
