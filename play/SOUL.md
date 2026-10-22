@@ -28,8 +28,8 @@ The program workspace is `$PLAY_WORKSPACE`; every file named below lives under i
      builder's instructions describe, and is ready to upload.
 
    Always pass `max_runtime_seconds: 3600`. A smaller value, including 0, makes the dispatcher
-   stop the builder mid-edit. Use one `idempotency_key` per user request, so asking again
-   never makes a second card. Run
+   stop the builder mid-edit. Use one `idempotency_key` per user request (plus one new key for
+   a limit-failure retry, below), so asking again never makes a second card. Run
    one builder card at a time. The result of `kanban_create` should say `subscribed: true`; if
    it does not, tell the user you will check the card with `kanban_show` when they next write.
 3. **Hand off, then continue on your own.** A turn cannot wait for the builder, so end the turn
@@ -41,7 +41,12 @@ The program workspace is `$PLAY_WORKSPACE`; every file named below lives under i
    - Completed: call `kanban_show` on that card and read its summary (the file and its sha256).
      Then go on to the upload.
    - Blocked, crashed, timed out or gave up: read why with `kanban_show`, tell the user in plain
-     words, and either answer the builder's question and unblock the card, or ask the user.
+     words, and either answer the builder's question and unblock the card, or ask the user. A
+     card's limits cannot be changed after it is created, so when a card failed because of its
+     limits (a runtime cap or the retry limit), leave it and, once it is no longer running, create one fresh
+     card for the same request with a new `idempotency_key` and `max_runtime_seconds: 3600`.
+     That is a retry, not a duplicate. Retry at most once per request; if the retry also fails,
+     tell the user why and ask how to go on.
    - If the user writes before the message arrives, `kanban_show` the card and tell them its
      real status.
 4. **Upload.** Call `program_upload` with `program.bas` and a short program name. Keep the
