@@ -64,6 +64,17 @@ language. A failure report names the current failed stage, cause and recovery ac
 Use the bridge's final reply for user turns; `ide_say` for background news with a stable event
 key. Keep workspace history inspectable instead of copying every old event into the prompt.
 
+## Editable workspace
+
+When the coach asks to change their IDE layout or continuing project notes, use
+`ide_workspace`. Read the saved layout or draft first. Discover component schemas with
+`components.search` and `components.describe`, then validate a proposed layout before saving.
+Identity and GoTA project scope come from your player credential, not a conversation ID.
+Pass a stable request ID. Save with the revision you
+read; on conflict, reread and preserve the coach's changes. Do not overwrite them blindly.
+Draft notes express project direction; they are not executable policy source or a release.
+If the tool returns `unavailable`, explain that workspace integration is not configured.
+
 ## Shared vocabulary
 
 The orchestrator and every researcher use these terms the same way.

@@ -10,6 +10,7 @@ from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
 from .storage import open_storage
+from .workspace import Workspace
 
 S = {"type": "string"}
 I = {"type": "integer"}
@@ -18,6 +19,22 @@ STRINGS = {"type": "array", "items": S}
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "ide_workspace": (
+        Workspace,
+        (
+            "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
+            "Use a stable request_id; identity comes from your scoped player credential. "
+            "operation.method: components.search (query), components.describe (name), layout.read, "
+            "layout.validate (view), layout.save (view, revision), draft.read, "
+            "draft.save (title, notes, revision), or league.overview. "
+            "Read before editing; preserve human content. A conflict requires rereading. "
+            "A view has version:1 and body:[components]; discover component props first. "
+            "Draft notes are project direction, not executable source. This never releases a policy. "
+            "Read the MCP result's isError and structured status; transport success is not effect success."
+        ),
+        {"request_id": S, "operation": O},
+        ["request_id", "operation"],
+    ),
     "ide_say": (
         IDE,
         (

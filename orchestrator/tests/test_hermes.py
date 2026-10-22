@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 from support.hermes_python import hermes_python
 
 DISTRIBUTION = Path(__file__).resolve().parents[1]
@@ -77,24 +78,30 @@ def test_clean_export_installs_paused(tmp_path):
     assert len(jobs) == 1 and jobs[0]["name"] == "supervisor"
     assert not jobs[0]["enabled"] and jobs[0]["state"] == "paused"
     assert jobs[0]["no_agent"] and jobs[0]["script"] == "supervisor_gate.py"
+    expected_tools = yaml.safe_load((profile / "plugins/orchestrator/plugin.yaml").read_text())[
+        "provides_tools"
+    ]
     # Real discovery/registration in Hermes; no models or API calls.
     code = """
 import json
+import sys
+from tools.registry import registry
 from hermes_cli.plugins import get_plugin_manager, get_plugin_toolsets
 manager = get_plugin_manager()
 manager.discover_and_load()
 plugin = next(p for p in manager.list_plugins() if p['name'] == 'orchestrator')
 assert not plugin['error'], plugin
-from orchestrator.plugin import TOOLS
-from tools.registry import registry
-assert plugin['enabled'] and plugin['tools'] == len(TOOLS), plugin
+expected = json.loads(sys.argv[2])
+assert plugin['enabled'] and plugin['tools'] == len(expected), plugin
+assert set(registry.get_tool_names_for_toolset('orchestrator')) == set(expected)
+assert registry.get_schema('ide_workspace')['parameters']['required'] == ['request_id', 'operation']
 schema = registry.get_schema('submit_requested_version')
 assert set(schema['parameters']['required']) == {'id', 'run_id', 'version', 'strategy', 'request'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 print(json.dumps({'ok': True}))
 """
     result = subprocess.run(
-        [hermes_python(), "-c", code, str(profile)],
+        [hermes_python(), "-c", code, str(profile), json.dumps(expected_tools)],
         env={**env, "HERMES_HOME": str(profile)},
         capture_output=True,
         text=True,
