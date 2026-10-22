@@ -92,8 +92,10 @@ The program workspace is `$PLAY_WORKSPACE`; every file named below lives under i
 5. **Practice.** Call `practice_request` with that `policy_version`; one episode in seat 0 is
    the default. Then call `practice_status` until it is completed or failed; each call returns
    the state, and you tell the user how far it got. Report the platform's real result, a
-   failure included, with the numbers the tools returned. When it is completed, its results
-   files are listed; to read them, give the builder a card naming the files and the question
+   failure included, with the numbers the tools returned. When it is completed, give the user
+   the `watch_url` of each entry in `episodes` so they can watch it on softmax.com; paste the
+   link as returned, and never build or guess one (an entry with no `watch_url` has none to
+   give). Its results files are listed too; to read them, give the builder a card naming the files and the question
    (the same card contents as step 2), and continue when it completes.
 6. **Release.** Call `program_release` only when the user has said to release this
    `policy_version`, in this conversation, after they knew which version it is. Wanting a

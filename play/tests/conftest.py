@@ -75,6 +75,10 @@ class FakeCli:
                             "status": self.xp_status,
                             "completed_count": 2,
                             "episode_count": 2,
+                            "episodes": [
+                                {"id": "ereq_1", "episode_id": "ep-1"},
+                                {"id": "ereq_2", "episode_id": None},
+                            ],
                         }
                     )
                 )

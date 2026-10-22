@@ -263,6 +263,7 @@ class Program:
         }
         if status.state != "completed":
             return out
+        out["episodes"] = self._watch_links(handle)
         dest = self.workspace / "practice" / request_id
         try:
             files = xp.artifacts(self.client._cli, handle, dest)
@@ -275,6 +276,22 @@ class Program:
                 return {**out, "results": None, "results_pending": str(error)}
             files = sorted(xp.verify_receipt(dest, r) for r in receipts if xp._completed(r))
         return {**out, "results": [str(path) for path in files if path.name.endswith(".json")]}
+
+    def _watch_links(self, handle: XpHandle) -> list[dict]:
+        """Each recorded episode of a request with the page on softmax.com where its owner watches
+        it (``/observatory/episodes/<episode id>``, the replay viewer). The episode id is what the
+        platform returned on the request; no link is made without one, or off a server that is
+        not softmax.com's ``/api``."""
+        cli = self.client._cli
+        detail = cli.run_json("coworld", ["xp-request", "get", handle.request_id])
+        site = cli.server.removesuffix("/api") if cli.server.endswith("/api") else None
+        links = []
+        for row in detail.get("episodes") or []:
+            episode_id = row.get("episode_id")
+            if episode_id:
+                watch = f"{site}/observatory/episodes/{episode_id}" if site else None
+                links.append({"episode_id": str(episode_id), "watch_url": watch})
+        return links
 
     # --- release --------------------------------------------------------
 
