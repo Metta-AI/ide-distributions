@@ -4,6 +4,7 @@ description: The user's own program on one coworld - starter, checked changes, v
 author: ide-distributions
 provides_tools:
   - who_we_are
+  - take_name
   - starter_fetch
   - program_show
   - program_change

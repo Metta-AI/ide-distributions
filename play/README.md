@@ -6,7 +6,7 @@ it, reports the results in plain words and releases a version only when the user
 It has only its own tools and the `memory` toolset: no raw file, terminal or Kanban tools.
 
 There are no research records, experiments or champions. GotA only: its program is one BASIC
-file (`program.bas`) that the game runs as is. Container coworlds are not supported yet.
+file (`program.bas`) that the game runs as is. Other coworlds are built by the user's local coding agent, guided by the cogent.
 
 `builder/` is the earlier builder profile. The hosted Play runtime still installs it
 (metta `devops/hermes-fleet/applications/play/runtime_definition.py` lists both profiles, and
@@ -23,7 +23,8 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 
 | Tool | What it does |
 |---|---|
-| `who_we_are` | The cogent's name and its user's (`null` when the user set none), from the public `GET /v2/cogents/<player>`. `softmax status` and `whoami` print the user's account name, not the cogent's. |
+| `who_we_are` | Whether the cogent has a name (`named`), its name (`cogent_name`, from its soul record; `null` until named), and its user's account name (`user_name`, `null` when none, from the public `GET /v2/cogents/<player>`). `softmax status` and `whoami` print the user's account name, not the cogent's. |
+| `take_name` | Takes the name the user chose: writes it into the cogent's soul record (`c/profile/soul`), keeping the other fields. `who_we_are` then reports `named: true`. |
 | `starter_fetch` | Downloads the coworld's starter player file (manifest `player` entry `baseline`, else the first file entry) to `starter/<id>.bas` and checks its sha256. |
 | `program_show` | The program now (or the starter before the first change), its name, its last version and whether it changed since. |
 | `program_edit` | Applies `{find, replace}` edits (each `find` exactly once; `edit_not_found` / `edit_ambiguous` otherwise) to the program now or the starter, then runs the same check and write as `program_change`. |
