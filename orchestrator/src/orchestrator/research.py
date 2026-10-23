@@ -147,8 +147,13 @@ class Research:
             limit,
         )
 
-    def game_support(self, league_id):
-        return self.call("softmax", "game-support", "--league", league_id)
+    def game_support(self, league_id, document=None, offset=0, limit=4000, expected_sha256=None):
+        args = ["softmax", "game-support", "--league", league_id, "--offset", offset, "--limit", limit]
+        if document is not None:
+            args.extend(["--document", document])
+        if expected_sha256 is not None:
+            args.extend(["--expected-sha256", expected_sha256])
+        return self.call(*args)
 
     def leaderboard(self, league_id, player_id):
         return self.call("softmax", "player-champion", "--league", league_id, "--player", player_id)

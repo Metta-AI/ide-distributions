@@ -1074,7 +1074,9 @@ def _discovery(ctx, sm, args) -> dict:
         case "league-players":
             return discovery.league_players(args.league, args.query, args.offset, args.limit)
         case "game-support":
-            return discovery.game_support(args.league)
+            return discovery.game_support(
+                args.league, args.document, args.offset, args.limit, args.expected_sha256
+            )
         case "player-champion":
             return discovery.leaderboard(args.league, args.player)
         case "player-result":
@@ -1106,6 +1108,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
             sub.add_argument("--limit", type=int, default=20)
         if name in ("player-champion", "player-result"):
             sub.add_argument("--player", required=True)
+        if name == "game-support":
+            sub.add_argument("--document")
+            sub.add_argument("--offset", type=int, default=0)
+            sub.add_argument("--limit", type=int, default=4000)
+            sub.add_argument("--expected-sha256")
 
     command(commands, "whoami", _whoami, "the credential's identity (must be our Player)")
     command(commands, "credits", _credits, "credit balance, when readable (A10)")

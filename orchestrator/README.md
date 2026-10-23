@@ -62,11 +62,12 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 
 | Tools | Behavior |
 |---|---|
+| `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
 | `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `card_create` | Prepare the assignee clone/branch and create native worktree work; return actual subscription status. |
-| `card_show`, `card_list` | Read native cards, runs and comments. |
+| `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
 | `status` | Cards by state, canonical record summary, durable pause and promotion state. |
@@ -77,7 +78,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `workspace_integrate(branch)` | Shared integration of a pushed card/repair branch. |
 | `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
 | `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
-| `game_support(league_id)` | Load the live participation guide, Coworld manifest, and installed research guide for the selected league. |
+| `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
 | `leaderboard(league_id, player_id)` | Read the selected player's current champion; never defaults to the workspace carrier. |
 | `xp_status(experiment)`, `credits` | Shared research platform reads. |
 | `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
@@ -140,7 +141,25 @@ supply owned-player IDs/names and current selections near the start of each turn
 context, not a fixed binding or credential grant. Discovery and match reads take explicit
 IDs and never write profile environment, canonical records or running cards.
 
-`game_support` loads published documentation on demand. An installed contract is matched by
+Ordinary greetings, navigation and goal setup do not initialize the research board. Notebook
+work starts from supplied evidence; research state is refreshed for task changes and supervision.
+
+`game_support` returns an index first. Pass a document ID and its `sha256` as
+`expected_sha256` to read the participation guide, manifest or installed research guide.
+Offsets count Unicode characters, not bytes. Continuing beyond offset zero requires the hash;
+`document_changed` means reload the index. The Coworld is read by its exact API ID, avoiding
+the CLI's catalog-wide summaries lookup. This response replaces the former inline manifest
+and participation text; update the plugin, shared CLI and SOUL together.
+
+Production release follows `ide-distributions/main` through Metta’s
+[Deploy Hermes agent workflow](https://github.com/Metta-AI/metta/blob/main/.github/workflows/deploy-hermes-agent.yml).
+With `HERMES_WORKSPACE_UPDATE_POLICY=preserve`, it polls the source every five minutes
+and qualifies the image before release. No separate Metta source-lock bump is needed
+for this path. Existing workspaces keep their selected image until the owner pauses
+and resumes them; the update preserves their workspace and identity. A merged source
+PR is not proof that image qualification or rollout has completed.
+
+An installed contract is matched by
 its declared league or published Coworld name, not by guessed directory paths. Missing bindings are reported separately
 from platform availability. This permits research and match analysis for games without a
 local build/evaluation adapter. The existing automated promotion loop still uses its installed

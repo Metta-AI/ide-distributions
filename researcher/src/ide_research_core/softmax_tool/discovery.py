@@ -1,15 +1,18 @@
 """Conversation-scoped platform reads. These tools never change the research team's defaults."""
 
+import hashlib
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from pydantic import BaseModel, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from ide_research_core.games.loader import load_game
 from ide_research_core.softmax_tool.client import SoftmaxClient
 from ide_research_core.softmax_tool.platform_cli import PlatformCli
+from ide_research_core.softmax_tool.protocol import Refused
 
 
 class Game(BaseModel):
@@ -49,6 +52,16 @@ class Coworld(BaseModel):
     name: str
     version: str
     manifest: dict[str, JsonValue]
+
+
+class SupportRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    league_id: str = Field(min_length=1)
+    document: str | None = Field(default=None, min_length=1, max_length=160)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=4000, ge=1, le=6000)
+    expected_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def matches(query: str, *values: str) -> bool:
@@ -113,13 +126,38 @@ class Discovery:
             "scope": "ranked players; absence does not establish that a player or policy does not exist",
         }
 
-    def game_support(self, league_id):
+    def game_support(self, league_id, document=None, offset=0, limit=4000, expected_sha256=None):
+        request = SupportRead(
+            league_id=league_id, document=document, offset=offset,
+            limit=limit, expected_sha256=expected_sha256,
+        )
+        league_id, document, offset, expected_sha256 = (
+            request.league_id, request.document, request.offset, request.expected_sha256,
+        )
+        if document is None and (offset or expected_sha256 is not None):
+            raise Refused("bad_arguments", "Select a document before supplying an offset or expected_sha256")
+        if offset and expected_sha256 is None:
+            raise Refused("bad_arguments", "Pass the document's expected_sha256 when continuing a read")
         league = League.model_validate(
             self.cli.api_get_json(
                 f"/observatory/v2/leagues/{quote(league_id, safe='')}"
             )
         )
+        if league.id != league_id:
+            raise Refused("scope_mismatch", "The platform returned a different league")
         coworld_id = league.game.coworld_id or league.game.canonical_coworld_id
+        coworld = Coworld.model_validate(
+            self.cli.api_get_json(f"/observatory/v2/coworlds/{quote(coworld_id, safe='')}")
+        ) if coworld_id else None
+        if coworld is not None and coworld.id != coworld_id:
+            raise Refused("scope_mismatch", "The platform returned a different Coworld")
+        documents = {
+            "participation": self.cli.api_get_text(
+                f"/observatory/v2/leagues/{quote(league.id, safe='')}.md"
+            ),
+        }
+        if coworld is not None:
+            documents["manifest"] = json.dumps(coworld.manifest, ensure_ascii=False, sort_keys=True)
         support = []
         # Inspect installed contracts by their declared league; never turn a model-supplied
         # name into a path or execute downloaded documentation.
@@ -133,20 +171,36 @@ class Discovery:
                     {
                         "name": game.name,
                         "league_id": game.league_id,
-                        "guide": game.guide,
+                        "document": f"research:{game.name}",
                         "bindings": game.bindings,
                     }
                 )
+                documents[f"research:{game.name}"] = game.guide
+        index = [
+            {"id": key, "sha256": hashlib.sha256(text.encode()).hexdigest(), "characters": len(text)}
+            for key, text in documents.items()
+        ]
+        page = None
+        if document is not None:
+            if document not in documents:
+                raise Refused("bad_arguments", "Choose a document id returned by game_support")
+            text = documents[document]
+            metadata = next(item for item in index if item["id"] == document)
+            if expected_sha256 is not None and metadata["sha256"] != expected_sha256:
+                raise Refused("document_changed", "Document changed; reload game_support before continuing")
+            if offset > len(text):
+                raise Refused("bad_arguments", "Document offset exceeds its character count")
+            end = min(offset + request.limit, len(text))
+            page = {
+                **metadata, "content": text[offset:end], "offset": offset,
+                "next_offset": end if end < len(text) else None,
+                "offset_unit": "unicode_characters",
+            }
         return {
             "league": league.model_dump(),
-            "coworld": Coworld.model_validate(
-                self.cli.run_json("coworld", ["show", coworld_id])
-            ).model_dump()
-            if coworld_id
-            else None,
-            "participation_guide": self.cli.api_get_text(
-                f"/observatory/v2/leagues/{quote(league.id, safe='')}.md"
-            ),
+            "coworld": coworld.model_dump(exclude={"manifest"}) if coworld is not None else None,
+            "documents": index,
+            "document": page,
             "installed_research_support": support,
             "research_bindings_available": bool(support),
             "workspace_game_hint": self.env.get("RESEARCH_GAME"),

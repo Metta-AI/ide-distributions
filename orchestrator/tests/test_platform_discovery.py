@@ -43,8 +43,12 @@ def test_discover_and_switch_games_without_a_workspace_binding(tmp_path):
         assert [league["id"] for league in found["leagues"]] == [league_id]
         support = call("game-support", "--league", league_id)
         assert support["league"]["id"] == league_id
-        assert support["coworld"]["manifest"]
-        assert support["participation_guide"]
+        assert support["coworld"]["id"]
+        assert "manifest" not in support["coworld"]
+        guide = next(doc for doc in support["documents"] if doc["id"] == "participation")
+        page = call("game-support", "--league", league_id, "--document", guide["id"],
+                    "--expected-sha256", guide["sha256"], "--limit", "100")
+        assert 0 < len(page["document"]["content"]) <= 100
         games.append(support["league"]["game"]["id"])
         ranked = call("league-players", "--league", league_id, "--limit", "1")
         assert ranked["league_id"] == league_id and len(ranked["players"]) <= 1

@@ -7,6 +7,23 @@ from urllib.request import Request, urlopen
 from .context import Context
 
 
+class WorkspaceError(RuntimeError):
+    def __init__(self, response):
+        self.envelope = {
+            "ok": False,
+            "error": {
+                "reason": "workspace_protocol" if "error" in response else "workspace_tool",
+                "message": "The workspace server rejected the operation",
+                "details": response,
+                "recovery": (
+                    "Read ide_workspace_schema for supported arguments. Do not retry unsupported "
+                    "scope or invent parameters. For uncertain effects, inspect the original request_id."
+                ),
+            },
+        }
+        super().__init__(self.envelope["error"]["message"])
+
+
 class Workspace:
     def __init__(self, context: Context):
         url = urlsplit(context.env.get("COGAMES_API_URL", "https://softmax.com/api"))
@@ -56,9 +73,12 @@ class Workspace:
             },
         )
         if "error" in initialized:
-            return {"kind": "protocol_error", "error": initialized["error"]}
+            raise WorkspaceError(initialized)
         self.post("/mcp", self.token, {"jsonrpc": "2.0", "method": "notifications/initialized"})
-        return self.post("/mcp", self.token, request)
+        result = self.post("/mcp", self.token, request)
+        if "error" in result or result.get("result", {}).get("isError", False):
+            raise WorkspaceError(result)
+        return result
 
     def ide_workspace_schema(self):
         """Discover the deployed SDK contract rather than copying its schemas into this distribution."""
