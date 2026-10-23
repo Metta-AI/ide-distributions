@@ -100,3 +100,17 @@ def test_play_lead_does_the_whole_loop_itself_in_plain_words():
     # No hand-off to another profile, and no internal words toward the user.
     for word in ("kanban_create", "builder", "max_runtime_seconds", "idempotency"):
         assert word not in soul, word
+
+
+def test_play_restart_words_point_to_start_over_and_never_name_files():
+    soul = (PROFILES["play"] / "SOUL.md").read_text()
+    for needle in (
+        '"Start over" action',
+        "/play page",
+        "Team testing",
+        "explicit yes",
+        "confirm: true",
+    ):
+        assert needle in soul, needle
+    assert ".bas" not in soul
+    assert 'say "your program"' in soul
