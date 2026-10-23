@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter
 
 from ide_research_core.games.loader import load_game
 from ide_research_core.softmax_tool.client import SoftmaxClient
+from ide_research_core.softmax_tool.discovery_schema import SupportRead
 from ide_research_core.softmax_tool.platform_cli import PlatformCli
 from ide_research_core.softmax_tool.protocol import Refused
 
@@ -52,16 +53,6 @@ class Coworld(BaseModel):
     name: str
     version: str
     manifest: dict[str, JsonValue]
-
-
-class SupportRead(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    league_id: str = Field(min_length=1)
-    document: str | None = Field(default=None, min_length=1, max_length=160)
-    offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=4000, ge=1, le=6000)
-    expected_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def matches(query: str, *values: str) -> bool:

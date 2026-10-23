@@ -4,7 +4,7 @@ import json
 from contextlib import closing
 from urllib.error import HTTPError
 
-from ide_research_core.softmax_tool.discovery import SupportRead
+from ide_research_core.softmax_tool.discovery_schema import SupportRead
 
 from .board import Board, CardFilters
 from .context import profile_context
