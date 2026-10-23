@@ -247,7 +247,8 @@ def test_practice_uses_the_league_the_coach_chose(program, cli, records):
         "rev": 1,
         "body": {"leagueId": CHOSEN, "at": "x"},
     }
-    games = {GOTA.league_id: {"name": "gota"}, CHOSEN: {"name": "gota"}}
+    game = {"name": "gota", "coworld_id": "cw_gota"}
+    games = {GOTA.league_id: game, CHOSEN: game}
     starter = program._fetch
     program._fetch = lambda url: (
         json.dumps({"game": games[url.rsplit("/", 1)[1]]}).encode()

@@ -193,7 +193,13 @@ class Program:
         if self._league is None:
             choice = self.records.get("state", "league")
             league = choice["body"]["leagueId"] if choice else self.game.league_id
-            if not self._builds_here(league):
+            try:
+                here = self._builds_here(league)
+            except (OSError, KeyError, ValueError) as error:  # URLError is an OSError
+                raise PlayError(
+                    "league_unreadable", f"could not read the chosen league {league}: {error}"
+                ) from error
+            if not here:
                 raise PlayError(
                     "builds_elsewhere",
                     "this coworld's programs are built on the user's own computer by their "
@@ -210,23 +216,18 @@ class Program:
         )
         return json.loads(self._fetch(url))["game"]
 
-    def _builds_here(self, league_id: str) -> bool:
+    def _builds_here(self, league_id: str, game: dict | None = None) -> bool:
         """Whether programs for this league's coworld are built here: it is GotA's coworld, judged
-        by the league's game (so any GotA league counts), not by the league's id."""
+        by the league's game (so any GotA league counts), not by the league's id. The two games are
+        compared on the first coworld field both carry; with none in common it is not GotA's."""
         if league_id == self.game.league_id:
             return True
-
-        def coworld(game: dict) -> str:
-            return (
-                game.get("canonical_coworld_id")
-                or game.get("coworld_id")
-                or game.get("coworld_name")
-                or game["name"]
-            )
-
-        return coworld(self._league_game(league_id)) == coworld(
-            self._league_game(self.game.league_id)
-        )
+        game = game if game is not None else self._league_game(league_id)
+        home = self._league_game(self.game.league_id)
+        for field in ("canonical_coworld_id", "coworld_id", "coworld_name"):
+            if game.get(field) and home.get(field):
+                return game[field] == home[field]
+        return False
 
     @property
     def program_file(self) -> Path:
@@ -266,15 +267,16 @@ class Program:
         choice = self.records.get("state", "league")
         coworld = None
         if choice:
-            league_id = choice["body"]["leagueId"]
             try:
+                league_id = choice["body"]["leagueId"]
                 game = self._league_game(league_id)
                 coworld = {
                     "name": game.get("coworld_name") or game["name"],
-                    "builds_here": self._builds_here(league_id),
+                    "builds_here": self._builds_here(league_id, game),
                 }
-            except (urllib.error.URLError, KeyError, TypeError, ValueError):
-                coworld = None  # optional: HTTPError is a URLError; never fail the first call
+            except (OSError, KeyError, TypeError, ValueError):
+                # Optional (any read failure, URLError and timeouts included): never fail the first call.
+                coworld = None
         return {
             "named": bool(name),
             "cogent_name": name or None,
