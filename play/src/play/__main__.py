@@ -13,10 +13,15 @@ from .program import PlayError, Program
 
 OPERATIONS = (
     "starter_fetch",
+    "program_show",
+    "program_change",
+    "program_edit",
+    "program_versions",
     "program_upload",
     "practice_request",
     "practice_status",
     "program_release",
+    "task_update",
 )
 
 

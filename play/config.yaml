@@ -1,7 +1,7 @@
 # Shipped defaults. Hermes keeps this file on `hermes profile update` (--force-config resets it).
-# The play profile has only its own tools and native Kanban: it never edits files or runs
-# commands; the builder profile does that on a Kanban card. The `memory` toolset is the lead's
-# notes about the user and itself.
+# The play profile has only its own tools and memory: it changes the program through
+# program_change (a checked write of one file), never with raw file or terminal tools, and it
+# hands no work to another profile. The `memory` toolset is its notes about the user and itself.
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
@@ -14,7 +14,7 @@ memory:
 agent:
   max_turns: 40
 platform_toolsets:
-  api_server: [play, kanban, memory]
+  api_server: [play, memory]
 # An upload may take 600 s; Hermes otherwise cuts a tool call after 420 s.
 timeouts:
   tools:

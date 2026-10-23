@@ -9,7 +9,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Game:
     name: str
-    league_id: str  # the same league as researcher/games/gota/GAME.md (a test checks it)
+    league_id: (
+        str  # used when the coach chose none; the same league as researcher/games/gota/GAME.md
+    )
     starter_player: str  # the manifest ``player[].id`` softmax.com names as the starter
     suffix: str  # the program file's extension
     seat_count: int  # the whole roster: the platform rejects a roster of any other length

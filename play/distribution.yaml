@@ -1,6 +1,6 @@
 name: play
 version: 0.1.0
-description: The user's Softmax cogent on one coworld. Takes the user's request, has the builder change the program, uploads it, practices it and releases it when the user says so.
+description: The user's Softmax cogent on one coworld. Changes the program itself on the user's request, saves it as a new version, practices it, reports the results plainly and releases it when the user says so.
 hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
@@ -23,5 +23,5 @@ env_requires:
   - name: PLAY_WORKSPACE
     required: true
     description: >-
-      Absolute path of the program workspace, shared with the builder profile. The play
-      profile passes it to every builder card as the card's directory.
+      Absolute path of the program workspace: program.bas, the starter, the program journal,
+      each uploaded version and the practice results.

@@ -18,7 +18,7 @@ Container coworlds are not supported yet.
   once per hero decision, 24 times a second; globals persist, so write no endless loop. The
   limits are 64 KiB of source, 20,000 compiled and 20,000 executed instructions per decision,
   a work budget of 50,000 units per decision (`walkTo` costs 800, so about 60 calls), 256
-  globals and 32 arrays holding 4,096 elements in total. A file that is too big or does not
+  globals (512 in structures mode) and 32 arrays holding 4,096 elements in total. A file that is too big or does not
   compile fails the whole practice episode; a runtime error or an exhausted budget disables
   that hero. Spell host calls exactly as `starter/baseline.bas` or the host-surface doc does.
 - You cannot run the game, so check the file before you finish: read it once as the compiler

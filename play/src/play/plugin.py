@@ -9,15 +9,26 @@ are installed) and returns its envelope: ``{"ok": true, "data": ...}`` or ``{"ok
 import json
 import subprocess
 
+from .basic import MAX_SOURCE_BYTES
 from .context import Context, profile_context
 from .fresh import clear_notes
 from .launch import ensure_venv
+from .limits import DEFAULT_EPISODES, MAX_EPISODES, MAX_WAIT_SECONDS, NAME_MAX, STEP_STATUS, STEPS
 
-S = {"type": "string"}
-POLICY_VERSION = {
+PROGRAM = {
     "type": "string",
-    "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]*:v[0-9]+$",
-    "description": "The <name>:v<N> that program_upload returned.",
+    "pattern": r"^[A-Za-z0-9][A-Za-z0-9_-]*((:[vV]| [vV]| version )[0-9]+)?$",
+    "maxLength": 120,
+    "description": (
+        'The program as the user names it: "towerless v2" (or "towerless:v2") for one '
+        'version, "towerless" for its latest. Never add a player id; the tool finds it.'
+    ),
+}
+NAME = {
+    "type": "string",
+    "pattern": r"^[a-z0-9]+(-[a-z0-9]+)*$",
+    "maxLength": NAME_MAX,
+    "description": "The program's name as the user knows it. Omit for the current program.",
 }
 REFUSAL = (
     "A coach refusal returns outcome refused with refusal permit_required (state waiting, "
@@ -30,9 +41,8 @@ TIMEOUT_S = 840  # an upload may take 600 s; Hermes allows tool calls up to time
 TOOLS = {
     "starter_fetch": (
         (
-            "Download the coworld's starter player file into the program workspace "
-            "(starter/<player>.bas) and check its sha256 against the published manifest. "
-            "Safe to repeat."
+            "Download the coworld's starter program into the program workspace and check it "
+            "against the published file. Safe to repeat."
         ),
         {
             "player": {
@@ -43,36 +53,121 @@ TOOLS = {
         },
         [],
     ),
-    "program_upload": (
+    "program_show": (
         (
-            "Upload a program file from the workspace with coworld upload-policy; returns its "
-            "policy_version <name>:v<N>. Each call makes a new version, so upload once per "
-            "change and reuse the result."
+            "Show the program as it is now (or the starter, before the first change): its full "
+            "text, its name, its last uploaded version and whether it changed since. With "
+            "program, show the text of that uploaded version, or of the starter with "
+            '"starter", instead.'
+        ),
+        {"program": PROGRAM},
+        [],
+    ),
+    "program_change": (
+        (
+            "Replace the program with a full new text (use program_edit for a small change). The "
+            "text is checked first (size, closed blocks, only GotA BASIC statements, the compile "
+            "limits it can count); on a problem nothing is written and the error lists each "
+            "problem by line. Returns the diff and warnings about names the starter never uses."
         ),
         {
-            "path": {
+            "text": {
                 "type": "string",
                 "minLength": 1,
-                "description": "The .bas file, absolute or relative to the program workspace.",
+                "maxLength": MAX_SOURCE_BYTES,
+                "description": "The whole new program, not a fragment.",
             },
-            "name": {
+            "change": {
                 "type": "string",
-                "pattern": r"^[a-z0-9]+(-[a-z0-9]+)*$",
-                "maxLength": 40,
-                "description": "Program name, lowercase words and hyphens; the player id is appended.",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "What this change does, in the user's words.",
             },
         },
-        ["path", "name"],
+        ["text", "change"],
+    ),
+    "program_edit": (
+        (
+            "Change the program with small find-and-replace edits instead of rewriting it. Each "
+            "find must match exactly once (edit_not_found / edit_ambiguous otherwise, with "
+            "nothing written); edits apply in order to the program now, or the starter. The "
+            "result gets the same check as program_change. Returns the diff and warnings."
+        ),
+        {
+            "edits": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "find": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Exact text to replace; it must occur once. Include a neighbouring line if needed.",
+                        },
+                        "replace": {
+                            "type": "string",
+                            "description": "The new text; empty deletes the find text.",
+                        },
+                    },
+                    "required": ["find", "replace"],
+                    "additionalProperties": False,
+                },
+            },
+            "change": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "What this change does, in the user's words.",
+            },
+        },
+        ["edits", "change"],
+    ),
+    "program_versions": (
+        (
+            "List all your programs and their versions on the platform, with what each version "
+            "of the program changed, its practice results and whether it was released, and how "
+            "the program now differs from its last version, or from the version `program` names."
+        ),
+        {"program": PROGRAM},
+        [],
+    ),
+    "program_upload": (
+        (
+            "Upload the changed program as its next version and return it as the user names it "
+            '("towerless v2"). Uploading an unchanged program returns the same version.'
+        ),
+        {
+            "name": {
+                **NAME,
+                "description": (
+                    "Needed for the first upload: the short name the user chose. Later uploads "
+                    "keep the name; a different name starts a new program."
+                ),
+            }
+        },
+        [],
     ),
     "practice_request": (
         (
-            "Request private practice episodes for an uploaded program in the game's league; "
-            "your program plays the chosen seats and random league players fill the rest. "
-            "Repeating the same arguments returns the same request; raise attempt only to run the same practice again. " + REFUSAL
+            "Request private practice games for an uploaded version; the program plays the "
+            "chosen seats and players the platform draws from the league fill the rest. "
+            "Repeating the same arguments returns the same request; raise attempt only to play "
+            "the same practice again. " + REFUSAL
         ),
         {
-            "policy_version": POLICY_VERSION,
-            "episodes": {"type": "integer", "minimum": 1, "maximum": 20, "default": 1},
+            "program": {
+                **PROGRAM,
+                "description": PROGRAM["description"] + " Omit for the latest version.",
+            },
+            "episodes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": MAX_EPISODES,
+                "default": DEFAULT_EPISODES,
+                "description": "How many games.",
+            },
             "seats": {
                 "type": "array",
                 "items": {"type": "integer", "minimum": 0, "maximum": 9},
@@ -83,24 +178,85 @@ TOOLS = {
             },
             "attempt": {"type": "integer", "minimum": 1, "default": 1},
         },
-        ["policy_version"],
+        [],
     ),
     "practice_status": (
         (
-            "Read a practice request's state and episode counts. Once completed, its results "
-            "files are downloaded into practice/<request_id>/ and listed."
+            "How far a practice is. Once it is over: each game's result in plain words (won, "
+            "lost, ran out of time, failed, and why), the hero's glory and XP, a summary "
+            "against the previous version's practice, what the results can and cannot measure, "
+            "and a link to watch each game."
         ),
-        {"request_id": {"type": "string", "pattern": r"^xreq_[A-Za-z0-9_-]+$"}},
-        ["request_id"],
+        {
+            "request_id": {
+                "type": "string",
+                "pattern": r"^xreq_[A-Za-z0-9_-]+$",
+                "description": "Omit for the latest practice.",
+            },
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": MAX_WAIT_SECONDS,
+                "default": 0,
+                "description": "Wait up to this long for the practice to end before answering.",
+            },
+        },
+        [],
     ),
     "program_release": (
         (
-            "Submit an uploaded program to the game's league. Call only after the user has "
-            "said to release this version. Idempotent: a version already submitted is reported "
-            "as released. " + REFUSAL
+            "Release a version of the program to the league. Call only after the user said yes "
+            "to releasing exactly this version. Idempotent: a version already released is "
+            "reported as released. " + REFUSAL
         ),
-        {"policy_version": POLICY_VERSION},
-        ["policy_version"],
+        {
+            "program": {
+                **PROGRAM,
+                "pattern": r"^[A-Za-z0-9][A-Za-z0-9_-]*(:[vV]| [vV]| version )[0-9]+$",
+                "description": 'The exact version the user said yes to, as they name it: "towerless v2".',
+            },
+            "user_said_yes": {
+                "const": True,
+                "description": "True only because the user said to release this version.",
+            },
+        },
+        ["program", "user_said_yes"],
+    ),
+    "task_update": (
+        (
+            "Keep the task card for the user's current request up to date; the user sees it in "
+            "the Mind on the play page. Pass title to start the card for a new request, then "
+            "update each step as it runs and ends; pass outcome to finish the card. Write in "
+            "plain words."
+        ),
+        {
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "Starts a new card: the request in a few plain words.",
+            },
+            "step": {"enum": list(STEPS)},
+            "status": {"enum": list(STEP_STATUS)},
+            "detail": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "What is happening or happened in this step, in plain words.",
+            },
+            "version": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The version the card is about.",
+            },
+            "outcome": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "Finishes the card: what came of the request, in plain words.",
+            },
+        },
+        ["step", "status", "detail"],
     ),
     "fresh_start": (
         (

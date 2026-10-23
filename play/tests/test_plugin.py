@@ -8,14 +8,23 @@ import yaml
 from play import fresh, plugin
 from play.context import Context
 from play.launch import lock_sha
+from play.limits import NAME_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
 
 DISTRIBUTION = Path(__file__).resolve().parents[1]
 PLAY_TOOLS = {
     "starter_fetch": ([], {"player"}),
-    "program_upload": (["path", "name"], {"path", "name"}),
-    "practice_request": (["policy_version"], {"policy_version", "episodes", "seats", "attempt"}),
-    "practice_status": (["request_id"], {"request_id"}),
-    "program_release": (["policy_version"], {"policy_version"}),
+    "program_show": ([], {"program"}),
+    "program_change": (["text", "change"], {"text", "change"}),
+    "program_edit": (["edits", "change"], {"edits", "change"}),
+    "program_versions": ([], {"program"}),
+    "program_upload": ([], {"name"}),
+    "practice_request": ([], {"program", "episodes", "seats", "attempt"}),
+    "practice_status": ([], {"request_id", "wait_seconds"}),
+    "program_release": (["program", "user_said_yes"], {"program", "user_said_yes"}),
+    "task_update": (
+        ["step", "status", "detail"],
+        {"title", "step", "status", "detail", "version", "outcome"},
+    ),
     "fresh_start": (["confirm"], {"confirm"}),
 }
 
@@ -57,13 +66,34 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
         return validator.is_valid(arguments)
 
     assert valid("starter_fetch", {}) and valid("starter_fetch", {"player": "baseline"})
-    assert valid("program_upload", {"path": "program.bas", "name": "my-first"})
-    assert not valid("program_upload", {"path": "program.bas", "name": "My First"})
-    assert valid("practice_request", {"policy_version": "p-ply_1:v3", "seats": [0, 5]})
-    assert not valid("practice_request", {"policy_version": "p-ply_1:v3", "seats": [0, 0]})
-    assert not valid("practice_request", {"policy_version": "p-ply_1"})
-    assert valid("practice_status", {"request_id": "xreq_abc"})
-    assert not valid("program_release", {"policy_version": "p:v1", "league_id": "other"})
+    assert valid("program_upload", {"name": "my-first"}) and valid("program_upload", {})
+    assert not valid("program_upload", {"name": "My First"})
+    # The real limit: the name plus the platform's "-<8 characters>" suffix fits 64.
+    assert valid("program_upload", {"name": "a" * NAME_MAX})
+    assert not valid("program_upload", {"name": "a" * (NAME_MAX + 1)})
+    assert NAME_MAX + 1 + SUFFIX_LENGTH == POLICY_NAME_MAX
+    for named in ("towerless v2", "towerless:v2", "Towerless V2", "towerless"):
+        assert valid("practice_request", {"program": named, "seats": [0, 5]}), named
+        assert valid("program_versions", {"program": named}), named
+    assert not valid("practice_request", {"program": "towerless v2", "seats": [0, 0]})
+    assert valid("program_release", {"program": "towerless v2", "user_said_yes": True})
+    assert not valid("program_release", {"program": "towerless", "user_said_yes": True})
+    assert not valid("program_release", {"program": "towerless v2", "user_said_yes": False})
+    assert not valid(
+        "program_release", {"program": "towerless v2", "user_said_yes": True, "league_id": "x"}
+    )
+    assert valid("practice_status", {"request_id": "xreq_abc", "wait_seconds": 480})
+    assert not valid("practice_status", {"wait_seconds": 481})
+    assert valid("program_change", {"text": "x = 1\n", "change": "set x"})
+    assert not valid("program_change", {"text": "x = 1\n"})
+    assert valid("program_edit", {"edits": [{"find": "a", "replace": ""}], "change": "x"})
+    assert not valid("program_edit", {"edits": [{"find": "", "replace": "b"}], "change": "x"})
+    assert not valid("program_edit", {"edits": [], "change": "x"})
+    assert valid(
+        "task_update",
+        {"title": "Run under towers less", "step": "understand", "status": "done", "detail": "ok"},
+    )
+    assert not valid("task_update", {"step": "deploy", "status": "done", "detail": "ok"})
 
 
 def test_manifest_advertises_registered_tools():
@@ -71,7 +101,8 @@ def test_manifest_advertises_registered_tools():
     assert manifest["provides_tools"] == list(plugin.TOOLS)
     config = yaml.safe_load((DISTRIBUTION / "config.yaml").read_text())
     assert config["plugins"]["enabled"] == ["play"]
-    assert config["platform_toolsets"]["api_server"] == ["play", "kanban", "memory"]
+    # No raw file, terminal or Kanban tools: the lead changes the program through its own tools.
+    assert config["platform_toolsets"]["api_server"] == ["play", "memory"]
     assert config["memory"]["memory_enabled"] is True
     assert config["memory"]["user_profile_enabled"] is True
     builder = yaml.safe_load((DISTRIBUTION / "builder/config.yaml").read_text())
@@ -89,12 +120,10 @@ def test_handler_runs_the_operation_in_the_profile_venv(env, tmp_path):
     (home / "uv.lock").write_text("contract fixture\n")
     (venv / ".lock-sha").write_text(lock_sha(home))
     context = Context(home, {**env, "PYTHONPATH": str(DISTRIBUTION / "src")})
-    outside = tmp_path / "x.bas"
-    outside.write_text("10 END\n")
-    envelope = plugin.call(context, "program_upload", {"path": str(outside), "name": "a"})
+    envelope = plugin.call(context, "program_change", {"text": "WHILE 1\n", "change": "loop"})
     assert envelope["ok"] is False
-    assert envelope["error"]["reason"] == "bad_arguments"
-    assert "outside the program workspace" in envelope["error"]["message"]
+    assert envelope["error"]["reason"] == "program_invalid"
+    assert envelope["error"]["details"]["problems"][0]["line"] == 1
     assert json.loads(json.dumps(envelope)) == envelope
 
 

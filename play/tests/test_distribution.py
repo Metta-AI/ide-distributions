@@ -73,18 +73,30 @@ def test_sync_regenerates_every_copy_identically(tmp_path):
     assert not (tmp_path / "play/SOUL.md").read_text().count("ontology")
 
 
-def test_play_lead_continues_the_loop_after_the_builder_card():
+def test_play_lead_does_the_whole_loop_itself_in_plain_words():
     soul = (PROFILES["play"] / "SOUL.md").read_text()
     for needle in (
-        "$PLAY_WORKSPACE",
-        "word for word",
-        "ready to upload",
-        "subscribed: true",
-        "[kanban] Task",
-        "continue on your own",
-        "practice_status",
-        "program_release",
+        "task_update",
+        "Your mistakes are yours to fix",
+        "Never ask the user to change a setting",
+        "summary.not_measured",
+        "watch_url",
+        '"towerless v2"',
+        "user_said_yes: true",
     ):
         assert needle in soul, needle
-    steps = [soul.index(name) for name in ("kanban_show", "program_upload", "practice_request", "practice_status")]
+    steps = [
+        soul.index(name)
+        for name in (
+            "program_show",
+            "program_change",
+            "program_upload",
+            "practice_request",
+            "practice_status",
+            "program_release",
+        )
+    ]
     assert steps == sorted(steps)
+    # No hand-off to another profile, and no internal words toward the user.
+    for word in ("kanban_create", "builder", "max_runtime_seconds", "idempotency"):
+        assert word not in soul, word
