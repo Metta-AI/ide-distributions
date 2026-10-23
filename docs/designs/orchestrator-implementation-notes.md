@@ -22,6 +22,11 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   `SOUL.md`, not a separate `doctrine/orchestrator.md` (which nothing loaded).
 - `tools/sync_shared.py` also copies `researcher/games/*/GAME.md` into `orchestrator/games/`:
   the shared package reads the league id from the game contract under the distribution root.
+  Games installed at runtime live in the host's `<root>/games/` instead, which both profiles
+  search after their shipped ones.
+- **One host, several games** (beyond the design, which bound a host to one game):
+  `RESEARCH_GAME` is the default game, and each card names its own. See
+  [multi-game-research.md](multi-game-research.md).
 - There is **no CI equality check** on the generated copies (design v4.4 cut it); the script
   is idempotent and the copies carry a `GENERATED.md` marker.
 - The shared package's tests run in `researcher/` against its copy.

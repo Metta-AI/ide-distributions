@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ide_research_core.games.scope import check_game_name, clone_for, locate_game
+
 from .context import Context
 from .research import Research, ResearchError
 
@@ -54,6 +56,31 @@ def subscribe(conn, task_id):
         return False
     add_notify_sub(conn, task_id=task_id, **target)
     return True
+
+
+def prepare_clone(profile, env, game):
+    """Make or refresh the assignee's clone of ``game`` with the assignee's own CLI, so a new
+    canonical repository is seeded with the assignee's doctrine and a changed doctrine reaches
+    the clone (``research workspace bootstrap``, idempotent)."""
+    result = subprocess.run(
+        [str(Path(profile) / "bin" / "research"), "workspace", "bootstrap", "--game", game],
+        env={"PATH": os.environ["PATH"], **env},
+        cwd=profile,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    try:
+        envelope = json.loads(result.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        envelope = {
+            "ok": False,
+            "error": {"reason": "setup", "message": result.stderr.strip()[-500:]},
+        }
+    if not envelope["ok"]:
+        raise ResearchError(envelope)
+    return envelope["data"]
 
 
 class Board:
@@ -109,8 +136,13 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         max_runtime_seconds=7200,
         failure_limit=2,
         session_id=None,
+        game=None,
     ):
-        """Replay an execution command; native Hermes owns task and worktree identity."""
+        """Replay an execution command; native Hermes owns task and worktree identity.
+
+        ``game`` (a shipped or installed game; default: the host's ``RESEARCH_GAME``) selects
+        the assignee's clone of that game, which Hermes makes the card worktree from. It is
+        recorded in the creation command, where every card-scoped effect reads it."""
         from agent.secret_scope import build_profile_secret_scope
         from gateway.session_context import get_session_env
         from hermes_cli import kanban_db as kb
@@ -141,21 +173,32 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         },
                     }
                 )
+        default = self.context.env.get("RESEARCH_GAME")
+        game = game or default
         profile = get_profile_dir(assignee)
-        env = build_profile_secret_scope(profile)
-        clone = Path(env.get("RESEARCH_WORKSPACE") or profile / "workspace")
-        payload = json.dumps(
-            {
-                "assignee": assignee,
-                "title": title,
-                "body": body,
-                "priority": priority,
-                "skills": skills or [],
-                "max_runtime_seconds": max_runtime_seconds,
-                "failure_limit": failure_limit,
-            },
-            sort_keys=True,
-        )
+        env = {**build_profile_secret_scope(profile), "HERMES_HOME": str(profile)}
+        if default is not None:
+            env.setdefault("RESEARCH_GAME", default)  # hosting writes one default everywhere
+        command = {
+            "assignee": assignee,
+            "title": title,
+            "body": body,
+            "priority": priority,
+            "skills": skills or [],
+            "max_runtime_seconds": max_runtime_seconds,
+            "failure_limit": failure_limit,
+        }
+        if game is None:  # a host with no default game: the assignee's own clone
+            clone = Path(env.get("RESEARCH_WORKSPACE") or profile / "workspace")
+        else:
+            # The concrete game is recorded, so a later change of default never moves a card.
+            command["game"] = game
+            clone = clone_for(env, game)
+            if game != env["RESEARCH_GAME"]:
+                locate_game(game, self.context.env)
+                # Outside the board transaction: idempotent, and it refreshes the doctrine.
+                prepare_clone(profile, env, game)
+        payload = json.dumps(command, sort_keys=True)
         with closing(connection()) as conn:
             # Serialize lookup and creation in the native task database. The task
             # and its immutable creation arguments commit together.
@@ -175,7 +218,10 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command'",
                         (task_id,),
                     ).fetchone()
-                    if json.loads(prior["payload"]) != json.loads(payload):
+                    recorded = json.loads(prior["payload"])
+                    if "game" not in recorded and game is not None and game == default:
+                        recorded["game"] = game  # recorded before cards named their game
+                    if recorded != json.loads(payload):
                         raise ValueError("command_id was already used with different arguments")
                 else:
                     git(clone, "fetch", "origin")
@@ -186,7 +232,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                             if project
                             else projects_db.create_project(
                                 projects,
-                                name=assignee,
+                                name=f"{assignee} {game}" if game else assignee,
                                 primary_path=str(clone),
                                 board_slug=BOARD,
                             )
@@ -325,6 +371,21 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             kb._append_event(conn, id, kind, payload, run_id=run_id)
             return task
 
+    def _card_game(self, id):
+        """The game recorded in the card's creation command (None, for a card created before
+        cards named their game: the default game)."""
+        with closing(connection()) as conn:
+            row = conn.execute(
+                "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command' "
+                "ORDER BY id LIMIT 1",
+                (id,),
+            ).fetchone()
+        return json.loads(row["payload"]).get("game") if row else None
+
+    def _research(self, id):
+        """Shared research for the card's game, in this profile's clone of it."""
+        return Research(self.context).in_game(self._card_game(id))
+
     def upload_build(self, id, run_id, build_dir, name, experiment=None):
         """Publish a committed artifact. Retry only with identical arguments; upload owns deduplication."""
         from hermes_cli.kanban_db_workspace import resolve_workspace
@@ -352,9 +413,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             raise ValueError("Stage the entire verified build before upload")
         # Native cleanup may have removed a clean completed checkout. Its task branch
         # restores the committed build; version receipts belong to that same branch.
-        context = Context(
-            self.context.home, {**self.context.env, "HERMES_KANBAN_WORKSPACE": str(worktree)}
-        )
+        scoped = self._research(id).context
+        context = Context(scoped.home, {**scoped.env, "HERMES_KANBAN_WORKSPACE": str(worktree)})
         research = Research(context)
         command = ("upload", experiment) if experiment else ("upload-build",)
         receipt = research.call("softmax", *command, "--build-dir", artifact, "--name", name)
@@ -364,7 +424,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
     def workspace_integrate(self, id, run_id, commit):
         """Integrate a completed run. Retry the identical commit; Git owns deduplication."""
         task = self._admit_effect(id, run_id, "integration_admitted", {"commit": commit})
-        return Research(self.context).call(
+        return self._research(id).call(
             "workspace", "integrate", "--branch", task.branch_name, "--commit", commit
         )
 
@@ -373,7 +433,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         self._admit_effect(
             id, run_id, "submission_admitted", {"version": version, "request": request}
         )
-        return Research(self.context).call(
+        return self._research(id).call(
             "promotion",
             "submit-requested",
             "--version",
@@ -386,8 +446,35 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
 
     def promotion_submit(self, id, run_id, experiment):
         self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment})
-        return Research(self.context).call("promotion", "submit", experiment)
+        return self._research(id).call("promotion", "submit", experiment)
 
     def bootstrap_champion(self, id, run_id, version):
         self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version})
-        return Research(self.context).call("promotion", "bootstrap", "--version", version)
+        return self._research(id).call("promotion", "bootstrap", "--version", version)
+
+    def game_install(self, id, run_id, name, replace=False):
+        """Install the game folder a completed card committed at ``games/<name>/`` host-wide.
+        Retry with identical arguments; reinstalling the same commit changes nothing."""
+        from hermes_cli.kanban_db_workspace import resolve_workspace
+
+        check_game_name(name)
+        task = self._admit_effect(
+            id, run_id, "game_install_admitted", {"name": name, "replace": replace}
+        )
+        worktree = resolve_workspace(task, board=BOARD)
+        folder = f"games/{name}"
+        git(worktree, "ls-files", "--error-unmatch", "--", f"{folder}/GAME.md")
+        if git(
+            worktree,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored=matching",
+            "--",
+            folder,
+        ):
+            raise ValueError("Stage the entire game folder before installing it")
+        arguments = ["game", "install", "--name", name, "--worktree", worktree]
+        arguments += ["--commit", git(worktree, "rev-parse", "HEAD"), "--card", id]
+        arguments += ["--run", run_id, *(["--replace"] if replace else [])]
+        return Research(self.context).call(*arguments)

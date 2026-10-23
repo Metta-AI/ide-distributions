@@ -15,10 +15,16 @@ from .storage import open_storage, snapshot
 
 def transitions(state, research, ide):
     pending = []
+    default = research
     for run in state["awaiting"]:
         metadata = json.loads(run["metadata"])
         awaiting = metadata.get("awaiting") or {}
         event = {"table": "task_runs", "id": run["id"], "card": run["task_id"]}
+        research = default
+        if run.get("game"):
+            # A card of another game: its experiments live in that game's workspace.
+            event["game"] = run["game"]
+            research = default.in_game(run["game"])
         if awaiting.get("xp"):
             # xp status takes an experiment ID; handoffs name it separately from request IDs.
             experiment = (metadata.get("experiment") or {}).get("id")
@@ -57,6 +63,19 @@ def transitions(state, research, ide):
     return pending
 
 
+def other_research_games(env):
+    """Games other than the default that have a canonical repository on this host."""
+    if "RESEARCH_CANONICAL" not in env:
+        return []
+    canonical = Path(env["RESEARCH_CANONICAL"])
+    games = sorted(
+        path.name.removeprefix("canonical-").removesuffix(".git")
+        for path in canonical.parent.glob("canonical-*.git")
+        if path != canonical and (path / "HEAD").exists()
+    )
+    return [game for game in games if game != env.get("RESEARCH_GAME")]
+
+
 def evaluate(context, research=None, ide=None, now=None):
     state = snapshot(context)
     now = now or datetime.now(UTC)
@@ -68,10 +87,13 @@ def evaluate(context, research=None, ide=None, now=None):
             return IDE(context).permit(ask)
 
     pending = transitions(state, research, ide or PermitReader())
-    if now.minute % 10 == 0 and research.call("promotion", "pending") is not None:
-        pending.append(
-            {"kind": "promotion_poll", "tick": now.replace(second=0, microsecond=0).isoformat()}
-        )
+    if now.minute % 10 == 0:
+        tick = now.replace(second=0, microsecond=0).isoformat()
+        if research.call("promotion", "pending") is not None:
+            pending.append({"kind": "promotion_poll", "tick": tick})
+        for game in other_research_games(context.env):
+            if research.in_game(game).call("promotion", "pending") is not None:
+                pending.append({"kind": "promotion_poll", "tick": tick, "game": game})
     # Native notifications alone deliver task events; cron only polls external waits.
     if not pending:
         return {"wakeAgent": False}

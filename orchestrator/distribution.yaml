@@ -21,12 +21,18 @@ env_requires:
     required: true
     description: Credential player for authorized research writes; not the conversation subject.
   - name: RESEARCH_GAME
-    required: false
+    required: true
     default: gota
-    description: Installed automation default; conversation discovery uses explicit league and player IDs.
+    description: >-
+      The host's default game, used by a card or tool that names no game; conversation
+      discovery uses explicit league and player IDs.
   - name: RESEARCH_WORKSPACE
     required: true
-    description: Absolute path to this profile's clone of the canonical repository.
+    description: >-
+      Absolute path to this profile's clone of the default game's canonical repository
+      (other games: $HERMES_HOME/workspace-<game>).
   - name: RESEARCH_CANONICAL
     required: true
-    description: Absolute path to the shared bare canonical repository.
+    description: >-
+      Absolute path to the default game's shared bare canonical repository; other games'
+      repositories sit beside it as canonical-<game>.git.

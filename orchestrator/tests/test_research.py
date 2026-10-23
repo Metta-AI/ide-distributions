@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from orchestrator.plugin import TOOLS
+from orchestrator.plugin import GAME, TOOLS
 from orchestrator.research import Research, ResearchError
 
 
@@ -37,7 +37,7 @@ def test_subprocess_contract_and_refusal(shared_fixture):
     ]
     assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version"]
     assert research.accept_champion()["args"] == ["promotion", "accept"]
-    assert TOOLS["accept_champion"][2:] == ({}, [])
+    assert TOOLS["accept_champion"][2:] == ({"game": GAME}, [])
 
 
 def test_publish_writes_exact_contract_files(shared_fixture):
@@ -92,3 +92,29 @@ def test_control_read_uses_canonical_main(context):
     git("push", str(canonical), "main")
     plan.write_text("Unpublished draft\n")
     assert Research(context).plan_read() == "User constraint: no statistical promotion.\n"
+
+
+def test_another_game_uses_its_own_workspace(shared_fixture):
+    """``game`` points the shared CLI at that game's canonical repository and this profile's
+    clone of it, made on first use; with no canonical repository there is nothing to clone."""
+    host = shared_fixture.home.parent.parent
+    shared_fixture.env.update(
+        RESEARCH_GAME="gota",
+        RESEARCH_CANONICAL=str(host / "canonical-gota.git"),
+    )
+    research = Research(shared_fixture)
+    assert research.in_game(None) is research and research.in_game("gota") is research
+    with pytest.raises(ResearchError) as error:
+        research.records_find("Experiment", game="newgame")
+    assert error.value.envelope["error"]["reason"] == "no_workspace"
+    (host / "canonical-newgame.git").mkdir()
+    (host / "canonical-newgame.git" / "HEAD").write_text("ref: refs/heads/main\n")
+    assert research.records_show("E-1", game="newgame")["args"] == ["records", "show", "E-1"]
+    calls = [
+        json.loads(line) for line in (shared_fixture.home / "calls.jsonl").read_text().splitlines()
+    ]
+    assert calls[-2:] == [["workspace", "bootstrap"], ["records", "show", "E-1"]]
+    scoped = research.in_game("newgame").context
+    assert scoped.env["RESEARCH_GAME"] == "newgame"
+    assert scoped.env["RESEARCH_CANONICAL"] == str(host / "canonical-newgame.git")
+    assert scoped.workspace == shared_fixture.home / "workspace-newgame"

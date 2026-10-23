@@ -25,6 +25,77 @@ def git(path, *args):
     ).stdout.strip()
 
 
+def game_cards(root, home, args):
+    """A card names its game: the assignee's own CLI prepares its clone of that game, the
+    card's worktree comes from that clone, and card effects run in that game's workspace."""
+    seed = root / "seed-newgame"
+    seed.mkdir()
+    git(seed, "init", "-b", "main")
+    git(seed, "config", "user.name", "Lifecycle test")
+    git(seed, "config", "user.email", "test@example.invalid")
+    (seed / "game-checkpoint").write_text("newgame\n")
+    git(seed, "add", ".")
+    git(seed, "commit", "-m", "seed newgame")
+    git(root, "clone", "--bare", str(seed), str(root / "canonical-newgame.git"))
+    (root / "games/newgame").mkdir(parents=True)
+    (root / "games/newgame/GAME.md").write_text("---\nname: newgame\n---\n")  # installed
+    researcher = root / "profiles/researcher-1"
+    shim = researcher / "bin/research"
+    shim.parent.mkdir()
+    shim.write_text(
+        "#!/bin/sh\nset -e\n"
+        '[ "$*" = "workspace bootstrap --game newgame" ]\n'
+        '[ -d "$HERMES_HOME/workspace-newgame" ] || '
+        f'git clone -q "{root / "canonical-newgame.git"}" "$HERMES_HOME/workspace-newgame"\n'
+        'echo \'{"ok": true, "data": {"actions": ["cloned"]}}\'\n'
+    )
+    shim.chmod(0o755)
+    env = {
+        **os.environ,
+        "RESEARCH_GAME": "default-game",
+        "RESEARCH_CANONICAL": str(root / "canonical.git"),
+        "RESEARCH_WORKSPACE": str(home / "workspace"),
+    }
+    board = Board(Context(home, env))
+    game_args = {**args, "command_id": "game:newgame:1", "game": "newgame"}
+    card = board.card_create(**game_args)["card"]
+    clone = researcher / "workspace-newgame"
+    assert git(clone, "rev-parse", card["branch_name"]) == git(seed, "rev-parse", "HEAD")
+    assert board._card_game(card["id"]) == "newgame"
+    assert board.card_create(**game_args)["card"]["id"] == card["id"]
+    with TestCase().assertRaisesRegex(ValueError, "different arguments"):
+        board.card_create(**{**game_args, "game": None})
+    with TestCase().assertRaisesRegex(Exception, "not found"):
+        board.card_create(**{**game_args, "command_id": "game:absent", "game": "absent"})
+    # Every new card records its concrete game; a command recorded before cards named their
+    # game still replays as the default game.
+    default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
+    assert board._card_game(default_card["id"]) == "default-game"
+    legacy = Board(Context(home, dict(os.environ))).card_create(
+        **{**args, "command_id": "game:legacy"}
+    )["card"]
+    assert board._card_game(legacy["id"]) is None
+    assert board.card_create(**{**args, "command_id": "game:legacy"})["card"]["id"] == legacy["id"]
+    with closing(connection()) as conn:
+        task = kb.claim_task(conn, card["id"])
+        worktree = resolve_workspace(task, board="autoresearch")
+        assert worktree.resolve().is_relative_to(clone.resolve())
+        assert kb.complete_task(conn, task.id, summary="done", expected_run_id=task.current_run_id)
+    calls = []
+
+    def record(research, *arguments):
+        calls.append((research.context.env["RESEARCH_GAME"], arguments[:2]))
+        return {"accepted": True}
+
+    with patch("orchestrator.board.Research.call", autospec=True, side_effect=record):
+        board.workspace_integrate(card["id"], task.current_run_id, "c" * 40)
+    # The orchestrator's own clone of the game is made first, then the effect runs there.
+    assert calls == [
+        ("newgame", ("workspace", "bootstrap")),
+        ("newgame", ("workspace", "integrate")),
+    ], calls
+
+
 def main():
     home = Path(os.environ["HERMES_HOME"])
     home.mkdir(parents=True)
@@ -239,6 +310,7 @@ def main():
                 publisher.id, publisher_run, "V-ready", "strategy.md", "Submit"
             )
         remote.assert_not_called()
+    game_cards(root, home, args)
     # Independent assignments coexist, with native ownership of each run.
     for index in range(1, 4):
         card = board.card_create(
