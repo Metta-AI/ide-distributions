@@ -12,7 +12,7 @@ from play.program import PlayError
 
 CHOSEN = "league_00000000-0000-0000-0000-000000000001"
 SHORT = PLAYER.removeprefix("ply_")[:SUFFIX_LENGTH]
-CHANGED = STARTER.decode().replace("myHp() < 100", "myHp() < 200")
+CHANGED = STARTER.decode().replace("self.abilityPoints = 0 then", "self.abilityPoints = 1 then")
 
 
 def workspace(env) -> Path:
@@ -59,24 +59,24 @@ def test_the_cogent_changes_the_program_itself_through_the_check(program, env):
     assert shown["source"] == "starter" and shown["text"] == STARTER.decode()
     assert program.program_show("starter")["text"] == STARTER.decode()
 
-    broken = "IF myHp() < 200 THEN walkTo(1, 1)\nFOR i = 1 TO 3\nWHILE 1\nname$ = 2\n"
+    broken = "IF myHp() < 200 THEN\nNEXT i\nWHILE 1\ny = 2 @ 3\n"
     with pytest.raises(PlayError) as error:
         program.program_change(broken, "retreat earlier")
     assert error.value.reason == "program_invalid"
     problems = error.value.details["problems"]
     assert [p["line"] for p in problems] == [1, 2, 3, 4]
-    assert "END IF" in problems[0]["problem"] and "FOR/NEXT" in problems[1]["problem"]
-    assert "never closed with WEND" in problems[2]["problem"] and "'$'" in problems[3]["problem"]
+    assert "END IF" in problems[0]["problem"] and "NEXT" in problems[1]["problem"]
+    assert "never closed with WEND" in problems[2]["problem"] and "'@'" in problems[3]["problem"]
     assert not (workspace(env) / "program.bas").exists()  # nothing was written
 
     data = program.program_change(CHANGED, "retreat earlier when hurt")
     assert (workspace(env) / "program.bas").read_text() == CHANGED
     assert data["lines_added"] == data["lines_removed"] == 1
-    assert "+IF myHp() < 200 THEN" in data["diff"] and data["warnings"] == []
+    assert "+    if self.abilityPoints = 1 then" in data["diff"] and data["warnings"] == []
 
-    typo = CHANGED.replace("attackNearest()", "atackNearest()")
+    typo = CHANGED.replace("attackTarget(bestId)", "atackTarget(bestId)")
     warned = program.program_change(typo, "typo")
-    assert [w["line"] for w in warned["warnings"]] == [9]
+    assert [w["line"] for w in warned["warnings"]] == [801]
     with pytest.raises(PlayError) as error:
         program.program_change(typo, "again")
     assert error.value.reason == "no_change"
@@ -176,7 +176,7 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
     }
     assert program.practice_status()["summary"]["program"] == "tower-retreat v1"
     # The platform's lookup is this player's own versions, by exact name and version.
-    assert "mine=true&limit=200&name_exact=towerless&version=1" in cli.api_reads
+    assert f"mine=true&limit=200&player_id={PLAYER}&name_exact=towerless&version=1" in cli.api_reads
     data = program.program_release("towerless v1", True)
     assert data == {"program": "towerless v1", "outcome": "released", "already": False}
     assert ["coworld", "submit", f"{legacy}:v1", "--league", GOTA.league_id, "--player", PLAYER,
@@ -406,3 +406,49 @@ def test_bad_arguments_never_reach_the_platform(program, cli):
         envelope = run(operation, arguments, program)
         assert envelope["ok"] is False and envelope["error"]["reason"] == "bad_arguments", operation
     assert cli.calls == []
+
+
+def test_a_name_another_player_of_the_user_owns_counts_as_taken(program, cli):
+    cli.siblings.append({"name": "towerless", "version": 1})
+    cli.policies.append({"name": "towerless-other", "version": 1})
+    data = first_version(program)
+    assert data["platform_name"] == f"towerless-{SHORT}"
+    assert data["version"] == 1  # a new policy of this player, not v2 of the sibling's
+    assert any("player_id=" + PLAYER in q for q in cli.api_reads)
+
+
+def test_small_edits_apply_once_and_go_through_the_same_check(program, env):
+    program.starter_fetch()
+    data = program.program_edit(
+        [{"find": "self.abilityPoints = 0 then", "replace": "self.abilityPoints = 1 then"}], "spend points sooner"
+    )
+    assert (workspace(env) / "program.bas").read_text() == CHANGED
+    assert data["lines_added"] == data["lines_removed"] == 1
+    again = program.program_edit([{"find": "= 1 then\n      exit sub", "replace": "= 2 then\n      exit sub"}], "again")
+    assert "= 2 then" in (workspace(env) / "program.bas").read_text() and again["warnings"] == []
+
+
+@pytest.mark.parametrize(
+    ("edits", "reason"),
+    [
+        ([{"find": "no such text anywhere", "replace": "x"}], "edit_not_found"),
+        ([{"find": "then", "replace": "THEN"}], "edit_ambiguous"),
+        ([{"find": "end if", "replace": ""}, {"find": "wend", "replace": ""}], None),
+        ([{"find": "", "replace": "x"}], "bad_arguments"),
+    ],
+)
+def test_a_bad_edit_writes_nothing(program, env, edits, reason):
+    program.starter_fetch()
+    with pytest.raises(PlayError) as error:
+        program.program_edit(edits, "bad")
+    if reason is not None:
+        assert error.value.reason == reason
+    assert not (workspace(env) / "program.bas").exists()
+
+
+def test_an_edit_that_breaks_the_program_is_refused_by_the_check(program, env):
+    program.starter_fetch()
+    with pytest.raises(PlayError) as error:
+        program.program_edit([{"find": "if bestClass >= 0 then", "replace": "if bestClass >= 0"}], "drop an end if")
+    assert error.value.reason == "program_invalid"
+    assert not (workspace(env) / "program.bas").exists()

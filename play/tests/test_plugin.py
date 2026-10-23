@@ -15,6 +15,7 @@ PLAY_TOOLS = {
     "starter_fetch": ([], {"player"}),
     "program_show": ([], {"program"}),
     "program_change": (["text", "change"], {"text", "change"}),
+    "program_edit": (["edits", "change"], {"edits", "change"}),
     "program_versions": ([], {"program"}),
     "program_upload": ([], {"name"}),
     "practice_request": ([], {"program", "episodes", "seats", "attempt"}),
@@ -80,6 +81,9 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
     assert not valid("practice_status", {"wait_seconds": 481})
     assert valid("program_change", {"text": "x = 1\n", "change": "set x"})
     assert not valid("program_change", {"text": "x = 1\n"})
+    assert valid("program_edit", {"edits": [{"find": "a", "replace": ""}], "change": "x"})
+    assert not valid("program_edit", {"edits": [{"find": "", "replace": "b"}], "change": "x"})
+    assert not valid("program_edit", {"edits": [], "change": "x"})
     assert valid("task_update", {"title": "Run under towers less", "step": "understand", "status": "done", "detail": "ok"})
     assert not valid("task_update", {"step": "deploy", "status": "done", "detail": "ok"})
 
@@ -108,7 +112,7 @@ def test_handler_runs_the_operation_in_the_profile_venv(env, tmp_path):
     (home / "uv.lock").write_text("contract fixture\n")
     (venv / ".lock-sha").write_text(lock_sha(home))
     context = Context(home, {**env, "PYTHONPATH": str(DISTRIBUTION / "src")})
-    envelope = plugin.call(context, "program_change", {"text": "FOR i = 1 TO 3\n", "change": "loop"})
+    envelope = plugin.call(context, "program_change", {"text": "WHILE 1\n", "change": "loop"})
     assert envelope["ok"] is False
     assert envelope["error"]["reason"] == "program_invalid"
     assert envelope["error"]["details"]["problems"][0]["line"] == 1

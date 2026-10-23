@@ -65,10 +65,10 @@ TOOLS = {
     ),
     "program_change": (
         (
-            "Replace the program with a full new text. The text is checked first (size, closed "
-            "IF/WHILE/SUB blocks, only GotA BASIC statements); on a problem nothing is written "
-            "and the error lists each problem by line. Returns the diff and warnings about "
-            "names the starter never uses."
+            "Replace the program with a full new text (use program_edit for a small change). The "
+            "text is checked first (size, closed blocks, only GotA BASIC statements, the compile "
+            "limits it can count); on a problem nothing is written and the error lists each "
+            "problem by line. Returns the diff and warnings about names the starter never uses."
         ),
         {
             "text": {
@@ -85,6 +85,41 @@ TOOLS = {
             },
         },
         ["text", "change"],
+    ),
+    "program_edit": (
+        (
+            "Change the program with small find-and-replace edits instead of rewriting it. Each "
+            "find must match exactly once (edit_not_found / edit_ambiguous otherwise, with "
+            "nothing written); edits apply in order to the program now, or the starter. The "
+            "result gets the same check as program_change. Returns the diff and warnings."
+        ),
+        {
+            "edits": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "find": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Exact text to replace; it must occur once. Include a neighbouring line if needed.",
+                        },
+                        "replace": {"type": "string", "description": "The new text; empty deletes the find text."},
+                    },
+                    "required": ["find", "replace"],
+                    "additionalProperties": False,
+                },
+            },
+            "change": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "What this change does, in the user's words.",
+            },
+        },
+        ["edits", "change"],
     ),
     "program_versions": (
         (

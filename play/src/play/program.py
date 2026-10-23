@@ -299,9 +299,52 @@ class Program:
     def program_change(self, text: str, change: str) -> dict:
         """Check the full new text and write it as ``program.bas``; nothing is written if the check
         finds a problem."""
+        change = self._described(change)
+        return self._write_checked(text, change)
+
+    def program_edit(self, edits: list, change: str) -> dict:
+        """Apply small ``{find, replace}`` edits, in order, to the program now (or the starter), then
+        check and write the result exactly as ``program_change`` does. Each ``find`` must occur
+        exactly once in the text as the earlier edits left it; nothing is written otherwise."""
+        change = self._described(change)
+        if not isinstance(edits, list) or not edits:
+            raise PlayError("bad_arguments", "edits must be a list of {find, replace}")
+        if self.program_file.is_file():
+            text = self.program_file.read_text()
+        elif (starter := self._starter_text()) is not None:
+            text = starter
+        else:
+            raise PlayError("no_program", "there is no program yet; fetch the starter first")
+        for number, edit in enumerate(edits, start=1):
+            find = edit.get("find") if isinstance(edit, dict) else None
+            replace = edit.get("replace") if isinstance(edit, dict) else None
+            if not isinstance(find, str) or not find or not isinstance(replace, str):
+                raise PlayError("bad_arguments", f"edit {number} needs a non-empty find and a replace string")
+            found = text.count(find)
+            if found == 0:
+                raise PlayError(
+                    "edit_not_found",
+                    f"edit {number}: the find text is not in the program; nothing was written",
+                    {"edit": number, "find": find[:200]},
+                )
+            if found > 1:
+                raise PlayError(
+                    "edit_ambiguous",
+                    f"edit {number}: the find text occurs {found} times; include more of the "
+                    "surrounding lines so it occurs once. Nothing was written",
+                    {"edit": number, "find": find[:200], "occurrences": found},
+                )
+            text = text.replace(find, replace)
+        return self._write_checked(text, change)
+
+    @staticmethod
+    def _described(change: str) -> str:
         change = change.strip()
         if not change:
             raise PlayError("bad_arguments", "say in a few words what this change does")
+        return change
+
+    def _write_checked(self, text: str, change: str) -> dict:
         starter = self._starter_text()
         problems, warnings = basic.check(text, starter)
         if problems:
@@ -411,7 +454,7 @@ class Program:
             return {"program": latest.display, "version": latest.number, "change": latest.change, "already": True}
         change = journal.change or "no description"
         platform = journal.platform_name if name == journal.name and journal.platform_name else name
-        label = self._upload(platform, change)
+        label = None if self._sibling_owns(platform) else self._upload(platform, change)
         if label is None:  # the name is someone else's: the platform's own suffix rule
             platform = f"{name}-{self.player.removeprefix('ply_')[:SUFFIX_LENGTH]}"
             label = self._upload(platform, change)
@@ -441,6 +484,11 @@ class Program:
             "already": False,
             "platform_name": platform,
         }
+
+    def _sibling_owns(self, platform: str) -> bool:
+        """True when another player of this user already owns the policy name: uploading to it would
+        add this program as a version of that player's policy, so the name counts as taken."""
+        return bool(self._mine(platform, any_player=True)) and not self._mine(platform)
 
     def _upload(self, platform: str, change: str) -> str | None:
         """The new ``<name>:v<N>`` label, or None when the name belongs to someone else."""
@@ -474,11 +522,15 @@ class Program:
         number = match["number"]
         return self.display_name(match["name"]), int(number) if number else None
 
-    def _mine(self, platform_name: str | None = None, version: int | None = None) -> list[dict]:
-        """This player's policy versions on the platform (``GET /stats/policy-versions?mine=true``,
-        the lookup the coworld CLI makes to release ``<name>:v<N>``): rows with ``name`` and
-        ``version``."""
+    def _mine(
+        self, platform_name: str | None = None, version: int | None = None, *, any_player: bool = False
+    ) -> list[dict]:
+        """This player's policy versions on the platform (``GET /stats/policy-versions`` with
+        ``player_id``): rows with ``name`` and ``version``. ``mine=true`` alone means every player of
+        this user, so it is narrowed to this player unless ``any_player`` asks for the whole user."""
         query = {"mine": "true", "limit": "200"}
+        if not any_player:
+            query["player_id"] = self.player
         if platform_name is not None:
             query["name_exact"] = platform_name
         if version is not None:

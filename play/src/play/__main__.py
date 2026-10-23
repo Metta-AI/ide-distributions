@@ -15,6 +15,7 @@ OPERATIONS = (
     "starter_fetch",
     "program_show",
     "program_change",
+    "program_edit",
     "program_versions",
     "program_upload",
     "practice_request",

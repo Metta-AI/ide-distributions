@@ -14,17 +14,9 @@ from play.records import CogentRecords
 
 PLAYER = "ply_281ba4ec-d1a2-4e37-a609-a391d30421d2"  # a real player id's shape: ply_<uuid>
 SERVER = "https://example.invalid/api"
-STARTER = b"""' starter
-DIM seen(9)
-SUB stepAside(dx)
-  walkTo(myX() + dx, myY())
-END SUB
-IF myHp() < 100 THEN
-  CALL stepAside(1)
-ELSE
-  attackNearest()
-END IF
-"""
+# The real GotA starter: Metta-AI/polyworld coworld/gota/players/base.bas (origin/main, sha256
+# 6b226d1d36475c7b5de8de602e6447bc0c175178830ed6a458c0997b9da8a1d8), as shipped.
+STARTER = (Path(__file__).parent / "support" / "gota_base.bas").read_bytes()
 STARTER_SHA = hashlib.sha256(STARTER).hexdigest()
 PERMIT_STDERR = (
     "Error: Access denied (403) for /v2/experience-requests. "
@@ -76,6 +68,7 @@ class FakeCli:
         ]
         self.taken: set[str] = set()  # policy names other users own
         self.policies: list[dict] = []  # this player's policy versions: {"name", "version"}
+        self.siblings: list[dict] = []  # versions of the same user's other players
         self.roster: list[dict] = []
         self.api_reads: list[str] = []
         self.requests = 0
@@ -107,7 +100,7 @@ class FakeCli:
                 if name in self.taken:
                     message = f"Policy name '{name}' is already taken by user 'u_x'. Please choose a different name."
                     return done(returncode=1, stderr=f"Error: Request failed (409): {message}\n")
-                number = 1 + sum(p["name"] == name for p in self.policies)
+                number = 1 + sum(p["name"] == name for p in self.policies + self.siblings)
                 self.policies.append({"name": name, "version": number})
                 return done(f"Policy name: {name}\nUploading...\nUpload complete: {name}:v{number}\n")
             case ["coworld", "xp-request", "create", "-", "--json"]:
@@ -180,9 +173,11 @@ class FakeCli:
         query = dict(urllib.parse.parse_qsl(parsed.query))
         assert query["mine"] == "true"
         self.api_reads.append(parsed.query)
+        assert query.get("player_id", PLAYER) == PLAYER  # only this player's own player_id is asked for
+        owned = self.policies if "player_id" in query else self.policies + self.siblings
         rows = [
             p
-            for p in self.policies
+            for p in owned
             if p["name"] == query.get("name_exact", p["name"])
             and str(p["version"]) == query.get("version", str(p["version"]))
         ]

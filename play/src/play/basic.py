@@ -1,10 +1,13 @@
 """A cheap static check of a GotA BASIC program, before it is written or uploaded.
 
-It follows the compiler's lexer and statement grammar (polyworld ``src/polyworld/basic.nim``
-``lex`` and ``parseStatement``, as the policy surface in researcher/games/gota/docs describes):
-case-insensitive words, ``'`` and ``REM`` comments, ``:`` as a line break, multiline ``IF … THEN`` / ``ELSE`` / ``END IF``,
-``WHILE`` / ``WEND``, top-level ``SUB`` / ``END SUB`` and top-level ``DIM`` arrays with literal
-bounds. It checks the limits the builder's GotA reference states: 64 KiB of source, 32 arrays and
+It follows the lexer and statement grammar of the compiler GotA runs (treeform/bassy
+``src/bassy.nim``: ``lex``, ``parseStatement`` and the ``parse*`` procs it calls; polyworld
+requires it): case-insensitive words, ``'`` and ``REM`` comments, ``:`` as a line break, ``_`` line
+continuation, labels and ``GOTO`` / ``GOSUB`` / ``ON``, single-line and block ``IF`` with ``ELSEIF``
+and ``ELSE``, ``WHILE`` / ``WEND``, ``FOR`` / ``TO`` / ``STEP`` / ``NEXT``, ``DO`` / ``LOOP``,
+``SELECT CASE``, ``EXIT SUB`` / ``FOR`` / ``DO``, top-level ``SUB`` / ``END SUB`` and top-level ``DIM``
+arrays with literal bounds. It also counts what it can cheaply: the 64 routines and the 256 globals
+(only variables assigned to, so a floor, never an overcount). It checks the limits the builder's GotA reference states: 64 KiB of source, 32 arrays and
 4,096 array elements in total. A program that opts into GotA's structures (a ``' @gota-structures``
 comment; researcher/games/gota/gates/limits.py) gets the host's storage, so only its size and
 blocks are checked. ``TYPE`` blocks and ``.`` member access are accepted in both modes.
@@ -22,27 +25,26 @@ MAX_STRUCTURED_SOURCE_BYTES = 65535
 STRUCTURES = "@gota-structures"
 MAX_ARRAYS = 32
 MAX_ARRAY_CELLS = 4096
-TOKEN = re.compile(r'\s*(?:(?P<word>[A-Za-z_]\w*)|(?P<int>\d+)|(?P<string>"(?:[^"]|"")*")|(?P<op><=|>=|<>|[()+\-*/\\^.=<>,;]))')
+MAX_ROUTINES = 64  # including the top-level routine
+MAX_GLOBALS = 256
+MAX_PARAMETERS = 16
+TOKEN = re.compile(r'\s*(?:(?P<word>[A-Za-z_]\w*\$?)|(?P<int>\d+)|(?P<string>"(?:[^"]|"")*")|(?P<op><=|>=|<>|[()+\-*/\\^.=<>,;]))')
 # Statement words the compiler starts a statement with; the rest are assignments or calls.
-STATEMENTS = {"dim", "if", "else", "end", "while", "wend", "sub", "exit", "return", "print", "stop", "call", "let"}
-OPERATORS = {"and", "or", "xor", "not", "mod", "true", "false", "then"}
-RESERVED = {"goto", "gosub"}  # reserved words with no statement: never valid
-# Words that cannot start a statement unless they are a variable or a SUB call (``next = 1``).
+STATEMENTS = {
+    "dim", "if", "elseif", "else", "end", "while", "wend", "sub", "exit", "return", "print", "stop",
+    "call", "let", "for", "next", "do", "loop", "select", "case", "goto", "gosub", "on", "data", "type",
+}
+# Words that cannot start a statement.
+OPERATORS = {"and", "or", "xor", "not", "mod", "true", "false", "then", "to", "step", "until", "is", "eqv", "imp", "as"}
+# Words that cannot start a statement unless they are a variable or a SUB call (``input = 1``).
 NOT_GOTA = {
-    "for": "GotA BASIC has no FOR/NEXT; use a counter with WHILE … WEND",
-    "next": "GotA BASIC has no FOR/NEXT; use a counter with WHILE … WEND",
-    "goto": "GotA BASIC has no GOTO; use IF blocks, WHILE loops and SUBs",
-    "gosub": "GotA BASIC has no GOSUB; declare a SUB and CALL it",
     "function": "GotA BASIC has no functions that return a value; use a SUB that sets a global",
-    "elseif": "GotA BASIC has no ELSEIF; nest another IF block inside ELSE",
-    "do": "GotA BASIC has no DO/LOOP; use WHILE … WEND",
-    "loop": "GotA BASIC has no DO/LOOP; use WHILE … WEND",
-    "select": "GotA BASIC has no SELECT CASE; use IF blocks",
-    "case": "GotA BASIC has no SELECT CASE; use IF blocks",
     "const": "GotA BASIC has no CONST; assign a global once",
     "input": "GotA BASIC has no INPUT or file access",
     "open": "GotA BASIC has no file access",
 }
+CLOSERS = {"if": "END IF", "while": "WEND", "sub": "END SUB", "type": "END TYPE", "for": "NEXT",
+           "do": "LOOP", "select": "END SELECT"}
 
 
 @dataclass(frozen=True)
@@ -53,22 +55,26 @@ class Problem:
 
 @dataclass
 class _Block:
-    kind: str  # "if", "while", "sub" or "type"
+    kind: str  # "if", "while", "sub", "type", "for", "do" or "select"
     line: int
     has_else: bool = False
+    counter: str | None = None
 
 
 def _statements(text: str):
-    """(line number, tokens) of each statement; a bad character is a token ``("bad", char)``."""
+    """(line number, tokens, colon) of each statement; ``colon`` is true when ``:`` ended it. A bad
+    character is a token ``("bad", char)``. A trailing ``_`` joins the next line."""
+    carry: list[tuple[str, str]] = []
     for number, raw in enumerate(text.splitlines(), start=1):
-        tokens: list[tuple[str, str]] = []
+        tokens: list[tuple[str, str]] = carry
+        carry = []
         rest = raw
         while rest.strip():
             stripped = rest.lstrip()
             if stripped.startswith("'"):
                 break
             if stripped.startswith(":"):
-                yield number, tokens
+                yield number, tokens, True
                 tokens, rest = [], stripped[1:]
                 continue
             match = TOKEN.match(rest)
@@ -85,7 +91,12 @@ def _statements(text: str):
                     tokens.append((kind, value))
                     break
             tokens.append((kind, value))
-        yield number, tokens
+        if tokens and tokens[-1] == ("word", "_"):
+            carry = tokens[:-1]
+            continue
+        yield number, tokens, False
+    if carry:
+        yield number, carry, False
 
 
 def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Problem]]:
@@ -101,27 +112,47 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
     arrays: dict[str, int] = {}
     defined: set[str] = set()
     called: dict[str, int] = {}
-    for line, tokens in _statements(text):
+    assigned: set[str] = set()
+    params: set[str] = set()
+    inline_line = 0  # the last line that held a single-line IF, where ELSE may follow mid-line
+    for line, tokens, colon in _statements(text):
+        if tokens and tokens[0][0] == "int":  # a line number is a label
+            tokens = tokens[1:]
         if not tokens:
             continue
         bad = next((value for kind, value in tokens if kind == "bad"), None)
-        reserved = next((value for kind, value in tokens if kind == "word" and value in RESERVED), None)
         first, second = tokens[0][1], tokens[1] if len(tokens) > 1 else None
         if bad is not None:
-            problems.append(Problem(line, f"'{bad}' is not allowed outside a PRINT string; "
-                                          "GotA BASIC has no string variables and no such symbol"))
-        elif reserved is not None:
-            problems.append(Problem(line, NOT_GOTA[reserved]))
+            problems.append(Problem(line, f"'{bad}' is not a character GotA BASIC understands "
+                                          "(or a string is missing its closing quote)"))
+        elif len(tokens) == 1 and tokens[0][0] == "word" and colon and first not in STATEMENTS | OPERATORS:
+            continue  # ``name:`` is a label
         elif first in NOT_GOTA and second not in (("op", "="), ("op", "(")):
             problems.append(Problem(line, NOT_GOTA[first]))
         else:
             for position, (kind, value) in enumerate(tokens[:-1]):
                 if kind == "word" and tokens[position + 1] == ("op", "("):
                     called.setdefault(value, line)
-            problems += _statement(line, tokens, blocks, arrays, defined)
+            if first == "if" and "then" in [v for _, v in tokens] and _body(tokens)[-1][1] != "then":
+                inline_line = line
+            problems += _statement(line, tokens, blocks, arrays, defined, inline_line == line)
+            if first == "sub":
+                params = {v for k, v in tokens[2:] if k == "word"}
+                if len(params) > MAX_PARAMETERS:
+                    problems.append(Problem(line, f"{len(params)} parameters; the limit is {MAX_PARAMETERS}"))
+            elif first == "end" and second == ("word", "sub"):
+                params = set()
+            target = _assigned(tokens)
+            if target is not None and target not in params:
+                assigned.add(target)
     for block in reversed(blocks):
-        closer = {"if": "END IF", "while": "WEND", "sub": "END SUB", "type": "END TYPE"}[block.kind]
-        problems.append(Problem(block.line, f"this {block.kind.upper()} is never closed with {closer}"))
+        problems.append(Problem(block.line, f"this {block.kind.upper()} is never closed with {CLOSERS[block.kind]}"))
+    if len(defined) + 1 > MAX_ROUTINES:
+        problems.append(Problem(0, f"{len(defined)} SUBs; the limit is {MAX_ROUTINES - 1} "
+                                   "(the top level counts as a routine)"))
+    scalars = len(assigned - set(arrays) - defined)
+    if scalars > MAX_GLOBALS:
+        problems.append(Problem(0, f"at least {scalars} global variables are assigned; the limit is {MAX_GLOBALS}"))
     if not structured and len(arrays) > MAX_ARRAYS:
         problems.append(Problem(0, f"{len(arrays)} arrays; the limit is {MAX_ARRAYS}"))
     cells = sum(arrays.values())
@@ -129,7 +160,7 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
         problems.append(Problem(0, f"the arrays hold {cells} elements; the limit is {MAX_ARRAY_CELLS}"))
     warnings = []
     if starter is not None:
-        known = {value for _, tokens in _statements(starter) for kind, value in tokens if kind == "word"}
+        known = {value for _, tokens, _ in _statements(starter) for kind, value in tokens if kind == "word"}
         known |= defined | set(arrays) | OPERATORS
         warnings = [
             Problem(line, f"{name} is not a name the starter uses or this program defines; "
@@ -140,19 +171,43 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
     return sorted(problems, key=lambda p: p.line), warnings
 
 
-def _statement(line, tokens, blocks, arrays, defined) -> list[Problem]:
+def _body(tokens):
+    """The tokens without a trailing ``REM`` comment."""
+    return tokens[:-1] if tokens and tokens[-1] == ("word", "rem") else tokens
+
+
+def _assigned(tokens) -> str | None:
+    """The scalar a statement assigns, if it is ``name = …``, ``LET name = …`` or ``FOR name = …``."""
+    words = tokens[1:] if tokens[0] == ("word", "let") else tokens
+    if tokens[0] == ("word", "for"):
+        words = tokens[1:]
+    if len(words) > 1 and words[0][0] == "word" and words[1] == ("op", "="):
+        name = words[0][1]
+        if tokens[0][1] in STATEMENTS - {"let", "for"} or name in OPERATORS or name.endswith("$"):
+            return None
+        return name
+    return None
+
+
+def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
     kind, first = tokens[0]
+    tokens = _body(tokens)
     words = [value if k == "word" else None for k, value in tokens]
     if kind != "word":
-        if kind == "int":
-            return [Problem(line, "GotA BASIC has no line numbers; start the line with a statement")]
         return [Problem(line, f"a statement cannot start with {first}")]
     if first == "if":
+        if "then" not in words:
+            return [Problem(line, "IF needs THEN")]
+        if words[-1] == "then":
+            blocks.append(_Block("if", line))
+    elif first == "elseif":
+        if not blocks or blocks[-1].kind != "if" or blocks[-1].has_else:
+            return [Problem(line, "this ELSEIF has no open IF block")]
         if words[-1] != "then":
-            return [Problem(line, "IF must end its line with THEN; put the statement on the next "
-                                  "line and close the block with END IF")]
-        blocks.append(_Block("if", line))
+            return [Problem(line, "ELSEIF must end its line with THEN")]
     elif first == "else":
+        if inline and not blocks:
+            return []
         if len(tokens) != 1:
             return [Problem(line, "ELSE must stand on its own line; nest another IF inside it")]
         if not blocks or blocks[-1].kind != "if" or blocks[-1].has_else:
@@ -162,8 +217,27 @@ def _statement(line, tokens, blocks, arrays, defined) -> list[Problem]:
         blocks.append(_Block("while", line))
     elif first == "wend":
         return _close(line, "while", "WEND", blocks)
+    elif first == "for":
+        blocks.append(_Block("for", line, counter=words[1] if len(words) > 1 else None))
+        if "to" not in words:
+            return [Problem(line, "FOR needs TO, like FOR i = 0 TO 9")]
+    elif first == "next":
+        names = [w for w in words[1:] if w]
+        problems = _close(line, "for", "NEXT", blocks, names)
+        return problems
+    elif first == "do":
+        blocks.append(_Block("do", line))
+    elif first == "loop":
+        return _close(line, "do", "LOOP", blocks)
+    elif first == "select":
+        if words[1:2] != ["case"]:
+            return [Problem(line, "SELECT must be followed by CASE")]
+        blocks.append(_Block("select", line))
+    elif first == "case":
+        if not any(block.kind == "select" for block in blocks):
+            return [Problem(line, "CASE can only be used inside SELECT CASE")]
     elif first == "end" and len(words) > 1:
-        if words[1] not in ("if", "sub", "type"):
+        if words[1] not in ("if", "sub", "type", "select"):
             return [Problem(line, f"END {tokens[1][1].upper()} closes nothing GotA BASIC has")]
         return _close(line, words[1], f"END {words[1].upper()}", blocks)
     elif first == "type" and len(tokens) == 2 and words[1] is not None:
@@ -175,20 +249,21 @@ def _statement(line, tokens, blocks, arrays, defined) -> list[Problem]:
             return [Problem(line, "SUB needs a name")]
         defined.add(words[1])
         blocks.append(_Block("sub", line))
-    elif first in ("exit", "return"):
-        if not any(block.kind == "sub" for block in blocks):
-            return [Problem(line, f"{first.upper()} can only be used inside a SUB")]
-        if first == "exit" and words[1:2] != ["sub"]:
-            return [Problem(line, "the only EXIT is EXIT SUB")]
+    elif first == "exit":
+        what = words[1] if len(words) > 1 else None
+        if what not in ("sub", "for", "do"):
+            return [Problem(line, "EXIT must be EXIT SUB, EXIT FOR or EXIT DO (there is no EXIT WHILE)")]
+        if not any(block.kind == what for block in blocks):
+            return [Problem(line, f"EXIT {what.upper()} has no enclosing {what.upper()}")]
     elif first == "dim":
         if blocks:
             return [Problem(line, "DIM arrays are declared at the top level, not inside a block")]
-        found = re.findall(r"(\w+) \( (\d+) \)", " ".join(value for _, value in tokens[1:]))
+        found = re.findall(r"([\w$]+) \( (\d+) \)", " ".join(value for _, value in tokens[1:]))
         if not found and "as" not in words:
             return [Problem(line, "DIM needs a name and a whole-number bound, like DIM seen(9)")]
         for name, bound in found:
             arrays[name] = int(bound) + 1
-    elif first in STATEMENTS or first == "rem":
+    elif first in STATEMENTS:
         pass
     elif first in OPERATORS:
         return [Problem(line, f"a statement cannot start with {first.upper()}")]
@@ -197,14 +272,16 @@ def _statement(line, tokens, blocks, arrays, defined) -> list[Problem]:
     return []
 
 
-def _close(line, kind, word, blocks) -> list[Problem]:
+def _close(line, kind, word, blocks, counters=()) -> list[Problem]:
     if not blocks or blocks[-1].kind != kind:
         if not blocks:
             return [Problem(line, f"this {word} has nothing to close")]
         open_block = blocks[-1]
         return [Problem(line, f"this {word} comes before the {open_block.kind.upper()} on line "
                               f"{open_block.line} is closed")]
-    blocks.pop()
+    counter = blocks.pop().counter
+    if len(counters) == 1 and counter and counters[0] != counter:
+        return [Problem(line, f"NEXT {counters[0]} does not match FOR {counter}")]
     return []
 
 
