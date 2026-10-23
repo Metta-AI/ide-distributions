@@ -67,10 +67,9 @@ def game_cards(root, home, args):
         board.card_create(**{**game_args, "game": None})
     with TestCase().assertRaisesRegex(Exception, "not found"):
         board.card_create(**{**game_args, "command_id": "game:absent", "game": "absent"})
-    # Every new card records its concrete game; a command recorded before cards named their
-    # game still replays as the default game.
+    # An omitted game stays neutral, even when a caller still carries an old profile default.
     default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
-    assert board._card_game(default_card["id"]) == "default-game"
+    assert board._card_game(default_card["id"]) is None
     legacy = Board(Context(home, dict(os.environ))).card_create(
         **{**args, "command_id": "game:legacy"}
     )["card"]
