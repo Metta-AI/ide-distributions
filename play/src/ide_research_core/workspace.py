@@ -24,7 +24,7 @@ import shutil
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import frontmatter
 
@@ -40,6 +40,7 @@ from ide_research_core.records.registry import (
     parse_record_path,
 )
 from ide_research_core.records.store import Change, RecordStore
+from ide_research_core.source_io import write_file
 
 WORKSPACE_ENV = "RESEARCH_WORKSPACE"
 CANONICAL_ENV = "RESEARCH_CANONICAL"
@@ -57,7 +58,9 @@ PROTECTED_PREFIXES = ("strategy/STRATEGY.md", "control/", "promotions/")
 # Integrate writes these after the merge, so a card that edits them would only conflict.
 GENERATED_PREFIXES = ("kb/index.md", "kb/_generated/")
 
-DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # games/ and doctrine/ live here
+DISTRIBUTION_ROOT = (
+    Path(__file__).resolve().parents[2]
+)  # games/ and doctrine/ live here
 DOCTRINE_FILES = ("research-agent.md", "communication.md")
 VERSION_HEADER = re.compile(r"\A<!-- doctrine-version: (\S+) -->")
 
@@ -124,7 +127,9 @@ def _fast_forward_main(clone: Path) -> str:
     reset = gitops._run(clone, "reset", "-q", "--keep", f"{REMOTE}/{MAIN}", check=False)
     if reset.returncode != 0:
         error = reset.stderr.decode(errors="replace").strip()
-        raise WorkspaceError("git", f"cannot bring {clone} main to canonical main: {error}")
+        raise WorkspaceError(
+            "git", f"cannot bring {clone} main to canonical main: {error}"
+        )
     return gitops.head(clone)
 
 
@@ -161,7 +166,9 @@ def validate(repo: Path, base: str, result: str) -> tuple[list[str], set[str]]:
             problems.append(f"{path}: only the orchestrator changes this path")
             continue
         if path.startswith(GENERATED_PREFIXES):
-            problems.append(f"{path}: integrate writes the generated views; do not edit them")
+            problems.append(
+                f"{path}: integrate writes the generated views; do not edit them"
+            )
             continue
         parsed = parse_record_path(_STORE.layout, path)
         if parsed is None:
@@ -176,7 +183,9 @@ def validate(repo: Path, base: str, result: str) -> tuple[list[str], set[str]]:
     for found in _STORE.validate_changes(changes).values():
         problems += found
     existing = {
-        parse_record_path(_STORE.layout, path)[1] for path, before, _ in changes if before
+        parse_record_path(_STORE.layout, path)[1]
+        for path, before, _ in changes
+        if before
     }
     return problems, existing
 
@@ -198,7 +207,9 @@ def _commit_worktree(worktree: Path, branch: str) -> str:
     # writes them on main after the merge.
     excluded = [f":!{path}" for path in GENERATED_PREFIXES]
     gitops.git(worktree, "add", "-A", "--", ".", *excluded)
-    gitops._run(worktree, "reset", "-q", "--", *GENERATED_PREFIXES, check=False)  # staged earlier
+    gitops._run(
+        worktree, "reset", "-q", "--", *GENERATED_PREFIXES, check=False
+    )  # staged earlier
     if gitops.git(worktree, "diff", "--cached", "--name-only"):
         gitops.git(worktree, "commit", "-q", "-m", f"{branch}: result")
     return gitops.head(worktree)
@@ -215,18 +226,30 @@ def stage(worktree: Path) -> dict:
     """Preserve an assignment's output without accepting it into canonical main."""
     branch = _current_branch(worktree)
     result = _commit_worktree(worktree, branch)
-    pushed, rejected = gitops.push_with_rejections(worktree, REMOTE, [f"{branch}:{branch}"])
+    pushed, rejected = gitops.push_with_rejections(
+        worktree, REMOTE, [f"{branch}:{branch}"]
+    )
     if not pushed:
-        raise WorkspaceError("push", f"push of {branch} was rejected", {"rejected": rejected})
+        raise WorkspaceError(
+            "push", f"push of {branch} was rejected", {"rejected": rejected}
+        )
     return {"branch": branch, "card_sha": result}
 
 
 def integrate(clone: Path, *, branch: str, commit: str | None = None) -> Integrated:
     """Validate and integrate a staged branch against the current canonical head."""
-    gitops.git(clone, "fetch", "-q", REMOTE, f"+refs/heads/{branch}:refs/remotes/{REMOTE}/{branch}")
+    gitops.git(
+        clone,
+        "fetch",
+        "-q",
+        REMOTE,
+        f"+refs/heads/{branch}:refs/remotes/{REMOTE}/{branch}",
+    )
     result = gitops.git(clone, "rev-parse", f"{REMOTE}/{branch}")
     if commit is not None and result != commit:
-        raise WorkspaceError("stale_artifact", "The staged branch changed after artifact review")
+        raise WorkspaceError(
+            "stale_artifact", "The staged branch changed after artifact review"
+        )
     with canonical_lock(canonical_of(clone)):
         main = _fast_forward_main(clone)
         if _is_ancestor(clone, result, main):
@@ -234,7 +257,9 @@ def integrate(clone: Path, *, branch: str, commit: str | None = None) -> Integra
         base = gitops.merge_base(clone, result, main)
         problems, existing = validate(clone, base, result)
         if problems:
-            raise WorkspaceError("validate", "; ".join(problems), {"problems": problems})
+            raise WorkspaceError(
+                "validate", "; ".join(problems), {"problems": problems}
+            )
         overlap = sorted(existing & _changed_ids(clone, base, main))
         if overlap:
             raise WorkspaceError(
@@ -243,12 +268,24 @@ def integrate(clone: Path, *, branch: str, commit: str | None = None) -> Integra
                 + ", ".join(overlap),
                 {"overlap": overlap, "base": base},
             )
-        merge = gitops._run(clone, "merge", "--no-ff", "-q", "-m", f"merge {branch}", result, check=False)
+        merge = gitops._run(
+            clone,
+            "merge",
+            "--no-ff",
+            "-q",
+            "-m",
+            f"merge {branch}",
+            result,
+            check=False,
+        )
         if merge.returncode != 0:
-            conflicts = sorted(gitops.git(clone, "diff", "--name-only", "--diff-filter=U").splitlines())
+            conflicts = sorted(
+                gitops.git(clone, "diff", "--name-only", "--diff-filter=U").splitlines()
+            )
             gitops._run(clone, "merge", "--abort", check=False)
             raise WorkspaceError(
-                "merge", f"{branch} conflicts with main in: " + ", ".join(conflicts),
+                "merge",
+                f"{branch} conflicts with main in: " + ", ".join(conflicts),
                 {"conflicts": conflicts},
             )
         _regenerate_views(clone)
@@ -270,7 +307,9 @@ def _push_main(clone: Path) -> None:
         # Drop this operation's commits, keeping unrelated uncommitted changes; if that is
         # refused, the next operation's _fast_forward_main drops them.
         gitops._run(clone, "reset", "-q", "--keep", f"{REMOTE}/{MAIN}", check=False)
-        raise WorkspaceError("push", "push of main was rejected", {"rejected": rejected})
+        raise WorkspaceError(
+            "push", "push of main was rejected", {"rejected": rejected}
+        )
 
 
 def merged(clone: Path, branch: str) -> dict:
@@ -278,22 +317,63 @@ def merged(clone: Path, branch: str) -> dict:
     gitops.git(clone, "fetch", "-q", REMOTE, MAIN)
     main = gitops.git(clone, "rev-parse", f"{REMOTE}/{MAIN}")
     try:
-        gitops.git(clone, "fetch", "-q", REMOTE, f"+refs/heads/{branch}:refs/remotes/{REMOTE}/{branch}")
+        gitops.git(
+            clone,
+            "fetch",
+            "-q",
+            REMOTE,
+            f"+refs/heads/{branch}:refs/remotes/{REMOTE}/{branch}",
+        )
     except gitops.GitError:
         return {"merged": False, "card_sha": None, "main_sha": main}
     card = gitops.git(clone, "rev-parse", f"{REMOTE}/{branch}")
-    return {"merged": _is_ancestor(clone, card, main), "card_sha": card, "main_sha": main}
+    return {
+        "merged": _is_ancestor(clone, card, main),
+        "card_sha": card,
+        "main_sha": main,
+    }
 
 
-def publish(clone: Path, files: Mapping[str, bytes | None], message: str) -> dict:
+def publish(
+    clone: Path,
+    files: Mapping[str, bytes | None],
+    message: str,
+    *,
+    expected_head: str | None = None,
+) -> dict:
     """Commit ``files`` (path -> content; None deletes the file) on canonical ``main`` and push.
 
     The content travels with the call: ``main`` is first brought to canonical (dropping what
     an interrupted or rejected publish left unpushed), then the files are written, committed
-    and pushed, so a retry publishes them again. On any failure the files are written back
-    into the clone, so the caller's draft is not lost."""
+    and pushed. ``expected_head`` conditionally publishes an edit against its observed
+    canonical revision. A conflict leaves the current files untouched. Publication failures
+    retain the caller's draft in the clone."""
     paths = list(files)
+    for path in paths:
+        if PurePosixPath(path).is_absolute() or any(
+            part in {"", ".", "..", ".git"} for part in path.split("/")
+        ):
+            raise WorkspaceError(
+                "invalid_path", "Publication requires relative workspace file paths"
+            )
     with canonical_lock(canonical_of(clone)):
+        for path in paths:
+            current = clone
+            for part in PurePosixPath(path).parts:
+                current /= part
+                if current.is_symlink() or (
+                    current.is_file() and current.stat().st_nlink != 1
+                ):
+                    raise WorkspaceError(
+                        "forbidden", "Publication cannot follow linked workspace paths"
+                    )
+        if expected_head is not None:
+            gitops.git(clone, "fetch", "-q", REMOTE, MAIN)
+            observed = gitops.git(clone, "rev-parse", f"{REMOTE}/{MAIN}")
+            if observed != expected_head:
+                raise WorkspaceError(
+                    "conflict", "Canonical workspace changed; read its current revision"
+                )
         try:
             for path in paths:  # as committed, so syncing cannot refuse them
                 if gitops.show(clone, "HEAD", path) is None:
@@ -314,11 +394,7 @@ def publish(clone: Path, files: Mapping[str, bytes | None], message: str) -> dic
 
 def _write_files(clone: Path, files: Mapping[str, bytes | None]) -> None:
     for path, content in files.items():
-        if content is None:
-            (clone / path).unlink(missing_ok=True)
-        else:
-            (clone / path).parent.mkdir(parents=True, exist_ok=True)
-            (clone / path).write_bytes(content)
+        write_file(clone.resolve(), path, content)
 
 
 def read_files(clone: Path, paths: list[str]) -> dict[str, bytes | None]:
@@ -361,7 +437,10 @@ def agents_md(root: Path) -> str | None:
         "# Research doctrine\n\n"
         f'Doctrine version {version}. Run the research CLI as `"$RESEARCH_CLI"`.\n\n'
     )
-    parts = [(root / "doctrine" / name).read_text(encoding="utf-8") for name in DOCTRINE_FILES]
+    parts = [
+        (root / "doctrine" / name).read_text(encoding="utf-8")
+        for name in DOCTRINE_FILES
+    ]
     return header + "\n".join(parts)
 
 
@@ -375,17 +454,27 @@ def _seed(clone: Path, game: str, root: Path) -> None:
     if doctrine is not None:
         write_text(clone / "AGENTS.md", doctrine)
     gitops.git(clone, "add", "-A")
-    gitops.git(clone, "commit", "-q", "-m", f"bootstrap: seed workspace from games/{game}/seed")
+    gitops.git(
+        clone, "commit", "-q", "-m", f"bootstrap: seed workspace from games/{game}/seed"
+    )
 
 
 def _reseed_agents_md(clone: Path, root: Path) -> bool:
     """Rewrite ``AGENTS.md`` when the shipped doctrine version differs from canonical's."""
     wanted = _doctrine_version(root)
     path = clone / "AGENTS.md"
-    current = VERSION_HEADER.match(path.read_text(encoding="utf-8")) if path.exists() else None
+    current = (
+        VERSION_HEADER.match(path.read_text(encoding="utf-8"))
+        if path.exists()
+        else None
+    )
     if wanted is None or (current and current.group(1) == wanted):
         return False
-    publish(clone, {"AGENTS.md": agents_md(root).encode()}, f"bootstrap: doctrine version {wanted}")
+    publish(
+        clone,
+        {"AGENTS.md": agents_md(root).encode()},
+        f"bootstrap: doctrine version {wanted}",
+    )
     return True
 
 

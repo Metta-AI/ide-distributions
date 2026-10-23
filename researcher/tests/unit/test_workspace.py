@@ -10,14 +10,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from records.fixtures import CLAIM, RESULT
 
 from ide_research_core import workspace
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
 from ide_research_core.workspace import WorkspaceError
-
-from records.fixtures import CLAIM, RESULT
 
 DISTRIBUTION = Path(__file__).resolve().parents[2]
 
@@ -63,7 +62,9 @@ def test_integrate_merges_a_card_and_knows_it_is_merged(tmp_path, bare):
 
     assert not done.already_merged
     assert workspace.merged(clone, "card/a") == {
-        "merged": True, "card_sha": done.card_sha, "main_sha": done.main_sha,
+        "merged": True,
+        "card_sha": done.card_sha,
+        "main_sha": done.main_sha,
     }
     other = clone_for(tmp_path, bare, "researcher-2")
     gitops.git(other, "pull", "-q")
@@ -160,7 +161,9 @@ def test_publish_commits_only_the_named_paths(tmp_path, bare):
     (orchestrator / "control" / "pause.json").write_text('{"paused": true}\n')
     (orchestrator / "scratch.txt").write_text("not mine to publish\n")
 
-    published = workspace.publish(orchestrator, workspace.read_files(orchestrator, ["plan.md", "control/pause.json"]), "plan")
+    published = workspace.publish(
+        orchestrator, workspace.read_files(orchestrator, ["plan.md", "control/pause.json"]), "plan"
+    )
 
     assert published["main_sha"] == gitops.git(bare, "rev-parse", "main")
     tracked = gitops.git(bare, "ls-tree", "-r", "--name-only", "main").splitlines()
@@ -174,9 +177,23 @@ def test_the_cli_reports_a_refusal_as_json(tmp_path, bare):
     (worktree / "control" / "pause.json").write_text("{}\n")
     staged = workspace.stage(worktree)
     run = subprocess.run(
-        [sys.executable, "-m", "ide_research_core", "workspace", "integrate", "--root", str(clone),
-         "--branch", staged["branch"], "--commit", staged["card_sha"]],
-        cwd=worktree, capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "ide_research_core",
+            "workspace",
+            "integrate",
+            "--root",
+            str(clone),
+            "--branch",
+            staged["branch"],
+            "--commit",
+            staged["card_sha"],
+        ],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+        check=False,
         env={**os.environ, "HERMES_HOME": str(tmp_path), "PYTHONPATH": str(DISTRIBUTION / "src")},
     )
     assert run.returncode == 1
@@ -316,8 +333,14 @@ def test_a_card_with_regenerated_views_can_be_integrated_again(tmp_path, bare, m
         workspace.integrate(clone, branch=workspace.stage(worktree)["branch"])
     monkeypatch.undo()
 
-    assert workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged is False
-    assert workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged is True
+    assert (
+        workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged
+        is False
+    )
+    assert (
+        workspace.integrate(clone, branch=workspace.stage(worktree)["branch"]).already_merged
+        is True
+    )
 
 
 def test_views_staged_by_the_worker_stay_out_of_the_card(tmp_path, bare):
@@ -347,3 +370,287 @@ def test_cli_shim_ignores_parent_pythonpath(tmp_path, monkeypatch):
     result = subprocess.run([str(shim), "--help"], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert "usage: research" in result.stdout
+
+
+def test_conditional_publish_preserves_concurrent_profile_edits(tmp_path, bare):
+    first = clone_for(tmp_path, bare, "orchestrator")
+    second = clone_for(tmp_path, bare, "other-session")
+    original = gitops.head(first)
+    published = workspace.publish(
+        first, {"control/layout.json": b'{"tab":"research"}'}, "layout", expected_head=original
+    )
+    (second / "control").mkdir(exist_ok=True)
+    draft = second / "control/layout.json"
+    draft.write_bytes(b'{"tab":"source"}')
+    with pytest.raises(WorkspaceError) as conflict:
+        workspace.publish(
+            second,
+            {"control/layout.json": draft.read_bytes()},
+            "stale layout",
+            expected_head=original,
+        )
+    assert conflict.value.reason == "conflict"
+    assert draft.read_bytes() == b'{"tab":"source"}'
+    assert gitops.git(bare, "show", "main:control/layout.json") == '{"tab":"research"}'
+    assert gitops.git(bare, "rev-parse", "main") == published["main_sha"]
+    workspace.publish(
+        first,
+        {"control/layout.json": b'{"tab":"source"}'},
+        "updated layout",
+        expected_head=published["main_sha"],
+    )
+    fresh = clone_for(tmp_path, bare, "recovered-session")
+    assert (fresh / "control/layout.json").read_bytes() == b'{"tab":"source"}'
+
+
+def test_presentation_is_canonical_and_replays_after_reclone(tmp_path, bare):
+    from ide_research_core.presentation import PresentationRequest, execute
+
+    root = clone_for(tmp_path, bare, "orchestrator")
+    league = "league_11111111-1111-1111-1111-111111111111"
+    first = PresentationRequest(
+        action="save",
+        league_id=league,
+        key="draft",
+        document={"notes": "first"},
+        request_id="first",
+    )
+    saved = execute(root, first)
+    assert saved["revision"] == 1
+    assert execute(root, first) == saved
+    changed = first.model_copy(update={"document": {"notes": "different"}})
+    with pytest.raises(WorkspaceError, match="already names"):
+        execute(root, changed)
+    second = first.model_copy(
+        update={"revision": 1, "document": {"notes": "second"}, "request_id": "second"}
+    )
+    assert execute(root, second)["revision"] == 2
+    recovered = clone_for(tmp_path, bare, "recovered")
+    assert execute(recovered, first) == saved
+    read = PresentationRequest(action="read", league_id=league, key="draft")
+    assert execute(recovered, read)["document"] == {"notes": "second"}
+    assert (
+        execute(
+            recovered,
+            read.model_copy(update={"league_id": "league_22222222-2222-2222-2222-222222222222"}),
+        )["document"]
+        is None
+    )
+    with pytest.raises(WorkspaceError, match="changed"):
+        execute(root, first.model_copy(update={"request_id": "stale"}))
+
+
+def test_ide_records_are_native_and_replay_across_reclone(tmp_path, bare):
+    from ide_research_core.workspace_records import RecordPatch, RecordsRequest, execute
+
+    root = clone_for(tmp_path, bare, "coordinator")
+    read = RecordsRequest(
+        action="read", league_id="league_11111111-1111-1111-1111-111111111111", owner_id="owner"
+    )
+    snapshot = execute(root, read)
+    patch = RecordPatch(
+        entity="topic",
+        id="nrn_metric",
+        meta={
+            "title": "Reward",
+            "objective": "Increase reward",
+            "metrics": [{"name": "Reward", "direction": "up", "readings": []}],
+            "guardrails": [],
+            "origin": {"kind": "human"},
+            "priority": 0,
+            "status": "active",
+        },
+    )
+    save = read.model_copy(
+        update={
+            "action": "save",
+            "revision": snapshot["revision"],
+            "patch": patch,
+            "intent": {"create": "Reward"},
+            "projection": {"id": "nrn_metric"},
+            "request_id": "create",
+        }
+    )
+    receipt = execute(root, save)
+    native = execute(root, read)["records"][0]
+    assert native["id"].startswith("T-")
+    assert store_of(root).load(native["id"])[0]["metrics"][0]["name"] == "Reward"
+    # Normal research integration changes the same record observed by the IDE.
+    task = card_worktree(root, "measure")
+    store_of(task).update(
+        native["id"],
+        {"metrics": [{"name": "Reward", "direction": "up", "readings": [{"value": 42}]}]},
+    )
+    workspace.integrate(root, branch=workspace.stage(task)["branch"])
+    recovered = clone_for(tmp_path, bare, "recovered")
+    assert execute(recovered, read)["records"][0]["meta"]["metrics"][0]["readings"] == [
+        {"value": 42}
+    ]
+    assert execute(recovered, save) == receipt
+    assert execute(
+        recovered, read.model_copy(update={"intent": save.intent, "request_id": "create"})
+    ) == {"replay": receipt}
+    with pytest.raises(WorkspaceError, match="already names"):
+        execute(recovered, save.model_copy(update={"intent": {"create": "Other"}}))
+    with pytest.raises(WorkspaceError, match="changed"):
+        execute(recovered, save.model_copy(update={"request_id": "stale"}))
+    from ide_research_core.presentation import PresentationRequest
+    from ide_research_core.presentation import execute as presentation
+
+    with pytest.raises(WorkspaceError, match="already names"):
+        presentation(
+            recovered,
+            PresentationRequest(
+                action="save",
+                league_id=read.league_id,
+                key="draft",
+                document={},
+                request_id="create",
+            ),
+        )
+    assert execute(recovered, read.model_copy(update={"owner_id": "other"}))["records"] == []
+    assert (
+        execute(
+            recovered,
+            read.model_copy(update={"league_id": "league_22222222-2222-2222-2222-222222222222"}),
+        )["records"]
+        == []
+    )
+
+
+def test_goal_progress_is_native_topic_state_not_host_state(tmp_path, bare):
+    from ide_research_core.workspace_goals import GoalsRequest, execute
+
+    root = clone_for(tmp_path, bare, "coordinator")
+    store = store_of(root)
+    reading = {"value": 1, "version": 1, "label": "Version 1"}
+    topic_id = store.create(
+        "topic",
+        {
+            "title": "Reward",
+            "objective": "Improve reward",
+            "metrics": [{"name": "Reward", "direction": "up", "readings": [reading]}],
+            "guardrails": [],
+            "origin": {"kind": "human"},
+            "priority": 0,
+            "status": "active",
+            "league_id": "league_11111111-1111-1111-1111-111111111111",
+            "agent_id": "owner",
+            "policy_id": "policy",
+            "ide_id": "nrn_reward",
+        },
+    )
+    path = store.path_of(topic_id).relative_to(root).as_posix()
+    workspace.publish(root, {path: (root / path).read_bytes()}, "topic")
+    scope = {"owner_id": "owner", "league_id": "league_11111111-1111-1111-1111-111111111111"}
+    goal_id = "11111111-1111-4111-8111-111111111111"
+    create = GoalsRequest(
+        action="create",
+        **scope,
+        request_id="create",
+        payload={
+            "id": goal_id,
+            "policy_id": "policy",
+            "policy_name": "Policy",
+            "game": None,
+            "neuron_id": "nrn_reward",
+            "target": {"kind": "value", "value": 5},
+        },
+    )
+    baseline = execute(root, create)
+    assert baseline["baseline"]["value"] == 1
+    assert baseline["target"]["direction"] == "at_least"
+    assert topic_id in baseline["contract"]["verification"]
+    assert "native research" in baseline["contract"]["constraints"]
+    with pytest.raises(WorkspaceError, match="already names"):
+        execute(
+            root,
+            create.model_copy(
+                update={"payload": {**create.payload, "target": {"kind": "value", "value": 9}}}
+            ),
+        )
+    assert execute(root, create) == baseline
+    evaluate = GoalsRequest(
+        action="evaluate",
+        **scope,
+        request_id="evaluate",
+        payload={
+            "id": goal_id,
+            "request_id": "22222222-2222-4222-8222-222222222222",
+            "started_at": "2026-10-22T00:00:00Z",
+            "summary": "A prose claim of success",
+            "activity": [],
+        },
+    )
+    assert execute(root, evaluate)["action"] is None
+    # A lost host acknowledgement must not append a second round.
+    execute(root, evaluate.model_copy(update={"request_id": "retry"}))
+    contexts = execute(root, GoalsRequest(action="list", **scope))["goals"]
+    assert len(contexts[goal_id]["rounds"]) == 1
+    assert store.load(topic_id)[0]["goals"][goal_id]["rounds"] == contexts[goal_id]["rounds"]
+    task = card_worktree(root, "improve")
+    store_of(task).update(
+        topic_id,
+        {
+            "metrics": [
+                {
+                    "name": "Reward",
+                    "direction": "up",
+                    "readings": [reading, {"value": 6, "version": 2, "label": "Version 2"}],
+                }
+            ]
+        },
+    )
+    workspace.integrate(root, branch=workspace.stage(task)["branch"])
+    recovered = clone_for(tmp_path, bare, "recovered")
+    completed = execute(
+        recovered, evaluate.model_copy(update={"request_id": "observed-new-measurement"})
+    )
+    assert completed["action"] == "complete"
+    assert "version 2" in completed["reason"]
+    assert execute(recovered, create) == baseline
+    assert (
+        len(execute(recovered, GoalsRequest(action="list", **scope))["goals"][goal_id]["rounds"])
+        == 1
+    )
+
+    # The profile resolves lower-is-better targets and latest comparison readings.
+    store = store_of(recovered)
+    store.update(
+        topic_id,
+        {
+            "game": "native-game",
+            "metrics": [
+                {
+                    "name": "Cost",
+                    "direction": "down",
+                    "readings": [
+                        {"value": 8, "version": 1, "label": "Version 1"},
+                        {"value": 4, "version": 2, "label": "Version 2"},
+                        {"value": 2, "version": None, "label": "Comparator"},
+                        {"value": 5, "version": None, "label": "Comparator"},
+                    ],
+                }
+            ],
+        },
+    )
+    workspace.publish(
+        recovered, {path: (recovered / path).read_bytes()}, "native metric definition"
+    )
+    best_id = "33333333-3333-4333-8333-333333333333"
+    best = execute(
+        recovered,
+        create.model_copy(
+            update={
+                "request_id": "best",
+                "payload": {**create.payload, "id": best_id, "target": {"kind": "best"}},
+            }
+        ),
+    )
+    assert best["target"] == {"kind": "best", "value": None, "direction": "at_most"}
+    assert best["game"] == "native-game"
+    assert "best measured comparison" in best["contract"]["objective"]
+    listed = execute(recovered, GoalsRequest(action="list", **scope))["goals"][best_id]
+    assert listed["observed"]["threshold"] == 5
+    assert listed["observed"]["current"]["value"] == 4
+    assert listed["observed"]["met"] is True
