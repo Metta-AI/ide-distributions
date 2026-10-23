@@ -108,7 +108,8 @@ def test_rejected_publication_never_returns_or_replays_unpublished_source(source
     assert saved["kind"] == "ok" and execute(root, seed, "seed") == saved
 
 
-def test_policy_source_is_bound_to_upload_provenance_and_committed_content(source):
+@pytest.mark.parametrize("source_path", ["src/player.py", "strategy/candidates/example/player.py"])
+def test_policy_source_is_bound_to_upload_provenance_and_committed_content(source, source_path):
     root, _ = source
     workspace.publish(
         root,
@@ -118,15 +119,17 @@ def test_policy_source_is_bound_to_upload_provenance_and_committed_content(sourc
                     "id": "V-123",
                     "policy_name": "policy",
                     "build": {
-                        "source_path": "src/player.py",
-                        "source_hashes": {"src/player.py": "a" * 64},
+                        "source_path": source_path,
+                        "source_hashes": {source_path: "a" * 64},
                     },
                 }
             ).encode(),
             "versions/V-123/events/VE-123.json": json.dumps(
                 {"version": "V-123", "kind": "uploaded", "data": {"policy_version_id": "policy:v1"}}
             ).encode(),
-            "src/player.py": b"original\n",
+            source_path: b"original\n",
+            "strategy/README.md": b"Strategy documentation\n",
+            "strategy/candidates/manifest.json": b"{}\n",
         },
         "uploaded source",
     )
@@ -135,17 +138,17 @@ def test_policy_source_is_bound_to_upload_provenance_and_committed_content(sourc
         policy_name="policy",
         record_id="V-123",
         version_id="policy:v1",
-        path="src/player.py",
+        path=source_path,
     )
     before = execute(root, command, "")
-    (root / "src/player.py").write_text("unpublished\n")
+    (root / source_path).write_text("unpublished\n")
     assert execute(root, command, "")["content"] == "original\n"
     write = command.model_copy(
         update={"action": "write", "content": "saved\n", "base_sha256": before["sha256"]}
     )
     saved = execute(root, write, "write")
     assert saved["kind"] == "ok"
-    workspace.publish(root, {"src/player.py": b"native\n"}, "native edit")
+    workspace.publish(root, {source_path: b"native\n"}, "native edit")
     assert execute(root, write, "write") == saved
     assert execute(root, command, "")["content"] == "native\n"
     assert (
@@ -168,16 +171,30 @@ def test_publication_rejects_traversal_without_touching_outside(source, tmp_path
     assert outside.read_text() == "keep"
 
 
-def test_source_rejects_committed_parent_symlink(source, tmp_path):
+@pytest.mark.parametrize("ancestor", ["projects", "sources", "sources/candidates"])
+def test_source_rejects_committed_parent_symlink(source, tmp_path, ancestor):
     root, _ = source
     outside = tmp_path / "outside"
     outside.mkdir()
-    (root / "projects").symlink_to(outside)
-    gitops.git(root, "add", "projects")
+    link = root / ancestor
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside)
+    gitops.git(root, "add", ancestor)
     gitops.git(root, "commit", "-qm", "unsafe link")
     gitops.git(root, "push", "-q", "origin", "main")
     with pytest.raises(workspace.WorkspaceError, match="ancestors"):
-        execute(root, seed_command(), "unsafe-seed")
+        command = (
+            seed_command()
+            if ancestor == "projects"
+            else HermesPolicyFiles(
+                action="read",
+                policy_name="policy",
+                record_id="V-123",
+                version_id="policy:v1",
+                path="sources/candidates/example/player.py",
+            )
+        )
+        execute(root, command, "unsafe-seed")
     assert list(outside.iterdir()) == []
 
 

@@ -58,13 +58,17 @@ def execute(
             }
         )
         if ancestors:
-            entries = gitops.git(
-                root, "--literal-pathspecs", "ls-tree", head, "--", *ancestors
-            )
-            if any(not entry.startswith("040000 ") for entry in entries.splitlines()):
-                raise workspace.WorkspaceError(
-                    "forbidden", "Source ancestors must be directories"
-                )
+            entries = gitops._run(
+                root, "--literal-pathspecs", "ls-tree", "-tz", head, "--", *ancestors
+            ).stdout
+            for entry in entries.split(b"\0"):
+                if not entry:
+                    continue
+                header, name = entry.split(b"\t", 1)
+                if name.decode() in ancestors and not header.startswith(b"040000 "):
+                    raise workspace.WorkspaceError(
+                        "forbidden", "Source ancestors must be directories"
+                    )
         entries = gitops._run(
             root, "--literal-pathspecs", "ls-tree", "-rz", head, "--", *prefixes
         ).stdout
