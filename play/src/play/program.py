@@ -193,7 +193,7 @@ class Program:
         if self._league is None:
             choice = self.records.get("state", "league")
             league = choice["body"]["leagueId"] if choice else self.game.league_id
-            if league != self.game.league_id:
+            if not self._builds_here(league):
                 raise PlayError(
                     "builds_elsewhere",
                     "this coworld's programs are built on the user's own computer by their "
@@ -201,6 +201,32 @@ class Program:
                 )
             self._league = league
         return self._league
+
+    def _league_game(self, league_id: str) -> dict:
+        """The game block of a league's public read (no credential)."""
+        url = (
+            f"{self.client._cli.server}/observatory/v2/leagues/"
+            f"{urllib.parse.quote(league_id, safe='')}"
+        )
+        return json.loads(self._fetch(url))["game"]
+
+    def _builds_here(self, league_id: str) -> bool:
+        """Whether programs for this league's coworld are built here: it is GotA's coworld, judged
+        by the league's game (so any GotA league counts), not by the league's id."""
+        if league_id == self.game.league_id:
+            return True
+
+        def coworld(game: dict) -> str:
+            return (
+                game.get("canonical_coworld_id")
+                or game.get("coworld_id")
+                or game.get("coworld_name")
+                or game["name"]
+            )
+
+        return coworld(self._league_game(league_id)) == coworld(
+            self._league_game(self.game.league_id)
+        )
 
     @property
     def program_file(self) -> Path:
@@ -241,22 +267,14 @@ class Program:
         coworld = None
         if choice:
             league_id = choice["body"]["leagueId"]
-            league_url = (
-                f"{self.client._cli.server}/observatory/v2/leagues/"
-                f"{urllib.parse.quote(league_id, safe='')}"
-            )
             try:
-                game = json.loads(self._fetch(league_url))["game"]
-            except urllib.error.HTTPError as error:
-                raise PlayError(
-                    "who_unavailable",
-                    f"GET {league_url} answered HTTP {error.code}",
-                    {"status": error.code},
-                ) from error
-            coworld = {
-                "name": game.get("coworld_name") or game["name"],
-                "builds_here": league_id == self.game.league_id,
-            }
+                game = self._league_game(league_id)
+                coworld = {
+                    "name": game.get("coworld_name") or game["name"],
+                    "builds_here": self._builds_here(league_id),
+                }
+            except (urllib.error.URLError, KeyError, TypeError, ValueError):
+                coworld = None  # optional: HTTPError is a URLError; never fail the first call
         return {
             "named": bool(name),
             "cogent_name": name or None,
@@ -273,8 +291,13 @@ class Program:
             raise PlayError("bad_name", f"the name is longer than {NAME_LIMIT} characters")
         live = self.records.get("profile", "soul")
         rev = live["rev"] if live else None
-        body = {**NEW_SOUL, **(live["body"] if live else {}), "name": name}
-        self.records.put("profile", "soul", body, rev, f"play:soul-name:{name}:{rev or 0}")
+        old = live["body"] if live else {}
+        body = {"name": name}
+        for field, default in NEW_SOUL.items():
+            value = old.get(field)
+            body[field] = value if isinstance(value, type(default)) and value else default
+        key = f"play:soul-name:{hashlib.sha256(name.encode()).hexdigest()[:16]}:{rev or 0}"
+        self.records.put("profile", "soul", body, rev, key)
         return {"name": name}
 
     # --- starter --------------------------------------------------------
