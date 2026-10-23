@@ -114,3 +114,20 @@ def test_play_restart_words_point_to_start_over_and_never_name_files():
         assert needle in soul, needle
     assert ".bas" not in soul
     assert 'say "your program"' in soul
+
+
+def test_play_first_meeting_is_getting_to_know_each_other_not_game_talk():
+    soul = (PROFILES["play"] / "SOUL.md").read_text()
+    meeting = soul[
+        soul.index("## The first meeting") : soul.index("Keep notes with the memory tool")
+    ]
+    for needle in (
+        "getting to know each other",
+        "how they like to talk",
+        "expect of the",
+        "concrete request",
+    ):
+        assert needle in meeting, needle
+    assert "Do not fetch the starter in the first meeting" in meeting
+    assert "On your first turn" not in soul and "plainly what you are for here" not in soul
+    assert "tone" in soul and "fresh_start" in soul and "`who_we_are`" in soul
