@@ -8,11 +8,29 @@ import sys
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .context import Context
 from .research import Research, ResearchError
 
 BOARD = "autoresearch"
+
+
+class CardFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str | None = None
+    assignee: str | None = None
+    tenant: str | None = None
+    session_id: str | None = None
+    include_archived: bool = False
+    limit: int = Field(default=20, ge=1, le=200)
+    order_by: Literal[
+        "assignee", "completed-desc", "created", "created-desc", "priority",
+        "priority-desc", "status", "title", "updated",
+    ] | None = None
 
 
 def git(clone, *args):
@@ -231,10 +249,11 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             }
 
     def card_list(self, filters=None):
+        filters = CardFilters.model_validate(filters or {}).model_dump(exclude_none=True)
         from hermes_cli import kanban_db as kb
 
         with closing(connection()) as conn:
-            return [asdict(task) for task in kb.list_tasks(conn, **(filters or {}))]
+            return [asdict(task) for task in kb.list_tasks(conn, **filters)]
 
     def card_show(self, id):
         from hermes_cli import kanban_db as kb

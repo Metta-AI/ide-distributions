@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from orchestrator.context import Context
-from orchestrator.workspace import Workspace
+from orchestrator.workspace import Workspace, WorkspaceError
 
 
 def context(credential="cga_fixture"):
@@ -51,8 +51,33 @@ def test_preserves_server_refusals(monkeypatch):
         }
 
     monkeypatch.setattr(Workspace, "post", post)
-    result = Workspace(context()).ide_workspace("request", {"method": "layout.read"})
-    assert result["result"]["isError"] is True
+    with pytest.raises(WorkspaceError) as error:
+        Workspace(context()).ide_workspace("request", {"method": "layout.read"})
+    assert error.value.envelope["ok"] is False
+    assert error.value.envelope["error"]["details"]["result"]["isError"] is True
+
+
+@pytest.mark.parametrize("stage", ["initialize", "tools/call"])
+def test_protocol_error_reaches_plugin_as_failure(monkeypatch, stage):
+    from orchestrator import plugin
+
+    calls = []
+    refusal = {"jsonrpc": "2.0", "error": {"code": -32602, "message": "Invalid tool arguments"}}
+
+    def post(self, path, token, body):
+        calls.append(body["method"])
+        return refusal if body["method"] == stage else {"result": {}}
+
+    monkeypatch.setattr(Workspace, "post", post)
+    monkeypatch.setattr(plugin, "profile_context", context)
+    result = json.loads(plugin.handler("ide_workspace")({
+        "request_id": "original", "operation": {"method": "league.overview", "leagueId": "unsupported"},
+    }))
+    assert result["ok"] is False
+    assert result["error"]["reason"] == "workspace_protocol"
+    assert result["error"]["details"] == refusal
+    if stage == "initialize":
+        assert calls == ["initialize"]
 
 
 @pytest.mark.parametrize(
@@ -134,5 +159,7 @@ def test_initialization_failure_stops_request(monkeypatch, method):
     monkeypatch.setattr(Workspace, "post", post)
     client = Workspace(context())
     args = () if method == "ide_workspace_schema" else ("request", {"method": "layout.read"})
-    assert getattr(client, method)(*args) == {"kind": "protocol_error", "error": error}
+    with pytest.raises(WorkspaceError) as failure:
+        getattr(client, method)(*args)
+    assert failure.value.envelope["error"]["details"] == {"error": error}
     assert calls == ["initialize"]
