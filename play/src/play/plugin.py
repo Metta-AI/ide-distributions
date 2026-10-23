@@ -44,7 +44,9 @@ TOOLS = {
             "Whether you have a name yet (named), your name (cogent_name, null until you are "
             "named) and your user's account name. Call once at the start of each conversation. "
             "user_name is null when the user has set none. The account name that softmax status "
-            "and whoami print is the user's, not yours."
+            "and whoami print is the user's, not yours. coworld is null until you have been "
+            "brought into one, then {name, builds_here}: builds_here is false for a coworld whose "
+            "programs the user's own coding agent builds, not you."
         ),
         {},
         [],

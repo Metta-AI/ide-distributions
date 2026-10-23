@@ -1,6 +1,7 @@
 """The coworlds Play supports. GotA only: its program is one game-hosted BASIC file.
 
-Container coworlds are not supported yet (the hosted agent cannot build an image).
+Other coworlds have container players, which the hosted agent cannot build: the user's local
+coding agent builds them, guided by the cogent.
 """
 
 from dataclasses import dataclass

@@ -6,7 +6,7 @@ it, reports the results in plain words and releases a version only when the user
 It has only its own tools and the `memory` toolset: no raw file, terminal or Kanban tools.
 
 There are no research records, experiments or champions. GotA only: its program is one BASIC
-file (`program.bas`) that the game runs as is. Container coworlds are not supported yet.
+file (`program.bas`) that the game runs as is. Other coworlds are built by the user's local coding agent, guided by the cogent.
 
 `builder/` is the earlier builder profile. The hosted Play runtime still installs it
 (metta `devops/hermes-fleet/applications/play/runtime_definition.py` lists both profiles, and

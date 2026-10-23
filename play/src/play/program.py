@@ -188,10 +188,18 @@ class Program:
         return self._records
 
     def league_id(self) -> str:
-        """The league the coach chose for this cogent, else the game's default league."""
+        """The league the coach chose for this cogent, else the game's default league. A chosen
+        league this module cannot build for is refused: its programs are built elsewhere."""
         if self._league is None:
             choice = self.records.get("state", "league")
-            self._league = choice["body"]["leagueId"] if choice else self.game.league_id
+            league = choice["body"]["leagueId"] if choice else self.game.league_id
+            if league != self.game.league_id:
+                raise PlayError(
+                    "builds_elsewhere",
+                    "this coworld's programs are built on the user's own computer by their "
+                    "coding agent, not here; guide them to its 'Copy prompt for your local agent' button",
+                )
+            self._league = league
         return self._league
 
     @property
@@ -215,7 +223,9 @@ class Program:
         None when the cogent is not named yet: the player's placeholder name is never its name.
         ``user_name`` comes from the public cogent profile (no credential) and is the user's
         account name, which ``softmax status`` and ``whoami`` also print; None when the user set
-        none."""
+        none. ``coworld`` is None until the cogent has been brought into a coworld; then it is
+        ``{"name", "builds_here"}``: the coworld's name and whether programs for it are built here
+        (only GotA's are; any other coworld's are built by the user's own coding agent)."""
         if not self.player:
             raise PlayError("not_configured", "RESEARCH_PLAYER_ID is not set")
         url = f"{self.client._cli.server}/observatory/v2/cogents/{urllib.parse.quote(self.player, safe='')}"
@@ -227,10 +237,31 @@ class Program:
             ) from error
         soul = self.records.get("profile", "soul")
         name = (soul["body"].get("name") or "").strip() if soul else ""
+        choice = self.records.get("state", "league")
+        coworld = None
+        if choice:
+            league_id = choice["body"]["leagueId"]
+            league_url = (
+                f"{self.client._cli.server}/observatory/v2/leagues/"
+                f"{urllib.parse.quote(league_id, safe='')}"
+            )
+            try:
+                game = json.loads(self._fetch(league_url))["game"]
+            except urllib.error.HTTPError as error:
+                raise PlayError(
+                    "who_unavailable",
+                    f"GET {league_url} answered HTTP {error.code}",
+                    {"status": error.code},
+                ) from error
+            coworld = {
+                "name": game.get("coworld_name") or game["name"],
+                "builds_here": league_id == self.game.league_id,
+            }
         return {
             "named": bool(name),
             "cogent_name": name or None,
             "user_name": profile.get("owner_name"),
+            "coworld": coworld,
         }
 
     def take_name(self, name: str) -> dict:
@@ -415,6 +446,7 @@ class Program:
             before, before_name = starter or "", "starter"
         if text == before:
             raise PlayError("no_change", "the new text is the same as the program now")
+        self.league_id()
         write_text(self.program_file, text)
         journal = Journal.load(self.workspace)
         journal.change = change
@@ -496,6 +528,7 @@ class Program:
     def program_upload(self, name: str | None = None) -> dict:
         """Upload ``program.bas`` as the next version of the program (``coworld upload-policy``).
         The same file uploaded again is the same version, not a new one."""
+        self.league_id()
         if not self.program_file.is_file():
             raise PlayError("no_program", "there is no changed program to upload yet")
         data = self.program_file.read_bytes()

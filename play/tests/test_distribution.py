@@ -39,8 +39,10 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
     for where, text in texts.items():
         assert not RESEARCH_WORDS.search(text), (where, RESEARCH_WORDS.search(text))
         assert "SOFTMAX_COGENT_MODE" not in text and not re.search(r"(?m)^\s*/[a-z]", text)
-    for soul in (folder / "SOUL.md" for folder in PROFILES.values()):
-        assert "Container coworlds are not supported yet." in soul.read_text()
+    assert "Coworlds you can't build for here" in (PROFILES["play"] / "SOUL.md").read_text()
+    assert (
+        "Container coworlds are not supported yet." in (PROFILES["builder"] / "SOUL.md").read_text()
+    )
 
 
 def test_gota_league_matches_the_game_contract():
