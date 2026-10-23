@@ -174,13 +174,14 @@ def _resolve(args, store: RecordStore) -> int:
     """The content an ``ar://`` reference names, at a workspace commit."""
     import base64
 
-    from ide_research_core.games.loader import GameError, load_game
+    from ide_research_core.games.loader import GameError
+    from ide_research_core.games.scope import load_named_game
     from ide_research_core.refs import resolve
 
     game = None
     if args.game:
         try:
-            game = load_game(Path(__file__).resolve().parents[3], args.game)
+            game = load_named_game(args.game)
         except GameError as error:
             raise BadArguments(str(error)) from None
     resolved = resolve(store.layout.root, args.uri, args.rev, game=game)

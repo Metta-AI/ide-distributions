@@ -20,7 +20,7 @@ HEAD and the result carries the full commit SHA it was read at. Reference forms
   ``ar://doctrine-proposal/<name>`` is ``doctrine-proposed/<name>``, else
   ``doctrine-proposed/<name>.md``.
 - A game type (``Game.reference_types``, never shadowing a core type): the game's resolver
-  command runs from the distribution root with the id as its last argument and
+  command runs from the game's root (``Game.root``) with the id as its last argument and
   ``RESEARCH_WORKSPACE`` (canonical) and ``RESEARCH_REV`` (the full SHA) in its
   environment. Exit 0 and stdout is the content; any other exit, or no exit within
   ``GAME_RESOLVER_TIMEOUT_S`` (30 s), is "not found". ``path`` is
@@ -81,8 +81,6 @@ DECISIONS_HEADING = "## Decisions"
 GAME_ENV_WORKSPACE = "RESEARCH_WORKSPACE"
 GAME_ENV_REV = "RESEARCH_REV"
 GAME_RESOLVER_TIMEOUT_S = 30
-# Game resolver commands are relative to the distribution root (where games/ lives).
-_REPO_ROOT = Path(__file__).resolve().parents[2]  # the distribution root: games/ lives here
 _DECISION_ANCHOR = re.compile(r"d(?P<n>[1-9][0-9]*)")
 _LESSON_ID = re.compile(r"L-[0-9A-HJKMNP-TV-Z]{26}")
 _LIST_ITEM = re.compile(r"(?:[-*+]|[0-9]+[.)])\s+(?P<text>.*)")
@@ -258,7 +256,7 @@ def _resolve_game(canonical: Path, sha: str, game: Game, kind: str, rest: str, u
     try:
         result = subprocess.run(
             command,
-            cwd=_REPO_ROOT,
+            cwd=game.root,
             env=env,
             capture_output=True,
             check=False,

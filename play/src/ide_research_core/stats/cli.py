@@ -54,7 +54,8 @@ from pathlib import Path
 
 from ide_research_core import promotion, runctx
 from ide_research_core.cli import register_group
-from ide_research_core.games.loader import GameError, load_game
+from ide_research_core.games.loader import GameError
+from ide_research_core.games.scope import load_named_game
 from ide_research_core.io.docs import _atomic_write_text
 from ide_research_core.paths import Layout
 from ide_research_core.records.cli import BadArguments, _check_id, _ok, _run
@@ -75,7 +76,6 @@ from ide_research_core.stats.noise import (
 from ide_research_core.stats.opponents import DEFAULT_EPISODES, league_snapshot, sample_lineups
 
 # games/ lives at the distribution root.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAMPION_UNKNOWN = "champion unknown: pass --champion"
 GAME_ENV = "RESEARCH_GAME"
 PLAYER_ENV = "RESEARCH_PLAYER_ID"
@@ -173,7 +173,7 @@ def _ingest(args, store: RecordStore) -> int:
         if not args.game_version or not args.game:
             raise BadArguments("--league needs --game-version and --game")
         try:
-            game = load_game(_REPO_ROOT, args.game)
+            game = load_named_game(args.game)
         except GameError as error:
             raise BadArguments(str(error)) from None
         metrics = [metric.name for metric in game.outcome_metrics]
@@ -221,7 +221,7 @@ def _design(args, store: RecordStore) -> int:
     if not game_name:
         raise BadArguments(f"pass --game or set {GAME_ENV}")
     try:
-        game = load_game(_REPO_ROOT, game_name)
+        game = load_named_game(game_name)
     except GameError as error:
         raise BadArguments(str(error)) from None
     meta, _ = store.load(experiment)
@@ -347,7 +347,7 @@ def _confirmed_champion() -> str | None:
     except KeyError:
         return None
     try:
-        game = load_game(_REPO_ROOT, game_name)
+        game = load_named_game(game_name)
     except GameError as error:
         raise BadArguments(str(error)) from None
     try:

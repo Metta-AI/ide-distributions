@@ -97,6 +97,10 @@ the game, for its league, from ``RESEARCH_GAME``):
   ``--league`` defaults to the game's league. Episodes are evaluated as they arrive (the real
   client fetches 4 at a time); a progress line goes to stderr every 10 episodes, and ``--out``
   is written once, when the read is complete.
+- ``league-results --league L --limit N --dest DIR``: up to N completed episodes of any league,
+  raw: ``DIR/<episode>/results.json`` and ``DIR/<episode>/episode.json`` (seats, seed, game
+  version). No game binding runs, so it works for a league no game folder covers yet (writing
+  a new game's ``evaluate`` binding). Prints ``{league_id, episodes, dest}``. Read-only.
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
@@ -147,7 +151,8 @@ from pydantic import ValidationError
 from ide_research_core import promotion, refs, runctx, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.games.bindings import binding_evaluate
-from ide_research_core.games.loader import GameError, load_game
+from ide_research_core.games.loader import GameError
+from ide_research_core.games.scope import load_named_game
 from ide_research_core.ids import parse_id
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_text
@@ -158,7 +163,7 @@ from ide_research_core.records.store import RecordNotFound, RecordProblems, Reco
 from ide_research_core.softmax_tool import evidence
 from ide_research_core.softmax_tool.discovery import Discovery
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
-from ide_research_core.softmax_tool.league import episode_rows
+from ide_research_core.softmax_tool.league import episode_rows, safe_name
 from ide_research_core.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
 from ide_research_core.softmax_tool.protocol import (
     BACKOFF_BASE,
@@ -178,7 +183,6 @@ from ide_research_core.softmax_tool.xp import ARMS, ArtifactsIncomplete, tag
 from ide_research_core.stats.design import DesignError, EvaluationDesign
 
 EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS, EXIT_TOOL_MISSING = 0, 1, 2, 3
-_REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project root
 GAME_ENV = "RESEARCH_GAME"
 PLAYER_ENV = "RESEARCH_PLAYER_ID"
 IDENTITY_ENV = ("SOFTMAX_PLAYER_CREDENTIAL", PLAYER_ENV)
@@ -325,7 +329,7 @@ def _game():
     name = os.environ.get(GAME_ENV)
     if not name:
         raise BadArguments(f"{GAME_ENV} is not set")
-    return load_game(_REPO_ROOT, name)
+    return load_named_game(name)
 
 
 def _league_id() -> str:
@@ -951,7 +955,7 @@ def _xp_evidence(ctx, sm, args) -> dict:
             root,
             sm,
             {**meta, "id": args.experiment},
-            binding_evaluate(game, _REPO_ROOT),
+            binding_evaluate(game),
             lambda: str(sm.game_version(game.league_id)).strip(),
             runctx.runtime_dir(ctx) / "xp",
             datetime.now(UTC),
@@ -1037,7 +1041,7 @@ def _league_episodes(ctx, sm, args) -> dict:
     game = _game()
     league_id = args.league or game.league_id
     current = str(sm.game_version(league_id)).strip()
-    evaluate = binding_evaluate(game, _REPO_ROOT)
+    evaluate = binding_evaluate(game)
     rows = []
     episodes = 0
     started = time.monotonic()
@@ -1061,13 +1065,27 @@ def _league_episodes(ctx, sm, args) -> dict:
     }
 
 
+def _league_results(ctx, sm, args) -> dict:
+    if args.limit < 1:
+        raise BadArguments("--limit must be positive")
+    dest = Path(args.dest)
+    episodes = 0
+    for episode in sm.league_episodes(args.league, args.limit):
+        folder = dest / safe_name(episode["episode_id"])
+        write_text(folder / "results.json", json.dumps(episode["results"], indent=2, sort_keys=True))
+        detail = {key: value for key, value in episode.items() if key != "results"}
+        write_text(folder / "episode.json", json.dumps(detail, indent=2, sort_keys=True))
+        episodes += 1
+    return {"league_id": args.league, "episodes": episodes, "dest": str(dest)}
+
+
 # --- parser ---
 
 
 def _discovery(ctx, sm, args) -> dict:
     # Discovery reads are explicit per operation. They do not load _game(), change
     # identity, or compare a different league with this workspace's promotion state.
-    discovery = Discovery(os.environ, _REPO_ROOT)
+    discovery = Discovery(os.environ)
     match args.command:
         case "discover-leagues":
             return discovery.discover_leagues(args.query, args.offset, args.limit)
@@ -1185,6 +1203,15 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--league", help="league id (default: the game's league)")
     sub.add_argument("--limit", type=int, required=True, help="most episodes to read")
     sub.add_argument("--out", required=True, help="EpisodeRow JSONL file to write")
+    sub = command(
+        commands,
+        "league-results",
+        _league_results,
+        "raw results of completed league episodes, no game binding (read-only)",
+    )
+    sub.add_argument("--league", required=True, help="league id")
+    sub.add_argument("--limit", type=int, required=True, help="most episodes to read")
+    sub.add_argument("--dest", required=True, help="directory that receives <episode>/ folders")
 
 
 register_group("softmax", setup)

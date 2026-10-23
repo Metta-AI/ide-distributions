@@ -45,6 +45,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ide_research_core.budget import EpisodeBudget
+from ide_research_core.games.scope import budget_path
 from ide_research_core.softmax_tool import xp
 from ide_research_core.softmax_tool.identity import require_player, whoami
 from ide_research_core.softmax_tool.platform_cli import (
@@ -104,7 +105,7 @@ class SoftmaxClient:
         self._expected_player = env.get("RESEARCH_PLAYER_ID", "")
         self._clock = clock
         self._budget = (
-            EpisodeBudget(Path(env["RESEARCH_CANONICAL"]) / "episode-budget.db", int(env["RESEARCH_EPISODE_LIMIT"]))
+            EpisodeBudget(budget_path(env), int(env["RESEARCH_EPISODE_LIMIT"]))
             if "RESEARCH_EPISODE_LIMIT" in env else None
         )
 

@@ -12,7 +12,8 @@ from pathlib import Path
 
 from ide_research_core import promotion, workspace
 from ide_research_core.cli import register_group
-from ide_research_core.games.loader import GameError, load_game
+from ide_research_core.games.loader import GameError
+from ide_research_core.games.scope import load_named_game
 from ide_research_core.io import gitops
 from ide_research_core.records.store import RecordNotFound
 from ide_research_core.softmax_tool.protocol import Refused, from_env
@@ -37,8 +38,7 @@ def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
             clone = Path(args.root) if args.root else workspace.workspace_from_env()
-            game = os.environ.get(workspace.GAME_ENV) or workspace.DEFAULT_GAME
-            league_id = load_game(workspace.DISTRIBUTION_ROOT, game).league_id
+            league_id = load_named_game(os.environ[workspace.GAME_ENV]).league_id
             player_id = os.environ[PLAYER_ENV]
             sm = from_env(os.environ, clone)
             data = handler(args, clone, sm, league_id, player_id)

@@ -14,6 +14,8 @@ from pydantic import ValidationError
 
 from ide_research_core import workspace
 from ide_research_core.cli import register_group
+from ide_research_core.games import scope
+from ide_research_core.games.loader import GameError
 from ide_research_core.io import gitops
 from ide_research_core.io.dotenv import set_env_lines
 from ide_research_core.records.store import RecordProblems
@@ -151,16 +153,26 @@ def _policy_files(args) -> dict:
 
 
 def _bootstrap(args) -> dict:
+    """``--game G`` prepares this profile's clone of another game than ``RESEARCH_GAME``
+    (``games.scope``: ``canonical-G.git`` beside ``RESEARCH_CANONICAL``, ``workspace-G``)."""
     home = Path(os.environ["HERMES_HOME"])
-    clone = _clone(args)
-    bare = Path(os.environ[workspace.CANONICAL_ENV])
-    game = os.environ.get(workspace.GAME_ENV) or workspace.DEFAULT_GAME
-    actions = workspace.bootstrap(clone, bare, game)
+    env = scope.env_for_game(os.environ, args.game)
+    game = env[workspace.GAME_ENV]
+    clone = Path(args.root) if args.root else workspace.workspace_from_env(env)
+    bare = Path(env[workspace.CANONICAL_ENV])
+    try:
+        game_root = scope.locate_game(game, env)
+    except GameError as error:
+        raise workspace.WorkspaceError("setup", str(error)) from None
+    actions = workspace.bootstrap(clone, bare, game, game_root=game_root)
+    # Installed games load their skills from here (researcher skills.external_dirs).
+    scope.installed_games_dir(env).mkdir(parents=True, exist_ok=True)
     shim = workspace.write_cli_shim(home)
     if set_env_lines(home / ".env", {"RESEARCH_CLI": str(shim)}):
         actions.append(f"set RESEARCH_CLI={shim} in {home / '.env'}")
     return {
         "actions": actions,
+        "game": game,
         "workspace": str(clone),
         "canonical": str(bare),
         "cli": str(shim),
@@ -218,11 +230,12 @@ def setup(parser: argparse.ArgumentParser) -> None:
     command(
         "records", _records, "read or update native research records from JSON on stdin"
     )
-    command(
+    sub = command(
         "bootstrap",
         _bootstrap,
-        "create or clone this profile's workspace; write the CLI shim",
+        "create or clone this profile's workspace of a game; write the CLI shim",
     )
+    sub.add_argument("--game", help="a shipped or installed game (default: $RESEARCH_GAME)")
 
 
 register_group("workspace", setup)

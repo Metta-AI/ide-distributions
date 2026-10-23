@@ -34,6 +34,8 @@ def test_config():
     assert {"RESEARCH_CLI", "RESEARCH_WORKSPACE", "RESEARCH_CANONICAL", "RESEARCH_PLAYER_ID",
             "RESEARCH_GAME", "SOFTMAX_PLAYER_CREDENTIAL"} <= passthrough  # fmt: skip
     assert not [name for name in passthrough if name.startswith("AUTORESEARCH_")]
+    # Installed games' skills: <hermes root>/games, relative to this profile's HERMES_HOME.
+    assert config["skills"]["external_dirs"] == ["../../games"]
 
 
 def test_no_cron_jobs():
@@ -130,6 +132,9 @@ def _is_denied(command: str) -> bool:
         ('"$RESEARCH_CLI" softmax xp create E-1', False),
         ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', False),
         ('"$RESEARCH_CLI" workspace integrate', True),
+        ('"$RESEARCH_CLI" game install --name x --worktree w --commit c', True),
+        ('"$RESEARCH_CLI" game new --name x --league l', False),
+        ('"$RESEARCH_CLI" source fetch --repo https://github.com/a/b', False),
         ('git commit -m "avoid coworld submit"', False),
         ("coworld submit pv_1 league_x", True),
         ("cd /tmp && coworld player use ply_1", True),

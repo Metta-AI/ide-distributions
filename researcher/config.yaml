@@ -34,6 +34,7 @@ approvals:
   deny:
     - "*workspace integrate*"
     - "*workspace publish*"
+    - "*game install*"
     - "coworld player use*"
     - "coworld submit*"
     - "coworld upload-policy*"
@@ -84,6 +85,14 @@ timeouts:
 plugins:
   enabled:
     - researcher_guard
+
+# Installed games (`research game install`, run by the orchestrator) live in the host's
+# `<hermes root>/games/`, two levels above this profile; Hermes loads their binding skills
+# (`games/<game>/skills/<binding>/SKILL.md`, named `<game>-<binding>`) from there. The
+# directory must exist when Hermes starts; `scripts/bootstrap.py` creates it.
+skills:
+  external_dirs:
+    - ../../games
 
 # Hermes has no auto-update; this turns off its passive update check.
 updates:

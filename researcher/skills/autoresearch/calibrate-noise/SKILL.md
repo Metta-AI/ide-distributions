@@ -41,7 +41,9 @@ Doctrine upheld: D-04, D-09.
    (when there are no XP rows, use `.scratch/league-rows.jsonl` alone). Rows of other game
    versions are dropped in the next step. Local runs never count (D-04).
 5. Ingest them as league rows:
-   `"$RESEARCH_CLI" stats ingest --league <league_id> --rows .scratch/noise-rows.jsonl --game-version <game_version> --game "$RESEARCH_GAME"`
+   `"$RESEARCH_CLI" stats ingest --league <league_id> --rows .scratch/noise-rows.jsonl --game-version <game_version> --game <game>`
+   (`<game>` is `data.name` of `"$RESEARCH_CLI" game show`: the card's game, which the shell's
+   `RESEARCH_GAME` is not when the card is on another game than the host's default)
    Read `data.report.kept`. With fewer than 10 rows per metric the record is weak; fetch
    more episodes (`--limit 400` at most: each episode costs two platform calls) or say so
    in the journal.

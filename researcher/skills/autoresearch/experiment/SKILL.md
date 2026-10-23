@@ -65,7 +65,7 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    Also write the prediction if the hypothesis is true and if it is false. They must differ.
 8. Create the experiment, still without its evaluation design:
    `"$RESEARCH_CLI" records new experiment --meta-file .scratch/experiment.json --body-file .scratch/experiment.md --slug <slug>`
-   with `{"hypothesis": "<H-id>", "mode": "experimentation", "lever": …, "baseline": "<champion>", "change": {"components": […], "description": …}, "environment": {"game_id": "<$RESEARCH_GAME>", "game_version": "<data.game_version of step 6>"}, "status": "designed", "xp_requests": [], "results": [], "lifecycle": {"launch_attempts": 0}}`.
+   with `{"hypothesis": "<H-id>", "mode": "experimentation", "lever": …, "baseline": "<champion>", "change": {"components": […], "description": …}, "environment": {"game_id": "<data.name of game show>", "game_version": "<data.game_version of step 6>"}, "status": "designed", "xp_requests": [], "results": [], "lifecycle": {"launch_attempts": 0}}`.
 9. Freeze the evaluation design from the noise record (D-09). Write the request to
    `.scratch/design-request.json`:
    `{"baseline_version": "<champion of step 3>", "seats": [<our seat slots>], "opponent_count": <opponents per episode>, "seeds": [<unique integers, one candidate/baseline pair each>], "primary_metrics": [{"name", "direction", "min_effect"}], "guardrails": [{"name", "direction", "tolerance"}]}`

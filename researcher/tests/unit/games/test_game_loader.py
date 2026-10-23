@@ -28,22 +28,25 @@ def _copy_fake(tmp_path, mutate):
 
 
 def test_template_has_every_field():
-    meta, body = read_doc(REPO_ROOT / "games" / "_template" / "GAME.md")
+    """The scaffold ``GAME.md`` has every field; ``CONTRACT.md`` explains each one."""
+    meta, _ = read_doc(REPO_ROOT / "games" / "_template" / "GAME.md")
+    contract = (REPO_ROOT / "games" / "_template" / "CONTRACT.md").read_text(encoding="utf-8")
     for field in REQUIRED_FIELDS:
         assert field in meta, field
     assert set(meta["bindings"]) == set(BINDING_NAMES)
     for field in REQUIRED_FIELDS:
-        assert field in body, f"body should explain {field}"
+        assert f"`{field}`" in contract, f"CONTRACT.md should explain {field}"
 
 
 def test_starter_policy_section_is_required_and_present():
     """Every game ships a starter policy, the first champion when the league shows none for
     our player (A14); a bootstrap card follows its ``## Starter policy``."""
-    _, template = read_doc(REPO_ROOT / "games" / "_template" / "GAME.md")
+    contract = (REPO_ROOT / "games" / "_template" / "CONTRACT.md").read_text(encoding="utf-8")
+    _, scaffold = read_doc(REPO_ROOT / "games" / "_template" / "GAME.md")
     _, fakegame = read_doc(REPO_ROOT / "games" / "fakegame" / "GAME.md")
-    assert "`## Starter policy` section" in template
-    assert "\n## Starter policy\n" in fakegame
-    assert "Baseline build" not in template + fakegame
+    assert "`## Starter policy` section" in contract
+    assert "\n## Starter policy\n" in fakegame and "\n## Starter policy\n" in scaffold
+    assert "Baseline build" not in contract + fakegame
 
 
 def test_fakegame_loads():

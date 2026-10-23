@@ -30,7 +30,7 @@ def episode_rows(
     episode: dict, evaluate: Evaluate, workdir: Path, fallback_version: str
 ) -> list[EpisodeRow]:
     episode_id = episode["episode_id"]
-    results_path = Path(workdir) / _safe_name(episode_id) / "results.json"
+    results_path = Path(workdir) / safe_name(episode_id) / "results.json"
     results_path.parent.mkdir(parents=True, exist_ok=True)
     results_path.write_text(json.dumps(episode["results"], sort_keys=True), encoding="utf-8")
     seats = {seat["position"]: seat for seat in episode["seats"]}
@@ -76,5 +76,5 @@ def episode_rows(
     return rows
 
 
-def _safe_name(episode_id: str) -> str:
+def safe_name(episode_id: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in episode_id)

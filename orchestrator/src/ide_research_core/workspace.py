@@ -1,10 +1,11 @@
 """The canonical workspace and the one way research reaches it.
 
-Every profile on a host (the orchestrator and each ``researcher-<i>``) works on one game
-through one bare git repository, ``RESEARCH_CANONICAL`` (``<root>/canonical-<game>.git``).
-Each profile has its own clone, ``RESEARCH_WORKSPACE``, whose ``main`` is checked out and
+Every profile on a host (the orchestrator and each ``researcher-<i>``) works on a game
+through that game's bare git repository, ``RESEARCH_CANONICAL`` (``<root>/canonical-<game>.git``).
+Each profile has its own clone of it, ``RESEARCH_WORKSPACE``, whose ``main`` is checked out and
 never edited by hand; a researcher works each card in a Hermes worktree of that clone on a
-branch ``card/<id>``.
+branch ``card/<id>``. A host researches several games: ``games.scope`` points these variables
+at one game (``canonical-<game>.git`` beside the default game's, a ``workspace-<game>`` clone).
 
 ``integrate`` is the deterministic last step of every card: it commits the worktree, pushes
 the card branch first (so recovery is branch-based whatever happens next), validates the
@@ -45,7 +46,6 @@ from ide_research_core.source_io import write_file
 WORKSPACE_ENV = "RESEARCH_WORKSPACE"
 CANONICAL_ENV = "RESEARCH_CANONICAL"
 GAME_ENV = "RESEARCH_GAME"
-DEFAULT_GAME = "gota"
 REMOTE = "origin"
 MAIN = "main"
 LOCK_NAME = "canonical.lock"
@@ -444,8 +444,8 @@ def agents_md(root: Path) -> str | None:
     return header + "\n".join(parts)
 
 
-def _seed(clone: Path, game: str, root: Path) -> None:
-    seed = root / "games" / game / "seed"
+def _seed(clone: Path, game: str, root: Path, game_root: Path) -> None:
+    seed = game_root / "games" / game / "seed"
     if not seed.is_dir():
         raise WorkspaceError("setup", f"no seed for game {game!r} at {seed}")
     shutil.copytree(seed, clone, dirs_exist_ok=True)
@@ -479,12 +479,18 @@ def _reseed_agents_md(clone: Path, root: Path) -> bool:
 
 
 def bootstrap(
-    clone: Path, bare: Path, game: str = DEFAULT_GAME, root: Path = DISTRIBUTION_ROOT
+    clone: Path,
+    bare: Path,
+    game: str,
+    root: Path = DISTRIBUTION_ROOT,
+    game_root: Path | None = None,
 ) -> list[str]:
     """Make ``bare`` and this profile's ``clone`` exist and agree; return what was done.
 
     Idempotent. The first profile on a host creates the bare repository and seeds it from
-    ``games/<game>/seed``; every later profile clones it."""
+    ``<game_root>/games/<game>/seed`` (``game_root`` defaults to ``root``; an installed game's
+    folder is on the host, ``games.scope``); every later profile clones it. ``root`` supplies
+    the doctrine for ``AGENTS.md``."""
     actions = []
     if not (bare / "HEAD").exists():
         bare.mkdir(parents=True, exist_ok=True)
@@ -501,7 +507,7 @@ def bootstrap(
                 gitops.git(clone, "checkout", "-q", "-B", MAIN, f"{REMOTE}/{MAIN}")
                 actions.append(f"cloned {bare}")
             else:
-                _seed(clone, game, root)
+                _seed(clone, game, root, game_root or root)
                 gitops.git(clone, "push", "-q", REMOTE, f"{MAIN}:{MAIN}")
                 actions.append(f"seeded {bare} from games/{game}/seed")
         gitops.git(clone, "branch", "-q", f"--set-upstream-to={REMOTE}/{MAIN}", MAIN)
