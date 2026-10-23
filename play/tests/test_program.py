@@ -364,9 +364,11 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
     submitted = upload[upload.index("--name") + 1]
 
     def membership(row_id, name, version, owner=PLAYER):
+        # The platform's shape: the name only under `policy`, the label `<name>:v<N>`.
         policy = {
+            "id": f"pv_{row_id}",
             "label": f"{name}:v{version}",
-            "name": name,
+            "policy": {"id": f"p_{name}", "name": name},
             "version": version,
             "player_id": owner,
         }

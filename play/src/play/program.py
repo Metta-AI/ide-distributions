@@ -933,11 +933,21 @@ class Program:
         return {**out, "outcome": "released", "already": False, **self._replaced(label, league)}
 
     def _replaced(self, label: str, league: str) -> dict:
-        """``{"replaced": ["towerless v1"]}`` for the programs just retired from the league, in
-        the user's names; empty when this release replaced nothing."""
-        retired = self.client.retire_other_memberships(league, label)
-        names = [f"{self.display_name(v['name'])} v{v['version']}" for v in retired]
-        return {"replaced": names} if names else {}
+        """``{"replaced": ["towerless v1"]}`` for the programs just retired from the league, and
+        ``replace_failed`` for any the platform would not retire, in the user's names; empty
+        when this release replaced nothing."""
+        retired, refused = self.client.retire_other_memberships(league, label)
+
+        def spoken(other: str) -> str:
+            name, _, version = other.rpartition(":v")
+            return f"{self.display_name(name)} v{version}"
+
+        out: dict = {}
+        if retired:
+            out["replaced"] = [spoken(x) for x in retired]
+        if refused:
+            out["replace_failed"] = [spoken(x) for x in refused]
+        return out
 
     # --- the task card --------------------------------------------------
 

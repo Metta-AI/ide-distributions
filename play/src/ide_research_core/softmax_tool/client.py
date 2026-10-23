@@ -258,16 +258,19 @@ class SoftmaxClient:
             raise SoftmaxCliError(f"submit printed no 'Submission:' line for {policy_version_id}")
         return submission_id
 
-    def retire_other_memberships(self, league_id: str, keep_policy_version_id: str) -> list[dict]:
+    def retire_other_memberships(
+        self, league_id: str, keep_policy_version_id: str
+    ) -> tuple[list[str], list[str]]:
         """One program per league: retire this player's other active memberships there
         (``coworld memberships --league L --player P --active-only --json``, then
         ``coworld retire-membership <id>``). Only rows whose policy version belongs to the
-        expected player are retired; returns their ``policy_version`` dicts (``name``,
-        ``version``), none when there was nothing else to retire."""
+        expected player are retired. Returns the ``<name>:v<N>`` labels retired, and those the
+        platform would not retire (said, not raised: the release itself stands)."""
         self._require_player()
         args = ["memberships", "--league", league_id, "--player", self._expected_player]
         rows = self._cli.run_json_pages("coworld", [*args, "--active-only"])
-        retired = []
+        retired: list[str] = []
+        refused: list[str] = []
         for row in rows:
             version = row["policy_version"]
             if version["player_id"] != self._expected_player:
@@ -275,9 +278,13 @@ class SoftmaxClient:
             if version["label"] == keep_policy_version_id:
                 continue
             reason = f"replaced by {keep_policy_version_id}"
-            self._cli.run("coworld", ["retire-membership", row["id"], "--reason", reason])
-            retired.append(version)
-        return retired
+            try:
+                self._cli.run("coworld", ["retire-membership", row["id"], "--reason", reason])
+            except SoftmaxCliError:
+                refused.append(version["label"])
+                continue
+            retired.append(version["label"])
+        return retired, refused
 
     def submissions(self, player_id: str) -> list[dict]:
         """``coworld submissions --player P --json`` rows (``LeagueSubmissionPublic``), each
