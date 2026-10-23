@@ -360,8 +360,32 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
     ):
         envelope = run("program_release", arguments, program)
         assert envelope["error"]["reason"] == "bad_arguments"
+    upload = next(c for c in cli.calls if c[1] == "upload-policy")
+    submitted = upload[upload.index("--name") + 1]
+
+    def membership(row_id, name, version, owner=PLAYER):
+        policy = {
+            "label": f"{name}:v{version}",
+            "name": name,
+            "version": version,
+            "player_id": owner,
+        }
+        return {"id": row_id, "status": "competing", "policy_version": policy}
+
+    cli.memberships = [
+        membership("m_old", submitted, 0),
+        membership("m_other", "rival", 1, owner="ply_someone_else"),
+        membership("m_new", submitted, 1),
+    ]
     data = program.program_release("towerless v1", True)
-    assert data == {"program": "towerless v1", "outcome": "released", "already": False}
+    assert data == {
+        "program": "towerless v1",
+        "outcome": "released",
+        "already": False,
+        "replaced": ["towerless v0"],
+    }
+    assert cli.retired == ["m_old"]  # not another player's, not the new version
+    cli.memberships = [cli.memberships[2]]
     cli.submissions = [
         {
             "id": "sub_1",

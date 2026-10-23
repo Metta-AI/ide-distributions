@@ -898,7 +898,8 @@ class Program:
 
     def program_release(self, program: str, user_said_yes: bool) -> dict:
         """``coworld submit <name>:v<N> --league L --player P``, once: an existing submission of
-        the same version to the league is reported as released."""
+        the same version to the league is reported as released. Either way the cogent's other
+        programs in that league are retired: one program per league, a release replaces."""
         if user_said_yes is not True:
             raise PlayError("bad_arguments", "release only after the user said yes to this version")
         if self._split(program)[1] is None:
@@ -915,7 +916,7 @@ class Program:
             if row["policy_version_id"] == label and row["league_id"] == league
         ]
         if found:
-            return {**out, "outcome": "released", "already": True}
+            return {**out, "outcome": "released", "already": True, **self._replaced(label, league)}
         try:
             result = self.client.submit(label, league)
         except SoftmaxCliError as error:
@@ -929,7 +930,14 @@ class Program:
         entry = entry or self._remember(journal, ref)
         entry.release = Release(league_id=league, submission_id=result, released_at=now())
         journal.save(self.workspace)
-        return {**out, "outcome": "released", "already": False}
+        return {**out, "outcome": "released", "already": False, **self._replaced(label, league)}
+
+    def _replaced(self, label: str, league: str) -> dict:
+        """``{"replaced": ["towerless v1"]}`` for the programs just retired from the league, in
+        the user's names; empty when this release replaced nothing."""
+        retired = self.client.retire_other_memberships(league, label)
+        names = [f"{self.display_name(v['name'])} v{v['version']}" for v in retired]
+        return {"replaced": names} if names else {}
 
     # --- the task card --------------------------------------------------
 

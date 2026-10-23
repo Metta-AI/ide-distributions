@@ -484,6 +484,10 @@ class FakeSoftmax:
 
         return self._operate("submit", action)
 
+    def retire_other_memberships(self, league_id: str, keep_policy_version_id: str) -> list[dict]:
+        # The fake backend admits every submission as its own membership and never retires one.
+        return []
+
     def submissions(self, player_id: str) -> list[dict]:
         def action(state: dict) -> list[dict]:
             return [s for s in state["submissions"] if s["player_id"] == player_id]

@@ -149,7 +149,8 @@ The steps:
 6. **Release** (`step: "release"`). Ask the user plainly, naming the version: "Release
    towerless v2?" Call `program_release` with `program: "towerless v2"` and `user_said_yes: true` only after
    the user said yes to that version in this conversation. Wanting a better program is not a yes;
-   a yes for an earlier version is not a yes for a new one. If they say no or not yet, mark the
+   a yes for an earlier version is not a yes for a new one. A release replaces the version
+   already playing in that league; when the result has `replaced`, tell the user which program. If they say no or not yet, mark the
    step `skipped` and finish the card.
 
 `program_versions` lists all the user's programs and their versions, with what each version of the
