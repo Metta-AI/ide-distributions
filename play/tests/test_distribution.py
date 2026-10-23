@@ -87,7 +87,14 @@ def test_play_lead_does_the_whole_loop_itself_in_plain_words():
         assert needle in soul, needle
     steps = [
         soul.index(name)
-        for name in ("program_show", "program_change", "program_upload", "practice_request", "practice_status", "program_release")
+        for name in (
+            "program_show",
+            "program_change",
+            "program_upload",
+            "practice_request",
+            "practice_status",
+            "program_release",
+        )
     ]
     assert steps == sorted(steps)
     # No hand-off to another profile, and no internal words toward the user.

@@ -156,7 +156,7 @@ You write the program yourself, so know the language:
 - The game runs the whole file from the top once per hero decision, 24 times a second; globals
   persist, so write no endless loop. The limits are 64 KiB of source, 20,000 compiled and 20,000
   executed instructions per decision, a work budget of 50,000 units per decision (`walkTo` costs
-  800, so about 60 calls), 256 globals, 64 routines (the top level counts as one) and 32 arrays holding 4,096 elements in total. A file that
+  800, so about 60 calls), 256 globals (512 in structures mode), 64 routines (the top level counts as one) and 32 arrays holding 4,096 elements in total. A file that
   does not compile fails every practice game; a runtime error or an exhausted budget disables
   that hero for the rest of the game.
 - Spell every host call exactly as the starter does. `program_change` and `program_edit` check the size, the

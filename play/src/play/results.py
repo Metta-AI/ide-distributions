@@ -37,7 +37,9 @@ def team(seat: int) -> str:
     return "Red" if seat < 5 else "Blue"
 
 
-def game_summary(number: int, seats: list[int], results: GameResults, watch_url: str | None) -> dict:
+def game_summary(
+    number: int, seats: list[int], results: GameResults, watch_url: str | None
+) -> dict:
     ours = {team(seat) for seat in seats}
     minutes = round(results.ticks / TICKS_PER_SECOND / 60, 1)
     winner = TEAMS.get(results.outcome)
@@ -76,7 +78,10 @@ def failed_game(number: int, why: str, watch_url: str | None) -> dict:
 def summarize(display: str, games: list[dict], previous: tuple[str, dict] | None) -> dict:
     """The practice's totals and a sentence the cogent can say as it is."""
     played = [g for g in games if g["result"] != "failed"]
-    count = {key: sum(g["result"] == key for g in games) for key in ("won", "lost", "no winner", "draw", "failed")}
+    count = {
+        key: sum(g["result"] == key for g in games)
+        for key in ("won", "lost", "no winner", "draw", "failed")
+    }
     summary = {
         "program": display,
         "games": len(games),
@@ -86,15 +91,28 @@ def summarize(display: str, games: list[dict], previous: tuple[str, dict] | None
         "average_minutes": _average(g["minutes"] for g in played),
     }
     parts = [f"{display} played {len(games)} practice game{'s' * (len(games) != 1)}"]
-    tally = [f"{label} {count[key]}" for key, label in (
-        ("won", "won"), ("lost", "lost"), ("no winner", "ran out of time"), ("draw", "drew"), ("failed", "failed to run")
-    ) if count[key]]
+    tally = [
+        f"{label} {count[key]}"
+        for key, label in (
+            ("won", "won"),
+            ("lost", "lost"),
+            ("no winner", "ran out of time"),
+            ("draw", "drew"),
+            ("failed", "failed to run"),
+        )
+        if count[key]
+    ]
     parts[0] += ": " + ", ".join(tally) + "." if tally else "."
     if played:
-        parts.append(f"Your hero averaged {summary['average_xp']:,} XP and {summary['average_glory']:g} glory.")
+        parts.append(
+            f"Your hero averaged {summary['average_xp']:,} XP and {summary['average_glory']:g} glory."
+        )
     if previous is not None:
         before, numbers = previous
-        summary["previous"] = {"program": before, **{k: numbers[k] for k in ("games", "won", "average_xp", "average_glory")}}
+        summary["previous"] = {
+            "program": before,
+            **{k: numbers[k] for k in ("games", "won", "average_xp", "average_glory")},
+        }
         parts.append(
             f"Last practice of {before}: won {numbers['won']} of {numbers['games']}, "
             f"{numbers['average_xp']:,} XP and {numbers['average_glory']:g} glory on average."

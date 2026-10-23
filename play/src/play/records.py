@@ -21,7 +21,9 @@ USER_AGENT = "softmax-play"
 Request = Callable[[str, str, dict[str, str], bytes | None], tuple[int, bytes]]
 
 
-def urllib_request(method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, bytes]:
+def urllib_request(
+    method: str, url: str, headers: dict[str, str], body: bytes | None
+) -> tuple[int, bytes]:
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
@@ -36,9 +38,15 @@ class CogentRecords:
         self._token = token
         self._request = request
 
-    def _call(self, method: str, collection: str, key: str, payload: dict | None = None) -> tuple[int, bytes]:
+    def _call(
+        self, method: str, collection: str, key: str, payload: dict | None = None
+    ) -> tuple[int, bytes]:
         url = f"{self._root}/{collection}/{urllib.parse.quote(key, safe='')}"
-        headers = {"Authorization": f"Bearer {self._token}", "User-Agent": USER_AGENT, "Accept": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        }
         body = None
         if payload is not None:
             headers["Content-Type"] = "application/json"
@@ -51,11 +59,17 @@ class CogentRecords:
         if status == 404:
             return None
         if status != 200:
-            raise SoftmaxCliError(f"GET c/{collection}/{key} answered HTTP {status}: {body[:300]!r}")
+            raise SoftmaxCliError(
+                f"GET c/{collection}/{key} answered HTTP {status}: {body[:300]!r}"
+            )
         return json.loads(body)
 
-    def put(self, collection: str, key: str, body: dict, base_rev: int | None, idempotency_key: str) -> None:
+    def put(
+        self, collection: str, key: str, body: dict, base_rev: int | None, idempotency_key: str
+    ) -> None:
         payload = {"body": body, "base_rev": base_rev, "idempotency_key": idempotency_key}
         status, response = self._call("PUT", collection, key, payload)
         if status not in (200, 201):
-            raise SoftmaxCliError(f"PUT c/{collection}/{key} answered HTTP {status}: {response[:500]!r}")
+            raise SoftmaxCliError(
+                f"PUT c/{collection}/{key} answered HTTP {status}: {response[:500]!r}"
+            )

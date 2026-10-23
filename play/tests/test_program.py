@@ -142,7 +142,9 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         "games": 5,
         "seats": [0],
     }
-    body = json.loads(cli.inputs[cli.calls.index(["coworld", "xp-request", "create", "-", "--json"])])
+    body = json.loads(
+        cli.inputs[cli.calls.index(["coworld", "xp-request", "create", "-", "--json"])]
+    )
     assert body == {
         "target": {"league_id": GOTA.league_id},
         "roster": [
@@ -167,7 +169,10 @@ def test_bare_names_resolve_inside_the_tool(program, cli, named):
 def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(program, cli):
     """An earlier Play appended the whole player id; the page and the user say "towerless v1"."""
     legacy = f"towerless-{PLAYER}"
-    cli.policies += [{"name": legacy, "version": 1}, {"name": f"tower-retreat-{SHORT}", "version": 1}]
+    cli.policies += [
+        {"name": legacy, "version": 1},
+        {"name": f"tower-retreat-{SHORT}", "version": 1},
+    ]
     assert program.practice_request("towerless v1")["program"] == "towerless v1"
     assert json.loads(cli.inputs[-1])["roster"][0]["player"] == {"policy_ref": f"{legacy}:v1"}
     assert program.practice_request("tower-retreat")["program"] == "tower-retreat v1"
@@ -179,8 +184,16 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
     assert f"mine=true&limit=200&player_id={PLAYER}&name_exact=towerless&version=1" in cli.api_reads
     data = program.program_release("towerless v1", True)
     assert data == {"program": "towerless v1", "outcome": "released", "already": False}
-    assert ["coworld", "submit", f"{legacy}:v1", "--league", GOTA.league_id, "--player", PLAYER,
-            "--no-open-browser"] in cli.calls
+    assert [
+        "coworld",
+        "submit",
+        f"{legacy}:v1",
+        "--league",
+        GOTA.league_id,
+        "--player",
+        PLAYER,
+        "--no-open-browser",
+    ] in cli.calls
     with pytest.raises(PlayError) as error:
         program.practice_request("towerless v7")
     assert error.value.reason == "unknown_version"
@@ -229,13 +242,25 @@ def test_practice_refusals_are_typed_and_never_retried(program, cli, stderr, exp
 
 
 def test_practice_uses_the_league_the_coach_chose(program, cli, records):
-    records.records[("state", "league")] = {"key": "league", "rev": 1, "body": {"leagueId": CHOSEN, "at": "x"}}
+    records.records[("state", "league")] = {
+        "key": "league",
+        "rev": 1,
+        "body": {"leagueId": CHOSEN, "at": "x"},
+    }
     first_version(program)
     program.practice_request()
     assert json.loads(cli.inputs[-1])["target"] == {"league_id": CHOSEN}
     program.program_release("towerless v1", True)
-    assert ["coworld", "submit", "towerless:v1", "--league", CHOSEN, "--player", PLAYER,
-            "--no-open-browser"] in cli.calls
+    assert [
+        "coworld",
+        "submit",
+        "towerless:v1",
+        "--league",
+        CHOSEN,
+        "--player",
+        PLAYER,
+        "--no-open-browser",
+    ] in cli.calls
 
 
 def test_practice_status_reports_every_game_in_plain_words(program, cli, env):
@@ -321,7 +346,10 @@ def test_practice_status_treats_not_produced_as_terminal(program, cli):
 
 def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, cli, env):
     first_version(program)
-    for arguments in ({"program": "towerless v1", "user_said_yes": False}, {"program": "towerless", "user_said_yes": True}):
+    for arguments in (
+        {"program": "towerless v1", "user_said_yes": False},
+        {"program": "towerless", "user_said_yes": True},
+    ):
         envelope = run("program_release", arguments, program)
         assert envelope["error"]["reason"] == "bad_arguments"
     data = program.program_release("towerless v1", True)
@@ -364,25 +392,53 @@ def test_one_task_card_per_request_in_the_records_the_mind_reads(program, record
     with pytest.raises(PlayError) as error:
         program.task_update("change", "running", "Editing")
     assert error.value.reason == "no_card"
-    program.task_update("understand", "done", "You want your hero to stay away from enemy towers.",
-                        title="Run under enemy towers less")
+    program.task_update(
+        "understand",
+        "done",
+        "You want your hero to stay away from enemy towers.",
+        title="Run under enemy towers less",
+    )
     program.task_update("change", "running", "Changing when the hero retreats")
     data = program.task_update("upload", "done", "Saved as towerless v2", version=2)
-    assert data == {"card": "Run under enemy towers less", "step": "Save it as a new version",
-                    "status": "done", "finished": False}
-    (key, card), = [(k, v) for (c, k), v in records.records.items() if c == "tasks"]
+    assert data == {
+        "card": "Run under enemy towers less",
+        "step": "Save it as a new version",
+        "status": "done",
+        "finished": False,
+    }
+    ((key, card),) = [(k, v) for (c, k), v in records.records.items() if c == "tasks"]
     assert key.startswith("play-") and card["rev"] == 3
     body = card["body"]
     assert body["origin"] == "player"  # the bridge forwards only coach tasks
     assert body["state"] == "active" and body["version"] == 2
-    assert [s["rung"] for s in body["steps"]] == ["reflect", "implement", "compile", "tryout", "screen", "submit"]
-    assert [s["status"] for s in body["steps"]] == ["ok", "running", "ok", "pending", "pending", "pending"]
+    assert [s["rung"] for s in body["steps"]] == [
+        "reflect",
+        "implement",
+        "compile",
+        "tryout",
+        "screen",
+        "submit",
+    ]
+    assert [s["status"] for s in body["steps"]] == [
+        "ok",
+        "running",
+        "ok",
+        "pending",
+        "pending",
+        "pending",
+    ]
     assert [p["base_rev"] for p in records.puts] == [None, 1, 2]
     assert len({p["idempotency_key"] for p in records.puts}) == 3
 
-    program.task_update("release", "skipped", "You chose not to release yet", outcome="towerless v2 won 3 of 5")
+    program.task_update(
+        "release", "skipped", "You chose not to release yet", outcome="towerless v2 won 3 of 5"
+    )
     body = records.records[("tasks", key)]["body"]
-    assert (body["state"], body["status"], body["outcome"]) == ("done", "kept", "towerless v2 won 3 of 5")
+    assert (body["state"], body["status"], body["outcome"]) == (
+        "done",
+        "kept",
+        "towerless v2 won 3 of 5",
+    )
 
     program.task_update("understand", "done", "Practice again", title="Practice towerless v2")
     program.task_update("understand", "done", "Something else", title="Release towerless v2")
@@ -420,11 +476,14 @@ def test_a_name_another_player_of_the_user_owns_counts_as_taken(program, cli):
 def test_small_edits_apply_once_and_go_through_the_same_check(program, env):
     program.starter_fetch()
     data = program.program_edit(
-        [{"find": "self.abilityPoints = 0 then", "replace": "self.abilityPoints = 1 then"}], "spend points sooner"
+        [{"find": "self.abilityPoints = 0 then", "replace": "self.abilityPoints = 1 then"}],
+        "spend points sooner",
     )
     assert (workspace(env) / "program.bas").read_text() == CHANGED
     assert data["lines_added"] == data["lines_removed"] == 1
-    again = program.program_edit([{"find": "= 1 then\n      exit sub", "replace": "= 2 then\n      exit sub"}], "again")
+    again = program.program_edit(
+        [{"find": "= 1 then\n      exit sub", "replace": "= 2 then\n      exit sub"}], "again"
+    )
     assert "= 2 then" in (workspace(env) / "program.bas").read_text() and again["warnings"] == []
 
 
@@ -449,6 +508,8 @@ def test_a_bad_edit_writes_nothing(program, env, edits, reason):
 def test_an_edit_that_breaks_the_program_is_refused_by_the_check(program, env):
     program.starter_fetch()
     with pytest.raises(PlayError) as error:
-        program.program_edit([{"find": "if bestClass >= 0 then", "replace": "if bestClass >= 0"}], "drop an end if")
+        program.program_edit(
+            [{"find": "if bestClass >= 0 then", "replace": "if bestClass >= 0"}], "drop an end if"
+        )
     assert error.value.reason == "program_invalid"
     assert not (workspace(env) / "program.bas").exists()

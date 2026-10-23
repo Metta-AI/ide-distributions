@@ -6,7 +6,7 @@ requires it): case-insensitive words, ``'`` and ``REM`` comments, ``:`` as a lin
 continuation, labels and ``GOTO`` / ``GOSUB`` / ``ON``, single-line and block ``IF`` with ``ELSEIF``
 and ``ELSE``, ``WHILE`` / ``WEND``, ``FOR`` / ``TO`` / ``STEP`` / ``NEXT``, ``DO`` / ``LOOP``,
 ``SELECT CASE``, ``EXIT SUB`` / ``FOR`` / ``DO``, top-level ``SUB`` / ``END SUB`` and top-level ``DIM``
-arrays with literal bounds. It also counts what it can cheaply: the 64 routines and the 256 globals
+arrays with literal bounds. It also counts what it can cheaply: the 64 routines and the 256 globals (512 in structures mode)
 (only variables assigned to, so a floor, never an overcount). It checks the limits the builder's GotA reference states: 64 KiB of source, 32 arrays and
 4,096 array elements in total. A program that opts into GotA's structures (a ``' @gota-structures``
 comment; researcher/games/gota/gates/limits.py) gets the host's storage, so only its size and
@@ -27,15 +27,59 @@ MAX_ARRAYS = 32
 MAX_ARRAY_CELLS = 4096
 MAX_ROUTINES = 64  # including the top-level routine
 MAX_GLOBALS = 256
+MAX_STRUCTURED_GLOBALS = 512  # structures.nim limits: 512 globals, 128 arrays, 262144 cells
+MAX_STRUCTURED_ARRAYS = 128
+MAX_STRUCTURED_ARRAY_CELLS = 262144
 MAX_PARAMETERS = 16
-TOKEN = re.compile(r'\s*(?:(?P<word>[A-Za-z_]\w*\$?)|(?P<int>\d+)|(?P<string>"(?:[^"]|"")*")|(?P<op><=|>=|<>|[()+\-*/\\^.=<>,;]))')
+TOKEN = re.compile(
+    r'\s*(?:(?P<word>[A-Za-z_]\w*\$?)|(?P<int>\d+)|(?P<string>"(?:[^"]|"")*")|(?P<op><=|>=|<>|[()+\-*/\\^.=<>,;]))'
+)
 # Statement words the compiler starts a statement with; the rest are assignments or calls.
 STATEMENTS = {
-    "dim", "if", "elseif", "else", "end", "while", "wend", "sub", "exit", "return", "print", "stop",
-    "call", "let", "for", "next", "do", "loop", "select", "case", "goto", "gosub", "on", "data", "type",
+    "dim",
+    "if",
+    "elseif",
+    "else",
+    "end",
+    "while",
+    "wend",
+    "sub",
+    "exit",
+    "return",
+    "print",
+    "stop",
+    "call",
+    "let",
+    "for",
+    "next",
+    "do",
+    "loop",
+    "select",
+    "case",
+    "goto",
+    "gosub",
+    "on",
+    "data",
+    "type",
 }
 # Words that cannot start a statement.
-OPERATORS = {"and", "or", "xor", "not", "mod", "true", "false", "then", "to", "step", "until", "is", "eqv", "imp", "as"}
+OPERATORS = {
+    "and",
+    "or",
+    "xor",
+    "not",
+    "mod",
+    "true",
+    "false",
+    "then",
+    "to",
+    "step",
+    "until",
+    "is",
+    "eqv",
+    "imp",
+    "as",
+}
 # Words that cannot start a statement unless they are a variable or a SUB call (``input = 1``).
 NOT_GOTA = {
     "function": "GotA BASIC has no functions that return a value; use a SUB that sets a global",
@@ -43,8 +87,15 @@ NOT_GOTA = {
     "input": "GotA BASIC has no INPUT or file access",
     "open": "GotA BASIC has no file access",
 }
-CLOSERS = {"if": "END IF", "while": "WEND", "sub": "END SUB", "type": "END TYPE", "for": "NEXT",
-           "do": "LOOP", "select": "END SELECT"}
+CLOSERS = {
+    "if": "END IF",
+    "while": "WEND",
+    "sub": "END SUB",
+    "type": "END TYPE",
+    "for": "NEXT",
+    "do": "LOOP",
+    "select": "END SELECT",
+}
 
 
 @dataclass(frozen=True)
@@ -99,11 +150,17 @@ def _statements(text: str):
         yield number, carry, False
 
 
+def _structured(text: str) -> bool:
+    """The compiler honours the marker only as a comment on the very first line."""
+    first = text.split("\n", 1)[0]
+    return re.match(r"'\s*" + re.escape(STRUCTURES), first) is not None
+
+
 def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Problem]]:
     """(problems, warnings). A program with problems would not compile; warnings are names the
     starter never uses (a likely misspelled host call), checked only when a starter is given."""
     problems: list[Problem] = []
-    structured = STRUCTURES in text
+    structured = _structured(text)
     limit = MAX_STRUCTURED_SOURCE_BYTES if structured else MAX_SOURCE_BYTES
     size = len(text.encode("utf-8"))
     if size > limit:
@@ -123,9 +180,19 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
         bad = next((value for kind, value in tokens if kind == "bad"), None)
         first, second = tokens[0][1], tokens[1] if len(tokens) > 1 else None
         if bad is not None:
-            problems.append(Problem(line, f"'{bad}' is not a character GotA BASIC understands "
-                                          "(or a string is missing its closing quote)"))
-        elif len(tokens) == 1 and tokens[0][0] == "word" and colon and first not in STATEMENTS | OPERATORS:
+            problems.append(
+                Problem(
+                    line,
+                    f"'{bad}' is not a character GotA BASIC understands "
+                    "(or a string is missing its closing quote)",
+                )
+            )
+        elif (
+            len(tokens) == 1
+            and tokens[0][0] == "word"
+            and colon
+            and first not in STATEMENTS | OPERATORS
+        ):
             continue  # ``name:`` is a label
         elif first in NOT_GOTA and second not in (("op", "="), ("op", "(")):
             problems.append(Problem(line, NOT_GOTA[first]))
@@ -133,38 +200,70 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
             for position, (kind, value) in enumerate(tokens[:-1]):
                 if kind == "word" and tokens[position + 1] == ("op", "("):
                     called.setdefault(value, line)
-            if first == "if" and "then" in [v for _, v in tokens] and _body(tokens)[-1][1] != "then":
-                inline_line = line
-            problems += _statement(line, tokens, blocks, arrays, defined, inline_line == line)
+            if (
+                first == "if"
+                and "then" in [v for _, v in tokens]
+                and (colon or _body(tokens)[-1][1] != "then")
+            ):
+                inline_line = line  # ``THEN:`` is a single-line IF too (parseIf)
+            problems += _statement(
+                line, tokens, blocks, arrays, defined, inline_line == line, colon
+            )
             if first == "sub":
                 params = {v for k, v in tokens[2:] if k == "word"}
                 if len(params) > MAX_PARAMETERS:
-                    problems.append(Problem(line, f"{len(params)} parameters; the limit is {MAX_PARAMETERS}"))
+                    problems.append(
+                        Problem(line, f"{len(params)} parameters; the limit is {MAX_PARAMETERS}")
+                    )
             elif first == "end" and second == ("word", "sub"):
                 params = set()
             target = _assigned(tokens)
             if target is not None and target not in params:
                 assigned.add(target)
     for block in reversed(blocks):
-        problems.append(Problem(block.line, f"this {block.kind.upper()} is never closed with {CLOSERS[block.kind]}"))
+        problems.append(
+            Problem(
+                block.line, f"this {block.kind.upper()} is never closed with {CLOSERS[block.kind]}"
+            )
+        )
     if len(defined) + 1 > MAX_ROUTINES:
-        problems.append(Problem(0, f"{len(defined)} SUBs; the limit is {MAX_ROUTINES - 1} "
-                                   "(the top level counts as a routine)"))
+        problems.append(
+            Problem(
+                0,
+                f"{len(defined)} SUBs; the limit is {MAX_ROUTINES - 1} "
+                "(the top level counts as a routine)",
+            )
+        )
     scalars = len(assigned - set(arrays) - defined)
-    if scalars > MAX_GLOBALS:
-        problems.append(Problem(0, f"at least {scalars} global variables are assigned; the limit is {MAX_GLOBALS}"))
-    if not structured and len(arrays) > MAX_ARRAYS:
-        problems.append(Problem(0, f"{len(arrays)} arrays; the limit is {MAX_ARRAYS}"))
+    max_globals = MAX_STRUCTURED_GLOBALS if structured else MAX_GLOBALS
+    max_arrays = MAX_STRUCTURED_ARRAYS if structured else MAX_ARRAYS
+    max_cells = MAX_STRUCTURED_ARRAY_CELLS if structured else MAX_ARRAY_CELLS
+    if scalars > max_globals:
+        problems.append(
+            Problem(
+                0, f"at least {scalars} global variables are assigned; the limit is {max_globals}"
+            )
+        )
+    if len(arrays) > max_arrays:
+        problems.append(Problem(0, f"{len(arrays)} arrays; the limit is {max_arrays}"))
     cells = sum(arrays.values())
-    if not structured and cells > MAX_ARRAY_CELLS:
-        problems.append(Problem(0, f"the arrays hold {cells} elements; the limit is {MAX_ARRAY_CELLS}"))
+    if cells > max_cells:
+        problems.append(Problem(0, f"the arrays hold {cells} elements; the limit is {max_cells}"))
     warnings = []
     if starter is not None:
-        known = {value for _, tokens, _ in _statements(starter) for kind, value in tokens if kind == "word"}
+        known = {
+            value
+            for _, tokens, _ in _statements(starter)
+            for kind, value in tokens
+            if kind == "word"
+        }
         known |= defined | set(arrays) | OPERATORS
         warnings = [
-            Problem(line, f"{name} is not a name the starter uses or this program defines; "
-                          "check its spelling against the starter")
+            Problem(
+                line,
+                f"{name} is not a name the starter uses or this program defines; "
+                "check its spelling against the starter",
+            )
             for name, line in called.items()
             if name not in known
         ]
@@ -189,7 +288,7 @@ def _assigned(tokens) -> str | None:
     return None
 
 
-def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
+def _statement(line, tokens, blocks, arrays, defined, inline, colon=False) -> list[Problem]:
     kind, first = tokens[0]
     tokens = _body(tokens)
     words = [value if k == "word" else None for k, value in tokens]
@@ -198,7 +297,7 @@ def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
     if first == "if":
         if "then" not in words:
             return [Problem(line, "IF needs THEN")]
-        if words[-1] == "then":
+        if words[-1] == "then" and not colon:
             blocks.append(_Block("if", line))
     elif first == "elseif":
         if not blocks or blocks[-1].kind != "if" or blocks[-1].has_else:
@@ -222,8 +321,11 @@ def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
         if "to" not in words:
             return [Problem(line, "FOR needs TO, like FOR i = 0 TO 9")]
     elif first == "next":
+        # ``NEXT j, i`` is split into two NEXTs (prepareTokens): the inner counter first
         names = [w for w in words[1:] if w]
-        problems = _close(line, "for", "NEXT", blocks, names)
+        problems = []
+        for name in names or [None]:
+            problems += _close(line, "for", "NEXT", blocks, [name] if name else [])
         return problems
     elif first == "do":
         blocks.append(_Block("do", line))
@@ -244,7 +346,9 @@ def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
         blocks.append(_Block("type", line))
     elif first == "sub":
         if blocks:
-            return [Problem(line, "a SUB can only be declared at the top level, not inside a block")]
+            return [
+                Problem(line, "a SUB can only be declared at the top level, not inside a block")
+            ]
         if len(words) < 2 or words[1] is None:
             return [Problem(line, "SUB needs a name")]
         defined.add(words[1])
@@ -252,7 +356,9 @@ def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
     elif first == "exit":
         what = words[1] if len(words) > 1 else None
         if what not in ("sub", "for", "do"):
-            return [Problem(line, "EXIT must be EXIT SUB, EXIT FOR or EXIT DO (there is no EXIT WHILE)")]
+            return [
+                Problem(line, "EXIT must be EXIT SUB, EXIT FOR or EXIT DO (there is no EXIT WHILE)")
+            ]
         if not any(block.kind == what for block in blocks):
             return [Problem(line, f"EXIT {what.upper()} has no enclosing {what.upper()}")]
     elif first == "dim":
@@ -268,7 +374,9 @@ def _statement(line, tokens, blocks, arrays, defined, inline) -> list[Problem]:
     elif first in OPERATORS:
         return [Problem(line, f"a statement cannot start with {first.upper()}")]
     elif len(tokens) == 1:
-        return [Problem(line, f"{first} on its own is not a statement; assign it or call it with ()")]
+        return [
+            Problem(line, f"{first} on its own is not a statement; assign it or call it with ()")
+        ]
     return []
 
 
@@ -277,8 +385,13 @@ def _close(line, kind, word, blocks, counters=()) -> list[Problem]:
         if not blocks:
             return [Problem(line, f"this {word} has nothing to close")]
         open_block = blocks[-1]
-        return [Problem(line, f"this {word} comes before the {open_block.kind.upper()} on line "
-                              f"{open_block.line} is closed")]
+        return [
+            Problem(
+                line,
+                f"this {word} comes before the {open_block.kind.upper()} on line "
+                f"{open_block.line} is closed",
+            )
+        ]
     counter = blocks.pop().counter
     if len(counters) == 1 and counter and counters[0] != counter:
         return [Problem(line, f"NEXT {counters[0]} does not match FOR {counter}")]

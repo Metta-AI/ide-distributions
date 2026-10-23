@@ -72,6 +72,7 @@ PROGRAM = "program.bas"
 STARTER_NAMES = ("starter", "the starter")
 DONE_WHEN = "The change is in a new version, practiced, and the result told to you."
 
+
 @dataclass(frozen=True)
 class Ref:
     """A version the user named, resolved: their name for it, its number, its platform label."""
@@ -319,7 +320,9 @@ class Program:
             find = edit.get("find") if isinstance(edit, dict) else None
             replace = edit.get("replace") if isinstance(edit, dict) else None
             if not isinstance(find, str) or not find or not isinstance(replace, str):
-                raise PlayError("bad_arguments", f"edit {number} needs a non-empty find and a replace string")
+                raise PlayError(
+                    "bad_arguments", f"edit {number} needs a non-empty find and a replace string"
+                )
             found = text.count(find)
             if found == 0:
                 raise PlayError(
@@ -394,7 +397,9 @@ class Program:
                 "version": number,
                 "program": f"{name} v{number}",
                 "change": entry.change if entry else None,
-                "practiced": [p.summary["plain"] for p in entry.practices if p.summary] if entry else [],
+                "practiced": [p.summary["plain"] for p in entry.practices if p.summary]
+                if entry
+                else [],
                 "released": entry.release is not None if entry else None,
             }
 
@@ -402,16 +407,21 @@ class Program:
             "program": name,
             "versions": [listed(n) for n in sorted(programs.get(name, ()))] if name else [],
             "all_programs": [
-                {"program": key, "versions": sorted(numbers)} for key, numbers in sorted(programs.items())
+                {"program": key, "versions": sorted(numbers)}
+                for key, numbers in sorted(programs.items())
             ],
         }
         if not self.program_file.is_file():
             return out
         base = ref.entry if ref is not None else (journal.latest(name) if name else None)
-        if (ref is not None and base is None) or (base is not None and not self._version_file(base).is_file()):
+        if (ref is not None and base is None) or (
+            base is not None and not self._version_file(base).is_file()
+        ):
             shown = ref.display if ref is not None else base.display
             out["compared_with"] = None
-            out["note"] = f"the text of {shown} is not kept in this workspace, so it cannot be compared"
+            out["note"] = (
+                f"the text of {shown} is not kept in this workspace, so it cannot be compared"
+            )
             return out
         if base is None:
             before, before_name = self._starter_text() or "", "starter"
@@ -422,7 +432,12 @@ class Program:
         return out
 
     def _version_file(self, version: Version) -> Path:
-        return self.workspace / "versions" / version.platform_name / f"v{version.number}{self.game.suffix}"
+        return (
+            self.workspace
+            / "versions"
+            / version.platform_name
+            / f"v{version.number}{self.game.suffix}"
+        )
 
     # --- upload ---------------------------------------------------------
 
@@ -451,7 +466,12 @@ class Program:
         digest = sha256(data)
         latest = journal.latest(name)
         if latest is not None and latest.sha256 == digest:
-            return {"program": latest.display, "version": latest.number, "change": latest.change, "already": True}
+            return {
+                "program": latest.display,
+                "version": latest.number,
+                "change": latest.change,
+                "already": True,
+            }
         change = journal.change or "no description"
         platform = journal.platform_name if name == journal.name and journal.platform_name else name
         label = None if self._sibling_owns(platform) else self._upload(platform, change)
@@ -502,7 +522,9 @@ class Program:
             raise SoftmaxCliError(describe_failure("coworld", args, result))
         label = _line_value(result.stdout, "Upload complete:")
         if label is None:
-            raise SoftmaxCliError(f"upload-policy printed no 'Upload complete:' line for {platform}")
+            raise SoftmaxCliError(
+                f"upload-policy printed no 'Upload complete:' line for {platform}"
+            )
         return label
 
     def display_name(self, platform_name: str) -> str:
@@ -517,13 +539,18 @@ class Program:
         match = LABEL_REF.fullmatch(program.strip().lower())
         if match is None:
             raise PlayError(
-                "bad_arguments", f'name a program as the user does, like "towerless v2": {program!r}'
+                "bad_arguments",
+                f'name a program as the user does, like "towerless v2": {program!r}',
             )
         number = match["number"]
         return self.display_name(match["name"]), int(number) if number else None
 
     def _mine(
-        self, platform_name: str | None = None, version: int | None = None, *, any_player: bool = False
+        self,
+        platform_name: str | None = None,
+        version: int | None = None,
+        *,
+        any_player: bool = False,
     ) -> list[dict]:
         """This player's policy versions on the platform (``GET /stats/policy-versions`` with
         ``player_id``): rows with ``name`` and ``version``. ``mine=true`` alone means every player of
@@ -567,7 +594,9 @@ class Program:
                 return Ref(name, found, f"{platform}:v{found}", None)
         known = sorted({self.display_name(row["name"]) for row in self._mine()})
         wanted = f"{name} v{number}" if number else name
-        raise PlayError("unknown_version", f"none of your programs is {wanted}", {"your_programs": known})
+        raise PlayError(
+            "unknown_version", f"none of your programs is {wanted}", {"your_programs": known}
+        )
 
     def _remember(self, journal: Journal, ref: Ref) -> Version:
         """A journal entry for a version uploaded before this workspace kept one, so its practices
@@ -596,7 +625,11 @@ class Program:
         The platform needs the whole roster: the program on ``seats``, and on every other seat a
         player the platform draws from the league at random."""
         seats = [0] if seats is None else seats
-        if not seats or len(set(seats)) != len(seats) or not set(seats) <= set(range(self.game.seat_count)):
+        if (
+            not seats
+            or len(set(seats)) != len(seats)
+            or not set(seats) <= set(range(self.game.seat_count))
+        ):
             raise PlayError("bad_arguments", "seats must be distinct GotA seats 0-9")
         if not 1 <= episodes <= MAX_EPISODES or attempt < 1:
             raise PlayError("bad_arguments", f"episodes must be 1-{MAX_EPISODES}; attempt positive")
@@ -650,7 +683,13 @@ class Program:
                 )
             )
             journal.save(self.workspace)
-        return {**out, "outcome": "requested", "request_id": request_id, "games": episodes, "seats": seats}
+        return {
+            **out,
+            "outcome": "requested",
+            "request_id": request_id,
+            "games": episodes,
+            "seats": seats,
+        }
 
     def practice_status(self, request_id: str | None = None, wait_seconds: int = 0) -> dict:
         """How far the practice is; once it is over, every game's result in plain words, a summary
@@ -673,12 +712,16 @@ class Program:
         deadline = time.monotonic() + wait_seconds
         while True:
             detail = cli.run_json("coworld", ["xp-request", "get", request_id])
-            state = xp.STATE_BY_SERVER_STATUS.get(str(detail.get("status")), xp.UNKNOWN_STATUS_STATE)
+            state = xp.STATE_BY_SERVER_STATUS.get(
+                str(detail.get("status")), xp.UNKNOWN_STATUS_STATE
+            )
             if state in ("completed", "failed") or time.monotonic() + POLL_SECONDS > deadline:
                 break
             self._sleep(POLL_SECONDS)
         done, total = int(detail["completed_count"]), int(detail["episode_count"])
-        display = found[0].display if found else (detail.get("title") or "").removeprefix("Practice: ")
+        display = (
+            found[0].display if found else (detail.get("title") or "").removeprefix("Practice: ")
+        )
         out = {
             "program": display,
             "request_id": request_id,
@@ -707,9 +750,15 @@ class Program:
                 for r in receipts
                 if r.get("filename") == "results.json"
             }
-        seats = found[1].seats if found else [
-            row["slot"] for row in detail["requested"]["roster"] if "policy_ref" in row["player"]
-        ]
+        seats = (
+            found[1].seats
+            if found
+            else [
+                row["slot"]
+                for row in detail["requested"]["roster"]
+                if "policy_ref" in row["player"]
+            ]
+        )
         site = cli.server.removesuffix("/api") if cli.server.endswith("/api") else None
         games = []
         for number, row in enumerate(detail.get("episodes") or [], start=1):
@@ -786,7 +835,9 @@ class Program:
         """Keep one task card per user request current in the cogent's ``tasks`` records, which the
         Mind on /play shows. A ``title`` starts the card for a new request."""
         if step not in STEPS or status not in STEP_STATUS or not detail.strip():
-            raise PlayError("bad_arguments", f"step must be one of {', '.join(STEPS)}; detail is required")
+            raise PlayError(
+                "bad_arguments", f"step must be one of {', '.join(STEPS)}; detail is required"
+            )
         journal = Journal.load(self.workspace)
         stamp = now()
         open_card = journal.card if journal.card and journal.card.body["state"] != "done" else None
@@ -830,11 +881,20 @@ class Program:
         if version is not None:
             body["version"] = version
         if outcome is not None:
-            body.update(state="done", status="failed" if status == "failed" else "kept", outcome=outcome.strip())
+            body.update(
+                state="done",
+                status="failed" if status == "failed" else "kept",
+                outcome=outcome.strip(),
+            )
         self._write_card(open_card.key, body)
         journal.card = Card(key=open_card.key, body=body)
         journal.save(self.workspace)
-        return {"card": body["text"], "step": STEPS[step][1], "status": status, "finished": body["state"] == "done"}
+        return {
+            "card": body["text"],
+            "step": STEPS[step][1],
+            "status": status,
+            "finished": body["state"] == "done",
+        }
 
     def _write_card(self, key: str, body: dict) -> None:
         live = self.records.get("tasks", key)

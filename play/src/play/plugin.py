@@ -20,8 +20,8 @@ PROGRAM = {
     "pattern": r"^[A-Za-z0-9][A-Za-z0-9_-]*((:[vV]| [vV]| version )[0-9]+)?$",
     "maxLength": 120,
     "description": (
-        "The program as the user names it: \"towerless v2\" (or \"towerless:v2\") for one "
-        "version, \"towerless\" for its latest. Never add a player id; the tool finds it."
+        'The program as the user names it: "towerless v2" (or "towerless:v2") for one '
+        'version, "towerless" for its latest. Never add a player id; the tool finds it.'
     ),
 }
 NAME = {
@@ -58,7 +58,7 @@ TOOLS = {
             "Show the program as it is now (or the starter, before the first change): its full "
             "text, its name, its last uploaded version and whether it changed since. With "
             "program, show the text of that uploaded version, or of the starter with "
-            "\"starter\", instead."
+            '"starter", instead.'
         ),
         {"program": PROGRAM},
         [],
@@ -106,7 +106,10 @@ TOOLS = {
                             "minLength": 1,
                             "description": "Exact text to replace; it must occur once. Include a neighbouring line if needed.",
                         },
-                        "replace": {"type": "string", "description": "The new text; empty deletes the find text."},
+                        "replace": {
+                            "type": "string",
+                            "description": "The new text; empty deletes the find text.",
+                        },
                     },
                     "required": ["find", "replace"],
                     "additionalProperties": False,
@@ -133,7 +136,7 @@ TOOLS = {
     "program_upload": (
         (
             "Upload the changed program as its next version and return it as the user names it "
-            "(\"towerless v2\"). Uploading an unchanged program returns the same version."
+            '("towerless v2"). Uploading an unchanged program returns the same version.'
         ),
         {
             "name": {
@@ -154,7 +157,10 @@ TOOLS = {
             "the same practice again. " + REFUSAL
         ),
         {
-            "program": {**PROGRAM, "description": PROGRAM["description"] + " Omit for the latest version."},
+            "program": {
+                **PROGRAM,
+                "description": PROGRAM["description"] + " Omit for the latest version.",
+            },
             "episodes": {
                 "type": "integer",
                 "minimum": 1,
@@ -207,7 +213,7 @@ TOOLS = {
             "program": {
                 **PROGRAM,
                 "pattern": r"^[A-Za-z0-9][A-Za-z0-9_-]*(:[vV]| [vV]| version )[0-9]+$",
-                "description": "The exact version the user said yes to, as they name it: \"towerless v2\".",
+                "description": 'The exact version the user said yes to, as they name it: "towerless v2".',
             },
             "user_said_yes": {
                 "const": True,
@@ -238,7 +244,11 @@ TOOLS = {
                 "maxLength": 300,
                 "description": "What is happening or happened in this step, in plain words.",
             },
-            "version": {"type": "integer", "minimum": 1, "description": "The version the card is about."},
+            "version": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The version the card is about.",
+            },
             "outcome": {
                 "type": "string",
                 "minLength": 1,

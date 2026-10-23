@@ -102,7 +102,9 @@ class FakeCli:
                     return done(returncode=1, stderr=f"Error: Request failed (409): {message}\n")
                 number = 1 + sum(p["name"] == name for p in self.policies + self.siblings)
                 self.policies.append({"name": name, "version": number})
-                return done(f"Policy name: {name}\nUploading...\nUpload complete: {name}:v{number}\n")
+                return done(
+                    f"Policy name: {name}\nUploading...\nUpload complete: {name}:v{number}\n"
+                )
             case ["coworld", "xp-request", "create", "-", "--json"]:
                 kind, stderr = self.create
                 if kind == "refuse":
@@ -152,7 +154,12 @@ class FakeCli:
                     )
                 if getattr(self, "replay_state", None):
                     rows.append(
-                        {"kind": "artifact", "state": self.replay_state, "artifact_id": "r1", "filename": "replay"}
+                        {
+                            "kind": "artifact",
+                            "state": self.replay_state,
+                            "artifact_id": "r1",
+                            "filename": "replay",
+                        }
                     )
                 (dest / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
                 return done()
@@ -173,7 +180,9 @@ class FakeCli:
         query = dict(urllib.parse.parse_qsl(parsed.query))
         assert query["mine"] == "true"
         self.api_reads.append(parsed.query)
-        assert query.get("player_id", PLAYER) == PLAYER  # only this player's own player_id is asked for
+        assert (
+            query.get("player_id", PLAYER) == PLAYER
+        )  # only this player's own player_id is asked for
         owned = self.policies if "player_id" in query else self.policies + self.siblings
         rows = [
             p
@@ -251,6 +260,8 @@ def program(env, cli, records, fetched, tmp_path):
         return STARTER
 
     client = SoftmaxClient(env, run=cli, bin_dir=tmp_path / "bin", http_get=cli.http_get)
-    play = Program(env, client=client, fetch=fetch, records=CogentRecords(SERVER, PLAYER, "cga_fake", records))
+    play = Program(
+        env, client=client, fetch=fetch, records=CogentRecords(SERVER, PLAYER, "cga_fake", records)
+    )
     play._sleep = lambda seconds: None
     return play

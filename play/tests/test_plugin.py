@@ -21,7 +21,10 @@ PLAY_TOOLS = {
     "practice_request": ([], {"program", "episodes", "seats", "attempt"}),
     "practice_status": ([], {"request_id", "wait_seconds"}),
     "program_release": (["program", "user_said_yes"], {"program", "user_said_yes"}),
-    "task_update": (["step", "status", "detail"], {"title", "step", "status", "detail", "version", "outcome"}),
+    "task_update": (
+        ["step", "status", "detail"],
+        {"title", "step", "status", "detail", "version", "outcome"},
+    ),
     "fresh_start": (["confirm"], {"confirm"}),
 }
 
@@ -76,7 +79,9 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
     assert valid("program_release", {"program": "towerless v2", "user_said_yes": True})
     assert not valid("program_release", {"program": "towerless", "user_said_yes": True})
     assert not valid("program_release", {"program": "towerless v2", "user_said_yes": False})
-    assert not valid("program_release", {"program": "towerless v2", "user_said_yes": True, "league_id": "x"})
+    assert not valid(
+        "program_release", {"program": "towerless v2", "user_said_yes": True, "league_id": "x"}
+    )
     assert valid("practice_status", {"request_id": "xreq_abc", "wait_seconds": 480})
     assert not valid("practice_status", {"wait_seconds": 481})
     assert valid("program_change", {"text": "x = 1\n", "change": "set x"})
@@ -84,7 +89,10 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
     assert valid("program_edit", {"edits": [{"find": "a", "replace": ""}], "change": "x"})
     assert not valid("program_edit", {"edits": [{"find": "", "replace": "b"}], "change": "x"})
     assert not valid("program_edit", {"edits": [], "change": "x"})
-    assert valid("task_update", {"title": "Run under towers less", "step": "understand", "status": "done", "detail": "ok"})
+    assert valid(
+        "task_update",
+        {"title": "Run under towers less", "step": "understand", "status": "done", "detail": "ok"},
+    )
     assert not valid("task_update", {"step": "deploy", "status": "done", "detail": "ok"})
 
 
