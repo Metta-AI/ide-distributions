@@ -111,8 +111,8 @@ class Research:
         target.write_text(text, encoding="utf-8")
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
-    def accept_champion(self):
-        return self.call("promotion", "accept")
+    def accept_champion(self, league_id):
+        return self.call("promotion", "accept", "--league", league_id)
 
     def xp_status(self, experiment):
         return self.call("softmax", "xp", "status", experiment)

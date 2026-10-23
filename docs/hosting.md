@@ -85,7 +85,7 @@ runs `scripts/queue_keeper.py --bootstrap-only` and resumes the `queue-keeper`, 
    | Variable | Value |
    |---|---|
    | `RESEARCH_PLAYER_ID` | `SOFTMAX_PLAYER_ID` |
-   | `RESEARCH_GAME` | the game folder, `gota` |
+   | `RESEARCH_GAME` | omitted: game scope comes from the current task, not the profile |
    | `RESEARCH_CANONICAL` | `<home>/canonical-<game>.git`, the same path for every profile |
    | `RESEARCH_WORKSPACE` | this profile's own clone, `<profile dir>/workspace` |
    | `TMPDIR` | `<home>/tmp` (the sandbox `/tmp` is a small tmpfs) |

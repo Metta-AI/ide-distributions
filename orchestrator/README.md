@@ -22,7 +22,7 @@ hermes profile install /path/to/empty-export/orchestrator --name orchestrator --
 ```
 
 Set the installed profile's `.env` with `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`,
-`SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL`, `RESEARCH_PLAYER_ID`, `RESEARCH_GAME`,
+`SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL`, `RESEARCH_PLAYER_ID`,
 `RESEARCH_WORKSPACE` (this profile's clone) and `RESEARCH_CANONICAL` (the bare repo).
 The manifest documents defaults. The credential accepts a bare token or player-session
 JSON. Hermes's routed profile secret scope supplies HTTP/CLI credentials; a different

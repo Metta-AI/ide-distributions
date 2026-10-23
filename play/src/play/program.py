@@ -10,7 +10,7 @@ Every platform call goes through the shared ``softmax_tool`` client: the credent
 into the profile-local Softmax home before each CLI call, and every mutating call (upload,
 practice, release) first runs ``whoami`` and refuses unless the credential is the Player
 ``RESEARCH_PLAYER_ID`` (``SoftmaxClient._require_player``). The league is the one the coach chose
-(the cogent's ``state/league`` record), else GotA's default league.
+(the cogent's ``state/league`` record); an absent choice never falls back to a game adapter.
 
 The coach's refusals come back as data, never as an error and never retried:
 ``{"outcome": "refused", "refusal": "permit_required" | "credit_denied" | "league_not_chosen",
@@ -170,7 +170,6 @@ class Program:
             raise PlayError("not_configured", "PLAY_WORKSPACE is not set")
         self.workspace = Path(env["PLAY_WORKSPACE"])
         self.player = env.get("RESEARCH_PLAYER_ID", "")
-        self.game = GOTA
         self.client = client or SoftmaxClient(env)
         self._fetch = fetch
         self._credential = env.get(CREDENTIAL_ENV)
@@ -188,11 +187,15 @@ class Program:
         return self._records
 
     def league_id(self) -> str:
-        """The league the coach chose for this cogent, else the game's default league. A chosen
-        league this module cannot build for is refused: its programs are built elsewhere."""
+        """The explicitly chosen league. Never select a league from an installed adapter."""
         if self._league is None:
             choice = self.records.get("state", "league")
-            league = choice["body"]["leagueId"] if choice else self.game.league_id
+            if not choice:
+                raise PlayError(
+                    "league_not_chosen",
+                    "Choose a league in the frontend before building a program.",
+                )
+            league = choice["body"]["leagueId"]
             try:
                 here = self._builds_here(league)
             except (OSError, KeyError, ValueError) as error:  # URLError is an OSError
@@ -220,10 +223,10 @@ class Program:
         """Whether programs for this league's coworld are built here: it is GotA's coworld, judged
         by the league's game (so any GotA league counts), not by the league's id. The two games are
         compared on the first coworld field both carry; with none in common it is not GotA's."""
-        if league_id == self.game.league_id:
+        if league_id == GOTA.reference_league_id:
             return True
         game = game if game is not None else self._league_game(league_id)
-        home = self._league_game(self.game.league_id)
+        home = self._league_game(GOTA.reference_league_id)
         for field in ("canonical_coworld_id", "coworld_id", "coworld_name"):
             if game.get(field) and home.get(field):
                 return game[field] == home[field]
@@ -235,7 +238,7 @@ class Program:
 
     @property
     def starter_file(self) -> Path:
-        return self.workspace / "starter" / f"{self.game.starter_player}{self.game.suffix}"
+        return self.workspace / "starter" / f"{GOTA.starter_player}{GOTA.suffix}"
 
     def _starter_text(self) -> str | None:
         return self.starter_file.read_text() if self.starter_file.is_file() else None
@@ -308,7 +311,7 @@ class Program:
         """Download the coworld's starter player file into ``starter/`` and check its sha256."""
         coworld = self.client._league_coworld(self.league_id())
         entries = [p for p in (coworld.get("manifest") or {}).get("player") or [] if p.get("file")]
-        wanted = player or self.game.starter_player
+        wanted = player or GOTA.starter_player
         entry = next((p for p in entries if p.get("id") == wanted), None)
         if entry is None and player is None and entries:
             entry = entries[0]  # softmax.com's rule: the `baseline` entry, else the first
@@ -342,7 +345,7 @@ class Program:
                 "the downloaded bytes do not match the published sha256",
                 {"url": url, "expected": digest, "actual": sha256(data)},
             )
-        target = self.workspace / "starter" / f"{entry['id']}{self.game.suffix}"
+        target = self.workspace / "starter" / f"{entry['id']}{GOTA.suffix}"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         return {
@@ -542,10 +545,7 @@ class Program:
 
     def _version_file(self, version: Version) -> Path:
         return (
-            self.workspace
-            / "versions"
-            / version.platform_name
-            / f"v{version.number}{self.game.suffix}"
+            self.workspace / "versions" / version.platform_name / f"v{version.number}{GOTA.suffix}"
         )
 
     # --- upload ---------------------------------------------------------
@@ -738,7 +738,7 @@ class Program:
         if (
             not seats
             or len(set(seats)) != len(seats)
-            or not set(seats) <= set(range(self.game.seat_count))
+            or not set(seats) <= set(range(GOTA.seat_count))
         ):
             raise PlayError("bad_arguments", "seats must be distinct GotA seats 0-9")
         if not 1 <= episodes <= MAX_EPISODES or attempt < 1:
@@ -755,9 +755,7 @@ class Program:
 
         body = {
             "target": {"league_id": league},
-            "roster": [
-                {"slot": seat, "player": player(seat)} for seat in range(self.game.seat_count)
-            ],
+            "roster": [{"slot": seat, "player": player(seat)} for seat in range(GOTA.seat_count)],
             "num_episodes": episodes,
             "private": True,
             "title": title,

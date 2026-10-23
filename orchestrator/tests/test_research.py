@@ -34,10 +34,11 @@ def test_subprocess_contract_and_refusal(shared_fixture):
         "version",
         "strategy",
         "request",
+        "league_id",
     ]
-    assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version"]
-    assert research.accept_champion()["args"] == ["promotion", "accept"]
-    assert TOOLS["accept_champion"][2:] == ({}, [])
+    assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version", "league_id"]
+    assert research.accept_champion("league_selected")["args"] == ["promotion", "accept", "--league", "league_selected"]
+    assert TOOLS["accept_champion"][2:] == ({"league_id": {"type": "string"}}, ["league_id"])
 
 
 def test_publish_writes_exact_contract_files(shared_fixture):

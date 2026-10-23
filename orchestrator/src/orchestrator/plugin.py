@@ -179,8 +179,8 @@ TOOLS = {
     "promotion_submit": (
         Board,
         ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),
-        {"id": S, "run_id": I, "experiment": S},
-        ["id", "run_id", "experiment"],
+        {"id": S, "run_id": I, "experiment": S, "league_id": S},
+        ["id", "run_id", "experiment", "league_id"],
     ),
     "submit_requested_version": (
         Board,
@@ -189,20 +189,20 @@ TOOLS = {
             "Quote that request. This records a requested submission, not statistical improvement. "
             "For autonomous research promotion use promotion_submit instead. Strategy must match the build."
         ),
-        {"id": S, "run_id": I, "version": S, "strategy": S, "request": S},
-        ["id", "run_id", "version", "strategy", "request"],
+        {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
+        ["id", "run_id", "version", "strategy", "request", "league_id"],
     ),
     "bootstrap_champion": (
         Board,
         "Submit an integrated starter-policy version (V-...) only when no champion exists.",
-        {"id": S, "run_id": I, "version": S},
-        ["id", "run_id", "version"],
+        {"id": S, "run_id": I, "version": S, "league_id": S},
+        ["id", "run_id", "version", "league_id"],
     ),
     "accept_champion": (
         Research,
-        "Record the league's current champion as the loop's, only after the user confirms.",
-        {},
-        [],
+        "Record the explicitly selected league's current champion as the loop's, only after the user confirms.",
+        {"league_id": S},
+        ["league_id"],
     ),
     "workspace_integrate": (
         Board,

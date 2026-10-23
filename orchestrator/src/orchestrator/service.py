@@ -17,11 +17,14 @@ class Service:
         by_state = {}
         for card in cards:
             by_state.setdefault(card["status"], []).append(card["id"])
+        promotion = self.research.call("promotion", "pending")
+        if promotion is not None:
+            promotion = self.research.call("promotion", "status", "--league", promotion["league_id"])
         return {
             "cards": by_state,
             "pending": transitions(snapshot(self.context), self.research, IDE(self.context)),
             "research": self.research.call("records", "summary"),
-            "promotion": self.research.call("promotion", "status"),
+            "promotion": promotion,
             "control": self.research.control_read(),
             "plan": self.research.plan_read(),
             "budget": self.research.budget_read(),

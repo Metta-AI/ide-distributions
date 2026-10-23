@@ -338,7 +338,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     promotion_env = base_env(board, RESEARCH_GAME='gota')
 
     def promotion(*argv):
-        run = subprocess.run([sys.executable, '-m', 'ide_research_core', 'promotion', *argv],
+        run = subprocess.run([sys.executable, '-m', 'ide_research_core', 'promotion', *argv, '--league', league],
                              capture_output=True, text=True, env=promotion_env, check=False)
         return run.returncode, json.loads(run.stdout)
 

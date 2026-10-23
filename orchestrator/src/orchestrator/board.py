@@ -368,14 +368,16 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             "workspace", "integrate", "--branch", task.branch_name, "--commit", commit
         )
 
-    def submit_requested_version(self, id, run_id, version, strategy, request):
+    def submit_requested_version(self, id, run_id, version, strategy, request, league_id):
         """Submit explicit user intent. Retry identical arguments; promotion owns deduplication."""
         self._admit_effect(
-            id, run_id, "submission_admitted", {"version": version, "request": request}
+            id, run_id, "submission_admitted", {"version": version, "request": request, "league_id": league_id}
         )
         return Research(self.context).call(
             "promotion",
             "submit-requested",
+            "--league",
+            league_id,
             "--version",
             version,
             "--strategy",
@@ -384,10 +386,10 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             request,
         )
 
-    def promotion_submit(self, id, run_id, experiment):
-        self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment})
-        return Research(self.context).call("promotion", "submit", experiment)
+    def promotion_submit(self, id, run_id, experiment, league_id):
+        self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment, "league_id": league_id})
+        return Research(self.context).call("promotion", "submit", experiment, "--league", league_id)
 
-    def bootstrap_champion(self, id, run_id, version):
-        self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version})
-        return Research(self.context).call("promotion", "bootstrap", "--version", version)
+    def bootstrap_champion(self, id, run_id, version, league_id):
+        self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version, "league_id": league_id})
+        return Research(self.context).call("promotion", "bootstrap", "--version", version, "--league", league_id)

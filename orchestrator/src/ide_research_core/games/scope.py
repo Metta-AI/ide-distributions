@@ -7,15 +7,14 @@ Research commands read three variables, ``RESEARCH_GAME``, ``RESEARCH_CANONICAL`
 
 - ``env_for_game(env, game)`` by naming rule, for a caller that chooses the game (the
   orchestrator's tools, card creation, ``workspace bootstrap --game``). Paths are always
-  derived from the profile's own variables, in which ``RESEARCH_GAME`` is the host's default
-  game: both functions keep those as ``RESEARCH_PROFILE_GAME``, ``_CANONICAL`` and ``_WORKSPACE``
+  derived from the profile's own variables, which have no game assignment: both functions keep those as ``RESEARCH_PROFILE_GAME``, ``_CANONICAL`` and ``_WORKSPACE``
   while they point elsewhere.
 - ``env_for_worktree(env, worktree)`` from a card worktree: its clone, that clone's ``origin``
   and the game in the origin's name. The CLI entry point applies it inside a Kanban worker, so a
   card of any game runs its commands against that game.
 
 The episode budget stays one host-wide allowance for every game: both functions keep its file
-(``RESEARCH_EPISODE_BUDGET``, by default ``episode-budget.db`` in the default game's canonical
+(``RESEARCH_EPISODE_BUDGET``, by default ``episode-budget.db`` in the neutral canonical
 repository) where the profile's own environment puts it; ``budget_path`` reads it.
 
 Game folders are found by ``locate_game``: the games shipped with the distribution first, then
@@ -93,7 +92,12 @@ def list_games(env: Mapping[str, str] = os.environ) -> list[dict]:
             name = path.parent.name
             if name in found or not GAME_NAME.fullmatch(name):
                 continue  # ``_template`` and other non-game folders
-            found[name] = {"name": name, "kind": kind, "root": str(root), "path": str(path.parent)}
+            found[name] = {
+                "name": name,
+                "kind": kind,
+                "root": str(root),
+                "path": str(path.parent),
+            }
     for entry in found.values():
         entry["workspace"] = (
             CANONICAL_ENV in env and (canonical_for(env, entry["name"]) / "HEAD").exists()
@@ -142,7 +146,7 @@ def _profile_env(env: Mapping[str, str]) -> dict[str, str]:
 
 def _scope(profile: Mapping[str, str], game: str, canonical: str, clone: str) -> dict[str, str]:
     if GAME_ENV in profile and HOME_ENV in profile:
-        # Keep the default game's clone even when RESEARCH_WORKSPACE was left to its default.
+        # Keep the explicitly selected task clone even when RESEARCH_WORKSPACE was left to its default.
         profile = {**profile, WORKSPACE_ENV: str(clone_for(profile, profile[GAME_ENV]))}
     scoped = dict(profile)
     _keep_budget(profile, scoped)
@@ -160,14 +164,16 @@ def env_for_game(env: Mapping[str, str], game: str | None) -> dict[str, str]:
     profile = _profile_env(env)
     if game == profile.get(GAME_ENV):
         return profile
-    return _scope(
-        profile, game, str(canonical_for(profile, game)), str(clone_for(profile, game))
-    )
+    return _scope(profile, game, str(canonical_for(profile, game)), str(clone_for(profile, game)))
 
 
 def _git(path: Path, *args: str) -> str | None:
     result = subprocess.run(
-        ["git", "-C", str(path), *args], capture_output=True, text=True, check=False, timeout=30
+        ["git", "-C", str(path), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
     )
     return result.stdout.strip() if result.returncode == 0 else None
 
@@ -190,6 +196,13 @@ def env_for_worktree(env: Mapping[str, str], worktree: Path) -> dict[str, str]:
     if common is None:
         return scoped
     clone = Path(common).parent
+    profile = _profile_env(env)
+    # Retained base repositories may have game-shaped names. Their history is not a
+    # task assignment; only a separately selected game clone supplies game context.
+    if GAME_ENV not in profile and clone == Path(
+        profile.get(WORKSPACE_ENV) or Path(profile[HOME_ENV]) / "workspace"
+    ):
+        return scoped
     origin = _git(clone, "remote", "get-url", "origin")
     game = _game_of_origin(origin)
     if game is None or game == env.get(GAME_ENV):

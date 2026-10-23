@@ -20,10 +20,6 @@ env_requires:
   - name: RESEARCH_PLAYER_ID
     required: true
     description: Credential player for authorized research writes; not the conversation subject.
-  - name: RESEARCH_GAME
-    required: false
-    default: gota
-    description: Installed automation default; conversation discovery uses explicit league and player IDs.
   - name: RESEARCH_WORKSPACE
     required: true
     description: Absolute path to this profile's clone of the canonical repository.
