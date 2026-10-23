@@ -106,11 +106,11 @@ def _publish(args) -> dict:
 
 
 def _presentation(args) -> dict:
-    from ide_research_core.presentation import PresentationRequest, execute
+    from ide_research_core.presentation import execute, presentation_request
 
     return execute(
         _clone(args),
-        PresentationRequest.model_validate_json(sys.stdin.buffer.read(150001)),
+        presentation_request.validate_json(sys.stdin.buffer.read(150001)),
     )
 
 
