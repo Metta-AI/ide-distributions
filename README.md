@@ -6,7 +6,7 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 | Folder | What it is |
 |---|---|
 | [`orchestrator/`](orchestrator/README.md) | The research lead: the IDE chat's agent. Plans research, assigns Kanban cards to researchers, answers them, promotes champions and tells the user what happened. |
-| [`researcher/`](researcher/README.md) | A research worker (formerly `autoresearch`, moved here from `Metta-AI/ide-mvp` with its full history). Install it once per researcher (`researcher-1`, `researcher-2`, ...). |
+| [`researcher/`](researcher/README.md) | A research worker (formerly `autoresearch`, moved here from `Metta-AI/ide-mvp` with its full history). Install it once per researcher (`researcher-1`, `researcher-2`, ...). Each card is on one game: a shipped one (`games/`), or one a card made and the orchestrator installed on the host. |
 | [`play/`](play/README.md) | Play: the user's own program on one coworld (GotA for now). The `play` profile takes the user's request, has the `builder` profile ([`play/builder/`](play/builder)) change the program through native Kanban, uploads it, practices it and releases it when the user says so. No research machinery. |
 
 Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
@@ -20,6 +20,9 @@ source and the copies together.
 The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
 browser) describes how they work together on one host: one Kanban board, one bare canonical
 git repository per game, the orchestrator between the IDE chat and the researchers.
+[Multi-game research](docs/designs/multi-game-research.md) describes how one host works on
+several games and how a new game's folder is made (from its GitHub source, adapting
+optimizer-seed's mixin method) and installed.
 [Implementation notes](docs/designs/orchestrator-implementation-notes.md) record where the
 code differs from it.
 

@@ -19,6 +19,28 @@ class Research:
     def __init__(self, context: Context):
         self.context = context
 
+    def in_game(self, game=None):
+        """This research in ``game``'s workspace (None or the default game: this one). The
+        orchestrator's clone of another game is made on first use, from a canonical repository
+        that a researcher's card preparation created (``Board.card_create``)."""
+        if game is None or game == self.context.env.get("RESEARCH_GAME"):
+            return self
+        scoped = Research(self.context.for_game(game))
+        if not (scoped.context.workspace / ".git").exists():
+            if not (Path(scoped.context.env["RESEARCH_CANONICAL"]) / "HEAD").exists():
+                raise ResearchError(
+                    {
+                        "ok": False,
+                        "error": {
+                            "reason": "no_workspace",
+                            "message": f"No research workspace for {game!r} yet. Create its "
+                            "first card with card_create game=" + game + ", which prepares it.",
+                        },
+                    }
+                )
+            scoped.call("workspace", "bootstrap")
+        return scoped
+
     def call(self, *args):
         ensure_venv(self.context.home)
         result = subprocess.run(
@@ -41,18 +63,18 @@ class Research:
         result.check_returncode()
         return envelope["data"]
 
-    def records_find(self, entity, filters=None):
-        return self.call(
+    def records_find(self, entity, filters=None, game=None):
+        return self.in_game(game).call(
             "records", "find", entity, *(f"{key}={value}" for key, value in (filters or {}).items())
         )
 
-    def records_show(self, id):
-        return self.call("records", "show", id)
+    def records_show(self, id, game=None):
+        return self.in_game(game).call("records", "show", id)
 
-    def plan_write(self, text):
-        return self._publish("plan.md", text, "Update research plan")
+    def plan_write(self, text, game=None):
+        return self.in_game(game)._publish("plan.md", text, "Update research plan")
 
-    def control_write(self, action, reason):
+    def control_write(self, action, reason, game=None):
         if action not in ("pause", "resume"):
             raise ValueError("action must be pause or resume")
         payload = {
@@ -61,7 +83,7 @@ class Research:
             "at": datetime.now(UTC).isoformat(),
             "by": "orchestrator",
         }
-        return self._publish(
+        return self.in_game(game)._publish(
             "control/pause.json",
             json.dumps(payload, indent=2) + "\n",
             f"Research {action}: {reason}",
@@ -97,12 +119,12 @@ class Research:
 
     def budget_read(self):
         from ide_research_core.budget import EpisodeBudget
+        from ide_research_core.games.scope import budget_path
 
         if "RESEARCH_EPISODE_LIMIT" not in self.context.env:
             return None
         return EpisodeBudget(
-            Path(self.context.env["RESEARCH_CANONICAL"]) / "episode-budget.db",
-            int(self.context.env["RESEARCH_EPISODE_LIMIT"]),
+            budget_path(self.context.env), int(self.context.env["RESEARCH_EPISODE_LIMIT"])
         ).snapshot()
 
     def _publish(self, path, text, message):
@@ -111,18 +133,18 @@ class Research:
         target.write_text(text, encoding="utf-8")
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
-    def accept_champion(self):
-        return self.call("promotion", "accept")
+    def accept_champion(self, game=None):
+        return self.in_game(game).call("promotion", "accept")
 
-    def xp_status(self, experiment):
-        return self.call("softmax", "xp", "status", experiment)
+    def xp_status(self, experiment, game=None):
+        return self.in_game(game).call("softmax", "xp", "status", experiment)
 
     def budget_limit(self, episodes):
         from ide_research_core.budget import EpisodeBudget
+        from ide_research_core.games.scope import budget_path
 
         return EpisodeBudget(
-            Path(self.context.env["RESEARCH_CANONICAL"]) / "episode-budget.db",
-            int(self.context.env["RESEARCH_EPISODE_LIMIT"]),
+            budget_path(self.context.env), int(self.context.env["RESEARCH_EPISODE_LIMIT"])
         ).lower(episodes)
 
     def credits(self):
@@ -154,6 +176,9 @@ class Research:
         if expected_sha256 is not None:
             args.extend(["--expected-sha256", expected_sha256])
         return self.call(*args)
+
+    def game_list(self):
+        return self.call("game", "list")
 
     def leaderboard(self, league_id, player_id):
         return self.call("softmax", "player-champion", "--league", league_id, "--player", player_id)
