@@ -39,6 +39,15 @@ TIMEOUT_S = 840  # an upload may take 600 s; Hermes allows tool calls up to time
 
 # name: (description, parameters, required)
 TOOLS = {
+    "who_we_are": (
+        (
+            "Your cogent name and your user's name. Call once at the start of each conversation. "
+            "user_name is null when the user has set none. The account name that softmax status "
+            "and whoami print is the user's, not yours."
+        ),
+        {},
+        [],
+    ),
     "starter_fetch": (
         (
             "Download the coworld's starter program into the program workspace and check it "

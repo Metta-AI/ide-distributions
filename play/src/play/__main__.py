@@ -12,6 +12,7 @@ from ide_research_core.softmax_tool.platform_cli import IdentityError, SoftmaxCl
 from .program import PlayError, Program
 
 OPERATIONS = (
+    "who_we_are",
     "starter_fetch",
     "program_show",
     "program_change",

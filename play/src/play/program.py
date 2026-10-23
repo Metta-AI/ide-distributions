@@ -194,6 +194,24 @@ class Program:
     def _starter_text(self) -> str | None:
         return self.starter_file.read_text() if self.starter_file.is_file() else None
 
+    # --- who we are -----------------------------------------------------
+
+    def who_we_are(self) -> dict:
+        """The cogent's name and its user's, from the public cogent profile (no credential).
+
+        ``softmax status`` and ``whoami`` print the user's account name, not the cogent's.
+        ``user_name`` is None when the user set no name on the platform."""
+        if not self.player:
+            raise PlayError("not_configured", "RESEARCH_PLAYER_ID is not set")
+        url = f"{self.client._cli.server}/observatory/v2/cogents/{urllib.parse.quote(self.player, safe='')}"
+        try:
+            profile = json.loads(self._fetch(url))
+        except urllib.error.HTTPError as error:
+            raise PlayError(
+                "who_unavailable", f"GET {url} answered HTTP {error.code}", {"status": error.code}
+            ) from error
+        return {"cogent_name": profile["name"], "user_name": profile.get("owner_name")}
+
     # --- starter --------------------------------------------------------
 
     def starter_fetch(self, player: str | None = None) -> dict:
