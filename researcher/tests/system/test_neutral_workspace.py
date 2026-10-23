@@ -53,6 +53,9 @@ def test_game_scope_is_selected_by_the_task(tmp_path, repository):
     selected = cli("workspace", "bootstrap", "--game", "gota")
     assert selected["game"] == "gota"
     assert selected["workspace"] == str(profile / "workspace-gota")
+    assert cli("workspace", "bootstrap", "--game", "gota", worker=profile / "workspace-gota")["workspace"] == str(
+        profile / "workspace-gota"
+    )
     assert cli("game", "show", "--name", "gota")["name"] == "gota"
     assert cli("game", "list", worker=profile / "workspace-gota")["default"] == "gota"
     assert cli("game", "list")["default"] is None

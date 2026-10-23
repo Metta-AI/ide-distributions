@@ -12,20 +12,24 @@ class Service:
         self.context = context
         self.research = Research(context)
 
-    def status(self):
+    def status(self, game=None):
+        """Board-wide cards and waits, the host-wide budget, and one game's research
+        (``game``; omit for the neutral workspace)."""
         cards = Board(self.context).card_list()
         by_state = {}
         for card in cards:
             by_state.setdefault(card["status"], []).append(card["id"])
-        promotion = self.research.call("promotion", "pending")
+        research = self.research.in_game(game)
+        promotion = research.call("promotion", "pending")
         if promotion is not None:
-            promotion = self.research.call("promotion", "status", "--league", promotion["league_id"])
+            promotion = research.call("promotion", "status", "--league", promotion["league_id"])
         return {
             "cards": by_state,
+            "game": research.context.env.get("RESEARCH_GAME"),
             "pending": transitions(snapshot(self.context), self.research, IDE(self.context)),
-            "research": self.research.call("records", "summary"),
+            "research": research.call("records", "summary"),
             "promotion": promotion,
-            "control": self.research.control_read(),
-            "plan": self.research.plan_read(),
+            "control": research.control_read(),
+            "plan": research.plan_read(),
             "budget": self.research.budget_read(),
         }

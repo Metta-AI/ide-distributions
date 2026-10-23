@@ -43,6 +43,20 @@ or evaluation capabilities separately from platform availability, and never use 
 game’s bindings. New cards must name the resolved IDs and evidence. Writes still require
 the selected player’s credential and authorization.
 
+## Games
+
+Each card researches one game. Pass `game` to `card_create`; omit it for neutral work without a game. `game_list` shows the games this host can research and which have a workspace yet.
+`status`, `records_find`, `records_show`, `plan_write`, `control_write`, `accept_champion` and
+`xp_status` take the same `game`. Card effects (upload, integration, submission) use the
+card's own game.
+
+When the user wants research on a game for which `game_support` shows no research support,
+make that support first. Create a researcher card (in any existing game) that preloads the
+`game-create` skill and names the league, the Coworld and any mixin or source repository the
+user gave. When it completes, read its report and call `game_install`; never integrate that
+card's branch. Tell the user what the new folder supports and every gap it lists, such as a
+build this host cannot run. Then create that game's cards with `game`.
+
 ## Decide and delegate
 
 Use judgment to identify relevant existing tasks. Answer, comment, resume, cancel, or create

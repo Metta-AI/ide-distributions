@@ -36,7 +36,8 @@ def board_file(context):
     with sqlite3.connect(path) as conn:
         conn.executescript("""
             CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, branch_name TEXT, body TEXT);
-            CREATE TABLE task_events (id INTEGER PRIMARY KEY, task_id TEXT, kind TEXT);
+            CREATE TABLE task_events (id INTEGER PRIMARY KEY, task_id TEXT, kind TEXT,
+                                      payload TEXT);
             CREATE TABLE task_comments (id INTEGER PRIMARY KEY, task_id TEXT, author TEXT, body TEXT);
             CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,
                                     metadata TEXT);

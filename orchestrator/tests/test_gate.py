@@ -29,6 +29,10 @@ class Platform:
     def control_read(self):
         return {"paused": self.paused}
 
+    def in_game(self, game):
+        self.games = [*getattr(self, "games", []), game]
+        return self
+
     def xp_status(self, experiment):
         assert experiment == "E-1"
         return self.xp
@@ -55,7 +59,7 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
         conn.execute(
             "INSERT INTO task_comments VALUES (1, 'card-1', 'researcher-1', 'question: why?')"
         )
-        conn.execute("INSERT INTO task_events VALUES (1, 'card-1', 'completed')")
+        conn.execute("INSERT INTO task_events (id, task_id, kind) VALUES (1, 'card-1', 'completed')")
     first = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
     assert first == {"wakeAgent": False}
 
@@ -170,7 +174,7 @@ def test_bookkeeping_and_comments_do_not_wake_cron(context, board_file):
 )
 def test_native_decision_events_are_not_requeued_by_cron(context, board_file, kind):
     with sqlite3.connect(board_file) as conn:
-        conn.execute("INSERT INTO task_events VALUES (1, 'card-1', ?)", (kind,))
+        conn.execute("INSERT INTO task_events (id, task_id, kind) VALUES (1, 'card-1', ?)", (kind,))
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
@@ -182,3 +186,32 @@ def test_bad_xp_handoff_has_stable_queue_input(context, board_file, experiment):
     assert event["table"] == "task_runs" and event["id"] == 1
     assert event["card"] == "card-1"
     assert evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"] == [event]
+
+
+def test_a_card_of_another_game_waits_in_that_game(context, board_file):
+    add_wait(board_file, {"xp": ["xp-1"]}, {"id": "E-1"})
+    with sqlite3.connect(board_file) as conn:
+        conn.execute(
+            "INSERT INTO task_events (task_id, kind, payload) VALUES ('card-1', "
+            "'creation_command', ?)",
+            (json.dumps({"assignee": "researcher-1", "game": "newgame"}),),
+        )
+    platform = Platform(xp=[{"request_id": "xp-1", "state": "completed"}])
+    result = evaluate(context, platform, platform, QUIET_MINUTE)
+    assert result["context"]["pending"][0]["game"] == "newgame"
+    assert platform.games == ["newgame"]
+
+
+def test_every_game_with_a_workspace_is_polled_for_promotion(context, board_file):
+    host = context.home.parent.parent
+    for game in ("gota", "newgame"):
+        (host / f"canonical-{game}.git").mkdir()
+        (host / f"canonical-{game}.git" / "HEAD").write_text("ref: refs/heads/main\n")
+    context.env.update(RESEARCH_GAME="gota", RESEARCH_CANONICAL=str(host / "canonical-gota.git"))
+    platform = Platform(in_flight={"stage": "submitted"})
+    now = QUIET_MINUTE.replace(minute=10)
+    pending = evaluate(context, platform, platform, now)["context"]["pending"]
+    assert pending == [
+        {"kind": "promotion_poll", "tick": now.isoformat()},
+        {"kind": "promotion_poll", "tick": now.isoformat(), "game": "newgame"},
+    ]

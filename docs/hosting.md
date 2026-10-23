@@ -86,8 +86,8 @@ runs `scripts/queue_keeper.py --bootstrap-only` and resumes the `queue-keeper`, 
    |---|---|
    | `RESEARCH_PLAYER_ID` | `SOFTMAX_PLAYER_ID` |
    | `RESEARCH_GAME` | omitted: game scope comes from the current task, not the profile |
-   | `RESEARCH_CANONICAL` | `<home>/canonical-<game>.git`, the same path for every profile |
-   | `RESEARCH_WORKSPACE` | this profile's own clone, `<profile dir>/workspace` |
+   | `RESEARCH_CANONICAL` | `<home>/canonical.git`, the same neutral repository for every profile |
+   | `RESEARCH_WORKSPACE` | this profile's neutral clone, `<profile dir>/workspace` |
    | `TMPDIR` | `<home>/tmp` (the sandbox `/tmp` is a small tmpfs) |
    | `GOTA_HERMES_PYTHON` | `/opt/hermes/.venv/bin/python` (researchers; GotA builds need it) |
    | `PATH` | the runtime's `PATH`, as today (Nim must be on it for researchers) |
@@ -167,6 +167,33 @@ it in the smoke test by reading the board's `notify_subs` table, not the create 
 The orchestrator posts to `/v2/cogents/<player>/say` with the player credential, as the
 bridge does. Check in the smoke test that those lines render in the IDE coach chat as the same
 player as the bridge's replies.
+
+## Several games on one host
+
+Since [multi-game research](designs/multi-game-research.md), a sandbox researches any shipped
+or installed game. Profiles have no default game: the conversation selects task scope.
+Hosting prepares the neutral workspace described above. What hosting should know:
+
+- **New durable paths under `/opt/data`**, all inside the one volume: `games/<game>/`
+  (installed game folders), `game-history/` (replaced ones), `sources/github.com/...`
+  (fetched GitHub snapshots and their caches), `canonical-<game>.git` for each other game, and
+  `profiles/<name>/workspace-<game>` clones. `.game-staging/` and `.game-install.lock` are
+  reconstructible.
+- **Researcher `config.yaml` gains `skills.external_dirs: ["../../games"]`**, so installed
+  games' binding skills load. Hermes keeps an installed `config.yaml` on update, so an existing
+  sandbox gets it only with `hermes -p researcher-<i> config set skills.external_dirs
+  '["../../games"]'` (or `hermes profile update --force-config`). Without it, research still
+  works but installed games' skills are not loadable as skills.
+- **The bootstrap creates `/opt/data/games`** (Hermes skips an external skills directory that
+  does not exist at start), so keep running each researcher's bootstrap before the gateway
+  starts.
+- **Doctrine.** Prepare's doctrine merge updates `profiles/<name>/workspace` only. Other games'
+  clones get doctrine when the CLI bootstraps them, which `card_create` does for every card of
+  that game.
+- **Network.** `source fetch` needs outbound HTTPS to `github.com`. The sandbox firewall
+  (`devops/hermes-fleet/firewall.sh`) rejects only private ranges, so it is allowed today.
+- **Not supported here:** container-image players (no Docker in the sandbox, and `softmax
+  upload` sends a file) and private GitHub repositories (no credential).
 
 ## Smoke test before advancing the lock
 

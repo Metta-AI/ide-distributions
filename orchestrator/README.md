@@ -1,7 +1,8 @@
 # Orchestrator
 
-A Hermes profile that leads research for one player/game and delegates implementation to
-native Kanban researchers on the explicitly named `autoresearch` board. API chat and cron
+A Hermes profile that leads research for one player, on any game the host can research, and
+delegates implementation to native Kanban researchers on the explicitly named
+`autoresearch` board. Each card names its game. API chat and cron
 turns expose only the `orchestrator` toolset. The supervisor is an agent cron job
 (`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
 skips the model when nothing needs attention.
@@ -66,21 +67,24 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
-| `card_create` | Prepare the assignee clone/branch and create native worktree work; return actual subscription status. |
+| `card_create(..., game?)` | Prepare the assignee's clone of the card's game (its own idempotent `research workspace bootstrap --game`, which also refreshes doctrine) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
 | `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
-| `status` | Cards by state, canonical record summary, durable pause and promotion state. |
-| `records_find`, `records_show` | Shared canonical record reads. |
-| `plan_write`, `control_write` | Publish plan.md or pause/resume through shared workspace publish. |
-| `promotion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow; bootstrap requires the integrated starter version record (`V-...`). |
-| `accept_champion()` | Record the league's current champion after the user confirms. |
-| `workspace_integrate(branch)` | Shared integration of a pushed card/repair branch. |
+| `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and promotion state. |
+| `records_find`, `records_show` (`game?`) | Shared canonical record reads. |
+| `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
+| `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
+| `promotion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
+| `accept_champion(game?)` | Record the league's current champion after the user confirms. |
+| `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
+| `game_list` | Shipped and installed games, whether each has a research workspace yet, and how an installed one was installed. |
+| `game_install(id, run_id, name, replace?)` | Install the `games/<name>/` folder a completed card committed, host-wide; returns its check report (problems refuse, gaps to report). |
 | `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
 | `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
 | `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
 | `leaderboard(league_id, player_id)` | Read the selected player's current champion; never defaults to the workspace carrier. |
-| `xp_status(experiment)`, `credits` | Shared research platform reads. |
+| `xp_status(experiment, game?)`, `credits` | Shared research platform reads. |
 | `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
 
 Describe the objective, inputs, constraints and completion criteria in the card body.
@@ -159,12 +163,28 @@ for this path. Existing workspaces keep their selected image until the owner pau
 and resumes them; the update preserves their workspace and identity. A merged source
 PR is not proof that image qualification or rollout has completed.
 
-An installed contract is matched by
+A shipped or installed contract is matched by
 its declared league or published Coworld name, not by guessed directory paths. Missing bindings are reported separately
 from platform availability. This permits research and match analysis for games without a
 local build/evaluation adapter. The existing automated promotion loop still uses its installed
 game contract and scoped credential; using a different player for writes requires the proper
 credential and authorization, not a prompt override.
+
+### Several games, and making support for a new one
+
+A host researches any shipped or installed game, each in its own canonical repository
+(`canonical-<game>.git` beside `RESEARCH_CANONICAL`) with a clone per profile
+(`workspace-<game>`). Cards and tools without a game use the neutral workspace; `RESEARCH_GAME` scopes selected tasks only.
+The minute supervisor reads each waiting run's game from its card and polls promotion in
+every game that has a workspace. The design is
+[docs/designs/multi-game-research.md](../docs/designs/multi-game-research.md).
+
+When the user asks for research on a game with no research support, the orchestrator creates
+a researcher card (in any existing game) that preloads `game-create`. The researcher fetches
+the game's source from GitHub, scaffolds `games/<game>/` from the researcher's template
+(installing a public optimizer-seed mixin when one exists), fills it and runs `game check`.
+The orchestrator then calls `game_install` on that card's completed run, never integrates
+its branch, tells the user the remaining gaps, and creates the game's cards with `game`.
 
 Run `tests/test_platform_discovery.py` against a real local Observatory fixture using
 `COGAMES_API_URL` (the frontend proxy), `SOFTMAX_PLAYER_CREDENTIAL`,

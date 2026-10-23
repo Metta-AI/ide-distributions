@@ -22,7 +22,11 @@ env_requires:
     description: Credential player for authorized research writes; not the conversation subject.
   - name: RESEARCH_WORKSPACE
     required: true
-    description: Absolute path to this profile's clone of the canonical repository.
+    description: >-
+      Absolute path to this profile's neutral canonical clone
+      (other games: $HERMES_HOME/workspace-<game>).
   - name: RESEARCH_CANONICAL
     required: true
-    description: Absolute path to the shared bare canonical repository.
+    description: >-
+      Absolute path to the neutral shared bare canonical repository; selected games'
+      repositories sit beside it as canonical-<game>.git.

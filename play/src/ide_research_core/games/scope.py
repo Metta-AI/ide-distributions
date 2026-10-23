@@ -141,6 +141,8 @@ def _profile_env(env: Mapping[str, str]) -> dict[str, str]:
     for name, kept in _PROFILE.items():
         if kept in env:
             base[name] = env[kept]
+    if base.get(GAME_ENV) == "":
+        del base[GAME_ENV]
     return base
 
 
@@ -153,6 +155,8 @@ def _scope(profile: Mapping[str, str], game: str, canonical: str, clone: str) ->
     for name, kept in _PROFILE.items():
         if name in profile:
             scoped[kept] = profile[name]
+    # Preserve an unassigned profile when a nested operation changes task scope.
+    scoped[_PROFILE[GAME_ENV]] = profile.get(GAME_ENV, "")
     scoped.update({GAME_ENV: game, CANONICAL_ENV: canonical, WORKSPACE_ENV: clone})
     return scoped
 
