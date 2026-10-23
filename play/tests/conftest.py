@@ -60,6 +60,8 @@ class FakeCli:
         self.create = ("ok", None)  # or ("refuse", stderr)
         self.submit = ("ok", None)
         self.submissions: list[dict] = []
+        self.memberships: list[dict] = []  # this league's active memberships, any player's
+        self.retired: list[str] = []
         self.xp_status = "completed"
         # (episode request id, episode id, status, results or None, error)
         self.episodes = [
@@ -166,6 +168,21 @@ class FakeCli:
             case ["coworld", "submissions", "--player", player, "--json"]:
                 assert player == PLAYER
                 return done(json.dumps({"entries": self.submissions}))
+            case [
+                "coworld",
+                "memberships",
+                "--league",
+                _,
+                "--player",
+                player,
+                "--active-only",
+                "--json",
+            ]:
+                assert player == PLAYER
+                return done(json.dumps({"entries": self.memberships}))
+            case ["coworld", "retire-membership", membership_id, "--reason", _]:
+                self.retired.append(membership_id)
+                return done()
             case ["coworld", "submit", _, "--league", _, "--player", _, "--no-open-browser"]:
                 kind, stderr = self.submit
                 if kind == "refuse":
