@@ -1,10 +1,25 @@
-"""``research game show [--name G]``: print the loaded game contract as JSON.
+"""``research game``: show, list, new, check and install game folders.
 
-Prints ``{"ok": true, "data": {name, bindings, reference_types, outcome_metrics,
-performance_guardrails, min_episodes_floor, league_id, noise_source, layers, compiler,
-path}}``: the validated ``GAME.md`` front matter (``games.loader.load_game``) and the file's
-path. The guide body is not printed; read ``path`` for it. ``--name`` defaults to
-``RESEARCH_GAME``. Exit 1 when the contract is missing or invalid, 2 when no game is named.
+- ``show [--name G]`` prints ``{"ok": true, "data": {name, bindings, reference_types,
+  outcome_metrics, performance_guardrails, min_episodes_floor, league_id, noise_source,
+  layers, compiler, root, path}}``: the validated ``GAME.md`` front matter
+  (``games.loader.load_game``), ``root`` (run the bindings from it) and the file's path. The
+  guide body is not printed; read ``path`` for it. ``--name`` defaults to ``RESEARCH_GAME``,
+  which inside a card worktree is the card's game (``games.scope``). Exit 1 when the contract
+  is missing or invalid, 2 when no game is named.
+- ``list`` prints every shipped and installed game, whether it has a research workspace on
+  this host, and how an installed one was installed.
+- ``new --name G --league L [--title T] [--source URL [--source-ref R]] [--mixin URL
+  [--mixin-ref R]] [--out DIR]`` scaffolds ``<DIR>/games/G/`` from the template (``DIR``
+  defaults to the card worktree, else the current directory); see ``games.authoring``.
+- ``check --name G [--root DIR]`` prints the install gate's problems and gaps for
+  ``<DIR>/games/G/`` (default: the card worktree's folder when it has one, else the shipped or
+  installed game).
+- ``install --name G --worktree W --commit SHA [--replace] [--card ID --run N]`` installs a
+  card's committed folder on the host. The orchestrator only.
+
+Every command prints one JSON object, ``{"ok": true, "data": ...}`` or ``{"ok": false,
+"error": {"reason", "message", "details"?}}``.
 """
 
 import argparse
@@ -13,15 +28,32 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+from ide_research_core import sources
 from ide_research_core.cli import register_group
-from ide_research_core.games.loader import GameError, load_game
+from ide_research_core.games import authoring
+from ide_research_core.games.loader import GameError
+from ide_research_core.games.scope import (
+    GAME_ENV,
+    WORKER_ENV,
+    list_games,
+    load_named_game,
+    locate_game,
+)
+from ide_research_core.io import gitops
 
-GAME_ENV = "RESEARCH_GAME"
-_REPO_ROOT = Path(__file__).resolve().parents[3]  # games/ lives at the project root
+EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS = 0, 1, 2
 
 
 def _emit(payload: dict) -> None:
     print(json.dumps(payload, sort_keys=True))
+
+
+def _fail(reason: str, message: str, code: int, details: dict | None = None) -> int:
+    error = {"reason": reason, "message": message}
+    if details:
+        error["details"] = details
+    _emit({"ok": False, "error": error})
+    return code
 
 
 def _show(args: argparse.Namespace) -> int:
@@ -30,15 +62,81 @@ def _show(args: argparse.Namespace) -> int:
         _emit({"ok": False, "error": {"message": f"pass --name or set {GAME_ENV}"}})
         return 2
     try:
-        game = load_game(_REPO_ROOT, name)
+        game = load_named_game(name)
     except GameError as error:
         _emit({"ok": False, "error": {"message": str(error)}})
         return 1
     data = asdict(game)
     del data["guide"]
-    data["path"] = str(_REPO_ROOT / "games" / name / "GAME.md")
+    data["root"] = str(game.root)
+    data["path"] = str(game.root / "games" / name / "GAME.md")
     _emit({"ok": True, "data": data})
     return 0
+
+
+def _list(args) -> dict:
+    games = list_games(os.environ)
+    for entry in games:
+        record = Path(entry["path"]) / authoring.INSTALL_RECORD
+        if entry["kind"] == "installed" and record.is_file():
+            entry["install"] = json.loads(record.read_text(encoding="utf-8"))
+    return {"games": games, "default": os.environ.get(GAME_ENV)}
+
+
+def _new(args) -> dict:
+    out = Path(args.out or os.environ.get(WORKER_ENV) or Path.cwd())
+    source = sources.fetch(args.source, args.source_ref) if args.source else None
+    mixin = sources.fetch(args.mixin, args.mixin_ref) if args.mixin else None
+    return authoring.new(
+        args.name, args.league, out, title=args.title, source=source, mixin=mixin
+    )
+
+
+def _check(args) -> dict:
+    if args.root:
+        root = Path(args.root)
+    else:
+        worktree = os.environ.get(WORKER_ENV)
+        local = Path(worktree) if worktree else Path.cwd()
+        found = (local / "games" / args.name / "GAME.md").is_file()
+        root = local if found else locate_game(args.name)
+    return authoring.check(args.name, root)
+
+
+def _install(args) -> dict:
+    if (Path(os.environ["HERMES_HOME"]) / "plugins" / "researcher_guard").is_dir():
+        raise authoring.AuthoringError(
+            "coordinator_required", "Only the workspace coordinator installs games"
+        )
+    return authoring.install(
+        args.name,
+        Path(args.worktree),
+        args.commit,
+        replace=args.replace,
+        card=args.card,
+        run_id=args.run,
+    )
+
+
+def _run(handler):
+    def run(args: argparse.Namespace) -> int:
+        try:
+            data = handler(args)
+        except authoring.AuthoringError as error:
+            return _fail(error.reason, str(error), EXIT_FAILED, error.details)
+        except sources.SourceError as error:
+            code = EXIT_BAD_ARGS if error.reason == "bad_arguments" else EXIT_FAILED
+            return _fail(error.reason, str(error), code)
+        except GameError as error:
+            return _fail("bad_arguments", str(error), EXIT_BAD_ARGS)
+        except gitops.GitError as error:
+            return _fail("git", str(error), EXIT_FAILED)
+        except KeyError as error:
+            return _fail("bad_arguments", f"{error.args[0]} is not set", EXIT_BAD_ARGS)
+        _emit({"ok": True, "data": data})
+        return EXIT_OK
+
+    return run
 
 
 def setup(parser: argparse.ArgumentParser) -> None:
@@ -46,6 +144,34 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub = commands.add_parser("show", help="print the game contract (GAME.md front matter)")
     sub.add_argument("--name", help=f"game directory under games/ (default ${GAME_ENV})")
     sub.set_defaults(func=_show)
+
+    sub = commands.add_parser("list", help="list shipped and installed games")
+    sub.set_defaults(func=_run(_list))
+
+    sub = commands.add_parser("new", help="scaffold games/<name>/ from the game template")
+    sub.add_argument("--name", required=True, help="the new game's folder name")
+    sub.add_argument("--league", required=True, help="the league its evaluations play in")
+    sub.add_argument("--title", help="the game's display name (default: --name)")
+    sub.add_argument("--source", help="the game source: https://github.com/<owner>/<repo>")
+    sub.add_argument("--source-ref", help="branch, tag or commit of --source")
+    sub.add_argument("--mixin", help="a mixin to install: https://github.com/<owner>/<repo>")
+    sub.add_argument("--mixin-ref", help="branch, tag or commit of --mixin")
+    sub.add_argument("--out", help="directory that receives games/<name>/ (default: worktree)")
+    sub.set_defaults(func=_run(_new))
+
+    sub = commands.add_parser("check", help="check a game folder before installation")
+    sub.add_argument("--name", required=True)
+    sub.add_argument("--root", help="directory that holds games/<name>/")
+    sub.set_defaults(func=_run(_check))
+
+    sub = commands.add_parser("install", help="install a card's game folder (orchestrator)")
+    sub.add_argument("--name", required=True)
+    sub.add_argument("--worktree", required=True, help="the card worktree holding games/<name>/")
+    sub.add_argument("--commit", required=True, help="the reviewed commit to install")
+    sub.add_argument("--replace", action="store_true", help="replace an installed game")
+    sub.add_argument("--card")
+    sub.add_argument("--run", type=int)
+    sub.set_defaults(func=_run(_install))
 
 
 register_group("game", setup)

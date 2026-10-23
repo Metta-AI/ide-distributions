@@ -4,7 +4,7 @@ A review card runs ``research softmax xp evidence <E>`` in its worktree. The exp
 requests come from ``Softmax.xp_recover``; per (batch, seed, arm) only the latest attempt
 counts. For every completed request without evidence yet, ``xp_artifacts`` downloads its
 results, the game's ``evaluate`` binding reads each ``results.json`` (``<evaluate> --results
-<file> --json``, see ``games/_template/GAME.md``), and the worktree gets:
+<file> --json``, see ``games/_template/CONTRACT.md``), and the worktree gets:
 
 - ``evidence/xp/<E>/<request id>/results.json`` (the platform file) and ``rows.jsonl``: one
   ``EpisodeRow`` per episode (``episode_id`` ``<request id>:<episode>``, or

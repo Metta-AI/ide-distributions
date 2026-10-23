@@ -133,12 +133,20 @@ the research method that uses these terms is in the researcher's `doctrine/` and
 
 ## Places
 
+- **Game folder**: `games/<game>/`, a game's contract (`GAME.md`), bindings, binding skills
+  (`<game>-ab`, ...) and seed. **Shipped** with a distribution, or **installed** on the host
+  (`<root>/games/<game>/`) by the orchestrator from a card that made it (`game-create`).
+- **Default game**: `RESEARCH_GAME`, the game a card or tool uses when it names none. A host
+  researches any shipped or installed game; each card names one.
 - **Canonical repository**: one bare git repository per game on the host
-  (`RESEARCH_CANONICAL`, `<root>/canonical-<game>.git`). Its `main` is the research record.
-- **Clone**: each profile's own clone of it (`RESEARCH_WORKSPACE`). Its `main` is never
-  edited by hand.
-- **Card worktree**: a git worktree of a researcher's clone on the branch `card/<id>` (or
-  `repair/<id>`), made for one card. A card's work happens only here.
+  (`<root>/canonical-<game>.git`; the default game's is `RESEARCH_CANONICAL`). Its `main` is
+  that game's research record.
+- **Clone**: each profile's own clone of a game's canonical repository (`RESEARCH_WORKSPACE`
+  for the default game, `workspace-<game>` beside it for others). Its `main` is never edited
+  by hand.
+- **Card worktree**: a git worktree of a researcher's clone of the card's game on the branch
+  `card/<id>` (or `repair/<id>`), made for one card. A card's work happens only here, and
+  every research command run in it works on that game.
 - **Integrate**: `research workspace integrate`, the only way a card's work reaches `main`
   (validate the records, refuse an overlap, merge under the host-wide lock, push).
   **Merged**: a card branch's commit is an ancestor of canonical `main`.

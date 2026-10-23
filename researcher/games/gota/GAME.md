@@ -287,7 +287,7 @@ and fetched manifest into its fresh work directory.
 
 `evaluate --results RESULTS_JSON --json` returns `data.episodes`, one metric entry
 per seat with the real integer seed. `softmax xp evidence` keeps only the design's seats and
-reduces them by the arithmetic mean, one row per episode (`games/_template/GAME.md`).
+reduces them by the arithmetic mean, one row per episode (`games/_template/CONTRACT.md`).
 The binding never guesses policy identity. Positional `evaluate RESULTS_JSON
 --seat N` retains the local metric-object form.
 

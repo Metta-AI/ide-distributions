@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ from orchestrator.research import Research
 
 @pytest.fixture
 def discovery(tmp_path):
-    client = Discovery({"HERMES_HOME": str(tmp_path)}, tmp_path)
+    client = Discovery({"HERMES_HOME": str(tmp_path)})
     guide = "Hook 🎯 then retreat.\n" * 1500
     league = {
         "id": "league_pudge", "name": "Pudge", "participation_url": "https://example.test",
@@ -89,25 +90,29 @@ def test_installed_guide_is_available_by_reference_without_changing_workspace(di
     from ide_research_core.softmax_tool import discovery as module
 
     client, _, _, _ = discovery
-    contract = client.root / "games/pudge/GAME.md"
+    root = Path(client.env["HERMES_HOME"])  # an installed game lives in the host's games/
+    contract = root / "games/pudge/GAME.md"
     contract.parent.mkdir(parents=True)
     contract.write_text("installed contract")
     game = SimpleNamespace(
         name="pudge", league_id="league_pudge", guide="Check hooks before uploading.",
         bindings={"local_check": "check-policy"},
     )
-    monkeypatch.setattr(module, "load_game", lambda root, name: game)
+    real = module.load_game  # shipped games load for real; only the installed one is faked
+    monkeypatch.setattr(
+        module, "load_game", lambda root, name: game if name == "pudge" else real(root, name)
+    )
     index = client.game_support("league_pudge")
     assert index["research_bindings_available"] is True
     assert index["installed_research_support"] == [{
-        "name": "pudge", "league_id": "league_pudge", "document": "research:pudge",
-        "bindings": game.bindings,
+        "name": "pudge", "kind": "installed", "league_id": "league_pudge",
+        "document": "research:pudge", "bindings": game.bindings, "research_workspace": False,
     }]
     metadata = next(doc for doc in index["documents"] if doc["id"] == "research:pudge")
     page = client.game_support("league_pudge", metadata["id"], expected_sha256=metadata["sha256"])
     assert page["document"]["content"] == game.guide
     assert contract.read_text() == "installed contract"
-    assert not (client.root / "workspace").exists()
+    assert not (root / "workspace").exists()
 
 
 def test_document_arguments_survive_subprocess_adapter(shared_fixture):

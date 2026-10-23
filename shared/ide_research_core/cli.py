@@ -5,6 +5,8 @@ Later tasks add subcommand groups with `register_group(name, setup_fn)`, where
 A handler takes the parsed `argparse.Namespace` and returns an exit code. A group module
 calls `register_group` at import time; list it in `GROUP_MODULES` so the parser imports it.
 A group option named `--root` (dest `root`) is made absolute here, before any handler runs.
+Inside a Kanban worker the research variables are pointed at the card's game first
+(``games.scope.worker_env``), so every command, binding and resolver works on that game.
 """
 
 import argparse
@@ -26,6 +28,7 @@ GROUP_MODULES = (
     "ide_research_core.games.cli",
     "ide_research_core.workspace_cli",
     "ide_research_core.promotion_cli",
+    "ide_research_core.sources",
 )
 
 
@@ -45,6 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from ide_research_core.games.scope import worker_env
+
+    os.environ.update(worker_env(os.environ))
     parser = build_parser()
     args = parser.parse_args(argv)  # argparse exits with code 2 on bad arguments
     if getattr(args, "root", None):

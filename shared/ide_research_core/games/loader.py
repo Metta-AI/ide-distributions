@@ -1,12 +1,13 @@
-"""Load a game contract from ``games/<name>/GAME.md``. Core code never names a game."""
+"""Load a game contract from ``games/<name>/GAME.md``. Core code never names a game.
+
+Importing this module needs only the standard library (``games.scope`` and the orchestrator's
+Hermes-process plugin import it); reading a contract needs the profile's packages."""
 
 import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-
-from ide_research_core.io.docs import read_doc
 
 BINDING_NAMES = ("build", "local_check", "upload", "evaluate", "replay_inspect")
 COMPILERS = ("pw", "basic", "none")
@@ -49,6 +50,8 @@ class Game:
       environment variables and executables (on PATH) a worker needs for the bindings, such as
       a build. A worker checks them before a long build and blocks its card with a
       ``help_request:`` reason when one is missing.
+    - root: the directory that holds ``games/<name>/``: bindings and resolvers run from it
+      (shipped games: the profile; installed games: the host's root, ``games.scope``).
     """
 
     name: str
@@ -65,6 +68,7 @@ class Game:
     source: dict[str, str] | None = None
     host_env: tuple[str, ...] = ()
     host_tools: tuple[str, ...] = ()
+    root: Path = Path()
 
 
 def _is_text(value) -> bool:
@@ -162,6 +166,8 @@ def _check_source(meta: dict, problems: list[str]) -> None:
 
 
 def load_game(repo_root: Path, name: str) -> Game:
+    from ide_research_core.io.docs import read_doc
+
     path = Path(repo_root) / "games" / name / "GAME.md"
     if not path.exists():
         raise GameError(f"game {name!r}: {path} not found")
@@ -184,6 +190,7 @@ def load_game(repo_root: Path, name: str) -> Game:
         source=dict(meta["source"]) if meta.get("source") is not None else None,
         host_env=tuple((meta.get("host_requirements") or {}).get("env", [])),
         host_tools=tuple((meta.get("host_requirements") or {}).get("tools", [])),
+        root=Path(repo_root),
     )
 
 

@@ -19,7 +19,7 @@ def test_real_shared_evaluate_and_league_consumers(tmp_path):
             'scores': [1] * 5 + [0] * 5, 'total_xp': list(range(10))}
     path = tmp_path / 'results.json'
     path.write_text(json.dumps(data))
-    evaluate = binding_evaluate(game, ROOT)
+    evaluate = binding_evaluate(game)
     entries = evaluate(path)
     assert [entry['seat'] for entry in entries] == list(range(10))
     assert {entry['seed'] for entry in entries} == {37}

@@ -37,6 +37,8 @@ CORE_SKILLS = {
 }
 # Plan 03 Task 4.2 adds these for System Design §5.6 and C10.
 MAINTENANCE_SKILLS = {"kb-maintenance", "calibrate-noise"}
+# Making a new game's folder (adapted from optimizer-seed's mixin method).
+GAME_SKILLS = {"game-create"}
 
 NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*")  # Hermes skill_manager_tool.VALID_NAME_RE
 DESCRIPTION_LIMIT = 60  # Hermes SKILL_PROMPT_DESC_LIMIT: longer descriptions are truncated
@@ -60,6 +62,7 @@ GROUPS = (
     "runtime",
     "provenance",
     "report",
+    "source",
 )
 # An inline-code span naming a command without the variable: a group, then a subcommand.
 PREFIXLESS = re.compile(rf"^(?:{'|'.join(GROUPS)}) [a-z]")
@@ -102,6 +105,12 @@ COMMAND_FLAGS = {
     "kb hubs": "--size-limit-tokens",
     "kb index": "--token-budget",
     "game show": "",
+    "game list": "",
+    "game new": "--name --league --title --source --source-ref --mixin --mixin-ref --out",
+    "game check": "--name --root",
+    "source fetch": "--repo --ref",
+    "softmax game-support": "--league",
+    "softmax league-results": "--league --limit --dest",
     "softmax whoami": "",
     "softmax credits": "",
     "softmax xp create": "--batch --attempt --batches",
@@ -157,7 +166,9 @@ def skill(request) -> Path:
 
 
 def test_every_core_skill_has_a_file():
-    assert {p.parent.name for p in SKILLS.glob("*/SKILL.md")} == CORE_SKILLS | MAINTENANCE_SKILLS
+    assert {p.parent.name for p in SKILLS.glob("*/SKILL.md")} == (
+        CORE_SKILLS | MAINTENANCE_SKILLS | GAME_SKILLS
+    )
     assert {p.parent.name for p in (ROOT / "skills" / "gota").glob("*/SKILL.md")} == {
         "replay-inspection",
         "eval-design",

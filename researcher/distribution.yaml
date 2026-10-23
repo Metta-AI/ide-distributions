@@ -1,6 +1,6 @@
 name: researcher
 version: 0.2.0
-description: Research worker for the Softmax IDE. Works Kanban cards from the orchestrator on one game, in its own clone of the shared canonical workspace.
+description: Research worker for the Softmax IDE. Works Kanban cards from the orchestrator, each on one game, in its own clone of that game's shared canonical workspace.
 hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
@@ -19,16 +19,21 @@ env_requires:
   - name: RESEARCH_CANONICAL
     required: true
     description: >-
-      Path of the bare canonical repository of the game, shared by every profile on the
-      host (for example <hermes root>/canonical-gota.git). `scripts/bootstrap.py` creates
-      and seeds it when it does not exist yet.
+      Path of the bare canonical repository of the default game (RESEARCH_GAME), shared by
+      every profile on the host (for example <hermes root>/canonical-gota.git).
+      `scripts/bootstrap.py` creates and seeds it when it does not exist yet. Every other
+      game's repository sits beside it, as canonical-<game>.git.
   - name: RESEARCH_WORKSPACE
     required: false
-    description: This profile's clone of the canonical repository. Default is $HERMES_HOME/workspace.
+    description: >-
+      This profile's clone of the default game's canonical repository. Default is
+      $HERMES_HOME/workspace; other games' clones are $HERMES_HOME/workspace-<game>.
   - name: RESEARCH_GAME
-    required: false
+    required: true
     default: gota
-    description: Game to research. A directory name under games/.
+    description: >-
+      The host's default game: a shipped or installed game folder (games/<game>/). Bootstrap
+      prepares it, and a card that names no game researches it.
   - name: COGAMES_API_URL
     required: false
     default: https://softmax.com/api

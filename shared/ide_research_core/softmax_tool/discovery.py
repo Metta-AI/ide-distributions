@@ -10,6 +10,7 @@ from urllib.parse import quote
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter
 
 from ide_research_core.games.loader import load_game
+from ide_research_core.games.scope import list_games
 from ide_research_core.softmax_tool.client import SoftmaxClient
 from ide_research_core.softmax_tool.discovery_schema import SupportRead
 from ide_research_core.softmax_tool.platform_cli import PlatformCli
@@ -68,9 +69,8 @@ def matches(query: str, *values: str) -> bool:
 
 
 class Discovery:
-    def __init__(self, env: Mapping[str, str], root: Path):
+    def __init__(self, env: Mapping[str, str]):
         self.env = env
-        self.root = root
         self.cli = PlatformCli(env)
         self.client = SoftmaxClient(env)
 
@@ -150,10 +150,10 @@ class Discovery:
         if coworld is not None:
             documents["manifest"] = json.dumps(coworld.manifest, ensure_ascii=False, sort_keys=True)
         support = []
-        # Inspect installed contracts by their declared league; never turn a model-supplied
-        # name into a path or execute downloaded documentation.
-        for path in sorted((self.root / "games").glob("*/GAME.md")):
-            game = load_game(self.root, path.parent.name)
+        # Inspect shipped and installed contracts by their declared league; never turn a
+        # model-supplied name into a path or execute downloaded documentation.
+        for entry in list_games(self.env):
+            game = load_game(Path(entry["root"]), entry["name"])
             if (
                 game.league_id == league.id
                 or game.name.casefold() == (league.game.coworld_name or "").casefold()
@@ -161,9 +161,11 @@ class Discovery:
                 support.append(
                     {
                         "name": game.name,
+                        "kind": entry["kind"],
                         "league_id": game.league_id,
                         "document": f"research:{game.name}",
                         "bindings": game.bindings,
+                        "research_workspace": entry["workspace"],
                     }
                 )
                 documents[f"research:{game.name}"] = game.guide
