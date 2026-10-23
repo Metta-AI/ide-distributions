@@ -13,6 +13,7 @@ from .program import PlayError, Program
 
 OPERATIONS = (
     "who_we_are",
+    "take_name",
     "starter_fetch",
     "program_show",
     "program_change",

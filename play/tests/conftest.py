@@ -213,7 +213,7 @@ class FakeRecords:
         live = self.records.get((collection, key))
         if method == "GET":
             return (200, json.dumps(live).encode()) if live else (404, b'{"detail": "not found"}')
-        assert method == "PUT" and collection == "tasks"
+        assert method == "PUT" and collection in ("tasks", "profile")
         payload = json.loads(body)
         assert payload["base_rev"] == (live["rev"] if live else None)
         rev = (live["rev"] if live else 0) + 1

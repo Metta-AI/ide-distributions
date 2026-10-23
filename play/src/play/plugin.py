@@ -41,12 +41,28 @@ TIMEOUT_S = 840  # an upload may take 600 s; Hermes allows tool calls up to time
 TOOLS = {
     "who_we_are": (
         (
-            "Your cogent name and your user's name. Call once at the start of each conversation. "
+            "Whether you have a name yet (named), your name (cogent_name, null until you are "
+            "named) and your user's account name. Call once at the start of each conversation. "
             "user_name is null when the user has set none. The account name that softmax status "
             "and whoami print is the user's, not yours."
         ),
         {},
         [],
+    ),
+    "take_name": (
+        (
+            "Take the name your user chose for you, exactly as they said it. Call only when "
+            "the user has told you a name in this conversation; never pick one yourself."
+        ),
+        {
+            "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "description": "The exact name the user chose.",
+            }
+        },
+        ["name"],
     ),
     "starter_fetch": (
         (

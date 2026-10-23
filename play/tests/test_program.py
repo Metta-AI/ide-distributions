@@ -523,7 +523,7 @@ def test_who_we_are_reads_the_public_cogent_profile(program):
         return json.dumps({"name": "scissors", "owner_name": "Emmett S"}).encode()
 
     program._fetch = profile
-    assert program.who_we_are() == {"cogent_name": "scissors", "user_name": "Emmett S"}
+    assert program.who_we_are() == {"named": False, "cogent_name": None, "user_name": "Emmett S"}
     assert urls == [f"{program.client._cli.server}/observatory/v2/cogents/{PLAYER}"]
 
 
@@ -531,7 +531,7 @@ def test_who_we_are_has_no_user_name_when_the_platform_has_none(program):
     program._fetch = lambda url: json.dumps({"name": "scissors", "owner_name": None}).encode()
     assert run("who_we_are", {}, program) == {
         "ok": True,
-        "data": {"cogent_name": "scissors", "user_name": None},
+        "data": {"named": False, "cogent_name": None, "user_name": None},
     }
 
 

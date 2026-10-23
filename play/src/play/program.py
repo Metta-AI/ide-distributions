@@ -147,6 +147,17 @@ def diff(before: str, after: str, before_name: str, after_name: str) -> dict:
     }
 
 
+NAME_LIMIT = 255
+# The soul record the server validates strictly; plain, truthful values for a cogent with none yet.
+NEW_SOUL = {
+    "temperament": "neutral",
+    "voice": "Still finding my voice.",
+    "aboutMistakes": "I say what went wrong and fix it.",
+    "neverSilently": ["submit", "spend"],
+    "body": "New here, getting to know my user.",
+}
+
+
 class Program:
     def __init__(
         self,
@@ -197,10 +208,14 @@ class Program:
     # --- who we are -----------------------------------------------------
 
     def who_we_are(self) -> dict:
-        """The cogent's name and its user's, from the public cogent profile (no credential).
+        """Whether the cogent has a name yet, its name, and its user's.
 
-        ``softmax status`` and ``whoami`` print the user's account name, not the cogent's.
-        ``user_name`` is None when the user set no name on the platform."""
+        ``named`` is true when the cogent's soul record holds a name; ``cogent_name`` is that name
+        (the page renames the player to match shortly after, so the soul is the truth first), or
+        None when the cogent is not named yet: the player's placeholder name is never its name.
+        ``user_name`` comes from the public cogent profile (no credential) and is the user's
+        account name, which ``softmax status`` and ``whoami`` also print; None when the user set
+        none."""
         if not self.player:
             raise PlayError("not_configured", "RESEARCH_PLAYER_ID is not set")
         url = f"{self.client._cli.server}/observatory/v2/cogents/{urllib.parse.quote(self.player, safe='')}"
@@ -210,7 +225,26 @@ class Program:
             raise PlayError(
                 "who_unavailable", f"GET {url} answered HTTP {error.code}", {"status": error.code}
             ) from error
-        return {"cogent_name": profile["name"], "user_name": profile.get("owner_name")}
+        soul = self.records.get("profile", "soul")
+        name = (soul["body"].get("name") or "").strip() if soul else ""
+        return {
+            "named": bool(name),
+            "cogent_name": name or None,
+            "user_name": profile.get("owner_name"),
+        }
+
+    def take_name(self, name: str) -> dict:
+        """Take the name the user chose: write it into the cogent's soul record."""
+        name = name.strip()
+        if not name:
+            raise PlayError("bad_name", "the name is empty")
+        if len(name) > NAME_LIMIT:
+            raise PlayError("bad_name", f"the name is longer than {NAME_LIMIT} characters")
+        live = self.records.get("profile", "soul")
+        rev = live["rev"] if live else None
+        body = {**NEW_SOUL, **(live["body"] if live else {}), "name": name}
+        self.records.put("profile", "soul", body, rev, f"play:soul-name:{name}:{rev or 0}")
+        return {"name": name}
 
     # --- starter --------------------------------------------------------
 

@@ -13,6 +13,7 @@ from play.limits import NAME_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
 DISTRIBUTION = Path(__file__).resolve().parents[1]
 PLAY_TOOLS = {
     "who_we_are": ([], set()),
+    "take_name": (["name"], {"name"}),
     "starter_fetch": ([], {"player"}),
     "program_show": ([], {"program"}),
     "program_change": (["text", "change"], {"text", "change"}),
