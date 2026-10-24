@@ -12,8 +12,6 @@ from pathlib import Path
 
 from ide_research_core import promotion, workspace
 from ide_research_core.cli import register_group
-from ide_research_core.games.loader import GameError
-from ide_research_core.games.scope import load_named_game
 from ide_research_core.io import gitops
 from ide_research_core.records.store import RecordNotFound
 from ide_research_core.softmax_tool.protocol import Refused, from_env
@@ -38,14 +36,21 @@ def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
             clone = Path(args.root) if args.root else workspace.workspace_from_env()
-            league_id = load_named_game(os.environ[workspace.GAME_ENV]).league_id
-            player_id = os.environ[PLAYER_ENV]
-            sm = from_env(os.environ, clone)
-            data = handler(args, clone, sm, league_id, player_id)
+            if args.command == "pending":
+                data = next(
+                    (
+                        p.to_dict()
+                        for p in reversed(promotion.load_all(clone))
+                        if p.stage in promotion.IN_FLIGHT
+                    ),
+                    None,
+                )
+            else:
+                player_id = os.environ[PLAYER_ENV]
+                sm = from_env(os.environ, clone)
+                data = handler(args, clone, sm, args.league, player_id)
         except KeyError as error:
             return _fail("bad_arguments", f"{error.args[0]} is not set", EXIT_BAD_ARGS)
-        except GameError as error:
-            return _fail("bad_arguments", str(error), EXIT_BAD_ARGS)
         except Refused as error:
             return _fail(error.reason, str(error), EXIT_FAILED, error.details)
         except RecordNotFound as error:
@@ -67,6 +72,12 @@ def setup(parser: argparse.ArgumentParser) -> None:
 
     def command(name: str, handler, help_text: str) -> argparse.ArgumentParser:
         sub = commands.add_parser(name, parents=[common], help=help_text)
+        if name != "pending":
+            sub.add_argument(
+                "--league",
+                required=True,
+                help="explicit target league from the conversation",
+            )
         sub.set_defaults(func=_run(handler))
         return sub
 
@@ -84,7 +95,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "submit a built version explicitly requested by the user, without an improvement claim",
     )
     sub.add_argument("--version", required=True)
-    sub.add_argument("--strategy", required=True, help="canonical strategy matching the uploaded build")
+    sub.add_argument(
+        "--strategy",
+        required=True,
+        help="canonical strategy matching the uploaded build",
+    )
     sub.add_argument("--request", required=True, help="the user's explicit submission request")
     sub = command(
         "bootstrap",
@@ -94,9 +109,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--version", required=True, help="the uploaded version record, V-...")
     command(
         "pending",
-        lambda a, c, sm, league, player: next(
-            (p.to_dict() for p in reversed(promotion.load_all(c)) if p.stage in promotion.IN_FLIGHT), None,
-        ),
+        None,
         "read an in-flight promotion without advancing or submitting it",
     )
     command(

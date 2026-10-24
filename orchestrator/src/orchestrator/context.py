@@ -38,7 +38,7 @@ class Context:
 
     def for_game(self, game: str | None) -> "Context":
         """This profile's context for ``game``: its canonical repository and this profile's
-        clone of it (``ide_research_core.games.scope``). None or the default game: unchanged."""
+        clone of it (``ide_research_core.games.scope``). None: unchanged."""
         from ide_research_core.games.scope import env_for_game
 
         return Context(self.home, env_for_game({**self.env, "HERMES_HOME": str(self.home)}, game))

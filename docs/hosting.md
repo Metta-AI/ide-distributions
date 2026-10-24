@@ -85,9 +85,9 @@ runs `scripts/queue_keeper.py --bootstrap-only` and resumes the `queue-keeper`, 
    | Variable | Value |
    |---|---|
    | `RESEARCH_PLAYER_ID` | `SOFTMAX_PLAYER_ID` |
-   | `RESEARCH_GAME` | the default game folder, `gota` |
-   | `RESEARCH_CANONICAL` | `<home>/canonical-<game>.git`, the same path for every profile |
-   | `RESEARCH_WORKSPACE` | this profile's own clone of the default game, `<profile dir>/workspace` |
+   | `RESEARCH_GAME` | omitted: game scope comes from the current task, not the profile |
+   | `RESEARCH_CANONICAL` | `<home>/canonical.git`, the same neutral repository for every profile |
+   | `RESEARCH_WORKSPACE` | this profile's neutral clone, `<profile dir>/workspace` |
    | `TMPDIR` | `<home>/tmp` (the sandbox `/tmp` is a small tmpfs) |
    | `GOTA_HERMES_PYTHON` | `/opt/hermes/.venv/bin/python` (researchers; GotA builds need it) |
    | `PATH` | the runtime's `PATH`, as today (Nim must be on it for researchers) |
@@ -171,8 +171,8 @@ player as the bridge's replies.
 ## Several games on one host
 
 Since [multi-game research](designs/multi-game-research.md), a sandbox researches any shipped
-or installed game, not only `RESEARCH_GAME`, which becomes the default game. It needs no new
-environment variable and no change to prepare's steps above. What hosting should know:
+or installed game. Profiles have no default game: the conversation selects task scope.
+Hosting prepares the neutral workspace described above. What hosting should know:
 
 - **New durable paths under `/opt/data`**, all inside the one volume: `games/<game>/`
   (installed game folders), `game-history/` (replaced ones), `sources/github.com/...`

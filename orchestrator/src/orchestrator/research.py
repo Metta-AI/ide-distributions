@@ -20,7 +20,7 @@ class Research:
         self.context = context
 
     def in_game(self, game=None):
-        """This research in ``game``'s workspace (None or the default game: this one). The
+        """This research in ``game``'s workspace (None: this one). The
         orchestrator's clone of another game is made on first use, from a canonical repository
         that a researcher's card preparation created (``Board.card_create``)."""
         if game is None or game == self.context.env.get("RESEARCH_GAME"):
@@ -133,8 +133,8 @@ class Research:
         target.write_text(text, encoding="utf-8")
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
-    def accept_champion(self, game=None):
-        return self.in_game(game).call("promotion", "accept")
+    def accept_champion(self, league_id, game=None):
+        return self.in_game(game).call("promotion", "accept", "--league", league_id)
 
     def xp_status(self, experiment, game=None):
         return self.in_game(game).call("softmax", "xp", "status", experiment)

@@ -88,9 +88,9 @@ Write `$PROFILE/.env` (Softmax hosting writes it for you):
 | `OPENROUTER_API_KEY` | OpenRouter key for the research model |
 | `SOFTMAX_PLAYER_CREDENTIAL` | the player's credential (a `cga_` agent token, or a player session as JSON) |
 | `RESEARCH_PLAYER_ID` | that player's id |
-| `RESEARCH_GAME` | the host's default game, a shipped or installed game folder (`gota` in hosting): bootstrap prepares it, and a card that names no game researches it |
-| `RESEARCH_CANONICAL` | the default game's bare canonical repository, shared by every profile on the host, for example `<host root>/canonical-gota.git`; other games' repositories sit beside it as `canonical-<game>.git` |
-| `RESEARCH_WORKSPACE` | this profile's clone of the default game (default `$PROFILE/workspace`); other games' clones are `$PROFILE/workspace-<game>` |
+| `RESEARCH_GAME` | selected task scope only; do not set it in profile configuration. Bootstrap without a game creates a neutral workspace. |
+| `RESEARCH_CANONICAL` | the neutral bare canonical repository, shared by every profile on the host, for example `<host root>/canonical.git`; other games' repositories sit beside it as `canonical-<game>.git` |
+| `RESEARCH_WORKSPACE` | this profile's neutral clone (default `$PROFILE/workspace`); other games' clones are `$PROFILE/workspace-<game>` |
 | `COGAMES_API_URL` | the Softmax API server (default `https://softmax.com/api`) |
 
 `distribution.yaml` lists the rest. `RESEARCH_SOFTMAX=fake` selects the fake platform in tests.

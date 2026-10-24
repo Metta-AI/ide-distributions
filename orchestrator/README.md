@@ -23,7 +23,7 @@ hermes profile install /path/to/empty-export/orchestrator --name orchestrator --
 ```
 
 Set the installed profile's `.env` with `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`,
-`SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL`, `RESEARCH_PLAYER_ID`, `RESEARCH_GAME`,
+`SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL`, `RESEARCH_PLAYER_ID`,
 `RESEARCH_WORKSPACE` (this profile's clone) and `RESEARCH_CANONICAL` (the bare repo).
 The manifest documents defaults. The credential accepts a bare token or player-session
 JSON. Hermes's routed profile secret scope supplies HTTP/CLI credentials; a different
@@ -174,7 +174,7 @@ credential and authorization, not a prompt override.
 
 A host researches any shipped or installed game, each in its own canonical repository
 (`canonical-<game>.git` beside `RESEARCH_CANONICAL`) with a clone per profile
-(`workspace-<game>`). `RESEARCH_GAME` is the default for a card or tool that names no game.
+(`workspace-<game>`). Cards and tools without a game use the neutral workspace; `RESEARCH_GAME` scopes selected tasks only.
 The minute supervisor reads each waiting run's game from its card and polls promotion in
 every game that has a workspace. The design is
 [docs/designs/multi-game-research.md](../docs/designs/multi-game-research.md).

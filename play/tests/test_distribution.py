@@ -47,7 +47,7 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
 
 def test_gota_league_matches_the_game_contract():
     contract = frontmatter.load(REPO / "researcher/games/gota/GAME.md")
-    assert GOTA.league_id == contract["league_id"]
+    assert GOTA.reference_league_id == contract["league_id"]
 
 
 def test_ide_profiles_do_not_import_play():
