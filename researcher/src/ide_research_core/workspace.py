@@ -20,7 +20,6 @@ the card branch's commit is an ancestor of canonical ``main`` (``merged``).
 
 import json
 import os
-import re
 import shutil
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -62,7 +61,6 @@ DISTRIBUTION_ROOT = (
     Path(__file__).resolve().parents[2]
 )  # games/ and doctrine/ live here
 DOCTRINE_FILES = ("research-agent.md", "communication.md")
-VERSION_HEADER = re.compile(r"\A<!-- doctrine-version: (\S+) -->")
 
 _STORE = RecordStore(Layout(Path()))
 
@@ -460,20 +458,15 @@ def _seed(clone: Path, game: str, root: Path, game_root: Path) -> None:
 
 
 def _reseed_agents_md(clone: Path, root: Path) -> bool:
-    """Rewrite ``AGENTS.md`` when the shipped doctrine version differs from canonical's."""
-    wanted = _doctrine_version(root)
+    """Refresh generated instructions even when doctrine changes keep the same version."""
+    wanted = agents_md(root)
     path = clone / "AGENTS.md"
-    current = (
-        VERSION_HEADER.match(path.read_text(encoding="utf-8"))
-        if path.exists()
-        else None
-    )
-    if wanted is None or (current and current.group(1) == wanted):
+    if wanted is None or (path.exists() and path.read_text(encoding="utf-8") == wanted):
         return False
     publish(
         clone,
-        {"AGENTS.md": agents_md(root).encode()},
-        f"bootstrap: doctrine version {wanted}",
+        {"AGENTS.md": wanted.encode()},
+        f"bootstrap: refresh doctrine version {_doctrine_version(root)}",
     )
     return True
 

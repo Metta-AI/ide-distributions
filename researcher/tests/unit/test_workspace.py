@@ -53,6 +53,21 @@ def test_first_bootstrap_seeds_and_later_ones_clone(tmp_path, bare):
     assert workspace.bootstrap(second, bare, "fakegame", DISTRIBUTION) == []
 
 
+def test_bootstrap_refreshes_changed_doctrine_without_version_bump(tmp_path, bare):
+    clone = clone_for(tmp_path, bare, "researcher-1")
+    expected = workspace.agents_md(DISTRIBUTION)
+    stale = expected.replace("Use `workspace stage`", "Run `workspace integrate`")
+    assert stale != expected
+    workspace.publish(clone, {"AGENTS.md": stale.encode(), "plan.md": b"Keep my plan"}, "Old doctrine")
+
+    assert workspace.bootstrap(clone, bare, "fakegame", DISTRIBUTION) == ["re-seeded AGENTS.md"]
+    assert (clone / "AGENTS.md").read_text() == expected
+    assert (clone / "plan.md").read_text() == "Keep my plan"
+    head = gitops.head(clone)
+    assert workspace.bootstrap(clone, bare, "fakegame", DISTRIBUTION) == []
+    assert gitops.head(clone) == head
+
+
 def test_integrate_merges_a_card_and_knows_it_is_merged(tmp_path, bare):
     clone = clone_for(tmp_path, bare, "researcher-1")
     worktree = card_worktree(clone, "a")
