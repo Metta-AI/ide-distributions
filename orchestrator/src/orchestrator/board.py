@@ -196,8 +196,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             clone = clone_for(env, game)
             if game != env["RESEARCH_GAME"]:
                 locate_game(game, self.context.env)
-                # Outside the board transaction: idempotent, and it refreshes the doctrine.
-                prepare_clone(profile, env, game)
+            # Refresh default-game clones too before native Hermes branches the task.
+            prepare_clone(profile, env, game)
         payload = json.dumps(command, sort_keys=True)
         with closing(connection()) as conn:
             # Serialize lookup and creation in the native task database. The task

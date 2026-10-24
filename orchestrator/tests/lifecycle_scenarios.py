@@ -44,6 +44,16 @@ def game_cards(root, home, args):
     shim.parent.mkdir()
     shim.write_text(
         "#!/bin/sh\nset -e\n"
+        'if [ "$*" = "workspace bootstrap --game default-game" ]; then\n'
+        '  cd "$HERMES_HOME/workspace"\n'
+        '  git checkout -q main\n'
+        '  printf "current doctrine\\n" > AGENTS.md\n'
+        "  git add AGENTS.md\n"
+        '  git diff --cached --quiet || git commit -qm "refresh default doctrine"\n'
+        '  git push -q origin main\n'
+        '  echo \'{"ok": true, "data": {}}\'\n'
+        "  exit 0\n"
+        "fi\n"
         '[ "$*" = "workspace bootstrap --game newgame" ]\n'
         '[ -d "$HERMES_HOME/workspace-newgame" ] || '
         f'git clone -q "{root / "canonical-newgame.git"}" "$HERMES_HOME/workspace-newgame"\n'
@@ -71,6 +81,10 @@ def game_cards(root, home, args):
     # game still replays as the default game.
     default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
     assert board._card_game(default_card["id"]) == "default-game"
+    assert (
+        git(researcher / "workspace", "show", f"{default_card['branch_name']}:AGENTS.md")
+        == "current doctrine"
+    )
     legacy = Board(Context(home, dict(os.environ))).card_create(
         **{**args, "command_id": "game:legacy"}
     )["card"]
