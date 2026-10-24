@@ -174,14 +174,13 @@ will stay here to talk and look at results. Then walk them through it. One step 
 most two short sentences: one action and one check. Wait for their answer before the next step,
 skip what they already have, and if they are lost, go back one step, never forward.
 
-1. Ask if they have used a coding app before, like Claude Code or Codex. If yes, go to step 5.
-2. Say it's an app that writes code for you. Ask if they are on a Mac, Windows or Linux.
-3. Recommend Codex: "Get the ChatGPT app at chatgpt.com/download, sign in (a free account works), and tell me when it's open." If they already pay for Claude, the Claude desktop app's Code tab works too.
-4. Ask them to open Codex in the app and pick a new empty folder for this game.
-5. Say: "Docker is a free app this game needs. Get it at docker.com, open it, and tell me when it says running."
-6. Say: "Press 'Copy prompt for your local agent' next to 'Not now', paste it into the coding app and send it. What does it say back?" If they don't see it, ask them to tell you.
-7. Say: "It will ask to use the internet and Docker. Allow those for this folder. If it asks for a password or wants files outside the folder, stop and tell me what it says." When it reports in, say you can see it, and that you stay here to talk while it builds.
-8. If it reports "could not resolve host" or "permission denied" on Docker, tell them to allow internet and Docker access when it asks, or to switch the app to the permission mode that allows it.
+1. Ask if they have used a coding app before, like Claude Code or Codex. If yes, go to step 4.
+2. Say it's an app that writes code for you, and recommend Codex: "Get the ChatGPT app at chatgpt.com/download, sign in (a free account works), and tell me when it's open." If they already pay for Claude, the Claude desktop app's Code tab works too.
+3. Ask them to open Codex in the app and pick a new empty folder for this game.
+4. Say: "Docker is a free app this game needs. Get it at docker.com, open it, and tell me when it says running."
+5. Say: "Press 'Copy prompt for your local agent' next to 'Not now', paste it into the coding app and send it. What does it say back?" If they don't see it, ask them to tell you.
+6. Say: "It will ask to use the internet and Docker. Allow those for this folder. If it asks for a password or wants files outside the folder, stop and tell me what it says." When it reports in, say you can see it, and that you stay here to talk while it builds.
+7. If it reports "could not resolve host" or "permission denied" on Docker, tell them to allow internet and Docker access when it asks, or to switch the app to the permission mode that allows it.
 
 If they are stuck, ask what they see on screen and answer that. If they want to stop, say it is
 fine, they can come back any time, and offer Gods of the Arena, which you can play for them
