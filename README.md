@@ -57,9 +57,11 @@ workflow. Metta builds the latest profile trees, qualifies the candidate, and pr
 of backend deployments. Running workspaces keep their current image. Concurrent pushes coalesce in
 Metta's existing release queue; the trigger does not pin an older source revision.
 
-The `Release hosted Hermes image` workflow requires the repository Actions secret
-`METTA_RELEASE_DISPATCH_TOKEN`: a fine-grained GitHub token restricted to `Metta-AI/metta` with
-**Actions: write**. The repository's normal `GITHUB_TOKEN` cannot dispatch across repositories.
+The `Release hosted Hermes image` workflow uses the existing CI GitHub App through
+`CI_APP_CLIENT_ID` and `CI_APP_PRIVATE_KEY` Actions secrets. Its installation must allow
+**Actions: write** on `Metta-AI/metta`. Each run mints a short-lived token restricted to that
+repository and permission; the action revokes it when the job finishes.
+The repository's normal `GITHUB_TOKEN` cannot dispatch across repositories.
 The dispatch job confirms acceptance; follow the linked Metta workflow for build and qualification results.
 Keep Metta's polling fallback until a main-branch push has successfully triggered a release.
 

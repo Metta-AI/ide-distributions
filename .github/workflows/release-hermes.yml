@@ -17,7 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Mint a short-lived Metta dispatch token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.CI_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: Metta-AI
+          repositories: metta
+          permission-actions: write
       - name: Trigger the independent image release
         env:
-          GH_TOKEN: ${{ secrets.METTA_RELEASE_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: gh workflow run deploy-hermes-agent.yml --repo Metta-AI/metta --ref main
