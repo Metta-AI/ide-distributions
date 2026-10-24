@@ -51,6 +51,18 @@ shared canonical workspace) and the host's Kanban dispatcher settings.
 
 ## Update
 
+Changes to `orchestrator/` or `researcher/` on `main` immediately dispatch Metta's
+[`Deploy Hermes agent`](https://github.com/Metta-AI/metta/actions/workflows/deploy-hermes-agent.yml)
+workflow. Metta builds the latest profile trees, qualifies the candidate, and promotes it independently
+of backend deployments. Running workspaces keep their current image. Concurrent pushes coalesce in
+Metta's existing release queue; the trigger does not pin an older source revision.
+
+The `Release hosted Hermes image` workflow requires the repository Actions secret
+`METTA_RELEASE_DISPATCH_TOKEN`: a fine-grained GitHub token restricted to `Metta-AI/metta` with
+**Actions: write**. The repository's normal `GITHUB_TOKEN` cannot dispatch across repositories.
+The dispatch job confirms acceptance; follow the linked Metta workflow for build and qualification results.
+Keep Metta's polling fallback until a main-branch push has successfully triggered a release.
+
 `hermes profile update` re-reads the recorded source path, so pull the clone first. The
 update keeps the installed `config.yaml`; `--force-config` resets it.
 
