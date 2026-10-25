@@ -45,7 +45,7 @@ def test_summary_omits_documents_and_reads_exact_coworld(discovery):
     assert [item["id"] for item in result["documents"]] == ["participation", "manifest"]
     assert result["credential_player_id"] == "transport_player"
     assert result["research_bindings_available"] is False
-    assert len(json.dumps(result).encode()) < 1500 < len(guide.encode())
+    assert len(json.dumps(result).encode()) < 2000 < len(guide.encode())
     assert calls == ["/observatory/v2/leagues/league_pudge", "/observatory/v2/coworlds/cow_pudge"]
 
 
@@ -96,18 +96,16 @@ def test_installed_guide_is_available_by_reference_without_changing_workspace(di
     contract.write_text("installed contract")
     game = SimpleNamespace(
         name="pudge", league_id="league_pudge", guide="Check hooks before uploading.",
-        bindings={"local_check": "check-policy"},
+        bindings={"local_check": "check-policy"}, host_env=(), host_tools=(),
     )
     real = module.load_game  # shipped games load for real; only the installed one is faked
     monkeypatch.setattr(
         module, "load_game", lambda root, name: game if name == "pudge" else real(root, name)
     )
     index = client.game_support("league_pudge")
-    assert index["research_bindings_available"] is True
-    assert index["installed_research_support"] == [{
-        "name": "pudge", "kind": "installed", "league_id": "league_pudge",
-        "document": "research:pudge", "bindings": game.bindings, "research_workspace": False,
-    }]
+    assert index["research_bindings_available"] is False
+    assert index["installed_research_support"][0]["bindings"] == game.bindings
+    assert index["installed_research_support"][0]["readiness"]["operations"]["build"]["status"] == "blocked"
     metadata = next(doc for doc in index["documents"] if doc["id"] == "research:pudge")
     page = client.game_support("league_pudge", metadata["id"], expected_sha256=metadata["sha256"])
     assert page["document"]["content"] == game.guide
@@ -131,3 +129,57 @@ def test_advertised_filters_reject_the_observed_sort_error():
         CardFilters(order_by="updated_at")
     assert not Draft202012Validator(schema).is_valid({"league_id": "invented"})
     assert CardFilters().limit == 20
+
+
+def test_starter_read_verifies_bytes_and_pins_pagination(discovery):
+    import hashlib
+
+    client, _, coworld, _ = discovery
+    data = ('PRINT "hello 🎯"\n' * 1000).encode()
+    digest = hashlib.sha256(data).hexdigest()
+    coworld["manifest"]["player"] = [{"id": "base", "name": "Base", "file": f"sha256:{digest}"}]
+    calls = []
+    def download(path, *, max_bytes):
+        calls.append((path, max_bytes))
+        return data
+    client.cli.api_get_bytes = download
+    index = client.game_support("league_pudge")
+    assert index["published_starters"][0]["sha256"] == digest
+    parts, offset = [], 0
+    while offset is not None:
+        page = client.game_starter("league_pudge", "base", digest, offset, 6000)
+        assert page["verified"] is True
+        assert page["source_kind"] == "published_starter_not_player_submission"
+        parts.append(page["content"])
+        offset = page["next_offset"]
+    assert ''.join(parts).encode() == data
+    assert calls[0] == (f"/observatory/v2/coworlds/cow_pudge/player-files/{digest}", 256_000)
+    client.cli.api_get_bytes = lambda *a, **kw: b"tampered"
+    with pytest.raises(Refused, match="published hash"):
+        client.game_starter("league_pudge", "base", digest)
+    with pytest.raises(Refused, match="Starter changed"):
+        client.game_starter("league_pudge", "base", "0" * 64)
+    with pytest.raises(Refused, match="Choose a published starter"):
+        client.game_starter("league_pudge", "../private", digest)
+
+
+def test_static_readiness_detects_stubs_and_host_dependencies(tmp_path):
+    from ide_research_core.games.readiness import binding_readiness
+    from ide_research_core.games.loader import BINDING_NAMES
+
+    (tmp_path / "stub.py").write_text('raise NotImplementedError("TODO")')
+    (tmp_path / "evaluate.py").write_text('print("real evaluator")')
+    game = SimpleNamespace(
+        bindings={name: "python3 stub.py" for name in BINDING_NAMES}, host_env=(), host_tools=(),
+    )
+    game.bindings["evaluate"] = "python3 evaluate.py"
+    result = binding_readiness(game, tmp_path, {})
+    assert result["operations"]["build"]["reasons"] == ["stub_marker_requires_review"]
+    assert result["operations"]["evaluate"]["status"] == "configured"
+    assert result["execution_verified"] is False
+    game.host_env = ("ENGINE_ROOT",)
+    game.host_tools = ("nonexistent-engine",)
+    result = binding_readiness(game, tmp_path, {})
+    assert result["missing_environment"] == ["ENGINE_ROOT"]
+    assert result["missing_tools"] == ["nonexistent-engine"]
+    assert all(item["status"] == "blocked" for item in result["operations"].values())

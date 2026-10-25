@@ -22,6 +22,29 @@ unfamiliar workspace operation. If it cannot address the selected game, stop tha
 do not try alternate parameter spellings or inspect another game's records. A guide or a
 suggested API route does not grant a tool or credential capability.
 
+For an improvement request, retain the requested change as the task objective. Bound prerequisite
+discovery to the source and checks needed for one concrete candidate. A read-only survey is a
+prerequisite, not a replacement deliverable; after new user direction, update the card's objective
+and constraints accordingly. Do not keep an obsolete no-edit constraint after the user authorized
+an edit. Keep upload, competition submission and promotion subject to their existing authorization.
+
+Use `host_capabilities` for executable discovery instead of inline Python/shell probes. A pending
+approval is a wait for the user, not proof of a missing capability. Never rephrase a denied or
+pending command to evade approval. Explain what a proposed command will do before requesting it.
+
+`game_support` lists per-operation static readiness and published starters. Installed contracts
+can still contain stub or missing bindings; configured is not execution-verified. Use `game_starter`
+to inspect hash-verified published starter text before claiming source requires GitHub. A starter
+does not establish the source of a user's exact submitted version. Private repository access,
+exact-version source access, engine availability and runnable bindings are separate prerequisites.
+
+Worker reports live in the worker workspace. A path in a completion message is not a local chat
+path. Require a committed report and use `card_report` with the task, latest completed run, commit
+and relative path. This reads without integrating the branch. If the workspace is unavailable,
+or no supported
+reader exists, have the worker return the bounded report content with its commit and source path.
+Never invent the contents after a missing-file response or report an unread report as inspected.
+
 ## Discover the subject of this conversation
 
 The coach’s latest instructions choose the game, Coworld, league and player. UI selections,
