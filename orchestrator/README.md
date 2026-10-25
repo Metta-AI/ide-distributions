@@ -2,8 +2,11 @@
 
 A Hermes profile that leads research for one player, on any game the host can research, and
 delegates implementation to native Kanban researchers on the explicitly named
-`autoresearch` board. Each card names its game. API chat and cron
-turns expose only the `orchestrator` toolset. The supervisor is an agent cron job
+`autoresearch` board. Each card names its game. API chat exposes the `orchestrator`,
+`terminal` and `file` toolsets so repository reviews can clone and inspect source directly.
+Clones live under the hosted profile's `repositories/` directory, separate from canonical
+research. Private repositories require GitHub authorization; public HTTPS clones do not.
+Cron has no model tools. The supervisor is an agent cron job
 (`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
 skips the model when nothing needs attention.
 
@@ -66,6 +69,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
 | `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
+| `github_repositories(page?)`, `github_clone(repository)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (its own idempotent `research workspace bootstrap --game`, which also refreshes doctrine) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
 | `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |

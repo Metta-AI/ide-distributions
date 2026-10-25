@@ -8,6 +8,7 @@ from ide_research_core.softmax_tool.discovery_schema import SupportRead
 
 from .board import Board, CardFilters
 from .context import profile_context
+from .github import GitHub
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
@@ -25,6 +26,18 @@ GAME = {
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "github_repositories": (
+        GitHub,
+        "List public and private GitHub repositories authorized by the workspace owner in Softmax IDEa. Follow nextPage for more results; never ask for a token in chat.",
+        {"page": {"type": "integer", "minimum": 1, "maximum": 1000}},
+        [],
+    ),
+    "github_clone": (
+        GitHub,
+        "Clone a GitHub repository through the owner's connected account into a new hosted checkout. Accepts owner/repository or its HTTPS GitHub URL. Returns the path and exact commit for native file inspection. Provider credentials never enter tool results. Use terminal git clone directly for public repos when no connection exists.",
+        {"repository": {"type": "string", "maxLength": 200}},
+        ["repository"],
+    ),
     "ide_workspace_schema": (
         Workspace,
         (
