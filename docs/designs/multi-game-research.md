@@ -5,7 +5,7 @@ when the code moves.
 
 ## Problem
 
-The research profiles were built around one game per host. Hosting writes one
+The research profiles were built around one game per host. Hosting previously wrote one
 `RESEARCH_GAME` (`gota`), one canonical repository (`canonical-gota.git`) and one clone per
 profile (`profiles/<name>/workspace`), and every research command reads those three variables.
 A user who asks the orchestrator about another coworld gets platform reads (`discover_leagues`,
@@ -34,7 +34,7 @@ A user who asks the orchestrator about another coworld gets platform reads (`dis
 
 ## Non-goals
 
-- Play (`play/`) stays GotA-only. Its tools build GotA BASIC programs.
+- Play has no default league. Its bundled build tools support explicitly selected GotA BASIC programs.
 - Private repositories. Sandboxes have no GitHub credential; a private repository fails with a
   plain reason.
 - Building or uploading container (Docker image) players. Most coworlds other than GotA use
@@ -60,8 +60,8 @@ durable volume.
 | `<root>/sources/github.com/<owner>/<repo>.git` | Blobless bare cache of a fetched repository (all fetched commits; `kb renew --game-repo` reads it). |
 | `<root>/sources/github.com/<owner>/<repo>@<sha12>/` | Read-only snapshot of one fetched commit, for reading. |
 | `dirname(RESEARCH_CANONICAL)/canonical-<game>.git` | One canonical repository per game (the existing naming rule). |
-| `<profile>/workspace` (`RESEARCH_WORKSPACE`) | The profile's clone of the default game (`RESEARCH_GAME`). |
-| `<profile>/workspace-<game>` | The profile's clone of any other game, made on first use. |
+| `<profile>/workspace` (`RESEARCH_WORKSPACE`) | The profile's neutral clone, with no `RESEARCH_GAME` assignment. |
+| `<profile>/workspace-<game>` | The profile's clone of an explicitly selected game, made on first use. |
 
 ### Selecting a game: one seam
 
@@ -79,9 +79,9 @@ durable volume.
   the directory bindings and resolvers run from (the one holding `games/`), replacing the
   `_REPO_ROOT` constants.
 
-`RESEARCH_GAME` becomes the host's *default* game: the one hosting bootstraps and the one a
-card or tool uses when it names none. The `DEFAULT_GAME = "gota"` fallback in code is removed;
-core code never names a game.
+Profiles omit `RESEARCH_GAME`. Hosting bootstraps a neutral repository without game seeds.
+A card or tool that names no game stays neutral; selected tasks set `RESEARCH_GAME` only
+within their operation. Frontend hints and the user's conversation select the subject.
 
 ### Cards carry their game
 
@@ -93,8 +93,7 @@ Hermes makes the card worktree from that project, so the worker lands in the rig
 
 The concrete game, the default included, is recorded in the card's immutable
 `creation_command` event, so changing the default later never moves a card. A command recorded
-before cards named their game replays as the default game; such a card's effects use the
-default. Every card-scoped orchestrator effect
+before cards named their game keeps its original workspace; it does not assign a game. Every card-scoped orchestrator effect
 (`upload_build`, `workspace_integrate`, `submit_requested_version`, `promotion_submit`,
 `bootstrap_champion`, `game_install`) reads it from there, and so does the minute supervisor for
 XP, credit and permit waits. Canonical-scoped tools (`status`, `records_find`, `records_show`,

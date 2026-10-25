@@ -195,7 +195,7 @@ def test_the_cli_prints_the_envelope(board):
         "RESEARCH_PLAYER_ID": PLAYER,
     }
     run = subprocess.run(
-        [sys.executable, "-m", "ide_research_core", "promotion", "submit", experiment],
+        [sys.executable, "-m", "ide_research_core", "promotion", "submit", experiment, "--league", LEAGUE],
         capture_output=True, text=True, env=env, check=False,
     )
     assert run.returncode == 0, run.stdout + run.stderr

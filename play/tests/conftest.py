@@ -89,7 +89,10 @@ class FakeCli:
             case ["softmax", "status"]:
                 return done(f"subject_type: player\nsubject_id: {self.player}\n")
             case ["coworld", "leagues", league, "--json"]:
-                assert league in (GOTA.league_id, "league_00000000-0000-0000-0000-000000000001")
+                assert league in (
+                    GOTA.reference_league_id,
+                    "league_00000000-0000-0000-0000-000000000001",
+                )
                 return done(json.dumps({"game": {"coworld_id": "cow_gota"}}))
             case ["coworld", "show", "cow_gota", "--json"]:
                 players = [
@@ -272,6 +275,12 @@ def fetched():
 
 @pytest.fixture
 def program(env, cli, records, fetched, tmp_path):
+    records.records[("state", "league")] = {
+        "key": "league",
+        "rev": 1,
+        "body": {"leagueId": GOTA.reference_league_id},
+    }
+
     def fetch(url):
         fetched.append(url)
         return STARTER

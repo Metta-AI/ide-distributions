@@ -12,14 +12,14 @@ the research method that uses these terms is in the researcher's `doctrine/` and
 - **Game folder**: `games/<game>/`, a game's contract (`GAME.md`), bindings, binding skills
   (`<game>-ab`, ...) and seed. **Shipped** with a distribution, or **installed** on the host
   (`<root>/games/<game>/`) by the orchestrator from a card that made it (`game-create`).
-- **Default game**: `RESEARCH_GAME`, the game a card or tool uses when it names none. A host
-  researches any shipped or installed game; each card names one.
-- **Canonical repository**: one bare git repository per game on the host
-  (`<root>/canonical-<game>.git`; the default game's is `RESEARCH_CANONICAL`). Its `main` is
-  that game's research record.
-- **Clone**: each profile's own clone of a game's canonical repository (`RESEARCH_WORKSPACE`
-  for the default game, `workspace-<game>` beside it for others). Its `main` is never edited
-  by hand.
+- **Game context**: profiles have no default game or league. The user's conversation selects
+  the subject; frontend selections are adjustable hints. `RESEARCH_GAME` scopes a selected
+  task only. Installed support and historical records do not assign the next task's game.
+- **Canonical repository**: `RESEARCH_CANONICAL` holds the neutral workspace's records.
+  Explicit game work uses `<root>/canonical-<game>.git`. Retained repositories keep their
+  original paths and history without assigning a game to the profile.
+- **Clone**: `RESEARCH_WORKSPACE` is the profile's neutral clone; `workspace-<game>` holds
+  explicitly selected game work. Its `main` is never edited by hand.
 - **Card worktree**: a git worktree of a researcher's clone of the card's game on the branch
   `card/<id>` (or `repair/<id>`), made for one card. A card's work happens only here, and
   every research command run in it works on that game.

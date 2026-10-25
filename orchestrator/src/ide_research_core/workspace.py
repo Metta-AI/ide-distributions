@@ -5,7 +5,7 @@ through that game's bare git repository, ``RESEARCH_CANONICAL`` (``<root>/canoni
 Each profile has its own clone of it, ``RESEARCH_WORKSPACE``, whose ``main`` is checked out and
 never edited by hand; a researcher works each card in a Hermes worktree of that clone on a
 branch ``card/<id>``. A host researches several games: ``games.scope`` points these variables
-at one game (``canonical-<game>.git`` beside the default game's, a ``workspace-<game>`` clone).
+at one game (``canonical-<game>.git`` beside the neutral repository, a ``workspace-<game>`` clone).
 
 ``integrate`` is the deterministic last step of every card: it commits the worktree, pushes
 the card branch first (so recovery is branch-based whatever happens next), validates the
@@ -442,18 +442,19 @@ def agents_md(root: Path) -> str | None:
     return header + "\n".join(parts)
 
 
-def _seed(clone: Path, game: str, root: Path, game_root: Path) -> None:
-    seed = game_root / "games" / game / "seed"
-    if not seed.is_dir():
-        raise WorkspaceError("setup", f"no seed for game {game!r} at {seed}")
-    shutil.copytree(seed, clone, dirs_exist_ok=True)
+def _seed(clone: Path, game: str | None, root: Path, game_root: Path) -> None:
+    if game is not None:
+        seed = game_root / "games" / game / "seed"
+        if not seed.is_dir():
+            raise WorkspaceError("setup", f"no seed for game {game!r} at {seed}")
+        shutil.copytree(seed, clone, dirs_exist_ok=True)
     write_text(clone / ".gitignore", "".join(f"{line}\n" for line in GITIGNORE_LINES))
     doctrine = agents_md(root)
     if doctrine is not None:
         write_text(clone / "AGENTS.md", doctrine)
     gitops.git(clone, "add", "-A")
     gitops.git(
-        clone, "commit", "-q", "-m", f"bootstrap: seed workspace from games/{game}/seed"
+        clone, "commit", "-q", "-m", "bootstrap: initialize workspace"
     )
 
 
@@ -474,7 +475,7 @@ def _reseed_agents_md(clone: Path, root: Path) -> bool:
 def bootstrap(
     clone: Path,
     bare: Path,
-    game: str,
+    game: str | None,
     root: Path = DISTRIBUTION_ROOT,
     game_root: Path | None = None,
 ) -> list[str]:
@@ -502,7 +503,7 @@ def bootstrap(
             else:
                 _seed(clone, game, root, game_root or root)
                 gitops.git(clone, "push", "-q", REMOTE, f"{MAIN}:{MAIN}")
-                actions.append(f"seeded {bare} from games/{game}/seed")
+                actions.append(f"seeded {bare}" + (f" from games/{game}/seed" if game else ""))
         gitops.git(clone, "branch", "-q", f"--set-upstream-to={REMOTE}/{MAIN}", MAIN)
     if _reseed_agents_md(clone, root):
         actions.append("re-seeded AGENTS.md")

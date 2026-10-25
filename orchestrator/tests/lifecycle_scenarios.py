@@ -77,12 +77,20 @@ def game_cards(root, home, args):
         board.card_create(**{**game_args, "game": None})
     with TestCase().assertRaisesRegex(Exception, "not found"):
         board.card_create(**{**game_args, "command_id": "game:absent", "game": "absent"})
-    # Every new card records its concrete game; a command recorded before cards named their
-    # game still replays as the default game.
+    # An omitted game stays neutral, even when a caller still carries an old profile default.
     default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
-    assert board._card_game(default_card["id"]) == "default-game"
+    assert board._card_game(default_card["id"]) is None
+    # Explicitly choosing the assignee's configured game still refreshes its doctrine.
+    with patch(
+        "agent.secret_scope.build_profile_secret_scope",
+        return_value={**env, "RESEARCH_WORKSPACE": str(researcher / "workspace")},
+    ):
+        selected_card = board.card_create(
+            **{**args, "command_id": "game:selected-default", "game": "default-game"}
+        )["card"]
+    assert board._card_game(selected_card["id"]) == "default-game"
     assert (
-        git(researcher / "workspace", "show", f"{default_card['branch_name']}:AGENTS.md")
+        git(researcher / "workspace", "show", f"{selected_card['branch_name']}:AGENTS.md")
         == "current doctrine"
     )
     legacy = Board(Context(home, dict(os.environ))).card_create(
@@ -225,9 +233,9 @@ def main():
         for operation, arguments in (
             (board.workspace_integrate, (result_commit,)),
             (board.upload_build, ("build-evidence/verified", "policy")),
-            (board.submit_requested_version, ("V-cancelled", "strategy.md", "Submit it")),
-            (board.promotion_submit, ("E-cancelled",)),
-            (board.bootstrap_champion, ("V-cancelled",)),
+            (board.submit_requested_version, ("V-cancelled", "strategy.md", "Submit it", "league_selected")),
+            (board.promotion_submit, ("E-cancelled", "league_selected")),
+            (board.bootstrap_champion, ("V-cancelled", "league_selected")),
         ):
             with TestCase().assertRaises(ValueError):
                 operation(task_id, result_run, *arguments)
@@ -239,7 +247,7 @@ def main():
         effect.assert_not_called()
         with TestCase().assertRaises(ValueError):
             board.submit_requested_version(
-                task_id, result_run, "V-cancelled", "strategy.md", "Submit it"
+                task_id, result_run, "V-cancelled", "strategy.md", "Submit it", "league_selected"
             )
         effect.assert_not_called()
     # Native replay also finds a terminal task; no semantic replacement or attempt key.
@@ -310,6 +318,7 @@ def main():
             "V-ready",
             "strategy.md",
             "Submit",
+            "league_selected",
         )
         assert admitted.wait(5)
         board.card_close(publisher.id, "archived")
@@ -321,7 +330,7 @@ def main():
     with patch("orchestrator.board.Research.call") as remote:
         with TestCase().assertRaises(ValueError):
             board.submit_requested_version(
-                publisher.id, publisher_run, "V-ready", "strategy.md", "Submit"
+                publisher.id, publisher_run, "V-ready", "strategy.md", "Submit", "league_selected"
             )
         remote.assert_not_called()
     game_cards(root, home, args)
