@@ -4,9 +4,11 @@ import json
 from contextlib import closing
 from urllib.error import HTTPError
 
-from ide_research_core.softmax_tool.discovery_schema import SupportRead
+from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
 from .board import Board, CardFilters
+from .artifacts import ReportRead, Reports
+from .capabilities import Capabilities
 from .context import profile_context
 from .ide import IDE
 from .research import Research, ResearchError
@@ -25,6 +27,23 @@ GAME = {
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "card_report": (
+        Reports,
+        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. No integration or filesystem mutation.",
+        ReportRead.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit", "path"],
+    ),
+    "host_capabilities": (
+        Capabilities,
+        "Check whether git, Python, softmax, coworld and the research CLI are installed on this profile host. Read-only; launches no inline scripts or commands. Returns no credential or environment values. Does not probe repository authorization.",
+        {}, [],
+    ),
+    "game_starter": (
+        Research,
+        "Read a bounded text page of a published starter from game_support, verifying its SHA-256. Does not require GitHub. This is not the player's submitted source and never uploads or executes code.",
+        StarterRead.model_json_schema()["properties"],
+        ["league_id", "starter_id", "expected_sha256"],
+    ),
     "ide_workspace_schema": (
         Workspace,
         (

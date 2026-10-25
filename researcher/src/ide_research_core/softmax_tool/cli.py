@@ -1095,6 +1095,8 @@ def _discovery(ctx, sm, args) -> dict:
             return discovery.game_support(
                 args.league, args.document, args.offset, args.limit, args.expected_sha256
             )
+        case "game-starter":
+            return discovery.game_starter(args.league, args.starter, args.expected_sha256, args.offset, args.limit)
         case "player-champion":
             return discovery.leaderboard(args.league, args.player)
         case "player-result":
@@ -1114,6 +1116,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
         ("discover-leagues", "find live leagues and games by name or ID"),
         ("league-players", "find ranked players in an explicit league"),
         ("game-support", "load live documentation and installed research support for a league"),
+        ("game-starter", "read a hash-verified published starter without requiring GitHub access"),
         ("player-champion", "read an explicit player's champion in an explicit league"),
         ("player-result", "read an explicit player's latest result in an explicit league"),
     ):
@@ -1126,11 +1129,13 @@ def setup(parser: argparse.ArgumentParser) -> None:
             sub.add_argument("--limit", type=int, default=20)
         if name in ("player-champion", "player-result"):
             sub.add_argument("--player", required=True)
-        if name == "game-support":
+        if name in ("game-support", "game-starter"):
             sub.add_argument("--document")
             sub.add_argument("--offset", type=int, default=0)
             sub.add_argument("--limit", type=int, default=4000)
-            sub.add_argument("--expected-sha256")
+            sub.add_argument("--expected-sha256", required=name == "game-starter")
+        if name == "game-starter":
+            sub.add_argument("--starter", required=True)
 
     command(commands, "whoami", _whoami, "the credential's identity (must be our Player)")
     command(commands, "credits", _credits, "credit balance, when readable (A10)")

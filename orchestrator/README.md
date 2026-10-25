@@ -164,7 +164,7 @@ and resumes them; the update preserves their workspace and identity. A merged so
 PR is not proof that image qualification or rollout has completed.
 
 A shipped or installed contract is matched by
-its declared league or published Coworld name, not by guessed directory paths. Missing bindings are reported separately
+its exact declared league ID, not by guessed directory paths. Missing bindings are reported separately
 from platform availability. This permits research and match analysis for games without a
 local build/evaluation adapter. The existing automated promotion loop still uses its installed
 game contract and scoped credential; using a different player for writes requires the proper
@@ -221,3 +221,12 @@ The tool is loaded with the orchestrator toolset. Its schema explains component 
 revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.
 The server derives the owner from the validated player credential and fixes league scope to GoTA. Inspect structured MCP results rather than treating
 an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.
+
+### Permission and source discovery
+
+`host_capabilities` checks executable availability without launching a shell or exposing environment values.
+`game_support` reports static readiness per operation, including installed-template markers and missing host requirements.
+Configured bindings are not execution-verified. `game_starter` reads bounded UTF-8 pages of a published starter,
+verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.
+`card_report` reads a committed report from the recorded workspace of the latest completed card run,
+checks commit membership in that card branch, and never integrates or executes the report.

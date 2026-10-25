@@ -275,6 +275,23 @@ class PlatformCli:
         except json.JSONDecodeError as error:
             raise SoftmaxCliError(f"GET {path} returned non-JSON: {error}") from None
 
+    def api_get_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Bounded same-platform read; never follow a redirect with the player's token."""
+        credential = parse_credential(self._credential_value)
+        request = urllib.request.Request(
+            f"{self.server}{path}", headers={"Authorization": f"Bearer {credential.token}", "User-Agent": USER_AGENT},
+        )
+        try:
+            with _OPENER.open(request, timeout=HTTP_TIMEOUT_S) as response:
+                body = response.read(max_bytes + 1)
+        except urllib.error.HTTPError as error:
+            raise SoftmaxCliError(f"GET {path} answered HTTP {error.code}") from None
+        except (urllib.error.URLError, OSError):
+            raise SoftmaxCliError(f"GET {path} failed") from None
+        if len(body) > max_bytes:
+            raise SoftmaxCliError(f"GET {path} exceeds the {max_bytes}-byte source limit")
+        return body
+
     def run_json_pages(self, tool: str, args: Sequence[str]) -> list[dict]:
         """Every ``entries`` row of a cursor-paginated ``--json`` listing."""
         entries: list[dict] = []
