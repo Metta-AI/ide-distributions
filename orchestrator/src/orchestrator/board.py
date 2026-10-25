@@ -140,7 +140,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
     ):
         """Replay an execution command; native Hermes owns task and worktree identity.
 
-        ``game`` (a shipped or installed game; default: the host's ``RESEARCH_GAME``) selects
+        ``game`` (a shipped or installed game; omit for the neutral workspace) selects
         the assignee's clone of that game, which Hermes makes the card worktree from. It is
         recorded in the creation command, where every card-scoped effect reads it."""
         from agent.secret_scope import build_profile_secret_scope
@@ -173,12 +173,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         },
                     }
                 )
-        default = self.context.env.get("RESEARCH_GAME")
-        game = game or default
         profile = get_profile_dir(assignee)
         env = {**build_profile_secret_scope(profile), "HERMES_HOME": str(profile)}
-        if default is not None:
-            env.setdefault("RESEARCH_GAME", default)  # hosting writes one default everywhere
         command = {
             "assignee": assignee,
             "title": title,
@@ -191,10 +187,10 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         if game is None:  # a host with no default game: the assignee's own clone
             clone = Path(env.get("RESEARCH_WORKSPACE") or profile / "workspace")
         else:
-            # The concrete game is recorded, so a later change of default never moves a card.
+            # Store the explicit choice; profile settings never select or move a card.
             command["game"] = game
             clone = clone_for(env, game)
-            if game != env["RESEARCH_GAME"]:
+            if game != env.get("RESEARCH_GAME"):
                 locate_game(game, self.context.env)
                 # Outside the board transaction: idempotent, and it refreshes the doctrine.
                 prepare_clone(profile, env, game)
@@ -219,8 +215,6 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                         (task_id,),
                     ).fetchone()
                     recorded = json.loads(prior["payload"])
-                    if "game" not in recorded and game is not None and game == default:
-                        recorded["game"] = game  # recorded before cards named their game
                     if recorded != json.loads(payload):
                         raise ValueError("command_id was already used with different arguments")
                 else:
@@ -373,7 +367,7 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
 
     def _card_game(self, id):
         """The game recorded in the card's creation command (None, for a card created before
-        cards named their game: the default game)."""
+        cards named their game: the neutral workspace)."""
         with closing(connection()) as conn:
             row = conn.execute(
                 "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command' "
@@ -428,14 +422,16 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             "workspace", "integrate", "--branch", task.branch_name, "--commit", commit
         )
 
-    def submit_requested_version(self, id, run_id, version, strategy, request):
+    def submit_requested_version(self, id, run_id, version, strategy, request, league_id):
         """Submit explicit user intent. Retry identical arguments; promotion owns deduplication."""
         self._admit_effect(
-            id, run_id, "submission_admitted", {"version": version, "request": request}
+            id, run_id, "submission_admitted", {"version": version, "request": request, "league_id": league_id}
         )
         return self._research(id).call(
             "promotion",
             "submit-requested",
+            "--league",
+            league_id,
             "--version",
             version,
             "--strategy",
@@ -444,13 +440,13 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             request,
         )
 
-    def promotion_submit(self, id, run_id, experiment):
-        self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment})
-        return self._research(id).call("promotion", "submit", experiment)
+    def promotion_submit(self, id, run_id, experiment, league_id):
+        self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment, "league_id": league_id})
+        return self._research(id).call("promotion", "submit", experiment, "--league", league_id)
 
-    def bootstrap_champion(self, id, run_id, version):
-        self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version})
-        return self._research(id).call("promotion", "bootstrap", "--version", version)
+    def bootstrap_champion(self, id, run_id, version, league_id):
+        self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version, "league_id": league_id})
+        return self._research(id).call("promotion", "bootstrap", "--version", version, "--league", league_id)
 
     def game_install(self, id, run_id, name, replace=False):
         """Install the game folder a completed card committed at ``games/<name>/`` host-wide.

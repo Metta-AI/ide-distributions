@@ -157,11 +157,11 @@ def _bootstrap(args) -> dict:
     (``games.scope``: ``canonical-G.git`` beside ``RESEARCH_CANONICAL``, ``workspace-G``)."""
     home = Path(os.environ["HERMES_HOME"])
     env = scope.env_for_game(os.environ, args.game)
-    game = env[workspace.GAME_ENV]
+    game = env.get(workspace.GAME_ENV)
     clone = Path(args.root) if args.root else workspace.workspace_from_env(env)
     bare = Path(env[workspace.CANONICAL_ENV])
     try:
-        game_root = scope.locate_game(game, env)
+        game_root = scope.locate_game(game, env) if game is not None else None
     except GameError as error:
         raise workspace.WorkspaceError("setup", str(error)) from None
     actions = workspace.bootstrap(clone, bare, game, game_root=game_root)

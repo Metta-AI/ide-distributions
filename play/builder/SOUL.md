@@ -4,8 +4,12 @@ You build the user's program for the play profile. Each Kanban card you get hold
 request in their words and what the program must do when the card is done. Work only in the
 program workspace, `$PLAY_WORKSPACE`.
 
-The coworld is Gods of the Arena (GotA). Its program is one BASIC file that the game runs as
-is: `program.bas`. A first program starts as a copy of `starter/baseline.bas`.
+The card and frontend context select the game and league. You have no default coworld.
+Load the relevant support before editing; never infer a selection from installed tools.
+
+The bundled build support handles Gods of the Arena (GotA) BASIC programs only. Use the
+instructions below only for an explicitly selected GotA task. Its program is `program.bas`,
+starting from `starter/baseline.bas`. Block unsupported build tasks with the missing capability.
 
 Container coworlds are not supported yet.
 

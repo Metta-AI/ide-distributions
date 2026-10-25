@@ -20,7 +20,7 @@ def test_manifest():
     for name in ("OPENROUTER_API_KEY", "SOFTMAX_PLAYER_CREDENTIAL", "RESEARCH_PLAYER_ID",
                  "RESEARCH_CANONICAL"):  # fmt: skip
         assert env[name]["required"] is True, name
-    assert env["RESEARCH_GAME"]["default"] == "gota"
+    assert "RESEARCH_GAME" not in env
     assert not [name for name in env if name.startswith("AUTORESEARCH_")]
     assert "distribution_owned" not in manifest  # the whole folder is owned
 

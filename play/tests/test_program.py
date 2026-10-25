@@ -146,7 +146,7 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         cli.inputs[cli.calls.index(["coworld", "xp-request", "create", "-", "--json"])]
     )
     assert body == {
-        "target": {"league_id": GOTA.league_id},
+        "target": {"league_id": GOTA.reference_league_id},
         "roster": [
             {"slot": 0, "player": {"policy_ref": "towerless:v1"}},
             *({"slot": seat, "player": {"random": True}} for seat in range(1, 10)),
@@ -189,7 +189,7 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
         "submit",
         f"{legacy}:v1",
         "--league",
-        GOTA.league_id,
+        GOTA.reference_league_id,
         "--player",
         PLAYER,
         "--no-open-browser",
@@ -248,7 +248,7 @@ def test_practice_uses_the_league_the_coach_chose(program, cli, records):
         "body": {"leagueId": CHOSEN, "at": "x"},
     }
     game = {"name": "gota", "coworld_id": "cw_gota"}
-    games = {GOTA.league_id: game, CHOSEN: game}
+    games = {GOTA.reference_league_id: game, CHOSEN: game}
     starter = program._fetch
     program._fetch = lambda url: (
         json.dumps({"game": games[url.rsplit("/", 1)[1]]}).encode()
@@ -392,7 +392,7 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
         {
             "id": "sub_1",
             "policy_version": {"label": "towerless:v1"},
-            "league": {"id": GOTA.league_id},
+            "league": {"id": GOTA.reference_league_id},
             "status": "pending",
         }
     ]
@@ -549,7 +549,8 @@ def test_an_edit_that_breaks_the_program_is_refused_by_the_check(program, env):
     assert not (workspace(env) / "program.bas").exists()
 
 
-def test_who_we_are_reads_the_public_cogent_profile(program):
+def test_who_we_are_reads_the_public_cogent_profile(program, records):
+    records.records.pop(("state", "league"))
     urls = []
 
     def profile(url):
