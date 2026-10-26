@@ -84,8 +84,23 @@ hermes profile update researcher-1
 
 ## Develop and test
 
-Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job per
-distribution folder. The tests of the shared package run in `researcher/`, against its copy,
+Shared runtime requirements, Python compatibility, development tools, and build dependencies
+are defined in [`shared/pyproject.toml`](shared/pyproject.toml). Its profile settings select
+research-only dependencies and any development additions. Edit dependency versions there,
+then regenerate the standalone profiles and refresh their locks:
+
+```bash
+python3 tools/sync_shared.py
+uv lock --project researcher
+uv lock --project orchestrator
+uv lock --project play
+```
+
+Each distribution keeps a generated dependency section in its own `pyproject.toml` and a
+resolved `uv.lock`, because Hermes installs only that folder. Profile names, entry points,
+and test configuration remain in the individual files. The sync test verifies that the
+committed copies match the master and that shared edits propagate to all profiles.
+CI runs one job per distribution folder. The tests of the shared package run in `researcher/`, against its copy,
 so run the sync script before testing a change under `shared/`.
 
 ```bash
