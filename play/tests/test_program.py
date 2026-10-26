@@ -339,7 +339,7 @@ def test_practice_status_waits_for_the_games(program, cli):
 
     program._sleep = sleep
     cli.xp_status = "running"
-    data = program.practice_status(wait_seconds=480)
+    data = program.practice_status(wait_seconds=60)
     assert data["state"] == "completed" and len(waited) == 3
 
 

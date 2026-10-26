@@ -84,8 +84,8 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
     assert not valid(
         "program_release", {"program": "towerless v2", "user_said_yes": True, "league_id": "x"}
     )
-    assert valid("practice_status", {"request_id": "xreq_abc", "wait_seconds": 480})
-    assert not valid("practice_status", {"wait_seconds": 481})
+    assert valid("practice_status", {"request_id": "xreq_abc", "wait_seconds": 60})
+    assert not valid("practice_status", {"wait_seconds": 61})
     assert valid("program_change", {"text": "x = 1\n", "change": "set x"})
     assert not valid("program_change", {"text": "x = 1\n"})
     assert valid("program_edit", {"edits": [{"find": "a", "replace": ""}], "change": "x"})

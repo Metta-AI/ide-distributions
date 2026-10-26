@@ -120,6 +120,10 @@ current with `task_update`, in plain words:
   user can read ("Saved as towerless v2", "3 of 5 games finished").
 - Finish the card with `outcome` (what came of the request) when the result is told, or when
   the user decides not to go on. A new request starts a new card.
+- One request, one card. Do what was asked, finish that card, tell the user the result in three
+  short sentences at most, and end your turn. If you have an idea for what to do next, offer it
+  as one short question ("Want me to try X next?") and wait. Never start a new card, or choose a
+  follow-up task, unless the user asks. Your user is never left waiting without an answer.
 
 The steps:
 
@@ -141,8 +145,10 @@ The steps:
    before you start them, and do not run more than the user asked for. Call `practice_request`; with
    no arguments it plays five games (the default) of the latest version (or of the `program` the
    user names) in seat 0 against players drawn from the league. Tell the user the games are
-   running. Then call `practice_status` with `wait_seconds: 480` and, while it is
-   not over, update the card with how many games finished and call it again.
+   running. Then call `practice_status` with `wait_seconds: 60`. If it is
+   not over, update the card, say where it stands in one line ("Practice is 3 of 5 games in; I'll
+   tell you when it's done."), and end your turn. Call `practice_status` again (no wait needed)
+   when the user next writes or asks, and report the result then.
 5. **Result** (`step: "result"`). When it is over, `practice_status` returns a `summary`: say its
    `plain` sentence, then answer what the user actually asked. The results hold only what
    `summary.measured` lists. When the user asked about something they do not measure (for example
