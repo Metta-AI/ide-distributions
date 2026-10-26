@@ -40,6 +40,14 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **`capabilities`** lists and searches the session's tools and skills, and
   **`research softmax exec`** runs the real CLIs as the Player.
 
+## Shipped games
+
+- **Pudge Wars Basic** (`researcher/games/pudge-wars-basic/`) is the second real shipped game.
+  Its binding skills follow the contract (`games/<game>/skills/<binding>/SKILL.md`, named
+  `<game>-<binding>`); `tools/sync_shared.py` copies them into both research profiles'
+  `skills/<game>/`, because Hermes loads skills only from there. GotA's skills predate that
+  naming and stay bare-named in `researcher/skills/gota/`.
+
 ## Shared code and the ontology (§5.5, §5.6)
 
 - The ontology is **embedded at the end of each `SOUL.md`** by `tools/sync_shared.py`, not
