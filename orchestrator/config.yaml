@@ -12,8 +12,8 @@ agent:
 # (execute_code) tools. Dangerous commands go through Hermes approvals: chat asks the user,
 # unattended cron turns deny them (approvals.cron_mode default).
 platform_toolsets:
-  api_server: [orchestrator, terminal, file, code_execution]
-  cron: [orchestrator, terminal, file, code_execution]
+  api_server: [orchestrator, terminal, file, code_execution, skills]
+  cron: [orchestrator, terminal, file, code_execution, skills]
 terminal:
   env_passthrough:
     - SOFTMAX_PLAYER_CREDENTIAL
