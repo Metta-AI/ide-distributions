@@ -45,6 +45,7 @@ def test_payload_present(install):
         "src/ide_research_core/schemas/entity/claim.json",
         "uv.lock",
         "plugins/researcher_guard/plugin.yaml",
+        "plugins/researcher_tools/plugin.yaml",
         "doctrine/VERSION",
     ):
         assert (profile / relative).is_file(), relative
@@ -94,6 +95,41 @@ def test_a_second_researcher_clones_the_same_canonical(install):
 def test_hermes_discovers_the_guard_plugin(install):
     listed = install.hermes("-p", install.profile, "plugins", "list").stdout
     assert "researcher_guard" in listed, listed
+    assert "researcher_tools" in listed, listed
+
+
+def test_capabilities_lists_the_session_tools_and_skills(install):
+    """Real Hermes discovery: the plugin registers `capabilities`, the CLI platform enables its
+    toolset, and the tool reports the session's tools and the profile's skills."""
+    code = """
+import json
+from hermes_cli.config import load_config
+from hermes_cli.plugins import get_plugin_manager
+from hermes_cli.tools_config import _get_platform_tools
+from tools.registry import registry
+manager = get_plugin_manager()
+manager.discover_and_load()
+plugin = next(p for p in manager.list_plugins() if p['name'] == 'researcher_tools')
+assert not plugin['error'], plugin
+assert registry.get_entry('capabilities').toolset == 'researcher'
+assert 'researcher' in _get_platform_tools(load_config(), 'cli')
+result = json.loads(registry.dispatch('capabilities', {}))
+assert 'terminal' in json.dumps(result['tools']), result
+assert any(line.startswith('capabilities:') for line in result['tools']['researcher']), result
+assert any(line.startswith('card:') for lines in result['skills'].values() for line in lines), result
+narrowed = json.loads(registry.dispatch('capabilities', {'query': 'replay', 'kind': 'skills'}))
+assert 'tools' not in narrowed and narrowed['skills_count'] >= 1, narrowed
+print(json.dumps({'ok': True}))
+"""
+    result = subprocess.run(
+        [hermes_python(), "-c", code],
+        env=install.profile_env(HERMES_HOME=str(install.profile_dir)),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_update_preserves(install):

@@ -134,7 +134,7 @@ class Research:
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
     def accept_champion(self, league_id, game=None):
-        return self.in_game(game).call("promotion", "accept", "--league", league_id)
+        return self.in_game(game).call("champion", "accept", "--league", league_id)
 
     def xp_status(self, experiment, game=None):
         return self.in_game(game).call("softmax", "xp", "status", experiment)

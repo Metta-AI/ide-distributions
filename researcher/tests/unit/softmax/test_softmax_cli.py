@@ -1,7 +1,7 @@
 """``research softmax ...`` through the real entry point (subprocess), with
 RESEARCH_SOFTMAX=fake and the fakegame contract, on a research board (a bare canonical
-repository and a clone with card worktrees). League submission is ``research promotion``:
-see ``test_promotion.py``."""
+repository and a clone with card worktrees). League submission is ``research champion``:
+see ``test_champion_submission.py``."""
 
 import json
 import os
@@ -647,9 +647,9 @@ def test_xp_create_empty_batch_is_refused_without_status_change(board):
 
 def test_xp_create_refuses_a_baseline_that_is_no_longer_the_champion(board, launch):
     """Another policy became champion after the design froze: the experiment can never
-    promote, so nothing is launched (no credits spent on it)."""
+    be submitted, so nothing is launched (no credits spent on it)."""
     worker, experiment = launch
-    board.sm.submit(PV_A, LEAGUE)  # a promotion made PV_A the champion
+    board.sm.submit(PV_A, LEAGUE)  # a champion submission made PV_A the champion
     board._accepted(PV_A)
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
@@ -679,7 +679,7 @@ def test_xp_create_refuses_while_the_league_shows_no_champion(board, launch):
     state = read_json(state_file)
     state["submissions"] = []
     write_json(state_file, state)
-    records = sorted((board.canonical / "promotions").glob("*.json"))
+    records = sorted((board.canonical / "champion-submissions").glob("*.json"))
     for record in records:
         record.unlink()
     paths = [r.relative_to(board.canonical).as_posix() for r in records]
@@ -1019,7 +1019,7 @@ def test_the_stop_check_finds_a_slugged_experiment_absent_from_the_clone(board, 
     assert softmax_cli._closed_in_canonical(SimpleNamespace(canonical=stale), experiment) == "reviewed"
 
 
-def test_upload_build_without_experiment_does_not_evaluate_or_promote(board):
+def test_upload_build_without_experiment_does_not_evaluate_or_submit(board):
     worker = board.admit(mode="experimentation")
     worker.start()
     build_dir = board.tmp_path / "requested-build"

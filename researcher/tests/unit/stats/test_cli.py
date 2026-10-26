@@ -165,9 +165,9 @@ def test_ingest_experiment_then_evaluate(tmp_path, experiment):
 
     code, env = stats(root, "evaluate", experiment, "--champion", BASE)
     assert code == 0, env
-    assert env["data"]["promote_eligible"] is True and env["data"]["failures"] == []
+    assert env["data"]["submit_eligible"] is True and env["data"]["failures"] == []
     stored = json.loads((root / "stats" / "outcomes" / f"{experiment}.json").read_text())
-    assert stored["promote_eligible"] is True and stored["champion"] == BASE
+    assert stored["submit_eligible"] is True and stored["champion"] == BASE
     assert stored["candidate_platform_id"] == CAND
     rows_bytes = (root / "stats" / "rows" / f"{experiment}.jsonl").read_bytes()
     assert stored["rows_sha256"] == hashlib.sha256(rows_bytes).hexdigest()
@@ -176,7 +176,7 @@ def test_ingest_experiment_then_evaluate(tmp_path, experiment):
 
     code, env = stats(root, "evaluate", experiment, "--champion", "pv-other")
     assert code == 0 and env["ok"] is True
-    assert env["data"]["promote_eligible"] is False
+    assert env["data"]["submit_eligible"] is False
     assert env["data"]["failures"] == ["baseline_not_champion"]
 
 
@@ -278,7 +278,7 @@ def test_non_numeric_metric_is_failure_envelope(tmp_path):
 
 
 @pytest.fixture
-def promotion(monkeypatch, tmp_path):
+def champion_league(monkeypatch, tmp_path):
     """Run inside a profile whose league shows BASE as our champion (A9); returns the league
     ids ``current_champion`` was asked about."""
     asked = []
@@ -300,7 +300,7 @@ def run_in_process(capsys, root, *argv):
     return code, json.loads(capsys.readouterr().out)
 
 
-def test_champion_from_promotion_and_mismatch(tmp_path, experiment, promotion, capsys):
+def test_champion_from_submission_and_mismatch(tmp_path, experiment, champion_league, capsys):
     root = tmp_path / "ws"
     rows_file = write_rows(tmp_path / "rows.jsonl", experiment_rows())
     code, env = run_in_process(
@@ -308,8 +308,8 @@ def test_champion_from_promotion_and_mismatch(tmp_path, experiment, promotion, c
     )
     assert code == 0, env
     code, env = run_in_process(capsys, root, "evaluate", experiment)
-    assert code == 0 and env["data"]["champion"] == BASE and env["data"]["promote_eligible"]
-    assert promotion == ["fake-league"]  # the game's league
+    assert code == 0 and env["data"]["champion"] == BASE and env["data"]["submit_eligible"]
+    assert champion_league == ["fake-league"]  # the game's league
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", BASE)
     assert code == 0
     code, env = run_in_process(capsys, root, "evaluate", experiment, "--champion", "pv-other")
@@ -327,7 +327,7 @@ def _ingested(tmp_path, capsys, experiment):
 
 
 def test_champion_override_needed_when_the_league_shows_none(
-    tmp_path, experiment, promotion, capsys, monkeypatch
+    tmp_path, experiment, champion_league, capsys, monkeypatch
 ):
     root = _ingested(tmp_path, capsys, experiment)
     monkeypatch.setattr(stats_cli, "current_champion", lambda sm, league_id: None)
@@ -338,7 +338,7 @@ def test_champion_override_needed_when_the_league_shows_none(
 
 
 def test_softmax_failure_while_confirming_the_champion_is_exit_1(
-    tmp_path, experiment, promotion, capsys, monkeypatch
+    tmp_path, experiment, champion_league, capsys, monkeypatch
 ):
     root = _ingested(tmp_path, capsys, experiment)
 

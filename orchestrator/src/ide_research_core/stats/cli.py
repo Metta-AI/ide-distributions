@@ -2,7 +2,7 @@
 
 Same envelope, exit codes and root resolution as ``research records`` (see
 ``ide_research_core.records.cli``). A blocked decision is still ``ok: true`` with
-``promote_eligible: false``; exit 1 is reserved for failures such as a missing record or rows.
+``submit_eligible: false``; exit 1 is reserved for failures such as a missing record or rows.
 
 Files under the workspace root:
 
@@ -15,12 +15,12 @@ Files under the workspace root:
   version (``Softmax.game_version``, so it needs a profile context). It stores the request as
   ``evaluation_design_request``. The experiment must be ``designed``, the request's
   ``baseline_version`` must be the current champion (``check_baseline``: the policy the
-  league shows competing for our player, A9, because a promotion requires champion ==
+  league shows competing for our player, A9, because a champion submission requires champion ==
   baseline), and its ``environment.game_version`` must be the current version. A refusal is
   exit 1 with ``error.reason``: ``not_designed``; ``identity`` (the credential is not the
   expected Player, checked first because the champion read is per player);
   ``champion_conflict`` (the league shows a champion the loop did not record:
-  ``promotion.conflict``);
+  ``champion_submission.conflict``);
   ``champion_unknown`` (the league shows no champion: run the starter-policy bootstrap first,
   A14); ``baseline_not_champion`` (any other policy, such as a leftover uploaded version);
   ``version_mismatch``; ``needs_calibration`` (no noise record for the current version); or
@@ -34,7 +34,7 @@ Files under the workspace root:
   ``bad_request``. A fixed ``opponents`` set needs ``opponent_rationale``.
 - ``stats/outcomes/<E-id>.json``: the last ``stats evaluate`` outcome, with the champion and
   candidate it was evaluated against, ``rows_sha256`` (of the rows file) and ``design_sha256``
-  (sha256 of the design as compact sorted-key JSON). The promotion check reads it and can
+  (sha256 of the design as compact sorted-key JSON). The champion-submission check reads it and can
   detect a stale outcome by recomputing both hashes.
 
 The champion for ``stats evaluate`` comes from ``Softmax.leaderboard_champion`` (the
@@ -52,7 +52,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ide_research_core import promotion, runctx
+from ide_research_core import champion_submission, runctx
 from ide_research_core.cli import register_group
 from ide_research_core.games.loader import GameError
 from ide_research_core.games.scope import load_named_game
@@ -268,7 +268,7 @@ def _design(args, store: RecordStore) -> int:
 
 def check_baseline(baseline: str | None, league_id: str) -> None:
     """Refuse (``Refusal``) unless ``baseline`` is the current champion
-    (``promotion.baseline_problem``, module docstring). Needs a profile context."""
+    (``champion_submission.baseline_problem``, module docstring). Needs a profile context."""
     try:
         ctx = runctx.from_env()
     except KeyError as error:
@@ -284,7 +284,7 @@ def check_baseline(baseline: str | None, league_id: str) -> None:
         )
         if problems:
             raise Refusal("identity", "; ".join(problems))
-        problem = promotion.baseline_problem(
+        problem = champion_submission.baseline_problem(
             ctx.canonical, sm, league_id, os.environ.get(PLAYER_ENV, ""), baseline
         )
     except (RuntimeError, OSError) as error:  # whoami / leaderboard failures (exit 1)

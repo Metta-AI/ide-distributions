@@ -146,7 +146,7 @@ def _find(args, store: RecordStore) -> int:
 def _summary(args, store: RecordStore) -> int:
     """Topic and experiment ids by status, the loop's champion and when the plan last changed:
     what the orchestrator's ``status`` tool reads from the workspace."""
-    from ide_research_core import promotion  # the records group loads without the platform
+    from ide_research_core import champion_submission  # the records group loads without the platform
 
     def by_status(entity: str) -> dict[str, list[str]]:
         grouped: dict[str, list[str]] = {}
@@ -155,7 +155,7 @@ def _summary(args, store: RecordStore) -> int:
         return grouped
 
     root = store.layout.root
-    champion = promotion.latest_champion(root)
+    champion = champion_submission.latest_champion(root)
     try:
         plan_updated = gitops.git(root, "log", "-1", "--format=%cI", "--", "plan.md") or None
     except gitops.GitError:

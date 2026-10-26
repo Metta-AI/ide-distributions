@@ -157,7 +157,7 @@
       "properties": {
         "outcome": {
           "enum": [
-            "promote",
+            "submit",
             "hold",
             "refute",
             "invalid"

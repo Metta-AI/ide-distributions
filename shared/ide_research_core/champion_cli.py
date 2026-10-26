@@ -1,4 +1,4 @@
-"""``research promotion``: submit, bootstrap, status and accept (see ``promotion``).
+"""``research champion``: submit, bootstrap, status and accept (see ``champion_submission``).
 
 The orchestrator runs these in its own clone; researchers' deny list blocks them. Every
 command prints one JSON object: ``{"ok": true, "data": ...}`` or
@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 
-from ide_research_core import promotion, workspace
+from ide_research_core import champion_submission, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.io import gitops
 from ide_research_core.records.store import RecordNotFound
@@ -40,8 +40,8 @@ def _run(handler):
                 data = next(
                     (
                         p.to_dict()
-                        for p in reversed(promotion.load_all(clone))
-                        if p.stage in promotion.IN_FLIGHT
+                        for p in reversed(champion_submission.load_all(clone))
+                        if p.stage in champion_submission.IN_FLIGHT
                     ),
                     None,
                 )
@@ -83,13 +83,13 @@ def setup(parser: argparse.ArgumentParser) -> None:
 
     sub = command(
         "submit",
-        lambda a, c, sm, league, player: promotion.submit(c, sm, a.experiment, league, player),
-        "submit a promoted experiment's candidate to the league",
+        lambda a, c, sm, league, player: champion_submission.submit(c, sm, a.experiment, league, player),
+        "submit the candidate of an experiment decided `submit` to the league as our champion",
     )
     sub.add_argument("experiment")
     sub = command(
         "submit-requested",
-        lambda a, c, sm, league, player: promotion.submit_requested(
+        lambda a, c, sm, league, player: champion_submission.submit_requested(
             c, sm, a.version, a.strategy, a.request, league, player
         ),
         "submit a built version explicitly requested by the user, without an improvement claim",
@@ -103,25 +103,25 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--request", required=True, help="the user's explicit submission request")
     sub = command(
         "bootstrap",
-        lambda a, c, sm, league, player: promotion.bootstrap(c, sm, a.version, league, player),
+        lambda a, c, sm, league, player: champion_submission.bootstrap(c, sm, a.version, league, player),
         "submit the uploaded starter-policy version as the first champion",
     )
     sub.add_argument("--version", required=True, help="the uploaded version record, V-...")
     command(
         "pending",
         None,
-        "read an in-flight promotion without advancing or submitting it",
+        "read an in-flight champion submission without advancing or submitting it",
     )
     command(
         "status",
-        lambda a, c, sm, league, player: promotion.status(c, sm, league, player),
-        "advance the promotion in flight one step and report the champion and any conflict",
+        lambda a, c, sm, league, player: champion_submission.status(c, sm, league, player),
+        "advance the champion submission in flight one step and report the champion and any conflict",
     )
     command(
         "accept",
-        lambda a, c, sm, league, player: promotion.accept(c, sm, league, player),
+        lambda a, c, sm, league, player: champion_submission.accept(c, sm, league, player),
         "record the league's current champion as the loop's (a human decided)",
     )
 
 
-register_group("promotion", setup)
+register_group("champion", setup)

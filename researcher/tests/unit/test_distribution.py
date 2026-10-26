@@ -27,7 +27,7 @@ def test_manifest():
 
 def test_config():
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
-    assert config["plugins"]["enabled"] == ["researcher_guard"]
+    assert config["plugins"]["enabled"] == ["researcher_guard", "researcher_tools"]
     assert config["memory"]["memory_enabled"] is False
     assert "platform_toolsets" not in config and "kanban" not in config
     passthrough = set(config["terminal"]["env_passthrough"])
@@ -130,7 +130,7 @@ def _is_denied(command: str) -> bool:
     ("command", "blocked"),
     [
         ('"$RESEARCH_CLI" softmax xp create E-1', False),
-        ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', False),
+        ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', True),  # upload belongs to the orchestrator
         ('"$RESEARCH_CLI" workspace integrate', True),
         ('"$RESEARCH_CLI" game install --name x --worktree w --commit c', True),
         ('"$RESEARCH_CLI" game new --name x --league l', False),
@@ -145,12 +145,12 @@ def _is_denied(command: str) -> bool:
         ("git push origin --force", True),
         ("hermes kanban create x --assignee researcher-1", True),
         ("hermes kanban --board autoresearch link t_1 t_2", True),
-        ('"$RESEARCH_CLI" promotion submit E-1', True),
-        ('"$RESEARCH_CLI" promotion submit-requested --version V-1', True),
-        ('cd /tmp && research promotion submit-requested --version V-1', True),
-        ('"$RESEARCH_CLI" promotion bootstrap --version V-1', True),
-        ("cd /x && research promotion accept", True),
-        ('git commit -m "the orchestrator runs promotion submit"', False),
+        ('"$RESEARCH_CLI" champion submit E-1', True),
+        ('"$RESEARCH_CLI" champion submit-requested --version V-1', True),
+        ('cd /tmp && research champion submit-requested --version V-1', True),
+        ('"$RESEARCH_CLI" champion bootstrap --version V-1', True),
+        ("cd /x && research champion accept", True),
+        ('git commit -m "the orchestrator runs champion submit"', False),
         ("cd /tmp && hermes kanban create x", True),
         ("hermes kanban show t_1 --json", False),
         ('git commit -m "no hermes kanban create here"', False),

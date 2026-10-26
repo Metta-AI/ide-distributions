@@ -69,7 +69,7 @@ MUTATIONS = {
     "card_create",
     "card_answer",
     "card_close",
-    "promotion_submit",
+    "champion_submit",
     "submit_requested_version",
     "bootstrap_champion",
     "upload_build",
@@ -145,7 +145,7 @@ def main():
                         "pending": [],
                         "research": {"champion": {"version": "V-existing"}},
                         "control": {"paused": False},
-                        "promotion": {"in_flight": None},
+                        "champion_submission": {"in_flight": None},
                     }
                 elif tool == "card_list":
                     data = [

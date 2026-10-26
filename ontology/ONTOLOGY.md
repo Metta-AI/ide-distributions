@@ -47,7 +47,7 @@ request.
 | Journal | `J-` | The record of one card run, with a required `## Decisions` section | outcome `done`, `partial`, `dropped`, `failed`, `blocked` |
 | Lesson | `L-` | A research-method lesson | `tentative`, `adopted` |
 
-An experiment's **decision** is set once: `promote`, `hold`, `refute` or `invalid`, by the
+An experiment's **decision** is set once: `submit`, `hold`, `refute` or `invalid`, by the
 rule frozen in its **evaluation design** (primary metrics, agent guardrails, a performance
 guardrail, the minimum detectable effect, sample size, the noise record revision, seeded
 line-ups). A **noise record** (`stats/metric-noise.yaml`) gives each metric's spread for a game
@@ -63,7 +63,8 @@ until evidence meets its `revise_if`.
 - **Champion**: the policy the league shows competing for our player. It is the only
   baseline an experiment may use.
 - **Candidate**: an experiment's uploaded build (its candidate binding).
-- **Promotion** `P-`: submitting a candidate, owned by the orchestrator. Stages `intent`,
+- **Champion submission** `CS-` (`champion-submissions/`): submitting a candidate as our
+  Champion, owned by the orchestrator (`research champion`). Not Softmax's "promotion". Stages `intent`,
   `submitted`, `recorded`, `published`; or `aborted`, `rejected`. One at a time. Kinds
   `experiment`, `requested` (an explicit user submission without an improvement claim),
   `bootstrap` (the game's unevaluated starter policy on a fresh install) and
@@ -97,7 +98,7 @@ The native inbox records consumption; no separate acknowledgement is required.
 
 ## Who decides what
 
-- The **orchestrator** owns the plan, the cards, the answers to researchers, promotion, the
+- The **orchestrator** owns the plan, the cards, the answers to researchers, champion submission, the
   pause decision (`control/pause.json`) and everything the user sees.
 - A **researcher** owns the research inside its card: evidence, records, experiments,
   results and the decision rule's application. It never talks to the user and never submits.

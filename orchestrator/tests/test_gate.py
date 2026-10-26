@@ -45,11 +45,11 @@ class Platform:
         return {"body": {"kind": "permit", "answer": self.answer}}
 
     def call(self, *args):
-        if args == ("promotion", "pending"):
+        if args == ("champion", "pending"):
             return self.in_flight
         if args == ("records", "summary"):
             return {"champion": None}
-        assert args == ("promotion", "status")
+        assert args == ("champion", "status")
         return {"conflict": self.conflict, "in_flight": self.in_flight, "champion": None}
 
 
@@ -92,11 +92,11 @@ def test_unresolved_wait_does_not_wake(context, board_file, awaiting):
     assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
 
 
-def test_cron_only_requests_coordinator_review_of_pending_promotion(context, board_file):
+def test_cron_only_requests_coordinator_review_of_pending_champion_submission(context, board_file):
     platform = Platform(in_flight={"stage": "submitted"})
     now = QUIET_MINUTE.replace(minute=10)
     result = evaluate(context, platform, platform, now)
-    assert result["context"]["pending"] == [{"kind": "promotion_poll", "tick": now.isoformat()}]
+    assert result["context"]["pending"] == [{"kind": "champion_submission_poll", "tick": now.isoformat()}]
     assert evaluate(context, Platform(), Platform(), now) == {"wakeAgent": False}
 
 
@@ -202,7 +202,7 @@ def test_a_card_of_another_game_waits_in_that_game(context, board_file):
     assert platform.games == ["newgame"]
 
 
-def test_every_game_with_a_workspace_is_polled_for_promotion(context, board_file):
+def test_every_game_with_a_workspace_is_polled_for_champion_submission(context, board_file):
     host = context.home.parent.parent
     for game in ("gota", "newgame"):
         (host / f"canonical-{game}.git").mkdir()
@@ -212,6 +212,6 @@ def test_every_game_with_a_workspace_is_polled_for_promotion(context, board_file
     now = QUIET_MINUTE.replace(minute=10)
     pending = evaluate(context, platform, platform, now)["context"]["pending"]
     assert pending == [
-        {"kind": "promotion_poll", "tick": now.isoformat()},
-        {"kind": "promotion_poll", "tick": now.isoformat(), "game": "newgame"},
+        {"kind": "champion_submission_poll", "tick": now.isoformat()},
+        {"kind": "champion_submission_poll", "tick": now.isoformat(), "game": "newgame"},
     ]

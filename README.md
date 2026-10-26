@@ -5,14 +5,17 @@ Hermes Agent profile distributions for the Softmax IDE. Each top-level folder th
 
 | Folder | What it is |
 |---|---|
-| [`orchestrator/`](orchestrator/README.md) | The research lead: the IDE chat's agent. Plans research, assigns Kanban cards to researchers, answers them, promotes champions and tells the user what happened. |
+| [`orchestrator/`](orchestrator/README.md) | The research lead: the IDE chat's agent. Plans research, assigns Kanban cards to researchers, answers them, submits champions and tells the user what happened. |
 | [`researcher/`](researcher/README.md) | A research worker (formerly `autoresearch`, moved here from `Metta-AI/ide-mvp` with its full history). Install it once per researcher (`researcher-1`, `researcher-2`, ...). Each card is on one game: a shipped one (`games/`), or one a card made and the orchestrator installed on the host. |
 | [`play/`](play/README.md) | Play: the user's own program on an explicitly selected coworld (bundled GotA build support). The `play` profile takes the user's request, has the `builder` profile ([`play/builder/`](play/builder)) change the program through native Kanban, uploads it, practices it and releases it when the user says so. No research machinery. |
 
 Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
-into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py), because
-Hermes installs a distribution by copying its one folder. The shared vocabulary,
-[`ontology/ONTOLOGY.md`](ontology/ONTOLOGY.md), is embedded by the same script at the end of
+into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py); the research-method
+skills in [`shared/skills/autoresearch/`](shared/skills/autoresearch) are copied into both research profiles' `skills/`, because
+Hermes installs a distribution by copying its one folder. The built-in knowledge
+([`ontology/KNOWLEDGE.md`](ontology/KNOWLEDGE.md)), the Softmax vocabulary
+([`ontology/VOCABULARY.md`](ontology/VOCABULARY.md), refreshed from metta by `tools/refresh_vocabulary.py`) and the
+research ontology ([`ontology/ONTOLOGY.md`](ontology/ONTOLOGY.md)) are embedded by the same script at the end of
 each research distribution's `SOUL.md`, so every session of every research profile has it. The copies are
 generated: edit `shared/` or `ontology/`, run `python3 tools/sync_shared.py`, and commit the
 source and the copies together.
