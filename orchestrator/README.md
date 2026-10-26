@@ -65,6 +65,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 
 | Tools | Behavior |
 |---|---|
+| `capabilities(query?, kind?)` | Every tool and skill this session has, with one-line descriptions, filtered by keyword. |
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
 | `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |

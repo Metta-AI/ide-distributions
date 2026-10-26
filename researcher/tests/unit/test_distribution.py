@@ -130,7 +130,7 @@ def _is_denied(command: str) -> bool:
     ("command", "blocked"),
     [
         ('"$RESEARCH_CLI" softmax xp create E-1', False),
-        ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', False),
+        ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', True),  # upload belongs to the orchestrator
         ('"$RESEARCH_CLI" workspace integrate', True),
         ('"$RESEARCH_CLI" game install --name x --worktree w --commit c', True),
         ('"$RESEARCH_CLI" game new --name x --league l', False),

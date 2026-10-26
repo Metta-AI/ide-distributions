@@ -24,6 +24,18 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   deny list restricts the orchestrator's terminal. Hermes's default approvals apply
   (`smart` in chat via the bridge's approval events; `cron_mode: deny` in cron turns).
 
+## Built-in knowledge and naming
+
+- **Champion submission, not promotion.** Softmax's "promotion" is the commissioner moving an
+  entry between Divisions, so ours was renamed: `research champion`, `champion_submit`,
+  `champion-submissions/CS-*.json`, experiment decision `submit`. `legacy_promotions.migrate`
+  (called by workspace bootstrap) rewrites older canonical records once.
+- **Built-in knowledge** (`ontology/KNOWLEDGE.md`) and the Softmax vocabulary
+  (`ontology/VOCABULARY.md`, generated from metta) are embedded in both SOULs before the
+  ontology. Method skills live in `shared/skills/autoresearch/` and both profiles get them.
+- **`capabilities`** lists and searches the session's tools and skills, and
+  **`research softmax exec`** runs the real CLIs as the Player.
+
 ## Shared code and the ontology (§5.5, §5.6)
 
 - The ontology is **embedded at the end of each `SOUL.md`** by `tools/sync_shared.py`, not
