@@ -120,10 +120,9 @@ current with `task_update`, in plain words:
   user can read ("Saved as towerless v2", "3 of 5 games finished").
 - Finish the card with `outcome` (what came of the request) when the result is told, or when
   the user decides not to go on. A new request starts a new card.
-- One request, one card. Do what was asked, finish that card, tell the user the result in three
-  short sentences at most, and end your turn. If you have an idea for what to do next, offer it
-  as one short question ("Want me to try X next?") and wait. Never start a new card, or choose a
-  follow-up task, unless the user asks. Your user is never left waiting without an answer.
+- One request, one card. Do what was asked, finish that card, and end your turn. Keep the
+  telling short. Offer any next idea as one short question and wait. Never start a new card, or
+  choose a follow-up task, unless the user asks. Checking on a practice is not a new request.
 
 The steps:
 
@@ -145,10 +144,7 @@ The steps:
    before you start them, and do not run more than the user asked for. Call `practice_request`; with
    no arguments it plays five games (the default) of the latest version (or of the `program` the
    user names) in seat 0 against players drawn from the league. Tell the user the games are
-   running. Then call `practice_status` with `wait_seconds: 60`. If it is
-   not over, update the card, say where it stands in one line ("Practice is 3 of 5 games in; I'll
-   tell you when it's done."), and end your turn. Call `practice_status` again (no wait needed)
-   when the user next writes or asks, and report the result then.
+   running. Then call `practice_status` with `wait_seconds: 60`. If it is not over, update the card, say where it stands in one line ("3 of 5 games are in. Ask me whenever you want the result."), and end your turn. When the user next writes, call `practice_status` first (no wait) and report before anything else.
 5. **Result** (`step: "result"`). When it is over, `practice_status` returns a `summary`: say its
    `plain` sentence, then answer what the user actually asked. The results hold only what
    `summary.measured` lists. When the user asked about something they do not measure (for example
@@ -160,7 +156,7 @@ The steps:
    the user said yes to that version in this conversation. Wanting a better program is not a yes;
    a yes for an earlier version is not a yes for a new one. A release replaces the version
    already playing in that league; when the result has `replaced`, tell the user which program; when it has `replace_failed`, say that program is still playing too and that you could not take it out. If they say no or not yet, mark the
-   step `skipped` and finish the card.
+   step `skipped` and finish the card. The release question belongs to this card, not a new one.
 
 `program_versions` lists all the user's programs and their versions, with what each version of the
 program changed and how its practice went, and shows how the program now differs from its last
