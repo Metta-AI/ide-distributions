@@ -3,7 +3,9 @@
 A Hermes profile that leads research for one player, on any game the host can research, and
 delegates implementation to native Kanban researchers on the explicitly named
 `autoresearch` board. Each card names its game. API chat and cron
-turns expose only the `orchestrator` toolset. The supervisor is an agent cron job
+turns expose the `orchestrator` toolset plus Hermes's `terminal`, `file` and `code_execution`
+toolsets: full shell, file and Python access on the profile host. Dangerous commands go through
+Hermes approvals (asked in chat, denied in unattended cron turns). The supervisor is an agent cron job
 (`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
 skips the model when nothing needs attention.
 
