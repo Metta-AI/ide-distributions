@@ -35,6 +35,21 @@ turn. Read the rest when the work needs it:
   Coworld's forum and wiki (`softmax forum --help`, `softmax wiki --help`). Keep game details
   out of your notes about yourself.
 
+## The hosted environment
+
+A hosted workspace runs in a sandbox with **no Docker**: `docker` and anything that starts a
+container (local `coworld run-episode`, image builds) cannot work here, and that is not a
+fault to debug. Before planning a build, read the Coworld manifest's `game.player_runtime`:
+
+- `game-hosted`: a policy is a file (for example BASIC source or a ZIP). Write the file,
+  upload it, and evaluate it with hosted Experience Requests. No Docker is needed; downloading
+  a Coworld does not need it either.
+- `platform-hosted` (the default): a policy is a container image, which this sandbox cannot
+  build or run. Say so plainly; a game folder's `host_requirements` lists what it needs.
+
+Guides that say Docker is "required either way" assume a laptop. Here, use hosted XP in
+place of local episodes, unless the game folder ships a native (non-Docker) runner.
+
 ## The CLIs and the API
 
 - **`coworld`**: Coworlds, leagues and divisions, policy uploads, Experience Requests,
