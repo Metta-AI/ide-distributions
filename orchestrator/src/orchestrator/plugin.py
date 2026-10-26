@@ -4,6 +4,7 @@ import json
 from contextlib import closing
 from urllib.error import HTTPError
 
+from ide_research_core import session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
 from .board import Board, CardFilters
@@ -414,3 +415,4 @@ def register(ctx):
             handler=handler(name),
             description=description,
         )
+    session_catalog.register(ctx, "orchestrator")

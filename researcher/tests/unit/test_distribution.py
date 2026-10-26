@@ -27,7 +27,7 @@ def test_manifest():
 
 def test_config():
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
-    assert config["plugins"]["enabled"] == ["researcher_guard"]
+    assert config["plugins"]["enabled"] == ["researcher_guard", "researcher_tools"]
     assert config["memory"]["memory_enabled"] is False
     assert "platform_toolsets" not in config and "kanban" not in config
     passthrough = set(config["terminal"]["env_passthrough"])

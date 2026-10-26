@@ -11,7 +11,8 @@ from orchestrator.research import Research, ResearchError
 
 def test_manifest_advertises_registered_tools():
     manifest = Path(__file__).resolve().parents[1] / "plugins/orchestrator/plugin.yaml"
-    assert set(yaml.safe_load(manifest.read_text())["provides_tools"]) == set(TOOLS)
+    # capabilities is the shared session catalog (ide_research_core.session_catalog).
+    assert set(yaml.safe_load(manifest.read_text())["provides_tools"]) == set(TOOLS) | {"capabilities"}
 
 
 def test_subprocess_contract_and_refusal(shared_fixture):

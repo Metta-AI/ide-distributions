@@ -1,0 +1,6 @@
+name: researcher_tools
+version: 0.1.0
+description: Researcher tools. `capabilities` lists and searches every tool and skill available in the session.
+author: ide-distributions
+provides_tools:
+  - capabilities

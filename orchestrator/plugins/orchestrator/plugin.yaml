@@ -3,6 +3,7 @@ version: 0.2.0
 description: Research lead tools for the native autoresearch board and shared research CLI.
 author: ide-distributions
 provides_tools:
+  - capabilities
   - host_capabilities
   - game_starter
   - card_report

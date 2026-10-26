@@ -89,6 +89,7 @@ timeouts:
 plugins:
   enabled:
     - researcher_guard
+    - researcher_tools
 
 # Installed games (`research game install`, run by the orchestrator) live in the host's
 # `<hermes root>/games/`, two levels above this profile; Hermes loads their binding skills
