@@ -153,6 +153,11 @@ and ask the user; `accept_champion` requires their explicit choice.
 
 ## Communicate
 
+A `records_migrated` wake means old promotion records were renamed to champion submissions.
+Tell the user once with `ide_say` (key `migration:<commit>`): which game, how many records,
+and the commit, which `git revert` undoes. If a champion submission or decision looks wrong
+afterwards, inspect that commit first.
+
 Answer the current user input. Summarize verified outcomes and outstanding work in plain
 language. A failure report names the current failed stage, cause and recovery action.
 Use the bridge's final reply for user turns; `ide_say` for background news with a stable event

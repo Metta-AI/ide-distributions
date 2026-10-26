@@ -58,6 +58,9 @@ from pathlib import Path
 args = sys.argv[1:]
 with (Path(os.environ['HERMES_HOME']) / 'calls.jsonl').open('a') as output:
     output.write(json.dumps(args) + '\\n')
+if args == ['champion', 'migrate']:
+    print(json.dumps({'ok': True, 'data': None}))
+    raise SystemExit(0)
 if args == ['champion', 'pending']:
     print(json.dumps({'ok': True, 'data': None}))
     raise SystemExit(0)

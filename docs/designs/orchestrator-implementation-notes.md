@@ -29,7 +29,11 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **Champion submission, not promotion.** Softmax's "promotion" is the commissioner moving an
   entry between Divisions, so ours was renamed: `research champion`, `champion_submit`,
   `champion-submissions/CS-*.json`, experiment decision `submit`. `legacy_promotions.migrate`
-  (called by workspace bootstrap) rewrites older canonical records once.
+  rewrites older canonical records once. It runs at workspace bootstrap, before every
+  `research champion` command, and on the gate's 10-minute poll (`research champion migrate`),
+  which wakes the coordinator with a `records_migrated` item so the user is told; it also
+  prints one stderr line. Hosted startup skips bootstrap when doctrine is unchanged, which is
+  why the poll exists.
 - **Built-in knowledge** (`ontology/KNOWLEDGE.md`) and the Softmax vocabulary
   (`ontology/VOCABULARY.md`, generated from metta) are embedded in both SOULs before the
   ontology. Method skills live in `shared/skills/autoresearch/` and both profiles get them.

@@ -509,8 +509,9 @@ def bootstrap(
         actions.append("re-seeded AGENTS.md")
     from ide_research_core import legacy_promotions  # imports this module
 
-    if legacy_promotions.migrate(clone):
-        actions.append("migrated promotion records to champion submissions")
+    migration = legacy_promotions.migrate(clone)
+    if migration:
+        actions.append(f"migrated promotion records to champion submissions at {migration['commit'][:12]}")
     return actions
 
 

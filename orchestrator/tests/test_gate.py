@@ -17,8 +17,10 @@ QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
 class Platform:
     def __init__(
-        self, *, xp=None, credits=0, answer=None, conflict=None, in_flight=None, paused=False
+        self, *, xp=None, credits=0, answer=None, conflict=None, in_flight=None, paused=False,
+        migration=None,
     ):
+        self.migration = migration
         self.xp = xp or []
         self.balance = credits
         self.answer = answer
@@ -45,6 +47,8 @@ class Platform:
         return {"body": {"kind": "permit", "answer": self.answer}}
 
     def call(self, *args):
+        if args == ("champion", "migrate"):
+            return self.migration
         if args == ("champion", "pending"):
             return self.in_flight
         if args == ("records", "summary"):
@@ -215,3 +219,11 @@ def test_every_game_with_a_workspace_is_polled_for_champion_submission(context, 
         {"kind": "champion_submission_poll", "tick": now.isoformat()},
         {"kind": "champion_submission_poll", "tick": now.isoformat(), "game": "newgame"},
     ]
+
+
+def test_a_migration_on_the_poll_wakes_the_coordinator(context, board_file):
+    migration = {"commit": "abc123", "champion_submissions": 1}
+    platform = Platform(migration=migration)
+    now = QUIET_MINUTE.replace(minute=10)
+    pending = evaluate(context, platform, platform, now)["context"]["pending"]
+    assert pending == [{"kind": "records_migrated", "tick": now.isoformat(), "migration": migration}]

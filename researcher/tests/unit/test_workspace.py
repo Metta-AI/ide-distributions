@@ -696,7 +696,7 @@ def test_bootstrap_migrates_old_promotion_records_once(tmp_path, bare):
         "old records",
     )
     actions = workspace.bootstrap(clone, bare, "fakegame", DISTRIBUTION)
-    assert actions == ["migrated promotion records to champion submissions"]
+    assert len(actions) == 1 and actions[0].startswith("migrated promotion records to champion submissions at ")
     assert not gitops.git(clone, "ls-files", "promotions")
     record = json.loads((clone / f"champion-submissions/CS-{ulid}.json").read_text())
     assert record["id"] == f"CS-{ulid}" and record["stage"] == "published"
