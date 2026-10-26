@@ -39,6 +39,28 @@ released). It sends the same credential token as a bearer header to the configur
 "error code: 1010" to urllib's default one), and never follows a redirect (urllib would copy
 the ``Authorization`` header to the redirect target). Replace it with ``coworld credits
 --json`` once a coworld release ships that command.
+
+``exec`` (``research softmax exec -- <coworld|softmax> <args>``) runs any other command of the
+real CLIs as the same Player, for an agent working in a shell. It differs from ``run``:
+
+- stdin, stdout and stderr pass straight through, and the child's exit code is returned;
+- it runs in the caller's working directory, so relative paths (a build or download
+  directory) mean what the caller expects. That is safe because ``COWORLD_AGENT_GUIDANCE=0``
+  stays set: the guidance is the only thing the CLIs write into a project they did not
+  name as output (an upserted block in the ``AGENTS.md`` of a ``.coworld-project`` root, such
+  as a card worktree, whose ``AGENTS.md`` is the doctrine). Point agents at ``coworld docs``
+  and https://softmax.com/agents.md instead;
+- it keeps the caller's environment (``HOME`` included, so Docker's config and the CLIs'
+  caches work) minus the credential variable, and points ``SOFTMAX_CONFIG_DIR`` at the
+  profile-local directory that holds the credentials file. softmax-cli reads that directory
+  instead of ``~/.softmax`` (``softmax_client/credentials.py``), so the host user's file is
+  never read or changed;
+- ``--server <server>`` is appended only when the server is not the CLIs' own default
+  (``DEFAULT_SERVER``): several leaf commands (``docs``, ``build``, ``init``, ...) have no
+  ``--server`` option and would fail on it. An argument ``--server`` of the caller's is
+  refused, because the credential is keyed by the configured server;
+- it refuses the commands in ``IDENTITY_COMMANDS``: they would sign in, sign out, switch or
+  print the credential, and the profile acts as one Player and never switches identity.
 """
 
 import json
@@ -75,6 +97,23 @@ DEFAULT_TIMEOUT_S = 120
 PAGE_LIMIT = 200
 HTTP_TIMEOUT_S = 30
 USER_AGENT = "autoresearch"
+CONFIG_DIR_ENV = "SOFTMAX_CONFIG_DIR"  # softmax-cli's credentials directory override
+EXEC_TOOLS = ("coworld", "softmax")
+# Leading command words that ``exec`` refuses: each signs in or out, switches the active
+# identity, or prints the token (softmax-cli 0.26.40, coworld 0.1.64).
+IDENTITY_COMMANDS = {
+    "softmax": (
+        ("login",),
+        ("logout",),
+        ("get-login-url",),
+        ("exchange-code",),
+        ("set-token",),
+        ("get-token",),
+        ("player", "use"),
+        ("player", "unset"),
+    ),
+    "coworld": (("player", "use"), ("player", "unset")),
+}
 # The coach's refusals (``coach_refusal``). A ``permit_required`` 403 carries a JSON object as
 # its detail, which coworld's ``_detail`` does not print as one, so it prints the whole body.
 PERMIT_DENIAL = re.compile(r"\(403\).*permit_required", re.DOTALL)
@@ -114,6 +153,27 @@ class IdentityError(RuntimeError):
 
 class ToolMissing(SoftmaxCliError):
     """The pinned ``softmax``/``coworld`` executable is not installed in the profile venv."""
+
+
+class ExecRefused(SoftmaxCliError):
+    """``exec`` will not run this command (module docstring)."""
+
+
+def exec_problem(tool: str, args: Sequence[str]) -> str | None:
+    """Why ``exec`` refuses ``tool args``, or None. Command words are the arguments that do
+    not start with ``-``; neither CLI has a top-level option that takes a value."""
+    if tool not in EXEC_TOOLS:
+        return f"exec runs only {' or '.join(EXEC_TOOLS)}, not {tool!r}"
+    if any(arg == "--server" or arg.startswith("--server=") for arg in args):
+        return "exec sets the server itself; do not pass --server"
+    words = tuple(arg for arg in args if not arg.startswith("-"))
+    for command in IDENTITY_COMMANDS[tool]:
+        if words[: len(command)] == command:
+            return (
+                f"{tool} {' '.join(command)} would change or reveal the Player credential; "
+                "this profile acts as one Player and never switches identity"
+            )
+    return None
 
 
 class CredentialError(IdentityError):
@@ -245,6 +305,38 @@ class PlatformCli:
         if result.returncode not in ok_codes:
             raise SoftmaxCliError(describe_failure(tool, args, result))
         return result
+
+    def exec(
+        self, tool: str, args: Sequence[str], *, cwd: Path, caller_env: Mapping[str, str]
+    ) -> int:
+        """Run ``<venv>/bin/<tool> <args>`` as the Player with the caller's stdio and working
+        directory; return its exit code (module docstring, ``exec``)."""
+        problem = exec_problem(tool, args)
+        if problem:
+            raise ExecRefused(problem)
+        self.install_credential()
+        executable = self._bin_dir / tool
+        argv = [str(executable), *args]
+        if self.server != DEFAULT_SERVER:
+            argv += ["--server", self.server]
+        env = {
+            key: value
+            for key, value in caller_env.items()
+            if key not in (CREDENTIAL_ENV, CONFIG_DIR_ENV)
+        }
+        env.update(
+            {
+                CONFIG_DIR_ENV: str(self.credentials_path.parent),
+                SERVER_ENV: self.server,
+                "COWORLD_AGENT_GUIDANCE": "0",
+            }
+        )
+        try:
+            return self._run(argv, env=env, cwd=str(cwd)).returncode
+        except FileNotFoundError:
+            raise ToolMissing(
+                f"{executable} is not installed (reinstall the profile venv)"
+            ) from None
 
     def run_json(self, tool: str, args: Sequence[str], **kwargs):
         result = self.run(tool, [*args, "--json"], **kwargs)

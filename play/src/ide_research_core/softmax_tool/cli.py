@@ -97,6 +97,13 @@ the game, for its league, from ``RESEARCH_GAME``):
   ``--league`` defaults to the game's league. Episodes are evaluated as they arrive (the real
   client fetches 4 at a time); a progress line goes to stderr every 10 episodes, and ``--out``
   is written once, when the read is complete.
+- ``exec -- <coworld|softmax> <args...>``: run any other command of the real CLIs as the
+  Player (``PlatformCli.exec``): output streams through and the exit code is the child's.
+  It refuses the commands that sign in or out, switch the identity or print the token
+  (``platform_cli.IDENTITY_COMMANDS``), a ``--server`` argument, and the fake backend
+  (``RESEARCH_SOFTMAX=fake``, which has no real CLI to run). Only those refusals print the
+  JSON envelope below. Prefer the commands above where one exists: they keep the records
+  and run the checks that a raw CLI command does not.
 - ``league-results --league L --limit N --dest DIR``: up to N completed episodes of any league,
   raw: ``DIR/<episode>/results.json`` and ``DIR/<episode>/episode.json`` (seats, seed, game
   version). No game binding runs, so it works for a league no game folder covers yet (writing
@@ -164,7 +171,12 @@ from ide_research_core.softmax_tool import evidence
 from ide_research_core.softmax_tool.discovery import Discovery
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
 from ide_research_core.softmax_tool.league import episode_rows, safe_name
-from ide_research_core.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
+from ide_research_core.softmax_tool.platform_cli import (
+    ExecRefused,
+    PlatformCli,
+    SoftmaxCliError,
+    ToolMissing,
+)
 from ide_research_core.softmax_tool.protocol import (
     BACKOFF_BASE,
     PERMIT_DECLINED,
@@ -254,6 +266,36 @@ def _run(handler):
         return EXIT_OK
 
     return run
+
+
+def _exec(args: argparse.Namespace) -> int:
+    """``exec``: the real CLI as the Player (module docstring). Not wrapped by ``_run``: the
+    child's output is the output, and its exit code is the exit code."""
+    command = list(args.argv)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        return _fail(
+            "bad_arguments",
+            "usage: research softmax exec -- <coworld|softmax> <args...>",
+            EXIT_BAD_ARGS,
+        )
+    if os.environ.get("RESEARCH_SOFTMAX") == "fake":
+        return _fail("fake_backend", "RESEARCH_SOFTMAX=fake has no real CLI to run", EXIT_FAILED)
+    if not os.environ.get("HERMES_HOME"):
+        return _fail("bad_arguments", "HERMES_HOME is not set", EXIT_BAD_ARGS)
+    try:
+        check_identity_unchanged(Path(os.environ["HERMES_HOME"]))
+        cli = PlatformCli(os.environ)
+        return cli.exec(command[0], command[1:], cwd=Path.cwd(), caller_env=os.environ)
+    except ExecRefused as error:
+        return _fail("refused", str(error), EXIT_FAILED)
+    except IdentityError as error:
+        return _fail("identity", str(error), EXIT_FAILED)
+    except ToolMissing as error:
+        return _fail("tool_missing", str(error), EXIT_TOOL_MISSING)
+    except (SoftmaxCliError, OSError) as error:
+        return _fail("platform", f"{type(error).__name__}: {error}", EXIT_FAILED)
 
 
 @contextmanager
@@ -1136,6 +1178,12 @@ def setup(parser: argparse.ArgumentParser) -> None:
             sub.add_argument("--expected-sha256", required=name == "game-starter")
         if name == "game-starter":
             sub.add_argument("--starter", required=True)
+
+    sub = commands.add_parser(
+        "exec", help="run a real coworld/softmax command as the Player: exec -- coworld <args>"
+    )
+    sub.add_argument("argv", nargs=argparse.REMAINDER, help="coworld|softmax and its arguments")
+    sub.set_defaults(func=_exec)
 
     command(commands, "whoami", _whoami, "the credential's identity (must be our Player)")
     command(commands, "credits", _credits, "credit balance, when readable (A10)")

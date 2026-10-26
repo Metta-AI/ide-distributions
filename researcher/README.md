@@ -145,6 +145,7 @@ Then, for example:
 "$RESEARCH_CLI" records resolve ar://plan
 "$RESEARCH_CLI" softmax whoami
 "$RESEARCH_CLI" softmax leaderboard
+"$RESEARCH_CLI" softmax exec -- coworld leagues --json   # any real CLI command, as the Player
 "$RESEARCH_CLI" kb lint
 "$RESEARCH_CLI" workspace merged --branch card/t_1234abcd
 ```
@@ -156,7 +157,7 @@ Then, for example:
 | `kb` | `lint`, `apply`, `index`, `stale`, `renew`, `compact`, `hubs` | maintenance cards run `apply`/`stale`/`renew`/`compact` in their worktree |
 | `game` | `show`, `list`, `new`, `check`, `install` | game folders; `install` is the orchestrator's |
 | `source` | `fetch` | read-only snapshots of public GitHub repositories |
-| `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-build`, `leaderboard`, `game-version`, `standings`, `league-episodes`, `league-results`, and the discovery reads (`discover-leagues`, `league-players`, `game-support`, `player-champion`, `player-result`) | every platform action of a researcher |
+| `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-build`, `leaderboard`, `game-version`, `standings`, `league-episodes`, `league-results`, and the discovery reads (`discover-leagues`, `league-players`, `game-support`, `player-champion`, `player-result`) | every platform action of a researcher; `exec -- <coworld\|softmax> <args>` runs any other real CLI command as the Player (identity switches and `--server` refused) |
 | `workspace` | `stage`, `integrate`, `merged`, `publish`, `bootstrap` | `integrate` and `publish` are the orchestrator's; `bootstrap --game G` prepares another game's clone |
 | `promotion` | `submit`, `bootstrap`, `status`, `accept` | the orchestrator's; denied to researchers |
 
