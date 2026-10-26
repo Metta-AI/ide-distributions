@@ -9,7 +9,7 @@ NAME_MAX = POLICY_NAME_MAX - SUFFIX_LENGTH - 1
 MAX_EPISODES = 20
 DEFAULT_EPISODES = 5
 MAX_WAIT_SECONDS = (
-    480  # practice_status waits at most this long, leaving room in the 840 s call for the download
+    60  # practice_status waits at most this long, so the user is never left unanswered
 )
 # The steps of one user request, each a step on its task card; the Mind's step names (rungs) are
 # fixed by the records schema (bodies.GoalStep), so each step is filed under the nearest one.

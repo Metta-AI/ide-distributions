@@ -339,7 +339,7 @@ def test_practice_status_waits_for_the_games(program, cli):
 
     program._sleep = sleep
     cli.xp_status = "running"
-    data = program.practice_status(wait_seconds=480)
+    data = program.practice_status(wait_seconds=60)
     assert data["state"] == "completed" and len(waited) == 3
 
 
@@ -583,3 +583,14 @@ def test_who_we_are_reports_an_unreachable_profile(program):
 
     program._fetch = refuse
     assert run("who_we_are", {}, program)["error"]["reason"] == "who_unavailable"
+
+
+def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
+    first_version(program)
+    program.practice_request()
+    program._sleep = lambda seconds: None
+    cli.xp_status = "running"
+    data = program.practice_status(wait_seconds=60)
+    assert data["state"] not in ("completed", "failed", "cancelled")
+    assert "summary" not in data
+    assert "games finished so far" in data["plain"]
