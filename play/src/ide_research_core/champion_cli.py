@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 
-from ide_research_core import champion_submission, workspace
+from ide_research_core import champion_submission, legacy_promotions, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.io import gitops
 from ide_research_core.records.store import RecordNotFound
@@ -36,7 +36,10 @@ def _run(handler):
     def run(args: argparse.Namespace) -> int:
         try:
             clone = Path(args.root) if args.root else workspace.workspace_from_env()
-            if args.command == "pending":
+            migration = legacy_promotions.migrate(clone)  # never read unmigrated records
+            if args.command == "migrate":
+                data = migration
+            elif args.command == "pending":
                 data = next(
                     (
                         p.to_dict()
@@ -72,7 +75,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
 
     def command(name: str, handler, help_text: str) -> argparse.ArgumentParser:
         sub = commands.add_parser(name, parents=[common], help=help_text)
-        if name != "pending":
+        if name not in ("pending", "migrate"):
             sub.add_argument(
                 "--league",
                 required=True,
@@ -107,6 +110,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "submit the uploaded starter-policy version as the first champion",
     )
     sub.add_argument("--version", required=True, help="the uploaded version record, V-...")
+    command(
+        "migrate",
+        None,
+        "rewrite old promotion records as champion submissions; prints a summary, or null",
+    )
     command(
         "pending",
         None,

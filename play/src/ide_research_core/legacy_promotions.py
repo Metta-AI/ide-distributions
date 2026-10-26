@@ -13,10 +13,15 @@ rewrites them in one commit on canonical ``main``:
 - a version event's ``data.promotion_id: P-...`` -> ``champion_submission_id: CS-...``.
 
 Free text (journals, ``plan.md``, history details) keeps the old words and ids. A workspace
-without old records is left untouched, so the call is idempotent.
+without old records is left untouched, so the call is idempotent, and ``needed`` makes the
+common no-op case two cheap git reads. Besides bootstrap, every ``research champion`` command
+migrates first (so no champion state is read from unmigrated records) and the orchestrator's
+gate runs ``research champion migrate`` for every game on its poll, waking the coordinator
+with the summary so the user is told. A migration also prints one line to stderr.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import frontmatter
@@ -95,21 +100,48 @@ def _version_event_files(bare: Path, show) -> dict[str, bytes]:
     return files
 
 
-def migrate(clone: Path) -> bool:
-    """Rewrite old promotion records on canonical ``main``; True if anything changed."""
-    bare = workspace.canonical_of(clone)
+OLD_VALUES = r"promote_eligible|\"promotion_id\"|outcome: promote\b"
+
+
+def needed(bare: Path) -> bool:
+    """Whether canonical ``main`` still holds old records (cheap: ls-tree and git grep)."""
     if not gitops.git(bare, "for-each-ref", f"refs/heads/{workspace.MAIN}"):
         return False
+    if _tracked(bare, f"{OLD_DIR}/"):
+        return True
+    found = gitops._run(
+        bare, "grep", "-q", "-E", OLD_VALUES, workspace.MAIN, "--",
+        "experiments", "stats/outcomes", "versions", check=False,
+    )
+    return found.returncode == 0
+
+
+def migrate(clone: Path) -> dict | None:
+    """Rewrite old promotion records on canonical ``main``; a summary if anything changed."""
+    bare = workspace.canonical_of(clone)
+    if not needed(bare):
+        return None
 
     def show(path: str) -> bytes:
         return gitops.show(bare, workspace.MAIN, path)
 
-    files: dict[str, bytes | None] = {}
-    files.update(_submission_files(bare, show))
-    files.update(_experiment_files(bare, show))
-    files.update(_outcome_files(bare, show))
-    files.update(_version_event_files(bare, show))
+    submissions = _submission_files(bare, show)
+    experiments = _experiment_files(bare, show)
+    outcomes = _outcome_files(bare, show)
+    events = _version_event_files(bare, show)
+    files = {**submissions, **experiments, **outcomes, **events}
     if not files:
-        return False
-    workspace.publish(clone, files, "migrate: rename promotion records to champion submissions")
-    return True
+        return None
+    published = workspace.publish(
+        clone, files, "migrate: rename promotion records to champion submissions"
+    )
+    summary = {
+        "canonical": str(bare),
+        "commit": published["main_sha"],
+        "champion_submissions": sum(1 for path in submissions if path.startswith(f"{OLD_DIR}/")),
+        "experiments": len(experiments),
+        "outcomes": len(outcomes),
+        "version_events": len(events),
+    }
+    print(f"research: migrated promotion records to champion submissions: {json.dumps(summary)}", file=sys.stderr)
+    return summary
