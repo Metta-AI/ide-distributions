@@ -13,11 +13,22 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **The research CLI is `research`** (`$HERMES_HOME/bin/research`, `RESEARCH_CLI`), written
   by `scripts/bootstrap.py`. The package is `ide_research_core`.
 
+## Toolsets (decision A6)
+
+- **The orchestrator has full shell, file and Python access**, unlike the design, which gave
+  it only the `orchestrator` plugin toolset and rejected a terminal (A6).
+  `platform_toolsets.api_server` and `.cron` are `[orchestrator, terminal, file,
+  code_execution]`. Reason: the user needed it to inspect and change files and run commands
+  directly. The checked plugin tools remain the path for board, integration, upload,
+  submission and promotion writes, but that is now doctrine (`SOUL.md`), not enforced: no
+  deny list restricts the orchestrator's terminal. Hermes's default approvals apply
+  (`smart` in chat via the bridge's approval events; `cron_mode: deny` in cron turns).
+
 ## Shared code and the ontology (§5.5, §5.6)
 
 - The ontology is **embedded at the end of each `SOUL.md`** by `tools/sync_shared.py`, not
   copied to `<distribution>/ontology/`. Hermes loads `SOUL.md` in every session, cron
-  included, and the orchestrator has no file tools to read a separate file.
+  included, so every turn has it without reading another file.
 - For the same reason the orchestrator's doctrine is the `## Doctrine` section of its
   `SOUL.md`, not a separate `doctrine/orchestrator.md` (which nothing loaded).
 - `tools/sync_shared.py` also copies `researcher/games/*/GAME.md` into `orchestrator/games/`:
