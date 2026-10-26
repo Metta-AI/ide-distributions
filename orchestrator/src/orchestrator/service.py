@@ -20,15 +20,15 @@ class Service:
         for card in cards:
             by_state.setdefault(card["status"], []).append(card["id"])
         research = self.research.in_game(game)
-        promotion = research.call("promotion", "pending")
-        if promotion is not None:
-            promotion = research.call("promotion", "status", "--league", promotion["league_id"])
+        submission = research.call("champion", "pending")
+        if submission is not None:
+            submission = research.call("champion", "status", "--league", submission["league_id"])
         return {
             "cards": by_state,
             "game": research.context.env.get("RESEARCH_GAME"),
             "pending": transitions(snapshot(self.context), self.research, IDE(self.context)),
             "research": research.call("records", "summary"),
-            "promotion": promotion,
+            "champion_submission": submission,
             "control": research.control_read(),
             "plan": research.plan_read(),
             "budget": self.research.budget_read(),

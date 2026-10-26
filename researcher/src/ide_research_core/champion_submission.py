@@ -1,12 +1,12 @@
-"""Promotion: the orchestrator submits a candidate to the live league and records the champion.
+"""Champion submission: the orchestrator submits a candidate to the live league and records the champion.
 
 Researchers never submit (their deny list blocks the commands). A researcher's card ends with
-an experiment whose ``decision.outcome`` is ``promote``, a stored ``stats evaluate`` outcome,
+an experiment whose ``decision.outcome`` is ``submit``, a stored ``stats evaluate`` outcome,
 a candidate binding (the uploaded version) and the candidate strategy at
 ``strategy/candidates/<E>/STRATEGY.md``, all merged into canonical ``main``. The orchestrator
-then runs ``promotion submit <E>`` in its own clone.
+then runs ``champion submit <E>`` in its own clone.
 
-A promotion is one JSON file ``promotions/<P-id>.json`` on canonical ``main`` (only the
+A champion submission is one JSON file ``champion-submissions/<CS-id>.json`` on canonical ``main`` (only the
 orchestrator writes there; ``workspace.integrate`` refuses it from a card). Stages, in
 write-ahead order so an interrupted submit is never sent twice blindly:
 
@@ -16,10 +16,10 @@ write-ahead order so an interrupted submit is never sent twice blindly:
   strategy is then copied to ``strategy/STRATEGY.md``;
 - ``published``: the champion file is on ``main``. Terminal, like ``aborted`` and ``rejected``.
 
-``status`` advances the one promotion in flight by at most one platform read and returns
+``status`` advances the one submission in flight by at most one platform read and returns
 where things stand, including a champion conflict: the league shows a policy for us that the
 loop did not record as its champion (someone submitted by hand, or the league dropped ours).
-A coach refusal (a permit ask, no league chosen) leaves the promotion at ``intent`` with
+A coach refusal (a permit ask, no league chosen) leaves the submission at ``intent`` with
 ``waiting`` set; ``status`` sends again only after the coach answers. ``accept`` records the
 league's current champion as the loop's when a human says so.
 """
@@ -52,11 +52,11 @@ from ide_research_core.softmax_tool.protocol import (
 )
 from ide_research_core.stats.design import EvaluationDesign, design_sha256
 
-PROMOTIONS_DIR = "promotions"
+SUBMISSIONS_DIR = "champion-submissions"
 CHAMPION_PATH = "strategy/STRATEGY.md"
-PROMOTION_LOCK = "promotion.lock"
+SUBMISSION_LOCK = "champion-submission.lock"
 IN_FLIGHT = ("intent", "submitted", "recorded")
-CHAMPIONS = ("published",)  # the stage that makes a promotion's policy the loop's champion
+CHAMPIONS = ("published",)  # the stage that makes a submission's policy the loop's champion
 
 
 def candidate_path(experiment: str) -> str:
@@ -69,7 +69,7 @@ def _now() -> str:
 
 
 @dataclass
-class Promotion:
+class ChampionSubmission:
     id: str
     kind: str  # experiment | requested | bootstrap | accepted
     version_id: str | None
@@ -85,51 +85,51 @@ class Promotion:
         return asdict(self)
 
 
-def _path(clone: Path, promotion_id: str) -> Path:
-    return clone / PROMOTIONS_DIR / f"{promotion_id}.json"
+def _path(clone: Path, record_id: str) -> Path:
+    return clone / SUBMISSIONS_DIR / f"{record_id}.json"
 
 
-def load_all(clone: Path) -> list[Promotion]:
-    """Every promotion on canonical ``main``, oldest first (ids are ULIDs). Read from the bare
+def load_all(clone: Path) -> list[ChampionSubmission]:
+    """Every submission on canonical ``main``, oldest first (ids are ULIDs). Read from the bare
     repository, not the clone's checkout: a researcher's clone moves only when it integrates,
-    and the orchestrator publishes promotions from its own clone."""
+    and the orchestrator publishes submissions from its own clone."""
     bare = workspace.canonical_of(clone)
-    listed = gitops._run(bare, "ls-tree", "--name-only", workspace.MAIN, f"{PROMOTIONS_DIR}/")
+    listed = gitops._run(bare, "ls-tree", "--name-only", workspace.MAIN, f"{SUBMISSIONS_DIR}/")
     paths = sorted(
-        path for path in listed.stdout.decode().split() if Path(path).name.startswith("P-")
+        path for path in listed.stdout.decode().split() if Path(path).name.startswith("CS-")
     )
-    return [Promotion(**json.loads(gitops.show(bare, workspace.MAIN, path))) for path in paths]
+    return [ChampionSubmission(**json.loads(gitops.show(bare, workspace.MAIN, path))) for path in paths]
 
 
 @contextmanager
 def _one_at_a_time(clone: Path) -> Iterator[None]:
-    """Hold the host's promotion lock (a file in the bare repository) from the checks to the
+    """Hold the host's submission lock (a file in the bare repository) from the checks to the
     recorded platform result. The orchestrator's chat turn and its supervisor both reach this
     code; without the lock two submits could both pass the busy check, and a ``status`` between
     a submit's ``intent`` and its send would abort a live submit."""
-    with file_lock(workspace.canonical_of(clone) / PROMOTION_LOCK, timeout_s=workspace.LOCK_TIMEOUT_S):
+    with file_lock(workspace.canonical_of(clone) / SUBMISSION_LOCK, timeout_s=workspace.LOCK_TIMEOUT_S):
         workspace.sync(clone)
         yield
 
 
-def in_flight(clone: Path) -> Promotion | None:
+def in_flight(clone: Path) -> ChampionSubmission | None:
     flying = [p for p in load_all(clone) if p.stage in IN_FLIGHT]
     return flying[-1] if flying else None
 
 
-def latest_champion(clone: Path) -> Promotion | None:
+def latest_champion(clone: Path) -> ChampionSubmission | None:
     champions = [p for p in load_all(clone) if p.stage in CHAMPIONS]
     return champions[-1] if champions else None
 
 
-def _move(clone: Path, promotion: Promotion, stage: str, detail: str, extra: tuple[str, ...] = ()):
+def _move(clone: Path, submission: ChampionSubmission, stage: str, detail: str, extra: tuple[str, ...] = ()):
     """Record ``stage`` and publish it (with ``extra`` paths) to canonical ``main``."""
-    promotion.stage = stage
-    promotion.history.append({"stage": stage, "at": _now(), "detail": detail})
-    relative = _path(clone, promotion.id).relative_to(clone).as_posix()
-    content = json.dumps(promotion.to_dict(), indent=2, sort_keys=True) + "\n"
+    submission.stage = stage
+    submission.history.append({"stage": stage, "at": _now(), "detail": detail})
+    relative = _path(clone, submission.id).relative_to(clone).as_posix()
+    content = json.dumps(submission.to_dict(), indent=2, sort_keys=True) + "\n"
     files = {relative: content.encode(), **workspace.read_files(clone, list(extra))}
-    workspace.publish(clone, files, f"promotion {promotion.id}: {stage}")
+    workspace.publish(clone, files, f"champion submission {submission.id}: {stage}")
 
 
 # --- the league ---
@@ -138,7 +138,7 @@ def _move(clone: Path, promotion: Promotion, stage: str, detail: str, extra: tup
 def conflict(clone: Path, sm: Softmax, league_id: str, player_id: str) -> str | None:
     """Why the league and the loop disagree about our champion, or None.
 
-    The loop's champion is the latest ``published`` promotion. A promotion still at
+    The loop's champion is the latest ``published`` submission. A submission still at
     ``submitted`` explains a league that does not show it yet."""
     shown = sm.leaderboard_champion(player_id, league_id)
     champion = latest_champion(clone)
@@ -161,7 +161,7 @@ def baseline_problem(
 ) -> tuple[str, str] | None:
     """Why an experiment may not use ``baseline`` now, as ``(reason, message)``, or None when
     it is the current champion. ``stats design`` and ``softmax xp create`` refuse on it: an
-    experiment against any other policy can never promote."""
+    experiment against any other policy can never be submitted."""
     disagreement = conflict(clone, sm, league_id, player_id)
     if disagreement is not None:
         return "champion_conflict", f"{disagreement}. Do not design or launch until it is resolved"
@@ -186,9 +186,9 @@ def _refuse_if_busy(clone: Path) -> None:
     flying = in_flight(clone)
     if flying is not None:
         raise Refused(
-            "promotion_in_flight",
-            f"promotion {flying.id} is {flying.stage}; one promotion runs at a time",
-            {"promotion": flying.id},
+            "submission_in_flight",
+            f"submission {flying.id} is {flying.stage}; one submission runs at a time",
+            {"submission": flying.id},
         )
 
 
@@ -199,7 +199,7 @@ def _check_outcome(store: RecordStore, experiment: str, meta: dict, platform_id:
     if not outcome_path.exists():
         raise Refused("no_outcome", f"no stored outcome {outcome_path}; run stats evaluate")
     outcome = read_json(outcome_path)
-    if outcome.get("promote_eligible") is not True:
+    if outcome.get("submit_eligible") is not True:
         failures = outcome.get("failures") or []
         raise Refused(
             "not_eligible",
@@ -253,7 +253,7 @@ def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
 
 
 def _new(kind: str, version_id: str | None, platform_id: str | None, league_id: str, **fields):
-    return Promotion(f"P-{ULID()}", kind, version_id, platform_id, league_id, "new", **fields)
+    return ChampionSubmission(f"CS-{ULID()}", kind, version_id, platform_id, league_id, "new", **fields)
 
 
 def submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id: str) -> dict:
@@ -267,8 +267,8 @@ def _submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id
     store = RecordStore(Layout(clone))
     meta, _ = store.load(experiment)
     decision = (meta.get("decision") or {}).get("outcome")
-    if decision != "promote":
-        raise Refused("not_promote", f"{experiment} decision is {decision!r}, not 'promote'")
+    if decision != "submit":
+        raise Refused("not_submit", f"{experiment} decision is {decision!r}, not 'submit'")
     binding = meta.get("candidate_binding")
     if not binding:
         raise Refused("no_binding", f"{experiment} has no candidate_binding")
@@ -289,11 +289,11 @@ def _submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id
             f"{experiment} was evaluated against {outcome.get('champion')}, but the current "
             f"champion is {champion}; evaluate again",
         )
-    promotion = _new(
+    submission = _new(
         "experiment", binding["version_id"], platform_id, league_id, experiment=experiment
     )
-    _move(clone, promotion, "intent", f"submit {experiment}")
-    return _send(clone, sm, promotion)
+    _move(clone, submission, "intent", f"submit {experiment}")
+    return _send(clone, sm, submission)
 
 
 def submit_requested(
@@ -326,7 +326,7 @@ def submit_requested(
         if current is not None and current.platform_policy_version_id == platform_id:
             return current.to_dict()
         record = _new("requested", version, platform_id, league_id)
-        snapshot = f"{PROMOTIONS_DIR}/sources/{record.id}.md"
+        snapshot = f"{SUBMISSIONS_DIR}/sources/{record.id}.md"
         (clone / snapshot).parent.mkdir(parents=True, exist_ok=True)
         (clone / snapshot).write_bytes(source)
         _move(clone, record, "intent", f"User requested submission: {request}", (snapshot,))
@@ -358,51 +358,51 @@ def _bootstrap(clone: Path, sm: Softmax, version_id: str, league_id: str, player
         raise Refused(
             "not_shipped_strategy",
             f"{version_id} compiled a STRATEGY.md with sha256 {built[0]}, not the shipped "
-            f"{CHAMPION_PATH} ({shipped_hash}); a bootstrap promotes only the shipped strategy",
+            f"{CHAMPION_PATH} ({shipped_hash}); a bootstrap submits only the shipped strategy",
         )
     _require_identity(sm, player_id)
     shown = sm.leaderboard_champion(player_id, league_id)
     if shown is not None:
         raise Refused("champion_exists", f"the {league_id} league already shows {shown} for us")
-    promotion = _new("bootstrap", version_id, platform_id, league_id)
-    _move(clone, promotion, "intent", f"bootstrap {version_id}")
-    return _send(clone, sm, promotion)
+    submission = _new("bootstrap", version_id, platform_id, league_id)
+    _move(clone, submission, "intent", f"bootstrap {version_id}")
+    return _send(clone, sm, submission)
 
 
-def _send(clone: Path, sm: Softmax, promotion: Promotion) -> dict:
-    """The single platform submit of an ``intent`` promotion."""
-    result = sm.submit(promotion.platform_policy_version_id, promotion.league_id)
+def _send(clone: Path, sm: Softmax, submission: ChampionSubmission) -> dict:
+    """The single platform submit of an ``intent`` submission."""
+    result = sm.submit(submission.platform_policy_version_id, submission.league_id)
     if isinstance(result, PermitRequired):
-        promotion.waiting = {"reason": "permit_required", "ask": result.ask, "detail": result.reason}
-        _move(clone, promotion, "intent", "waiting for the coach's permit")
+        submission.waiting = {"reason": "permit_required", "ask": result.ask, "detail": result.reason}
+        _move(clone, submission, "intent", "waiting for the coach's permit")
         raise Refused(
             "permit_required", f"the coach must approve the submission: {result.reason}",
-            {"promotion": promotion.id, "ask": result.ask},
+            {"submission": submission.id, "ask": result.ask},
         )
     if isinstance(result, LeagueNotChosen):
-        promotion.waiting = {"reason": "league_not_chosen", "detail": result.reason}
-        _move(clone, promotion, "intent", "waiting for the coach to choose the league")
+        submission.waiting = {"reason": "league_not_chosen", "detail": result.reason}
+        _move(clone, submission, "intent", "waiting for the coach to choose the league")
         raise Refused(
-            "league_not_chosen", result.reason, {"promotion": promotion.id}
+            "league_not_chosen", result.reason, {"submission": submission.id}
         )
-    promotion.waiting = None
-    promotion.submission_id = result
+    submission.waiting = None
+    submission.submission_id = result
     extra: tuple[str, ...] = ()
-    if promotion.version_id is not None:
+    if submission.version_id is not None:
         store = RecordStore(Layout(clone))
         event = store.add_event(
-            promotion.version_id,
+            submission.version_id,
             "submitted",
             {
                 "submission_id": result,
-                "policy_version_id": promotion.platform_policy_version_id,
-                "league_id": promotion.league_id,
-                "promotion_id": promotion.id,
+                "policy_version_id": submission.platform_policy_version_id,
+                "league_id": submission.league_id,
+                "champion_submission_id": submission.id,
             },
         )
         extra = (store.path_of(event).relative_to(clone).as_posix(),)
-    _move(clone, promotion, "submitted", f"submission {result}", extra)
-    return promotion.to_dict()
+    _move(clone, submission, "submitted", f"submission {result}", extra)
+    return submission.to_dict()
 
 
 def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
@@ -414,90 +414,90 @@ def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
 def _accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     _refuse_if_busy(clone)
     shown = sm.leaderboard_champion(player_id, league_id)
-    promotion = _new("accepted", None, shown, league_id)
-    _move(clone, promotion, "published", f"accepted the league's champion {shown or 'none'}")
-    return promotion.to_dict()
+    submission = _new("accepted", None, shown, league_id)
+    _move(clone, submission, "published", f"accepted the league's champion {shown or 'none'}")
+    return submission.to_dict()
 
 
-# --- status: advance the promotion in flight ---
+# --- status: advance the submission in flight ---
 
 
-def _advance_intent(clone: Path, sm: Softmax, promotion: Promotion, player_id: str) -> None:
-    waiting = promotion.waiting or {}
+def _advance_intent(clone: Path, sm: Softmax, submission: ChampionSubmission, player_id: str) -> None:
+    waiting = submission.waiting or {}
     answer = None
     if waiting.get("reason") == "permit_required" and waiting.get("ask"):
         answer = sm.permit_answer(waiting["ask"])
         if answer in (None, ANSWER_WAITING):
             return
         if answer == ANSWER_NO:
-            _move(clone, promotion, "aborted", "the coach declined the submission")
+            _move(clone, submission, "aborted", "the coach declined the submission")
             return
     # Clear the wait on main before sending again, so a send that dies after the platform
     # accepted it is recovered by the submissions lookup below, not asked for again. A yes
     # already used means such a send happened: look it up now.
-    promotion.waiting = None
+    submission.waiting = None
     if waiting and answer != ANSWER_USED:
-        _move(clone, promotion, "intent", "sending again")
+        _move(clone, submission, "intent", "sending again")
         try:
-            _send(clone, sm, promotion)
+            _send(clone, sm, submission)
         except Refused:
             pass  # still waiting; _send recorded why
         return
     # An intent with no recorded outcome: the submit may or may not have reached the platform.
     found = [
         s for s in sm.submissions(player_id)
-        if s["policy_version_id"] == promotion.platform_policy_version_id
+        if s["policy_version_id"] == submission.platform_policy_version_id
     ]
     if found:
-        promotion.submission_id = found[-1]["submission_id"]
-        _move(clone, promotion, "submitted", "found on the platform after an interruption")
+        submission.submission_id = found[-1]["submission_id"]
+        _move(clone, submission, "submitted", "found on the platform after an interruption")
     else:
-        _move(clone, promotion, "aborted", "interrupted before the platform had a submission")
+        _move(clone, submission, "aborted", "interrupted before the platform had a submission")
 
 
-def _advance_submitted(clone: Path, sm: Softmax, promotion: Promotion, player_id: str) -> None:
+def _advance_submitted(clone: Path, sm: Softmax, submission: ChampionSubmission, player_id: str) -> None:
     state = sm.submission_state(
-        player_id, promotion.league_id, promotion.platform_policy_version_id
+        player_id, submission.league_id, submission.platform_policy_version_id
     )
     if state.stage == "rejected":
-        _move(clone, promotion, "rejected", f"the league rejected it ({state.detail})")
+        _move(clone, submission, "rejected", f"the league rejected it ({state.detail})")
     elif state.stage == "competing" and state.is_champion:
-        _move(clone, promotion, "recorded", "the league shows it as our champion")
+        _move(clone, submission, "recorded", "the league shows it as our champion")
 
 
-def _advance_recorded(clone: Path, promotion: Promotion) -> None:
+def _advance_recorded(clone: Path, submission: ChampionSubmission) -> None:
     extra: tuple[str, ...] = ()
-    if promotion.kind in ("experiment", "requested"):
+    if submission.kind in ("experiment", "requested"):
         # Always published: a local copy that already matches (a failed publish writes its
         # content back) says nothing about canonical main.
         source = (
-            candidate_path(promotion.experiment) if promotion.kind == "experiment"
-            else f"{PROMOTIONS_DIR}/sources/{promotion.id}.md"
+            candidate_path(submission.experiment) if submission.kind == "experiment"
+            else f"{SUBMISSIONS_DIR}/sources/{submission.id}.md"
         )
         content = (clone / source).read_bytes()
-        if promotion.kind == "requested":
-            meta, _ = RecordStore(Layout(clone)).load(promotion.version_id)
+        if submission.kind == "requested":
+            meta, _ = RecordStore(Layout(clone)).load(submission.version_id)
             if meta["strategy_sha256"] != hashlib.sha256(content).hexdigest():
                 raise Refused("strategy_mismatch", "The saved submission source does not match the build")
         (clone / CHAMPION_PATH).write_bytes(content)
         extra = (CHAMPION_PATH,)
-    _move(clone, promotion, "published", "champion recorded on main", extra)
+    _move(clone, submission, "published", "champion recorded on main", extra)
 
 
 def status(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
-    """Advance the promotion in flight by one step, then report."""
+    """Advance the submission in flight by one step, then report."""
     with _one_at_a_time(clone):
         return _status(clone, sm, league_id, player_id)
 
 
 def _status(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
-    promotion = in_flight(clone)
-    if promotion is not None and promotion.stage == "intent":
-        _advance_intent(clone, sm, promotion, player_id)
-    elif promotion is not None and promotion.stage == "submitted":
-        _advance_submitted(clone, sm, promotion, player_id)
-    if promotion is not None and promotion.stage == "recorded":
-        _advance_recorded(clone, promotion)
+    submission = in_flight(clone)
+    if submission is not None and submission.stage == "intent":
+        _advance_intent(clone, sm, submission, player_id)
+    elif submission is not None and submission.stage == "submitted":
+        _advance_submitted(clone, sm, submission, player_id)
+    if submission is not None and submission.stage == "recorded":
+        _advance_recorded(clone, submission)
     flying = in_flight(clone)
     champion = latest_champion(clone)
     return {

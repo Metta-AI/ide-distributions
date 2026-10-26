@@ -178,7 +178,7 @@ TOOLS = {
     ),
     "status": (
         Service,
-        "Read native task state, pending external waits, the host-wide budget, and one game's research summary, pause and promotion state.",
+        "Read native task state, pending external waits, the host-wide budget, and one game's research summary, pause and champion-submission state.",
         {"game": GAME},
         [],
     ),
@@ -224,9 +224,9 @@ TOOLS = {
         {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S},
         ["id", "run_id", "build_dir", "name"],
     ),
-    "promotion_submit": (
+    "champion_submit": (
         Board,
-        ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),
+        ("Submit an experiment's reviewed `submit` decision as our champion through the shared write-ahead champion-submission workflow."),
         {"id": S, "run_id": I, "experiment": S, "league_id": S},
         ["id", "run_id", "experiment", "league_id"],
     ),
@@ -235,7 +235,7 @@ TOOLS = {
         (
             "Submit an integrated uploaded version only when the user explicitly requested submission. "
             "Quote that request. This records a requested submission, not statistical improvement. "
-            "For autonomous research promotion use promotion_submit instead. Strategy must match the build."
+            "For autonomous research champion use champion_submit instead. Strategy must match the build."
         ),
         {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
         ["id", "run_id", "version", "strategy", "request", "league_id"],

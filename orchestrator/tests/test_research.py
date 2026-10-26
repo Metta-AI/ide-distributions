@@ -20,10 +20,10 @@ def test_subprocess_contract_and_refusal(shared_fixture):
         "args": ["records", "find", "Experiment", "status=reviewed"]
     }
     with pytest.raises(ResearchError) as error:
-        research.call("promotion", "submit", "refuse")
+        research.call("champion", "submit", "refuse")
     assert error.value.envelope["error"]["reason"] == "baseline_not_champion"
-    assert research.call("promotion", "bootstrap", "--version", "V-starter")["args"] == [
-        "promotion",
+    assert research.call("champion", "bootstrap", "--version", "V-starter")["args"] == [
+        "champion",
         "bootstrap",
         "--version",
         "V-starter",
@@ -37,7 +37,7 @@ def test_subprocess_contract_and_refusal(shared_fixture):
         "league_id",
     ]
     assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version", "league_id"]
-    assert research.accept_champion("league_selected")["args"] == ["promotion", "accept", "--league", "league_selected"]
+    assert research.accept_champion("league_selected")["args"] == ["champion", "accept", "--league", "league_selected"]
     assert TOOLS["accept_champion"][2:] == ({"league_id": {"type": "string"}, "game": GAME}, ["league_id"])
 
 
@@ -87,12 +87,12 @@ def test_control_read_uses_canonical_main(context):
     pause.write_text('{"paused": false}')
     assert research.control_read() == {"paused": True}
     plan = context.workspace / "plan.md"
-    plan.write_text("User constraint: no statistical promotion.\n")
+    plan.write_text("User constraint: no statistical champion submission.\n")
     git("add", "plan.md")
     git("commit", "-m", "Persist user constraint")
     git("push", str(canonical), "main")
     plan.write_text("Unpublished draft\n")
-    assert Research(context).plan_read() == "User constraint: no statistical promotion.\n"
+    assert Research(context).plan_read() == "User constraint: no statistical champion submission.\n"
 
 
 def test_another_game_uses_its_own_workspace(shared_fixture):

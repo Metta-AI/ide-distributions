@@ -43,7 +43,7 @@ def test_game_scope_is_selected_by_the_task(tmp_path, repository):
     saved.write_text("Keep this research and its history.")
     assert cli("workspace", "bootstrap")["game"] is None
     assert saved.read_text() == "Keep this research and its history."
-    assert cli("promotion", "pending") is None
+    assert cli("champion", "pending") is None
     assert cli("game", "list")["default"] is None
     card = tmp_path / "neutral-card"
     subprocess.run(

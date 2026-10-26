@@ -491,7 +491,7 @@ def test_bad_arguments_never_reach_the_platform(program, cli):
         ("program_release", {"program": "p v1", "user_said_yes": True, "league": "other"}),
         ("program_change", {"text": "x = 1\n", "change": " "}),
         ("task_update", {"step": "deploy", "status": "done", "detail": "x"}),
-        ("promotion_submit", {}),
+        ("champion_submit", {}),
     ]:
         envelope = run(operation, arguments, program)
         assert envelope["ok"] is False and envelope["error"]["reason"] == "bad_arguments", operation

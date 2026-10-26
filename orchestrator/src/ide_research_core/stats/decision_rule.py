@@ -1,4 +1,4 @@
-"""The pre-registered decision rule: is the candidate eligible for promotion?
+"""The pre-registered decision rule: is the candidate eligible to be submitted as champion?
 
 All metric names, directions, effects, tolerances and deltas come from the frozen design.
 Differences are candidate minus baseline after ``signed()``, so larger is always better.
@@ -14,7 +14,7 @@ The candidate is eligible only when every check passes:
 - ``performance_slip_without_significance:<name>`` - a performance metric slipped (within
   delta) but no primary metric is significant, so no slip is allowed.
 - ``baseline_not_champion`` - ``design.baseline_version`` is not the current champion.
-- ``no_primary_metric`` - the design has no primary metric, so nothing can justify promotion.
+- ``no_primary_metric`` - the design has no primary metric, so nothing can justify a champion submission.
 
 With no pairs at all only ``n_short`` (and possibly ``baseline_not_champion``) is reported.
 """
@@ -31,7 +31,7 @@ BOOTSTRAP_SEED = 0
 
 @dataclass
 class RuleOutcome:
-    promote_eligible: bool
+    submit_eligible: bool
     failures: list[str] = field(default_factory=list)
     per_metric: dict[str, dict] = field(default_factory=dict)
 
@@ -115,4 +115,4 @@ def evaluate(
 
     if design.baseline_version != current_champion:
         failures.append("baseline_not_champion")
-    return RuleOutcome(promote_eligible=not failures, failures=failures, per_metric=per_metric)
+    return RuleOutcome(submit_eligible=not failures, failures=failures, per_metric=per_metric)

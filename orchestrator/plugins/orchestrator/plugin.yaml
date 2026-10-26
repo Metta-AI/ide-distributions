@@ -24,7 +24,7 @@ provides_tools:
   - control_write
   - upload_build
   - submit_requested_version
-  - promotion_submit
+  - champion_submit
   - bootstrap_champion
   - accept_champion
   - workspace_integrate

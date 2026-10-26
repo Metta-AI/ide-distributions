@@ -234,7 +234,7 @@ def main():
             (board.workspace_integrate, (result_commit,)),
             (board.upload_build, ("build-evidence/verified", "policy")),
             (board.submit_requested_version, ("V-cancelled", "strategy.md", "Submit it", "league_selected")),
-            (board.promotion_submit, ("E-cancelled", "league_selected")),
+            (board.champion_submit, ("E-cancelled", "league_selected")),
             (board.bootstrap_champion, ("V-cancelled", "league_selected")),
         ):
             with TestCase().assertRaises(ValueError):

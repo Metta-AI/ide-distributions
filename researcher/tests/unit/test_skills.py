@@ -55,7 +55,7 @@ GROUPS = (
     "card",
     "comms",
     "queue",
-    "promotion",
+    "champion",
     "softmax",
     "game",
     "workspace",
@@ -207,7 +207,7 @@ def test_command_checks_cover_multiline_calls_and_fail_closed():
         "comms stage",
         "queue request create",
         "card finish",
-        "promotion submit",
+        "champion submit",
         "softmax submit",
         "softmax bootstrap-champion",
         "runtime status",
@@ -322,7 +322,7 @@ def test_native_completion_example_does_not_require_integration_or_journal():
 def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap():
     text = (SKILLS / "candidate" / "SKILL.md").read_text(encoding="utf-8")
     for required in (
-        "decision.outcome: promote",
+        "decision.outcome: submit",
         "stats/outcomes/<E-id>.json",
         "strategy/candidates/<E-id>/STRATEGY.md",
         "uploaded candidate binding",

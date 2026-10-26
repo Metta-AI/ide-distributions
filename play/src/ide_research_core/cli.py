@@ -27,7 +27,7 @@ GROUP_MODULES = (
     "ide_research_core.softmax_tool.cli",
     "ide_research_core.games.cli",
     "ide_research_core.workspace_cli",
-    "ide_research_core.promotion_cli",
+    "ide_research_core.champion_cli",
     "ide_research_core.sources",
 )
 
@@ -54,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)  # argparse exits with code 2 on bad arguments
     if getattr(args, "root", None):
-        # Every group's --root (records, stats, kb, workspace, promotion). Handlers pass paths
+        # Every group's --root (records, stats, kb, workspace, champion). Handlers pass paths
         # under it to tools that run in another directory (``git -C``), so a relative root
         # breaks them.
         args.root = os.path.abspath(args.root)

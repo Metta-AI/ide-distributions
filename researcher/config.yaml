@@ -29,7 +29,7 @@ approvals:
   mode: "off"
   # Hermes matches these over the whole command and over each command word's tail
   # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
-  # Promotion and league submission belong to the orchestrator.
+  # Champion submission and other league submission belong to the orchestrator.
   deny:
     - "*workspace integrate*"
     - "*workspace publish*"
@@ -47,14 +47,14 @@ approvals:
     - "hermes kanban link*"
     - "hermes kanban --board * create*"
     - "hermes kanban --board * link*"
-    - "*promotion submit-requested"
-    - "*promotion submit-requested *"
-    - "*promotion submit"
-    - "*promotion submit *"
-    - "*promotion bootstrap"
-    - "*promotion bootstrap *"
-    - "*promotion accept"
-    - "*promotion accept *"
+    - "*champion submit-requested"
+    - "*champion submit-requested *"
+    - "*champion submit"
+    - "*champion submit *"
+    - "*champion bootstrap"
+    - "*champion bootstrap *"
+    - "*champion accept"
+    - "*champion accept *"
 
 terminal:
   # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.

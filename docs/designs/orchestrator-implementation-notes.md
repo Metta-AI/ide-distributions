@@ -53,7 +53,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   orchestrator's supervisor gate.
 - **Bootstrap is split**: the researcher's bootstrap card builds the starter policy and runs
   `softmax upload-build`; the orchestrator submits that version with
-  `promotion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,
+  `champion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,
   but the build and upload need a researcher's terminal).
 - The KB's hub and staleness checks report findings (`kb hubs`, `kb renew` -> `reverify`)
   instead of writing card requests. Automatic claim renewal when the game source pin changes
@@ -78,7 +78,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - `researcher_guard` has the two rules of §4, with rule 2 widened from "no push to `main`"
   to "no terminal `git push`": integrate does every push, and a ref check missed implicit
   pushes (`git push` from the clone). About 60 lines.
-- The researcher's deny list blocks `research promotion submit|bootstrap|accept`; the
+- The researcher's deny list blocks `research champion submit|bootstrap|accept`; the
   commands themselves stay in the shared CLI (one vendored package for both profiles).
 
 - The handoff's `journal` is `ar://journal/J-...`; the design's `ar://J-...` does not resolve
@@ -98,7 +98,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **Champion conflict** = the league shows a champion the loop did not record as its latest
   `published` promotion (a `submitted` promotion explains a gap). A host migrated from
   autoresearch starts in conflict until a human confirms the league's champion:
-  **`promotion accept`** (new) records it.
+  **`champion accept`** (new) records it.
 - The guards of the old submit path are kept: decision `promote`, a candidate binding, an
   eligible and current `stats evaluate` outcome (rows and design hashes), identity, no
   conflict, outcome champion == league champion, one promotion at a time, the candidate

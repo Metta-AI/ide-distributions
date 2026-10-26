@@ -40,7 +40,7 @@ class CreditDenied:
 PERMIT_WAITING, PERMIT_DECLINED, PERMIT_OVER_CAP = "waiting", "declined", "over_cap"
 # ``Softmax.permit_answer``: the coach's answer to one ask.
 ANSWER_YES, ANSWER_NO, ANSWER_USED, ANSWER_WAITING = "yes", "no", "used", "waiting"
-# The retry timing shared by XP relaunches (credit denials, the coach's refusals) and promotion
+# The retry timing shared by XP relaunches (credit denials, the coach's refusals) and champion
 # submits the coach refused (A10): ``BACKOFF_BASE`` first (XP: or the worker's configured base),
 # doubling per refusal, at most ``BACKOFF_CAP`` (``retry_backoff``).
 BACKOFF_BASE = timedelta(minutes=30)
@@ -93,7 +93,7 @@ class SubmissionState:
     - ``competing``: admitted; ``is_champion`` says whether it is our champion (an admitted
       membership becomes champion by default and earlier ones are ``benched``);
     - ``rejected``: the submission was rejected or withdrawn, or the membership disqualified;
-    - ``unknown``: neither list names it, or it has a status we do not know (the promotion
+    - ``unknown``: neither list names it, or it has a status we do not know (the champion submission
       stays ``submitted`` and is read again).
 
     ``detail`` is the platform's status and substatus, for messages and logs."""

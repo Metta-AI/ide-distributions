@@ -77,7 +77,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `records_find`, `records_show` (`game?`) | Shared canonical record reads. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
 | `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
-| `promotion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
+| `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
 | `accept_champion(game?)` | Record the league's current champion after the user confirms. |
 | `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
 | `game_list` | Shipped and installed games, whether each has a research workspace yet, and how an installed one was installed. |

@@ -92,7 +92,7 @@ def whoami(cli: PlatformCli) -> Identity:
 def identity_problems(identity: Identity, expected_player_id: str, now: datetime) -> list[str]:
     """Why ``identity`` may not act as ``expected_player_id`` now; empty when it may (C6).
 
-    The single source of these checks: ``require_player`` and the promotion guards use it.
+    The single source of these checks: ``require_player`` and the champion-submission guards use it.
     """
     problems = []
     if identity.subject_type != "player":
