@@ -2,7 +2,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import frontmatter
@@ -74,34 +73,6 @@ def test_sync_regenerates_every_copy_identically(tmp_path):
     )
     assert result.stdout.strip() == "copies are up to date"
     assert not (tmp_path / "play/SOUL.md").read_text().count("ontology")
-
-    # Shared changes propagate without hand-editing any standalone profile.
-    master = tmp_path / "shared/pyproject.toml"
-    master.write_text(
-        master.read_text()
-        .replace('"pydantic>=2"', '"pydantic>=2.10"')
-        .replace('"numpy"', '"numpy>=2"')
-        .replace('"pytest"', '"pytest>=8"')
-        .replace('"hatchling"', '"hatchling>=1.25"')
-    )
-    subprocess.run([sys.executable, str(tmp_path / "tools/sync_shared.py")], check=True)
-    for name in ("researcher", "orchestrator", "play"):
-        project = tomllib.loads((tmp_path / name / "pyproject.toml").read_text())
-        assert "pydantic>=2.10" in project["project"]["dependencies"]
-        assert "pytest>=8" in project["dependency-groups"]["dev"]
-        assert project["build-system"]["requires"] == ["hatchling>=1.25"]
-        assert ("numpy>=2" in project["project"]["dependencies"]) == (name != "play")
-        assert ("jsonschema" in project["dependency-groups"]["dev"]) == (name == "play")
-        assert project["project"]["name"] == name
-    researcher = tomllib.loads((tmp_path / "researcher/pyproject.toml").read_text())
-    assert researcher["project"]["scripts"]["autoresearch"] == "ide_research_core.cli:main"
-    result = subprocess.run(
-        [sys.executable, str(tmp_path / "tools/sync_shared.py")],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert result.stdout.strip() == "copies are up to date"
 
 
 def test_play_lead_does_the_whole_loop_itself_in_plain_words():

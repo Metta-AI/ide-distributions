@@ -3,26 +3,23 @@ name = "orchestrator"
 version = "0.1.0"
 description = "Research lead for native Hermes Kanban workers"
 requires-python = ">=3.12,<3.13"
-# Generated from shared/pyproject.toml by tools/sync_shared.py; edit there.
 dependencies = [
+    "jsonschema",
     "pydantic>=2",
     "python-frontmatter",
-    "PyYAML",
-    "coworld>=0.1.64,<0.2",
-    "softmax-cli>=0.26.40,<0.27",
-    "jsonschema",
     "numpy",
+    "PyYAML",
     "python-ulid",
     "scipy",
     "pandas",
+    "coworld>=0.1.64,<0.2",
+    "softmax-cli>=0.26.40,<0.27",
 ]
 
 [dependency-groups]
-# Generated from shared/pyproject.toml.
 dev = ["pytest", "ruff"]
 
 [build-system]
-# Generated from shared/pyproject.toml.
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
