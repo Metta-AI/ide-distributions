@@ -82,6 +82,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (its own idempotent `research workspace bootstrap --game`, which also refreshes doctrine) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
 | `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
+| `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
 | `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and promotion state. |
@@ -245,9 +246,24 @@ verifies its manifest SHA-256 and distinguishes it from the selected player's su
 `card_report` reads a committed report from the recorded workspace of the latest completed card run,
 checks commit membership in that card branch, and never integrates or executes the report.
 If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.
-Use `card_verify_artifacts(task_id, run_id, commit, artifacts)` to check the report's expected
-SHA-256 hashes against committed files, including binary replays. `artifacts` maps normalized
-relative paths to hashes; each call accepts at most 64 files totaling 256 MiB. Read `status`
-(`verified` or `mismatch`) and the per-file results. This shares the completed-run and branch
-checks with `card_report`, ignores uncommitted changes, and never executes artifact content.
-Hash agreement establishes byte identity; review the result rows and evaluation evidence separately.
+
+Review a completed experiment through these tools:
+
+1. Get its latest completed run and full commit from `card_show`.
+2. Call `card_files(task_id, run_id, commit)` to discover the root. Follow directory paths and
+   `next_offset` for bounded listings, rather than guessing report paths.
+3. Use `card_report` for bounded text pages. Use `card_artifacts(task_id, run_id, commit, paths)`
+   for SHA-256 hashes, byte sizes and Git blob IDs. Optional `expected_sha256` maps paths to
+   hashes from the report or index; each file reports whether its expected hash matched.
+4. Set `export=true` on `card_artifacts` to copy source, logs, JSON/CSV results and binary replays
+   into a fresh private snapshot under this profile's `cache/card-artifacts/`. The returned
+   `directory` preserves relative paths; `manifest` records the task, run, commit and file hashes.
+   Native file and terminal tools can then analyze this coordinator-owned copy.
+
+Each batch accepts at most 64 regular files totaling 256 MiB. `status=mismatch` exports nothing;
+otherwise status is `inspected` or `exported`. Exports contain committed bytes even when a worker
+worktree has uncommitted changes. Symlinks, submodules and unsafe paths cannot be exported.
+Each export creates a separate snapshot, so a retry never overwrites an earlier analysis.
+These tools share completed-run and branch checks, recover cleaned worktrees through Hermes,
+never integrate a branch, and never execute copied files. Hash agreement establishes byte identity;
+review result rows and evaluation evidence separately. Active worker files remain unavailable.

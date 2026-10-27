@@ -143,41 +143,82 @@ with closing(connection()) as conn:
     worktree = resolve_workspace(task, board='autoresearch')
     set_workspace_path(conn, task_id, worktree)
 payload = bytes(range(256)) * 4096
-(worktree / 'replay.bin').write_bytes(payload)
+(worktree / 'evidence/nested').mkdir(parents=True)
+(worktree / 'evidence/nested/replay.bin').write_bytes(payload)
+results = ''.join(json.dumps({'tick': tick, 'errors': 0}) + '\\n' for tick in range(12000))
+(worktree / 'evidence/results.jsonl').write_text(results)
 (worktree / 'report.md').write_text('Recorded evidence')
-(worktree / 'link').symlink_to('replay.bin')
+(worktree / 'policy.bas').write_text('PRINT "candidate"')
+(worktree / 'link').symlink_to('evidence/nested/replay.bin')
 git(worktree, 'config', 'user.name', 'Artifact system test')
 git(worktree, 'config', 'user.email', 'test@example.invalid')
 git(worktree, 'add', '.')
 git(worktree, 'commit', '-m', 'record evidence')
 git(worktree, 'push', 'origin', task.branch_name)
 commit = git(worktree, 'rev-parse', 'HEAD')
-request = {'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit,
-           'artifacts': {'replay.bin': hashlib.sha256(payload).hexdigest()}}
-assert not json.loads(registry.dispatch('card_verify_artifacts', request))['ok']
+identity = {'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit}
+request = {**identity, 'paths': ['evidence/nested/replay.bin', 'evidence/results.jsonl', 'policy.bas'],
+           'expected_sha256': {'evidence/nested/replay.bin': hashlib.sha256(payload).hexdigest()}}
+assert not json.loads(registry.dispatch('card_artifacts', request))['ok']
+assert not json.loads(registry.dispatch('card_files', identity))['ok']
 with closing(connection()) as conn:
     assert kb.complete_task(conn, task_id, summary='Evidence committed', expected_run_id=task.current_run_id)
 assert not worktree.exists(), 'Native completion must exercise cleaned-worktree recovery'
-verified = json.loads(registry.dispatch('card_verify_artifacts', request))
-assert verified['ok'] and verified['data']['status'] == 'verified', verified
-assert verified['data']['artifacts'][0]['bytes'] == len(payload)
+listing = json.loads(registry.dispatch('card_files', {**identity, 'limit': 2}))
+assert listing['ok'], listing
+files = listing['data']['files']
+while listing['data']['next_offset'] is not None:
+    listing = json.loads(registry.dispatch('card_files', {
+        **identity, 'limit': 2, 'offset': listing['data']['next_offset'],
+    }))
+    assert listing['ok'], listing
+    files.extend(listing['data']['files'])
+assert {item['path']: item['kind'] for item in files} == {
+    'seed.txt': 'blob', 'evidence': 'tree', 'link': 'symlink', 'policy.bas': 'blob', 'report.md': 'blob',
+}, files
+nested = json.loads(registry.dispatch('card_files', {**identity, 'directory': 'evidence/nested'}))
+assert nested['ok'] and nested['data']['files'][0]['path'] == request['paths'][0], nested
 assert worktree.exists()
-(worktree / 'replay.bin').write_bytes(b'uncommitted change')
-assert json.loads(registry.dispatch('card_verify_artifacts', request))['data']['status'] == 'verified'
-mismatch = json.loads(registry.dispatch('card_verify_artifacts', {
-    **request, 'artifacts': {'replay.bin': '0' * 64},
+(worktree / 'evidence/nested/replay.bin').write_bytes(b'uncommitted change')
+inspected = json.loads(registry.dispatch('card_artifacts', request))
+assert inspected['ok'] and inspected['data']['status'] == 'inspected', inspected
+assert inspected['data']['artifacts'][0]['matches'] is True
+assert inspected['data']['artifacts'][0]['bytes'] == len(payload)
+assert inspected['data']['artifacts'][1]['matches'] is None
+mismatch = json.loads(registry.dispatch('card_artifacts', {
+    **request, 'export': True, 'expected_sha256': {'evidence/nested/replay.bin': '0' * 64},
 }))
 assert mismatch['ok'] and mismatch['data']['status'] == 'mismatch', mismatch
-for path in ['../replay.bin', 'link', '/etc/passwd']:
-    rejected = json.loads(registry.dispatch('card_verify_artifacts', {
-        **request, 'artifacts': {path: '0' * 64},
+assert not (home / 'cache/card-artifacts').exists(), 'Mismatch must not publish any files'
+exported = json.loads(registry.dispatch('card_artifacts', {**request, 'export': True}))
+assert exported['ok'] and exported['data']['status'] == 'exported', exported
+directory = Path(exported['data']['directory'])
+assert directory.is_relative_to(home / 'cache/card-artifacts')
+assert (directory / request['paths'][0]).read_bytes() == payload
+assert (directory / 'policy.bas').read_text() == 'PRINT "candidate"'
+rows = [json.loads(line) for line in (directory / 'evidence/results.jsonl').read_text().splitlines()]
+assert len(rows) == 12000 and all(row['errors'] == 0 for row in rows)
+manifest = json.loads(Path(exported['data']['manifest']).read_text())
+assert all(manifest[key] == value for key, value in identity.items())
+for item in manifest['artifacts']:
+    copied = directory / item['path']
+    assert hashlib.sha256(copied.read_bytes()).hexdigest() == item['sha256']
+    assert copied.stat().st_mode & 0o777 == 0o600
+(directory / 'policy.bas').write_text('local analysis copy')
+again = json.loads(registry.dispatch('card_artifacts', {**request, 'export': True}))
+assert again['ok'] and again['data']['directory'] != str(directory), again
+assert (directory / 'policy.bas').read_text() == 'local analysis copy'
+assert (Path(again['data']['directory']) / 'policy.bas').read_text() == 'PRINT "candidate"'
+for path in ['../report.md', 'link', '/etc/passwd', 'evidence']:
+    rejected = json.loads(registry.dispatch('card_artifacts', {
+        **identity, 'paths': [path], 'export': True,
     }))
     assert not rejected['ok'], rejected
-report = json.loads(registry.dispatch('card_report', {
-    'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit, 'path': 'report.md',
-}))
+assert not json.loads(registry.dispatch('card_files', {**identity, 'directory': '../'}))['ok']
+report = json.loads(registry.dispatch('card_report', {**identity, 'path': 'report.md'}))
 assert report['ok'] and report['data']['content'] == 'Recorded evidence', report
-assert (worktree / 'replay.bin').read_bytes() == b'uncommitted change'
+assert not json.loads(registry.dispatch('card_report', {**identity, 'path': 'evidence/results.jsonl'}))['ok']
+assert (worktree / 'evidence/nested/replay.bin').read_bytes() == b'uncommitted change'
 print(json.dumps({'ok': True}))
 """
     result = subprocess.run(

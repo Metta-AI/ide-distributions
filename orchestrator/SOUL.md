@@ -76,6 +76,11 @@ and relative path. This reads without integrating the branch. If the workspace i
 or no supported
 reader exists, have the worker return the bounded report content with its commit and source path.
 Never invent the contents after a missing-file response or report an unread report as inspected.
+Use `card_files` to discover committed paths and `card_artifacts` to inspect hashes or export
+selected evidence into this profile's private cache. Analyze the returned local copy with native
+file/terminal tools. This supports large logs and binary replays without reading an active worker's
+files or integrating an unreviewed branch. Supply reported hashes when available; a mismatch
+exports nothing. File identity alone does not verify an evaluation's claims.
 
 ## Discover the subject of this conversation
 

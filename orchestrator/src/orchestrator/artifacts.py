@@ -1,9 +1,11 @@
-"""Bounded committed report reads from a completed card's recorded workspace."""
+"""Discover, inspect and export committed evidence from completed native cards."""
 
 import hashlib
+import json
 import subprocess
 from contextlib import closing
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,11 +27,20 @@ class ReportRead(CompletedCardRead):
     limit: int = Field(default=4000, ge=1, le=6000)
 
 
-class ArtifactVerify(CompletedCardRead):
-    artifacts: dict[
-        Annotated[str, Field(min_length=1, max_length=512)],
-        Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
-    ] = Field(min_length=1, max_length=64, description="Committed relative paths mapped to expected SHA-256 hashes")
+ArtifactPath = Annotated[str, Field(min_length=1, max_length=512)]
+Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class CardFiles(CompletedCardRead):
+    directory: str = Field(default="", max_length=512)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class ArtifactRead(CompletedCardRead):
+    paths: list[ArtifactPath] = Field(min_length=1, max_length=64)
+    expected_sha256: dict[ArtifactPath, Sha256] = Field(default_factory=dict, max_length=64)
+    export: bool = False
 
 
 class ArtifactDigest(BaseModel):
@@ -37,7 +48,8 @@ class ArtifactDigest(BaseModel):
     blob: str
     bytes: int
     sha256: str
-    matches: bool
+    expected_sha256: str | None
+    matches: bool | None
 
 
 class Reports:
@@ -50,7 +62,7 @@ class Reports:
         latest = max(runs, key=lambda item: item["id"], default=None)
         if (not latest or latest["id"] != request.run_id or latest["task_id"] != request.task_id
                 or latest["status"] != "done" or not latest.get("ended_at") or task["status"] != "done"):
-            raise ValueError("Read a report only from the card's latest completed run; refresh card_show")
+            raise ValueError("Read artifacts only from the card's latest completed run; refresh card_show")
         workspace = Path(task.get("workspace_path") or "").resolve()
         if not task.get("workspace_path") or not workspace.is_relative_to(self.context.root.resolve()):
             raise ValueError("The card workspace is not on this profile host; request a report handoff from the worker")
@@ -85,15 +97,46 @@ class Reports:
             raise ValueError("The requested commit/report is not available on the recorded card branch")
         return result.stdout
 
-    def _blob(self, workspace: Path, commit: str, path: str) -> tuple[str, int]:
+    @staticmethod
+    def _relative(path: str) -> PurePosixPath:
         relative = PurePosixPath(path)
         if relative.is_absolute() or ".." in relative.parts or "\0" in path or str(relative) != path:
             raise ValueError("Use the committed artifact's normalized relative path")
+        return relative
+
+    def _blob(self, workspace: Path, commit: str, path: str) -> tuple[str, int]:
+        self._relative(path)
         entry = self._git(workspace, "ls-tree", "--format=%(objectmode) %(objecttype) %(objectname)", commit, "--", path).decode().strip().split()
         if len(entry) != 3 or entry[0] not in ("100644", "100755") or entry[1] != "blob":
             raise ValueError("Choose a committed regular report file; directories and symlinks are not supported")
         blob = entry[2]
         return blob, int(self._git(workspace, "cat-file", "-s", blob))
+
+    def card_files(self, task_id, run_id, commit, directory="", offset=0, limit=100):
+        request = CardFiles(task_id=task_id, run_id=run_id, commit=commit,
+                            directory=directory, offset=offset, limit=limit)
+        workspace = self._workspace(request)
+        if request.directory:
+            self._relative(request.directory)
+        tree = request.commit + (":" + request.directory if request.directory else "")
+        entries = self._git(workspace, "ls-tree", "--long", "-z", tree).split(b"\0")[:-1]
+        if request.offset > len(entries):
+            raise ValueError("Offset exceeds the directory's entry count")
+        files = []
+        for entry in entries[request.offset:request.offset + request.limit]:
+            metadata, name = entry.split(b"\t", 1)
+            mode, kind, blob, size = metadata.decode().split()
+            files.append({
+                "path": str(PurePosixPath(request.directory) / name.decode()),
+                "kind": "symlink" if mode == "120000" else kind,
+                "blob": blob, "bytes": int(size) if size != "-" else None,
+            })
+        end = min(request.offset + request.limit, len(entries))
+        return {
+            "task_id": request.task_id, "run_id": request.run_id, "commit": request.commit,
+            "directory": request.directory, "files": files, "total": len(entries),
+            "next_offset": end if end < len(entries) else None,
+        }
 
     def card_report(self, task_id, run_id, commit, path, offset=0, limit=4000):
         request = ReportRead(task_id=task_id, run_id=run_id, commit=commit, path=path, offset=offset, limit=limit)
@@ -118,21 +161,50 @@ class Reports:
             "provenance": "commit reachable from the recorded branch of this card's latest completed run; not an integration receipt",
         }
 
-    def card_verify_artifacts(self, task_id, run_id, commit, artifacts):
-        request = ArtifactVerify(task_id=task_id, run_id=run_id, commit=commit, artifacts=artifacts)
+    def card_artifacts(self, task_id, run_id, commit, paths, expected_sha256=None, export=False):
+        request = ArtifactRead(task_id=task_id, run_id=run_id, commit=commit, paths=paths,
+                               expected_sha256=expected_sha256 or {}, export=export)
+        if len(set(request.paths)) != len(request.paths) or not request.expected_sha256.keys() <= set(request.paths):
+            raise ValueError("Choose distinct paths and provide expected hashes only for those paths")
         workspace = self._workspace(request)
-        entries = [(path, *self._blob(workspace, request.commit, path)) for path in request.artifacts]
+        entries = [(path, *self._blob(workspace, request.commit, path)) for path in request.paths]
         if sum(size for _, _, size in entries) > 256 * 1024 * 1024:
-            raise ValueError("Artifact batch exceeds 256 MiB; verify smaller batches")
+            raise ValueError("Artifact batch exceeds 256 MiB; select smaller batches")
         digests = []
+        contents = []
         for path, blob, size in entries:
-            digest = hashlib.sha256(self._git(workspace, "cat-file", "blob", blob)).hexdigest()
+            content = self._git(workspace, "cat-file", "blob", blob)
+            digest = hashlib.sha256(content).hexdigest()
+            expected = request.expected_sha256.get(path)
             digests.append(ArtifactDigest(
-                path=path, blob=blob, bytes=size, sha256=digest, matches=digest == request.artifacts[path],
+                path=path, blob=blob, bytes=size, sha256=digest,
+                expected_sha256=expected, matches=digest == expected if expected else None,
             ))
-        return {
+            if request.export:
+                contents.append(content)
+        result = {
             "task_id": request.task_id, "run_id": request.run_id, "commit": request.commit,
-            "status": "verified" if all(item.matches for item in digests) else "mismatch",
+            "status": "mismatch" if any(item.matches is False for item in digests) else "inspected",
             "artifacts": [item.model_dump() for item in digests],
             "provenance": "committed bytes on this card's latest completed branch; hashes do not prove evaluation claims",
         }
+        if request.export and result["status"] != "mismatch":
+            cache = self.context.home / "cache" / "card-artifacts"
+            cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with TemporaryDirectory(prefix=".staging-", dir=cache) as temporary:
+                staged = Path(temporary) / "snapshot"
+                staged.mkdir(mode=0o700)
+                for item, content in zip(digests, contents, strict=True):
+                    target = staged / "files" / item.path
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    with target.open("xb") as output:
+                        output.write(content)
+                    target.chmod(0o600)
+                manifest = staged / "manifest.json"
+                manifest.write_text(json.dumps(result, indent=2) + "\n")
+                manifest.chmod(0o600)
+                destination = cache / Path(temporary).name.removeprefix(".staging-")
+                staged.rename(destination)
+            result.update(status="exported", directory=str(destination / "files"),
+                          manifest=str(destination / "manifest.json"))
+        return result

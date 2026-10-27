@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from ide_research_core import session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
-from .artifacts import ArtifactVerify, ReportRead, Reports
+from .artifacts import ArtifactRead, CardFiles, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .capabilities import Capabilities
@@ -55,11 +55,17 @@ TOOLS = {
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
     ),
-    "card_verify_artifacts": (
+    "card_files": (
         Reports,
-        "Verify expected SHA-256 hashes for committed files from a card's latest completed run. Pass relative paths mapped to hashes from its report/index. Supports binary replays; returns verified or mismatch plus actual hashes, sizes and Git blobs. At most 64 files and 256 MiB per call. Uses the same task, branch and completion checks as card_report, including native worktree restoration. Never executes artifacts or reads uncommitted files. Hash agreement proves byte identity, not evaluation correctness.",
-        ArtifactVerify.model_json_schema()["properties"],
-        ["task_id", "run_id", "commit", "artifacts"],
+        "Discover committed files and directories from a card's latest completed run. Start with directory omitted for the root; follow directory paths and next_offset. Returns paths, kinds, sizes and Git blob IDs, at most 200 entries per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
+        CardFiles.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit"],
+    ),
+    "card_artifacts": (
+        Reports,
+        "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest completed run. Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
+        ArtifactRead.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit", "paths"],
     ),
     "host_capabilities": (
         Capabilities,

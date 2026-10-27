@@ -10,7 +10,8 @@ provides_tools:
   - host_capabilities
   - game_starter
   - card_report
-  - card_verify_artifacts
+  - card_files
+  - card_artifacts
   - ide_workspace
   - ide_workspace_schema
   - ide_say
