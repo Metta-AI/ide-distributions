@@ -81,7 +81,7 @@ TOOLS = {
     ),
     "worker_capabilities": (
         Capabilities,
-        "Inspect an assigned worker's installed tools and skills before planning policy work. Optional game returns its build, local_check, upload, evaluate and replay_inspect bindings, missing scripts, executables and environment requirements. query filters tools and skills only. Uses the worker's own profile and research interpreter, not this coordinator's copied game guide. Read-only: creates no task, runs no binding, spends no evaluation budget, and returns no credentials. Configured bindings are not execution proof or permission to publish; task restrictions still apply. Missing profile/runtime/game have explicit status values.",
+        "Inspect an assigned worker's installed tools and skills before planning policy work. Optional game returns its build, local_check, upload, evaluate and replay_inspect bindings, missing scripts, executables and environment requirements. query filters tools and skills only. Uses the worker's own profile and research interpreter, not this coordinator's installation. Read-only: creates no task, runs no binding, spends no evaluation budget, and returns no credentials. Configured bindings are not execution proof or permission to publish; task restrictions still apply. Missing profile/runtime/game have explicit status values.",
         WorkerRead.model_json_schema()["properties"],
         ["assignee"],
     ),

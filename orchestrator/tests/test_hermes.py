@@ -67,6 +67,10 @@ from tools.registry import registry
 get_plugin_manager().discover_and_load()
 profile = Path(sys.argv[1])
 worker = profile.parent / 'researcher-1'
+# Retained profiles may be from different releases. Model that difference using
+# real installed files, and verify that coordinator files cannot mask the worker.
+script = 'games/pudge-wars-basic/tools/build.py'
+(profile / script).unlink()
 args = {'assignee': 'researcher-1', 'game': 'pudge-wars-basic'}
 schema = registry.get_schema('worker_capabilities')
 assert schema['parameters']['required'] == ['assignee']
@@ -84,10 +88,9 @@ assert game['root'] == str(worker), game
 assert game['status'] == 'installed', game
 assert all('missing_script' not in binding['reasons']
            for binding in game['readiness']['operations'].values()), game
-script = 'games/pudge-wars-basic/tools/build.py'
 assert not (profile / script).exists()
 # A real broken worker installation is visible on the next call, without making
-# a task or consulting the coordinator's intentionally guide-only game copy.
+# a task or consulting the coordinator's different game copy.
 (worker / script).unlink()
 broken = json.loads(registry.dispatch('worker_capabilities', args))
 assert broken['ok'], broken

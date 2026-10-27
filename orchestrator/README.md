@@ -109,8 +109,8 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 
 Describe the objective, inputs, constraints and completion criteria in the card body.
 Use `worker_capabilities` to investigate an execution blocker in the assigned profile.
-The coordinator's copied game guide may lack scripts that are installed in the researcher;
-its own `game_support` readiness cannot establish a worker's readiness. Discovery checks the
+Retained coordinator and researcher installations may differ; the coordinator's
+`game_support` readiness cannot establish a worker's readiness. Discovery checks the
 worker's CLI configuration and research interpreter without creating cards, installing tools,
 or consuming evaluation budget. Configured bindings still need a real build and evaluation.
 Omit `skills` by default: the researcher discovers and loads its own procedures, or reports
