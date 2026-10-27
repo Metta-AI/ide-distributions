@@ -138,8 +138,11 @@ or triaged task. Cancel only obsolete work. Do not increment a semantic attempt 
 ## Accept results
 
 Native completion ends an assignment. It does not prove the user's request is fulfilled.
-Workers stage complete verified builds and finish their native assignments. Use `upload_build`
-to publish a completed run’s committed build and stage its version receipts. Integrate the returned commit.
+Workers stage complete verified builds and finish their native assignments. For file policies,
+use `upload_build` to publish a completed run’s committed artifact and stage its version receipts.
+For container policies, discover the provider’s build and registration capability. Preserve its
+receipt and verify the game’s bindings before claiming an integrated research candidate.
+Integrate the returned commit when the publication workflow supplies one.
 Inspect staged commits, build reports, upload/version receipts, and platform results against
 the assigned objective. Integrate accepted branches through `workspace_integrate` in sequence.
 Conflicts require resolution and revalidation against current main. Keep unrelated research
@@ -233,20 +236,28 @@ turn. Read the rest when the work needs it:
   Coworld's forum and wiki (`softmax forum --help`, `softmax wiki --help`). Keep game details
   out of your notes about yourself.
 
-## The hosted environment
+## Execution capabilities
 
-A hosted workspace runs in a sandbox with **no Docker**: `docker` and anything that starts a
-container (local `coworld run-episode`, image builds) cannot work here, and that is not a
-fault to debug. Before planning a build, read the Coworld manifest's `game.player_runtime`:
+Discover the current session's tools and skills before declaring an operation unavailable.
+Use `capabilities` to find relevant capabilities and native tool discovery to read their schemas.
+Local executables and hosted services are different capabilities: no local Docker does not
+establish that container building or evaluation is unavailable. Do not infer capabilities
+from the hosting backend, an old task, or a missing local executable.
 
-- `game-hosted`: a policy is a file (for example BASIC source or a ZIP). Write the file,
-  upload it, and evaluate it with hosted Experience Requests. No Docker is needed; downloading
-  a Coworld does not need it either.
-- `platform-hosted` (the default): a policy is a container image, which this sandbox cannot
-  build or run. Say so plainly; a game folder's `host_requirements` lists what it needs.
+Before planning a build, read the Coworld manifest's `game.player_runtime`:
 
-Guides that say Docker is "required either way" assume a laptop. Here, use hosted XP in
-place of local episodes, unless the game folder ships a native (non-Docker) runner.
+- `game-hosted`: a policy is a file (for example BASIC source or a ZIP). Prepare and verify
+  that artifact, then use the coordinator's file-publication workflow.
+- `platform-hosted` (the default): a policy is a container image. The coordinator discovers
+  available build and registration services and follows their current input schemas and receipts.
+  Researchers prepare source and required verification; they do not publish directly.
+
+Check the game's build and evaluation requirements separately. A hosted build service does
+not establish local container execution, an evaluation binding, or a completed experiment.
+Use hosted Experience Requests when available and appropriate, or the game's supported native
+runner. Preserve required gates. If a capability is absent, report the specific missing operation
+and evidence; do not generalize it to the whole platform or substitute credentials and ad hoc plumbing.
+Registration is not league submission; keep submission authorization separate.
 
 ## The CLIs and the API
 

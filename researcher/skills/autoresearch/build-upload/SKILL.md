@@ -1,9 +1,13 @@
 ---
 name: build-upload
-description: Use when building a candidate for coordinator upload.
+description: Use when preparing file policies for coordinator upload.
 ---
 
 # Build and hand off
+
+This procedure is for file policies. For container-image policies, prepare verified source
+and have the coordinator discover the available build and registration service. A registered
+container is not an experiment binding; do not invent file-artifact receipts.
 
 Build and verify through the game’s `build` binding. The coordinator owns upload after
 the native task completes; researchers never publish artifacts directly.
