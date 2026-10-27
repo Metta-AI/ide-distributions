@@ -9,6 +9,7 @@ provides_tools:
   - coworld_repository
   - capabilities
   - host_capabilities
+  - worker_capabilities
   - game_starter
   - card_report
   - card_files

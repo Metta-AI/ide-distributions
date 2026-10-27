@@ -10,7 +10,7 @@ from ide_research_core.softmax_tool.discovery_schema import StarterRead, Support
 from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
-from .capabilities import Capabilities
+from .capabilities import Capabilities, WorkerRead
 from .context import profile_context
 from .coworld_context import CoworldContext, Selection, repository_context_middleware
 from .github import GitHub
@@ -78,6 +78,12 @@ TOOLS = {
         Capabilities,
         "Check whether git, Python, softmax, coworld and the research CLI are installed on this profile host. Read-only; launches no inline scripts or commands. Returns no credential or environment values. Does not probe repository authorization.",
         {}, [],
+    ),
+    "worker_capabilities": (
+        Capabilities,
+        "Inspect an assigned worker's installed tools and skills before planning policy work. Optional game returns its build, local_check, upload, evaluate and replay_inspect bindings, missing scripts, executables and environment requirements. query filters tools and skills only. Uses the worker's own profile and research interpreter, not this coordinator's copied game guide. Read-only: creates no task, runs no binding, spends no evaluation budget, and returns no credentials. Configured bindings are not execution proof or permission to publish; task restrictions still apply. Missing profile/runtime/game have explicit status values.",
+        WorkerRead.model_json_schema()["properties"],
+        ["assignee"],
     ),
     "game_starter": (
         Research,
