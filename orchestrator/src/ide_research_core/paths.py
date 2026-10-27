@@ -11,7 +11,7 @@ class Layout:
     kb/claims, kb/hubs, kb/archive, kb/log (one ``<ULID>.md`` per entry), kb/_generated;
     topics, hypotheses, experiments, results, versions (``<V-id>/version.json`` + events/);
     evidence/index (``<EV-id>.json``); journal; lessons; strategy; candidates; stats; plan.md;
-    AGENTS.md. The orchestrator also writes ``control/`` and ``promotions/`` (see ``workspace``).
+    AGENTS.md. The orchestrator also writes ``control/`` and ``champion-submissions/`` (see ``workspace``).
     """
 
     root: Path

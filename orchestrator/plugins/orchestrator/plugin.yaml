@@ -5,6 +5,10 @@ author: ide-distributions
 provides_tools:
   - github_repositories
   - github_clone
+  - capabilities
+  - host_capabilities
+  - game_starter
+  - card_report
   - ide_workspace
   - ide_workspace_schema
   - ide_say
@@ -23,7 +27,7 @@ provides_tools:
   - control_write
   - upload_build
   - submit_requested_version
-  - promotion_submit
+  - champion_submit
   - bootstrap_champion
   - accept_champion
   - workspace_integrate

@@ -158,7 +158,7 @@ def test_xp_requests_need_binding_and_fields():
 def test_decision_set_once():
     decided = {"outcome": "hold", "reason": "flat"}
     before = exp(status="reviewed", decision=decided)
-    after = exp(status="reviewed", decision={"outcome": "promote", "reason": "changed my mind"})
+    after = exp(status="reviewed", decision={"outcome": "submit", "reason": "changed my mind"})
     assert any("decision" in p and "once" in p for p in check_change("experiment", before, after))
 
 
@@ -285,8 +285,8 @@ def test_store_status_change_needs_fresh_reason_and_ref(store):
     with pytest.raises(ValueError, match="new state_reason"):
         store.update(hid, {"state": "supported"})
     with pytest.raises(ValueError, match="new state_ref"):
-        store.set_status(hid, "supported", reason="R-1 promote", ref="E-1")
-    store.set_status(hid, "supported", reason="R-1 promote", ref="R-1")
+        store.set_status(hid, "supported", reason="R-1 submit", ref="E-1")
+    store.set_status(hid, "supported", reason="R-1 submit", ref="R-1")
     meta = store.load(hid)[0]
     assert meta["state"] == "supported"
     assert [h["ref"] for h in meta["state_history"]] == ["E-1", "R-1"]

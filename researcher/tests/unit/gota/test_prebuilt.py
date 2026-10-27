@@ -229,7 +229,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     from games.gota.tools import native_build
     from ide_research_core import workspace
     from ide_research_core.io import gitops
-    from ide_research_core.promotion import CHAMPION_PATH, in_flight, latest_champion
+    from ide_research_core.champion_submission import CHAMPION_PATH, in_flight, latest_champion
     from ide_research_core.softmax_tool.upload import policy_name
 
     board = ResearchBoard(tmp_path, seed_champion=False)
@@ -255,7 +255,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     input_commit = gitops.head(worker.worktree)
     real_run = subprocess.run
     def recorded_process(argv, **kwargs):
-        if argv[:4] == [sys.executable, '-m', 'ide_research_core', 'promotion']:
+        if argv[:4] == [sys.executable, '-m', 'ide_research_core', 'champion']:
             return real_run(argv, **kwargs)  # the orchestrator's submit, below
         if argv[:5] == [sys.executable, '-m', 'ide_research_core', 'softmax', 'upload-build']:
             assert kwargs['env']['RESEARCH_SOFTMAX'] == 'fake'
@@ -335,14 +335,14 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
 
     # The orchestrator submits it as the first champion, then reports until it is published.
     league = 'league_3c60897b-25cf-4b37-9d1a-8554c1198f28'
-    promotion_env = base_env(board, RESEARCH_GAME='gota')
+    champion_env = base_env(board, RESEARCH_GAME='gota')
 
-    def promotion(*argv):
-        run = subprocess.run([sys.executable, '-m', 'ide_research_core', 'promotion', *argv, '--league', league],
-                             capture_output=True, text=True, env=promotion_env, check=False)
+    def champion(*argv):
+        run = subprocess.run([sys.executable, '-m', 'ide_research_core', 'champion', *argv, '--league', league],
+                             capture_output=True, text=True, env=champion_env, check=False)
         return run.returncode, json.loads(run.stdout)
 
-    code, response = promotion('bootstrap', '--version', data['version_id'])
+    code, response = champion('bootstrap', '--version', data['version_id'])
     assert code == 0, response
     current = in_flight(board.canonical)
     assert current.kind == 'bootstrap' and current.experiment is None
@@ -351,14 +351,14 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert submission['league_id'] == league
     assert submission['policy_version_id'] == data['platform_policy_version_id']
     [submitted] = board.store.find('version_event', version=data['version_id'], kind='submitted')
-    assert board.store.load(submitted)[0]['data']['promotion_id'] == current.id
+    assert board.store.load(submitted)[0]['data']['champion_submission_id'] == current.id
     fake_state = json.loads((board.canonical / '.supervisor/runtime/fake_softmax.json').read_text())
     assert list(fake_state['uploads']) == [data['platform_policy_version_id']]
     assert fake_state['xp'] == {} and board.store.find('experiment') == []
 
-    code, refused = promotion('bootstrap', '--version', data['version_id'])
-    assert code == 1 and refused['error']['reason'] == 'promotion_in_flight'
-    code, status = promotion('status')
+    code, refused = champion('bootstrap', '--version', data['version_id'])
+    assert code == 1 and refused['error']['reason'] == 'submission_in_flight'
+    code, status = champion('status')
     assert code == 0 and status['data']['conflict'] is None, status
     assert latest_champion(board.canonical).platform_policy_version_id == data['platform_policy_version_id']
     assert board.sm.leaderboard_champion(PLAYER, league) == data['platform_policy_version_id']
@@ -366,7 +366,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert board.store.load(data['version_id'])[0] == meta
     assert len(board.sm.submissions(PLAYER)) == 1
     assert not gitops.git(board.canonical, 'ls-files', '.scratch')
-    code, refused = promotion('bootstrap', '--version', data['version_id'])
+    code, refused = champion('bootstrap', '--version', data['version_id'])
     assert code == 1 and refused['error']['reason'] == 'champion_exists'
 
 

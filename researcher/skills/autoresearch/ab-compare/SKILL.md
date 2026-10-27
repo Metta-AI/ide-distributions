@@ -29,7 +29,7 @@ Doctrine upheld: D-06, D-09.
 3. Apply the decision rule. The champion is the policy the league's leaderboard shows
    competing for us; do not pass `--champion` inside a card:
    `"$RESEARCH_CLI" stats evaluate <E-id>`
-4. Read `data`: `promote_eligible`, `failures` (for example `n_short:…`,
+4. Read `data`: `submit_eligible`, `failures` (for example `n_short:…`,
    `primary_not_significant:<m>`, `guardrail_breach:<m>`, `performance_slip:<m>`,
    `baseline_not_champion`), and `per_metric` (`mean_signed_diff`, `ci`, `threshold`,
    `passed` per metric and role (`per_metric[name][role]`); larger is always better after the sign). Copy `per_metric` and the

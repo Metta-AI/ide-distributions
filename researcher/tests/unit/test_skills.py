@@ -55,7 +55,7 @@ GROUPS = (
     "card",
     "comms",
     "queue",
-    "promotion",
+    "champion",
     "softmax",
     "game",
     "workspace",
@@ -69,12 +69,23 @@ PREFIXLESS = re.compile(rf"^(?:{'|'.join(GROUPS)}) [a-z]")
 BARE_CALL = re.compile(rf"(?<![\w/$.-])(?:python3? -m )?autoresearch (?:{'|'.join(GROUPS)})\b")
 
 
+# Shipped games with binding skills under skills/<game>/ (GotA's predate the <game>-<binding>
+# naming; Pudge Wars Basic's are copies of games/pudge-wars-basic/skills by tools/sync_shared.py).
+GAME_SKILL_DIRS = ("gota", "pudge-wars-basic")
+BINDINGS = {"replay-inspection", "eval-design", "diagnosis", "ab", "survey"}
+
+
 def skill_files() -> list[Path]:
-    return sorted(SKILLS.glob("*/SKILL.md")) + sorted((ROOT / "skills" / "gota").glob("*/SKILL.md"))
+    games = [path for game in GAME_SKILL_DIRS for path in sorted((ROOT / "skills" / game).glob("*/SKILL.md"))]
+    return sorted(SKILLS.glob("*/SKILL.md")) + games
 
 
 def skill_ids() -> list[str]:
-    return [path.parent.name for path in skill_files()]
+    return [f"{path.parent.parent.name}/{path.parent.name}" for path in skill_files()]
+
+
+def game_of(skill: Path) -> str | None:
+    return None if skill.parent.parent == SKILLS else skill.parent.parent.name
 
 
 def rule_ids() -> set[str]:
@@ -169,19 +180,23 @@ def test_every_core_skill_has_a_file():
     assert {p.parent.name for p in SKILLS.glob("*/SKILL.md")} == (
         CORE_SKILLS | MAINTENANCE_SKILLS | GAME_SKILLS
     )
-    assert {p.parent.name for p in (ROOT / "skills" / "gota").glob("*/SKILL.md")} == {
-        "replay-inspection",
-        "eval-design",
-        "diagnosis",
-        "ab",
-        "survey",
-    }
+    for game in GAME_SKILL_DIRS:
+        assert {p.parent.name for p in (ROOT / "skills" / game).glob("*/SKILL.md")} == BINDINGS
+
+
+def test_shipped_game_skill_copies_match_their_source():
+    source = ROOT / "games" / "pudge-wars-basic" / "skills"
+    for path in source.glob("*/SKILL.md"):
+        copy = ROOT / "skills" / "pudge-wars-basic" / path.parent.name / "SKILL.md"
+        assert copy.read_bytes() == path.read_bytes(), "run python3 tools/sync_shared.py"
 
 
 def test_front_matter_is_valid(skill):
     post = frontmatter.loads(skill.read_text(encoding="utf-8"))
     name, description = post.metadata.get("name"), post.metadata.get("description")
-    assert name == skill.parent.name
+    game = game_of(skill)
+    # GotA's binding skills use the bare binding name; later games use <game>-<binding>.
+    assert name == (skill.parent.name if game in (None, "gota") else f"{game}-{skill.parent.name}")
     assert NAME_PATTERN.fullmatch(name)
     assert isinstance(description, str) and description.startswith("Use when ")
     assert len(description) <= DESCRIPTION_LIMIT, description
@@ -207,7 +222,7 @@ def test_command_checks_cover_multiline_calls_and_fail_closed():
         "comms stage",
         "queue request create",
         "card finish",
-        "promotion submit",
+        "champion submit",
         "softmax submit",
         "softmax bootstrap-champion",
         "runtime status",
@@ -232,7 +247,7 @@ def test_core_skills_never_name_a_game(skill):
     if skill.parent.parent != SKILLS:
         return
     assert not re.search(
-        r"gota|gods of the arena", skill.read_text(encoding="utf-8"), re.IGNORECASE
+        r"gota|gods of the arena|pudge", skill.read_text(encoding="utf-8"), re.IGNORECASE
     )
 
 
@@ -242,19 +257,24 @@ def test_cited_doctrine_ids_exist(skill):
     assert cited <= rule_ids(), cited - rule_ids()
 
 
-GAME_CALL = re.compile(r'"\$RESEARCH_PYTHON" "\$RESEARCH_HOME/games/gota/tools/([^"/]+)"([^`\n]*)')
+GAME_CALL = re.compile(r'"\$RESEARCH_PYTHON" "\$RESEARCH_HOME/games/([a-z0-9-]+)/tools/([^"/]+)"([^`\n]*)')
+GAME_TOOLS = {
+    "gota": {"replay_stats.py", "evaluate.py", "compare.py", "make_v13_live.py", "build.py"},
+    "pudge-wars-basic": {
+        "native.py", "match.py", "build.py", "local_check.py", "evaluate.py",
+        "replay_inspect.py", "branch.py", "compare.py", "hosted_logs.py",
+    },
+}
 
 
-def check_game_call(script: str, arguments: str) -> None:
-    assert script in {
-        "replay_stats.py",
-        "evaluate.py",
-        "compare.py",
-        "make_v13_live.py",
-        "build.py",
-    }, script
-    path = ROOT / "games" / "gota" / "tools" / script
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def check_game_call(script: str, arguments: str, game: str = "gota") -> None:
+    assert script in GAME_TOOLS.get(game, ()), (game, script)
+    path = ROOT / "games" / game / "tools" / script
+    source = path.read_text(encoding="utf-8")
+    shared = path.parent / "cli_contract.py"  # Pudge Wars Basic's tools add --json there
+    if game != "gota" and shared.is_file():
+        source += "\n" + shared.read_text(encoding="utf-8")
+    tree = ast.parse(source)
     supported = {
         argument.value
         for call in ast.walk(tree)
@@ -274,9 +294,10 @@ def test_game_tool_commands_and_flags_exist(skill):
     if skill.parent.parent == SKILLS:
         return
     calls = GAME_CALL.findall(skill.read_text(encoding="utf-8"))
-    assert calls, f"{skill}: no GotA instrument command"
-    for script, arguments in calls:
-        check_game_call(script, arguments)
+    assert calls, f"{skill}: no game instrument command"
+    for game, script, arguments in calls:
+        assert game == game_of(skill), f"{skill}: calls another game's tool {game}/{script}"
+        check_game_call(script, arguments, game)
 
 
 def test_game_command_regressions_fail_closed():
@@ -322,7 +343,7 @@ def test_native_completion_example_does_not_require_integration_or_journal():
 def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap():
     text = (SKILLS / "candidate" / "SKILL.md").read_text(encoding="utf-8")
     for required in (
-        "decision.outcome: promote",
+        "decision.outcome: submit",
         "stats/outcomes/<E-id>.json",
         "strategy/candidates/<E-id>/STRATEGY.md",
         "uploaded candidate binding",
@@ -364,7 +385,9 @@ SKILL_REFERENCE = re.compile(
 def test_every_skill_named_in_a_soul_or_game_file_exists():
     """No SOUL.md or GAME.md may send a mind to a skill that does not ship (the hosted
     transcript asked for a nonexistent `research` skill)."""
-    shipped = set(skill_ids())
+    shipped = {path.parent.name for path in skill_files()} | {
+        frontmatter.loads(path.read_text(encoding="utf-8")).metadata["name"] for path in skill_files()
+    }
     files = [ROOT / "SOUL.md", ROOT.parent / "orchestrator" / "SOUL.md"]
     files += sorted((ROOT / "games").glob("*/GAME.md"))
     named = set()

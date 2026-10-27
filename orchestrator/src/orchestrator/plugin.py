@@ -4,9 +4,12 @@ import json
 from contextlib import closing
 from urllib.error import HTTPError
 
-from ide_research_core.softmax_tool.discovery_schema import SupportRead
+from ide_research_core import session_catalog
+from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
+from .artifacts import ReportRead, Reports
 from .board import Board, CardFilters
+from .capabilities import Capabilities
 from .context import profile_context
 from .github import GitHub
 from .ide import IDE
@@ -37,6 +40,23 @@ TOOLS = {
         "Clone a GitHub repository through the owner's connected account into a new hosted checkout. Accepts owner/repository or its HTTPS GitHub URL. Returns the path and exact commit for native file inspection. Provider credentials never enter tool results. Use terminal git clone directly for public repos when no connection exists.",
         {"repository": {"type": "string", "maxLength": 200}},
         ["repository"],
+    ),
+    "card_report": (
+        Reports,
+        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. No integration or filesystem mutation.",
+        ReportRead.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit", "path"],
+    ),
+    "host_capabilities": (
+        Capabilities,
+        "Check whether git, Python, softmax, coworld and the research CLI are installed on this profile host. Read-only; launches no inline scripts or commands. Returns no credential or environment values. Does not probe repository authorization.",
+        {}, [],
+    ),
+    "game_starter": (
+        Research,
+        "Read a bounded text page of a published starter from game_support, verifying its SHA-256. Does not require GitHub. This is not the player's submitted source and never uploads or executes code.",
+        StarterRead.model_json_schema()["properties"],
+        ["league_id", "starter_id", "expected_sha256"],
     ),
     "ide_workspace_schema": (
         Workspace,
@@ -172,7 +192,7 @@ TOOLS = {
     ),
     "status": (
         Service,
-        "Read native task state, pending external waits, the host-wide budget, and one game's research summary, pause and promotion state.",
+        "Read native task state, pending external waits, the host-wide budget, and one game's research summary, pause and champion-submission state.",
         {"game": GAME},
         [],
     ),
@@ -218,9 +238,9 @@ TOOLS = {
         {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S},
         ["id", "run_id", "build_dir", "name"],
     ),
-    "promotion_submit": (
+    "champion_submit": (
         Board,
-        ("Submit a reviewed promote decision through the shared write-ahead promotion workflow."),
+        ("Submit an experiment's reviewed `submit` decision as our champion through the shared write-ahead champion-submission workflow."),
         {"id": S, "run_id": I, "experiment": S, "league_id": S},
         ["id", "run_id", "experiment", "league_id"],
     ),
@@ -229,7 +249,7 @@ TOOLS = {
         (
             "Submit an integrated uploaded version only when the user explicitly requested submission. "
             "Quote that request. This records a requested submission, not statistical improvement. "
-            "For autonomous research promotion use promotion_submit instead. Strategy must match the build."
+            "For autonomous research champion use champion_submit instead. Strategy must match the build."
         ),
         {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
         ["id", "run_id", "version", "strategy", "request", "league_id"],
@@ -408,3 +428,4 @@ def register(ctx):
             handler=handler(name),
             description=description,
         )
+    session_catalog.register(ctx, "orchestrator")

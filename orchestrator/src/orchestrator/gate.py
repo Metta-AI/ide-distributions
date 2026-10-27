@@ -89,11 +89,20 @@ def evaluate(context, research=None, ide=None, now=None):
     pending = transitions(state, research, ide or PermitReader())
     if now.minute % 10 == 0:
         tick = now.replace(second=0, microsecond=0).isoformat()
-        if research.call("promotion", "pending") is not None:
-            pending.append({"kind": "promotion_poll", "tick": tick})
+        # Old "promotion" records are rewritten on the first poll after an upgrade; the
+        # coordinator is woken so it tells the user what was migrated.
+        migration = research.call("champion", "migrate")
+        if migration is not None:
+            pending.append({"kind": "records_migrated", "tick": tick, "migration": migration})
         for game in other_research_games(context.env):
-            if research.in_game(game).call("promotion", "pending") is not None:
-                pending.append({"kind": "promotion_poll", "tick": tick, "game": game})
+            migration = research.in_game(game).call("champion", "migrate")
+            if migration is not None:
+                pending.append({"kind": "records_migrated", "tick": tick, "game": game, "migration": migration})
+        if research.call("champion", "pending") is not None:
+            pending.append({"kind": "champion_submission_poll", "tick": tick})
+        for game in other_research_games(context.env):
+            if research.in_game(game).call("champion", "pending") is not None:
+                pending.append({"kind": "champion_submission_poll", "tick": tick, "game": game})
     # Native notifications alone deliver task events; cron only polls external waits.
     if not pending:
         return {"wakeAgent": False}

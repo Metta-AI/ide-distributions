@@ -182,6 +182,6 @@ def test_one_card_from_creation_to_the_orchestrators_view(host):
     assert orchestrator(profiles, "gate") == {"wakeAgent": False}
     status = orchestrator(profiles, "status")
     assert status["cards"] == {"done": [card["id"]]}
-    assert status["promotion"] is None  # no selected league or pending submission
+    assert status["champion_submission"] is None  # no selected league or pending submission
     found = envelope(run([cli, "records", "find", "claim"], researcher_env))["ids"]
     assert claim in found

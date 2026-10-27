@@ -134,7 +134,7 @@ class Research:
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
     def accept_champion(self, league_id, game=None):
-        return self.in_game(game).call("promotion", "accept", "--league", league_id)
+        return self.in_game(game).call("champion", "accept", "--league", league_id)
 
     def xp_status(self, experiment, game=None):
         return self.in_game(game).call("softmax", "xp", "status", experiment)
@@ -179,6 +179,12 @@ class Research:
 
     def game_list(self):
         return self.call("game", "list")
+
+    def game_starter(self, league_id, starter_id, expected_sha256, offset=0, limit=4000):
+        return self.call(
+            "softmax", "game-starter", "--league", league_id, "--starter", starter_id,
+            "--expected-sha256", expected_sha256, "--offset", offset, "--limit", limit,
+        )
 
     def leaderboard(self, league_id, player_id):
         return self.call("softmax", "player-champion", "--league", league_id, "--player", player_id)

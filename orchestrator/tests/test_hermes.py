@@ -98,11 +98,15 @@ assert registry.get_schema('ide_workspace')['parameters']['required'] == ['reque
 schema = registry.get_schema('submit_requested_version')
 assert set(schema['parameters']['required']) == {'id', 'run_id', 'version', 'strategy', 'request', 'league_id'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
+# capabilities resolves the api_server session's toolsets from config.yaml.
+listing = json.loads(registry.dispatch('capabilities', {'kind': 'tools'}))
+assert {'orchestrator', 'terminal', 'file', 'code_execution'} <= set(listing['tools']), listing
+assert 'skills' not in listing
 print(json.dumps({'ok': True}))
 """
     result = subprocess.run(
         [hermes_python(), "-c", code, str(profile), json.dumps(expected_tools)],
-        env={**env, "HERMES_HOME": str(profile)},
+        env={**env, "HERMES_HOME": str(profile), "HERMES_SESSION_PLATFORM": "api_server"},
         capture_output=True,
         text=True,
         check=False,

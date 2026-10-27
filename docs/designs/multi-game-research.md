@@ -94,7 +94,7 @@ Hermes makes the card worktree from that project, so the worker lands in the rig
 The concrete game, the default included, is recorded in the card's immutable
 `creation_command` event, so changing the default later never moves a card. A command recorded
 before cards named their game keeps its original workspace; it does not assign a game. Every card-scoped orchestrator effect
-(`upload_build`, `workspace_integrate`, `submit_requested_version`, `promotion_submit`,
+(`upload_build`, `workspace_integrate`, `submit_requested_version`, `champion_submit`,
 `bootstrap_champion`, `game_install`) reads it from there, and so does the minute supervisor for
 XP, credit and permit waits. Canonical-scoped tools (`status`, `records_find`, `records_show`,
 `plan_write`, `control_write`, `accept_champion`, `xp_status`) take an optional `game`. The

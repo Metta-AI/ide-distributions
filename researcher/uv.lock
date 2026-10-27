@@ -188,7 +188,7 @@ wheels = [
 
 [[package]]
 name = "coworld"
-version = "0.1.58"
+version = "0.1.64"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -207,9 +207,9 @@ dependencies = [
     { name = "typer" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5e/0d/085dfd8845e8b65434a75acae668096b909ed32a874002ad43f28dc0d37a/coworld-0.1.58.tar.gz", hash = "sha256:020e8bad18cc898f44b79d70cf97c30f1e0ab01a8f715d3f8a0d2e16854bef7a", size = 2197795, upload-time = "2026-10-08T01:56:08.104Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/b1/1fddd639a6fc2d2f0d75e57a8c93d5d9d83b4919dffd05b769f7bf6872db/coworld-0.1.64.tar.gz", hash = "sha256:f0bbe6d430b5171c956a94aef16f31d2258dc750f7a848d45a987d29281b0993", size = 2318611, upload-time = "2026-10-23T23:45:37.545Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/25/0e6f99009a375012292a02451254a6eab2d8efb15225ba7f6aa12b6134ba/coworld-0.1.58-py3-none-any.whl", hash = "sha256:b97ccd307cd47da79b4ef9ed5f89226b6e2075e228ae5644a07a7d37a9447ab5", size = 515283, upload-time = "2026-10-08T01:56:06.109Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/4b/ebc3ba26503b364e733dd6937179d0f345ec62e27afb2387f34d435212f0/coworld-0.1.64-py3-none-any.whl", hash = "sha256:db3e218c948bce3010874f377377bd336de2522d201acfb59bd5036e66e9567f", size = 629341, upload-time = "2026-10-23T23:45:35.806Z" },
 ]
 
 [[package]]
@@ -727,7 +727,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "coworld", specifier = "==0.1.58" },
+    { name = "coworld", specifier = ">=0.1.64,<0.2" },
     { name = "jsonschema" },
     { name = "numpy" },
     { name = "pandas" },
@@ -736,7 +736,7 @@ requires-dist = [
     { name = "python-ulid" },
     { name = "pyyaml" },
     { name = "scipy" },
-    { name = "softmax-cli", specifier = "==0.26.38" },
+    { name = "softmax-cli", specifier = ">=0.26.40,<0.27" },
 ]
 
 [package.metadata.requires-dev]
@@ -859,9 +859,10 @@ wheels = [
 
 [[package]]
 name = "softmax-cli"
-version = "0.26.38"
+version = "0.26.40"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "click" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -870,9 +871,9 @@ dependencies = [
     { name = "typer" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/4c/a5bd4428f631ee1f04599bba80c8eb5a5a7f79e21c1c4829c09ff92fa9e0/softmax_cli-0.26.38.tar.gz", hash = "sha256:f8b47330c5b3a9dacebfa85b48302936f4447752626e49966e256d4a83edb965", size = 52709, upload-time = "2026-09-17T18:11:31.368Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/1f/c65cb650f9eb9acba79a811f1ab77dc1adadb93a0a17764dc14ad771b673/softmax_cli-0.26.40.tar.gz", hash = "sha256:25470f0dae58cc591f9dfb0e14ad1d4cf998c0a6e39fec10b10bf1a507d9097f", size = 56631, upload-time = "2026-10-23T20:36:01.41Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/81/ddc4c86add539b3d8e61776a8c453e2ff27d5a3c6d1e4a4cf0a0948920bc/softmax_cli-0.26.38-py3-none-any.whl", hash = "sha256:5c413e0019f6df06a4aa298c9ae04056613d01cad9439cf4476f7ce7477ac861", size = 38716, upload-time = "2026-09-17T18:11:30.002Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/d1/efc28a799ca72fddae176118e49bd33978779a449bf9663c3d7d2eb8f041/softmax_cli-0.26.40-py3-none-any.whl", hash = "sha256:6942eb7814a1a728b37cd6eb718b40ea4e56e3f0aebe2def5d34d4950f338905", size = 38318, upload-time = "2026-10-23T20:35:59.897Z" },
 ]
 
 [[package]]
@@ -899,17 +900,17 @@ wheels = [
 
 [[package]]
 name = "typer"
-version = "0.27.3"
+version = "0.25.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "click" },
     { name = "rich" },
     { name = "shellingham" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/51/d33db42cc72ffd8c30777547b42d01f0cbf9d95a770457698d0174b3ed71/typer-0.27.3.tar.gz", hash = "sha256:d0396f770a560ab1b0a8504e13b5f254b728cedb05c61cf0359e944e50ce8901", size = 205303, upload-time = "2026-10-06T17:24:16.61Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/51/9aed62104cea109b820bbd6c14245af756112017d309da813ef107d42e7e/typer-0.25.1.tar.gz", hash = "sha256:9616eb8853a09ffeabab1698952f33c6f29ffdbceb4eaeecf571880e8d7664cc", size = 122276, upload-time = "2026-04-30T19:32:16.964Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/ea/2e31b67051e91a133189e9c000c222502ddc6969856416de0d095de4c0b0/typer-0.27.3-py3-none-any.whl", hash = "sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff", size = 123312, upload-time = "2026-10-06T17:24:15.054Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/f9/2b3ff4e56e5fa7debfaf9eb135d0da96f3e9a1d5b27222223c7296336e5f/typer-0.25.1-py3-none-any.whl", hash = "sha256:75caa44ed46a03fb2dab8808753ffacdbfea88495e74c85a28c5eefcf5f39c89", size = 58409, upload-time = "2026-04-30T19:32:18.271Z" },
 ]
 
 [[package]]

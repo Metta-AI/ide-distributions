@@ -192,8 +192,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             clone = clone_for(env, game)
             if game != env.get("RESEARCH_GAME"):
                 locate_game(game, self.context.env)
-                # Outside the board transaction: idempotent, and it refreshes the doctrine.
-                prepare_clone(profile, env, game)
+            # Refresh default-game clones too before native Hermes branches the task.
+            prepare_clone(profile, env, game)
         payload = json.dumps(command, sort_keys=True)
         with closing(connection()) as conn:
             # Serialize lookup and creation in the native task database. The task
@@ -423,12 +423,12 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         )
 
     def submit_requested_version(self, id, run_id, version, strategy, request, league_id):
-        """Submit explicit user intent. Retry identical arguments; promotion owns deduplication."""
+        """Submit explicit user intent. Retry identical arguments; champion submission owns deduplication."""
         self._admit_effect(
             id, run_id, "submission_admitted", {"version": version, "request": request, "league_id": league_id}
         )
         return self._research(id).call(
-            "promotion",
+            "champion",
             "submit-requested",
             "--league",
             league_id,
@@ -440,13 +440,13 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             request,
         )
 
-    def promotion_submit(self, id, run_id, experiment, league_id):
-        self._admit_effect(id, run_id, "promotion_admitted", {"experiment": experiment, "league_id": league_id})
-        return self._research(id).call("promotion", "submit", experiment, "--league", league_id)
+    def champion_submit(self, id, run_id, experiment, league_id):
+        self._admit_effect(id, run_id, "champion_submission_admitted", {"experiment": experiment, "league_id": league_id})
+        return self._research(id).call("champion", "submit", experiment, "--league", league_id)
 
     def bootstrap_champion(self, id, run_id, version, league_id):
         self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version, "league_id": league_id})
-        return self._research(id).call("promotion", "bootstrap", "--version", version, "--league", league_id)
+        return self._research(id).call("champion", "bootstrap", "--version", version, "--league", league_id)
 
     def game_install(self, id, run_id, name, replace=False):
         """Install the game folder a completed card committed at ``games/<name>/`` host-wide.

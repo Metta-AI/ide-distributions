@@ -33,7 +33,7 @@ Doctrine upheld: D-01, D-06, D-09, D-14, D-15, D-17, D-20, D-22, D-23.
    `"$RESEARCH_CLI" records link <E-id> results <R-id>`
 5. Apply the pre-registered rule in the experiment body exactly (D-09). No new thresholds
    after seeing data. Choose `promote`, `hold`, `refute`, or `invalid`. `promote` needs
-   `promote_eligible: true` from `stats evaluate` and a valid Result.
+   `submit_eligible: true` from `stats evaluate` and a valid Result.
 6. Record the decision with its reason and the Result ref (set once, D-01), then close the
    experiment:
    `"$RESEARCH_CLI" records update <E-id> --patch '{"decision": {"outcome": "<o>", "reason": "<why>", "decided_at": "<ISO time>", "refs": ["ar://result/<R-id>"]}}'`

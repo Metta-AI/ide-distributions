@@ -152,7 +152,7 @@ Where: `distribution.py`, `build.py`, `autoresearch.lock.json`, `Dockerfile`,
   both.
 - The Dockerfile installs them at `/opt/ide-distributions/orchestrator` and
   `/opt/ide-distributions/researcher` and writes one commit marker per folder. Nim stays for
-  GotA builds.
+  GotA builds and Pudge Wars Basic's native headless match runner.
 - The lock file records the commit and tree of the new repository
   (`ide-distributions.lock.json`). Existing pinned images and selections stay valid.
 

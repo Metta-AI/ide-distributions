@@ -1,7 +1,7 @@
 """``research softmax ...``: the platform actions of a researcher, and the reads both profiles use.
 
-League submission is not here: the orchestrator submits through ``research promotion``
-(``ide_research_core.promotion``), and the researcher's deny list blocks that group.
+League submission is not here: the orchestrator submits through ``research champion``
+(``ide_research_core.champion_submission``), and the researcher's deny list blocks that group.
 
 Commands (the Softmax backend comes from ``RESEARCH_SOFTMAX``: ``fake`` or the real client;
 the game, for its league, from ``RESEARCH_GAME``):
@@ -19,9 +19,9 @@ the game, for its league, from ``RESEARCH_GAME``):
   a platform error or crash mid-batch loses no record), then moves
   ``uploaded|awaiting-credits|awaiting-permit`` to ``evaluating``.
   Before it creates any request it checks the identity and that ``design.baseline_version``
-  is still the current champion (``promotion.baseline_problem``; refusals
+  is still the current champion (``champion_submission.baseline_problem``; refusals
   ``champion_conflict``, ``champion_unknown``, ``baseline_not_champion``, and nothing is
-  created): an experiment whose baseline is not the champion can never promote. It prints
+  created): an experiment whose baseline is not the champion can never be submitted. It prints
   ``{created, existing, missing, pairing, credit_denied, permit_required,
   league_not_chosen}``, plus ``permit_declined``, ``permit_asks`` and ``credits_short`` on a
   refusal of the coach's. A credit denial stops the batch
@@ -83,10 +83,10 @@ the game, for its league, from ``RESEARCH_GAME``):
 - ``upload <E> --name NAME --build-dir D``: ``softmax_tool.upload``.
 - ``upload-build --name NAME --build-dir D``: upload a checked build as a version with no experiment;
   prints ``{version_id, platform_policy_version_id}``. Supports explicit build/upload-only requests
-  and starter builds. It does not evaluate or promote; starter promotion remains explicit.
+  and starter builds. It does not evaluate or submit; submitting a starter remains explicit.
 - ``leaderboard``: ``{league_id, player_id, current_champion, conflict}``. The champion is the
   policy the league shows competing for our player (A9; null: none). ``conflict`` is null, or
-  why the league and the loop's recorded champion disagree (``promotion.conflict``).
+  why the league and the loop's recorded champion disagree (``champion_submission.conflict``).
 - ``game-version``: ``{league_id, game_version}``, the league's current game version
   (``Softmax.game_version``; the version noise records and designs must match, C10).
 - ``standings``: ``{league_id, rows}``, the league standings (``Softmax.standings``), read-only.
@@ -97,6 +97,13 @@ the game, for its league, from ``RESEARCH_GAME``):
   ``--league`` defaults to the game's league. Episodes are evaluated as they arrive (the real
   client fetches 4 at a time); a progress line goes to stderr every 10 episodes, and ``--out``
   is written once, when the read is complete.
+- ``exec -- <coworld|softmax> <args...>``: run any other command of the real CLIs as the
+  Player (``PlatformCli.exec``): output streams through and the exit code is the child's.
+  It refuses the commands that sign in or out, switch the identity or print the token
+  (``platform_cli.IDENTITY_COMMANDS``), a ``--server`` argument, and the fake backend
+  (``RESEARCH_SOFTMAX=fake``, which has no real CLI to run). Only those refusals print the
+  JSON envelope below. Prefer the commands above where one exists: they keep the records
+  and run the checks that a raw CLI command does not.
 - ``league-results --league L --limit N --dest DIR``: up to N completed episodes of any league,
   raw: ``DIR/<episode>/results.json`` and ``DIR/<episode>/episode.json`` (seats, seed, game
   version). No game binding runs, so it works for a league no game folder covers yet (writing
@@ -148,7 +155,7 @@ from pathlib import Path
 import frontmatter
 from pydantic import ValidationError
 
-from ide_research_core import promotion, refs, runctx, workspace
+from ide_research_core import champion_submission, refs, runctx, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.games.bindings import binding_evaluate
 from ide_research_core.games.loader import GameError
@@ -164,7 +171,12 @@ from ide_research_core.softmax_tool import evidence
 from ide_research_core.softmax_tool.discovery import Discovery
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
 from ide_research_core.softmax_tool.league import episode_rows, safe_name
-from ide_research_core.softmax_tool.platform_cli import SoftmaxCliError, ToolMissing
+from ide_research_core.softmax_tool.platform_cli import (
+    ExecRefused,
+    PlatformCli,
+    SoftmaxCliError,
+    ToolMissing,
+)
 from ide_research_core.softmax_tool.protocol import (
     BACKOFF_BASE,
     PERMIT_DECLINED,
@@ -254,6 +266,36 @@ def _run(handler):
         return EXIT_OK
 
     return run
+
+
+def _exec(args: argparse.Namespace) -> int:
+    """``exec``: the real CLI as the Player (module docstring). Not wrapped by ``_run``: the
+    child's output is the output, and its exit code is the exit code."""
+    command = list(args.argv)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        return _fail(
+            "bad_arguments",
+            "usage: research softmax exec -- <coworld|softmax> <args...>",
+            EXIT_BAD_ARGS,
+        )
+    if os.environ.get("RESEARCH_SOFTMAX") == "fake":
+        return _fail("fake_backend", "RESEARCH_SOFTMAX=fake has no real CLI to run", EXIT_FAILED)
+    if not os.environ.get("HERMES_HOME"):
+        return _fail("bad_arguments", "HERMES_HOME is not set", EXIT_BAD_ARGS)
+    try:
+        check_identity_unchanged(Path(os.environ["HERMES_HOME"]))
+        cli = PlatformCli(os.environ)
+        return cli.exec(command[0], command[1:], cwd=Path.cwd(), caller_env=os.environ)
+    except ExecRefused as error:
+        return _fail("refused", str(error), EXIT_FAILED)
+    except IdentityError as error:
+        return _fail("identity", str(error), EXIT_FAILED)
+    except ToolMissing as error:
+        return _fail("tool_missing", str(error), EXIT_TOOL_MISSING)
+    except (SoftmaxCliError, OSError) as error:
+        return _fail("platform", f"{type(error).__name__}: {error}", EXIT_FAILED)
 
 
 @contextmanager
@@ -782,7 +824,7 @@ def _xp_create_locked(ctx, sm, args, base: timedelta) -> dict:
         problems = identity_problems(sm.whoami(), expected, datetime.now(UTC))
         if problems:
             raise IdentityError("; ".join(problems))
-        problem = promotion.baseline_problem(
+        problem = champion_submission.baseline_problem(
             ctx.canonical, sm, _league_id(), expected, design["baseline_version"]
         )
         if problem is not None:
@@ -1002,7 +1044,7 @@ def _leaderboard(ctx, sm, args) -> dict:
         "league_id": league_id,
         "player_id": player_id,
         "current_champion": current,
-        "conflict": promotion.conflict(ctx.canonical, sm, league_id, player_id),
+        "conflict": champion_submission.conflict(ctx.canonical, sm, league_id, player_id),
     }
 
 
@@ -1084,7 +1126,7 @@ def _league_results(ctx, sm, args) -> dict:
 
 def _discovery(ctx, sm, args) -> dict:
     # Discovery reads are explicit per operation. They do not load _game(), change
-    # identity, or compare a different league with this workspace's promotion state.
+    # identity, or compare a different league with this workspace's champion-submission state.
     discovery = Discovery(os.environ)
     match args.command:
         case "discover-leagues":
@@ -1095,6 +1137,8 @@ def _discovery(ctx, sm, args) -> dict:
             return discovery.game_support(
                 args.league, args.document, args.offset, args.limit, args.expected_sha256
             )
+        case "game-starter":
+            return discovery.game_starter(args.league, args.starter, args.expected_sha256, args.offset, args.limit)
         case "player-champion":
             return discovery.leaderboard(args.league, args.player)
         case "player-result":
@@ -1114,6 +1158,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
         ("discover-leagues", "find live leagues and games by name or ID"),
         ("league-players", "find ranked players in an explicit league"),
         ("game-support", "load live documentation and installed research support for a league"),
+        ("game-starter", "read a hash-verified published starter without requiring GitHub access"),
         ("player-champion", "read an explicit player's champion in an explicit league"),
         ("player-result", "read an explicit player's latest result in an explicit league"),
     ):
@@ -1126,11 +1171,19 @@ def setup(parser: argparse.ArgumentParser) -> None:
             sub.add_argument("--limit", type=int, default=20)
         if name in ("player-champion", "player-result"):
             sub.add_argument("--player", required=True)
-        if name == "game-support":
+        if name in ("game-support", "game-starter"):
             sub.add_argument("--document")
             sub.add_argument("--offset", type=int, default=0)
             sub.add_argument("--limit", type=int, default=4000)
-            sub.add_argument("--expected-sha256")
+            sub.add_argument("--expected-sha256", required=name == "game-starter")
+        if name == "game-starter":
+            sub.add_argument("--starter", required=True)
+
+    sub = commands.add_parser(
+        "exec", help="run a real coworld/softmax command as the Player: exec -- coworld <args>"
+    )
+    sub.add_argument("argv", nargs=argparse.REMAINDER, help="coworld|softmax and its arguments")
+    sub.set_defaults(func=_exec)
 
     command(commands, "whoami", _whoami, "the credential's identity (must be our Player)")
     command(commands, "credits", _credits, "credit balance, when readable (A10)")

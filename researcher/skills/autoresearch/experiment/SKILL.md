@@ -57,7 +57,7 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    again as a primary metric or an agent guardrail.
 7. Write the decision rule in the experiment body before any result exists (D-09). Use this
    default unless the Topic needs another:
-   - `promote`: `stats evaluate` reports `promote_eligible: true` and the Result is valid.
+   - `promote`: `stats evaluate` reports `submit_eligible: true` and the Result is valid.
    - `refute`: N is met and the bootstrap CI of every primary metric lies at or below 0.
    - `invalid`: the Result is not valid (wrong versions, failed episodes, the change did not
      activate).

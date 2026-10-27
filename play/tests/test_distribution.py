@@ -39,7 +39,11 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
     for where, text in texts.items():
         assert not RESEARCH_WORDS.search(text), (where, RESEARCH_WORDS.search(text))
         assert "SOFTMAX_COGENT_MODE" not in text and not re.search(r"(?m)^\s*/[a-z]", text)
-    assert "Coworlds you can't build for here" in (PROFILES["play"] / "SOUL.md").read_text()
+    play_soul = (PROFILES["play"] / "SOUL.md").read_text()
+    assert "Coworlds you can't build for here" in play_soul
+    assert "Copy prompt for your local agent" in play_soul
+    assert "Not now" in play_soul
+    assert "this only applies once the coworld comes up" in play_soul
     assert (
         "Container coworlds are not supported yet." in (PROFILES["builder"] / "SOUL.md").read_text()
     )

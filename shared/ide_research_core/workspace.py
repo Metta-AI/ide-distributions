@@ -53,7 +53,7 @@ COMMITTER = ("research", "research@localhost")
 GITIGNORE_LINES = (".supervisor/runtime/", ".worktrees/", ".scratch/")
 
 # Only the orchestrator changes these (design: permissions); integrate refuses them from a card.
-PROTECTED_PREFIXES = ("strategy/STRATEGY.md", "control/", "promotions/")
+PROTECTED_PREFIXES = ("strategy/STRATEGY.md", "control/", "champion-submissions/")
 # Integrate writes these after the merge, so a card that edits them would only conflict.
 GENERATED_PREFIXES = ("kb/index.md", "kb/_generated/")
 
@@ -507,6 +507,11 @@ def bootstrap(
         gitops.git(clone, "branch", "-q", f"--set-upstream-to={REMOTE}/{MAIN}", MAIN)
     if _reseed_agents_md(clone, root):
         actions.append("re-seeded AGENTS.md")
+    from ide_research_core import legacy_promotions  # imports this module
+
+    migration = legacy_promotions.migrate(clone)
+    if migration:
+        actions.append(f"migrated promotion records to champion submissions at {migration['commit'][:12]}")
     return actions
 
 

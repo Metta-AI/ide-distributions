@@ -15,14 +15,14 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
    `"$RESEARCH_CLI" records show <E-id>`
    `"$RESEARCH_CLI" records show <R-id>`
    `"$RESEARCH_CLI" records show <V-id>`
-2. Use the recorded `reviewed` experiment with `decision.outcome: promote`, a valid Result
+2. Use the recorded `reviewed` experiment with `decision.outcome: submit`, a valid Result
    and the stored eligible `stats/outcomes/<E-id>.json` from `stats evaluate`. Do not invent
    a decision, edit the statistical output or relax the frozen rule to make it eligible.
 3. Keep the uploaded candidate binding and `strategy/candidates/<E-id>/STRATEGY.md` intact.
    They must describe the candidate actually evaluated. Read
    `"$RESEARCH_CLI" softmax leaderboard`; if the baseline changed, report that fact and
    propose re-evaluation. Do not rewrite a frozen decision or promote against a different baseline.
-4. Prepare the handoff fields for `card`. Set `experiment` to `{"id":"<E-id>","status":"reviewed","decision":"promote"}`,
+4. Prepare the handoff fields for `card`. Set `experiment` to `{"id":"<E-id>","status":"reviewed","decision":"submit"}`,
    list the changed records, and put the candidate version and Result refs in `next`.
    The orchestrator receives the staged decision, stats, binding and candidate strategy.
 5. A `highlight:` reports the supported finding, not a submission that has not happened.

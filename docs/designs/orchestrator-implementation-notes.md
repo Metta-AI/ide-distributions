@@ -13,11 +13,46 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **The research CLI is `research`** (`$HERMES_HOME/bin/research`, `RESEARCH_CLI`), written
   by `scripts/bootstrap.py`. The package is `ide_research_core`.
 
+## Toolsets (decision A6)
+
+- **The orchestrator has full shell, file and Python access**, unlike the design, which gave
+  it only the `orchestrator` plugin toolset and rejected a terminal (A6).
+  `platform_toolsets.api_server` and `.cron` are `[orchestrator, terminal, file,
+  code_execution]`. Reason: the user needed it to inspect and change files and run commands
+  directly. The checked plugin tools remain the path for board, integration, upload,
+  submission and promotion writes, but that is now doctrine (`SOUL.md`), not enforced: no
+  deny list restricts the orchestrator's terminal. Hermes's default approvals apply
+  (`smart` in chat via the bridge's approval events; `cron_mode: deny` in cron turns).
+
+## Built-in knowledge and naming
+
+- **Champion submission, not promotion.** Softmax's "promotion" is the commissioner moving an
+  entry between Divisions, so ours was renamed: `research champion`, `champion_submit`,
+  `champion-submissions/CS-*.json`, experiment decision `submit`. `legacy_promotions.migrate`
+  rewrites older canonical records once. It runs at workspace bootstrap, before every
+  `research champion` command, and on the gate's 10-minute poll (`research champion migrate`),
+  which wakes the coordinator with a `records_migrated` item so the user is told; it also
+  prints one stderr line. Hosted startup skips bootstrap when doctrine is unchanged, which is
+  why the poll exists.
+- **Built-in knowledge** (`ontology/KNOWLEDGE.md`) and the Softmax vocabulary
+  (`ontology/VOCABULARY.md`, generated from metta) are embedded in both SOULs before the
+  ontology. Method skills live in `shared/skills/autoresearch/` and both profiles get them.
+- **`capabilities`** lists and searches the session's tools and skills, and
+  **`research softmax exec`** runs the real CLIs as the Player.
+
+## Shipped games
+
+- **Pudge Wars Basic** (`researcher/games/pudge-wars-basic/`) is the second real shipped game.
+  Its binding skills follow the contract (`games/<game>/skills/<binding>/SKILL.md`, named
+  `<game>-<binding>`); `tools/sync_shared.py` copies them into both research profiles'
+  `skills/<game>/`, because Hermes loads skills only from there. GotA's skills predate that
+  naming and stay bare-named in `researcher/skills/gota/`.
+
 ## Shared code and the ontology (§5.5, §5.6)
 
 - The ontology is **embedded at the end of each `SOUL.md`** by `tools/sync_shared.py`, not
   copied to `<distribution>/ontology/`. Hermes loads `SOUL.md` in every session, cron
-  included, and the orchestrator has no file tools to read a separate file.
+  included, so every turn has it without reading another file.
 - For the same reason the orchestrator's doctrine is the `## Doctrine` section of its
   `SOUL.md`, not a separate `doctrine/orchestrator.md` (which nothing loaded).
 - `tools/sync_shared.py` also copies `researcher/games/*/GAME.md` into `orchestrator/games/`:
@@ -42,7 +77,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   orchestrator's supervisor gate.
 - **Bootstrap is split**: the researcher's bootstrap card builds the starter policy and runs
   `softmax upload-build`; the orchestrator submits that version with
-  `promotion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,
+  `champion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,
   but the build and upload need a researcher's terminal).
 - The KB's hub and staleness checks report findings (`kb hubs`, `kb renew` -> `reverify`)
   instead of writing card requests. Automatic claim renewal when the game source pin changes
@@ -67,7 +102,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - `researcher_guard` has the two rules of §4, with rule 2 widened from "no push to `main`"
   to "no terminal `git push`": integrate does every push, and a ref check missed implicit
   pushes (`git push` from the clone). About 60 lines.
-- The researcher's deny list blocks `research promotion submit|bootstrap|accept`; the
+- The researcher's deny list blocks `research champion submit|bootstrap|accept`; the
   commands themselves stay in the shared CLI (one vendored package for both profiles).
 
 - The handoff's `journal` is `ar://journal/J-...`; the design's `ar://J-...` does not resolve
@@ -87,7 +122,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **Champion conflict** = the league shows a champion the loop did not record as its latest
   `published` promotion (a `submitted` promotion explains a gap). A host migrated from
   autoresearch starts in conflict until a human confirms the league's champion:
-  **`promotion accept`** (new) records it.
+  **`champion accept`** (new) records it.
 - The guards of the old submit path are kept: decision `promote`, a candidate binding, an
   eligible and current `stats evaluate` outcome (rows and design hashes), identity, no
   conflict, outcome champion == league champion, one promotion at a time, the candidate

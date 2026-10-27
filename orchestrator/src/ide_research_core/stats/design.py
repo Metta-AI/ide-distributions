@@ -175,7 +175,7 @@ def signed(value: float, spec: MetricSpec) -> float:
 
 
 def design_sha256(design: EvaluationDesign) -> str:
-    """The hash ``stats evaluate`` stores with an outcome, so a promotion can tell that the
+    """The hash ``stats evaluate`` stores with an outcome, so a champion submission can tell that the
     outcome was computed for the frozen design it is about to submit."""
     canonical = json.dumps(design.to_dict(), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

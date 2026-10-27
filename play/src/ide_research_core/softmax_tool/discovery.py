@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated
@@ -10,9 +11,10 @@ from urllib.parse import quote
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter
 
 from ide_research_core.games.loader import load_game
+from ide_research_core.games.readiness import binding_readiness
 from ide_research_core.games.scope import list_games
 from ide_research_core.softmax_tool.client import SoftmaxClient
-from ide_research_core.softmax_tool.discovery_schema import SupportRead
+from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 from ide_research_core.softmax_tool.platform_cli import PlatformCli
 from ide_research_core.softmax_tool.protocol import Refused
 
@@ -66,6 +68,27 @@ def matches(query: str, *values: str) -> bool:
         in "".join(character for character in value.casefold() if character.isalnum())
         for value in values
     )
+
+
+def published_starters(coworld):
+    if coworld is None:
+        return []
+    players = coworld.manifest.get("player", [])
+    if not isinstance(players, list):
+        return []
+    result = []
+    for player in players:
+        if not isinstance(player, dict) or not isinstance(player.get("id"), str):
+            continue
+        file = player.get("file")
+        match = re.fullmatch(r"(?:file:)?sha256:([0-9a-f]{64})", file) if isinstance(file, str) else None
+        if match:
+            digest = match[1]
+            result.append({
+                "id": player["id"], "name": player.get("name", player["id"]), "sha256": digest,
+                "path": f"/observatory/v2/coworlds/{quote(coworld.id, safe='')}/player-files/{digest}",
+            })
+    return result
 
 
 class Discovery:
@@ -154,10 +177,7 @@ class Discovery:
         # model-supplied name into a path or execute downloaded documentation.
         for entry in list_games(self.env):
             game = load_game(Path(entry["root"]), entry["name"])
-            if (
-                game.league_id == league.id
-                or game.name.casefold() == (league.game.coworld_name or "").casefold()
-            ):
+            if game.league_id == league.id:
                 support.append(
                     {
                         "name": game.name,
@@ -166,6 +186,7 @@ class Discovery:
                         "document": f"research:{game.name}",
                         "bindings": game.bindings,
                         "research_workspace": entry["workspace"],
+                        "readiness": binding_readiness(game, Path(entry["root"]), self.env),
                     }
                 )
                 documents[f"research:{game.name}"] = game.guide
@@ -195,9 +216,45 @@ class Discovery:
             "documents": index,
             "document": page,
             "installed_research_support": support,
-            "research_bindings_available": bool(support),
+            "research_bindings_available": any(
+                all(operation["status"] == "configured" for operation in item["readiness"]["operations"].values())
+                for item in support
+            ),
+            "published_starters": published_starters(coworld),
+            "source_guidance": (
+                "game_starter reads a published starter with hash verification; GitHub access is separate. "
+                "A starter is not the selected player's submitted policy. Configured bindings are not execution verification."
+            ),
             "workspace_game_hint": self.env.get("RESEARCH_GAME"),
             "credential_player_id": self.client.whoami().player_id,
+        }
+
+    def game_starter(self, league_id, starter_id, expected_sha256, offset=0, limit=4000):
+        request = StarterRead(
+            league_id=league_id, starter_id=starter_id, expected_sha256=expected_sha256, offset=offset, limit=limit,
+        )
+        support = self.game_support(request.league_id)
+        starter = next((item for item in support["published_starters"] if item["id"] == request.starter_id), None)
+        if starter is None:
+            raise Refused("not_found", "Choose a published starter id returned by game_support")
+        if starter["sha256"] != request.expected_sha256:
+            raise Refused("document_changed", "Starter changed; reload game_support before continuing")
+        data = self.cli.api_get_bytes(starter["path"], max_bytes=256_000)
+        if hashlib.sha256(data).hexdigest() != request.expected_sha256:
+            raise Refused("hash_mismatch", "Downloaded starter does not match its published hash")
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Refused("binary_starter", "This starter is binary; a text source read is unavailable") from None
+        if request.offset > len(text):
+            raise Refused("bad_arguments", "Offset exceeds the starter's character count")
+        end = min(request.offset + request.limit, len(text))
+        return {
+            "league_id": request.league_id, "coworld": support["coworld"],
+            "starter_id": request.starter_id, "sha256": request.expected_sha256, "verified": True,
+            "content": text[request.offset:end], "characters": len(text), "offset": request.offset,
+            "next_offset": end if end < len(text) else None, "offset_unit": "unicode_characters",
+            "source_kind": "published_starter_not_player_submission",
         }
 
     def leaderboard(self, league_id, player_id):

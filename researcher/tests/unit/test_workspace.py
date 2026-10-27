@@ -669,3 +669,42 @@ def test_goal_progress_is_native_topic_state_not_host_state(tmp_path, bare):
     assert listed["observed"]["threshold"] == 5
     assert listed["observed"]["current"]["value"] == 4
     assert listed["observed"]["met"] is True
+
+
+def test_bootstrap_migrates_old_promotion_records_once(tmp_path, bare):
+    """Canonical repositories from before the rename hold ``promotions/P-*`` and ``promote``
+    values; the next bootstrap rewrites them to champion submissions in one commit."""
+    import json
+
+    clone = clone_for(tmp_path, bare, "orchestrator")
+    ulid = "01K0000000000000000000000A"
+    old = {"id": f"P-{ulid}", "kind": "experiment", "stage": "published", "history": []}
+    experiment = (
+        "---\nid: E-01K0000000000000000000000B\nstatus: reviewed\n"
+        "decision:\n  outcome: promote\n  reason: fixture\n---\nbody\n"
+    )
+    event = {"id": "VE-01K0000000000000000000000C", "data": {"promotion_id": f"P-{ulid}"}}
+    workspace.publish(
+        clone,
+        {
+            f"promotions/P-{ulid}.json": json.dumps(old).encode(),
+            "promotions/sources/V-1.md": b"source\n",
+            "experiments/E-01K0000000000000000000000B--x.md": experiment.encode(),
+            "stats/outcomes/E-01K0000000000000000000000B.json": b'{"promote_eligible": true}',
+            "versions/V-1/events/VE-01K0000000000000000000000C.json": json.dumps(event).encode(),
+        },
+        "old records",
+    )
+    actions = workspace.bootstrap(clone, bare, "fakegame", DISTRIBUTION)
+    assert len(actions) == 1 and actions[0].startswith("migrated promotion records to champion submissions at ")
+    assert not gitops.git(clone, "ls-files", "promotions")
+    record = json.loads((clone / f"champion-submissions/CS-{ulid}.json").read_text())
+    assert record["id"] == f"CS-{ulid}" and record["stage"] == "published"
+    assert (clone / "champion-submissions/sources/V-1.md").read_text() == "source\n"
+    meta, _ = store_of(clone).load("E-01K0000000000000000000000B")
+    assert meta["decision"]["outcome"] == "submit"
+    outcome = json.loads((clone / "stats/outcomes/E-01K0000000000000000000000B.json").read_text())
+    assert outcome == {"submit_eligible": True}
+    migrated = json.loads((clone / "versions/V-1/events/VE-01K0000000000000000000000C.json").read_text())
+    assert migrated["data"] == {"champion_submission_id": f"CS-{ulid}"}
+    assert workspace.bootstrap(clone, bare, "fakegame", DISTRIBUTION) == []
