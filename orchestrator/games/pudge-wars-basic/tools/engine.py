@@ -8,7 +8,8 @@ tools never trust a pin. `live()` reads the public Observatory API, no credentia
                                                        pins the commit; player[] file shas)
 
 `API` is $COGAMES_API_URL or https://softmax.com/api. The answer is cached in
-tools/.cache/live-engine.json for one hour, so every tool run re-checks at least hourly.
+$HERMES_HOME/cache/pudge-wars-basic/live-engine.json for one hour, so every tool run
+re-checks at least hourly.
 When the API cannot be reached the tools fall back to the cache (any age) or, without one,
 to the last-known engine in tools/engine.env + tools/coworld_manifest.json, and every
 envelope says so (`engine.live: false`, `stale_risk: true`, a warning). Never silently.
@@ -35,7 +36,7 @@ from pathlib import Path
 import cli_contract
 
 TOOLS = cli_contract.TOOLS
-CACHE = TOOLS / '.cache'
+CACHE = cli_contract.CACHE
 LIVE_CACHE = CACHE / 'live-engine.json'
 COWORLD_CACHE = CACHE / 'coworlds'
 VENDORED_MANIFEST = TOOLS / 'coworld_manifest.json'
