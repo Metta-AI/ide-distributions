@@ -65,10 +65,10 @@ def _verify(build_id: str, *, context: GateContext | None = None, manifest: Path
         measurements={},
         compiler_map=builds.read(stage / "map.json"),
     )
-    from games.gota.tools.native_build import TOOLS, validate
+    from games.gota.tools.native_build import build_root, validate
     native_builds = {
         'gate_probe': validate(context.native_binary, 'gate_probe', commit),
-        'gota_match': validate(TOOLS / 'bin' / f'gota_match-{commit[:8]}',
+        'gota_match': validate(build_root() / 'bin' / f'gota_match-{commit[:8]}',
                                'gota_match', commit),
     }
     from games.gota.tools.native_build import fingerprint

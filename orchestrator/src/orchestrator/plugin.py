@@ -4,13 +4,12 @@ import json
 from contextlib import closing
 from urllib.error import HTTPError
 
-from ide_research_core import session_catalog
+from ide_research_core import host_capabilities, session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
 from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
-from .capabilities import Capabilities
 from .context import profile_context
 from .github import GitHub
 from .ide import IDE
@@ -66,11 +65,6 @@ TOOLS = {
         "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest completed run. Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
         ArtifactRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "paths"],
-    ),
-    "host_capabilities": (
-        Capabilities,
-        "Check whether git, Python, softmax, coworld and the research CLI are installed on this profile host. Read-only; launches no inline scripts or commands. Returns no credential or environment values. Does not probe repository authorization.",
-        {}, [],
     ),
     "game_starter": (
         Research,
@@ -451,3 +445,4 @@ def register(ctx):
             description=description,
         )
     session_catalog.register(ctx, "orchestrator")
+    host_capabilities.register(ctx, "orchestrator")

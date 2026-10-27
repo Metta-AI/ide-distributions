@@ -85,6 +85,50 @@ def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Pa
     warning.unlink(missing_ok=True)
 
 
+# Shipped settings that are single values. Prepare replaces a retained value only when it is
+# unset or is one of these known earlier defaults (Hermes's own, or an older shipped value), so
+# a value the owner chose survives.
+EARLIER_DEFAULTS = {
+    "agent.max_turns": {40},  # the orchestrator shipped 40 before matching the researcher
+    "terminal.timeout": {180},  # Hermes's default
+    "timeouts.tools.sequential_call": {420},  # Hermes's default
+    "timeouts.tools.concurrent_batch": {420},
+}
+
+
+def _shipped(defaults: dict, key: str):
+    value = defaults
+    for part in key.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def _retained(hermes: str, key: str):
+    """The profile's current value, or None when the key is not set."""
+    result = subprocess.run(
+        [hermes, "config", "get", key, "--json"], capture_output=True, text=True, check=False
+    )
+    return json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else None
+
+
+def reconcile_settings(defaults: dict, hermes: str) -> None:
+    """Bring retained single-value settings and the fallback model up to the shipped ones."""
+    for key, earlier in EARLIER_DEFAULTS.items():
+        shipped = _shipped(defaults, key)
+        if shipped is None:
+            continue
+        current = _retained(hermes, key)
+        if current != shipped and (current is None or current in earlier):
+            subprocess.run([hermes, "config", "set", key, json.dumps(shipped)], check=True)
+    fallback = defaults.get("fallback_providers")
+    if fallback and not _retained(hermes, "fallback_providers"):
+        subprocess.run(
+            [hermes, "config", "set", "fallback_providers", json.dumps(fallback)], check=True
+        )
+
+
 def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     profile = Path(os.environ["HERMES_HOME"])
     home = Path(os.environ["HERMES_REAL_HOME"])
@@ -95,18 +139,19 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     reconcile_workspace(profile, workspace, remote, source)
     defaults = yaml.safe_load((source / "config.yaml").read_text())
     append = {"terminal.env_passthrough": defaults["terminal"]["env_passthrough"]}
+    if _shipped(defaults, "skills.external_dirs"):
+        append["skills.external_dirs"] = defaults["skills"]["external_dirs"]
     coordinator = (source / "coordinator.json").exists()
     if coordinator:
         append["platform_toolsets.api_server"] = defaults["platform_toolsets"]["api_server"]
     else:
         append["approvals.deny"] = defaults["approvals"]["deny"]
     for key, required in append.items():
-        current = json.loads(
-            subprocess.check_output([hermes, "config", "get", key, "--json"], text=True)
-        )
+        current = _retained(hermes, key) or []  # an older profile may not have the key
         desired = list(dict.fromkeys([*current, *required]))
         if desired != current:
             subprocess.run([hermes, "config", "set", key, json.dumps(desired)], check=True)
+    reconcile_settings(defaults, hermes)
     if not coordinator:
         return
     EpisodeBudget(

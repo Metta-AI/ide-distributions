@@ -97,7 +97,7 @@ def build(candidate, out, artifact, identity, *, started=None, full_evaluation=F
         retain_episode_locators,
     )
     from games.gota.tools.engine_identity import provision
-    from games.gota.tools.native_build import TOOLS, validate
+    from games.gota.tools.native_build import build_root, validate
 
     artifact = artifact.resolve()
     head, hashes, provenance = validate_source(candidate, artifact, identity)
@@ -153,7 +153,7 @@ def build(candidate, out, artifact, identity, *, started=None, full_evaluation=F
         if (current_head, current_hashes) != (head, hashes):
             raise ValueError('prebuilt committed inputs changed during gates')
         if (validate(binary, 'gate_probe', identity['commit']) != native['gate_probe'] or
-                validate(TOOLS / 'bin' / f'gota_match-{identity["commit"][:8]}',
+                validate(build_root() / 'bin' / f'gota_match-{identity["commit"][:8]}',
                          'gota_match', identity['commit']) != native['gota_match']):
             raise ValueError('native build changed during prebuilt gates')
     except Exception as fault:  # noqa: BLE001 - retain final provenance faults with gate evidence.

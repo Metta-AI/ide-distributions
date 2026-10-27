@@ -18,7 +18,12 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **The orchestrator has full shell, file and Python access**, unlike the design, which gave
   it only the `orchestrator` plugin toolset and rejected a terminal (A6).
   `platform_toolsets.api_server` and `.cron` are `[orchestrator, terminal, file,
-  code_execution]`. Reason: the user needed it to inspect and change files and run commands
+  code_execution, skills, web, browser, vision, todo, session_search, delegation, memory]`:
+  the Hermes tools a researcher gets by default, less `kanban` (the `card_*` tools replace
+  it) and `cronjob` (an enabled cron job keeps a hosted workspace awake). The orchestrator is
+  a superset of the researcher apart from the researcher's restrictions; `terminal.timeout`,
+  `timeouts.tools`, `terminal.env_passthrough`, `skills.external_dirs`, `fallback_providers`
+  and `agent.max_turns` (150) match `researcher/config.yaml`. Reason: the user needed it to inspect and change files and run commands
   directly. The checked plugin tools remain the path for board, integration, upload,
   submission and promotion writes, but that is now doctrine (`SOUL.md`), not enforced: no
   deny list restricts the orchestrator's terminal. Hermes's default approvals apply

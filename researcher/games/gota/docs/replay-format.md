@@ -2,6 +2,10 @@
 
 > Historical source reference. This file describes the pinned September source.
 > See [toolkit provenance](../PROVENANCE.md) for verified live replay adaptations.
+>
+> Commands here (`uv run`, `/tmp`, `tests/...`) are for a development checkout of
+> ide-distributions. In a profile, run tools as [GAME.md](../GAME.md) shows, with
+> `"$HERMES_HOME/local/venv/bin/python" -I`, and write to `$TMPDIR` or `.scratch/`.
 
 # Gods of the Arena replay format and expander design
 
