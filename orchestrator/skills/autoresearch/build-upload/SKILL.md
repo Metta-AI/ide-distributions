@@ -5,9 +5,8 @@ description: Use when preparing file policies for coordinator upload.
 
 # Build and hand off
 
-This procedure is for file policies. For container-image policies, prepare verified source
-and have the coordinator discover the available build and registration service. A registered
-container is not an experiment binding; do not invent file-artifact receipts.
+Use this procedure when the selected publication tool accepts verified file artifacts.
+For other artifact types, discover the appropriate tool and applicable procedure before acting.
 
 Build and verify through the game’s `build` binding. The coordinator owns upload after
 the native task completes; researchers never publish artifacts directly.

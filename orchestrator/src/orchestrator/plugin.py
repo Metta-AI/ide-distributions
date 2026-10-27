@@ -94,12 +94,8 @@ TOOLS = {
             "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
             "Use a stable request_id; identity comes from your scoped player credential. "
             "Call ide_workspace_schema first for the deployed operation names, parameters and schemas. "
-            "Pass operation.leagueId from the current IDE context on every call. "
-            "Identity comes from the credential; leagueId selects the requested workspace, not authority. "
-            "If the deployed schema rejects the requested scope, report that gap instead of guessing parameters. "
-            "Read before editing; preserve human content. A conflict requires rereading. "
-            "A view has version:1 and body:[components]; discover component props first. "
-            "Draft notes are project direction, not executable source. Publication operations require explicit user authorization. "
+            "Use the provider's current scope, formats, conflict and retry rules. "
+            "Read before editing, preserve human content and honor the user's authorization. "
             "Read the MCP result's isError and structured status; transport success is not effect success."
         ),
         {"request_id": S, "operation": O},

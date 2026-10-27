@@ -101,4 +101,4 @@ The native inbox records consumption; no separate acknowledgement is required.
 - The **orchestrator** owns the plan, the cards, the answers to researchers, champion submission, the
   pause decision (`control/pause.json`) and everything the user sees.
 - A **researcher** owns the research inside its card: evidence, records, experiments,
-  results and the decision rule's application. It never talks to the user and never submits.
+  results and the decision rule's application. During execution it reports to the coordinator and never submits. An explicit human discussion can request evidence-based answers without changing task execution.

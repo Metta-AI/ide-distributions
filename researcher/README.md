@@ -250,11 +250,9 @@ tests' fixture refuses any real agent binary once it is active:
   [`test_pudge_readonly_tools.py`](tests/system/test_pudge_readonly_tools.py) runs a real league
   match, verifies its replay and reuses compiled binaries after task output cleanup, with
   installed tools read-only. Paired local screens do not establish live league superiority.
-- **Container players.** Most coworlds other than GotA play a Docker image. Discover local and hosted
-  capabilities before declaring build support unavailable. The coordinator owns publication;
-  a remote build service does not automatically supply a game’s research bindings or evaluation
-  gates. Keep unimplemented bindings explicit, and list local executable requirements in
-  `host_requirements`.
+- **Game bindings.** Discover the capabilities a game's runtime contract requires. Service
+  availability does not establish that a research binding is implemented or verified. Keep gaps
+  explicit, and list local executable requirements in `host_requirements`.
 - **Public repositories only.** `source fetch` has no GitHub credential; most mixins are
   private, so `game-create` usually builds a folder from the game source alone.
 - **One OS user.** Workers, the orchestrator and Hermes run as one user, so no guard is a
