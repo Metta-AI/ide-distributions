@@ -31,9 +31,7 @@ class Jobs(BaseModel):
     jobs: list[Job]
 
 
-def reconcile_workspace(
-    profile: Path, workspace: Path, remote: Path, source: Path
-) -> None:
+def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Path) -> None:
     """Publish current doctrine and merge it without discarding retained edits."""
     workspaces.write_cli_shim(profile)
     warning = profile / "local/doctrine-migration-warning.txt"
@@ -51,9 +49,7 @@ def reconcile_workspace(
         )
     git = ["git", "-C", str(workspace)]
     agents = workspace / "AGENTS.md"
-    conflicts = subprocess.check_output(
-        [*git, "diff", "--name-only", "--diff-filter=U"], text=True
-    )
+    conflicts = subprocess.check_output([*git, "diff", "--name-only", "--diff-filter=U"], text=True)
     if conflicts:
         warning.write_text(
             f"{profile.name}: doctrine update deferred because this workspace has unresolved Git conflicts. "
@@ -104,9 +100,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     append = {"terminal.env_passthrough": defaults["terminal"]["env_passthrough"]}
     coordinator = (source / "coordinator.json").exists()
     if coordinator:
-        append["platform_toolsets.api_server"] = defaults["platform_toolsets"][
-            "api_server"
-        ]
+        append["platform_toolsets.api_server"] = defaults["platform_toolsets"]["api_server"]
     else:
         append["approvals.deny"] = defaults["approvals"]["deny"]
     for key, required in append.items():
@@ -125,9 +119,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
                 )
             ]
         if desired != current:
-            subprocess.run(
-                [hermes, "config", "set", key, json.dumps(desired)], check=True
-            )
+            subprocess.run([hermes, "config", "set", key, json.dumps(desired)], check=True)
     if not coordinator:
         return
     EpisodeBudget(
@@ -185,12 +177,8 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--source", type=Path, required=True, help="Pristine distribution payload"
-    )
-    parser.add_argument(
-        "--hermes", required=True, help="Supported Hermes CLI executable"
-    )
+    parser.add_argument("--source", type=Path, required=True, help="Pristine distribution payload")
+    parser.add_argument("--hermes", required=True, help="Supported Hermes CLI executable")
     parser.add_argument(
         "--activate-supervisor",
         action="store_true",
