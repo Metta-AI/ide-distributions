@@ -54,10 +54,10 @@ researcher delegation, and research acceptance remain distribution responsibilit
 
 ## Verification and rollout
 
-Run `researcher/tests/integration/test_prepare.py` against supported Hermes. It exercises native
+Run `researcher/tests/system/test_prepare_system.py` against supported Hermes. It exercises native
 installation and retained update, custom configuration, worker policy, same-version doctrine changes,
-paused supervisor preservation, and repeat preparation. Unit preparation tests cover clean, dirty,
-committed-conflict, and unresolved-conflict workspaces using real Git.
+paused supervisor preservation, and repeat preparation. Development verification also covered clean, dirty, committed-conflict, and unresolved-conflict
+workspaces using real Git; commands and results are retained in PR evidence.
 
 Metta's image qualification must also run its retained-state and chat proofs with both repositories'
 changes. Land the distribution entrypoint before the Metta caller and pin a distribution commit that
