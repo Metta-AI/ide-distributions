@@ -4,12 +4,11 @@ import base64
 import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter
 
-from ide_research_core.softmax_tool.platform_cli import PlatformCli
+from .ide import IDE
 
 MAX_BYTES = 25 * 1024 * 1024
 
@@ -43,13 +42,10 @@ class Attachments:
 
     def attachment_download(self, sha256):
         request = AttachmentDownload(sha256=sha256)
-        player = quote(self.context.env["RESEARCH_PLAYER_ID"], safe="")
         stored = TypeAdapter(
             InlineArtifact | StoredArtifact, config=ConfigDict(hide_input_in_errors=True)
         ).validate_python(
-            PlatformCli(self.context.env).api_get_json(
-                f"/observatory/v2/cogents/{player}/artifacts/{request.sha256}"
-            )
+            IDE(self.context).request("GET", f"artifacts/{request.sha256}")
         )
         if stored.sha256 != request.sha256:
             raise ValueError("The platform returned a different attachment")
