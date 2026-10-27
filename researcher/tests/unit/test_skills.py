@@ -38,7 +38,7 @@ CORE_SKILLS = {
 # Plan 03 Task 4.2 adds these for System Design §5.6 and C10.
 MAINTENANCE_SKILLS = {"kb-maintenance", "calibrate-noise"}
 # Making a new game's folder (adapted from optimizer-seed's mixin method).
-GAME_SKILLS = {"game-create"}
+GAME_SKILLS = {"game-create", "coworld-context"}
 
 NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*")  # Hermes skill_manager_tool.VALID_NAME_RE
 DESCRIPTION_LIMIT = 60  # Hermes SKILL_PROMPT_DESC_LIMIT: longer descriptions are truncated
@@ -122,6 +122,7 @@ COMMAND_FLAGS = {
     "source fetch": "--repo --ref",
     "softmax game-support": "--league",
     "softmax league-results": "--league --limit --dest",
+    "softmax exec": "",
     "softmax whoami": "",
     "softmax credits": "",
     "softmax xp create": "--batch --attempt --batches",
@@ -147,6 +148,9 @@ def check_cli_call(call: str) -> None:
     size = 3 if words[:2] == ["softmax", "xp"] else 2
     command = " ".join(words[:size])
     assert command in COMMAND_FLAGS, f"unknown researcher command: {command}"
+    if command == "softmax exec":
+        assert words[2] == "--" and words[3] in {"coworld", "softmax"}
+        return  # The installed provider CLI owns flags after the passthrough separator.
     options = set(COMMAND_FLAGS[command].split()) | {"--help"}
     if words[0] in {"records", "stats", "kb"}:
         options.add("--root")

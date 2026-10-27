@@ -1,6 +1,6 @@
 name: researcher_tools
 version: 0.1.0
-description: Researcher tools. `capabilities` lists and searches every tool and skill available in the session; `host_capabilities` checks what the host has and where it can write.
+description: Researcher tools. `capabilities` searches profile-configured tools and skills; session additions and job overrides may be absent. `host_capabilities` checks the host and writable paths.
 author: ide-distributions
 provides_tools:
   - capabilities

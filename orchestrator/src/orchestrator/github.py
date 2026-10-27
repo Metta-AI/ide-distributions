@@ -4,7 +4,6 @@ import json
 import os
 import re
 import subprocess
-from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -35,7 +34,7 @@ class GitHub:
         with urlopen(request, timeout=30) as response:
             return json.load(response)
 
-    def github_clone(self, repository: str, commit: str | None = None, public_first: bool = False):
+    def github_clone(self, repository: str, commit: str | None = None):
         repository = repository.removeprefix("https://github.com/").rstrip("/").removesuffix(".git")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}", repository):
             raise ValueError("Use owner/repository or an HTTPS github.com repository URL")
@@ -64,29 +63,12 @@ class GitHub:
             "GIT_CONFIG_KEY_2": "http.userAgent",
             "GIT_CONFIG_VALUE_2": "Mozilla/5.0 SoftmaxIDEa/0.9",
         }
-        # Public source needs no GitHub connection. Authorization is scoped to the
-        # broker URL even when the first attempt uses GitHub directly.
-        sources = [f"https://github.com/{repository}.git", url] if public_first else [url]
-        if public_first and "COWORLD_REPOSITORIES_DIR" in self.context.env:
-            # Operator-configured local development mirror. The model cannot
-            # supply a host path, and the requested commit must already exist.
-            mirror = Path(self.context.env["COWORLD_REPOSITORIES_DIR"]) / repository
-            origin = subprocess.check_output(
-                ["git", "-C", str(mirror), "remote", "get-url", "origin"],
-                env=env, text=True, timeout=10,
-            ).strip().removesuffix(".git")
-            if origin != f"https://github.com/{repository}":
-                raise ValueError("Local Coworld repository origin does not match the selected source")
-            sources = [str(mirror.resolve())]
-        for source in sources:
-            checkout = root / f"{owner}-{name}-{uuid4().hex[:12]}"
-            result = subprocess.run(
-                ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "credential.helper=",
-                 "clone", "--depth", "1", "--no-recurse-submodules", "--", source, str(checkout)],
-                env=env, capture_output=True, text=True, timeout=240, check=False,
-            )
-            if result.returncode == 0:
-                break
+        checkout = root / f"{owner}-{name}-{uuid4().hex[:12]}"
+        result = subprocess.run(
+            ["git", "-c", f"core.hooksPath={os.devnull}", "-c", "credential.helper=",
+             "clone", "--depth", "1", "--no-recurse-submodules", "--", url, str(checkout)],
+            env=env, capture_output=True, text=True, timeout=240, check=False,
+        )
         if result.returncode:
             raise ValueError(
                 "GitHub clone failed. Connect GitHub repository access in IDEa settings and "
