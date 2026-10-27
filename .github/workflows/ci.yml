@@ -45,8 +45,9 @@ jobs:
       - name: Verify generated distribution payloads
         if: matrix.distribution == 'researcher'
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python ../tools/sync_shared.py
-          git diff --exit-code
+          git -C "$GITHUB_WORKSPACE" diff --exit-code
       - run: uv sync --frozen
       - run: uv run pytest -q
       - name: Validate real Hermes task admission and profile installation
