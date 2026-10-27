@@ -44,7 +44,8 @@ STUB_MARKER = "research-template-stub"
 REQUIRED_SECTIONS = ("Seats and opponents", "Starter policy")
 KNOWLEDGE_BINDINGS = ("ab", "survey", "replay-inspection", "eval-design", "diagnosis")
 SKILL_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")  # Hermes skill names
-NOT_COPIED = ("CONTRACT.md",)  # the field reference stays with the template
+# The field reference stays with the template; GENERATED.md marks the orchestrator's copy.
+NOT_COPIED = ("CONTRACT.md", "GENERATED.md")
 MIXIN_SKIPPED = ("skills", ".github")
 INSTALL_RECORD = "INSTALLED.json"
 

@@ -4,4 +4,7 @@
 set -eu
 TOOLS=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$TOOLS/engine.env"
-exec uv run --locked --offline --project "$TOOLS/../../.." python "$TOOLS/native_build.py" gota_match "$POLYWORLD_COMMIT"
+# native_build.py needs only the standard library. Run it with the profile's python3 (first
+# on PATH in a profile shell), not `uv run --project`, which would make a venv inside the
+# installed profile: read-only on hosted workspaces.
+exec python3 "$TOOLS/native_build.py" gota_match "$POLYWORLD_COMMIT"

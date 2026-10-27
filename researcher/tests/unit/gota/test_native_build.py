@@ -1,5 +1,6 @@
 """Native receipts fail closed on changed inputs or executable bytes."""
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -134,3 +135,24 @@ def test_offline_build_does_not_prepare_missing_sources(tmp_path, monkeypatch):
     monkeypatch.setattr(native_build, 'prepare', forbidden)
     with pytest.raises(FileNotFoundError):
         native_build.build('gate_probe', '0' * 40, tools=tmp_path / 'tools')
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='root ignores file permissions')
+def test_read_only_install_builds_in_the_profile(tmp_path, monkeypatch):
+    """A hosted profile is installed read-only, so sources and builds go to its own state."""
+    monkeypatch.delenv('GOTA_DEPENDENCY_ROOT', raising=False)
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'profile'))
+    dependency = tmp_path / 'dependency'
+    dep_pin = commit(dependency, {'src/library.nim': 'discard\n'})
+    pin = commit(tmp_path / 'upstream', {'config.nims': '# config\n',
+                                         'coworld/dependencies.lock': f'library 1 {dependency} {dep_pin}\n'})
+    tools = tmp_path / 'install/tools'
+    tools.mkdir(parents=True)
+    tools.chmod(0o555)
+    try:
+        clone = native_build.prepare(pin, tools=tools, engine_source=str(tmp_path / 'upstream'))
+        assert clone.is_relative_to(tmp_path / 'profile/cache/gota/.cache')
+        assert not any(tools.iterdir())
+    finally:
+        tools.chmod(0o755)
+    assert native_build.build_root(tools) == tools  # a writable checkout keeps its own folders
