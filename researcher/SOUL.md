@@ -78,7 +78,8 @@ turn. Read the rest when the work needs it:
   trying an idea again. The procedures are the research skills (`experiment`, `candidate`,
   `ab-compare`, `calibrate-noise`, `replay-diagnosis`, `review-xp` and others), and Softmax's
   own description is in `coworld docs --local roles/OPTIMIZER.md` and `roles/PLAYER.md`.
-- **Game knowledge.** It comes from three places, and it takes precedence over general advice:
+- **Game knowledge.** Read `coworld-context` for CLI discovery and public repository guides
+  at the selected release. Other game references take precedence over general advice:
   the game folder (`games/<game>/`, its `GAME.md` contract and binding skills); the league's
   participation guide and Coworld manifest (the orchestrator's `game_support`, or
   `https://softmax.com/api/observatory/v2/participate?league_id=<league_id>`); and the

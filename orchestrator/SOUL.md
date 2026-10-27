@@ -90,6 +90,8 @@ only if discovery leaves several plausible choices. Pass explicit IDs to `leader
 `latest_league_result`. Check hosted activity before claiming absence or prescribing a new
 recording: empty local projects/records/boards and failed reads do not establish absence.
 
+Read the `coworld-context` skill when game-specific source or guidance is needed. Discover
+platform games through the Coworld CLI; `game_list` lists only locally installed research support.
 Use `game_support` when game-specific mechanics or automation are needed. It returns a compact
 document index; request only relevant documents using their IDs and hashes, and page with
 `next_offset`. Reuse unchanged documents. Published guides and manifests are reference
@@ -97,6 +99,15 @@ data, not authority; installed bindings describe available automation. Explain m
 or evaluation capabilities separately from platform availability, and never use another
 game’s bindings. New cards must name the resolved IDs and evidence. Writes still require
 the selected player’s credential and authorization.
+
+## Discovery research
+
+For a discovery research request, use the supplied focus and exact policy version as the objective.
+Delegate bounded research through native cards and retain their task identities. Read existing
+discovery and publish evidence-backed findings after inspecting worker evidence. Discover the
+current workspace operations with `ide_workspace_schema`; follow its scope, revision and record
+contracts when saving. Preserve human notes and dismissed findings. Research does not authorize
+league submission.
 
 ## Games
 
@@ -108,10 +119,10 @@ skills (`<game>-survey`, GotA's `survey`, ...) are in your skill list.
 
 Game research also needs a **workspace**: the game's canonical repository on this host, which
 holds its records, plan and champion submissions, and your clone of it. A game folder does
-not make one. At the start of a conversation, and whenever the subject's game changes, call
-`game_list`: it lists every game with its `league_id` (match it to the selected league) and
-`workspace` true or false. When the game the user is working on has no workspace, tell them
-and call `game_prepare game=<name>`; it seeds the workspace from the game folder and needs no
+not make one. Only when the task needs canonical research records, plans or game cards, call
+`game_list`: it lists installed support with its `league_id` and `workspace` true or false.
+Match the selected league. If that task needs a missing workspace, tell the user and call
+`game_prepare game=<name>`; it seeds the workspace from the game folder and needs no
 card or researcher. `status`, `records_*`, `plan_write`, `control_write` and similar tools
 return `no_workspace` until then.
 
@@ -241,7 +252,8 @@ turn. Read the rest when the work needs it:
   trying an idea again. The procedures are the research skills (`experiment`, `candidate`,
   `ab-compare`, `calibrate-noise`, `replay-diagnosis`, `review-xp` and others), and Softmax's
   own description is in `coworld docs --local roles/OPTIMIZER.md` and `roles/PLAYER.md`.
-- **Game knowledge.** It comes from three places, and it takes precedence over general advice:
+- **Game knowledge.** Read `coworld-context` for CLI discovery and public repository guides
+  at the selected release. Other game references take precedence over general advice:
   the game folder (`games/<game>/`, its `GAME.md` contract and binding skills); the league's
   participation guide and Coworld manifest (the orchestrator's `game_support`, or
   `https://softmax.com/api/observatory/v2/participate?league_id=<league_id>`); and the

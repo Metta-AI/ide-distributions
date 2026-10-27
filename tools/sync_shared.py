@@ -11,7 +11,7 @@ Sources and their copies:
 - ``shared/ide_research_core/`` -> ``<distribution>/src/ide_research_core/``
 - ``ontology/KNOWLEDGE.md``, ``VOCABULARY.md`` and ``ONTOLOGY.md`` -> the end of ``<distribution>/SOUL.md``, after the line
   ``ONTOLOGY_MARKER`` (Hermes loads SOUL.md in every session, so every turn has the shared
-  vocabulary; the orchestrator has no file tools to read a separate copy). Only the research
+  vocabulary). Only the research
   distributions get it: ``play`` uses the package's Softmax tool, not the research vocabulary.
 - ``shared/scripts/prepare.py`` -> each research profile’s ``scripts/prepare.py``
 - ``shared/skills/autoresearch/`` -> ``<distribution>/skills/autoresearch/`` for the research

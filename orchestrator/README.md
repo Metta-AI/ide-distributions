@@ -11,9 +11,9 @@ skips the model when nothing needs attention.
 
 ## GitHub repositories
 
-For automatic release-pinned game guidance and local repository iteration, follow
-[Coworld repository context](../docs/coworld-context.md). The current IDEa selection
-loads `COWORLD.md` and its skill index before the model responds.
+For agent-driven game discovery and release-pinned public repository reads, follow
+[Coworld repository context](../docs/coworld-context.md). Both profiles use the shared
+`coworld-context` skill and existing CLI; the IDE supplies conversation context only.
 
 Use `github_repositories` and `github_clone` for the owner's connected GitHub account.
 Pass `commit` with the full SHA when the league manifest pins a release. Authorization
@@ -78,7 +78,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | Tools | Behavior |
 |---|---|
 | `attachment_download(sha256)` | Save an attachment from the current workspace to a private local cache, verifying its size and SHA-256 (maximum 25 MiB). Use the hash in conversation context, then read the returned path. The tool resolves the signed URL internally; never transcribe it into a command. It uses the current Player credential and cannot read another workspace's attachments. |
-| `capabilities(query?, kind?)` | Every tool and skill this session has, with one-line descriptions, filtered by keyword. |
+| `capabilities(query?, kind?)` | Profile-configured tools and skills, filtered by keyword; session additions and job overrides may be absent. |
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
 | `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
@@ -236,9 +236,8 @@ Deploy and qualify the Metta workspace SDK, migration and public route before me
 Metta's `preserve` release workflow polls this repository's main branch, so merging can trigger an image release.
 Running hosts adopt that image through the existing explicit Pause/Resume path, preserving their storage.
 
-The tool is loaded with the orchestrator toolset. Its schema explains component discovery, layout validation,
-revision checks, and draft notes. No legacy chat record or token exchange is required. Retain `request_id` on retries.
-The server derives the owner from the validated player credential and fixes league scope to GoTA. Inspect structured MCP results rather than treating
+The tool is loaded with the orchestrator toolset. Read `ide_workspace_schema` for the deployed component, layout, revision and draft-note contracts. No legacy chat record or token exchange is required. Retain `request_id` on retries.
+The server derives the owner from the validated player credential and validates the explicitly selected league scope. Inspect structured MCP results rather than treating
 an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.
 
 ### Permission and source discovery
