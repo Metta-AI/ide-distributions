@@ -23,7 +23,7 @@ class Job(BaseModel):
     id: str
     no_agent: bool = False
     script: str | None = None
-    prompt: str
+    prompt: str | None = None
 
 
 class Jobs(BaseModel):
@@ -124,7 +124,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
                 supervisor.prompt,
             )
     pending = jobs_path.with_suffix(".pending")
-    pending.write_text(jobs.model_dump_json(indent=2) + "\n")
+    pending.write_text(jobs.model_dump_json(indent=2, exclude_unset=True) + "\n")
     pending.replace(jobs_path)
     subprocess.run(
         [

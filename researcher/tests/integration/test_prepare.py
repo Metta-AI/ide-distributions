@@ -83,6 +83,13 @@ def test_retained_profile_upgrade(tmp_path):
             supervisor = next(job for job in jobs["jobs"] if job["id"] == "supervisor")
             supervisor.update(no_agent=False, script=None, prompt="Obsolete planner prompt")
             retained_job = dict(supervisor)
+            custom_job = {
+                "id": "user-script",
+                "prompt": None,
+                "script": "custom.py",
+                "enabled": False,
+            }
+            jobs["jobs"].append(custom_job)
             jobs_path.write_text(json.dumps(jobs))
         config_path.write_text(yaml.safe_dump(defaults))
         if kind == "researcher":
@@ -114,6 +121,14 @@ def test_retained_profile_upgrade(tmp_path):
                 if key not in {"no_agent", "script", "prompt"}:
                     assert supervisor[key] == value, key
             assert supervisor["state"] == "paused" and not supervisor["enabled"]
+            assert (
+                next(
+                    job
+                    for job in json.loads(jobs_path.read_text())["jobs"]
+                    if job["id"] == "user-script"
+                )
+                == custom_job
+            )
         before = (profile / "config.yaml").read_bytes()
         subprocess.run(command, env=profile_env, check=True, timeout=300)
         assert (profile / "config.yaml").read_bytes() == before
