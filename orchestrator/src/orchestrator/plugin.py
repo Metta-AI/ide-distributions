@@ -10,7 +10,6 @@ from ide_research_core.softmax_tool.discovery_schema import StarterRead, Support
 from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
-from .worker_capabilities import WorkerCapabilities, WorkerRead
 from .context import profile_context
 from .coworld_context import CoworldContext, Selection, repository_context_middleware
 from .github import GitHub
@@ -18,6 +17,7 @@ from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
 from .storage import open_storage
+from .worker_capabilities import WorkerCapabilities, WorkerRead
 from .workspace import Workspace, WorkspaceError
 
 S = {"type": "string"}
