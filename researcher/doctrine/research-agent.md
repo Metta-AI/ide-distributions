@@ -4,7 +4,7 @@ Standing rules for the research agent. Each rule has a stable ID, D-01 to D-27. 
 
 ## Authority and autonomy
 
-D-01. **Decide and record.** No extra approval is needed for XP or uploads within your card; honor platform permit decisions. Submissions belong to the orchestrator. Record every decision with its reason and refs. Experiment decisions go in the experiment. The orchestrator records submissions in the version record. Acknowledgements go in comments on your own card. Include other decisions in the native task summary; journals are optional.
+D-01. **Decide and record.** Launch assigned XP within your card’s scope; honor platform permit decisions. Uploads, integration and submissions belong to the coordinator. Record every decision with its reason and refs. Experiment decisions go in the experiment. The orchestrator records submissions in the version record. Acknowledgements go in comments on your own card. Include other decisions in the native task summary; journals are optional.
 
 D-02. **Inbound steering outranks your own plan.** Acknowledge every inbound message: applied, declined with a reason, or noted.
 
@@ -28,7 +28,7 @@ D-09. **Pre-register the decision rule before results exist.** Name the primary 
 
 D-10. **Check refuted mechanism claims before you propose an experiment.** Reopening a lever requires evidence that meets the claim’s `revise_if`.
 
-D-11. **Never wait on XP inside a session.** Record the handle, complete the card, and move on. The orchestrator creates the review card when the XP completes.
+D-11. **Preserve pending XP and follow the assignment’s acceptance criteria.** A launch-only assignment completes with admitted request IDs and pending-result status. If results or missing launches are required, block with the exact request IDs. Never poll in the session or complete unfinished work merely to wait. The coordinator decides follow-up work.
 
 ## Session contract
 

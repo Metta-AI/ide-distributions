@@ -56,9 +56,9 @@ batch, preserve its state and complete without waiting for the platform.
   return existing handles for review.
 - `busy`: do not duplicate a running command. If `details.own_run` is true, wait on your own
   process with `process_manage` as in `card`, then recover its handles. Otherwise report the
-  holder and complete `partial`; do not loop or take its lock.
+  holder and block with the exact dependency; do not loop or take its lock.
 - A retryable `platform` refusal or interrupted launch can replay the same batch/attempt to
-  create only missing requests. If it still fails, preserve the state and complete `partial`.
+  create only missing requests. If it still fails, preserve the state and block with the exact outstanding requests.
 - A tooling traceback, an `errored` check or `tool_missing` follows D-26 in `card`. Do not retry it.
 
 For a launch-only assignment completed with pending results, include optional native completion

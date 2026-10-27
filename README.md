@@ -96,3 +96,7 @@ cd researcher
 uv sync --frozen
 uv run pytest -q
 ```
+
+Profile policy and retained doctrine updates are owned by `scripts/prepare.py`, generated from
+`shared/scripts/prepare.py` and backed by `shared/ide_research_core/prepare.py`. Hosts invoke this
+operation after installation and updates; see [hosting](docs/hosting.md).

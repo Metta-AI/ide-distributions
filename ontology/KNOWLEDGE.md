@@ -20,8 +20,7 @@ Softmax publishes guides for agents. Read them when you need them rather than re
 Only who you are, the vocabulary, your role and how to act as your Player are loaded on every
 turn. Read the rest when the work needs it:
 
-- **Skills.** Call `capabilities` (optionally with a keyword) for every tool and skill you have
-  in this session; `skill_view(name)` reads a skill, and `tool_search` finds deferred tools.
+- **Skills.** Call `capabilities` (optionally with a keyword) for tools and skills enabled by your profile configuration; `skill_view(name)` reads a skill, and `tool_search` finds deferred tools.
 - **Policy improvement.** Diagnose from replays before changing strategy; change one thing per
   experiment; know how noisy a metric is before trusting a difference; judge only by results
   from the live field, not local runs; check refuted claims and earlier experiments before

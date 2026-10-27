@@ -7,13 +7,10 @@ memory:
   write_approval: false
 agent:
   max_turns: 40
-# Chat (api_server) and supervisor (cron) turns get the plugin tools plus Hermes's shell
-# (terminal, process_manage), file (read_file, write_file, patch, search_files) and Python
-# (execute_code) tools. Dangerous commands go through Hermes approvals: chat asks the user,
-# unattended cron turns deny them (approvals.cron_mode default).
+# Chat uses research and native tools. Supervisor cron only wakes the coordinator.
 platform_toolsets:
-  api_server: [orchestrator, terminal, file, code_execution, skills]
-  cron: [orchestrator, terminal, file, code_execution, skills]
+  api_server: [orchestrator, memory, terminal, file, code_execution, skills]
+  cron: []
 terminal:
   env_passthrough:
     - SOFTMAX_PLAYER_CREDENTIAL
