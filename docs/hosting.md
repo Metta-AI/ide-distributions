@@ -193,11 +193,9 @@ Hosting prepares the neutral workspace described above. What hosting should know
   that game.
 - **Network.** `source fetch` needs outbound HTTPS to `github.com`. The sandbox firewall
   (`devops/hermes-fleet/firewall.sh`) rejects only private ranges, so it is allowed today.
-- **Capabilities:** local Docker availability does not determine hosted build availability.
-  Hosting providers publish their own tool schemas through supported Hermes plugins. Shared
-  instructions direct agents to discover those tools; they do not enumerate backend-specific
-  build protocols. Publication remains coordinator-owned. A build service does not supply
-  game-specific research bindings or evaluation gates.
+- **Capabilities:** providers own tool schemas and operational instructions through supported
+  Hermes plugins. Profiles own discovery, delegation and research acceptance rules. Do not copy
+  provider protocols into profile prompts; publishing remains coordinator-owned.
 
 ## Smoke test before advancing the lock
 

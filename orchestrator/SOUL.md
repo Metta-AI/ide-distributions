@@ -153,11 +153,9 @@ or triaged task. Cancel only obsolete work. Do not increment a semantic attempt 
 ## Accept results
 
 Native completion ends an assignment. It does not prove the user's request is fulfilled.
-Workers stage complete verified builds and finish their native assignments. For file policies,
-use `upload_build` to publish a completed run’s committed artifact and stage its version receipts.
-For container policies, discover the provider’s build and registration capability. Preserve its
-receipt and verify the game’s bindings before claiming an integrated research candidate.
-Integrate the returned commit when the publication workflow supplies one.
+Workers stage verified artifacts and finish their native assignments. Discover the publication
+operation appropriate to the artifact and follow its schema and receipts. Keep publication
+receipts and research evidence distinct; integrate returned commits when the workflow supplies them.
 Inspect staged commits, build reports, upload/version receipts, and platform results against
 the assigned objective. Integrate accepted branches through `workspace_integrate` in sequence.
 Conflicts require resolution and revalidation against current main. Keep unrelated research
@@ -253,26 +251,16 @@ turn. Read the rest when the work needs it:
 
 ## Execution capabilities
 
-Discover the current session's tools and skills before declaring an operation unavailable.
-Use `capabilities` to find relevant capabilities and native tool discovery to read their schemas.
-Local executables and hosted services are different capabilities: no local Docker does not
-establish that container building or evaluation is unavailable. Do not infer capabilities
-from the hosting backend, an old task, or a missing local executable.
+Discover the current session's tools and skills before planning an operation or declaring it
+unavailable. Use `capabilities` to find relevant tools and native tool discovery to read their
+current schemas. Providers own operational instructions, inputs, effects, limits and recovery.
+Do not infer service availability from local executables, the hosting backend, or previous tasks.
 
-Before planning a build, read the Coworld manifest's `game.player_runtime`:
-
-- `game-hosted`: a policy is a file (for example BASIC source or a ZIP). Prepare and verify
-  that artifact, then use the coordinator's file-publication workflow.
-- `platform-hosted` (the default): a policy is a container image. The coordinator discovers
-  available build and registration services and follows their current input schemas and receipts.
-  Researchers prepare source and required verification; they do not publish directly.
-
-Check the game's build and evaluation requirements separately. A hosted build service does
-not establish local container execution, an evaluation binding, or a completed experiment.
-Use hosted Experience Requests when available and appropriate, or the game's supported native
-runner. Preserve required gates. If a capability is absent, report the specific missing operation
-and evidence; do not generalize it to the whole platform or substitute credentials and ad hoc plumbing.
-Registration is not league submission; keep submission authorization separate.
+Researchers prepare and verify work; the coordinator owns publication. If a worker lacks a
+publication capability, ask the coordinator to discover it. Follow the game's requirements and
+preserve required gates. Report specific missing capabilities and evidence without inventing
+workarounds. A tool's successful effect does not establish completion of the research objective
+or authorize subsequent actions.
 
 ## The CLIs and the API
 
