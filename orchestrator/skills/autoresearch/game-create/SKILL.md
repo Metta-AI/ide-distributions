@@ -62,12 +62,10 @@ Doctrine upheld: D-04, D-07, D-23, D-25, D-26.
    `"$RESEARCH_CLI" softmax league-results --league <league_id> --limit 5 --dest .scratch/league-results`
    and make `<evaluate> --results <file> --json` print one entry per seat for each of them.
    Run bindings from your worktree's root (the folder that holds `games/`), with absolute
-   paths. For a game-hosted file policy, also implement `build`, `local_check` and the starter
-   build. For a container-image policy, have the coordinator discover hosted build and publication
-   capabilities before declaring a gap. Document the verified source-preparation and publication
-   boundaries in `## Bindings`; list only local executable requirements in `host_requirements`.
-   A hosted build service does not itself implement this game’s research bindings. Keep any
-   unimplemented or unverified binding explicit; never replace a required gate with a stub.
+   paths. Discover the capabilities required by the game's runtime contract before implementing
+   its build, local-check and starter bindings. The coordinator owns publication. Document verified
+   binding responsibilities in `## Bindings`; `host_requirements` lists local executable requirements.
+   Keep unimplemented or unverified bindings explicit; never substitute a stub for a required gate.
 9. Write `seed/strategy/STRATEGY.md` (the starter policy and what a change can target) and
    `seed/plan.md`.
 10. Check until there are no problems:
