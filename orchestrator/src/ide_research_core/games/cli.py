@@ -7,8 +7,8 @@
   guide body is not printed; read ``path`` for it. ``--name`` defaults to ``RESEARCH_GAME``,
   which inside a card worktree is the card's game (``games.scope``). Exit 1 when the contract
   is missing or invalid, 2 when no game is named.
-- ``list`` prints every shipped and installed game, whether it has a research workspace on
-  this host, and how an installed one was installed.
+- ``list`` prints every shipped and installed game, its league, whether it has a research
+  workspace on this host, and how an installed one was installed.
 - ``new --name G --league L [--title T] [--source URL [--source-ref R]] [--mixin URL
   [--mixin-ref R]] [--out DIR]`` scaffolds ``<DIR>/games/G/`` from the template (``DIR``
   defaults to the card worktree, else the current directory); see ``games.authoring``.
@@ -31,7 +31,7 @@ from pathlib import Path
 from ide_research_core import sources
 from ide_research_core.cli import register_group
 from ide_research_core.games import authoring
-from ide_research_core.games.loader import GameError
+from ide_research_core.games.loader import GameError, load_game
 from ide_research_core.games.scope import (
     GAME_ENV,
     WORKER_ENV,
@@ -77,6 +77,10 @@ def _show(args: argparse.Namespace) -> int:
 def _list(args) -> dict:
     games = list_games(os.environ)
     for entry in games:
+        try:
+            entry["league_id"] = load_game(Path(entry["root"]), entry["name"]).league_id
+        except GameError as error:  # an installed folder can be broken; list it anyway
+            entry["error"] = str(error)
         record = Path(entry["path"]) / authoring.INSTALL_RECORD
         if entry["kind"] == "installed" and record.is_file():
             entry["install"] = json.loads(record.read_text(encoding="utf-8"))

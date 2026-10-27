@@ -20,9 +20,9 @@ class Research:
         self.context = context
 
     def in_game(self, game=None):
-        """This research in ``game``'s workspace (None: this one). The
-        orchestrator's clone of another game is made on first use, from a canonical repository
-        that a researcher's card preparation created (``Board.card_create``)."""
+        """This research in ``game``'s workspace (None: this one). The orchestrator's clone
+        is made on first use once the game's canonical repository exists (``game_prepare``,
+        or a card's preparation in ``Board.card_create``)."""
         if game is None or game == self.context.env.get("RESEARCH_GAME"):
             return self
         scoped = Research(self.context.for_game(game))
@@ -33,8 +33,8 @@ class Research:
                         "ok": False,
                         "error": {
                             "reason": "no_workspace",
-                            "message": f"No research workspace for {game!r} yet. Create its "
-                            "first card with card_create game=" + game + ", which prepares it.",
+                            "message": f"No research workspace for {game!r} yet. Call "
+                            f"game_prepare game={game} to create it.",
                         },
                     }
                 )
@@ -179,6 +179,11 @@ class Research:
 
     def game_list(self):
         return self.call("game", "list")
+
+    def game_prepare(self, game):
+        """Create ``game``'s canonical repository (seeded from its folder's ``seed/``) and this
+        profile's clone of it, or refresh them. Idempotent; needs no researcher."""
+        return self.call("workspace", "bootstrap", "--game", game)
 
     def game_starter(self, league_id, starter_id, expected_sha256, offset=0, limit=4000):
         return self.call(

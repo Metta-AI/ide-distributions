@@ -225,9 +225,15 @@ TOOLS = {
     ),
     "game_list": (
         Research,
-        "List the games this host can research: shipped and installed game folders, whether each has a research workspace yet, and how an installed one was installed.",
+        "List the games this host can research: shipped and installed game folders, each one's league_id, whether each has a research workspace yet (workspace=false: call game_prepare before game-scoped work), and how an installed one was installed.",
         {},
         [],
+    ),
+    "game_prepare": (
+        Research,
+        "Create a game's research workspace on this host (its canonical repository, seeded from the game folder, and your clone), or refresh an existing one. Safe to repeat. Needs no card or researcher. Run it before status, records, plans or cards for a game that game_list shows with workspace=false.",
+        {"game": {"type": "string", "description": "A shipped or installed game (game_list)."}},
+        ["game"],
     ),
     "game_install": (
         Board,

@@ -1,0 +1,198 @@
+{
+  "build_id": "00a0bdcc-2",
+  "oracle_equivalent": true,
+  "oracle_records": 624040,
+  "oracle_sha256": "1b36bf793c6d6cc37ce5f00e71f477da0d9b473ddfcf2c8be83dc941bc9cb408",
+  "audit_decisions": 2882000,
+  "audits": [
+    {
+      "seed": 1,
+      "report_sha256": "dd9dfb6f70c433f65986687659af21fcfe3416cda115e88cd550cc98e3593a69",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 2,
+      "report_sha256": "d2328bdece4b0b3bbdc7d031a9886d2c3d469a0d274742998e306690d670f1d7",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 3,
+      "report_sha256": "1a634626b019e98a1e39ce3fbe3901e9335f68a4a2910fa1b35643a5c693adae",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 4,
+      "report_sha256": "e93ed40c25142db37239d2860a1d92780e0b0108c6a4b8ad262febc314cc87b3",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 5,
+      "report_sha256": "747d02f3d55628be3d91fdc8143df18ad846efed877604cd34debf896bbc70a2",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 6,
+      "report_sha256": "8e154c1d9b037b5e7c98ac761269fcfd52c8f16d4a7dbc595ca274bf5776a3cf",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 7,
+      "report_sha256": "170c6181486d1efa3d046a3b96075c5683704db16b2530c5adeae672572b2686",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 8,
+      "report_sha256": "a87f722670736a8c3980b6dd37b5f97f782d8c6ac9607f5a6a655458641ccc71",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 9,
+      "report_sha256": "25b91ad966f89066354fa93bf7bf92950cd948b9f8c586954af03de647ddf281",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 10,
+      "report_sha256": "d7e523c7ba0170a0f2197c04c965e0081982eff0e46a58c7ec67ad77cbdfcdc7",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 11,
+      "report_sha256": "49aefa8665139a50160de089221d25a76374ede5e6a3e383f081df390815ff52",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 12,
+      "report_sha256": "65d981d9bfb32febf9cfd844bb0aa2734b17dff2895736a31c025e83427dea9d",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 13,
+      "report_sha256": "20222baccbb01e8d17f625d7d961f78e8e205d8342127a7ec721a86af175cecc",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 14,
+      "report_sha256": "a888354f797d6bac68156aec490e15e09b45654203445d662184766e8cf52f19",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 15,
+      "report_sha256": "32bdcfa7ac6f2c8467a084539554fcc258bafea433d33ad217e81154ff487295",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 16,
+      "report_sha256": "d99d1780bd972462ac1ab0c068a3a99cad24a6edc4e83d7ab25ccaa84c8de760",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 17,
+      "report_sha256": "9ae7ba07127f2704ecfcf63020fc5e7acde7817482a89022956a145935157bb9",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 18,
+      "report_sha256": "2cf6f7f04ac01300969463e483827a3fa98c740d4a388c4c1474f8d6f184649e",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 19,
+      "report_sha256": "a7560c4bad80578ab9483d69b1657227e8d9e4cd3e6acda03d14a3d4e1d897f6",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    },
+    {
+      "seed": 20,
+      "report_sha256": "9861a9a252c255e32167298436de9109034953ea7d92e401e1dc17826e314c28",
+      "seats": 5,
+      "decisions": 144100,
+      "coverage_complete": true,
+      "issues": 0,
+      "all_predicates_and_claims": "unmeasurable"
+    }
+  ],
+  "free_gib": 13.100479125976562,
+  "engine": "801749e509e888b423ba44ee2188946c22e3ba85",
+  "game_version": "2026.10.7.2",
+  "source_commit": "00a0bdcc1414cc9b162d3a5e30a8097f11db6a17",
+  "policy_sha256": "9a091ac3aaa925aa7c2a89c5a944ef38f1a36eefe966c84f037e36a42298b9fc",
+  "reference_sha256": "1637c5604a522342de710afbffb16cdaa84befe99d3df17fa28e146414f86f9c",
+  "strategy_sha256": "857a1e84af3b116678052b63a0a607b6699b50a3a154bbea2816b93352696dd8",
+  "provenance": "Preserved local qualification-summary.json plus compiler-task-2.4-m1.md, not a rerun.",
+  "scope": "Historical local action equivalence and attribution only; no new-engine semantic or competitive qualification."
+}

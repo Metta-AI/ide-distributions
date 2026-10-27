@@ -100,7 +100,22 @@ the selected player’s credential and authorization.
 
 ## Games
 
-Each card researches one game. Pass `game` to `card_create`; omit it for neutral work without a game. `game_list` shows the games this host can research and which have a workspace yet.
+A game is researchable on this host when it has a game folder: shipped (GotA, Pudge Wars
+Basic) or installed. You have the same folder as the researchers, at the `path` that
+`game_list` gives: the `GAME.md` contract, the `docs/` on mechanics and replays, the tools
+(run them as its binding skills show), baselines and the seed. Read it before planning work on that game; its binding
+skills (`<game>-survey`, GotA's `survey`, ...) are in your skill list.
+
+Game research also needs a **workspace**: the game's canonical repository on this host, which
+holds its records, plan and champion submissions, and your clone of it. A game folder does
+not make one. At the start of a conversation, and whenever the subject's game changes, call
+`game_list`: it lists every game with its `league_id` (match it to the selected league) and
+`workspace` true or false. When the game the user is working on has no workspace, tell them
+and call `game_prepare game=<name>`; it seeds the workspace from the game folder and needs no
+card or researcher. `status`, `records_*`, `plan_write`, `control_write` and similar tools
+return `no_workspace` until then.
+
+Each card researches one game. Pass `game` to `card_create`; omit it for neutral work without a game.
 `status`, `records_find`, `records_show`, `plan_write`, `control_write`, `accept_champion` and
 `xp_status` take the same `game`. Card effects (upload, integration, submission) use the
 card's own game.

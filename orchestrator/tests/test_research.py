@@ -121,3 +121,25 @@ def test_another_game_uses_its_own_workspace(shared_fixture):
     assert scoped.env["RESEARCH_GAME"] == "newgame"
     assert scoped.env["RESEARCH_CANONICAL"] == str(host / "canonical-newgame.git")
     assert scoped.workspace == shared_fixture.home / "workspace-newgame"
+
+
+def test_game_prepare_bootstraps_the_named_game(shared_fixture):
+    assert Research(shared_fixture).game_prepare("pudge-wars-basic")["args"] == [
+        "workspace",
+        "bootstrap",
+        "--game",
+        "pudge-wars-basic",
+    ]
+    assert TOOLS["game_prepare"][3] == ["game"]
+
+
+def test_orchestrator_seeds_a_shipped_game_without_a_researcher(tmp_path):
+    """The orchestrator's own copy of a shipped game folder is enough to create its workspace."""
+    from ide_research_core import workspace
+    from ide_research_core.io import gitops
+
+    bare, clone = tmp_path / "canonical-pudge-wars-basic.git", tmp_path / "workspace-pudge-wars-basic"
+    actions = workspace.bootstrap(clone, bare, "pudge-wars-basic")
+    assert actions[1] == f"seeded {bare} from games/pudge-wars-basic/seed"
+    assert (clone / "strategy/policy.bas").is_file()
+    assert gitops.git(bare, "for-each-ref", "refs/heads/main")

@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""Build a committed semantic candidate or gate an exact prebuilt BASIC artifact."""
+import argparse
+import contextlib
+import hashlib
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+from games.gota.tools.build_input import InputRejected
+
+TOOLS = ROOT / 'games/gota/compiler/tools'
+DEFAULT_AGENT_TIMEOUT_S = 1200
+DEFAULT_AGENT_BUDGET_S = 1800
+# Under the profile home (the worker's HERMES_HOME): one directory per compiler build holding a
+# copy of the compiler child's ``state.db``, so its sessions outlive the build's scratch
+# directory. The baseline report reads them as source ``compiler``.
+COMPILER_SESSIONS_DIR = 'gota-compiler'
+
+
+def validate_manifest(path, *, offline=False):
+    if offline and path is None:
+        raise InputRejected('--offline requires --manifest PATH or GOTA_MANIFEST',
+                            path='--manifest', action='Supply the intended historical manifest.')
+    from games.gota.tools.engine_identity import resolve
+    return resolve(path, offline=offline)
+
+
+def agent_limit(value, flag, environment, default):
+    """Resolve a positive limit; an empty host setting leaves the default in place."""
+    setting = flag if value is not None else environment
+    if value is None:
+        value = os.environ.get(environment) or default
+    try:
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise TypeError
+        seconds = int(value)
+        if seconds < 1:
+            raise ValueError
+        return seconds
+    except (TypeError, ValueError):
+        raise InputRejected(f'{setting} must be a positive integer number of seconds',
+                            path=setting, action='Supply a positive integer number of seconds.') from None
+
+
+def now_iso():
+    return datetime.now(UTC).isoformat(timespec='seconds')
+
+
+def keep_compiler_sessions(home, scratch, profile_home):
+    """Copy the compiler child's ``state.db`` to
+    ``<profile_home>/gota-compiler/<build id>-<scratch suffix>/state.db`` before the scratch
+    directory goes. The compiler's build id (``<commit>-<n>``) repeats when the same candidate
+    commit is built again, so the scratch directory's unique suffix is appended. Never fails the
+    build: a problem is a warning on stderr."""
+    source = home / 'state.db'
+    if not source.is_file():
+        return
+    if not profile_home:
+        print('warning: HERMES_HOME is not set; compiler sessions not kept', file=sys.stderr)
+        return
+    try:
+        claims = scratch / 'staging' / '.claims'
+        build_ids = sorted(path.name for path in claims.iterdir()) if claims.is_dir() else []
+        name = f"{build_ids[0] if build_ids else 'no-build-id'}-{scratch.name.removeprefix('.gota-build-')}"
+        target = Path(profile_home) / COMPILER_SESSIONS_DIR / name / 'state.db'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # The backup API gives a consistent copy that includes any WAL content. The copy then
+        # leaves WAL mode, so read-only readers create no -wal/-shm files beside it.
+        with contextlib.closing(sqlite3.connect(source)) as src, \
+                contextlib.closing(sqlite3.connect(target)) as dst:
+            src.backup(dst)
+            dst.execute('PRAGMA journal_mode=DELETE')
+    except Exception as error:  # noqa: BLE001 - never fail the build or mask its own error
+        print(f'warning: compiler sessions not kept ({type(error).__name__}: {error})', file=sys.stderr)
+
+
+def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=False, prebuilt=None, full_evaluation=False):
+    """Output is new and immutable; failure retains evidence without an upload envelope."""
+    started = now_iso()
+    profile_home = os.environ.get('HERMES_HOME')
+    if prebuilt is None:
+        timeout = agent_limit(timeout, '--agent-timeout', 'GOTA_AGENT_TIMEOUT_S',
+                              DEFAULT_AGENT_TIMEOUT_S)
+        budget = agent_limit(budget, '--agent-budget', 'GOTA_AGENT_BUDGET_S',
+                             DEFAULT_AGENT_BUDGET_S)
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(TOOLS))
+    identity = validate_manifest(manifest, offline=offline)
+    if out.exists():
+        raise InputRejected(f'output already exists (immutable): {out}', path=out,
+                            action='Preserve the previous attempt and choose a new --out directory.')
+    if prebuilt is not None:
+        from games.gota.tools import prebuilt as existing
+        return existing.build(candidate, out, prebuilt, identity, started=started, full_evaluation=full_evaluation)
+    source = candidate / 'STRATEGY.md'
+    repo = subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
+    os.environ['GOTA_CANDIDATE_REPO'] = repo
+    import pw_cli
+    python = os.environ.get('GOTA_HERMES_PYTHON')
+    if not python:
+        raise pw_cli.EnvironmentMissing('Hermes Python is not configured', 'set GOTA_HERMES_PYTHON to the installed Hermes Python')
+
+    from games.gota.tools.engine_identity import provision
+    identity, _, _ = provision(identity)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix='.gota-build-', dir=out.parent))
+    os.environ['GOTA_ANALYSIS_DIR'] = str(scratch / 'analysis')
+    import pw_strategy
+    import strategy_build as compiler
+
+    resolved_manifest = identity.pop('manifest')
+    manifest = scratch / 'manifest.json'
+    manifest.write_text(json.dumps(resolved_manifest, indent=2) + '\n')
+    home = scratch / 'hermes-home'
+    home.mkdir()
+    os.environ['GOTA_COMPILER_HERMES_HOME'] = str(home)
+    compiler.BUILDS = scratch / 'compiled'
+    compiler.STAGING = scratch / 'staging'
+    args = pw_strategy.parser().parse_args(['compile', '--source', str(source), '--agent', 'hermes',
+                                           '--manifest', str(manifest), '--agent-timeout', str(timeout),
+                                           '--agent-budget', str(budget)] + (['--full-evaluation'] if full_evaluation else []))
+    report = pw_cli.Report('gota_build', json_mode=True)
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            result = pw_strategy.run(args, report, engine_identity=identity)
+    except BaseException:  # the scratch directory stays; keep the sessions findable too
+        keep_compiler_sessions(home, scratch, profile_home)
+        raise
+    target = Path(result['build'])
+    analysis = scratch / 'analysis'
+    if analysis.exists():
+        analysis.rename(target / 'analysis')
+    version = compiler.read(target / 'version.json')
+    version['engine'] = identity
+    version['artifact'] = 'policy.bas'
+    version['started'], version['finished'] = started, now_iso()
+    version['strategy_sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
+    installed = {name: value for name, value in version['source_hashes'].items() if Path(name).is_absolute()}
+    version['compiler']['installed_source_hashes'] = installed
+    version['driver'] = {'candidate_commit': version['source_commit'],
+                         'installed_source_sha256': hashlib.sha256(json.dumps(installed, sort_keys=True).encode()).hexdigest(),
+                         'installed_commit': None if installed else version['source_commit']}
+    compiler.dump(target / 'version.json', version)
+    shutil.copyfile(manifest, target / 'coworld_manifest.json')
+    target.rename(out)
+    keep_compiler_sessions(home, scratch, profile_home)
+    shutil.rmtree(scratch)
+    return {'ok': version['status'] == 'passed', 'build_id': version['build_id'],
+            'status': version['status'], 'error': result.get('error'), 'build': str(out),
+            'validation_scope': version['validation_scope'], 'evaluation': version['evaluation'],
+            'gates': version['gates'], 'artifact': str(out / 'policy.bas')}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('candidate', type=Path)
+    parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--prebuilt', type=Path, help='committed BASIC artifact; policy.bas requires policy.provenance.json (replace .bas); no model compiler')
+    parser.add_argument('--manifest', type=Path, default=None)
+    parser.add_argument('--agent-timeout', metavar='SECONDS',
+                        help=f'per-generation compiler timeout; overrides GOTA_AGENT_TIMEOUT_S (default: {DEFAULT_AGENT_TIMEOUT_S}s)')
+    parser.add_argument('--agent-budget', metavar='SECONDS',
+                        help=f'cumulative generation budget; overrides GOTA_AGENT_BUDGET_S (default: {DEFAULT_AGENT_BUDGET_S}s)')
+    parser.add_argument('--full-evaluation', action='store_true', help='also run full G2–G5 evaluation; default compiles and checks static host limits only')
+    parser.add_argument('--offline', action='store_true', help='explicit historical pinned engine; no live lookup')
+    parser.add_argument('--json', action='store_true')
+    args = parser.parse_args()
+    try:
+        manifest = args.manifest or (os.environ.get('GOTA_MANIFEST') if args.offline else None)
+        options = {'offline': args.offline, 'timeout': args.agent_timeout, 'budget': args.agent_budget, 'full_evaluation': args.full_evaluation}
+        if args.prebuilt is not None:
+            options['prebuilt'] = args.prebuilt.resolve()
+        result = build(args.candidate.resolve(), args.out.resolve(), Path(manifest).resolve() if manifest else None, **options)
+    except (Exception, SystemExit) as error:
+        if isinstance(error, SystemExit) and isinstance(error.code, int):
+            raise
+        from games.gota.gates import exception_summary
+        rejected = isinstance(error, InputRejected)
+        status = 'rejected' if rejected else 'errored'
+        result = {'ok': False, 'status': status, 'build': str(args.out.resolve()),
+                  'error': error.to_dict() if rejected else exception_summary(error), 'gates': {}}
+        # Never overwrite an existing immutable build, even if the caller reused --out.
+        if not args.out.exists():
+            args.out.mkdir(parents=True)
+            for name in ('report.json', 'version.json'):
+                (args.out / name).write_text(json.dumps(result, indent=2) + '\n')
+            (args.out / 'report.md').write_text(
+                f'# Build error\n\nStatus: **{status}**.\n\n```json\n' +
+                json.dumps(result['error'], indent=2) + '\n```\n')
+        print(json.dumps(result))
+        if rejected:
+            return 2
+        return getattr(error, 'exit_code', 3)
+    print(json.dumps(result))
+    return 0 if result['ok'] else 3 if result.get('status') == 'errored' else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
