@@ -35,8 +35,9 @@ Stop after completion. Do not claim the user's whole request is fulfilled from w
 
 When work is waiting for credits, permits, or a necessary experiment result, report the exact
 request identifiers and block. Do not mark unfinished work complete merely to wait. If your
-assignment was only to launch requests, report that launch as complete and identify the
-pending results; the coordinator decides follow-up work.
+assignment was only to launch requests, complete it only after every requested launch was
+admitted. A partial launch is unfinished: preserve admitted IDs and block on the refused or
+missing requests. Identify pending results; the coordinator decides follow-up work.
 
 Use approved research/game tools and the configured player identity. Respect scope, budget,
 and denied actions. Explicit build/upload requests do not require statistical experiments.

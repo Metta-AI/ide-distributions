@@ -10,7 +10,9 @@ launch card. Doctrine upheld: D-03, D-06, D-09, D-11, D-21, D-27.
 
 Read the experiment's frozen design, uploaded candidate binding and recorded requests.
 The orchestrator assigns work on this entity; your job is to recover or launch the specified
-batch, preserve its state and complete without waiting for the platform.
+batch and preserve its state. Complete a launch-only assignment only when every requested
+launch was admitted. Block when any launch is missing or refused; partial receipts never
+satisfy a full-batch assignment. Do not wait in the session for admitted requests to finish.
 
 ## Procedure
 

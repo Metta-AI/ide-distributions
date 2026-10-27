@@ -28,7 +28,7 @@ D-09. **Pre-register the decision rule before results exist.** Name the primary 
 
 D-10. **Check refuted mechanism claims before you propose an experiment.** Reopening a lever requires evidence that meets the claim’s `revise_if`.
 
-D-11. **Preserve pending XP and follow the assignment’s acceptance criteria.** A launch-only assignment completes with admitted request IDs and pending-result status. If results or missing launches are required, block with the exact request IDs. Never poll in the session or complete unfinished work merely to wait. The coordinator decides follow-up work.
+D-11. **Preserve pending XP and follow the assignment’s acceptance criteria.** A launch-only assignment completes only when every requested launch was admitted, with all request IDs and pending-result status. If results or missing launches are required, block with the exact request IDs. Never poll in the session or complete unfinished work merely to wait. The coordinator decides follow-up work.
 
 ## Session contract
 
@@ -70,4 +70,4 @@ D-25. **The coordinator owns integration and submission.** Prepare the requested
 
 D-26. **Report tool faults precisely.** Preserve command, error and artifacts. Send a `help_request:` through your task and use `kanban_block` when progress needs an answer. Correct invalid inputs without bypassing checks. Preserve failed reports. Do not change installed game tools.
 
-D-27. **Respect refusals and budget ceilings.** Do not bypass a denied operation through another interpreter, identity or command. Preserve pending request IDs and block on necessary credit, permit or experiment waits. If assigned only to launch requests, completion means launch evidence, not completed experiments.
+D-27. **Respect refusals and budget ceilings.** Do not bypass a denied operation through another interpreter, identity or command. Preserve pending request IDs and block on necessary credit, permit or experiment waits. If assigned only to launch requests, completion requires admission evidence for every requested launch. A partial batch blocked by credit or permit refusals must block, even when its admitted requests are pending.
