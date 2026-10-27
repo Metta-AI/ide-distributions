@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from ide_research_core import session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
-from .artifacts import ArtifactRead, CardFiles, ReportRead, Reports
+from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .capabilities import Capabilities
@@ -390,7 +390,7 @@ def handler(name):
                 arguments["session_id"] = session_id
             data = getattr(owner(context), name)(**arguments)
             return json.dumps({"ok": True, "data": data})
-        except (ResearchError, WorkspaceError) as error:
+        except (ArtifactError, ResearchError, WorkspaceError) as error:
             return json.dumps(error.envelope)
         except HTTPError as error:
             details = {"status": error.code}

@@ -159,7 +159,7 @@ commit = git(worktree, 'rev-parse', 'HEAD')
 identity = {'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit}
 request = {**identity, 'paths': ['evidence/nested/replay.bin', 'evidence/results.jsonl', 'policy.bas'],
            'expected_sha256': {'evidence/nested/replay.bin': hashlib.sha256(payload).hexdigest()}}
-assert not json.loads(registry.dispatch('card_artifacts', request))['ok']
+assert json.loads(registry.dispatch('card_artifacts', request))['error']['reason'] == 'card_not_completed'
 assert not json.loads(registry.dispatch('card_files', identity))['ok']
 with closing(connection()) as conn:
     assert kb.complete_task(conn, task_id, summary='Evidence committed', expected_run_id=task.current_run_id)
@@ -209,6 +209,19 @@ again = json.loads(registry.dispatch('card_artifacts', {**request, 'export': Tru
 assert again['ok'] and again['data']['directory'] != str(directory), again
 assert (directory / 'policy.bas').read_text() == 'local analysis copy'
 assert (Path(again['data']['directory']) / 'policy.bas').read_text() == 'PRINT "candidate"'
+cache = home / 'cache/card-artifacts'
+preserved = home / 'cache/preserved-artifacts'
+outside = root / 'outside-cache'
+outside.mkdir()
+cache.rename(preserved)
+cache.symlink_to(outside, target_is_directory=True)
+try:
+    escaped = json.loads(registry.dispatch('card_artifacts', {**request, 'export': True}))
+    assert escaped['error']['reason'] == 'invalid_export_cache', escaped
+    assert not list(outside.iterdir())
+finally:
+    cache.unlink()
+    preserved.rename(cache)
 for path in ['../report.md', 'link', '/etc/passwd', 'evidence']:
     rejected = json.loads(registry.dispatch('card_artifacts', {
         **identity, 'paths': [path], 'export': True,

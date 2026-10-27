@@ -6,7 +6,7 @@ import subprocess
 from contextlib import closing
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,6 +52,15 @@ class ArtifactDigest(BaseModel):
     matches: bool | None
 
 
+class ArtifactError(ValueError):
+    def __init__(self, reason: Literal[
+        "card_not_completed", "workspace_unavailable", "artifact_unavailable",
+        "invalid_artifact_path", "invalid_artifact_selection", "artifact_limit", "invalid_export_cache",
+    ], message: str):
+        super().__init__(message)
+        self.envelope = {"ok": False, "error": {"reason": reason, "message": message}}
+
+
 class Reports:
     def __init__(self, context):
         self.context = context
@@ -62,13 +71,13 @@ class Reports:
         latest = max(runs, key=lambda item: item["id"], default=None)
         if (not latest or latest["id"] != request.run_id or latest["task_id"] != request.task_id
                 or latest["status"] != "done" or not latest.get("ended_at") or task["status"] != "done"):
-            raise ValueError("Read artifacts only from the card's latest completed run; refresh card_show")
+            raise ArtifactError("card_not_completed", "Read artifacts only from the card's latest completed run; refresh card_show")
         workspace = Path(task.get("workspace_path") or "").resolve()
         if not task.get("workspace_path") or not workspace.is_relative_to(self.context.root.resolve()):
-            raise ValueError("The card workspace is not on this profile host; request a report handoff from the worker")
+            raise ArtifactError("workspace_unavailable", "The card workspace is not on this profile host; request a report handoff from the worker")
         branch = task.get("branch_name")
         if not branch:
-            raise ValueError("The card workspace is unavailable; request a report handoff from the worker")
+            raise ArtifactError("workspace_unavailable", "The card workspace is unavailable; request a report handoff from the worker")
         if not workspace.is_dir() and task["workspace_kind"] == "worktree":
             from hermes_cli import kanban_db as kb
             from hermes_cli.kanban_db_workspace import resolve_workspace
@@ -79,9 +88,9 @@ class Reports:
                 completed = kb.get_task(conn, request.task_id)
             restored = resolve_workspace(completed, board=BOARD).resolve()
             if restored != workspace:
-                raise ValueError("The restored workspace differs from the card's recorded workspace")
+                raise ArtifactError("workspace_unavailable", "The restored workspace differs from the card's recorded workspace")
         if not workspace.is_dir():
-            raise ValueError("The card workspace is unavailable; request a report handoff from the worker")
+            raise ArtifactError("workspace_unavailable", "The card workspace is unavailable; request a report handoff from the worker")
 
         self._git(workspace, "check-ref-format", "refs/heads/" + branch)
         self._git(workspace, "merge-base", "--is-ancestor", request.commit, "refs/heads/" + branch)
@@ -94,21 +103,21 @@ class Reports:
             capture_output=True, timeout=30, check=False,
         )
         if result.returncode:
-            raise ValueError("The requested commit/report is not available on the recorded card branch")
+            raise ArtifactError("artifact_unavailable", "The requested commit/artifact is not available on the recorded card branch")
         return result.stdout
 
     @staticmethod
     def _relative(path: str) -> PurePosixPath:
         relative = PurePosixPath(path)
         if relative.is_absolute() or ".." in relative.parts or "\0" in path or str(relative) != path:
-            raise ValueError("Use the committed artifact's normalized relative path")
+            raise ArtifactError("invalid_artifact_path", "Use the committed artifact's normalized relative path")
         return relative
 
     def _blob(self, workspace: Path, commit: str, path: str) -> tuple[str, int]:
         self._relative(path)
         entry = self._git(workspace, "ls-tree", "--format=%(objectmode) %(objecttype) %(objectname)", commit, "--", path).decode().strip().split()
         if len(entry) != 3 or entry[0] not in ("100644", "100755") or entry[1] != "blob":
-            raise ValueError("Choose a committed regular report file; directories and symlinks are not supported")
+            raise ArtifactError("artifact_unavailable", "Choose a committed regular file; directories and symlinks are not supported")
         blob = entry[2]
         return blob, int(self._git(workspace, "cat-file", "-s", blob))
 
@@ -121,7 +130,7 @@ class Reports:
         tree = request.commit + (":" + request.directory if request.directory else "")
         entries = self._git(workspace, "ls-tree", "--long", "-z", tree).split(b"\0")[:-1]
         if request.offset > len(entries):
-            raise ValueError("Offset exceeds the directory's entry count")
+            raise ArtifactError("invalid_artifact_selection", "Offset exceeds the directory's entry count")
         files = []
         for entry in entries[request.offset:request.offset + request.limit]:
             metadata, name = entry.split(b"\t", 1)
@@ -143,15 +152,15 @@ class Reports:
         workspace = self._workspace(request)
         blob, size = self._blob(workspace, request.commit, request.path)
         if size > 256_000:
-            raise ValueError("Report exceeds the 256,000-byte read limit; ask the worker for a bounded summary")
+            raise ArtifactError("artifact_limit", "Report exceeds the 256,000-byte read limit; export it with card_artifacts for local analysis")
         try:
             text = self._git(workspace, "cat-file", "blob", blob).decode("utf-8")
         except UnicodeDecodeError:
-            raise ValueError("Report is not UTF-8 text") from None
+            raise ArtifactError("artifact_unavailable", "Report is not UTF-8 text; export it with card_artifacts") from None
         if "\0" in text:
-            raise ValueError("Report is binary")
+            raise ArtifactError("artifact_unavailable", "Report is binary; export it with card_artifacts")
         if request.offset > len(text):
-            raise ValueError("Offset exceeds the report's character count")
+            raise ArtifactError("invalid_artifact_selection", "Offset exceeds the report's character count")
         end = min(request.offset + request.limit, len(text))
         return {
             "task_id": request.task_id, "run_id": request.run_id, "commit": request.commit,
@@ -165,11 +174,11 @@ class Reports:
         request = ArtifactRead(task_id=task_id, run_id=run_id, commit=commit, paths=paths,
                                expected_sha256=expected_sha256 or {}, export=export)
         if len(set(request.paths)) != len(request.paths) or not request.expected_sha256.keys() <= set(request.paths):
-            raise ValueError("Choose distinct paths and provide expected hashes only for those paths")
+            raise ArtifactError("invalid_artifact_selection", "Choose distinct paths and provide expected hashes only for those paths")
         workspace = self._workspace(request)
         entries = [(path, *self._blob(workspace, request.commit, path)) for path in request.paths]
         if sum(size for _, _, size in entries) > 256 * 1024 * 1024:
-            raise ValueError("Artifact batch exceeds 256 MiB; select smaller batches")
+            raise ArtifactError("artifact_limit", "Artifact batch exceeds 256 MiB; select smaller batches")
         digests = []
         contents = []
         for path, blob, size in entries:
@@ -190,6 +199,8 @@ class Reports:
         }
         if request.export and result["status"] != "mismatch":
             cache = self.context.home / "cache" / "card-artifacts"
+            if not cache.resolve().is_relative_to(self.context.home.resolve()):
+                raise ArtifactError("invalid_export_cache", "Artifact exports must remain inside this coordinator profile")
             cache.mkdir(parents=True, exist_ok=True, mode=0o700)
             with TemporaryDirectory(prefix=".staging-", dir=cache) as temporary:
                 staged = Path(temporary) / "snapshot"

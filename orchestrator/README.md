@@ -267,3 +267,7 @@ Each export creates a separate snapshot, so a retry never overwrites an earlier 
 These tools share completed-run and branch checks, recover cleaned worktrees through Hermes,
 never integrate a branch, and never execute copied files. Hash agreement establishes byte identity;
 review result rows and evaluation evidence separately. Active worker files remain unavailable.
+Failures carry stable reasons: `card_not_completed`, `workspace_unavailable`, `artifact_unavailable`,
+`invalid_artifact_path`, `invalid_artifact_selection`, `artifact_limit`, or `invalid_export_cache`.
+Refresh native task state, correct the selection, or reduce the batch according to that reason;
+these conditions do not imply missing account credentials.
