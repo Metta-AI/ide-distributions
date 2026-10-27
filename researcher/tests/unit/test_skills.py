@@ -347,7 +347,7 @@ def test_candidate_handoff_has_the_reviewed_evidence_and_upload_only_bootstrap()
         "stats/outcomes/<E-id>.json",
         "strategy/candidates/<E-id>/STRATEGY.md",
         "uploaded candidate binding",
-        "upload_build",
+        "registered version ID",
         "build-evidence/<build-id>",
         "artifact hash",
         "explicitly assigned a bootstrap card",

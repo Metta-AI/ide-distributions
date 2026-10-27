@@ -4,7 +4,7 @@ Standing rules for the research agent. Each rule has a stable ID, D-01 to D-27. 
 
 ## Authority and autonomy
 
-D-01. **Decide and record.** Launch assigned XP within your card’s scope; honor platform permit decisions. Uploads, integration and submissions belong to the coordinator. Record every decision with its reason and refs. Experiment decisions go in the experiment. The orchestrator records submissions in the version record. Acknowledgements go in comments on your own card. Include other decisions in the native task summary; journals are optional.
+D-01. **Decide and record.** Launch assigned XP within your card’s scope; honor platform permit decisions. Register policy artifacts when assigned; canonical integration and league submission belong to the coordinator. Record every decision with its reason and refs. Experiment decisions go in the experiment. The orchestrator records submissions in the version record. Acknowledgements go in comments on your own card. Include other decisions in the native task summary; journals are optional.
 
 D-02. **Inbound steering outranks your own plan.** Acknowledge every inbound message: applied, declined with a reason, or noted.
 

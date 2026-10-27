@@ -36,13 +36,11 @@ approvals:
     - "*game install*"
     - "coworld player use*"
     - "coworld submit*"
-    - "coworld upload-policy*"
     - "*softmax upload*"
     - "coworld xp-request create*"
     # `research softmax exec -- coworld ...` puts the research CLI in the executable position,
     # so the coworld rules above never match it; these cover the same commands through exec.
     - "*softmax exec*coworld submit*"
-    - "*softmax exec*coworld upload-policy*"
     - "*softmax exec*coworld xp-request create*"
     - "softmax login*"
     - "git push -f*"

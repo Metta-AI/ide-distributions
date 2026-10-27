@@ -1,15 +1,20 @@
 ---
 name: build-upload
-description: Use when preparing file policies for coordinator upload.
+description: Use when building or uploading a policy artifact.
 ---
 
-# Build and hand off
+# Build and upload
 
-Use this procedure when the selected publication tool accepts verified file artifacts.
-For other artifact types, discover the appropriate tool and applicable procedure before acting.
+For an explicit build/upload assignment, run the game's documented build command in the assigned worktree.
+For a Dockerfile policy, use `coworld build-policy . --output /tmp/player.tar`, then
+`coworld upload-policy --image-archive /tmp/player.tar --name NAME --server SERVER`.
+For a game-hosted file, use `coworld upload-policy --file PATH --name NAME --server SERVER`.
+Use the assigned name, server, and existing player credentials. Consult CLI help and the game's Coworld instructions
+for arguments. Wait for each command's exit status; upload only a successful build. Return the registered version ID.
+An explicit upload assignment does not require a statistical experiment. League submission remains coordinator-owned.
 
-Build and verify through the game’s `build` binding. The coordinator owns upload after
-the native task completes; researchers never publish artifacts directly.
+For a research experiment requiring a local candidate binding, use the existing procedure below. The coordinator
+records that binding and accepts the completed evidence.
 
 Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 

@@ -39,7 +39,11 @@ def test_retained_profile_upgrade(tmp_path):
         defaults = yaml.safe_load(config_path.read_text())
         old = yaml.safe_load(config_path.read_text())
         if kind == "researcher":
-            old["approvals"]["deny"] = ["user-prohibited-command"]
+            old["approvals"]["deny"] = [
+                "user-prohibited-command",
+                "coworld upload-policy*",
+                "*softmax exec*coworld upload-policy*",
+            ]
             doctrine = source / "doctrine/research-agent.md"
             doctrine.write_text(
                 doctrine.read_text().replace("# Research agent doctrine", "# Old research doctrine")
@@ -105,6 +109,8 @@ def test_retained_profile_upgrade(tmp_path):
         if kind == "researcher":
             assert set(defaults["approvals"]["deny"]) <= set(actual["approvals"]["deny"])
             assert "user-prohibited-command" in actual["approvals"]["deny"]
+            assert "coworld upload-policy*" not in actual["approvals"]["deny"]
+            assert "*softmax exec*coworld upload-policy*" not in actual["approvals"]["deny"]
             assert "# Old research doctrine" not in (workspace / "AGENTS.md").read_text()
         else:
             assert set(defaults["platform_toolsets"]["api_server"]) <= set(
