@@ -85,8 +85,16 @@ def test_clean_export_installs_paused(tmp_path):
     code = """
 import json
 import sys
+import hashlib
+import subprocess
+from contextlib import closing
+from pathlib import Path
 from tools.registry import registry
 from hermes_cli.plugins import get_plugin_manager, get_plugin_toolsets
+from hermes_cli import kanban_db as kb
+from hermes_cli.kanban_db_boards import create_board
+from hermes_cli.kanban_db_workspace import resolve_workspace, set_workspace_path
+from orchestrator.board import connection
 manager = get_plugin_manager()
 manager.discover_and_load()
 plugin = next(p for p in manager.list_plugins() if p['name'] == 'orchestrator')
@@ -102,6 +110,73 @@ assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 listing = json.loads(registry.dispatch('capabilities', {'kind': 'tools'}))
 assert {'orchestrator', 'terminal', 'file', 'code_execution'} <= set(listing['tools']), listing
 assert 'skills' not in listing
+
+# Complete a real native task, let Hermes clean its worktree, then review its
+# committed text and binary evidence through the installed agent tools.
+home = Path(sys.argv[1])
+root = home.parent.parent
+seed = root / 'evidence-seed'
+seed.mkdir()
+def git(path, *args):
+    return subprocess.check_output(['git', '-C', str(path), *args], stderr=subprocess.PIPE).decode().strip()
+git(seed, 'init', '-b', 'main')
+git(seed, 'config', 'user.name', 'Artifact system test')
+git(seed, 'config', 'user.email', 'test@example.invalid')
+(seed / 'seed.txt').write_text('initial')
+git(seed, 'add', '.')
+git(seed, 'commit', '-m', 'seed')
+remote = root / 'evidence.git'
+git(root, 'clone', '--bare', str(seed), str(remote))
+worker = root / 'profiles/researcher-1'
+worker.mkdir()
+clone = worker / 'workspace'
+git(root, 'clone', str(remote), str(clone))
+create_board('autoresearch')
+created = json.loads(registry.dispatch('card_create', {
+    'command_id': 'artifact-system:create', 'assignee': 'researcher-1',
+    'title': 'Produce verifiable evidence', 'body': 'Commit the report and binary artifact',
+}))
+assert created['ok'], created
+task_id = created['data']['card']['id']
+with closing(connection()) as conn:
+    task = kb.claim_task(conn, task_id)
+    worktree = resolve_workspace(task, board='autoresearch')
+    set_workspace_path(conn, task_id, worktree)
+payload = bytes(range(256)) * 4096
+(worktree / 'replay.bin').write_bytes(payload)
+(worktree / 'report.md').write_text('Recorded evidence')
+(worktree / 'link').symlink_to('replay.bin')
+git(worktree, 'config', 'user.name', 'Artifact system test')
+git(worktree, 'config', 'user.email', 'test@example.invalid')
+git(worktree, 'add', '.')
+git(worktree, 'commit', '-m', 'record evidence')
+commit = git(worktree, 'rev-parse', 'HEAD')
+request = {'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit,
+           'artifacts': {'replay.bin': hashlib.sha256(payload).hexdigest()}}
+assert not json.loads(registry.dispatch('card_verify_artifacts', request))['ok']
+with closing(connection()) as conn:
+    assert kb.complete_task(conn, task_id, summary='Evidence committed', expected_run_id=task.current_run_id)
+assert not worktree.exists(), 'Native completion must exercise cleaned-worktree recovery'
+verified = json.loads(registry.dispatch('card_verify_artifacts', request))
+assert verified['ok'] and verified['data']['status'] == 'verified', verified
+assert verified['data']['artifacts'][0]['bytes'] == len(payload)
+assert worktree.exists()
+(worktree / 'replay.bin').write_bytes(b'uncommitted change')
+assert json.loads(registry.dispatch('card_verify_artifacts', request))['data']['status'] == 'verified'
+mismatch = json.loads(registry.dispatch('card_verify_artifacts', {
+    **request, 'artifacts': {'replay.bin': '0' * 64},
+}))
+assert mismatch['ok'] and mismatch['data']['status'] == 'mismatch', mismatch
+for path in ['../replay.bin', 'link', '/etc/passwd']:
+    rejected = json.loads(registry.dispatch('card_verify_artifacts', {
+        **request, 'artifacts': {path: '0' * 64},
+    }))
+    assert not rejected['ok'], rejected
+report = json.loads(registry.dispatch('card_report', {
+    'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit, 'path': 'report.md',
+}))
+assert report['ok'] and report['data']['content'] == 'Recorded evidence', report
+assert (worktree / 'replay.bin').read_bytes() == b'uncommitted change'
 print(json.dumps({'ok': True}))
 """
     result = subprocess.run(

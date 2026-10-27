@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from ide_research_core import session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
-from .artifacts import ReportRead, Reports
+from .artifacts import ArtifactVerify, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .capabilities import Capabilities
@@ -54,6 +54,12 @@ TOOLS = {
         "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
+    ),
+    "card_verify_artifacts": (
+        Reports,
+        "Verify expected SHA-256 hashes for committed files from a card's latest completed run. Pass relative paths mapped to hashes from its report/index. Supports binary replays; returns verified or mismatch plus actual hashes, sizes and Git blobs. At most 64 files and 256 MiB per call. Uses the same task, branch and completion checks as card_report, including native worktree restoration. Never executes artifacts or reads uncommitted files. Hash agreement proves byte identity, not evaluation correctness.",
+        ArtifactVerify.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit", "artifacts"],
     ),
     "host_capabilities": (
         Capabilities,

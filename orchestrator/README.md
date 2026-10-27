@@ -245,3 +245,9 @@ verifies its manifest SHA-256 and distinguishes it from the selected player's su
 `card_report` reads a committed report from the recorded workspace of the latest completed card run,
 checks commit membership in that card branch, and never integrates or executes the report.
 If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.
+Use `card_verify_artifacts(task_id, run_id, commit, artifacts)` to check the report's expected
+SHA-256 hashes against committed files, including binary replays. `artifacts` maps normalized
+relative paths to hashes; each call accepts at most 64 files totaling 256 MiB. Read `status`
+(`verified` or `mismatch`) and the per-file results. This shares the completed-run and branch
+checks with `card_report`, ignores uncommitted changes, and never executes artifact content.
+Hash agreement establishes byte identity; review the result rows and evaluation evidence separately.
