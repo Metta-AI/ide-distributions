@@ -1,8 +1,9 @@
 # researcher
 
 A research worker for the Softmax IDE: it improves game policies by working Kanban cards that
-the `orchestrator` profile gives it, each card on one game. It ships two games, Gods of the
-Arena (`gota`) and the test game `fakegame`; a card can also make the folder for a new game
+the `orchestrator` profile gives it, each card on one game. It ships three games, Gods of the
+Arena (`gota`), Pudge Wars Basic (`pudge-wars-basic`, the game-hosted BASIC league) and the test
+game `fakegame`; a card can also make the folder for a new game
 (the `game-create` skill), which the orchestrator installs on the host. It never talks to the
 user; the orchestrator does. Several researchers work on one host, each as its own profile
 (`researcher-1`, `researcher-2`, ...) installed from this folder.
@@ -56,7 +57,7 @@ the bounds.
 | `git` | any recent | the canonical workspace and its clones |
 | `uv` | any recent | the profile venv (the launcher runs `uv sync --frozen`) |
 | Hermes Agent | v0.21.6 | the dispatcher, the workers and Kanban |
-| Nim | 2.2.10 | building GotA native tools and running native gate/replay tests; pure Python tests need no Nim |
+| Nim | 2.2.10 | building GotA and Pudge Wars Basic native tools and running native gate/replay tests; pure Python tests need no Nim |
 
 ```sh
 git --version
@@ -244,6 +245,10 @@ tests' fixture refuses any real agent binary once it is active:
 - **GotA is bound but not proven end to end.** `games/gota` has real build, local check,
   evaluate and upload bindings, and the compiler passed M1 on engine 2026.10.7.2 only. No
   research cycle has run on GotA under the orchestrator yet.
+- **Pudge Wars Basic is bound but not proven end to end.** `games/pudge-wars-basic` has real
+  build, local check (G1–G4), evaluate and replay bindings, and a native headless match runner
+  checked against the league host on 2026-10-26 (version 0.1.8); no research cycle has run on it
+  under the orchestrator yet.
 - **Container players.** Most coworlds other than GotA play a Docker image. Hosted sandboxes
   have no Docker, and `softmax upload` sends a file or directory, so a new game folder for such
   a game can hold its docs, skills and `evaluate` binding but not a build that runs here; its
