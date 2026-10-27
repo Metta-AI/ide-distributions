@@ -245,3 +245,4 @@ Configured bindings are not execution-verified. `game_starter` reads bounded UTF
 verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.
 `card_report` reads a committed report from the recorded workspace of the latest completed card run,
 checks commit membership in that card branch, and never integrates or executes the report.
+If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.

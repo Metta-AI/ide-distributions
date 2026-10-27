@@ -51,7 +51,7 @@ TOOLS = {
     ),
     "card_report": (
         Reports,
-        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. No integration or filesystem mutation.",
+        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
     ),
