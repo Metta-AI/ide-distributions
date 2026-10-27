@@ -99,9 +99,10 @@ runs `scripts/queue_keeper.py --bootstrap-only` and resumes the `queue-keeper`, 
    `AUTORESEARCH_CARD_MODELS`): the profiles have no spend management. The full list each
    profile reads is in its `distribution.yaml` (`env_requires`).
 
-2. **Run each profile's bootstrap, researchers first.** The first researcher creates the bare
-   canonical repository and seeds it from its `games/<game>/seed`; the orchestrator ships no
-   seed, so on an empty canonical repository its bootstrap fails with "no seed for game".
+2. **Run each profile's bootstrap.** Whichever profile runs first creates the bare canonical
+   repository and seeds it from its `games/<game>/seed`; both research profiles ship the
+   shipped games' folders, so the order does not matter. The orchestrator also creates a
+   game's workspace later with its `game_prepare` tool.
    Pass the profile's `.env` values in the environment, as today's prepare does for
    `queue_keeper.py`:
 

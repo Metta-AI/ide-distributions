@@ -38,10 +38,8 @@ The manifest documents defaults. The credential accepts a bare token or player-s
 JSON. Hermes's routed profile secret scope supplies HTTP/CLI credentials; a different
 profile's ambient credential is not used. Gate subprocesses get the configured passthrough.
 
-Then prepare the profile once, after at least one researcher profile has run its own
-bootstrap (the first researcher creates the bare canonical repository and seeds it from its
-`games/<game>/seed`; this profile ships no seed, so on an empty canonical repository it fails
-with "no seed for game"):
+Then prepare the profile once. Whichever profile bootstraps first creates the bare canonical
+repository; this profile ships every shipped game's folder, seed included, so it can be first:
 
 ```sh
 HERMES_HOME=<profile> python3 <profile>/scripts/bootstrap.py
@@ -52,8 +50,8 @@ It syncs `$HERMES_HOME/local/venv` from `uv.lock`, clones the canonical reposito
 `RESEARCH_CLI` to `.env`. The board is created once per host with
 `hermes kanban boards create autoresearch`.
 
-`src/ide_research_core/`, the ontology at the end of `SOUL.md` and `games/<game>/GAME.md` are
-copies made by `python3 tools/sync_shared.py` at the repository root. Edit the sources
+`src/ide_research_core/`, the ontology at the end of `SOUL.md`, the game folders under
+`games/` and the game skills under `skills/<game>/` are copies made by `python3 tools/sync_shared.py` at the repository root. Edit the sources
 (`shared/`, `ontology/`, `researcher/games/`) and rerun the script; do not edit the copies.
 
 The installed supervisor starts paused. Hosting should resume it once after preparation,
@@ -89,7 +87,8 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
 | `accept_champion(game?)` | Record the league's current champion after the user confirms. |
 | `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
-| `game_list` | Shipped and installed games, whether each has a research workspace yet, and how an installed one was installed. |
+| `game_list` | Shipped and installed games with each one's `league_id`, whether each has a research workspace yet, and how an installed one was installed. |
+| `game_prepare(game)` | Create a game's research workspace (canonical repository seeded from the game folder, plus this profile's clone), or refresh it. Idempotent; no card or researcher needed. |
 | `game_install(id, run_id, name, replace?)` | Install the `games/<name>/` folder a completed card committed, host-wide; returns its check report (problems refuse, gaps to report). |
 | `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
 | `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |

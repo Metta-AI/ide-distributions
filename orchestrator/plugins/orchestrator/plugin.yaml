@@ -40,4 +40,5 @@ provides_tools:
   - leaderboard
   - latest_league_result
   - game_list
+  - game_prepare
   - game_install

@@ -37,3 +37,11 @@ def test_unknown_or_unnamed_game(capsys, monkeypatch):
     assert show(capsys)[0] == 2
     code, env = show(capsys, "--name", "nope")
     assert code == 1 and "not found" in env["error"]["message"]
+
+
+def test_list_names_each_games_league(capsys, monkeypatch):
+    monkeypatch.delenv("RESEARCH_GAME", raising=False)
+    assert main(["game", "list"]) == 0
+    games = {game["name"]: game for game in json.loads(capsys.readouterr().out)["data"]["games"]}
+    assert games["fakegame"]["league_id"] == "fake-league"
+    assert games["pudge-wars-basic"]["league_id"] == "league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0"

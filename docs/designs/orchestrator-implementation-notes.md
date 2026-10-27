@@ -45,8 +45,18 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 - **Pudge Wars Basic** (`researcher/games/pudge-wars-basic/`) is the second real shipped game.
   Its binding skills follow the contract (`games/<game>/skills/<binding>/SKILL.md`, named
   `<game>-<binding>`); `tools/sync_shared.py` copies them into both research profiles'
-  `skills/<game>/`, because Hermes loads skills only from there. GotA's skills predate that
-  naming and stay bare-named in `researcher/skills/gota/`.
+  `skills/<game>/`, because Hermes loads skills only from there. GotA's skills live in
+  `researcher/games/gota/skills/` the same way but keep their older bare names (`survey`, `ab`, ...).
+- **The orchestrator has every shipped game folder**, not only `GAME.md`: the docs, tools,
+  baselines and seed, so it knows each game as well as a researcher does and can seed a
+  game's workspace itself.
+- **`game_prepare`** creates a game's workspace with the orchestrator's own CLI
+  (`research workspace bootstrap --game <game>`). The design made it only as a side effect of
+  `card_create` preparing a researcher's clone. A workspace the orchestrator seeds starts
+  without `AGENTS.md`, because the doctrine ships only with the researcher; the first card's
+  preparation runs the researcher's bootstrap, which publishes it before the card's worktree
+  is branched. `game_list` reports each game's `league_id` so the selected league can be
+  matched to a game folder.
 
 ## Shared code and the ontology (§5.5, §5.6)
 
@@ -55,8 +65,8 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   included, so every turn has it without reading another file.
 - For the same reason the orchestrator's doctrine is the `## Doctrine` section of its
   `SOUL.md`, not a separate `doctrine/orchestrator.md` (which nothing loaded).
-- `tools/sync_shared.py` also copies `researcher/games/*/GAME.md` into `orchestrator/games/`:
-  the shared package reads the league id from the game contract under the distribution root.
+- `tools/sync_shared.py` also copies each whole `researcher/games/<game>/` folder into
+  `orchestrator/games/` (see Shipped games), skipping the tools' local build cache and binaries.
   Games installed at runtime live in the host's `<root>/games/` instead, which both profiles
   search after their shipped ones.
 - **One host, several games** (beyond the design, which bound a host to one game):
@@ -132,7 +142,7 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
 
 The metta changes R-1 to R-6 are in [docs/hosting.md](../hosting.md), updated for this
 implementation: one `RESEARCH_*` environment for every profile, each profile's
-`scripts/bootstrap.py` as the prepare step (researchers first: the first researcher creates
-and seeds the bare canonical repository; the orchestrator ships no seed, so on an empty
-canonical repository its bootstrap fails with "no seed for game"), the board created once,
+`scripts/bootstrap.py` as the prepare step (in any order: whichever profile runs first creates
+and seeds the bare canonical repository, since both ship the game folders' seeds), the board
+created once,
 and the supervisor resumed once.

@@ -1,0 +1,242 @@
+{
+  "examples/pudge_wars/coworld_host.nim:1066-1071@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/coworld_host.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 1066,
+    "end": 1071,
+    "text": "  for i, pudge in world.pudges:\n    let\n      mine = if pudge.team == WestTeam: west else: east\n      theirs = if pudge.team == WestTeam: east else: west\n    # Win or fail per seated agent: 1 if that bank is ahead, else 0 (draws fail).\n    scores.add %(if mine > theirs: 1.0 else: 0.0)\n",
+    "sha256": "2b0249b3b36e88a74094d1c26deab575f5ec0aed88c46f3d8ad21707f346bce4",
+    "file_sha256": "4f92bc4f270f92ade2063545dceb49097c5e950a2a67619339696383a546b205"
+  },
+  "examples/pudge_wars/coworld_host.nim:1080-1089@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/coworld_host.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 1080,
+    "end": 1089,
+    "text": "  let reason =\n    if world.gameOver: \"kill_goal\"\n    else: \"time_limit\"\n  var winner = \"draw\"\n  if west > east:\n    winner = \"west\"\n  elif east > west:\n    winner = \"east\"\n  if world.gameOver:\n    winner = winnerName(world)\n",
+    "sha256": "a8b739c88f6204142e455308db671a5208a369480dd3c861d810529d36cb5490",
+    "file_sha256": "4f92bc4f270f92ade2063545dceb49097c5e950a2a67619339696383a546b205"
+  },
+  "examples/pudge_wars/sim.nim:1754-1763@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 1754,
+    "end": 1763,
+    "text": "  inc world.pudges[victimIndex].deaths\n  if selfRot:\n    # Own Rot: suicide bounty. The other team still scores the kill\n    # toward the goal; nobody is paid gold or personal KO/PTS.\n    let other = if victimTeam == WestTeam: EastTeam else: WestTeam\n    inc world.teamKills[other.ord]\n  elif killer >= 0 and world.pudges[killer].team != victimTeam:\n    inc world.pudges[killer].kills\n    inc world.pudges[killer].points\n    inc world.pudges[killer].streak\n",
+    "sha256": "d4f1b9ffeb79be1302af33e12e7c49f0c2344cf0020668d5b3a920237cd5557b",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/sim.nim:1788-1788@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 1788,
+    "end": 1788,
+    "text": "    inc world.teamKills[world.pudges[killer].team.ord]\n",
+    "sha256": "e6dc1bd159400d6b45921ea009a3f04e7c6ceb00f46f3b52c9495e611253b9f5",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/sim.nim:4429-4436@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 4429,
+    "end": 4436,
+    "text": "  if victim.hookedBy != 0 and victim.hookedBy != hook.ownerId:\n    if victim.team != hook.team and\n        not world.pudges[bestPudge].hasCheat(CheatFlagGod):\n      let killer = world.pudgeIndex(hook.ownerId)\n      if killer >= 0:\n        world.pudges[killer].justHeadshot = true\n        inc world.pudges[killer].headshotCount\n        inc world.pudges[killer].hooksLanded\n",
+    "sha256": "c81d559df7f7d63916ed8310824244339d6bbf96c409e44291081b94cdf34a5a",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/sim.nim:4458-4460@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 4458,
+    "end": 4460,
+    "text": "  let owner = world.pudgeIndex(hook.ownerId)\n  if owner >= 0:\n    inc world.pudges[owner].hooksLanded\n",
+    "sha256": "f35fef3b0bcc2f35cb06e25aca63809d0ad8dafb8bbfd135a8de80c81676d29a",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/sim.nim:4371-4373@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 4371,
+    "end": 4373,
+    "text": "  let owner = world.pudgeIndex(hook.ownerId)\n  if owner >= 0:\n    inc world.pudges[owner].hooksLanded\n",
+    "sha256": "f35fef3b0bcc2f35cb06e25aca63809d0ad8dafb8bbfd135a8de80c81676d29a",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/bots.nim:116-117@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/bots.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 116,
+    "end": 117,
+    "text": "  result.maxInstructions = 100_000\n  result.maxWorkUnits = 250_000\n",
+    "sha256": "b8f90c97ed2348d58578ce2d32f7a0305f1b146e39507f3347841b373d672f28",
+    "file_sha256": "d3676d4ce28fa3f1825f838f7350ea36989a18955042d517a0e51ca7b9393c04"
+  },
+  "examples/pudge_wars/bots.nim:722-723@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/bots.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 722,
+    "end": 723,
+    "text": "  if vm == nil or vm.failed or pudge.state == Dying:\n    return\n",
+    "sha256": "f1305ed8fe7f364d87ad1d7d498802a6bce0464a9e043eeaf464095fed11d0a5",
+    "file_sha256": "d3676d4ce28fa3f1825f838f7350ea36989a18955042d517a0e51ca7b9393c04"
+  },
+  "examples/pudge_wars/bots.nim:827-831@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/bots.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 827,
+    "end": 831,
+    "text": "  except BasicError as error:\n    vm.failed = true\n    vm.lastError = error.msg\n    if vm.output == nil:\n      echo \"pudge \", pudge.id, \" BASIC error: \", error.msg\n",
+    "sha256": "96f5e507d4309abd22e518933a1bb03d759cf308a8536c9208ae045cf9f9628b",
+    "file_sha256": "d3676d4ce28fa3f1825f838f7350ea36989a18955042d517a0e51ca7b9393c04"
+  },
+  "examples/pudge_wars/fileplayers.nim:144-152@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/fileplayers.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 144,
+    "end": 152,
+    "text": "proc rejectPlayer(players: FilePlayers, slot: int, message: string) =\n  players.seats[slot].failed = true\n  players.playerLog(slot, \"BASIC loading error: \" & message & \"\\n\")\n  players.close()\n  players.writeStatus()\n  writeAtomic(players.failurePath, $(%*{\n    \"message\": \"Policy loading failed for player slot \" & $slot,\n    \"failed_policy_index\": slot\n  }))\n",
+    "sha256": "f52ef9144efe7217d9e154d2ebb3620140b3d548a2110d0fa806d140781d21c3",
+    "file_sha256": "e0fe1703c68c43704de422ed761bd2cb6faaf895d6340a9477767ab22a9501aa"
+  },
+  "examples/pudge_wars/content.nim:32-37@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/content.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 32,
+    "end": 37,
+    "text": "  HookCooldownTicks* = TickRate * 2 + 1\n    ## 2 s plus one tick. A round 64-tick cooldown is a multiple of\n    ## every even roster (2/4/8 butchers), so the decision-rotation\n    ## phase locked to one bank for the whole match and that bank won\n    ## every same-cycle hook/rune race. +1 tick makes the throw cycle\n    ## drift on 2, 4, 6, 8, and 10 seat boards.\n",
+    "sha256": "c06e5f276710c2abd5dbe1e23e1b80e238534084eefc2bb1d7e97c09fe6e17b9",
+    "file_sha256": "47e1f96173aadcf15f5c4671bac9d5ca619d523d4aa846b287564e477b15af99"
+  },
+  "examples/pudge_wars/sim.nim:1602-1611@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 1602,
+    "end": 1611,
+    "text": "  let count = matchPudgeCount(n)\n  result.setLen(count)\n  for i in 0 ..< count:\n    let team = if i < n: WestTeam else: EastTeam\n    result[i] = ReplayPudge(\n      id: FirstPudgeId + int32(i),\n      team: uint8(team.ord),\n      slot: uint8(i mod n),\n      lobbySeat: uint8(i)\n    )\n",
+    "sha256": "8ce16f6830ecb716c6873ba6a19d290a77aa39f55467a17943fbfb4eef9c9b00",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/sim.nim:3539-3546@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 3539,
+    "end": 3546,
+    "text": "    for i in 0 ..< world.pudges.len:\n      if world.pudges[i].state != Alive:\n        continue\n      if not within(world.pudges[i].position, origin, RotRadius):\n        continue\n      if world.pudges[i].shieldTicks > 0 and world.pudges[i].id != ownerId:\n        continue\n      world.dealPudgeDamage(i, RotDamage, ownerId)\n",
+    "sha256": "33c78224c6ac7b5808bd831764a8985af50444cc5a14967049d2af086b79a2d7",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/sim.nim:3504-3514@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 3504,
+    "end": 3514,
+    "text": "  for i in 0 ..< world.pudges.len:\n    if world.pudges[i].state != Alive or not world.pudges[i].inRiver:\n      continue\n    if world.pudges[i].hookedBy != 0:\n      continue\n    inc world.pudges[i].drownTicks\n    if world.pudges[i].drownTicks >= DrownPeriodTicks:\n      world.pudges[i].drownTicks = 0\n      world.dealPudgeDamage(\n        i, DrownDamage, world.pudges[i].lastHurtBy\n      )\n",
+    "sha256": "6ea9ba09a7aa3efa848cba744c0856f10ad2b5f40cfff48d227702d469a63d9f",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "examples/pudge_wars/bots.nim:850-852@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/bots.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 850,
+    "end": 852,
+    "text": "    elif game.botEvery <= 1 or\n        (int(game.world.tick) + index) mod int(game.botEvery) == 0:\n      runPudgeScript(game, index)\n",
+    "sha256": "6f6c034e1ada70efd373e0526fcfbd14b8e78b54b5efa5ca97e7274734e694ce",
+    "file_sha256": "d3676d4ce28fa3f1825f838f7350ea36989a18955042d517a0e51ca7b9393c04"
+  },
+  "examples/pudge_wars/sim.nim:5258-5266@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/sim.nim",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 5258,
+    "end": 5266,
+    "text": "  result = Game(\n    world: newWorld(map, maximumTicks, setup, goal, runes),\n    map: map,\n    replayMode: replayMode,\n    replayData: replayData,\n    maximumTicks: maximumTicks,\n    botEvery: 1,\n    botSpeech: newSeq[BotSpeech](setup.len)\n  )\n",
+    "sha256": "76aa2dcfa79d5357d5b9f5648f4bc6a5ba6dfd7060a6749d2efd5f17f85e63aa",
+    "file_sha256": "356d7759545c01c77e8b061ee9036100038e85a678c2a1a3e6c706e4b4ff3b73"
+  },
+  "games/pudge-wars/experiments/2026-09-10-hp1200-blink.md:55-57@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "games/pudge-wars/experiments/2026-09-10-hp1200-blink.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 55,
+    "end": 57,
+    "text": "Games had normal fog, fair native difficulty, a 20-minute cap, and goals of\n30 kills for 3v3 or 10 for 1v1. Native fair difficulty schedules a bot every\neight ticks. JSON policies decide each tick; replies are applied on the next\n",
+    "sha256": "af171548c7435a49f49646c4971de72fc4835cdf7bdb5f62a933f601a463f7b0",
+    "file_sha256": "2a639155b81c2e0a5c5c7b20079f99c85a333ec5d0a5f179ea6cdae7bb8d8409"
+  },
+  "examples/pudge_wars/BASE_POLICY_AUTORESEARCH.md:18-20@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "examples/pudge_wars/BASE_POLICY_AUTORESEARCH.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 18,
+    "end": 20,
+    "text": "Each format uses seeds **2001\u20132024**, with the policies swapping banks\nfor every seed: 48 matches per policy per format. Both formats use fair\ndifficulty and a 20-minute limit. Teams play to 30 kills; duels to 10.\n",
+    "sha256": "7dcf68e4340a6fa8215a4e23689abf608d4ac9a948f0e6d0bfdfd048f6ce29ea",
+    "file_sha256": "ad0fb4e9dbbfce90daeb1ec4e196084a1822ae9cd5e1436bbd722dcd17400b42"
+  },
+  "games/pudge-wars/closed_levers.md:41-42@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "games/pudge-wars/closed_levers.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 41,
+    "end": 42,
+    "text": "Previous native holdouts 2001\u20132024 and hosted episodes already inspected are\ndiagnostic data now, not fresh validation for another candidate.\n",
+    "sha256": "e0eaae0be7572eabb92e1c0c38d5ee733483eeaf6ee28c984146de30212754cc",
+    "file_sha256": "ebe9a386470765221ff5e395ce4ec4aca3d66c07138be64253aa63e11965aaca"
+  },
+  "games/pudge-wars/experiments/2026-10-13-skill-gradient.md:72-78@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "games/pudge-wars/experiments/2026-10-13-skill-gradient.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 72,
+    "end": 78,
+    "text": "**Shorter lead passes the registered local rule.** Both intervals are positive\nand wins exceed losses in both formats. Retain the frozen research candidate\n`tmp/skill-gradient/policies/short-lead.bas`; do not yet promote it to the default.\nThe duel effect is small and its interval barely excludes zero. These tests\ncompare each isolated candidate against the original baseline, not their\ncombination. Further validation must test the combined candidate, fresh seeds,\nother opponents and the actual hosted runtime before broader claims.\n",
+    "sha256": "320426c0b6cdafeeb73ab004d3d8bd51cabe19f3822adc4195dcffadc8c1def1",
+    "file_sha256": "256afa505015f68a35d860e8ba0eb4d2f3d7abb86b2366ee5be6deec6af51225"
+  },
+  "games/pudge-wars/closed_levers.md:68-75@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "games/pudge-wars/closed_levers.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 68,
+    "end": 75,
+    "text": "The user then requested [all three coaching suggestions together](../../coaching/policies/session-20260915-bundle/README.md).\nThe complete E06b package (earlier/broader melee-centroid priority, continuous\nCurveHook with native windup handling, and an all-throw fountain guard) passed\nits 48-game screen and a fresh 96-game native confirmation: **67\u201329**, mean\npaired-bank margin **+7.146**, 95% seed-block interval **[4.948, 9.198]** versus\nfrozen v14. Retain its research IR/policy pair. This does not reverse the\nindividual E04/E05 findings or isolate which part helped, and hosted transfer\nremains untested. E06a's favorable 38\u201310 screen had no flight/return movement\n",
+    "sha256": "dfed7d99feb634773dc7804f77b45fa86ecc93faa2ec24a740f8e6897a5e9e3e",
+    "file_sha256": "ebe9a386470765221ff5e395ce4ec4aca3d66c07138be64253aa63e11965aaca"
+  },
+  "games/pudge-wars/experiments/2026-10-13-skill-gradient.md:63-70@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "games/pudge-wars/experiments/2026-10-13-skill-gradient.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 63,
+    "end": 70,
+    "text": "**Threat correctness confirmed; competitive effect inconclusive.** The fixture\nfailed before the fix: distance 80 belonged to (38,68), but selected coordinates\nwere (46,58), producing dodgeSide +1 instead of -1. After the two assignments\nmoved inside the minimum comparison, both iteration orders passed. The existing\nbot suite also passed. The default receives only this correctness fix. The\nnegative team estimate is reported explicitly; a win-rate gain is not claimed.\nThe unchanged duel trajectory is expected because a single enemy cannot expose\nthe multiple-enemy-hook selection error.\n",
+    "sha256": "2f1141edb619152459324f5eeda39edb4297ad8f2b13507497e7ebd4607e2915",
+    "file_sha256": "256afa505015f68a35d860e8ba0eb4d2f3d7abb86b2366ee5be6deec6af51225"
+  },
+  "games/pudge-wars/experiments/2026-10-13-skill-gradient.md:90-94@cd8111a5ee4f2fdc38c027615b33421f6c7d2536": {
+    "repo": "Metta-AI/polyworld-pudge-wars",
+    "path": "games/pudge-wars/experiments/2026-10-13-skill-gradient.md",
+    "commit": "cd8111a5ee4f2fdc38c027615b33421f6c7d2536",
+    "start": 90,
+    "end": 94,
+    "text": "The initial duel replay check failed from tick one because it generated a\none-lane map from the two-seat roster. The hosted duel actually uses the\nthree-lane map. The checker now uses `generateMapMatching(seed, mapHash)` and\nrejects unmatched geometry. All **192 replays, 4,026,844 ticks and 51,344,924\nactions** verified with zero state-hash mismatches after this correction.\n",
+    "sha256": "cbbe526ad82b20889f3cd0166fd3caa5764d8a1be011b01888b3c4663423d514",
+    "file_sha256": "256afa505015f68a35d860e8ba0eb4d2f3d7abb86b2366ee5be6deec6af51225"
+  }
+}
