@@ -1,8 +1,7 @@
-"""Read-only host discovery without launching a shell or exposing environment values."""
+"""Inspect the assigned worker without executing its game bindings."""
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,7 @@ class WorkerRead(BaseModel):
     query: str = Field(default="", max_length=200)
 
 
-class Capabilities:
+class WorkerCapabilities:
     def __init__(self, context):
         self.context = context
 
@@ -112,21 +111,3 @@ else:
             )
             result["game"] = json.loads(readiness.stdout)
         return result
-
-    def host_capabilities(self):
-        env = self.context.env
-        tools = {}
-        for name in ("git", "python3", "softmax", "coworld"):
-            installed = self.context.home / "local/venv/bin" / name
-            tools[name] = bool(
-                shutil.which(str(installed)) or shutil.which(name, path=env.get("PATH", ""))
-            )
-        cli = env.get("RESEARCH_CLI")
-        return {
-            "executables": tools,
-            "research_cli_configured": bool(cli),
-            "research_cli_available": bool(cli and shutil.which(cli, path=env.get("PATH", ""))),
-            "scope": "this profile's host, not the user's Mac or a worker container",
-            "workspace_present": Path(self.context.workspace).is_dir(),
-            "authorization": "Executable presence does not establish GitHub access or permission to run a command.",
-        }

@@ -1,5 +1,5 @@
-"""Prepare the orchestrator: sync its venv, clone the canonical workspace (a researcher's
-bootstrap creates and seeds it first; the orchestrator ships no game seed), write the
+"""Prepare the orchestrator: sync its venv, create or clone the canonical workspace (whichever
+profile bootstraps first creates it; the orchestrator ships the game seeds too), write the
 ``bin/research`` CLI shim and ``RESEARCH_CLI``. Idempotent. Run once after
 ``hermes profile install`` and after each update:
 

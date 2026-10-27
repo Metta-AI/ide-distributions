@@ -1,5 +1,9 @@
 # Shared local GotA gates
 
+> Commands here (`uv run`, `/tmp`, `tests/...`) are for a development checkout of
+> ide-distributions. In a profile, run tools as [GAME.md](../GAME.md) shows, with
+> `"$HERMES_HOME/local/venv/bin/python" -I`, and write to `$TMPDIR` or `.scratch/`.
+
 Every gate exports `run(artifact: Path, context: GateContext) -> GateResult`.
 `GateResult.outcome` is `passed`, `failed`, or `errored`; its computed `ok` is true
 only for `passed`. A deliberate policy rejection (compile diagnostics, resource

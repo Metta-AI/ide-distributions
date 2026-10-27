@@ -2,9 +2,12 @@
 
 A Hermes profile that leads research for one player, on any game the host can research, and
 delegates implementation to native Kanban researchers on the explicitly named
-`autoresearch` board. Each card names its game. API chat and cron
-turns expose the `orchestrator` toolset plus Hermes's `terminal`, `file` and `code_execution`
-toolsets: full shell, file and Python access on the profile host. Dangerous commands go through
+`autoresearch` board. Each card names its game. It has everything a researcher has except the
+researcher's restrictions: the same skills, game folders and template, doctrine, Hermes
+toolsets, timeouts and terminal environment (`config.yaml`). API chat and cron turns expose the
+`orchestrator` toolset plus Hermes's `terminal`, `file`, `code_execution`, `skills`, `web`,
+`browser`, `vision`, `todo`, `session_search`, `delegation` and `memory` toolsets: full shell,
+file and Python access on the profile host. Dangerous commands go through
 Hermes approvals (asked in chat, denied in unattended cron turns). The supervisor is an agent cron job
 (`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
 skips the model when nothing needs attention.
@@ -249,7 +252,10 @@ an HTTP response as success. Draft notes do not edit, build, upload, or release 
 
 ### Permission and source discovery
 
-`host_capabilities` checks executable availability without launching a shell or exposing environment values.
+`host_capabilities` (shared with the researchers, `ide_research_core.host_capabilities`) reports, without running
+anything or exposing environment values: installed executables (git, uv, gcc, nim, docker, ...), whether Docker has a
+daemon, which places are writable (profile, workspace, `TMPDIR`, `/tmp`, the installed games and venv, the game build
+folder), whether `/tmp` can run programs, whether this is a hosted workspace, and each game's missing host requirements.
 `game_support` reports static readiness per operation, including installed-template markers and missing host requirements.
 Configured bindings are not execution-verified. `game_starter` reads bounded UTF-8 pages of a published starter,
 verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.

@@ -74,7 +74,20 @@ source:
   worker needs on the host to run the bindings (for example a build): a variable must be set
   (and, when its value is an absolute path, that path must exist), and a tool must be on the
   worker's `PATH`. A worker that finds one missing blocks its card with a `help_request:`
-  reason naming them, instead of failing a long build.
+  reason naming them, instead of failing a long build. On Softmax hosting the host already
+  has `git`, `gcc`/`g++`/`make`, Nim 2.2.10, `uv`, `node` and `curl`, and nothing can be
+  installed: no root, no `pip`, no Docker.
+
+## Where tools may write
+
+A shipped game folder is installed read-only on Softmax hosting (an installed one is not, so
+a tool that writes beside itself passes `game check` and breaks only once shipped). Tools
+write only to an output or work directory they are given (`--out`, `--work-dir`), to
+`$TMPDIR`, or to `$HERMES_HOME/cache/<game>/` for downloads, caches and binaries (as
+Pudge Wars Basic's `tools/cli_contract.py` and GotA's `native_build.build_root()` do).
+Never write under `games/<game>/`, and never under `/tmp`, which on hosting is small memory that restarts empty. Run Python helpers with
+the profile's `python3` (or `sys.executable`), not `uv run --project`, which makes a new
+environment inside the installed profile.
 
 ## Required guide sections
 

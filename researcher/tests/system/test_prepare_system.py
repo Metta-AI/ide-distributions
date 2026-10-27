@@ -47,7 +47,11 @@ def test_retained_profile_upgrade(tmp_path):
         else:
             old["platform_toolsets"]["api_server"] = ["orchestrator"]
             old["platform_toolsets"]["cron"] = ["orchestrator"]
-        old["agent"]["max_turns"] = 23
+            # An orchestrator installed before it matched the researcher's settings.
+            for key in ("fallback_providers", "skills", "timeouts"):
+                old.pop(key)
+            old["terminal"].pop("timeout")
+        old["agent"]["max_turns"] = 23  # the owner's own choice: kept
         config_path.write_text(yaml.safe_dump(old))
         subprocess.run(
             ["hermes", "profile", "install", str(source), "--name", name, "--yes"],
@@ -102,6 +106,11 @@ def test_retained_profile_upgrade(tmp_path):
         assert actual["agent"]["max_turns"] == 23
         assert (workspace / "notes.txt").read_text() == "uncommitted notes"
         assert "USER_SETTING='preserve-me'" in (profile / ".env").read_text()
+        # Shipped settings an older install lacked are filled in.
+        assert actual["terminal"]["timeout"] == defaults["terminal"]["timeout"]
+        assert actual["timeouts"]["tools"] == defaults["timeouts"]["tools"]
+        assert actual["skills"]["external_dirs"] == defaults["skills"]["external_dirs"]
+        assert actual["fallback_providers"] == defaults["fallback_providers"]
         if kind == "researcher":
             assert set(defaults["approvals"]["deny"]) <= set(actual["approvals"]["deny"])
             assert "user-prohibited-command" in actual["approvals"]["deny"]

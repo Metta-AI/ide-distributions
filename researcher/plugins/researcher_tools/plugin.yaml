@@ -1,6 +1,7 @@
 name: researcher_tools
 version: 0.1.0
-description: Researcher tools. `capabilities` lists and searches every tool and skill available in the session.
+description: Researcher tools. `capabilities` lists and searches every tool and skill available in the session; `host_capabilities` checks what the host has and where it can write.
 author: ide-distributions
 provides_tools:
   - capabilities
+  - host_capabilities

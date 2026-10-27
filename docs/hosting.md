@@ -32,7 +32,10 @@ Existing unresolved conflicts remain untouched. The host can surface
 `local/doctrine-migration-warning.txt`; successful reconciliation clears it and its reported marker.
 
 Prepare adds required worker denials and environment passthrough from shipped config while retaining
-custom settings. Coordinator tool defaults and the script-only supervisor execution contract also
+custom settings. It also adds shipped `skills.external_dirs`, sets the fallback model when none is
+set, and fills `agent.max_turns`, `terminal.timeout` and `timeouts.tools` when a retained value is
+unset or a known earlier default (`EARLIER_DEFAULTS` in `ide_research_core/prepare.py`); a value
+the owner chose is kept. Coordinator tool defaults and the script-only supervisor execution contract also
 come from shipped files. Retained schedule, pause state, history, and unrelated jobs remain intact.
 The optional `--activate-supervisor` enables supervision once, guarded by `.softmax-prepared`;
 it never resumes a deliberately paused retained supervisor. Omit it for an installation that should
@@ -41,6 +44,13 @@ remain paused. Preparation creates no research tasks or model calls.
 Metta configures shared gateway dispatch capacity and worker profile names after preparation.
 The distribution disables automatic task decomposition because its coordinator owns assignment.
 Game selection comes from the conversation and task; never supply a default `RESEARCH_GAME`.
+
+## Writable storage
+
+Profile code from the image is read-only. Game tools build into
+`$HERMES_HOME/cache/<game>/` on the workspace disk when their own `tools/.cache` and
+`tools/bin` are not writable, so a shipped game needs no image volume. The researcher GotA volumes
+still work and can be removed.
 
 ## Platform capabilities
 
