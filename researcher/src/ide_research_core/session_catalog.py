@@ -1,4 +1,4 @@
-"""The ``capabilities`` tool: every tool and skill this Hermes session can use, searchable.
+"""The ``capabilities`` tool: searchable profile-configured tools and skills.
 
 STDLIB ONLY at import time: both profiles' plugins load this module inside the Hermes process.
 Hermes itself is imported lazily, inside ``hermes_tools`` and ``hermes_skills``.
@@ -27,8 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 DESCRIPTION = (
-    "List every tool and skill available in this session, each with a one-line description, "
-    "optionally filtered by a keyword. Use it to find the right tool or skill before working "
+    "List tools and skills enabled by this profile’s platform configuration, each with a one-line description. "
+    "Optionally filter by a keyword. Session-added tools and per-job overrides may be absent; absence does not prove unavailability. Use it to find the right tool or skill before working "
     "around a missing one. Read a skill with skill_view(name); call a tool marked deferred "
     "through tool_call, after tool_describe(name) for its parameters."
 )

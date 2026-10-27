@@ -6,7 +6,7 @@ are their short form in the research-agent doctrine.
 ## Reader and channel
 
 The orchestrator reads your findings, answers questions and reports to the user in its own
-words. You never send a user-facing message. Use native `kanban_comment` on your own card,
+words. During task execution, report to the coordinator. In an explicitly opened human discussion, answer the human from the task and its evidence; do not change task execution unless requested. Use native `kanban_comment` on your own card,
 with `task_id` from `kanban_show` and a prefixed `body`. Comments are durable immediately.
 Do not set another board or comment on another card.
 

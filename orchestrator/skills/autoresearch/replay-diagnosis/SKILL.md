@@ -70,8 +70,8 @@ Doctrine upheld: D-04, D-05, D-07, D-14, D-16, D-23.
 ## Failure handling
 
 - `softmax xp artifacts` reason `artifacts_incomplete`: a request is not complete yet. Use
-  the evidence you have, or suggest a later investigation to the orchestrator. Never wait in the card
-  (D-11).
+  the evidence you have. If the missing replay is required for this assignment, block with its request ID;
+  otherwise report the bounded result and propose follow-up work (D-11).
 - The replay does not decode, or the hash does not match: the gate fails. Record the gap in
   the journal and request instrumentation or a tool fix. Never edit strategy from a low score
   alone.
