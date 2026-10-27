@@ -32,11 +32,14 @@ tool from `"$RESEARCH_HOME"` with `"$RESEARCH_PYTHON"` as shown. Read
 `games/pudge-wars-basic/GAME.md` and its linked `docs/mechanics.md`,
 `docs/replay-format.md` and `docs/game-guide.md` under RESEARCH_HOME. This folder
 targets Pudge Wars Basic only: league `league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0`,
-Coworld `pudge-wars-basic` 0.1.8 (`cow_c23845f0-444f-4d2f-864f-5764c58eda4a`), source
-`Metta-AI/polyworld-pudge-wars` at `cd8111a5`, replay game version 38. Resolve the
-current version with `softmax game-version` before new work; a newer source commit
-needs a rebuilt headless binary (`tools/native.py build --commit <SHA>`) before replays
-recorded on it decode.
+Coworld `pudge-wars-basic`. The knowledge here was written for version 0.1.8
+(`cow_c23845f0-444f-4d2f-864f-5764c58eda4a`), source `Metta-AI/polyworld-pudge-wars` at
+`cd8111a5`, replay game version 38. The tools follow the live league by themselves: every
+envelope's `engine` block names the version and commit that ran (binaries for a new commit
+are built on first use). If `engine.live` is false the league could not be checked and the
+run may be stale: say so in the record. If `knowledge.current` is false, treat
+game-specific claims here as possibly stale and propose the maintenance card the
+`knowledge.message` names (`kb renew ...`).
 
 ## Long commands
 
@@ -55,7 +58,7 @@ Classify a witnessed loss or death against these names (mechanics in `docs/mecha
 | Class | Definition | Witness |
 |---|---|---|
 | `compile-failure` | a seat fails to load (syntax, > 64 KiB, bad ZIP); the episode has no results | `player_failure.json` `failed_policy_index`; local G1/G2 |
-| `vm-disabled` | runtime `BasicError` (budget, division by zero, array bounds, fractional action argument, PRINT overflow, tensor error); the seat freezes for the rest of the game | `BASIC VM disabled` in `player_status.json`; `pudge <id> BASIC error:` in stdout; a butcher with no `action` rows after a tick |
+| `vm-disabled` | runtime `BasicError` (budget, division by zero, array bounds, fractional action argument, PRINT overflow, tensor error); the seat freezes for the rest of the game | `BASIC VM disabled` in `player_status.json`; the `BASIC error:` line in `players/<slot>/log.txt` (local, or hosted via `hosted_logs.py`); a butcher with no `action` rows after a tick |
 | `budget-overrun` | `vm-disabled` with "instruction limit" / "work limit": > 100,000 instructions or > 250,000 work per tick (each `walkTo/hookTo/blinkTo` costs 400) | the error text; worst-case loops in `policy.bas` |
 | `hook-miss-far` | misses concentrated in the 45+ tile band; long flight lets the target move | `hitRateByDist`, `hooks[].closest.dist`, `targetMoved` |
 | `hook-miss-lead` | misses with small `closest.dist` but consistent offset: wrong lead (`leadDiv`, velocity sampling) | `hooks[]` aim vs target position at resolve |
@@ -95,6 +98,7 @@ East (a one-side failure is a coordinate-mirroring bug).
 ```sh
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/evaluate.py" <ABS_RESULTS_JSON> --seat <N>
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/replay_inspect.py" <ABS_EPISODE_DIR> --seat <N> --events kill,damage,hook_landed,hook_missed,river_enter --json
+"$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/hosted_logs.py" --xp <xreq_id> --dest <ABS_XP_DIR> --json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/branch.py" <ABS_REPLAY> --slot <N> --ticks <T1>,<T2> --horizon 160 --seeds 1 --json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/match.py" --seat <ABS_POLICY>:3 --seat base:3 --variant league-3v3 --seeds 1..8 --out <ABS_MATCH_DIR> --jobs 4 --json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/compare.py" <ABS_BASE_DIR> <ABS_CAND_DIR> --group seat --metric deaths --json
@@ -102,14 +106,19 @@ East (a one-side failure is a coordinate-mirroring bug).
 ```
 
 - `match.py` reproduces a mechanism locally under league timing (every tick, no aim
-  noise) and writes `results.json`, `replay.pwr`, `summary.json`, `events.jsonl` per
-  episode; seed it away from the upstream used-evidence seeds. Local runs explain; they
-  never decide (D-04).
+  noise) on the native league host and writes `results.json`, `replay.pwr`,
+  `summary.json`, `events.jsonl`, `player_status.json` and each seat's
+  `players/<slot>/log.txt` and `annotations.jsonl` per episode; seed it away from the
+  upstream used-evidence seeds. Local runs explain; they never decide (D-04).
+- Hosted decision trace: `hosted_logs.py --xp <xreq_id> --dest <ABS_DIR>` fetches our seats'
+  PRINT logs, annotations and artifacts per episode (`<ABS_DIR>/<ereq>/players/<slot>/`).
 - `branch.py` scores alternatives from a recorded state with bots continuing; use it to
   ask "was the hook/retreat/rot option better here", not to predict hosted outcomes.
 - Instrumentation: add `ANNOTATE(worldTick, "kind", "function", "{...}")` calls to a
   candidate (1,024 work each, 1,000 records cap) to log the branch taken; they appear in
-  the league host's per-seat annotations, not in headless runs.
+  `players/<slot>/annotations.jsonl` of local runs (default league runner, not
+  `--runner headless`) and of hosted episodes fetched with `hosted_logs.py`. No output
+  reports per-decision instruction or work use; annotate loop counts to see budget headroom.
 - Core: `records find claim --where status=refuted` before proposing (D-10), core
   `diagnose` for the hypothesis method, `pudge-wars-basic-replay-inspection` for decoding.
 
@@ -143,8 +152,8 @@ falsification. Preserve a nearby counterexample and name the distinguishing cond
 ```
 
 Output: evidence refs, before metric, mechanism, pinned source location, predicted metric
-and a bounded next step. If coverage is missing (for example no decision trace), record
-the gap and request instrumentation; do not claim an unobserved behaviour failed (D-07).
+and a bounded next step. If coverage is missing (for example the policy wrote no
+annotations, or a seat log was not fetched), record the gap and request instrumentation; do not claim an unobserved behaviour failed (D-07).
 
 ## Rejected build inputs
 

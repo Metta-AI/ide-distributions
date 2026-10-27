@@ -2,8 +2,11 @@
 """Decode a Pudge Wars Basic replay by re-simulation and summarise it per seat.
 
 A replay is an action tape plus one state hash per tick, not a state dump (see
-docs/replay-format.md). This tool gunzips it if needed (hosted copies are gzip), checks the
-header's game version, runs `pudge_headless --replay R --duellog DIR` (which verifies every
+docs/replay-format.md), so it must be decoded by the engine that recorded it. The engine is
+chosen by --commit, --coworld-id, episode metadata beside the replay (our episode.json, or a
+saved episode row with `coworld_id`), else the live engine; its binary is built on first use.
+The tape header's game version must match that engine's. This tool gunzips the replay if
+needed (hosted copies are gzip), runs `pudge_headless --replay R --duellog DIR` (which verifies every
 tick's hash) and reads the match log it writes. The decode is cached next to the replay in
 `<replay>.decoded-<binary sha12>/` (summary.json, events.jsonl, stdout.log) and reused.
 
@@ -32,6 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cli_contract
+import engine
 import episodes
 import native
 from cli_contract import Rejected
@@ -77,15 +81,38 @@ def header(data: bytes) -> dict:
     return {'file_version': file_version, 'game_version': game_version, 'game': name}
 
 
+def replay_engine(replay: Path, data: bytes, *, binary: Path | None = None, commit: str | None = None,
+                  coworld_id: str | None = None) -> tuple[Path, dict]:
+    """The pudge_headless for the replay's own engine, and how it was chosen (module docstring).
+
+    The tape's header game version must equal that engine's ReplayGameVersion; otherwise the
+    decode would fail tick verification, so it is refused here with what to pass instead.
+    """
+    tape = header(data)
+    if binary is not None:
+        if not binary.is_file():
+            raise Rejected(f'--binary does not exist: {binary}')
+        receipt = native.read_receipt(binary.resolve()) or {}
+        chosen, how = (receipt.get('inputs') or {}).get('engine', {}).get('commit'), '--binary'
+        binary = binary.resolve()
+    else:
+        chosen, how = engine.replay_commit(replay, commit=native.check_commit(commit) if commit else None,
+                                           coworld_id=coworld_id)
+        binary = native.ensure(chosen)[0]
+    expected = native.replay_game_version(chosen) if chosen and native.source_dir(chosen).is_dir() else None
+    if tape['game'] != 'pudge_wars' or (expected is not None and tape['game_version'] != expected):
+        raise Rejected(f'the replay is {tape["game"]} game version {tape["game_version"]}, but the engine chosen '
+                       f'({how}: {str(chosen)[:8]}) decodes pudge_wars version {expected}. Pass --coworld-id '
+                       '<the episode\'s coworld_id> (from `coworld episodes <ereq> --json`) or --commit <sha>, '
+                       'or keep the episode row JSON beside the replay', reason='engine_mismatch')
+    return binary, {'commit': chosen, 'chosen_by': how, 'replay_game_version': expected}
+
+
 def decode(binary: Path, replay: Path, cache_root: Path | None = None) -> tuple[dict, Path, dict]:
     """(replay info, decode dir, summary); reuses a matching cached decode."""
     data, gzipped = raw_bytes(replay)
     info = {'replay': str(replay.resolve()), 'replay_sha256': hashlib.sha256(replay.read_bytes()).hexdigest(),
             'raw_sha256': hashlib.sha256(data).hexdigest(), 'gzip': gzipped, **header(data)}
-    expected = int(cli_contract.engine()['REPLAY_GAME_VERSION'])
-    if info['game'] != 'pudge_wars' or info['game_version'] != expected:
-        raise Rejected(f'replay is {info["game"]} game version {info["game_version"]}; this engine '
-                       f'decodes pudge_wars version {expected} only (build the matching commit)')
     binary_sha = episodes.sha256(binary)
     cache = (cache_root or replay.parent) / f'{replay.name}.decoded-{binary_sha[:12]}'
     stamp = {'raw_sha256': info['raw_sha256'], 'binary_sha256': binary_sha}
@@ -193,21 +220,19 @@ def main(argv=None) -> int:
     parser.add_argument('--ticks', help='A:B half-open tick window for --events')
     parser.add_argument('--limit', type=int, default=500, help='maximum events returned (default 500)')
     parser.add_argument('--cache-dir', type=Path, help='where to cache the decode (default: beside the replay)')
-    parser.add_argument('--binary', type=Path, help='use this pudge_headless instead of native.py path')
-    parser.add_argument('--commit', help='engine commit for native.py (default: tools/engine.env)')
+    parser.add_argument('--coworld-id', help="the episode's Coworld id (its engine is used for the decode)")
+    parser.add_argument('--commit', help='decode with this engine commit')
+    parser.add_argument('--binary', type=Path, help='decode with this pudge_headless')
 
     def body(args):
         replay = find_replay(args.replay)
         ticks = parse_ticks(args.ticks)
         if args.limit < 0:
             raise Rejected('--limit must be nonnegative')
-        if args.binary is not None:
-            if not args.binary.is_file():
-                raise Rejected(f'--binary does not exist: {args.binary}')
-            binary = args.binary.resolve()
-        else:
-            binary = native.ensure(args.commit)[0]
+        binary, replay_engine_info = replay_engine(replay, raw_bytes(replay)[0], binary=args.binary,
+                                                   commit=args.commit, coworld_id=args.coworld_id)
         info, cache, summary = decode(binary, replay, args.cache_dir)
+        info['decode_engine'] = replay_engine_info
         events_path = cache / 'events.jsonl'
         seats = seat_rows(summary, events_path)
         results_path = replay.parent / 'results.json'

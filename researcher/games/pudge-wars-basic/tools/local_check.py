@@ -3,8 +3,10 @@
 
   G1 static      upload rules: UTF-8 BASIC <= 64 KiB; ZIP <= 16 MiB, <= 256 entries, canonical
                  names, exactly one .bas, tensors.json shape (gates_g1_static.py)
-  G2 episode     compiles and plays one league-length league-3v3 episode (seed 2026) in all
-                 six seats: no VM disabled, decisions made, replay re-verifies (gates_g2_episode.py)
+  G2 episode     compiles and plays one league-length league-3v3 episode (the live variant's
+                 seed and length) in all six seats on the league host: no VM disabled (player_status),
+                 every seat acted, replay re-verifies; reports seat PRINT/ANNOTATE counts
+                 (gates_g2_episode.py)
   G3 robustness  seeds 1..N on both sides against --baseline: no candidate VM disabled
                  (gates_g3_robustness.py; per-decision instruction/work use is not measured)
   G4 screen      advisory, only with --full or --gate G4: candidate vs baseline over the
@@ -15,7 +17,8 @@ Default: G1-G3. --full: G1-G4. --gate G (repeatable) runs ONLY the named gates.
 
 ARTIFACT is a .bas file, a ZIP package, or a package directory (packed deterministically
 into WORK_DIR/package.zip first). --baseline is a policy path or a starter name (base,
-aggressive, sniper, neural). G2-G4 build the headless binary on first use (native.py).
+aggressive, sniper, neural). G2-G4 run on the live engine and build its binaries on first
+use (native.py); --runner headless trades the seat logs for ~25% speed.
 Gates run in order and stop at the first errored gate; G1 or G2 failing skips the rest.
 Writes WORK_DIR/gates.json (per gate) and WORK_DIR/evaluation.json (status, artifact hash,
 complete). Status: passed when every non-advisory gate run passed.
@@ -48,9 +51,9 @@ def run_gates(artifact: Path, context: GateContext, names: list[str]) -> tuple[d
     for name in GATE_NAMES:
         if name not in names:
             continue
-        if name != 'G1' and context.binary is None:
+        if name != 'G1' and context.runner is None:
             try:
-                context.binary, context.binary_receipt = native.ensure()
+                context.runner = episodes.Runner.build(context.runner_kind, context.commit)
             except Exception as error:  # noqa: BLE001 - a missing toolchain is a recorded fault
                 result = GateResult('errored', {'error': gates_common.exception_summary(error)})
                 gates[name] = {'outcome': 'errored', 'passed': False, 'advisory': name in gates_common.ADVISORY,
@@ -96,7 +99,9 @@ def main(argv=None) -> int:
     parser.add_argument('--full', action='store_true', help='run G1-G4 (adds the advisory G4 screen)')
     parser.add_argument('--seeds', type=int, default=10, help='G3/G4 seeds 1..N, each played from both sides (default 10)')
     parser.add_argument('--jobs', type=int, default=2, help='episodes run in parallel (default 2)')
-    parser.add_argument('--binary', type=Path, help='use this pudge_headless instead of native.py path')
+    parser.add_argument('--runner', choices=episodes.RUNNERS, default='league',
+                        help='episode runner for G2-G4: league (default; seat logs, player_status) or headless')
+    parser.add_argument('--commit', help='engine commit (default: the live league commit)')
 
     def body(args):
         names = selected_gates(args.gate, args.full)
@@ -111,12 +116,8 @@ def main(argv=None) -> int:
         artifact = gates_common.artifact_file(args.artifact.resolve(), work_dir)
         artifact_sha256 = gates_common.sha256(artifact)
         context = GateContext(work_dir, baseline=episodes.resolve_policy(args.baseline),
-                              seeds=args.seeds, jobs=args.jobs)
-        if args.binary is not None:
-            if not args.binary.is_file():
-                raise Rejected(f'--binary does not exist: {args.binary}')
-            context.binary = args.binary.resolve()
-            context.binary_receipt = native.read_receipt(context.binary)
+                              seeds=args.seeds, jobs=args.jobs, runner_kind=args.runner,
+                              commit=native.check_commit(args.commit) if args.commit else None)
         gates, status = run_gates(artifact, context, names)
         if gates_common.sha256(artifact) != artifact_sha256:
             raise cli_contract.Errored('artifact changed during the gates')
@@ -124,8 +125,7 @@ def main(argv=None) -> int:
                       'artifact_sha256': artifact_sha256, 'baseline': str(context.baseline),
                       'baseline_sha256': gates_common.sha256(context.baseline),
                       'complete': set(gates) == set(names), 'gates_requested': names,
-                      'binary': str(context.binary) if context.binary else None,
-                      'engine_commit': ((context.binary_receipt or {}).get('inputs') or {}).get('engine', {}).get('commit'),
+                      'runner': context.runner.describe() if context.runner else None,
                       'seeds': args.seeds, 'gates': gates}
         episodes.write_json(work_dir / 'gates.json', gates)
         episodes.write_json(work_dir / 'evaluation.json', evaluation)

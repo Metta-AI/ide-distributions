@@ -69,7 +69,7 @@ worktree paths. Each tool has `--help`; with `--json` it prints one envelope
 
 | Tool | Use |
 |---|---|
-| `tools/native.py prepare\|build\|path` | Fetch the pinned game source and `nimby.lock` dependencies, build the headless simulator `pudge_headless` with a receipt, print its path. Other tools build it on first use. |
+| `tools/native.py resolve\|prepare\|build\|path [--target pudge_league\|pudge_headless]` | `resolve` reads the live league engine (below). The others fetch the live commit's game source and `nimby.lock` dependencies and build, with receipts, the league host `pudge_league` (runs episodes with seat logs) and the headless simulator `pudge_headless` (decodes replays, scores branches). Other tools build both on first use. |
 | `tools/match.py --seat SPEC ... [--variant] [--seeds A..B] [--out DIR]` | Run local episodes. `SPEC` is `PATH[:COUNT]` or a starter (`base`, `aggressive`, `sniper`, `neural`), in slot order. Writes `results.json` (hosted schema), replay, `summary.json`, `events.jsonl` per episode. |
 | `tools/build.py --source F --strategy S --out D` / `--starter NAME --out D` | The `build` binding (below). |
 | `tools/local_check.py ARTIFACT --baseline B --work-dir W [--full] [--gate G]` | The `local_check` binding: G1 static upload rules, G2 one league-length episode in all six seats, G3 robustness over seeds × sides, G4 advisory screen (with `--full`). |
@@ -77,14 +77,35 @@ worktree paths. Each tool has `--help`; with `--json` it prints one envelope
 | `tools/replay_inspect.py REPLAY [--seat N] [--events K,...] [--ticks A:B]` | The `replay_inspect` binding: re-simulates a replay (raw or gzip; hosted or local) with every tick's hash verified, and reports per seat enemy hook accuracy, kills, deaths, damage by cause, hit rate by distance, dodges, runes and upgrades, plus filtered events. |
 | `tools/branch.py TAPE --slot N --ticks T,T` | Counterfactual scoring of the options a seat had at chosen ticks (bots continue the match; evidence about that state, not proof). |
 | `tools/compare.py BASE_DIR CAND_DIR [--group team\|seat] [--seats ...]` | A/B diagnostics over two sets of results (local or downloaded XP). Needs scipy: use `"$RESEARCH_PYTHON"`. The decision still comes from `stats evaluate`. |
+| `tools/hosted_logs.py --xp XREQ\|--episode EREQ --dest DIR` | Fetch our own seats' PRINT logs, annotations and artifacts from hosted episodes as the Player (`"$RESEARCH_CLI" softmax exec -- coworld ...`), laid out like a local episode (`players/<slot>/log.txt`, `annotations.jsonl`). Other players' logs are not readable. |
 | `tools/upload.py` | The `upload` binding: `"$RESEARCH_CLI" softmax upload` (the coordinator uploads). |
 
-Local episodes run natively on the host: the headless simulator is the game's own
-`examples/pudge_wars/pw.nim` (`-d:release -d:headless`) at the pinned commit. It reproduces the
-league host's per-tick state hashes exactly (checked on macOS, Linux arm64 and Linux x86_64),
-needs only libc (libcurl is stubbed; `tools/curl_stub.c`), and plays a league-length 3v3 in
-about 2–3 seconds. It does not produce seat `PRINT` logs or `ANNOTATE` output; hosted episodes of
-our own policies do (`docs/replay-format.md`).
+Local episodes run natively on the host through the game's own league host
+(`examples/pudge_wars/coworld_host.nim`, `-d:basicLeague`) at the live commit: the same program
+the league runs, with the same per-seat `players/<slot>/log.txt` (BASIC `PRINT`),
+`annotations.jsonl` (`ANNOTATE`) and `player_status.json`. A league-length 3v3 takes about 3
+seconds. `match.py --runner headless` uses the headless simulator instead (slightly faster, no seat
+logs); both give byte-identical `results.json` and state hashes. Both binaries need only libc
+(libcurl is stubbed, `tools/curl_stub.c`; no SSL) and were checked on macOS and Linux. Neither
+reports per-decision instruction or work use, so a policy near the 100,000-instruction budget is
+not detected locally.
+
+### Staying current with the league
+
+Nothing here is pinned to one game version. Every tool reads the live engine from the public
+API (league → `game.canonical_coworld_id` → the Coworld's version, manifest `source_url` commit
+and starter files), re-checked at least hourly (`tools/.cache/live-engine.json`), and builds the
+binaries for that commit on first use, so a league update reaches the tools automatically.
+`tools/engine.env` is only a last-known fallback when the API cannot be reached; every envelope
+then says `engine.live: false`, `stale_risk: true` and warns. `COGAMES_API_URL` selects the API
+server; `PUDGE_LIVE_ENGINE` overrides the live lookup (tests and offline hosts).
+
+Every envelope also carries `knowledge {cited_commit, live_commit, current}` and `starters`. The
+docs, skills and seed claims cite `cd8111a5`; when `knowledge.current` is false, treat
+game-specific claims as possibly stale and propose a maintenance card that runs
+`kb renew --game-repo <clone> --old cd8111a5ee4f2fdc38c027615b33421f6c7d2536 --new <live commit>
+--version <live version>` and re-checks the docs. A `starters` mismatch means the league's
+starter files changed and `baselines/` needs refreshing.
 
 ## Local validation
 
@@ -132,11 +153,9 @@ bytes (there is no compiler: `compiler: basic`). A neural candidate is a package
 runs G1 and G2 (seconds once the simulator is built); `--full-evaluation` adds G3 and G4.
 Upload requires every non-advisory gate to pass.
 
-The build reads the live Coworld version through `"$RESEARCH_CLI" softmax game-version` and
-refuses (errored) when it differs from `tools/engine.env`; `--offline` uses the pin without
-asking. When the league moves to a new version, a maintenance card updates `tools/engine.env`
-and `tools/coworld_manifest.json` from the new manifest (`game.runnable.source_url` pins the
-commit), rebuilds the simulator and re-checks the docs' citations (`kb renew`).
+The build gates against the live engine and records it in `version.json.engine` (version,
+Coworld id, commit, source URL, manifest hash, `live`, knowledge and starter status, binaries).
+`--offline` skips the API and uses the last-known engine, marked `live: false`.
 
 The coordinator uploads a completed build with `upload_build`; the file reaches the platform
 through `coworld upload-policy --file`. Researchers never upload.
@@ -161,7 +180,8 @@ STRATEGY.md.
 
 Checked on 2026-10-26 against Coworld version 0.1.8 and source commit `cd8111a5`: the headless
 simulator's results and replays match the league host (a Docker `coworld run-episode` duel, a
-native 3v3, and a hosted league replay re-simulated against its hosted results); the starter
+native 3v3, and a hosted league replay re-simulated against its hosted results), and the league
+host and headless runners give byte-identical results; the starter
 build passes the shared upload check. Not checked: how the platform validates a file at upload,
 and per-decision budget use.
 

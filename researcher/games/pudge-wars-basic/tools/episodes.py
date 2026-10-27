@@ -1,23 +1,25 @@
-"""Run and read local Pudge Wars Basic episodes on the headless binary (library, no CLI).
+"""Run and read local Pudge Wars Basic episodes (library, no CLI).
 
-One episode directory holds:
+Two runners, both the live engine's own code (native.py):
 
-  results.json   the hosted results schema, rebuilt from the headless match log (below)
-  replay.pwr     the raw action tape (hosted copies are the same bytes, gzipped)
-  summary.json   the headless match log's per-seat summary (landed ratio, hit rate by distance,
-                 dodge, damage by cause, runes, upgrades, hooks[], kills[])
-  events.jsonl   the headless match log's event stream (hooks, damage, kills, 4 Hz state)
-  episode.json   provenance and VM status: binary and its sha256, engine commit, variant,
-                 seed, ticks, kill goal, every seat's policy sha256 and whether its VM failed
-  stdout.log, stderr.log   the binary's own output
-  policies/      the exact policy bytes the seats ran (one file per distinct policy)
+  league    (default) the league host, pudge_league, driven by the game's own
+            scripts/run_episode.py exactly as the hosted runner stages seats. Writes the hosted
+            accounting: players/<slot>/log.txt (the seat's PRINT output plus the host's
+            "Player slot N started." / "BASIC error: ..." lines), players/<slot>/annotations.jsonl
+            (ANNOTATE), player_status.json (exit_code 1 = "BASIC VM disabled"), and
+            player_failure.json when a policy does not load. The replay is then re-simulated by
+            pudge_headless for summary.json and events.jsonl (verifying every tick).
+  headless  pudge_headless --bot: about 25% faster, but no seat logs, annotations or
+            player_status; a VM failure is read from its `pudge N BASIC error:` line, and a
+            policy that does not load is named by loading each policy alone.
 
-What the headless binary cannot produce, compared with a hosted (or `pwleague`) episode:
-seat PRINT logs and ANNOTATE output (headless shows PRINT as a speech bubble and keeps no
-annotation sink), `player_status.json` exit codes (a VM failure is read from the binary's
-`pudge N BASIC error:` line instead) and `player_failure.json` (a policy that does not load
-stops the whole binary; we name the failing seats by loading each policy alone). The
-simulation itself is the league's: same seeds, same per-tick state hashes.
+Both give identical results.json, replays and state hashes for the same seats and seed.
+One episode directory holds results.json (hosted schema), replay.pwr (raw tape; hosted copies
+are the same bytes gzipped), summary.json and events.jsonl (headless match log), episode.json
+(our provenance and VM status: runner, binaries and sha256s, engine commit, variant, seed,
+ticks, kill goal, each seat's policy sha256, vm_failed, vm_error), and the runner's own files.
+Neither runner reports per-decision instruction or work-unit use: the VM keeps it
+(examples/pudge_wars/bots.nim:832-833 vm.lastWork/lastInstructions) but no output carries it.
 """
 from __future__ import annotations
 
@@ -26,17 +28,20 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 
 import cli_contract
 import evaluate
+import native
 from cli_contract import Errored, Rejected
 
 GAME = cli_contract.GAME
 BASELINES = GAME / 'baselines'
-MANIFEST = cli_contract.TOOLS / 'coworld_manifest.json'
+MANIFEST = cli_contract.TOOLS / 'coworld_manifest.json'  # last-known; engine.manifest() is live
+RUNNERS = ('league', 'headless')
 STARTERS = {'base': 'base.bas', 'aggressive': 'aggressive.bas', 'sniper': 'sniper.bas',
             'neural': 'neural.zip'}
 EPISODE_SCHEMA = 'pudge-local-episode/1'
@@ -53,8 +58,9 @@ def sha256(path: Path) -> str:
 
 
 def variants() -> dict[str, dict]:
-    """The manifest variants: seats, seed, max_ticks, kill_goal (the league's own config)."""
-    manifest = json.loads(MANIFEST.read_text())
+    """The live manifest's variants: seats, seed, max_ticks, kill_goal (the league's config)."""
+    import engine
+    manifest = engine.manifest(engine.live())
     return {variant['id']: {'seats': len(variant['game_config']['players']),
                             'seed': variant['game_config']['seed'],
                             'max_ticks': variant['game_config']['max_ticks'],
@@ -200,9 +206,8 @@ def results_from_log(summary: dict, end: dict, seed: int) -> dict:
     return results
 
 
-def run_episode(binary: Path, policies: list[Path], *, seed: int, max_ticks: int, kill_goal: int,
-                out: Path, variant: str | None = None, timeout: int = 900,
-                binary_receipt: dict | None = None) -> dict:
+def run_headless_episode(binary: Path, policies: list[Path], *, seed: int, max_ticks: int, kill_goal: int,
+                out: Path, variant: str | None = None, timeout: int = 900) -> dict:
     """Run one episode into a new directory ``out``; return its episode.json record.
 
     The record's ``status`` is ``completed`` or ``policy_load_failed`` (a seat's policy did
@@ -214,9 +219,8 @@ def run_episode(binary: Path, policies: list[Path], *, seed: int, max_ticks: int
     out.mkdir(parents=True)
     staged = stage_policies(policies, out / 'policies')
     seats = len(policies)
-    record = {'schema': EPISODE_SCHEMA, 'runner': 'pudge_headless', 'binary': str(binary),
+    record = {'schema': EPISODE_SCHEMA, 'runner': 'headless', 'binary': str(binary),
               'binary_sha256': sha256(binary),
-              'engine_commit': (binary_receipt or {}).get('inputs', {}).get('engine', {}).get('commit'),
               'variant': variant, 'seed': seed, 'max_ticks': max_ticks, 'kill_goal': kill_goal,
               'seats': [{'slot': slot, 'team': 'west' if slot < seats // 2 else 'east',
                          'source': str(policy), 'policy': str(staged[slot].relative_to(out)),
@@ -273,11 +277,124 @@ def run_episode(binary: Path, policies: list[Path], *, seed: int, max_ticks: int
     summary['dir'] = str(out)
     write_json(out / 'summary.json', summary)
     (out / 'events.jsonl').write_text(events_text)
-    write_json(out / 'results.json', results)
+    # Compact, like the league host writes it, so both runners give the same bytes.
+    (out / 'results.json').write_text(json.dumps(results, separators=(',', ':')))
     record.update(status='completed', scripts_active=int(scripts[1]), decisions=int(scripts[3]),
                   state_hash=state[1], map_hash=state[2], end_tick=results['end_tick'],
                   replay_sha256=sha256(out / 'replay.pwr'))
     write_json(out / 'episode.json', record)
+    return record
+
+
+class Runner:
+    """Which binaries run local episodes: the league host (default) or the headless simulator."""
+
+    def __init__(self, kind: str, headless: Path, league: Path | None = None, commit: str | None = None):
+        if kind not in RUNNERS:
+            raise Rejected(f'unknown runner {kind!r}; valid: {", ".join(RUNNERS)}')
+        if kind == 'league' and league is None:
+            raise Rejected('the league runner needs the pudge_league binary')
+        self.kind, self.headless, self.league, self.commit = kind, headless, league, commit
+
+    @classmethod
+    def build(cls, kind: str = 'league', commit: str | None = None) -> Runner:
+        """Build (or reuse) the binaries for the commit (default: the live league's)."""
+        commit = commit or native.default_commit()
+        headless, _ = native.ensure(commit, 'pudge_headless')
+        league = native.ensure(commit, 'pudge_league')[0] if kind == 'league' else None
+        return cls(kind, headless, league, commit)
+
+    @classmethod
+    def from_binaries(cls, kind: str, headless: Path, league: Path | None = None) -> Runner:
+        receipt = native.read_receipt(headless) or {}
+        return cls(kind, headless, league, (receipt.get('inputs') or {}).get('engine', {}).get('commit'))
+
+    def describe(self) -> dict:
+        return {'runner': self.kind, 'engine_commit': self.commit,
+                'binaries': {name: {'path': str(path), 'sha256': sha256(path)}
+                             for name, path in (('pudge_headless', self.headless), ('pudge_league', self.league))
+                             if path is not None}}
+
+    def run(self, policies: list[Path], *, seed: int, max_ticks: int, kill_goal: int, out: Path,
+            variant: str | None = None, timeout: int = 900) -> dict:
+        if self.kind == 'headless':
+            record = run_headless_episode(self.headless, policies, seed=seed, max_ticks=max_ticks,
+                                          kill_goal=kill_goal, out=out, variant=variant, timeout=timeout)
+        else:
+            record = run_league_episode(self, policies, seed=seed, max_ticks=max_ticks,
+                                        kill_goal=kill_goal, out=out, variant=variant, timeout=timeout)
+        record.update(self.describe())
+        write_json(out / 'episode.json', record)
+        return record
+
+
+def seat_error(log: Path) -> str | None:
+    """The last `BASIC error:` / `BASIC loading error:` line the host wrote to a seat log."""
+    if not log.is_file():
+        return None
+    found = None
+    with log.open(errors='replace') as stream:
+        for line in stream:
+            if 'BASIC error:' in line or 'BASIC loading error:' in line:
+                found = line.strip()
+    return found
+
+
+def run_league_episode(runner: Runner, policies: list[Path], *, seed: int, max_ticks: int, kill_goal: int,
+                       out: Path, variant: str | None = None, timeout: int = 900) -> dict:
+    """One episode on the league host via the game's scripts/run_episode.py (module docstring)."""
+    if out.exists():
+        raise Rejected(f'episode output already exists: {out}')
+    out.mkdir(parents=True)
+    source = native.source_dir(runner.commit)
+    script = source / 'scripts/run_episode.py'
+    if not script.is_file():
+        raise Errored(f'the game source at {runner.commit[:8]} has no scripts/run_episode.py; use --runner headless',
+                      reason='runner_missing')
+    command = [sys.executable, '-I', str(script), *map(str, policies), '--seed', str(seed),
+               '--ticks', str(max_ticks), '--kill-goal', str(kill_goal), '--binary', str(runner.league),
+               '--output', str(out), '--timeout', str(timeout)]
+    started = time.monotonic()
+    completed = run_binary(command, cwd=source, timeout=timeout + 60)
+    wall = round(time.monotonic() - started, 3)
+    (out / 'runner.log').write_text(completed.stdout + completed.stderr)
+    if (out / 'episode.json').is_file():
+        (out / 'episode.json').rename(out / 'host_episode.json')
+    seats = len(policies)
+    record = {'schema': EPISODE_SCHEMA, 'variant': variant, 'seed': seed, 'max_ticks': max_ticks,
+              'kill_goal': kill_goal, 'command': command, 'wall_seconds': wall,
+              'seats': [{'slot': slot, 'team': 'west' if slot < seats // 2 else 'east', 'source': str(policy),
+                         'policy': f'players/{slot}/file', 'sha256': sha256(policy),
+                         'log': f'players/{slot}/log.txt', 'annotations': f'players/{slot}/annotations.jsonl'}
+                        for slot, policy in enumerate(policies)]}
+    if completed.returncode == 2 and (out / 'player_failure.json').is_file():
+        failure = json.loads((out / 'player_failure.json').read_text())
+        slot = failure['failed_policy_index']
+        record.update(status='policy_load_failed', failed_slots=[slot],
+                      errors={f'players/{slot}/file': seat_error(out / f'players/{slot}/log.txt') or failure['message']})
+        return record
+    if completed.returncode not in (0, 3) or not (out / 'results.json').is_file():
+        tail = (out / 'game.log').read_text()[-1000:] if (out / 'game.log').is_file() else ''
+        raise Errored(f'the league host run failed (exit {completed.returncode}): '
+                      f'{(completed.stderr.strip() or tail)[-1000:]}', reason='binary_failed')
+    results = json.loads((out / 'results.json').read_text())
+    evaluate.validate(results)
+    status = {row['slot']: row for row in json.loads((out / 'player_status.json').read_text())['players']}
+    for seat in record['seats']:
+        row = status[seat['slot']]
+        seat['vm_failed'] = row['exit_code'] != 0
+        seat['vm_error'] = seat_error(out / seat['log']) if seat['vm_failed'] else None
+        seat['status'] = row['reason']
+    decoded = resimulate(runner.headless, out / 'replay.pwr', out / '.decode')
+    for name in ('summary.json', 'events.jsonl'):
+        shutil.move(str(out / '.decode' / name), str(out / name))
+    shutil.rmtree(out / '.decode')
+    state = HASH.search(decoded['stdout'])
+    actions = re.search(r'^replay: (\d+)/(\d+) actions$', decoded['stdout'], re.MULTILINE)
+    record.update(status='completed', scripts_active=sum(1 for seat in record['seats'] if not seat['vm_failed']),
+                  decisions=None, actions=int(actions[2]) if actions else None, state_hash=state[1] if state else None,
+                  map_hash=state[2] if state else None, end_tick=results['end_tick'],
+                  replay_sha256=sha256(out / 'replay.pwr'), replay_verified=True)
     return record
 
 

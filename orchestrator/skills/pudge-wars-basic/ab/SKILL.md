@@ -31,11 +31,14 @@ tool from `"$RESEARCH_HOME"` with `"$RESEARCH_PYTHON"` as shown. Read
 `games/pudge-wars-basic/GAME.md` and its linked `docs/mechanics.md`,
 `docs/replay-format.md` and `docs/game-guide.md` under RESEARCH_HOME. This folder
 targets Pudge Wars Basic only: league `league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0`,
-Coworld `pudge-wars-basic` 0.1.8 (`cow_c23845f0-444f-4d2f-864f-5764c58eda4a`), source
-`Metta-AI/polyworld-pudge-wars` at `cd8111a5`, replay game version 38. Resolve the
-current version with `softmax game-version` before new work; a newer source commit
-needs a rebuilt headless binary (`tools/native.py build --commit <SHA>`) before replays
-recorded on it decode.
+Coworld `pudge-wars-basic`. The knowledge here was written for version 0.1.8
+(`cow_c23845f0-444f-4d2f-864f-5764c58eda4a`), source `Metta-AI/polyworld-pudge-wars` at
+`cd8111a5`, replay game version 38. The tools follow the live league by themselves: every
+envelope's `engine` block names the version and commit that ran (binaries for a new commit
+are built on first use). If `engine.live` is false the league could not be checked and the
+run may be stale: say so in the record. If `knowledge.current` is false, treat
+game-specific claims here as possibly stale and propose the maintenance card the
+`knowledge.message` names (`kb renew ...`).
 
 ## Long commands
 
@@ -93,8 +96,9 @@ Drop or flag an episode before any mean:
   failed to load. If the index is our seat it is our compile/package failure (count it
   against the candidate, and it counts toward league disqualification); otherwise the
   episode is invalid for both arms.
-- **`BASIC VM disabled`** for a seat (`player_status.json` `exit_code 1`, or a
-  `pudge <id> BASIC error:` line in a local stdout log): that seat stood still from the
+- **`BASIC VM disabled`** for a seat (`player_status.json` `exit_code 1`; the
+  `BASIC error:` line is in that seat's `players/<slot>/log.txt`, locally and, for our
+  seats, in hosted episodes fetched with `hosted_logs.py`): that seat stood still from the
   failure tick. Our seat: a candidate failure, not noise. Another seat: the line-up was
   broken; keep it visible as a separate count.
 - **Platform failure**: XP episode status failed/cancelled, missing replay, a results hash

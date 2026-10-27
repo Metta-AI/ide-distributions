@@ -13,13 +13,16 @@ baselines/base.bas (checked), so strategy_sha256 is that STRATEGY.md's hash. Oth
 have no STRATEGY.md; their source hash stands in.
 
 Gates: G1 (static upload rules) and G2 (compiles and plays a league-length episode in all
-six seats; replay re-verifies) by default (validation_scope "build", a few seconds once the
-headless binary is built). --full-evaluation adds G3 (robustness, seeds 1..10 both sides vs
-the base starter) and the advisory G4 screen. Upload requires every non-advisory gate passed.
+six seats on the league host; replay re-verifies) by default (validation_scope "build", a few
+seconds once the binaries are built). --full-evaluation adds G3 (robustness, seeds 1..10 both
+sides vs the base starter) and the advisory G4 screen. Upload requires every non-advisory gate
+passed.
 
-Engine: by default the live league's Coworld version is read through
-`$RESEARCH_CLI softmax game-version` and must equal tools/engine.env COWORLD_VERSION (else
-the pin is stale: errored). --offline uses the engine.env pin without asking.
+Engine: the build gates on the engine the league runs now (tools/engine.py: public API,
+hourly cache), building its binaries on first use, and records it in version.json `engine`
+(version, coworld_id, commit, source_url, manifest_sha256, live, knowledge, the binaries).
+If the live lookup fails, or with --offline, it gates on the cached or last-known engine and
+records live=false, stale_risk=true and the warning.
 
 Writes BUILD_DIR/{policy.bas | policy.zip, version.json, report.json, report.md, gates/}.
 BUILD_DIR must not exist. On a rejected or errored build the same files are written with
@@ -28,9 +31,7 @@ the error and no artifact. Exit 0 passed; 1 a gate failed; 2 rejected input; 3 e
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -38,10 +39,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cli_contract
+import engine
 import episodes
 import gates_common
 import local_check
-import native
 from build_input import InputRejected
 from cli_contract import Errored, Rejected
 
@@ -57,36 +58,15 @@ def now() -> str:
 
 
 def engine_identity(offline: bool) -> dict:
-    pin = cli_contract.engine()
-    identity = {'schema': 'pudge-engine/1', 'mode': 'offline' if offline else 'live',
-                'commit': pin['POLYWORLD_PUDGE_COMMIT'], 'coworld_id': pin['COWORLD_ID'],
-                'coworld_version': pin['COWORLD_VERSION'], 'source_url': pin['SOURCE_URL'],
-                'league_id': pin['LEAGUE_ID'], 'bassy_commit': pin['BASSY_COMMIT'],
-                'replay_game_version': int(pin['REPLAY_GAME_VERSION']),
-                'manifest_sha256': episodes.sha256(episodes.MANIFEST)}
-    manifest = json.loads(episodes.MANIFEST.read_text())
-    if manifest['game']['runnable']['source_url'] != pin['SOURCE_URL'] or manifest['game']['version'] != pin['COWORLD_VERSION']:
-        raise Errored('tools/coworld_manifest.json disagrees with tools/engine.env', reason='pin_mismatch')
-    if offline:
-        return identity
-    cli = os.environ.get('RESEARCH_CLI')
-    if not cli:
-        raise Rejected('set RESEARCH_CLI to check the live game version, or pass --offline to use the pin',
-                       reason='invalid_input')
-    try:
-        completed = subprocess.run([cli, 'softmax', 'game-version'], capture_output=True, text=True,
-                                   timeout=120, check=False)
-        envelope = json.loads(completed.stdout)
-    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
-        raise Errored(f'softmax game-version failed: {error}', reason='engine_lookup_failed') from None
-    if not isinstance(envelope, dict) or envelope.get('ok') is not True:
-        raise Errored(f'softmax game-version failed: {completed.stderr.strip()[-500:]}', reason='engine_lookup_failed')
-    live = envelope['data']
-    if live.get('league_id') != pin['LEAGUE_ID'] or str(live.get('game_version')).strip() != pin['COWORLD_VERSION']:
-        raise Errored(f'the league runs {live.get("league_id")} version {live.get("game_version")}; the tools are '
-                      f'pinned to {pin["COWORLD_VERSION"]} (tools/engine.env): update the pin, manifest and '
-                      'native build before building', reason='engine_pin_stale')
-    identity['live'] = live
+    """The engine this build is gated on: the live league's (tools/engine.py), recorded in full.
+
+    When the live lookup fails (or --offline), the build still runs on the cached or
+    last-known engine, and version.json says so (live false, stale_risk true, warning).
+    """
+    record = engine.live(offline=offline)
+    identity = {'schema': 'pudge-engine/2', **engine.summary(record), 'league_id': record.get('league_id'),
+                'knowledge': engine.knowledge(record), 'starters': engine.starters(record)}
+    identity['coworld_version'] = record.get('version')
     return identity
 
 
@@ -159,15 +139,13 @@ def build(args) -> dict:
         if strategy is not None:
             source_hashes[str(strategy)] = episodes.sha256(strategy)
         names = FULL_GATES if args.full_evaluation else BUILD_GATES
-        context = gates_common.GateContext(scratch / 'gates', baseline=episodes.starter('base'))
+        context = gates_common.GateContext(scratch / 'gates', baseline=episodes.starter('base'),
+                                           commit=identity['commit'])
         context.work_dir.mkdir()
-        if args.binary is not None:
-            context.binary = args.binary.resolve()
-            context.binary_receipt = native.read_receipt(context.binary)
         gates, status = local_check.run_gates(artifact, context, names)
         policy_sha256 = episodes.sha256(artifact)
         source_path = str(strategy) if strategy is not None else str(inputs['source'])
-        receipt = context.binary_receipt or {}
+        runner = context.runner.describe() if context.runner else None
         version = {
             'build_id': out.name, 'status': status, 'artifact': artifact.name, 'policy_sha256': policy_sha256,
             'gates': gates, 'validation_scope': 'full' if args.full_evaluation else 'build',
@@ -175,11 +153,7 @@ def build(args) -> dict:
             'strategy_sha256': source_hashes[source_path], 'source_path': source_path,
             'source_hashes': source_hashes, 'starter': inputs['starter'],
             'compiler': {'mode': 'basic', 'transform': 'pack-directory' if inputs['source'].is_dir() else 'identity'},
-            'engine': {**identity, 'native_build': {
-                'binary': str(context.binary) if context.binary else None,
-                'binary_sha256': episodes.sha256(context.binary) if context.binary else None,
-                'receipt_binary_sha256': receipt.get('binary_sha256'),
-                'toolchain': (receipt.get('inputs') or {}).get('toolchain')}},
+            'engine': {**identity, 'native_build': runner},
             'created': now(), 'started': started, 'finished': now(),
         }
         if inputs['starter'] == 'base':
@@ -227,8 +201,8 @@ def main(argv=None) -> int:
     parser.add_argument('--starter', help='build a shipped starter instead: base, aggressive, sniper or neural')
     parser.add_argument('--out', type=Path, required=True, help='new build directory (must not exist)')
     parser.add_argument('--full-evaluation', action='store_true', help='also run G3 and the advisory G4 (minutes)')
-    parser.add_argument('--offline', action='store_true', help='use the tools/engine.env pin without a live check')
-    parser.add_argument('--binary', type=Path, help='use this pudge_headless instead of native.py path (tests)')
+    parser.add_argument('--offline', action='store_true',
+                        help='do not contact the API: build on the cached or last-known engine (recorded as not live)')
 
     def body(args):
         try:

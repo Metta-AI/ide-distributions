@@ -8,6 +8,11 @@ Output: with ``--json`` a tool prints exactly one JSON object on stdout:
 Everything else (progress, child-process output) goes to stderr. Without ``--json`` the
 tool prints ``data`` as indented JSON on success and the error message on stderr.
 
+Every envelope also carries the engine context (tools/engine.py): ``engine`` (live league
+version, Coworld id, commit; ``live: false`` and ``stale_risk: true`` with a warning when the
+live lookup failed), ``knowledge`` (whether the shipped docs/seed/skills cite the live commit)
+and ``starters`` (whether baselines/ match the live starter files), plus ``warnings``.
+
 Exit codes: 0 ok; 1 failed (the tool ran, the inputs or gates did not pass); 2 rejected
 input (fix the arguments and retry); 3 errored (a tool or environment fault, such as a
 missing Nim toolchain or a native build that cannot run).
@@ -122,11 +127,33 @@ def stdout_to_stderr():
         os.close(saved)
 
 
-def run(parser: ArgumentParser, body, argv: list[str] | None = None) -> int:
+def engine_context(check: str) -> dict:
+    """The envelope's engine/knowledge/starters/warnings; ``check`` is live, cached or none."""
+    if check == 'none':
+        return {}
+    import engine as engine_module  # late: engine imports this module
+
+    try:
+        record = engine_module.live(offline=check == 'cached')
+    except Exception as error:  # noqa: BLE001 - the envelope must still be printed
+        return {'engine': {'live': False, 'stale_risk': True, 'error': f'{type(error).__name__}: {error}'},
+                'warnings': [f'the engine could not be determined: {error}']}
+    context = {'engine': engine_module.summary(record), 'knowledge': engine_module.knowledge(record),
+               'starters': engine_module.starters(record)}
+    warnings = [record['warning']] if record.get('warning') else []
+    warnings += [context[key]['message'] for key in ('knowledge', 'starters') if context[key].get('message')]
+    if warnings:
+        context['warnings'] = warnings
+    return context
+
+
+def run(parser: ArgumentParser, body, argv: list[str] | None = None, *, engine_check: str = 'live') -> int:
     """Parse argv, call ``body(args)`` for the data, print the envelope, return the exit code.
 
     ``body`` returns the data on success or raises a ToolError. Any other exception is a
     tool bug: it is reported as ``errored`` (exit 3) with the traceback on stderr.
+    ``engine_check``: ``live`` (re-check the league when the hourly cache expired),
+    ``cached`` (never touch the network) or ``none``.
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     json_mode = '--json' in argv
@@ -150,6 +177,10 @@ def run(parser: ArgumentParser, body, argv: list[str] | None = None) -> int:
             code = EXIT_ERRORED
             envelope = {'ok': False, 'error': {
                 'reason': 'errored', 'message': f'{type(error).__name__}: {error} (tool bug; traceback on stderr)'}}
+    context = engine_context(engine_check)
+    envelope.update(jsonable(context))
+    for warning in context.get('warnings', []):
+        print(f'{parser.prog}: warning: {warning}', file=sys.stderr)
     if json_mode:
         print(json.dumps(envelope, allow_nan=False))
     elif envelope['ok'] or 'data' in envelope:

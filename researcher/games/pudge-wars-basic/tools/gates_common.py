@@ -61,8 +61,10 @@ def gate_run(run):
 class GateContext:
     work_dir: Path
     baseline: Path | None = None
-    binary: Path | None = None
-    binary_receipt: dict | None = None
+    # episodes.Runner for G2-G4; built for `commit` (default: the live engine) on first use.
+    runner: object | None = None
+    runner_kind: str = 'league'
+    commit: str | None = None
     seeds: int = 10
     jobs: int = 2
     timeout: int = 900

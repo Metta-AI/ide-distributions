@@ -262,7 +262,7 @@ GAME_TOOLS = {
     "gota": {"replay_stats.py", "evaluate.py", "compare.py", "make_v13_live.py", "build.py"},
     "pudge-wars-basic": {
         "native.py", "match.py", "build.py", "local_check.py", "evaluate.py",
-        "replay_inspect.py", "branch.py", "compare.py",
+        "replay_inspect.py", "branch.py", "compare.py", "hosted_logs.py",
     },
 }
 

@@ -3,18 +3,20 @@
 Plays seeds 1..N (default 10) on both sides: candidate in the west seats against the
 baseline in the east, and swapped. Fails if any candidate seat's VM is disabled at runtime
 (any BasicError, including the 100,000-instruction / 250,000-work-unit per-decision budget)
-or if either policy fails to load. The episodes are shared with G4.
+or if either policy fails to load. Episodes run on the league host, so a disabled VM is the
+host's own player_status verdict and its error line is in that seat's log. The episodes are
+shared with G4.
 
-Not measured: per-decision instruction and work-unit use. The headless binary does not
-report them (only whether a VM failed), so G3 cannot say how close the candidate runs to
-the budget; a policy near the limit can still pass here and fail on a rarer state.
+Not measured: per-decision instruction and work-unit use. Neither binary reports them (the
+VM keeps vm.lastWork/lastInstructions internally, bots.nim:832-833), so G3 cannot say how
+close the candidate runs to the budget; a policy near the limit can pass here and fail on a
+rarer state.
 """
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import episodes
 from gates_common import GateContext, GateResult, PolicyFailure, gate_run
 
 
@@ -32,10 +34,10 @@ def screen(artifact: Path, context: GateContext) -> list[dict]:
         seed, side = job
         seats = ([artifact] * half + [context.baseline] * half if side == 'west'
                  else [context.baseline] * half + [artifact] * half)
-        record = episodes.run_episode(
-            context.binary, seats, seed=seed, max_ticks=config['max_ticks'], kill_goal=config['kill_goal'],
+        record = context.runner.run(
+            seats, seed=seed, max_ticks=config['max_ticks'], kill_goal=config['kill_goal'],
             out=context.work_dir / 'screen' / f'seed-{seed}-candidate-{side}', variant=context.variant,
-            timeout=context.timeout, binary_receipt=context.binary_receipt)
+            timeout=context.timeout)
         record['candidate_side'] = side
         record['candidate_slots'] = list(range(half) if side == 'west' else range(half, 2 * half))
         return record
@@ -65,5 +67,5 @@ def run(artifact: Path, context: GateContext) -> GateResult:
         raise PolicyFailure('; '.join(problems[:10]) + (f' (+{len(problems) - 10} more)' if len(problems) > 10 else ''))
     return GateResult('passed', {'episodes': len(records), 'seeds': context.seeds,
                                  'candidate_vm_failures': 0, 'baseline_vm_failures': baseline_failures,
-                                 'instruction_work_use': 'not measured (headless binary reports VM failure only)',
+                                 'instruction_work_use': 'not measured (no binary output reports it)',
                                  'screen_dir': str(context.work_dir / 'screen')})

@@ -8,6 +8,9 @@ reposition, none, ... whatever was eligible, or --options), every other seat is 
 and both teams' deltas are reported. Rollouts are deterministic for a given tape, slot,
 option and seed; --seeds N > 1 reseeds the world stream for extra rollouts per option.
 
+The engine is the replay's own, chosen as replay_inspect.py does (--commit, --coworld-id,
+episode metadata beside the tape, else live).
+
 Caveat (examples/pudge_wars/branch.nim:1-14@cd8111a5): the continuation is bots, not the
 players who were there, so the ranking is evidence about this state, not proof of what the
 real opponents would have done.
@@ -25,7 +28,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cli_contract
 import episodes
-import native
 import replay_inspect
 from cli_contract import Rejected
 
@@ -80,8 +82,9 @@ def main(argv=None) -> int:
     parser.add_argument('--bot', default='base', help='policy for the other seats after the branch (default base)')
     parser.add_argument('--teachers', help='comma-separated policies asked what they would do at each window')
     parser.add_argument('--out', type=Path, help='also keep the raw JSONL rows here (new file)')
-    parser.add_argument('--binary', type=Path, help='use this pudge_headless instead of native.py path')
-    parser.add_argument('--commit', help='engine commit for native.py (default: tools/engine.env)')
+    parser.add_argument('--coworld-id', help="the episode's Coworld id (its engine runs the rollouts)")
+    parser.add_argument('--commit', help='run the rollouts with this engine commit')
+    parser.add_argument('--binary', type=Path, help='run the rollouts with this pudge_headless')
 
     def body(args):
         tape = replay_inspect.find_replay(args.tape)
@@ -94,12 +97,8 @@ def main(argv=None) -> int:
             raise Rejected(f'--out already exists: {args.out}')
         bot = episodes.resolve_policy(args.bot)
         teachers = [episodes.resolve_policy(name.strip()) for name in (args.teachers or '').split(',') if name.strip()]
-        if args.binary is not None:
-            if not args.binary.is_file():
-                raise Rejected(f'--binary does not exist: {args.binary}')
-            binary = args.binary.resolve()
-        else:
-            binary = native.ensure(args.commit)[0]
+        binary, decode_engine = replay_inspect.replay_engine(tape, data, binary=args.binary, commit=args.commit,
+                                                             coworld_id=args.coworld_id)
         with tempfile.TemporaryDirectory(prefix='pudge-branch-') as scratch:
             raw = Path(scratch) / 'tape.pwr'
             raw.write_bytes(data)
@@ -125,7 +124,7 @@ def main(argv=None) -> int:
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(text)
         return {'tape': str(tape.resolve()), 'gzip': gzipped, 'slot': args.slot, 'ticks': ticks,
-                'bot': bot, 'binary': binary, 'windows': summarise(rows),
+                'bot': bot, 'binary': binary, 'decode_engine': decode_engine, 'windows': summarise(rows),
                 'teachers': [row for row in rows if 'option' not in row], 'rows_out': args.out}
 
     return cli_contract.run(parser, body, argv)

@@ -51,7 +51,12 @@
 The binding gunzips if needed and runs the headless binary
 (`examples/pudge_wars/pw.nim` built `-d:release -d:headless`) as
 `pudge_headless --replay R --duellog DIR`, caching the output next to the replay. It
-must report every tick matched; any mismatch means a wrong binary, not a game fact. The
+must report every tick matched; any mismatch means a wrong binary, not a game fact.
+The binary is the replay's **own** engine: `--commit`, `--coworld-id`, an episode row
+beside the replay (`episode.json` with `coworld_id`, as `hosted_logs.py` and
+`softmax league-results` write it, or `engine_commit` from `match.py`), else the live
+engine; it is built on first use. A tape whose header game version differs from that
+engine's is refused (`engine_mismatch`) with what to pass instead. The
 duel logger is a pure observer (`examples/pudge_wars/duellog.nim:1-17@cd8111a5`).
 
 ```sh
@@ -120,27 +125,42 @@ this choice reasonable", not a prediction of the hosted outcome.
   `worldTick` in every line (`examples/pudge_wars/fileplayers.nim:51-57@cd8111a5`). Cap 10 MiB.
 - `ANNOTATE(worldTick, "kind", "function", "{json}")` writes
   `{"schema_version":1,"time":T,"kind":…,"function":…,"args":{…}}` per line
-  (`src/polyworld/annotations.nim:69-99@cd8111a5`). Join to the replay by `time` = tick.
-- **The headless binary keeps neither**: PRINT becomes a speech bubble and `ANNOTATE`
-  returns "disabled" (`src/polyworld/annotations.nim:113-130@cd8111a5`). Local
-  `match.py` runs therefore give no decision trace. The headless binary does echo
-  `pudge <id> BASIC error: <message>` to stdout when a VM is disabled
-  (`examples/pudge_wars/bots.nim:827-833@cd8111a5`) and ends with
-  `scripts: N/M active`.
-- Hosted: the core `softmax xp artifacts` command downloads results and replays only. Seat
-  logs and annotations exist for our own policies on the platform, but no installed command
-  fetches them yet; treat the decision trace as unavailable and say so.
+  (`src/polyworld/annotations.nim:69-99@cd8111a5`); at most 1,000 events (2 MiB) per seat,
+  so annotate decisions, not every tick. Join to the replay by `time` = tick.
+- **Local** (`match.py`, `local_check.py` G2/G3, default `--runner league`): episodes run on
+  the native league host (`pudge_league`, `examples/pudge_wars/coworld_host.nim
+  -d:basicLeague`, the hosted image's `pwleague` without SSL) through the game's own
+  `scripts/run_episode.py`, so every seat gets `players/<slot>/log.txt` (PRINT plus the host's
+  `Player slot N started.` and `BASIC error: …` lines) and `players/<slot>/annotations.jsonl`,
+  and the episode gets `player_status.json`. `--runner headless` is about 25% faster but keeps
+  neither: there PRINT becomes a speech bubble and `ANNOTATE` returns "disabled"
+  (`src/polyworld/annotations.nim:113-130@cd8111a5`); a disabled VM shows only as
+  `pudge <id> BASIC error: <message>` on stdout (`examples/pudge_wars/bots.nim:827-833@cd8111a5`).
+- **Hosted**: `tools/hosted_logs.py --xp XREQ` (or `--episode EREQ`) `--dest DIR` fetches our
+  own seats' PRINT logs, annotations and player artifacts, plus results, replay and the
+  episode row, as the Player (`$RESEARCH_CLI softmax exec -- coworld …`: `xp-request download
+  --include player_logs --include player_artifact`, `episode-logs --mine`,
+  `episode-annotations`). It writes the same layout as local runs:
+  `DIR/<ereq>/players/<slot>/{log.txt, annotations.jsonl, artifact.zip}`, `results.json`,
+  `replay`, `episode.json`. Other players' logs are not served (the platform checks policy
+  ownership).
+- Neither runner, nor the platform, reports per-decision instruction or work-unit use: the VM
+  keeps `vm.lastWork` / `vm.lastInstructions` (`examples/pudge_wars/bots.nim:832-833@cd8111a5`)
+  but no output carries them. To see headroom, have the policy ANNOTATE its own loop counts.
 
 ## Local episode output (`match.py`)
 
-Per episode: `results.json` in the hosted schema, `replay.pwr`, `summary.json`,
-`events.jsonl` and the stdout log. The headless binary reproduced the league host's final
-state hashes for the same seats and seed, so local tapes decode the same way as hosted ones.
-It does not produce `player_status.json`; a disabled VM shows in the stdout log.
+Per episode: `results.json` in the hosted schema, `replay.pwr`, `summary.json` and
+`events.jsonl` (the headless re-simulation of the tape, verified every tick), `episode.json`
+(runner, binaries, engine commit, seats, `vm_failed`, `vm_error`), and with the default league
+runner also `players/<slot>/{file, log.txt, annotations.jsonl}`, `player_status.json`,
+`player_failure.json` (when a policy does not load), `config.json`, `player_seats.json`,
+`game.log`. Both runners give identical results and state hashes for the same seats and seed,
+and match the hosted league host's.
 
 ## Open questions
 
 - Whether the platform compiles a policy at upload or only at episode start (assume the
   latter and validate locally).
-- Episode directory names inside an XP download depend on the platform CLI; read the
-  download's `manifest.jsonl` rather than assuming a layout.
+- Episode directory names inside a raw XP download depend on the platform CLI (receipts in
+  `manifest.jsonl`); `hosted_logs.py` maps them to `DIR/<ereq>/` for you.

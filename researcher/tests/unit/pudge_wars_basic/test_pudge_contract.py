@@ -146,13 +146,6 @@ def test_build_argument_handling(tmp_path):
     assert not any((tmp_path / 'exists').iterdir())
 
 
-def test_build_live_mode_needs_research_cli(tmp_path, monkeypatch):
-    env = {key: value for key, value in os.environ.items() if key != 'RESEARCH_CLI'}
-    completed = run('build.py', '--starter', 'base', '--out', tmp_path / 'live', '--json', env=env)
-    assert completed.returncode == 2
-    assert 'RESEARCH_CLI' in completed.stdout
-
-
 def test_upload_requires_shared_cli(monkeypatch):
     monkeypatch.delenv('RESEARCH_CLI', raising=False)
     completed = run('upload.py')
@@ -181,7 +174,7 @@ def test_upload_help_is_the_shared_cli_help(tmp_path):
     assert completed.stdout.strip() == 'usage: research softmax upload --help'
 
 
-@pytest.mark.parametrize('name', ['native', 'match', 'build', 'local_check', 'evaluate',
+@pytest.mark.parametrize('name', ['native', 'match', 'build', 'local_check', 'evaluate', 'hosted_logs',
                                   'resolve_segment', 'replay_inspect', 'branch', 'compare'])
 def test_tool_help(name):
     completed = run(f'{name}.py', '--help')
@@ -204,6 +197,17 @@ def test_rejected_input_exits_2_with_envelope(name, args):
     assert envelope['ok'] is False and envelope['error']['message']
 
 
+def test_envelopes_carry_engine_and_knowledge():
+    completed = run('evaluate.py', '--results', fixture('hosted_west_win.results.json'), '--json')
+    envelope = json.loads(completed.stdout)
+    assert envelope['engine']['live'] is True and envelope['engine']['source'] == 'override'
+    assert envelope['knowledge'] == {'cited_commit': envelope['engine']['commit'],
+                                     'live_commit': envelope['engine']['commit'],
+                                     'live_version': envelope['engine']['version'], 'current': True}
+    assert envelope['starters'] == {'current': True, 'changed': []}
+    assert 'warnings' not in envelope
+
+
 def test_engine_pin_matches_manifest_and_starters(tools):
     pin = tools.cli_contract.engine()
     manifest = json.loads((TOOLS / 'coworld_manifest.json').read_text())
@@ -211,6 +215,7 @@ def test_engine_pin_matches_manifest_and_starters(tools):
     assert manifest['game']['version'] == pin['COWORLD_VERSION']
     assert manifest['game']['runnable']['source_url'] == pin['SOURCE_URL']
     assert pin['POLYWORLD_PUDGE_COMMIT'] in pin['SOURCE_URL']
+    assert pin['KNOWLEDGE_COMMIT'] == pin['POLYWORLD_PUDGE_COMMIT']
     for player in manifest['player']:
         path = tools.episodes.starter(player['id'])
         assert player['file'].endswith(tools.episodes.sha256(path))

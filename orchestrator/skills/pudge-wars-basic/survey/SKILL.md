@@ -32,11 +32,14 @@ tool from `"$RESEARCH_HOME"` with `"$RESEARCH_PYTHON"` as shown. Read
 `games/pudge-wars-basic/GAME.md` and its linked `docs/mechanics.md`,
 `docs/replay-format.md` and `docs/game-guide.md` under RESEARCH_HOME. This folder
 targets Pudge Wars Basic only: league `league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0`,
-Coworld `pudge-wars-basic` 0.1.8 (`cow_c23845f0-444f-4d2f-864f-5764c58eda4a`), source
-`Metta-AI/polyworld-pudge-wars` at `cd8111a5`, replay game version 38. Resolve the
-current version with `softmax game-version` before new work; a newer source commit
-needs a rebuilt headless binary (`tools/native.py build --commit <SHA>`) before replays
-recorded on it decode.
+Coworld `pudge-wars-basic`. The knowledge here was written for version 0.1.8
+(`cow_c23845f0-444f-4d2f-864f-5764c58eda4a`), source `Metta-AI/polyworld-pudge-wars` at
+`cd8111a5`, replay game version 38. The tools follow the live league by themselves: every
+envelope's `engine` block names the version and commit that ran (binaries for a new commit
+are built on first use). If `engine.live` is false the league could not be checked and the
+run may be stale: say so in the record. If `knowledge.current` is false, treat
+game-specific claims here as possibly stale and propose the maintenance card the
+`knowledge.message` names (`kb renew ...`).
 
 ## Long commands
 
@@ -62,7 +65,7 @@ One row per policy (aggregate teammate copies per episode first), findings first
 | landed/thrown | `hook_landed_rate` | includes ally saves; field mean 49.3% (SD 9.6) |
 | enemy hit rate, clash W/L | `replay_inspect` `hooks[]` | only for decoded episodes; say how many |
 | deaths by cause | `replay_inspect` `damageTaken`, `kill` events | hook, headshot, drown, rot, melee, fire, lightning |
-| VM disabled / load failures | `player_status.json`, `player_failure.json`, stdout | a separate count, never folded into means |
+| VM disabled / load failures | `player_status.json`, `player_failure.json`, our seats' `players/<slot>/log.txt` (`BASIC error:` line; hosted via `hosted_logs.py`) | a separate count, never folded into means |
 
 Add the batch context: game version, seeds (distinct?), line-ups, West/East counts.
 Missing values stay missing; do not fill zeros.

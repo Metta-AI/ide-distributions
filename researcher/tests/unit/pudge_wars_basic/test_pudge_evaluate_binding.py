@@ -2,7 +2,6 @@
 `softmax xp evidence` seat reduction), on recorded hosted results."""
 import json
 import shutil
-from pathlib import Path
 
 import pytest
 from support.pudge_wars_basic import GAME, ROOT, fixture, results
@@ -64,12 +63,12 @@ def test_shared_league_episode_rows(game, tmp_path):
     assert set(rows[0].metrics) == {'win', 'team_kill_margin', 'kills', 'deaths', 'hook_landed_rate'}
 
 
-def test_xp_evidence_reduction_sees_one_metric_set(game):
+def test_xp_evidence_reduction_sees_one_metric_set(game, tmp_path):
     # `softmax xp evidence` fails an episode whose own seats report different metric names;
     # every seat must carry all five metrics, including zero-throw seats.
     data = results('hosted_west_win.results.json')
     data['per_seat'][0].update(hooks_thrown=0, hooks_landed=0)
-    path = Path(game.root) / 'zero.results.json'
+    path = tmp_path / 'zero.results.json'
     path.write_text(json.dumps(data))
     entries = binding_evaluate(game)(path)
     assert len({frozenset(entry['metrics']) for entry in entries}) == 1
