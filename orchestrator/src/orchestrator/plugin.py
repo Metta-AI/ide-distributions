@@ -8,6 +8,7 @@ from ide_research_core import session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
 from .artifacts import ReportRead, Reports
+from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .capabilities import Capabilities
 from .context import profile_context
@@ -29,6 +30,12 @@ GAME = {
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "attachment_download": (
+        Attachments,
+        "Download a conversation attachment by its SHA-256 from the current workspace. Returns a local path after verifying its size and hash (maximum 25 MiB). Use the hash from attachment context; no URL, credential, or destination argument is needed. Read the returned file with native file or terminal tools. Never executes its contents.",
+        AttachmentDownload.model_json_schema()["properties"],
+        ["sha256"],
+    ),
     "github_repositories": (
         GitHub,
         "List public and private GitHub repositories authorized by the workspace owner in Softmax IDEa. Follow nextPage for more results; never ask for a token in chat.",
@@ -37,8 +44,9 @@ TOOLS = {
     ),
     "github_clone": (
         GitHub,
-        "Clone a GitHub repository through the owner's connected account into a new hosted checkout. Accepts owner/repository or its HTTPS GitHub URL. Returns the path and exact commit for native file inspection. Provider credentials never enter tool results. Use terminal git clone directly for public repos when no connection exists.",
-        {"repository": {"type": "string", "maxLength": 200}},
+        "Clone a GitHub repository through the owner's connected account into a new hosted checkout. Accepts owner/repository or its HTTPS GitHub URL and an optional full commit SHA for a pinned release. Returns the path and exact commit for native file inspection. Provider credentials never enter tool results. Later terminal fetches do not retain authorization; use this tool with commit to obtain another revision. Use terminal git clone directly for public repos when no connection exists.",
+        {"repository": {"type": "string", "maxLength": 200},
+         "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
         ["repository"],
     ),
     "card_report": (
