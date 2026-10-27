@@ -57,7 +57,7 @@ TOOLS = {
     ),
     "card_files": (
         Reports,
-        "Discover committed files and directories from a card's latest completed run. Start with directory omitted for the root; follow directory paths and next_offset. Returns paths, kinds, sizes and Git blob IDs, at most 200 entries per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
+        "Discover committed files and directories from a card's latest completed run. Lists the whole tree recursively by default; directory limits the subtree, recursive=false lists one level. Follow next_offset for at most 200 paths, kinds, sizes and Git blob IDs per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
         CardFiles.model_json_schema()["properties"],
         ["task_id", "run_id", "commit"],
     ),

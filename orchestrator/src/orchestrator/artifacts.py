@@ -33,6 +33,7 @@ Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 class CardFiles(CompletedCardRead):
     directory: str = Field(default="", max_length=512)
+    recursive: bool = True
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=200)
 
@@ -121,14 +122,15 @@ class Reports:
         blob = entry[2]
         return blob, int(self._git(workspace, "cat-file", "-s", blob))
 
-    def card_files(self, task_id, run_id, commit, directory="", offset=0, limit=100):
+    def card_files(self, task_id, run_id, commit, directory="", recursive=True, offset=0, limit=100):
         request = CardFiles(task_id=task_id, run_id=run_id, commit=commit,
-                            directory=directory, offset=offset, limit=limit)
+                            directory=directory, recursive=recursive, offset=offset, limit=limit)
         workspace = self._workspace(request)
         if request.directory:
             self._relative(request.directory)
         tree = request.commit + (":" + request.directory if request.directory else "")
-        entries = self._git(workspace, "ls-tree", "--long", "-z", tree).split(b"\0")[:-1]
+        traversal = ["-r", "-t"] if request.recursive else []
+        entries = self._git(workspace, "ls-tree", *traversal, "--long", "-z", tree).split(b"\0")[:-1]
         if request.offset > len(entries):
             raise ArtifactError("invalid_artifact_selection", "Offset exceeds the directory's entry count")
         files = []
@@ -143,7 +145,7 @@ class Reports:
         end = min(request.offset + request.limit, len(entries))
         return {
             "task_id": request.task_id, "run_id": request.run_id, "commit": request.commit,
-            "directory": request.directory, "files": files, "total": len(entries),
+            "directory": request.directory, "recursive": request.recursive, "files": files, "total": len(entries),
             "next_offset": end if end < len(entries) else None,
         }
 

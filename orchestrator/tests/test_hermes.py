@@ -164,18 +164,20 @@ assert not json.loads(registry.dispatch('card_files', identity))['ok']
 with closing(connection()) as conn:
     assert kb.complete_task(conn, task_id, summary='Evidence committed', expected_run_id=task.current_run_id)
 assert not worktree.exists(), 'Native completion must exercise cleaned-worktree recovery'
-listing = json.loads(registry.dispatch('card_files', {**identity, 'limit': 2}))
+listing = json.loads(registry.dispatch('card_files', {**identity, 'recursive': False, 'limit': 2}))
 assert listing['ok'], listing
 files = listing['data']['files']
 while listing['data']['next_offset'] is not None:
     listing = json.loads(registry.dispatch('card_files', {
-        **identity, 'limit': 2, 'offset': listing['data']['next_offset'],
+        **identity, 'recursive': False, 'limit': 2, 'offset': listing['data']['next_offset'],
     }))
     assert listing['ok'], listing
     files.extend(listing['data']['files'])
 assert {item['path']: item['kind'] for item in files} == {
     'seed.txt': 'blob', 'evidence': 'tree', 'link': 'symlink', 'policy.bas': 'blob', 'report.md': 'blob',
 }, files
+tree = json.loads(registry.dispatch('card_files', identity))
+assert tree['ok'] and set(request['paths']) <= {item['path'] for item in tree['data']['files']}, tree
 nested = json.loads(registry.dispatch('card_files', {**identity, 'directory': 'evidence/nested'}))
 assert nested['ok'] and nested['data']['files'][0]['path'] == request['paths'][0], nested
 assert worktree.exists()

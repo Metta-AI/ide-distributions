@@ -250,8 +250,9 @@ If native completion cleaned up the worktree, the reader restores it through Her
 Review a completed experiment through these tools:
 
 1. Get its latest completed run and full commit from `card_show`.
-2. Call `card_files(task_id, run_id, commit)` to discover the root. Follow directory paths and
-   `next_offset` for bounded listings, rather than guessing report paths.
+2. Call `card_files(task_id, run_id, commit)` to discover the tree recursively. `directory`
+   restricts the subtree; `recursive=false` lists one level. Follow `next_offset` for bounded
+   pages, rather than guessing report paths or making a separate call for every match folder.
 3. Use `card_report` for bounded text pages. Use `card_artifacts(task_id, run_id, commit, paths)`
    for SHA-256 hashes, byte sizes and Git blob IDs. Optional `expected_sha256` maps paths to
    hashes from the report or index; each file reports whether its expected hash matched.
