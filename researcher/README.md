@@ -245,10 +245,11 @@ tests' fixture refuses any real agent binary once it is active:
 - **GotA is bound but not proven end to end.** `games/gota` has real build, local check,
   evaluate and upload bindings, and the compiler passed M1 on engine 2026.10.7.2 only. No
   research cycle has run on GotA under the orchestrator yet.
-- **Pudge Wars Basic is bound but not proven end to end.** `games/pudge-wars-basic` has real
-  build, local check (G1–G4), evaluate and replay bindings, and a native headless match runner
-  checked against the league host on 2026-10-26 (version 0.1.8); no research cycle has run on it
-  under the orchestrator yet.
+- **Pudge Wars Basic local execution is verified; live promotion is not.**
+  `games/pudge-wars-basic` has build, local check (G1–G4), evaluate and replay bindings.
+  [`test_pudge_readonly_tools.py`](tests/system/test_pudge_readonly_tools.py) runs a real league
+  match, verifies its replay and reuses compiled binaries after task output cleanup, with
+  installed tools read-only. Paired local screens do not establish live league superiority.
 - **Container players.** Most coworlds other than GotA play a Docker image. Discover local and hosted
   capabilities before declaring build support unavailable. The coordinator owns publication;
   a remote build service does not automatically supply a game’s research bindings or evaluation
