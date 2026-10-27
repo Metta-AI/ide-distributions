@@ -253,10 +253,9 @@ tests' fixture refuses any real agent binary once it is active:
   build, local check (G1–G4), evaluate and replay bindings, and a native headless match runner
   checked against the league host on 2026-10-26 (version 0.1.8); no research cycle has run on it
   under the orchestrator yet.
-- **Container players.** Most coworlds other than GotA play a Docker image. Hosted sandboxes
-  have no Docker, and `softmax upload` sends a file or directory, so a new game folder for such
-  a game can hold its docs, skills and `evaluate` binding but not a build that runs here; its
-  `host_requirements` say what is missing.
+- **Game bindings.** Discover the capabilities a game's runtime contract requires. Service
+  availability does not establish that a research binding is implemented or verified. Keep gaps
+  explicit, and list local executable requirements in `host_requirements`.
 - **Public repositories only.** `source fetch` has no GitHub credential; most mixins are
   private, so `game-create` usually builds a folder from the game source alone.
 - **One OS user.** Workers, the orchestrator and Hermes run as one user, so no guard is a

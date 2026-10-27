@@ -62,11 +62,12 @@ Doctrine upheld: D-04, D-07, D-23, D-25, D-26.
    `"$RESEARCH_CLI" softmax league-results --league <league_id> --limit 5 --dest .scratch/league-results`
    and make `<evaluate> --results <file> --json` print one entry per seat for each of them.
    Run bindings from your worktree's root (the folder that holds `games/`), with absolute
-   paths. For a game-hosted file policy, also implement `build`, `local_check` and the starter
-   build. For a container-image policy, describe the build in `## Bindings`, declare its tools
-   in `host_requirements`, and leave a stub that cannot run here as a gap. Tools write only
-   where `games/_template/CONTRACT.md` ("Where tools may write") allows: once shipped, the
-   game folder is read-only.
+   paths. Discover the capabilities required by the game's runtime contract before implementing
+   its build, local-check and starter bindings. The coordinator owns publication. Document verified
+   binding responsibilities in `## Bindings`; `host_requirements` lists local executable requirements.
+   Keep unimplemented or unverified bindings explicit; never substitute a stub for a required gate.
+   Tools write only where `games/_template/CONTRACT.md` ("Where tools may write") allows: once
+   shipped, the game folder is read-only.
 9. Write `seed/strategy/STRATEGY.md` (the starter policy and what a change can target) and
    `seed/plan.md`.
 10. Check until there are no problems:

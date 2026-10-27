@@ -13,6 +13,7 @@ Sources and their copies:
   ``ONTOLOGY_MARKER`` (Hermes loads SOUL.md in every session, so every turn has the shared
   vocabulary without reading another file). Only the research
   distributions get it: ``play`` uses the package's Softmax tool, not the research vocabulary.
+- ``shared/scripts/prepare.py`` -> each research profile’s ``scripts/prepare.py``
 - ``shared/skills/autoresearch/`` -> ``<distribution>/skills/autoresearch/`` for the research
   distributions (the research-method skills both the orchestrator and researchers use)
 - ``researcher/games/<game>/skills/`` -> ``<distribution>/skills/<game>/`` for the research
@@ -124,6 +125,11 @@ def main() -> int:
         changes += mirror(REPO / "shared" / PACKAGE, distribution / "src" / PACKAGE)
         if name in RESEARCH_DISTRIBUTIONS:
             changes += mirror(REPO / "shared" / "skills" / SKILLS, distribution / "skills" / SKILLS)
+            prepare = REPO / "shared/scripts/prepare.py"
+            target = distribution / "scripts/prepare.py"
+            if not target.exists() or target.read_bytes() != prepare.read_bytes():
+                target.write_bytes(prepare.read_bytes())
+                changes.append(f"wrote {target.relative_to(REPO)}")
             changes += embed_ontology(distribution / "SOUL.md", REPO / "ontology" / "ONTOLOGY.md")
     orchestrator = REPO / "orchestrator"
     if (orchestrator / "distribution.yaml").is_file():

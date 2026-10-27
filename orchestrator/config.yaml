@@ -13,15 +13,15 @@ memory:
   write_approval: false
 agent:
   max_turns: 150
-# Chat (api_server) and supervisor (cron) turns get the plugin tools plus the Hermes tools a
-# researcher has: shell (terminal, process_manage), files, Python (execute_code), skills, web
-# search and extraction, browser, image reading (vision), todo lists, past-session search,
-# subagents (delegation) and memory. Not kanban (the card_* tools replace it) or cronjob (an
-# enabled cron job keeps a hosted workspace awake). Dangerous commands go through Hermes
-# approvals: chat asks the user, unattended cron turns deny them (approvals.cron_mode default).
+# Chat gets the plugin tools plus the Hermes tools a researcher has: shell (terminal,
+# process_manage), files, Python (execute_code), skills, web search and extraction, browser,
+# image reading (vision), todo lists, past-session search, subagents (delegation) and memory.
+# Not kanban (the card_* tools replace it) or cronjob (an enabled cron job keeps a hosted
+# workspace awake). Dangerous commands go through Hermes approvals, which chat asks the user.
+# Supervisor cron only wakes the coordinator, so it has no tools.
 platform_toolsets:
-  api_server: [orchestrator, terminal, file, code_execution, skills, web, browser, vision, todo, session_search, delegation, memory]
-  cron: [orchestrator, terminal, file, code_execution, skills, web, browser, vision, todo, session_search, delegation, memory]
+  api_server: [orchestrator, memory, terminal, file, code_execution, skills, web, browser, vision, todo, session_search, delegation]
+  cron: []
 terminal:
   # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.
   timeout: 1800

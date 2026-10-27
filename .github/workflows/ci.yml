@@ -42,6 +42,12 @@ jobs:
           mkdir /opt/nim-2.2.10
           tar -xJf /tmp/nim.tar.xz -C /opt/nim-2.2.10 --strip-components=1
           echo /opt/nim-2.2.10/bin >> "$GITHUB_PATH"
+      - name: Verify generated distribution payloads
+        if: matrix.distribution == 'researcher'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python ../tools/sync_shared.py
+          git -C "$GITHUB_WORKSPACE" diff --exit-code
       - run: uv sync --frozen
       - run: uv run pytest -q
       - name: Validate real Hermes task admission and profile installation
@@ -56,4 +62,4 @@ jobs:
         if: matrix.distribution == 'researcher'
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          uv run pytest -q -m hermes tests/integration/test_install.py::test_guard_preserves_native_completion_after_retained_update
+          uv run pytest -q -m hermes tests/integration/test_install.py::test_guard_preserves_native_completion_after_retained_update tests/system/test_prepare_system.py

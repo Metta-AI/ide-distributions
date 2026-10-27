@@ -10,7 +10,9 @@ launch card. Doctrine upheld: D-03, D-06, D-09, D-11, D-21, D-27.
 
 Read the experiment's frozen design, uploaded candidate binding and recorded requests.
 The orchestrator assigns work on this entity; your job is to recover or launch the specified
-batch, preserve its state and complete without waiting for the platform.
+batch and preserve its state. Complete a launch-only assignment only when every requested
+launch was admitted. Block when any launch is missing or refused; partial receipts never
+satisfy a full-batch assignment. Do not wait in the session for admitted requests to finish.
 
 ## Procedure
 
@@ -56,9 +58,9 @@ batch, preserve its state and complete without waiting for the platform.
   return existing handles for review.
 - `busy`: do not duplicate a running command. If `details.own_run` is true, wait on your own
   process with `process_manage` as in `card`, then recover its handles. Otherwise report the
-  holder and complete `partial`; do not loop or take its lock.
+  holder and block with the exact dependency; do not loop or take its lock.
 - A retryable `platform` refusal or interrupted launch can replay the same batch/attempt to
-  create only missing requests. If it still fails, preserve the state and complete `partial`.
+  create only missing requests. If it still fails, preserve the state and block with the exact outstanding requests.
 - A tooling traceback, an `errored` check or `tool_missing` follows D-26 in `card`. Do not retry it.
 
 For a launch-only assignment completed with pending results, include optional native completion
