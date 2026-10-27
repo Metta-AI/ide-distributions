@@ -12,6 +12,7 @@ from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .capabilities import Capabilities
 from .context import profile_context
+from .coworld_context import CoworldContext, Selection, repository_context_middleware
 from .github import GitHub
 from .ide import IDE
 from .research import Research, ResearchError
@@ -30,6 +31,12 @@ GAME = {
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "coworld_repository": (
+        CoworldContext,
+        "Load the selected Coworld's source at its full GitHub commit SHA. Returns a reusable checkout and bounded COWORLD.md with document/skill links and a content hash. Pass the current desktop repository selection verbatim. Public source needs no GitHub connection; private source uses the owner's consented broker. Never executes repo code, installs global skills, changes game defaults, or resets candidate edits. Missing guides and unpinned source are explicit statuses. This game source is not the player's submitted policy.",
+        {"selection": Selection.model_json_schema()},
+        ["selection"],
+    ),
     "attachment_download": (
         Attachments,
         "Download a conversation attachment by its SHA-256 from the current workspace. Returns a local path after verifying its size and hash (maximum 25 MiB). Use the hash from attachment context; no URL, credential, or destination argument is needed. Read the returned file with native file or terminal tools. Never executes its contents.",
@@ -437,6 +444,7 @@ def handler(name):
 
 
 def register(ctx):
+    ctx.register_middleware("llm_request", repository_context_middleware)
     for name, (_, description, properties, required) in TOOLS.items():
         schema = {
             "name": name,
