@@ -45,13 +45,6 @@ Metta configures shared gateway dispatch capacity and worker profile names after
 The distribution disables automatic task decomposition because its coordinator owns assignment.
 Game selection comes from the conversation and task; never supply a default `RESEARCH_GAME`.
 
-## Writable storage
-
-Profile code from the image is read-only. Game tools build into
-`$HERMES_HOME/cache/<game>/` on the workspace disk when their own `tools/.cache` and
-`tools/bin` are not writable, so a shipped game needs no image volume. The researcher GotA volumes
-still work and can be removed.
-
 ## Platform capabilities
 
 Providers own operation schemas, input semantics, limits, effects, status and recovery instructions.
