@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from ide_research_core import host_capabilities, session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
-from .artifacts import ReportRead, Reports
+from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .context import profile_context
@@ -53,6 +53,18 @@ TOOLS = {
         "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
+    ),
+    "card_files": (
+        Reports,
+        "Discover committed files and directories from a card's latest completed run. Lists the whole tree recursively by default; directory limits the subtree, recursive=false lists one level. Follow next_offset for at most 200 paths, kinds, sizes and Git blob IDs per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
+        CardFiles.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit"],
+    ),
+    "card_artifacts": (
+        Reports,
+        "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest completed run. Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
+        ArtifactRead.model_json_schema()["properties"],
+        ["task_id", "run_id", "commit", "paths"],
     ),
     "game_starter": (
         Research,
@@ -368,7 +380,7 @@ def handler(name):
                 arguments["session_id"] = session_id
             data = getattr(owner(context), name)(**arguments)
             return json.dumps({"ok": True, "data": data})
-        except (ResearchError, WorkspaceError) as error:
+        except (ArtifactError, ResearchError, WorkspaceError) as error:
             return json.dumps(error.envelope)
         except HTTPError as error:
             details = {"status": error.code}

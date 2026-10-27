@@ -34,6 +34,7 @@ from pathlib import Path
 EXIT_OK, EXIT_FAILED, EXIT_REJECTED, EXIT_ERRORED = 0, 1, 2, 3
 TOOLS = Path(__file__).resolve().parent
 GAME = TOOLS.parent
+CACHE = Path(os.environ.get('HERMES_HOME', Path.home() / '.hermes')) / 'cache' / GAME.name
 ENGINE_ENV = TOOLS / 'engine.env'
 
 

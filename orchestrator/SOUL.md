@@ -295,8 +295,8 @@ discover platform services.
 
 **Builds and software.**
 
-- Game tools build into `$HERMES_HOME/local/game-builds/<game>/` when their own folder is
-  read-only (`GAME_BUILD_ROOT` overrides it); the first build of a game takes minutes. A
+- Game tools keep downloads and builds in `$HERMES_HOME/cache/<game>/` when their own folder
+  is read-only; the first build of a game takes minutes. A
   shipped tool that fails with "Read-only file system" has a bug: report the command and the
   error. Until it is fixed you may copy the game folder to the disk and run the copy; say so
   in your report.

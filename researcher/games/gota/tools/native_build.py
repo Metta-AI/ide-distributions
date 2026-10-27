@@ -20,7 +20,6 @@ TOOLS = Path(__file__).resolve().parent
 TARGETS = {'gota_match', 'gate_probe', 'expand_replay', 'raw_spell_counts',
            'gota_verify', 'gota_audit', 'gota_policy_replay'}
 SOURCE_SUFFIXES = {'.nim', '.nims', '.bas', '.cfg', '.h', '.c', '.cpp'}
-BUILD_ROOT_ENV = 'GAME_BUILD_ROOT'
 
 
 def writable(path: Path) -> bool:
@@ -33,19 +32,14 @@ def writable(path: Path) -> bool:
 def build_root(tools: Path = TOOLS) -> Path:
     """Where downloads, compiler caches and binaries go (``.cache/`` and ``bin/`` below it).
 
-    A hosted workspace installs the profile read-only, so this is, in order:
-    ``$GAME_BUILD_ROOT/gota`` when set; ``tools`` when its ``.cache`` and ``bin`` can be
-    written (a development checkout, or a host that mounts writable folders there); else
-    ``$HERMES_HOME/local/game-builds/gota``, the profile's own state, kept across restarts.
+    ``tools`` when its ``.cache`` and ``bin`` can be written (a development checkout, or a host
+    that mounts writable folders there), else ``$HERMES_HOME/cache/gota``: a hosted workspace
+    installs the profile read-only, and the profile's own cache is writable and kept across
+    restarts (Pudge Wars Basic keeps its builds in ``cache/pudge-wars-basic`` the same way).
     Receipts record absolute paths, so never link these folders elsewhere."""
-    if os.environ.get(BUILD_ROOT_ENV):
-        return Path(os.environ[BUILD_ROOT_ENV]) / 'gota'
     if writable(tools / '.cache') and writable(tools / 'bin'):
         return tools
-    if os.environ.get('HERMES_HOME'):
-        return Path(os.environ['HERMES_HOME']) / 'local' / 'game-builds' / 'gota'
-    raise OSError(f'{tools} is read-only and HERMES_HOME is not set; '
-                  f'set {BUILD_ROOT_ENV} to a writable folder for builds')
+    return Path(os.environ.get('HERMES_HOME', Path.home() / '.hermes')) / 'cache' / 'gota'
 
 
 def digest(path: Path) -> str:

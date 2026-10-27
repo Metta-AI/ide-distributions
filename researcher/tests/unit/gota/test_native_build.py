@@ -141,7 +141,6 @@ def test_offline_build_does_not_prepare_missing_sources(tmp_path, monkeypatch):
 def test_read_only_install_builds_in_the_profile(tmp_path, monkeypatch):
     """A hosted profile is installed read-only, so sources and builds go to its own state."""
     monkeypatch.delenv('GOTA_DEPENDENCY_ROOT', raising=False)
-    monkeypatch.delenv('GAME_BUILD_ROOT', raising=False)
     monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'profile'))
     dependency = tmp_path / 'dependency'
     dep_pin = commit(dependency, {'src/library.nim': 'discard\n'})
@@ -152,12 +151,8 @@ def test_read_only_install_builds_in_the_profile(tmp_path, monkeypatch):
     tools.chmod(0o555)
     try:
         clone = native_build.prepare(pin, tools=tools, engine_source=str(tmp_path / 'upstream'))
-        assert clone.is_relative_to(tmp_path / 'profile/local/game-builds/gota/.cache')
+        assert clone.is_relative_to(tmp_path / 'profile/cache/gota/.cache')
         assert not any(tools.iterdir())
-        monkeypatch.delenv('HERMES_HOME')
-        with pytest.raises(OSError, match='GAME_BUILD_ROOT'):
-            native_build.build_root(tools)
     finally:
         tools.chmod(0o755)
-    monkeypatch.setenv('GAME_BUILD_ROOT', str(tmp_path / 'override'))
-    assert native_build.build_root(tools) == tmp_path / 'override/gota'
+    assert native_build.build_root(tools) == tools  # a writable checkout keeps its own folders

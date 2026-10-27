@@ -94,11 +94,10 @@ not detected locally.
 
 Nothing here is pinned to one game version. Every tool reads the live engine from the public
 API (league → `game.canonical_coworld_id` → the Coworld's version, manifest `source_url` commit
-and starter files), re-checked at least hourly (`.cache/live-engine.json`), and builds the binaries for that
-commit on first use, so a league update reaches the tools automatically. Downloads and builds
-go to the build root (`tools/storage.py`): `tools/` itself in a writable checkout, otherwise
-`$HERMES_HOME/local/game-builds/pudge-wars-basic/` (hosted profiles are installed
-read-only); `GAME_BUILD_ROOT` overrides it.
+and starter files), re-checked at least hourly, and builds binaries for that commit on first use.
+Engine records, source checkouts, dependencies and binaries live under
+`$HERMES_HOME/cache/pudge-wars-basic/` (`~/.hermes/cache/pudge-wars-basic/` outside a profile).
+This writable profile cache survives task cleanup and leaves the installed game folder read-only.
 `tools/engine.env` is only a last-known fallback when the API cannot be reached; every envelope
 then says `engine.live: false`, `stale_risk: true` and warns. `COGAMES_API_URL` selects the API
 server; `PUDGE_LIVE_ENGINE` overrides the live lookup (tests and offline hosts).

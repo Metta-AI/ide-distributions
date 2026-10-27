@@ -83,11 +83,9 @@ source:
 A shipped game folder is installed read-only on Softmax hosting (an installed one is not, so
 a tool that writes beside itself passes `game check` and breaks only once shipped). Tools
 write only to an output or work directory they are given (`--out`, `--work-dir`), to
-`$TMPDIR`, or to a build root for downloads, caches and binaries, resolved as
-`games/pudge-wars-basic/tools/storage.py` does: `$GAME_BUILD_ROOT/<game>` when set, the
-tools folder when its `.cache` and `bin` can be written, else
-`$HERMES_HOME/local/game-builds/<game>`. Never write under `games/<game>/`, and never
-under `/tmp`, which on hosting is small memory that restarts empty. Run Python helpers with
+`$TMPDIR`, or to `$HERMES_HOME/cache/<game>/` for downloads, caches and binaries (as
+Pudge Wars Basic's `tools/cli_contract.py` and GotA's `native_build.build_root()` do).
+Never write under `games/<game>/`, and never under `/tmp`, which on hosting is small memory that restarts empty. Run Python helpers with
 the profile's `python3` (or `sys.executable`), not `uv run --project`, which makes a new
 environment inside the installed profile.
 

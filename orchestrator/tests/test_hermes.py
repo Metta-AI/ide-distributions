@@ -85,10 +85,18 @@ def test_clean_export_installs_paused(tmp_path):
     code = """
 import json
 import sys
+import hashlib
+import subprocess
+from contextlib import closing
+from pathlib import Path
 from tools.registry import registry
 from hermes_cli.plugins import get_plugin_manager, get_plugin_toolsets
+from hermes_cli import kanban_db as kb
+from hermes_cli.kanban_db_boards import create_board
+from hermes_cli.kanban_db_workspace import resolve_workspace, set_workspace_path
 manager = get_plugin_manager()
 manager.discover_and_load()
+from orchestrator.board import connection
 plugin = next(p for p in manager.list_plugins() if p['name'] == 'orchestrator')
 assert not plugin['error'], plugin
 expected = json.loads(sys.argv[2])
@@ -102,6 +110,130 @@ assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 listing = json.loads(registry.dispatch('capabilities', {'kind': 'tools'}))
 assert {'orchestrator', 'terminal', 'file', 'code_execution'} <= set(listing['tools']), listing
 assert 'skills' not in listing
+
+# Complete a real native task, let Hermes clean its worktree, then review its
+# committed text and binary evidence through the installed agent tools.
+home = Path(sys.argv[1])
+root = home.parent.parent
+seed = root / 'evidence-seed'
+seed.mkdir()
+def git(path, *args):
+    return subprocess.check_output(['git', '-C', str(path), *args], stderr=subprocess.PIPE).decode().strip()
+git(seed, 'init', '-b', 'main')
+git(seed, 'config', 'user.name', 'Artifact system test')
+git(seed, 'config', 'user.email', 'test@example.invalid')
+(seed / 'seed.txt').write_text('initial')
+git(seed, 'add', '.')
+git(seed, 'commit', '-m', 'seed')
+remote = root / 'evidence.git'
+git(root, 'clone', '--bare', str(seed), str(remote))
+worker = root / 'profiles/researcher-1'
+worker.mkdir()
+clone = worker / 'workspace'
+git(root, 'clone', str(remote), str(clone))
+create_board('autoresearch')
+created = json.loads(registry.dispatch('card_create', {
+    'command_id': 'artifact-system:create', 'assignee': 'researcher-1',
+    'title': 'Produce verifiable evidence', 'body': 'Commit the report and binary artifact',
+}))
+assert created['ok'], created
+task_id = created['data']['card']['id']
+with closing(connection()) as conn:
+    task = kb.claim_task(conn, task_id)
+    worktree = resolve_workspace(task, board='autoresearch')
+    set_workspace_path(conn, task_id, worktree)
+payload = bytes(range(256)) * 4096
+(worktree / 'evidence/nested').mkdir(parents=True)
+(worktree / 'evidence/nested/replay.bin').write_bytes(payload)
+results = ''.join(json.dumps({'tick': tick, 'errors': 0}) + '\\n' for tick in range(12000))
+(worktree / 'evidence/results.jsonl').write_text(results)
+(worktree / 'report.md').write_text('Recorded evidence')
+(worktree / 'policy.bas').write_text('PRINT "candidate"')
+(worktree / 'link').symlink_to('evidence/nested/replay.bin')
+git(worktree, 'config', 'user.name', 'Artifact system test')
+git(worktree, 'config', 'user.email', 'test@example.invalid')
+git(worktree, 'add', '.')
+git(worktree, 'commit', '-m', 'record evidence')
+git(worktree, 'push', 'origin', task.branch_name)
+commit = git(worktree, 'rev-parse', 'HEAD')
+identity = {'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit}
+request = {**identity, 'paths': ['evidence/nested/replay.bin', 'evidence/results.jsonl', 'policy.bas'],
+           'expected_sha256': {'evidence/nested/replay.bin': hashlib.sha256(payload).hexdigest()}}
+assert json.loads(registry.dispatch('card_artifacts', request))['error']['reason'] == 'card_not_completed'
+assert not json.loads(registry.dispatch('card_files', identity))['ok']
+with closing(connection()) as conn:
+    assert kb.complete_task(conn, task_id, summary='Evidence committed', expected_run_id=task.current_run_id)
+assert not worktree.exists(), 'Native completion must exercise cleaned-worktree recovery'
+listing = json.loads(registry.dispatch('card_files', {**identity, 'recursive': False, 'limit': 2}))
+assert listing['ok'], listing
+files = listing['data']['files']
+while listing['data']['next_offset'] is not None:
+    listing = json.loads(registry.dispatch('card_files', {
+        **identity, 'recursive': False, 'limit': 2, 'offset': listing['data']['next_offset'],
+    }))
+    assert listing['ok'], listing
+    files.extend(listing['data']['files'])
+assert {item['path']: item['kind'] for item in files} == {
+    'seed.txt': 'blob', 'evidence': 'tree', 'link': 'symlink', 'policy.bas': 'blob', 'report.md': 'blob',
+}, files
+tree = json.loads(registry.dispatch('card_files', identity))
+assert tree['ok'] and set(request['paths']) <= {item['path'] for item in tree['data']['files']}, tree
+nested = json.loads(registry.dispatch('card_files', {**identity, 'directory': 'evidence/nested'}))
+assert nested['ok'] and nested['data']['files'][0]['path'] == request['paths'][0], nested
+assert worktree.exists()
+(worktree / 'evidence/nested/replay.bin').write_bytes(b'uncommitted change')
+inspected = json.loads(registry.dispatch('card_artifacts', request))
+assert inspected['ok'] and inspected['data']['status'] == 'inspected', inspected
+assert inspected['data']['artifacts'][0]['matches'] is True
+assert inspected['data']['artifacts'][0]['bytes'] == len(payload)
+assert inspected['data']['artifacts'][1]['matches'] is None
+mismatch = json.loads(registry.dispatch('card_artifacts', {
+    **request, 'export': True, 'expected_sha256': {'evidence/nested/replay.bin': '0' * 64},
+}))
+assert mismatch['ok'] and mismatch['data']['status'] == 'mismatch', mismatch
+assert not (home / 'cache/card-artifacts').exists(), 'Mismatch must not publish any files'
+exported = json.loads(registry.dispatch('card_artifacts', {**request, 'export': True}))
+assert exported['ok'] and exported['data']['status'] == 'exported', exported
+directory = Path(exported['data']['directory'])
+assert directory.is_relative_to(home / 'cache/card-artifacts')
+assert (directory / request['paths'][0]).read_bytes() == payload
+assert (directory / 'policy.bas').read_text() == 'PRINT "candidate"'
+rows = [json.loads(line) for line in (directory / 'evidence/results.jsonl').read_text().splitlines()]
+assert len(rows) == 12000 and all(row['errors'] == 0 for row in rows)
+manifest = json.loads(Path(exported['data']['manifest']).read_text())
+assert all(manifest[key] == value for key, value in identity.items())
+for item in manifest['artifacts']:
+    copied = directory / item['path']
+    assert hashlib.sha256(copied.read_bytes()).hexdigest() == item['sha256']
+    assert copied.stat().st_mode & 0o777 == 0o600
+(directory / 'policy.bas').write_text('local analysis copy')
+again = json.loads(registry.dispatch('card_artifacts', {**request, 'export': True}))
+assert again['ok'] and again['data']['directory'] != str(directory), again
+assert (directory / 'policy.bas').read_text() == 'local analysis copy'
+assert (Path(again['data']['directory']) / 'policy.bas').read_text() == 'PRINT "candidate"'
+cache = home / 'cache/card-artifacts'
+preserved = home / 'cache/preserved-artifacts'
+outside = root / 'outside-cache'
+outside.mkdir()
+cache.rename(preserved)
+cache.symlink_to(outside, target_is_directory=True)
+try:
+    escaped = json.loads(registry.dispatch('card_artifacts', {**request, 'export': True}))
+    assert escaped['error']['reason'] == 'invalid_export_cache', escaped
+    assert not list(outside.iterdir())
+finally:
+    cache.unlink()
+    preserved.rename(cache)
+for path in ['../report.md', 'link', '/etc/passwd', 'evidence']:
+    rejected = json.loads(registry.dispatch('card_artifacts', {
+        **identity, 'paths': [path], 'export': True,
+    }))
+    assert not rejected['ok'], rejected
+assert not json.loads(registry.dispatch('card_files', {**identity, 'directory': '../'}))['ok']
+report = json.loads(registry.dispatch('card_report', {**identity, 'path': 'report.md'}))
+assert report['ok'] and report['data']['content'] == 'Recorded evidence', report
+assert not json.loads(registry.dispatch('card_report', {**identity, 'path': 'evidence/results.jsonl'}))['ok']
+assert (worktree / 'evidence/nested/replay.bin').read_bytes() == b'uncommitted change'
 print(json.dumps({'ok': True}))
 """
     result = subprocess.run(

@@ -26,7 +26,7 @@ DESCRIPTION = (
     "Check this profile's host without running anything: which executables are installed "
     "(git, python3, uv, gcc, make, nim, node, curl, docker, softmax, coworld), whether Docker "
     "has a daemon, which places are writable (home, profile, workspace, TMPDIR, /tmp, the "
-    "installed games/ and venv, the game build folder), whether /tmp forbids running programs, "
+    "installed games/ and venv, the profile cache where game tools build), whether /tmp forbids running programs, "
     "whether this is a hosted workspace, and which installed or shipped games are missing a "
     "host requirement. Returns no credential or environment values."
 )
@@ -85,7 +85,7 @@ def host_capabilities(home: Path, env: Mapping[str, str]) -> dict:
         "tmp": Path("/tmp"),
         "installed_games": home / "games",
         "profile_venv": home / "local/venv",
-        "game_builds": home / "local/game-builds",
+        "game_cache": home / "cache",
     }
     tmp_options = _mount_options("/tmp")
     return {

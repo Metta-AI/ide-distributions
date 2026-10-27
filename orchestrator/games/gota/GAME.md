@@ -250,8 +250,7 @@ helpers using [native preparation](tools/native_build.py), and Hermes with its
 built-in command protections. Softmax hosting provides all of them; there, a missing one is
 a host gap to report with `help_request:`, not something to install. Native sources and
 binaries go to the build root (`native_build.build_root()`): `tools/` when its `.cache`
-and `bin` can be written, else `$HERMES_HOME/local/game-builds/gota/` (`GAME_BUILD_ROOT`
-overrides it). Set `GOTA_HERMES_PYTHON` to that Hermes
+and `bin` can be written, else `$HERMES_HOME/cache/gota/`. Set `GOTA_HERMES_PYTHON` to that Hermes
 installation's Python executable and configure `OPENROUTER_API_KEY` in the Hermes profile, plus `OPENROUTER_MODEL`.
 The compiler launcher resolves its key through Hermes profile secret scope. A missing
 key in the terminal environment is expected; do not expose it there. Invoke the

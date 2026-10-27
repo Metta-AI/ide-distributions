@@ -48,7 +48,7 @@ Game selection comes from the conversation and task; never supply a default `RES
 ## Writable storage
 
 Profile code from the image is read-only. Game tools build into
-`$HERMES_HOME/local/game-builds/<game>/` on the workspace disk when their own `tools/.cache` and
+`$HERMES_HOME/cache/<game>/` on the workspace disk when their own `tools/.cache` and
 `tools/bin` are not writable, so a shipped game needs no image volume. The researcher GotA volumes
 still work and can be removed.
 
