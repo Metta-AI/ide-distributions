@@ -94,9 +94,9 @@ from hermes_cli.plugins import get_plugin_manager, get_plugin_toolsets
 from hermes_cli import kanban_db as kb
 from hermes_cli.kanban_db_boards import create_board
 from hermes_cli.kanban_db_workspace import resolve_workspace, set_workspace_path
-from orchestrator.board import connection
 manager = get_plugin_manager()
 manager.discover_and_load()
+from orchestrator.board import connection
 plugin = next(p for p in manager.list_plugins() if p['name'] == 'orchestrator')
 assert not plugin['error'], plugin
 expected = json.loads(sys.argv[2])
@@ -150,6 +150,7 @@ git(worktree, 'config', 'user.name', 'Artifact system test')
 git(worktree, 'config', 'user.email', 'test@example.invalid')
 git(worktree, 'add', '.')
 git(worktree, 'commit', '-m', 'record evidence')
+git(worktree, 'push', 'origin', task.branch_name)
 commit = git(worktree, 'rev-parse', 'HEAD')
 request = {'task_id': task_id, 'run_id': task.current_run_id, 'commit': commit,
            'artifacts': {'replay.bin': hashlib.sha256(payload).hexdigest()}}
