@@ -44,6 +44,9 @@ jobs:
           echo /opt/nim-2.2.10/bin >> "$GITHUB_PATH"
       - run: uv sync --frozen
       - run: uv run pytest -q
+      - name: Validate Pudge tools from a read-only installation
+        if: matrix.distribution == 'researcher'
+        run: PUDGE_NATIVE_TESTS=1 uv run pytest -q tests/system/test_pudge_readonly_tools.py
       - name: Validate real Hermes task admission and profile installation
         if: matrix.distribution == 'orchestrator'
         run: |
