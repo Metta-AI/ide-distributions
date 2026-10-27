@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import gota_cli
+from native_build import build_root
 
 TOOLS = Path(__file__).resolve().parent
 DEFAULT_TICKS = 28_800
@@ -30,7 +31,7 @@ BUILD_COMMAND = "games/gota/tools/build_gota_match.sh"
 def binary_path(commit: str | None = None) -> Path:
     """The cached match executable for `commit` (default: the engine.env pin), unvalidated."""
     commit = commit or gota_cli.engine()['POLYWORLD_COMMIT']
-    return TOOLS / 'bin' / f'gota_match-{commit[:8]}'
+    return build_root(TOOLS) / 'bin' / f'gota_match-{commit[:8]}'
 
 
 def binary_identity(commit: str | None = None) -> dict:
@@ -322,7 +323,7 @@ def screen(candidate: str | Path, opponent: str | Path, *, seeds=range(1, 5),
     tasks = _tasks(candidate, opponent, seeds, (0, 1), ticks, draft, out, False, False)
     if workers < 1:
         raise gota_cli.UsageError("workers must be positive")
-    baseline_root = Path(cache) if cache else TOOLS.parent / "tmp/gota-local/baselines"
+    baseline_root = Path(cache) if cache else build_root(TOOLS) / ".cache/gota-local/baselines"
     fingerprint = {"policy_sha256": _sha256(Path(opponent).resolve()),
                    "engine": gota_cli.engine(), "binary_sha256": _sha256(binary())}
     baseline_tasks = []

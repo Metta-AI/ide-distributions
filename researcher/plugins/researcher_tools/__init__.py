@@ -29,8 +29,9 @@ _src = str(_distribution_root() / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
-from ide_research_core import session_catalog
+from ide_research_core import host_capabilities, session_catalog
 
 
 def register(ctx) -> None:
     session_catalog.register(ctx, "researcher")
+    host_capabilities.register(ctx, "researcher")

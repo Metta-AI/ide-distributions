@@ -111,7 +111,8 @@ runs `scripts/queue_keeper.py --bootstrap-only` and resumes the `queue-keeper`, 
      /opt/hermes/.venv/bin/python <profile dir>/scripts/bootstrap.py
    ```
 
-   It is idempotent. It syncs `<profile dir>/local/venv` from the profile's `uv.lock`, creates
+   It is idempotent. It syncs `<profile dir>/local/venv` from the profile's `uv.lock` (on
+   Softmax hosting the venv is the image's and already matches, so nothing syncs), creates
    or clones the canonical workspace into `RESEARCH_WORKSPACE`, writes the `research` CLI shim
    to `<profile dir>/bin/research` and adds `RESEARCH_CLI` to the profile `.env`.
 
@@ -153,7 +154,11 @@ Where: `distribution.py`, `build.py`, `autoresearch.lock.json`, `Dockerfile`,
   both.
 - The Dockerfile installs them at `/opt/ide-distributions/orchestrator` and
   `/opt/ide-distributions/researcher` and writes one commit marker per folder. Nim stays for
-  GotA builds and Pudge Wars Basic's native headless match runner.
+  GotA builds and Pudge Wars Basic's native headless match runner. Game tools no longer need
+  writable folders in the image: when their own `tools/.cache` and `tools/bin` are read-only
+  they build into `$HERMES_HOME/local/game-builds/<game>/` on the workspace disk. The GotA
+  volumes for the researcher (`Dockerfile`, `runtime_definition.py`) still work and can be
+  removed.
 - The lock file records the commit and tree of the new repository
   (`ide-distributions.lock.json`). Existing pinned images and selections stay valid.
 
@@ -195,6 +200,19 @@ Hosting prepares the neutral workspace described above. What hosting should know
   (`devops/hermes-fleet/firewall.sh`) rejects only private ranges, so it is allowed today.
 - **Not supported here:** container-image players (no Docker in the sandbox, and `softmax
   upload` sends a file) and private GitHub repositories (no credential).
+
+## Config changes reach existing workspaces only through prepare
+
+Hermes keeps an installed `config.yaml` on `hermes profile update`, so a change to a shipped
+`config.yaml` reaches only new installs. Existing hosted workspaces need prepare to apply it
+(the `configure(...)` pattern in metta's `applications/autoresearch/prepare.py`) or
+`hermes profile update --force-config`. Changes waiting on that, for the orchestrator:
+`platform_toolsets` (adds `skills`, `web`, `browser`, `vision`, `todo`, `session_search`,
+`delegation`, `memory`), `agent.max_turns: 150`, `terminal.timeout: 1800`, `timeouts.tools`,
+`terminal.env_passthrough` (adds `SSL_CERT_FILE`, `OPENROUTER_MODEL`, `GOTA_G2_RUNNER`,
+`GOTA_HERMES_PYTHON`), `skills.external_dirs` and `fallback_providers`; for researchers,
+`GOTA_HERMES_PYTHON` in `terminal.env_passthrough`. Prepare currently sets the orchestrator's
+`platform_toolsets.cron` to `[]`, so its cron turns stay tool-free whatever this file says.
 
 ## Smoke test before advancing the lock
 

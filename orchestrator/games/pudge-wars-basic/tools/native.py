@@ -15,8 +15,8 @@ every command and every tool):
 Commands:
   resolve  print the live engine (league -> Coworld -> version, commit), refreshing the hourly cache
   prepare  fetch the game source at the commit and every nimby.lock dependency at its locked
-           commit into tools/.cache/ (network: github.com over HTTPS, via git)
-  build    compile tools/bin/<commit8>/<target> offline with a receipt next to it (sources,
+           commit into <build root>/.cache/ (network: github.com over HTTPS, via git)
+  build    compile <build root>/bin/<commit8>/<target> offline with a receipt next to it (sources,
            dependency pins, toolchain, options, binary sha256); prepares first if needed
   path     print the binary path, building it if it is missing or its receipt is stale
 
@@ -47,10 +47,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cli_contract
 from cli_contract import Errored, Rejected
+from storage import build_root
 
 TOOLS = Path(__file__).resolve().parent
-CACHE = TOOLS / '.cache'
-BIN = TOOLS / 'bin'
+CACHE = build_root() / '.cache'
+BIN = build_root() / 'bin'
 RECEIPT_SCHEMA = 'pudge-native-build/1'
 # Logical compile options; absolute --path/--import/--nimcache/-o values are added at build time.
 COMMON_OPTIONS = ['--hints:off', '--warnings:off', '--noNimblePath', '--dynlibOverride:libcurl',

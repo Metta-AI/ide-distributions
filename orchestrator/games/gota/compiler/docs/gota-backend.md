@@ -1,5 +1,9 @@
 # GotA compiler and M1 readiness
 
+> Commands here (`uv run`, `/tmp`, `tests/...`) are for a development checkout of
+> ide-distributions. In a profile, run tools as [GAME.md](../../GAME.md) shows, with
+> `"$HERMES_HOME/local/venv/bin/python" -I`, and write to `$TMPDIR` or `.scratch/`.
+
 The existing Paintbot pipeline now targets GotA at Polyworld
 `801749e509e888b423ba44ee2188946c22e3ba85`, version `2026.10.7.2`, with Bassy
 `a02e6dd5889310b13d21725c891bde8d01539f08`. The primary GotA reference is

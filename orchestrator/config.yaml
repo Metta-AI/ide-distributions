@@ -1,21 +1,32 @@
+# The orchestrator has everything a researcher has except the researcher's restrictions
+# (plugins/researcher_guard, the approvals deny list, the run budget): toolsets, timeouts,
+# environment, installed-game skills and the fallback model below match researcher/config.yaml.
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
+fallback_providers:
+  - provider: openrouter
+    model: z-ai/glm-5.3
 memory:
   memory_enabled: true
   user_profile_enabled: false
   write_approval: false
 agent:
-  max_turns: 40
-# Chat (api_server) and supervisor (cron) turns get the plugin tools plus Hermes's shell
-# (terminal, process_manage), file (read_file, write_file, patch, search_files) and Python
-# (execute_code) tools. Dangerous commands go through Hermes approvals: chat asks the user,
-# unattended cron turns deny them (approvals.cron_mode default).
+  max_turns: 150
+# Chat (api_server) and supervisor (cron) turns get the plugin tools plus the Hermes tools a
+# researcher has: shell (terminal, process_manage), files, Python (execute_code), skills, web
+# search and extraction, browser, image reading (vision), todo lists, past-session search,
+# subagents (delegation) and memory. Not kanban (the card_* tools replace it) or cronjob (an
+# enabled cron job keeps a hosted workspace awake). Dangerous commands go through Hermes
+# approvals: chat asks the user, unattended cron turns deny them (approvals.cron_mode default).
 platform_toolsets:
-  api_server: [orchestrator, terminal, file, code_execution, skills]
-  cron: [orchestrator, terminal, file, code_execution, skills]
+  api_server: [orchestrator, terminal, file, code_execution, skills, web, browser, vision, todo, session_search, delegation, memory]
+  cron: [orchestrator, terminal, file, code_execution, skills, web, browser, vision, todo, session_search, delegation, memory]
 terminal:
+  # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.
+  timeout: 1800
   env_passthrough:
+    - SSL_CERT_FILE
     - SOFTMAX_PLAYER_CREDENTIAL
     - COGAMES_API_URL
     - RESEARCH_PLAYER_ID
@@ -26,9 +37,22 @@ terminal:
     - RESEARCH_CLI
     - RESEARCH_SOFTMAX
     - SOFTMAX_BRIDGE_DIRECTORY
+    - OPENROUTER_MODEL
     - TMPDIR
+    - GOTA_G2_RUNNER
+    - GOTA_HERMES_PYTHON
+# Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
+# process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin.
+timeouts:
+  tools:
+    sequential_call: 1900
+    concurrent_batch: 1900
 plugins:
   enabled: [orchestrator]
+# Installed games' binding skills, as for researchers (researcher/config.yaml).
+skills:
+  external_dirs:
+    - ../../games
 updates:
   check: false
 curator:

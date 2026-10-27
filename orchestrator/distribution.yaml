@@ -30,3 +30,26 @@ env_requires:
     description: >-
       Absolute path to the neutral shared bare canonical repository; selected games'
       repositories sit beside it as canonical-<game>.git.
+  - name: TMPDIR
+    required: false
+    description: >-
+      Scratch directory for builds and episodes. Set by Softmax hosting (/opt/data/tmp, because
+      the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS.
+  - name: GOTA_HERMES_PYTHON
+    required: false
+    description: >-
+      Python of the Hermes install, for GotA builds (games/gota/GAME.md host_requirements).
+      Softmax hosting sets /opt/hermes/.venv/bin/python.
+  - name: GOTA_G2_RUNNER
+    required: false
+    default: native
+    description: >-
+      GotA G2 episode runner. "native" runs the pinned native match binary and needs no
+      Docker; "docker" runs pinned coworld run-episode (needs Docker).
+  - name: RESEARCH_CREDIT_BACKOFF_MINUTES
+    required: false
+    default: "30"
+    description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
+  - name: RESEARCH_SOFTMAX
+    required: false
+    description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.

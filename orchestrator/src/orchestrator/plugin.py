@@ -4,13 +4,12 @@ import json
 from contextlib import closing
 from urllib.error import HTTPError
 
-from ide_research_core import session_catalog
+from ide_research_core import host_capabilities, session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
 from .artifacts import ReportRead, Reports
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
-from .capabilities import Capabilities
 from .context import profile_context
 from .github import GitHub
 from .ide import IDE
@@ -54,11 +53,6 @@ TOOLS = {
         "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
-    ),
-    "host_capabilities": (
-        Capabilities,
-        "Check whether git, Python, softmax, coworld and the research CLI are installed on this profile host. Read-only; launches no inline scripts or commands. Returns no credential or environment values. Does not probe repository authorization.",
-        {}, [],
     ),
     "game_starter": (
         Research,
@@ -443,3 +437,4 @@ def register(ctx):
             description=description,
         )
     session_catalog.register(ctx, "orchestrator")
+    host_capabilities.register(ctx, "orchestrator")

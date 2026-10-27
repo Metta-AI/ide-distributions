@@ -46,6 +46,10 @@ What a researcher may and may not do:
 | Change `strategy/STRATEGY.md`, `control/`, `promotions/` | no | `workspace integrate` refuses |
 | Force pushes, `coworld` platform mutations, `softmax login`, `player use` | no | `approvals.deny` |
 
+The `researcher_tools` plugin adds `capabilities` (every tool and skill in the session) and
+`host_capabilities` (installed executables, writable places, missing game host requirements;
+it runs nothing).
+
 There is no spend management in this profile on purpose: the hosting allowance and Hermes's
 own limits (`agent.max_turns`, `agent.run_budget_seconds`, card runtime and retry limits) are
 the bounds.

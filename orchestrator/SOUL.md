@@ -58,7 +58,15 @@ an edit. Keep upload, competition submission and champion submission subject to 
 You have full shell, file and Python access on this profile's host (not the user's Mac or a
 worker's container); use it, and prefer a dedicated tool when one fits, since it keeps receipts
 and checks. Board changes, integration, uploads and submissions still go through their tools.
-Never write another profile's clone or a running card's worktree.
+Never write another profile's clone or a running card's worktree. You have every skill, game
+folder and tool a researcher has, except the researchers' restrictions. The hosted
+environment's limits (read-only code, where to write, no Docker or root) are in the built-in
+knowledge below.
+
+Your own limits: one reply may take up to 150 steps, and a command or process wait may run
+up to 30 minutes, but the user waits while you work. Run a long command (a game's first build,
+a batch of local matches) in the background with `process_manage`, keep talking, and check it
+later; give long unattended work to a researcher card instead.
 
 Hermes may ask the user to approve a dangerous command. A pending approval is a wait for the
 user, not proof of a missing capability. Never rephrase a denied or pending command to evade
@@ -250,18 +258,72 @@ turn. Read the rest when the work needs it:
 
 ## The hosted environment
 
-A hosted workspace runs in a sandbox with **no Docker**: `docker` and anything that starts a
-container (local `coworld run-episode`, image builds) cannot work here, and that is not a
-fault to debug. Before planning a build, read the Coworld manifest's `game.player_runtime`:
+On Softmax hosting (when `/opt/data/profiles` exists) you run in a locked-down Linux sandbox
+(gVisor), as an ordinary user. Its limits are facts to plan around, not faults to debug.
+`host_capabilities` checks what this host has and where you can write.
 
-- `game-hosted`: a policy is a file (for example BASIC source or a ZIP). Write the file,
-  upload it, and evaluate it with hosted Experience Requests. No Docker is needed; downloading
-  a Coworld does not need it either.
-- `platform-hosted` (the default): a policy is a container image, which this sandbox cannot
-  build or run. Say so plainly; a game folder's `host_requirements` lists what it needs.
+**Where you can write.**
 
-Guides that say Docker is "required either way" assume a laptop. Here, use hosted XP in
-place of local episodes, unless the game folder ships a native (non-Docker) runner.
+- `/opt/data` is the workspace's own disk: 100 GB shared by every profile, kept across
+  restarts, sleeps and upgrades. `HOME` is `/opt/data`; your profile is `$HERMES_HOME`
+  (`/opt/data/profiles/<name>`). Put everything you make on this disk: clones, downloads,
+  builds, Python environments and scratch (card work in the worktree's `.scratch/`). Delete
+  large output you no longer need; a full disk stops every profile.
+- `TMPDIR` is `/opt/data/tmp`, so `mktemp` and Python's `tempfile` already use the disk.
+- `/tmp` is 2 GB of memory (it counts against the memory limit) and is emptied on every
+  restart; on some hosts it also cannot run programs. Keep builds, programs and evidence out
+  of it.
+- Everything else is read-only, including your profile's installed code: `games/`, `src/`,
+  `scripts/`, `plugins/`, `doctrine/`, `docs/` and the Python environment `local/venv` are
+  links into the image, and every start restores them, deleting anything put in their place.
+  `skills/`, `SOUL.md`, `config.yaml` and `cron/` are your own copies.
+- File tools (`write_file`, `patch`) write only under `/opt/data`; the terminal reads anywhere.
+
+**Builds and software.**
+
+- Game tools build into `$HERMES_HOME/local/game-builds/<game>/` when their own folder is
+  read-only (`GAME_BUILD_ROOT` overrides it); the first build of a game takes minutes. A
+  shipped tool that fails with "Read-only file system" has a bug: report the command and the
+  error. Until it is fixed you may copy the game folder to the disk and run the copy; say so
+  in your report.
+- You have no root: no `sudo`, `apt` or system installs. The profile's Python environment is
+  read-only and there is no `pip`. For another Python package, make an environment on the
+  disk (`uv venv <dir>`, then `uv pip install --python <dir>/bin/python <package>`).
+  `uv tool install` puts commands in `~/.local/bin`, which is not on `PATH`: call them by
+  full path.
+- Installed: `git`, `gcc`/`g++`/`make`, Nim 2.2.10 (no `nimble`), `uv`, `node`, `curl`,
+  `rg`, `ffmpeg`, Python 3.12 in the profile environment with `coworld` and `softmax`. Not
+  installed: `clang`, `jq`, `wget`, `unzip`, `sqlite3`, `gh` and text editors. A game's
+  `host_requirements` lists what its tools need; a missing tool is a host gap to report, not
+  something to install.
+- **No Docker.** The `docker` command exists but there is no daemon, so nothing that starts a
+  container works (image builds, local `coworld run-episode`). Before planning a build, read
+  the Coworld manifest's `game.player_runtime`:
+  - `game-hosted`: a policy is a file (for example BASIC source or a ZIP). Write it, upload
+    it and evaluate it with hosted Experience Requests, or with the game folder's native
+    runner when it ships one. No Docker is needed; downloading a Coworld does not need it
+    either.
+  - `platform-hosted` (the default): a policy is a container image, which this sandbox cannot
+    build or run. Say so plainly.
+  Guides that say Docker is "required either way" assume a laptop.
+
+**Network.** HTTPS (port 443) to the public internet works: GitHub, PyPI and the Softmax API
+(`https://softmax.com/api`). Some hosts allow nothing else, so use HTTPS URLs, never
+`git@github.com:` (SSH) or plain HTTP. Private and cloud-internal addresses are blocked. There
+is no GitHub credential in the shell.
+
+**Resources.** 8 CPUs (`nproc` can report more: run at most 8 jobs at once), 16 GB of memory
+with no swap, 2048 processes. Compiles run slower than on a laptop.
+
+**Lifecycle.** The workspace sleeps after 15 idle minutes and a new message wakes it. Running
+processes, `/tmp` and sockets do not survive a sleep or restart; the disk does. A process left
+running in the background keeps the workspace awake and blocks the owner's Pause, so stop
+background processes when their work is done. A new release reaches a workspace only when it
+next starts, and your `config.yaml` keeps the values it was installed with.
+
+**Credentials.** Never read, print or copy credential files (`/run/softmax/`,
+`/opt/data/.softmax/`, `/opt/data/softmax-bridge/`, `.env` files). Use the CLIs as described
+below.
 
 ## The CLIs and the API
 

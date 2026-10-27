@@ -20,6 +20,32 @@ TOOLS = Path(__file__).resolve().parent
 TARGETS = {'gota_match', 'gate_probe', 'expand_replay', 'raw_spell_counts',
            'gota_verify', 'gota_audit', 'gota_policy_replay'}
 SOURCE_SUFFIXES = {'.nim', '.nims', '.bas', '.cfg', '.h', '.c', '.cpp'}
+BUILD_ROOT_ENV = 'GAME_BUILD_ROOT'
+
+
+def writable(path: Path) -> bool:
+    """Whether ``path`` can be written, or created inside its nearest existing parent."""
+    while not path.exists():
+        path = path.parent
+    return os.access(path, os.W_OK)
+
+
+def build_root(tools: Path = TOOLS) -> Path:
+    """Where downloads, compiler caches and binaries go (``.cache/`` and ``bin/`` below it).
+
+    A hosted workspace installs the profile read-only, so this is, in order:
+    ``$GAME_BUILD_ROOT/gota`` when set; ``tools`` when its ``.cache`` and ``bin`` can be
+    written (a development checkout, or a host that mounts writable folders there); else
+    ``$HERMES_HOME/local/game-builds/gota``, the profile's own state, kept across restarts.
+    Receipts record absolute paths, so never link these folders elsewhere."""
+    if os.environ.get(BUILD_ROOT_ENV):
+        return Path(os.environ[BUILD_ROOT_ENV]) / 'gota'
+    if writable(tools / '.cache') and writable(tools / 'bin'):
+        return tools
+    if os.environ.get('HERMES_HOME'):
+        return Path(os.environ['HERMES_HOME']) / 'local' / 'game-builds' / 'gota'
+    raise OSError(f'{tools} is read-only and HERMES_HOME is not set; '
+                  f'set {BUILD_ROOT_ENV} to a writable folder for builds')
 
 
 def digest(path: Path) -> str:
@@ -40,10 +66,10 @@ def git(directory: Path, *args) -> str:
 
 
 def source_cache(commit: str, tools: Path) -> Path:
-    primary = tools / '.cache/polyworld'
+    primary = build_root(tools) / '.cache/polyworld'
     if primary.is_dir() and git(primary, 'rev-parse', 'HEAD') == commit:
         return primary
-    return tools / f'.cache/polyworld-{commit[:8]}'
+    return build_root(tools) / f'.cache/polyworld-{commit[:8]}'
 
 
 def populate(directory: Path, source: str, pin: str) -> None:
@@ -191,7 +217,7 @@ def finish_build(binary: Path, before: dict, target: str, commit: str, *, tools=
 
 def build(target: str, commit: str, *, tools=TOOLS) -> Path:
     clone = source_cache(commit, tools)
-    output = tools / f'bin/{target}-{commit[:8]}'
+    output = build_root(tools) / f'bin/{target}-{commit[:8]}'
     if not clone.is_dir():
         raise FileNotFoundError(
             f'native sources missing: {clone}; run native_build.py prepare {commit} first')
@@ -210,7 +236,7 @@ def build(target: str, commit: str, *, tools=TOOLS) -> Path:
     receipt_path(output).unlink(missing_ok=True)
     try:
         command = ['nim', 'c', *before['options'],
-                   f'--nimcache:{tools}/.cache/nimcache-{target}-{commit[:8]}',
+                   f'--nimcache:{build_root(tools)}/.cache/nimcache-{target}-{commit[:8]}',
                    f'-o:{temporary}', str(source)]
         result = execute(command, cwd=clone, env=build_environment(clone))
         if result.stderr:

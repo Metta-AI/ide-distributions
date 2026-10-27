@@ -37,6 +37,12 @@ def ensure_venv(hermes_home: Path, run=subprocess.run) -> bool:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         if stamp.exists() and stamp.read_text().strip() == wanted:
             return False
+        if venv_dir.is_symlink():
+            # Softmax hosting links local/venv to the image's read-only environment.
+            raise LaunchError(
+                "local/venv is the hosting image's read-only environment and does not match "
+                "uv.lock; restart the workspace to load a matching image. Do not delete local/venv."
+            )
         env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv_dir)}
         try:
             run(sync_argv(hermes_home), env=env, check=True)

@@ -64,7 +64,9 @@ Doctrine upheld: D-04, D-07, D-23, D-25, D-26.
    Run bindings from your worktree's root (the folder that holds `games/`), with absolute
    paths. For a game-hosted file policy, also implement `build`, `local_check` and the starter
    build. For a container-image policy, describe the build in `## Bindings`, declare its tools
-   in `host_requirements`, and leave a stub that cannot run here as a gap.
+   in `host_requirements`, and leave a stub that cannot run here as a gap. Tools write only
+   where `games/_template/CONTRACT.md` ("Where tools may write") allows: once shipped, the
+   game folder is read-only.
 9. Write `seed/strategy/STRATEGY.md` (the starter policy and what a change can target) and
    `seed/plan.md`.
 10. Check until there are no problems:
