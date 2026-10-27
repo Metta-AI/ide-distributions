@@ -11,6 +11,10 @@ skips the model when nothing needs attention.
 
 ## GitHub repositories
 
+For automatic release-pinned game guidance and local repository iteration, follow
+[Coworld repository context](../docs/coworld-context.md). The current IDEa selection
+loads `COWORLD.md` and its skill index before the model responds.
+
 Use `github_repositories` and `github_clone` for the owner's connected GitHub account.
 Pass `commit` with the full SHA when the league manifest pins a release. Authorization
 exists only during this tool call; later terminal fetches do not retain it. Request a new

@@ -90,6 +90,9 @@ def test_say_exported_schema(field, value, valid):
         def register_tool(self, **tool):
             self.tools[tool["name"]] = tool
 
+        def register_middleware(self, kind, callback):
+            pass
+
     registry = Registry()
     register(registry)
     schema = registry.tools["ide_say"]["schema"]["parameters"]
