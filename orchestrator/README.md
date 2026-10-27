@@ -12,6 +12,9 @@ skips the model when nothing needs attention.
 ## GitHub repositories
 
 Use `github_repositories` and `github_clone` for the owner's connected GitHub account.
+Pass `commit` with the full SHA when the league manifest pins a release. Authorization
+exists only during this tool call; later terminal fetches do not retain it. Request a new
+pinned clone through the tool when another revision is needed.
 Clones live under the hosted profile's `repositories/` directory, separate from canonical
 research. Private repositories require repository consent in Softmax IDEa; public HTTPS
 clones do not. Neither a local `gh` login nor a GitHub token on the host is required.
@@ -72,11 +75,12 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 
 | Tools | Behavior |
 |---|---|
+| `attachment_download(sha256)` | Save an attachment from the current workspace to a private local cache, verifying its size and SHA-256 (maximum 25 MiB). Use the hash in conversation context, then read the returned path. The tool resolves the signed URL internally; never transcribe it into a command. It uses the current Player credential and cannot read another workspace's attachments. |
 | `capabilities(query?, kind?)` | Every tool and skill this session has, with one-line descriptions, filtered by keyword. |
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
 | `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
-| `github_repositories(page?)`, `github_clone(repository)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. |
+| `github_repositories(page?)`, `github_clone(repository, commit?)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. The optional full SHA selects a pinned release using the same authorization. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (its own idempotent `research workspace bootstrap --game`, which also refreshes doctrine) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
 | `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
@@ -241,3 +245,4 @@ Configured bindings are not execution-verified. `game_starter` reads bounded UTF
 verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.
 `card_report` reads a committed report from the recorded workspace of the latest completed card run,
 checks commit membership in that card branch, and never integrates or executes the report.
+If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.

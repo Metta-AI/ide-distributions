@@ -34,13 +34,15 @@ class GitHub:
         with urlopen(request, timeout=30) as response:
             return json.load(response)
 
-    def github_clone(self, repository: str):
+    def github_clone(self, repository: str, commit: str | None = None):
         repository = repository.removeprefix("https://github.com/").rstrip("/").removesuffix(".git")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}", repository):
             raise ValueError("Use owner/repository or an HTTPS github.com repository URL")
         owner, name = repository.split("/")
         if name in {".", ".."}:
             raise ValueError("Invalid repository name")
+        if commit is not None and not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError("Use a full lowercase Git commit SHA")
         root = self.context.home / "repositories"
         root.mkdir(parents=True, exist_ok=True)
         checkout = root / f"{owner}-{name}-{uuid4().hex[:12]}"
@@ -88,6 +90,25 @@ class GitHub:
                 "GitHub clone failed. Connect GitHub repository access in IDEa settings and "
                 "verify repository and organization access. "
                 + result.stderr.replace(self.token, "[redacted]")[-1000:]
+            )
+        if commit is not None:
+            # Later terminal fetches cannot reuse this ephemeral authorization. Resolve
+            # the requested release here without persisting credentials in the checkout.
+            result = subprocess.run(
+                ["git", "-c", "credential.helper=", "-C", str(checkout),
+                 "fetch", "--depth=1", "--no-tags", "origin", commit],
+                env=env, capture_output=True, text=True, timeout=240, check=False,
+            )
+            if result.returncode:
+                raise ValueError(
+                    "GitHub could not fetch the requested commit. Verify that it belongs to "
+                    "this authorized repository. "
+                    + result.stderr.replace(self.token, "[redacted]")[-1000:]
+                )
+            subprocess.run(
+                ["git", "-c", f"core.hooksPath={os.devnull}", "-C", str(checkout),
+                 "checkout", "--detach", commit],
+                env=env, capture_output=True, text=True, timeout=60, check=True,
             )
         commit = subprocess.check_output(
             ["git", "-C", str(checkout), "rev-parse", "HEAD"], env=env, text=True, timeout=10

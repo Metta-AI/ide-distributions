@@ -3,6 +3,7 @@ version: 0.2.0
 description: Research lead tools for the native autoresearch board and shared research CLI.
 author: ide-distributions
 provides_tools:
+  - attachment_download
   - github_repositories
   - github_clone
   - capabilities

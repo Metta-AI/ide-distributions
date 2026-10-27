@@ -1,11 +1,12 @@
 """Bounded committed report reads from a completed card's recorded workspace."""
 
 import subprocess
+from contextlib import closing
 from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .board import Board
+from .board import BOARD, Board, connection
 
 
 class ReportRead(BaseModel):
@@ -38,7 +39,20 @@ class Reports:
         if not task.get("workspace_path") or not workspace.is_relative_to(self.context.root.resolve()):
             raise ValueError("The card workspace is not on this profile host; request a report handoff from the worker")
         branch = task.get("branch_name")
-        if not branch or not workspace.is_dir():
+        if not branch:
+            raise ValueError("The card workspace is unavailable; request a report handoff from the worker")
+        if not workspace.is_dir() and task["workspace_kind"] == "worktree":
+            from hermes_cli import kanban_db as kb
+            from hermes_cli.kanban_db_workspace import resolve_workspace
+
+            # Native completion removes clean worktrees but retains the card branch.
+            # Restore through the same lifecycle API used for completed-build uploads.
+            with closing(connection()) as conn:
+                completed = kb.get_task(conn, request.task_id)
+            restored = resolve_workspace(completed, board=BOARD).resolve()
+            if restored != workspace:
+                raise ValueError("The restored workspace differs from the card's recorded workspace")
+        if not workspace.is_dir():
             raise ValueError("The card workspace is unavailable; request a report handoff from the worker")
 
         def git(*args):
