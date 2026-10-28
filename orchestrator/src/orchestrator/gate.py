@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 from .context import subprocess_context
 from .ide import IDE
 from .research import Research
-from .storage import open_storage, snapshot
+from .storage import card_sessions, open_storage, snapshot
 
 
 def transitions(state, research, ide):
@@ -124,19 +124,28 @@ def wake(context, state):
     }
     if state["wakeAgent"]:
         with closing(open_storage(context.storage_path)) as conn:
-            origin = conn.execute("SELECT value FROM coordinator WHERE key='session'").fetchone()
-        if origin is not None:
+            latest = conn.execute("SELECT value FROM coordinator WHERE key='session'").fetchone()
+        # A card's events resume the session that created the card, as native notifications
+        # do. Only events with no origin (no card, or a card created outside a session) go to
+        # the session that most recently called a tool.
+        origins = card_sessions(context)
+        sessions = {}
+        for event in state["context"]["pending"]:
+            session = origins.get(event.get("card")) or (latest and latest[0])
+            if session:
+                sessions.setdefault(session, []).append(event)
+        for session, pending in sorted(sessions.items()):
             prompt = (
                 "Background coordinator wake. Read current status before acting; "
                 "these source events may already be handled. Reuse event-derived command IDs. "
                 "Send meaningful verified updates with ide_say. Queue completion records this input as handled.\n"
-                + json.dumps(state["context"], sort_keys=True)
+                + json.dumps({**state["context"], "pending": pending}, sort_keys=True)
             )
-            identity = "wake:" + hashlib.sha256((origin[0] + "\n" + prompt).encode()).hexdigest()
+            identity = "wake:" + hashlib.sha256((session + "\n" + prompt).encode()).hexdigest()
             request = Request(
                 url + "/v1/coordinator/inputs",
                 data=json.dumps(
-                    {"identity": identity, "request": {"session_id": origin[0], "input": prompt}}
+                    {"identity": identity, "request": {"session_id": session, "input": prompt}}
                 ).encode(),
                 headers=headers,
             )

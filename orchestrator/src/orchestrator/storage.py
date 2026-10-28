@@ -33,3 +33,11 @@ def snapshot(context):
             )
         ]
     return {"awaiting": runs}
+
+
+def card_sessions(context):
+    """Each card's origin: the coordinator session that created it (native ``tasks.session_id``)."""
+    if not context.board_path.exists():
+        return {}
+    with closing(sqlite3.connect(f"{context.board_path.as_uri()}?mode=ro", uri=True)) as conn:
+        return dict(conn.execute("SELECT id, session_id FROM tasks WHERE session_id IS NOT NULL"))

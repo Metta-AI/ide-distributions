@@ -154,6 +154,9 @@ separate wake receipt, command ledger, event acknowledgement, or replacement-tas
 
 Native notifications alone deliver task events. Cron polls external XP, credit and
 permit waits, and periodically requests champion-submission review through the same inbox.
+A card's wait events resume the session that created the card (native `session_id`),
+as native notifications do; events with no card, or a card without an origin session,
+resume the session that most recently called an orchestrator tool.
 `status` reads native tasks and current external waits. Resume blocked or triaged tasks
 with `card_answer`; task completion never depends on Git ancestry.
 
