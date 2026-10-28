@@ -15,10 +15,15 @@ RESEARCHER_MARKER = Path("plugins") / "researcher_guard"
 def dispatch_profiles(root):
     """The root Hermes config's ``kanban.dispatch_profiles``: the assignees this host's
     dispatcher claims (a list or a comma-separated string), or None when it is not set."""
-    import yaml
+    # The plugin runs inside Hermes's own Python, which has no PyYAML; use Hermes's reader there.
+    # Tests run in the profile venv, which has PyYAML but not Hermes.
+    try:
+        from hermes_cli.config import fast_safe_load as safe_load
+    except ImportError:
+        from yaml import safe_load
 
     path = root / "config.yaml"
-    config = yaml.safe_load(path.read_text()) if path.is_file() else None
+    config = safe_load(path.read_text()) if path.is_file() else None
     value = ((config or {}).get("kanban") or {}).get("dispatch_profiles")
     if value is None:
         return None

@@ -448,3 +448,25 @@ def test_native_dispatch_capacity(tmp_path, capacity):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.splitlines()[-1])["ok"]
+
+
+@pytest.mark.hermes
+def test_researcher_roster_reads_root_config_in_hermes_python(tmp_path):
+    # Plugins run in Hermes's interpreter, which has no PyYAML. A PyYAML import here broke
+    # the status tool in hosted release qualification while profile-venv tests passed.
+    (tmp_path / "config.yaml").write_text("kanban:\n  dispatch_profiles: researcher-1, researcher-2\n")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1])\n"
+        "from pathlib import Path\n"
+        "from orchestrator.service import dispatch_profiles\n"
+        "print(dispatch_profiles(Path(sys.argv[2])))\n"
+    )
+    result = subprocess.run(
+        [hermes_python(), "-c", code, str(DISTRIBUTION / "src"), str(tmp_path)],
+        env=clean_env(tmp_path / "home"),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.stdout.strip() == "['researcher-1', 'researcher-2']"
