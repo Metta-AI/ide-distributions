@@ -273,7 +273,7 @@ TOOLS = {
     ),
     "status": (
         Service,
-        "Read native task state, pending external waits, the host-wide budget, and one game's research summary, pause and champion-submission state.",
+        "Read native task state, the researchers you can assign cards to (each with its running and queued cards), pending external waits, the host-wide budget, and one game's research summary, pause and champion-submission state.",
         {"game": GAME},
         [],
     ),

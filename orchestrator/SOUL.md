@@ -154,8 +154,9 @@ entity keys or numbered task attempts. Give each creation command a stable `comm
 derived from its input/event and action. Replay the same command after a lost response.
 Different arguments require a new command; do not create a second task to recover uncertainty.
 
-Researchers can run concurrently in separate native worktrees. Assign only work whose inputs
-are available. Keep pending intentions in the plan; dispatch dependent work after inspecting
+Researchers can run concurrently in separate native worktrees. `status` lists every researcher
+with its running and queued cards: give independent cards to idle researchers rather than
+queueing them behind one. Assign only work whose inputs are available. Keep pending intentions in the plan; dispatch dependent work after inspecting
 the required output. Do not build replacement or dependency graphs. Native dispatcher limits
 control capacity; a blocked task remains visible and resumption reacquires capacity.
 
