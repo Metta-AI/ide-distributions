@@ -87,7 +87,8 @@ def test_main_returns_1_when_venv_python_missing(tmp_path, monkeypatch):
 
 
 def test_image_linked_venv_is_never_resynced(tmp_path):
-    """Hosting links local/venv to the image's read-only environment: report, never sync."""
+    """Hosting links local/venv to the image's read-only environment and owns it: an agent's
+    edited uv.lock never syncs into it or stops the launcher."""
     (tmp_path / "uv.lock").write_text("lock-v2")
     image = tmp_path / "image-venv"
     image.mkdir()
@@ -95,6 +96,5 @@ def test_image_linked_venv_is_never_resynced(tmp_path):
     (tmp_path / "local").mkdir()
     (tmp_path / "local/venv").symlink_to(image)
     calls = []
-    with pytest.raises(launch.LaunchError, match="Do not delete local/venv"):
-        launch.ensure_venv(tmp_path, run=lambda *a, **k: calls.append(a))
+    assert launch.ensure_venv(tmp_path, run=lambda *a, **k: calls.append(a)) is False
     assert calls == []
