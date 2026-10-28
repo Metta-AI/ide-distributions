@@ -184,3 +184,15 @@ def test_background_news_retries_keep_the_first_payload(context, monkeypatch):
     IDE(context).ide_say("A different summary from a concurrent wake", "say:task_events:54")
     assert sent[0] == sent[1]
 
+
+
+def test_refusals_say_what_they_mean():
+    from orchestrator.evidence import refusal
+    from orchestrator.workspace import WorkspaceError
+
+    assert "not proof the evidence is absent" in refusal(403, "policy-versions?player_id=p")
+    assert "no downloadable player file" in refusal(409, "policy-files/v1/download")
+    unbound = WorkspaceError({"result": {"isError": True, "content": [{"text": "Conversation not found"}]}})
+    assert "native Hermes session" in unbound.envelope["error"]["recovery"]
+    other = WorkspaceError({"error": {"message": "bad scope"}})
+    assert "native Hermes session" not in other.envelope["error"]["recovery"]

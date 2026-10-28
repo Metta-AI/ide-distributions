@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from uuid import UUID
@@ -81,6 +82,25 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def refusal(status: int, path: str) -> str:
+    """What a refused platform read means, so a refusal is reported as a refusal and never read
+    as the evidence not existing."""
+    if status in (401, 403):
+        return (
+            f"HTTP {status} on {path}: this workspace's player credential may not read it. This is a "
+            "permission limit, not proof the evidence is absent; owner-wide reads need platform "
+            "support (metta #29690). Say which read was refused and continue with what is readable."
+        )
+    if status == 404:
+        return f"HTTP 404 on {path}: no such record is visible to this workspace's player."
+    if status == 409 and "policy-files" in path:
+        return (
+            f"HTTP 409 on {path}: this version has no downloadable player file (a container "
+            "policy is an image; read its source or image artifact instead)."
+        )
+    return f"HTTP {status} on {path}"
+
+
 class Evidence:
     def __init__(self, context):
         self.home = context.home
@@ -94,6 +114,12 @@ class Evidence:
             raise ValueError("Platform evidence requires HTTPS")
 
     def _get(self, path, *, max_bytes=MAX_JSON_BYTES):
+        try:
+            return self._read(path, max_bytes=max_bytes)
+        except HTTPError as error:
+            raise ValueError(refusal(error.code, path)) from None
+
+    def _read(self, path, *, max_bytes):
         request = Request(
             f"{self.base}/observatory/v2/{path}",
             headers={"Authorization": f"Bearer {self.token}", "User-Agent": "autoresearch"},
