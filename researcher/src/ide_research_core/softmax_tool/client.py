@@ -83,7 +83,7 @@ CREDITS_PATH = "/observatory/usage/me/credits"
 # ``cogent_get``): a player credential reads its own cogent (``cogents/queries._owned``). The
 # body is a ``PermitAsk``: ``{kind, action, ref, why, at, amount?, answer?: {yes, at},
 # used?: {at}}``.
-ASK_PATH = "/v2/cogents/{player}/c/asks/{key}"
+ASK_PATH = "/observatory/v2/cogents/{player}/c/asks/{key}"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
