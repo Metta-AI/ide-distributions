@@ -2,7 +2,6 @@ import json
 import subprocess
 import sys
 
-
 from .conftest import C_GOOD, C_GRADE, C_VERIF, HUB, kb_id
 from .test_staleness import _commit, game_repo  # noqa: F401  (pytest fixture)
 

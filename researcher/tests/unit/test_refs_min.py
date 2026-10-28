@@ -1,9 +1,9 @@
 import pytest
 from support.canonical import Canonical
 
-from ide_research_core.refs import ResolveError, resolve
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_doc
+from ide_research_core.refs import ResolveError, resolve
 
 
 @pytest.fixture

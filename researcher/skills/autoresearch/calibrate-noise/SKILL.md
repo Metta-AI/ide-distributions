@@ -64,4 +64,4 @@ Doctrine upheld: D-04, D-09.
   yet. Treat it like the case above.
 - `stats noise` exit 1 "no rows for league": step 5 kept no rows. Check the game version
   and the league id.
-- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `card`, "Tool fault").
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: follow D-26 (work around it, keep going and report it). A failed gate verdict is a result, not a fault: never skip or weaken a gate.

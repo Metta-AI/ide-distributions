@@ -3,6 +3,7 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+
 from ide_research_core.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from ide_research_core.softmax_tool.fake import FakeSoftmax
 from ide_research_core.softmax_tool.identity import IdentityError
@@ -422,7 +423,7 @@ def test_an_unknown_membership_status_is_unknown_not_pending(env, runner):
     assert state.stage == "unknown" and "retired" in state.detail
 
 
-# --- the coach's answer to a permit ask (GET /v2/cogents/{player}/c/asks/{key}) ---
+# --- the coach's answer to a permit ask (GET /observatory/v2/cogents/{player}/c/asks/{key}) ---
 
 ASK = "permit-spend-8c5edbef63cc84a1-1"
 
@@ -446,7 +447,7 @@ def test_permit_answer_reads_our_cogents_ask_record(env, runner, fixture, answer
     client = SoftmaxClient(env, run=runner, http_get=http_get)
     assert client.permit_answer(ASK) == answer
     [(url, headers)] = seen
-    assert url == f"{DEFAULT_SERVER}/v2/cogents/{PLAYER_ID}/c/asks/{ASK}"
+    assert url == f"{DEFAULT_SERVER}/observatory/v2/cogents/{PLAYER_ID}/c/asks/{ASK}"
     assert headers["Authorization"].startswith("Bearer ")
     assert runner.calls == []  # no CLI call: the read costs nothing but one GET
 

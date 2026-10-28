@@ -123,4 +123,4 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 - The hypothesis is not in the card refs: do not change it. Suggest work that names it.
 - If the build cannot finish in this card, complete `partial` with the experiment state and
   a bounded build recommendation in `metadata.next`.
-- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `card`, "Tool fault").
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: follow D-26 (work around it, keep going and report it). A failed gate verdict is a result, not a fault: never skip or weaken a gate.

@@ -37,16 +37,21 @@ def test_every_rule_code_used_in_src_exists():
     assert used <= set(rule_ids())
 
 
-def test_tool_fault_rule_preserves_work_and_blocks():
+def test_tool_fault_rule_keeps_going_and_reports():
     text = (DOCTRINE / "research-agent.md").read_text(encoding="utf-8")
     rule = text[text.index("\nD-26.") : text.index("\nD-27.")]
     for required in (
+        "Keep going when a tool fails",
+        "Never edit the installed",  # work around a broken tool with a copy, never patch it
+        "preserve failed reports",
+        "Report what failed",
         "help_request:",
         "kanban_block",
-        "Preserve failed reports",
-        "Do not change installed game tools",
+        "only when no reasonable way remains",
     ):
         assert required in rule
+    refusals = text[text.index("\nD-27.") :]
+    assert "A crashing or broken tool is not a refusal" in refusals
 
 
 def test_worker_roles_and_communication_channels():

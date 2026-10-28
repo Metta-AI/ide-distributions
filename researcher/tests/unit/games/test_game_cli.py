@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from ide_research_core.cli import main
 
 

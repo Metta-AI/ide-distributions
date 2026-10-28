@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from records.fixtures import EXP_DESIGNED
+
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
@@ -15,7 +17,6 @@ from ide_research_core.softmax_tool.fake import FAULTS_ENV, FakeSoftmax
 from ide_research_core.softmax_tool.platform_cli import IdentityError
 from ide_research_core.softmax_tool.protocol import Refused
 from ide_research_core.softmax_tool.upload import artifact_sha256, policy_name, upload
-from records.fixtures import EXP_DESIGNED
 
 REPO = Path(__file__).resolve().parents[3]
 STRATEGY_SHA = "a" * 64
