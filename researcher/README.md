@@ -48,7 +48,10 @@ What a researcher may and may not do:
 
 The `researcher_tools` plugin adds `capabilities` (every tool and skill in the session) and
 `host_capabilities` (installed executables, writable places, missing game host requirements;
-it runs nothing).
+it runs nothing). Exact executable/location paths are in `runtime`; game binding prefixes
+include `argv` and `cwd`. Append arguments to those prefixes instead of guessing the
+interpreter under the game installation. `execution` reports the current session approval
+mode and active unattended contexts; these observations do not approve commands.
 
 There is no spend management in this profile on purpose: the hosting allowance and Hermes's
 own limits (`agent.max_turns`, `agent.run_budget_seconds`, card runtime and retry limits) are

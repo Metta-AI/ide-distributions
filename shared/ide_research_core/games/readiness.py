@@ -4,6 +4,8 @@ import shlex
 import shutil
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from ide_research_core.games.loader import BINDING_NAMES
 
 
@@ -51,3 +53,25 @@ def binding_readiness(game, root, env):
         "execution_verified": False,
         "scope": "current profile only; configured does not prove the worker can execute the binding",
     }
+
+
+class BindingCommand(BaseModel):
+    argv: list[str]
+    cwd: str
+
+
+def binding_commands(game, root: Path, python: str | None) -> dict[str, dict]:
+    """Runnable binding prefixes; callers supply operation arguments and honor readiness."""
+    commands = {}
+    for name, command in game.bindings.items():
+        argv = shlex.split(command)
+        if not argv:
+            continue
+        if argv[0] == "python3" or argv[0].endswith(".py"):
+            if python is None:
+                continue
+            if argv[0] == "python3":
+                argv = argv[1:]
+            argv = [python, *argv]
+        commands[name] = BindingCommand(argv=argv, cwd=str(root.absolute())).model_dump()
+    return commands

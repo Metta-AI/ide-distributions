@@ -127,6 +127,24 @@ command returns the same native task, including after archive. Reusing its ID wi
 different arguments fails. Creation and its immutable arguments commit in one native
 transaction. Serial reconciliation does not serialize the workers themselves.
 
+New task branches start at fetched canonical `origin/main`. A retained worker clone can
+have local commits, staged changes, modified doctrine/plan files, or untracked notes;
+creation preserves its checkout and index. Only missing game clones are bootstrapped.
+Profile preparation owns doctrine and stored-record migrations, independently of task admission.
+Completed task artifacts remain available through `card_files` and `card_artifacts` after
+native worktree cleanup.
+
+`host_capabilities` returns `runtime.executables` and `runtime.locations` with exact paths,
+plus each game's binding `commands` (`argv` and `cwd`). Use the profile interpreter with
+the returned game directory; the installed game root need not contain a virtualenv.
+Append operation arguments or `--help` to the returned argv. Presence/readiness is not an
+execution result. `execution` reports this session's approval mode and active unattended
+contexts; local `execute_code` uses whole-script approval while terminal commands retain
+their native command gates. Discovery never approves an operation or bypasses a refusal.
+`worker_capabilities.host` reports the same information from the assigned worker's CLI
+context; a dispatched task's session settings can differ.
+
+
 All coordinator inputs enter one durable inbox. Its identity deduplicates delivery;
 its oldest unfinished row owns execution. A failed turn or dead process leaves that
 same row recoverable. Completing the turn acknowledges it automatically. There is no

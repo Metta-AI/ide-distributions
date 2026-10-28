@@ -1,7 +1,7 @@
 """``host_capabilities``: what this profile's host has and where it can write.
 
 It only looks: executables on ``PATH``, file permissions and mount options. It runs no command
-and returns no environment value, so it is safe in every session. Both research profiles
+and returns only executable/location paths and approval modes, never credentials. Both research profiles
 register it (the orchestrator plugin and ``researcher_tools``).
 
 A hosted workspace installs the profile read-only and makes only its own disk writable, so
@@ -16,6 +16,8 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
+from pydantic import BaseModel
+
 EXECUTABLES = (
     "git", "python3", "uv", "gcc", "make", "nim", "node", "curl", "docker", "softmax", "coworld",
 )
@@ -28,7 +30,9 @@ DESCRIPTION = (
     "has a daemon, which places are writable (home, profile, workspace, TMPDIR, /tmp, the "
     "installed games/ and venv, the profile cache), whether /tmp forbids running programs, "
     "whether this is a hosted workspace, and which installed or shipped games are missing a "
-    "host requirement. Returns no credential or environment values."
+    "host requirement. runtime contains exact executable and location paths; games include "
+    "binding argv and cwd. execution reports the current session approval constraints; "
+    "discovery does not grant permission. Returns no credentials."
 )
 
 
@@ -51,13 +55,20 @@ def _mount_options(mount_point: str) -> list[str] | None:
     return None
 
 
-def _executable(name: str, home: Path, env: Mapping[str, str]) -> bool:
+class RuntimePaths(BaseModel):
+    executables: dict[str, str | None]
+    research_cli: str | None
+    locations: dict[str, str]
+
+
+def _executable(name: str, home: Path, env: Mapping[str, str]) -> str | None:
     venv = home / "local/venv/bin" / name
-    return bool(shutil.which(str(venv)) or shutil.which(name, path=env.get("PATH", "")))
+    return shutil.which(str(venv)) or shutil.which(name, path=env.get("PATH", ""))
 
 
 def _games(home: Path, env: Mapping[str, str]) -> dict:
     from ide_research_core.games.loader import GameError, load_game
+    from ide_research_core.games.readiness import binding_commands
     from ide_research_core.games.scope import list_games
 
     games = {}
@@ -68,6 +79,9 @@ def _games(home: Path, env: Mapping[str, str]) -> dict:
             games[entry["name"]] = {"error": str(error)}
             continue
         games[entry["name"]] = {
+            "root": entry["root"],
+            "directory": entry["path"],
+            "commands": binding_commands(game, Path(entry["root"]), _executable("python3", home, env)),
             "missing_tools": [name for name in game.host_tools if not _executable(name, home, env)],
             "missing_env": [name for name in game.host_env if not env.get(name)],
         }
@@ -90,7 +104,12 @@ def host_capabilities(home: Path, env: Mapping[str, str]) -> dict:
     tmp_options = _mount_options("/tmp")
     return {
         "hosted": HOSTED_PROFILES.is_dir(),
-        "executables": executables,
+        "executables": {name: path is not None for name, path in executables.items()},
+        "runtime": RuntimePaths(
+            executables=executables,
+            research_cli=shutil.which(cli, path=env.get("PATH", "")) if cli else None,
+            locations={name: str(path.absolute()) for name, path in places.items()},
+        ).model_dump(),
         "docker_daemon": DOCKER_SOCKET.exists(),
         "writable": {name: writable(path) for name, path in places.items()},
         "tmp_allows_programs": None if tmp_options is None else "noexec" not in tmp_options,
@@ -116,7 +135,22 @@ def _session() -> tuple[Path, dict[str, str]]:
 
 def handle(args: dict | None = None, **_kwargs) -> str:
     try:
-        return json.dumps({"ok": True, "data": host_capabilities(*_session())})
+        from tools.approval import _unattended_contexts
+        from tools.approval_context import _get_approval_mode, _get_session_platform
+
+        data = host_capabilities(*_session())
+        data["execution"] = {
+            "platform": _get_session_platform(),
+            "approval_mode": _get_approval_mode(),
+            "unattended": [{"context": ctx.name, "mode": ctx.mode()} for ctx in _unattended_contexts()],
+            "terminal": "Commands remain subject to native command guards and approval transport.",
+            "execute_code": (
+                "Local Python requires whole-script approval. An active unattended deny mode "
+                "blocks it unless guards are disabled by runtime configuration. "
+                "Use the normal tool approval flow; never reroute a denied action."
+            ),
+        }
+        return json.dumps({"ok": True, "data": data})
     except Exception as error:  # noqa: BLE001 - tool boundary reports the failure
         return json.dumps({"ok": False, "error": f"{type(error).__name__}: {error}"})
 

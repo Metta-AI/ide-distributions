@@ -20,7 +20,6 @@ def test_reports_presence_without_executing_or_returning_secrets(tmp_path):
     assert result["research_cli_available"] is True
     assert not marker.exists()
     assert "cga_private" not in str(result)
-    assert str(executable) not in str(result)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
