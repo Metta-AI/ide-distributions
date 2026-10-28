@@ -54,6 +54,28 @@ def researchers(context, cards):
     return roster
 
 
+TOOLING_NOTICES = {"update": "local/tooling-update.json", "fallback": "local/tooling-fallback.json"}
+
+
+def tooling(context):
+    """Writable-tooling problems on every profile of this host: a release that could not merge into a
+    profile's edits (written by hosting), or a profile whose own ``src`` failed to import (written
+    by its plugin). Empty when nothing needs attention."""
+    import json
+
+    profiles = context.home.parent if context.home.parent.name == "profiles" else None
+    homes = sorted(path for path in profiles.iterdir() if path.is_dir()) if profiles else [context.home]
+    notices = []
+    for home in homes:
+        for kind, relative in TOOLING_NOTICES.items():
+            try:
+                notice = json.loads((home / relative).read_text())
+            except (OSError, ValueError):
+                continue
+            notices.append({"profile": home.name, "kind": kind, **notice})
+    return notices
+
+
 class Service:
     def __init__(self, context):
         self.context = context
@@ -74,6 +96,7 @@ class Service:
         return {
             "cards": by_state,
             "researchers": researchers(self.context, cards),
+            "tooling": tooling(self.context),
             "game": research.context.env.get("RESEARCH_GAME"),
             "pending": transitions(snapshot(self.context), self.research, IDE(self.context)),
             "research": research.call("records", "summary"),
