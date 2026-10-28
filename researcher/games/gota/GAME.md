@@ -221,16 +221,15 @@ structural policy error remains `failed`. Tool timeouts never request a repair, 
 when some budget remains. Prebuilt builds ignore both settings because they run no
 compiler agent.
 
-The card's configured 5400-second run budget is soft: Hermes injects a wrap-up notice
-at 80%, or 4320 seconds, rather than enforcing a build deadline. The card's runtime cap
-is hard: the orchestrator creates cards with `max_runtime_seconds` 7200 by default, and
+The card's configured 12600-second run budget is soft: Hermes injects a wrap-up notice
+at 80%, or 10080 seconds, rather than enforcing a build deadline. The card's runtime cap
+is hard: the orchestrator creates cards with `max_runtime_seconds` 14400 by default, and
 the Hermes dispatcher then stops the worker and re-queues the card. The documented G3/G4
 workload takes about 3300 seconds on the test box. The default 1800-second cumulative
-generation allowance plus that estimate totals 5100 seconds, leaving about 300 seconds
-for other work but exceeding the wrap-up threshold. A repair after a G3 failure repeats
-the roughly 55-minute gate workload; two gate runs alone take about 6600 seconds and
-can exceed the card budget whatever generation timeout is chosen. Setup overhead,
-host speed, and separate local checks can increase the total further.
+generation allowance plus that estimate totals 5100 seconds. A repair after a G3 failure
+repeats the roughly 55-minute gate workload, so two gate runs plus generation take about
+8400 seconds, inside the run budget; hosted builds have taken 6600 to 8400 seconds. Setup
+overhead, host speed, and separate local checks can increase the total further.
 
 The timeout choice is informed by timings measured on the EC2 test box, 2026-10-09.
 Passed builds had intervals between stream creation and last write of 691 and 185 seconds

@@ -23,7 +23,9 @@ tool_loop_guardrails:
 
 agent:
   max_turns: 150
-  run_budget_seconds: 5400
+  # Below card_create's default max_runtime_seconds (14,400), so a run ends before its card is
+  # killed; long enough for a hosted GotA native build (6,600-8,400 s).
+  run_budget_seconds: 12600
 
 approvals:
   mode: "off"

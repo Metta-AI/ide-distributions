@@ -148,7 +148,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         body,
         priority=0,
         skills=None,
-        max_runtime_seconds=7200,
+        # GotA native builds took 6,600-8,400 s on hosted workspaces (10-27 sessions).
+        max_runtime_seconds=14400,
         failure_limit=2,
         session_id=None,
         game=None,
