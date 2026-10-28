@@ -48,10 +48,9 @@ and each decoded episode's `expanded-replay.jsonl` and
 
 If the witnessed failure is a build with `status: errored`, it is a tool fault,
 not a strategy problem. Follow `eval-design`'s **Build tool faults** procedure:
-send a `help_request:` comment on your own card with the exact error and absolute
-build directory, record
-it in the card's journal, and stop without retrying the build or rewriting the
-candidate or STRATEGY. Do not form policy hypotheses from that tooling error.
+get the build working (D-26: fix the tool in your profile and commit), report the
+exact error, absolute build directory and what you did on your own card and in the
+card's journal, and do not rewrite the candidate or STRATEGY to get around it. Do not form policy hypotheses from that tooling error.
 
 Use after `replay-inspection`, with core `diagnose`. Start with witness evidence,
 not a low aggregate score. Check the refuted lever before creating another idea:

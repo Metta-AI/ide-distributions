@@ -66,8 +66,7 @@ Doctrine upheld: D-04, D-07, D-23, D-25, D-26.
    its build, local-check and starter bindings. The coordinator owns publication. Document verified
    binding responsibilities in `## Bindings`; `host_requirements` lists local executable requirements.
    Keep unimplemented or unverified bindings explicit; never substitute a stub for a required gate.
-   Tools write only where `games/_template/CONTRACT.md` ("Where tools may write") allows: once
-   shipped, the game folder is read-only.
+   Tools write only where `games/_template/CONTRACT.md` ("Where tools may write") allows.
 9. Write `seed/strategy/STRATEGY.md` (the starter policy and what a change can target) and
    `seed/plan.md`.
 10. Check until there are no problems:

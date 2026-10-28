@@ -108,8 +108,8 @@ For either compiler or prebuilt builds, read the build JSON and retained reports
 before continuing. A build with `status: errored` is a tool fault, not a strategy
 problem. Do not rewrite the candidate or STRATEGY to get around it: that would change
 what you are measuring. Preserve the build directory and reports, then follow D-26: get the
-build working another way (rerun after a transient network error, a writable copy of the
-tool, a missing dependency in an environment on the workspace disk) with a new output
+build working (rerun after a transient network error, fix the tool in your profile and commit
+the fix, a missing dependency in an environment on the workspace disk) with a new output
 directory, keeping every gate.
 
 Report it either way: a `help_request:` or `note:` comment on your own card with the exact

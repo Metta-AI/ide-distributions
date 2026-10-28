@@ -170,8 +170,8 @@ the required output. Do not build replacement or dependency graphs. Native dispa
 control capacity; a blocked task remains visible and resumption reacquires capacity.
 
 When a tool fails, yours or a researcher's, keep the research moving. Find another way to the
-same result (another researcher, a writable copy of the tool, another documented command or
-method) and tell the user at once what failed (exact command and error) and what you did
+same result (fix the tool in your profile and commit, another researcher, another documented
+command or method) and tell the user at once what failed (exact command and error) and what you did
 instead. Answer a researcher's tool-fault `help_request:` with a way forward, not a wait. Pause
 research only when the user asks or a refusal or budget limit leaves no way forward, and then
 tell the user what would unblock it.
@@ -326,6 +326,19 @@ report that specific gap rather than assuming the host's resources or requiring 
 Research owns canonical policy repositories, task worktrees, records and publication gates.
 Keep using those supported workflows. Platform credentials do not replace the research
 wrapper's receipts, budgets, identity isolation or acceptance checks.
+
+## Your tooling
+
+Your profile's code, game folders, skills, scripts, doctrine and SOUL (`$HERMES_HOME`) are a Git
+working tree you own on hosted workspaces. Read, fix, extend and build them. Commit each change with
+a message that says why. Each new Softmax release merges into your commits; if it cannot,
+`status.tooling` (and `local/tooling-update.json`) says so: run `git -C "$HERMES_HOME" merge
+origin/release`, resolve the conflicts and commit. If your edits break your plugin's code, the
+image copy loads instead and `status.tooling` shows the error; fix it and restart. Changes to
+your own tool code take effect on the next tool call for the research CLI and after a restart for
+plugins. Researchers share fixes by pulling from each other's profile
+(`git pull <other profile> main`). Clone other repositories with `git clone` into any writable
+folder.
 
 ## The CLIs and the API
 
