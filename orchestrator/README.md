@@ -91,13 +91,13 @@ published by the bridge, and so is a background wake's final reply (there is no 
 | `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. A body citing a record id (`E-`, `H-`, `V-`, `CS-`, ...) or `ar://file/` path that is not on that game's canonical `main` is refused with `unknown_records` listing them (content-search and game reference types are not checked). |
 | `card_show`, `card_list` | Read native cards, runs and comments. `card_list` takes its filters as top-level parameters (`status`, `assignee`, `limit`, `order_by`, ...) with typed sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
-| `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
+| `card_files`, `card_report`, `card_artifacts` | Discover committed files of a card's latest ended run (completed, or blocked: staged commits only), read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
 | `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). |
 | `records_find`, `records_show` (`game?`) | Shared canonical record reads. `records_show` also takes an `ar://` reference and a champion submission by `CS-`, legacy `P-` or platform `sub_` id. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
-| `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
+| `upload_build(id, run_id, build_dir, name, experiment?)` | Upload the staged, committed build of a card's latest ended run (completed, or blocked mid-experiment) in the card's game. Never from a running card. |
 | `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
 | `accept_champion(game?)` | Record the league's current champion as the loop's; resolves a champion conflict without asking the user. |
 | `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
@@ -170,7 +170,8 @@ resume the session that most recently called an orchestrator tool.
 with `card_answer`; task completion never depends on Git ancestry.
 
 Researchers build, smoke-test, and commit the complete artifact. The coordinator calls
-`upload_build` on the latest completed native run, integrates its receipt commit, and
+`upload_build` on the latest ended native run (completed, or blocked after staging a verified
+build; never a running one). Once the card completes it integrates the receipt commit, and
 uses `submit_requested_version` for a direct submission (the user asked, or the coordinator
 chose to compete a verified version; `request` records why). Cancellation revokes
 publication before stopping the native worker. A direct submission claims no statistical
@@ -292,13 +293,15 @@ cache), whether `/tmp` can run programs, whether this is a hosted workspace, and
 `game_support` reports static readiness per operation, including installed-template markers and missing host requirements.
 Configured bindings are not execution-verified. `game_starter` reads bounded UTF-8 pages of a published starter,
 verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.
-`card_report` reads a committed report from the recorded workspace of the latest completed card run,
-checks commit membership in that card branch, and never integrates or executes the report.
+`card_report` reads a committed report from the recorded workspace of the card's latest ended run,
+checks commit membership in that card branch, and never integrates or executes the report. A completed
+card reads its card branch; a blocked card (its run ended, e.g. waiting on XP results) reads only commits
+staged on origin. A running card is never read.
 If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.
 
 Review a completed experiment through these tools:
 
-1. Get its latest completed run and full commit from `card_show`.
+1. Get its latest ended run (completed, or blocked) and full commit from `card_show`.
 2. Call `card_files(task_id, run_id, commit)` to discover the tree recursively. `directory`
    restricts the subtree; `recursive=false` lists one level. Follow `next_offset` for bounded
    pages, rather than guessing report paths or making a separate call for every match folder.

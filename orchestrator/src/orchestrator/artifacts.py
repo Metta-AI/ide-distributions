@@ -1,4 +1,4 @@
-"""Discover, inspect and export committed evidence from completed native cards."""
+"""Discover, inspect and export committed evidence from completed (or blocked, ended) native cards."""
 
 import hashlib
 import json
@@ -70,9 +70,13 @@ class Reports:
         snapshot = Board(self.context).card_show(request.task_id)
         task, runs = snapshot["card"], snapshot["runs"]
         latest = max(runs, key=lambda item: item["id"], default=None)
+        completed = task["status"] == "done" and latest is not None and latest["status"] == "done"
+        # A blocked card's run is over (e.g. waiting on experiment results); its staged
+        # commits are readable. A running card's worktree is still being written.
+        blocked = task["status"] == "blocked" and not task.get("current_run_id")
         if (not latest or latest["id"] != request.run_id or latest["task_id"] != request.task_id
-                or latest["status"] != "done" or not latest.get("ended_at") or task["status"] != "done"):
-            raise ArtifactError("card_not_completed", "Read artifacts only from the card's latest completed run; refresh card_show")
+                or not latest.get("ended_at") or not (completed or blocked)):
+            raise ArtifactError("card_not_completed", "Read artifacts only from the card's latest ended run (completed, or blocked); refresh card_show")
         workspace = Path(task.get("workspace_path") or "").resolve()
         if not task.get("workspace_path") or not workspace.is_relative_to(self.context.root.resolve()):
             raise ArtifactError("workspace_unavailable", "The card workspace is not on this profile host; request a report handoff from the worker")
@@ -94,7 +98,14 @@ class Reports:
             raise ArtifactError("workspace_unavailable", "The card workspace is unavailable; request a report handoff from the worker")
 
         self._git(workspace, "check-ref-format", "refs/heads/" + branch)
-        self._git(workspace, "merge-base", "--is-ancestor", request.commit, "refs/heads/" + branch)
+        if blocked:
+            # The blocked worker may resume; read only what it staged on origin, never
+            # local commits it has not published.
+            staged = "refs/remotes/origin/" + branch
+            self._git(workspace, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:{staged}")
+            self._git(workspace, "merge-base", "--is-ancestor", request.commit, staged)
+        else:
+            self._git(workspace, "merge-base", "--is-ancestor", request.commit, "refs/heads/" + branch)
         return workspace
 
     @staticmethod
@@ -169,7 +180,7 @@ class Reports:
             "path": request.path, "blob": blob, "content": text[request.offset:end],
             "characters": len(text), "offset": request.offset, "next_offset": end if end < len(text) else None,
             "offset_unit": "unicode_characters",
-            "provenance": "commit reachable from the recorded branch of this card's latest completed run; not an integration receipt",
+            "provenance": "commit reachable from the recorded branch of this card's latest ended run; not an integration receipt",
         }
 
     def card_artifacts(self, task_id, run_id, commit, paths, expected_sha256=None, export=False):
@@ -197,7 +208,7 @@ class Reports:
             "task_id": request.task_id, "run_id": request.run_id, "commit": request.commit,
             "status": "mismatch" if any(item.matches is False for item in digests) else "inspected",
             "artifacts": [item.model_dump() for item in digests],
-            "provenance": "committed bytes on this card's latest completed branch; hashes do not prove evaluation claims",
+            "provenance": "committed bytes on this card's latest ended run's branch; hashes do not prove evaluation claims",
         }
         if request.export and result["status"] != "mismatch":
             cache = self.context.home / "cache" / "card-artifacts"

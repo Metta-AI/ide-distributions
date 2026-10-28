@@ -92,7 +92,7 @@ does not establish the source of a user's exact submitted version. Private repos
 exact-version source access, engine availability and runnable bindings are separate prerequisites.
 
 Worker reports live in the worker workspace. A path in a completion message is not a local chat
-path. Require a committed report and use `card_report` with the task, latest completed run, commit
+path. Require a committed report and use `card_report` with the task, latest ended run, commit
 and relative path. This reads without integrating the branch. If the workspace is unavailable,
 or no supported
 reader exists, have the worker return the bounded report content with its commit and source path.
@@ -188,7 +188,10 @@ tell the user what would unblock it.
 
 Read `card_show` before recovering a failure. Answer questions on blocked tasks using
 `card_answer`; use comments for running workers. An integrated checkpoint is not task
-completion. A resumed researcher can produce additional commits. Cancel obsolete work before
+completion. A resumed researcher can produce additional commits. While a researcher is blocked
+(for example waiting on XP results), you can read its staged reports and `upload_build` a
+verified build it staged before blocking; integration, submission and `game_install` wait for
+a completed card, and a running card never publishes. Cancel obsolete work before
 reusing its slot; inspect confirmed native termination. Other researchers continue.
 
 Describe objective, inputs, constraints, budget, and acceptance evidence in each task.

@@ -421,8 +421,12 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 raise ValueError("outcome must be done or archived")
             return {"changed": changed}
 
-    def _admit_effect(self, id, run_id, kind, payload):
-        """Native archive and publication admission use the same transaction boundary."""
+    def _admit_effect(self, id, run_id, kind, payload, allow_blocked=False):
+        """Native archive and publication admission use the same transaction boundary.
+
+        Effects require the card's latest native run. ``allow_blocked`` (upload only) also
+        admits a blocked card whose latest run has ended, so a verified build staged before
+        the worker blocked can be uploaded; a running card never publishes."""
         from hermes_cli import kanban_db as kb
 
         with closing(connection()) as conn, kb.write_txn(conn):
@@ -432,12 +436,19 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 "SELECT 1 FROM task_events WHERE task_id=? AND kind='publication_revoked' LIMIT 1",
                 (id,),
             ).fetchone()
+            latest = max(runs, key=lambda run: run.id) if runs else None
+            blocked = allow_blocked and task.status == "blocked" and task.current_run_id is None
             if (
                 revoked
-                or task.status != "done"
-                or not runs
-                or max(run.id for run in runs) != run_id
+                or not (task.status == "done" or blocked)
+                or latest is None
+                or latest.id != run_id
+                or latest.ended_at is None
             ):
+                if allow_blocked:
+                    raise ValueError(
+                        "Only the latest ended native run of a completed or blocked card may upload"
+                    )
                 raise ValueError("Only the latest completed native run may publish")
             kb._append_event(conn, id, kind, payload, run_id=run_id)
             return task
@@ -466,12 +477,17 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             run_id,
             "upload_admitted",
             {"build_dir": build_dir, "name": name, "experiment": experiment},
+            allow_blocked=True,
         )
         worktree = resolve_workspace(task, board=BOARD)
         # Native completion can remove the checkout and its local branch. The researcher
         # staged its result on origin; restore that published result before reading artifacts.
         git(worktree, "fetch", "origin", f"{task.branch_name}:refs/remotes/origin/{task.branch_name}")
         git(worktree, "merge", "--ff-only", f"origin/{task.branch_name}")
+        # Upload only the staged branch, never local commits the worker did not push
+        # (a blocked worker's checkout is still its own).
+        if git(worktree, "rev-parse", "HEAD") != git(worktree, "rev-parse", f"origin/{task.branch_name}"):
+            raise ValueError("The task checkout has commits that are not staged; upload only staged builds")
         artifact = (worktree / build_dir).resolve()
         if Path(build_dir).is_absolute() or not artifact.is_relative_to(worktree.resolve()):
             raise ValueError("build_dir must be inside the task's committed worktree")

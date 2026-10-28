@@ -115,19 +115,19 @@ TOOLS = {
     ),
     "card_report": (
         Reports,
-        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
+        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest ended run only: a completed card, or a blocked card (then only commits staged on origin); never a running card. Validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
     ),
     "card_files": (
         Reports,
-        "Discover committed files and directories from a card's latest completed run. Lists the whole tree recursively by default; directory limits the subtree, recursive=false lists one level. Follow next_offset for at most 200 paths, kinds, sizes and Git blob IDs per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
+        "Discover committed files and directories from a card's latest ended run (completed, or blocked: staged commits only). Lists the whole tree recursively by default; directory limits the subtree, recursive=false lists one level. Follow next_offset for at most 200 paths, kinds, sizes and Git blob IDs per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
         CardFiles.model_json_schema()["properties"],
         ["task_id", "run_id", "commit"],
     ),
     "card_artifacts": (
         Reports,
-        "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest completed run. Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
+        "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest ended run (completed, or blocked: staged commits only). Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
         ArtifactRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "paths"],
     ),
@@ -313,7 +313,7 @@ TOOLS = {
     ),
     "upload_build": (
         Board,
-        "Upload the latest completed task run’s verified build. build_dir is a committed task-relative directory containing the policy artifact named in version.json, version.json and gate evidence. Return upload receipts and the new staged commit for integration. Reuse name on retry. Optional experiment binds a research candidate.",
+        "Upload the verified build of a card's latest ended run: a completed card, or a blocked card whose worker staged the build before blocking (e.g. waiting on XP results). Never from a running card; uploads only the staged branch. build_dir is a committed task-relative directory containing the policy artifact named in version.json, version.json and gate evidence. Return upload receipts and the new staged commit for integration. Reuse name on retry. Optional experiment binds a research candidate.",
         {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S},
         ["id", "run_id", "build_dir", "name"],
     ),

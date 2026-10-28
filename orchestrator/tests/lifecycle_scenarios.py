@@ -117,6 +117,68 @@ def game_cards(root, home, args):
     ], calls
 
 
+def blocked_upload(board, args):
+    """#29: a worker that staged a verified build and then blocked (e.g. waiting on
+    experiment results) can have that build uploaded. Other publication effects still
+    need a completed card, and a running run never publishes."""
+    card = board.card_create(**{**args, "command_id": "blocked:upload"})["card"]
+    with closing(connection()) as conn:
+        task = kb.claim_task(conn, card["id"])
+        worktree = resolve_workspace(task, board="autoresearch")
+        set_workspace_path(conn, task.id, worktree)
+    git(worktree, "config", "user.name", "Lifecycle test")
+    git(worktree, "config", "user.email", "test@example.invalid")
+    build = worktree / "build-evidence/verified"
+    build.mkdir(parents=True)
+    (build / "version.json").write_text('{"artifact": "policy.bas"}\n')
+    git(worktree, "add", ".")
+    git(worktree, "commit", "-m", "stage verified build")
+    git(worktree, "push", "origin", task.branch_name)
+    staged = git(worktree, "rev-parse", "HEAD")
+    with patch("orchestrator.board.Research.call") as effect:
+        with TestCase().assertRaisesRegex(ValueError, "may upload"):
+            board.upload_build(task.id, task.current_run_id, "build-evidence/verified", "policy")
+        effect.assert_not_called()
+    with closing(connection()) as conn:
+        assert kb.block_task(conn, task.id, reason="Waiting on XP results", kind="needs_input")
+        ended = kb.get_task(conn, task.id)
+        assert ended.status == "blocked" and ended.current_run_id is None
+    with patch("orchestrator.board.Research.call") as effect:
+        for operation, arguments in (
+            (board.workspace_integrate, (staged,)),
+            (board.submit_requested_version, ("V-blocked", "strategy.md", "Submit it", "league_selected")),
+            (board.champion_submit, ("E-blocked", "league_selected")),
+            (board.bootstrap_champion, ("V-blocked", "league_selected")),
+            (board.game_install, ("newgame",)),
+        ):
+            with TestCase().assertRaisesRegex(ValueError, "latest completed"):
+                operation(task.id, task.current_run_id, *arguments)
+        effect.assert_not_called()
+    # A local commit the blocked worker never staged is not uploadable.
+    (worktree / "scratch").write_text("unstaged\n")
+    git(worktree, "add", "scratch")
+    git(worktree, "commit", "-m", "local only")
+    with patch("orchestrator.board.Research.call") as effect:
+        with TestCase().assertRaisesRegex(ValueError, "not staged"):
+            board.upload_build(task.id, task.current_run_id, "build-evidence/verified", "policy")
+        effect.assert_not_called()
+    git(worktree, "reset", "--hard", staged)
+    with patch("orchestrator.board.Research.call", return_value={"accepted": True}) as effect:
+        result = board.upload_build(task.id, task.current_run_id, "build-evidence/verified", "policy")
+        assert result == {"accepted": True}
+        assert effect.call_args_list[0].args[:2] == ("softmax", "upload-build")
+    # Once the worker resumes, the ended run can no longer publish.
+    assert board.card_answer(task.id, "Results are in")["unblocked"]
+    with closing(connection()) as conn:
+        resumed = kb.claim_task(conn, task.id)
+    with patch("orchestrator.board.Research.call") as effect:
+        for run_id in (task.current_run_id, resumed.current_run_id):
+            with TestCase().assertRaisesRegex(ValueError, "may upload"):
+                board.upload_build(task.id, run_id, "build-evidence/verified", "policy")
+        effect.assert_not_called()
+    board.card_close(task.id, "archived")
+
+
 def main():
     home = Path(os.environ["HERMES_HOME"])
     home.mkdir(parents=True)
@@ -348,6 +410,7 @@ def main():
                 publisher.id, publisher_run, "V-ready", "strategy.md", "Submit", "league_selected"
             )
         remote.assert_not_called()
+    blocked_upload(board, args)
     game_cards(root, home, args)
     # Independent assignments coexist, with native ownership of each run.
     for index in range(1, 4):
