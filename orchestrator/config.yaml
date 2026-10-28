@@ -14,6 +14,16 @@ memory:
   write_approval: false
 agent:
   max_turns: 150
+  # A chat reply has a user waiting on it. At 80% of this budget (12 minutes) Hermes tells the
+  # model to stop discovery and answer from what it has; long work goes to the background or a
+  # card (SOUL "Your own limits"). Without it, replies ran 17-24 minutes and ended with no result.
+  run_budget_seconds: 900
+# Every model call resends the whole session, and an IDE conversation is one long session.
+# Hermes's default trigger is 50% of the window: 525,000 tokens for a 1.05M-token model such as
+# openai/gpt-6-luna, so each call carried about 300,000 tokens and a 10-call reply read 3.6M.
+# A fixed cap keeps calls at or below 200,000 tokens whatever model the platform routes to.
+compression:
+  threshold_tokens: 200000
 # Chat gets the plugin tools plus the Hermes tools a researcher has: shell (terminal,
 # process_manage), files, Python (execute_code), skills, web search and extraction, browser,
 # image reading (vision), todo lists, past-session search, subagents (delegation) and memory.

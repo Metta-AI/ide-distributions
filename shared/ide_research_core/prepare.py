@@ -114,6 +114,7 @@ def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Pa
 EARLIER_DEFAULTS = {
     "agent.max_turns": {40},  # the orchestrator shipped 40 before matching the researcher
     "agent.run_budget_seconds": {5400},  # researchers shipped 5,400 before GotA builds needed more
+    "compression.threshold_tokens": set(),  # unset: Hermes compacted at 50% of the window
     "terminal.timeout": {180},  # Hermes's default
     "timeouts.tools.sequential_call": {420},  # Hermes's default
     "timeouts.tools.concurrent_batch": {420},

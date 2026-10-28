@@ -27,6 +27,11 @@ agent:
   # killed; long enough for a hosted GotA native build (6,600-8,400 s).
   run_budget_seconds: 12600
 
+# Hermes's default compaction trigger is 50% of the window (525,000 tokens for a 1.05M-token
+# model), and every model call resends the whole session. Same cap as the orchestrator.
+compression:
+  threshold_tokens: 200000
+
 approvals:
   mode: "off"
   # Never prompt: "off" is Hermes's yolo mode. The per-context modes are backstops so an

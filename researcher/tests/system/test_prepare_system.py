@@ -56,6 +56,10 @@ def test_retained_profile_upgrade(tmp_path):
                 old.pop(key)
             old["terminal"].pop("timeout")
         old["agent"]["max_turns"] = 23  # the owner's own choice: kept
+        # Installed before the compaction cap (and, for the orchestrator, the reply budget).
+        old.pop("compression")
+        if kind == "orchestrator":
+            old["agent"].pop("run_budget_seconds")
         config_path.write_text(yaml.safe_dump(old))
         subprocess.run(
             ["hermes", "profile", "install", str(source), "--name", name, "--yes"],
@@ -121,6 +125,8 @@ def test_retained_profile_upgrade(tmp_path):
         assert actual["timeouts"]["tools"] == defaults["timeouts"]["tools"]
         assert actual["skills"]["external_dirs"] == defaults["skills"]["external_dirs"]
         assert actual["fallback_providers"] == defaults["fallback_providers"]
+        assert actual["compression"]["threshold_tokens"] == defaults["compression"]["threshold_tokens"]
+        assert actual["agent"]["run_budget_seconds"] == defaults["agent"]["run_budget_seconds"]
         if kind == "researcher":
             assert set(defaults["approvals"]["deny"]) <= set(actual["approvals"]["deny"])
             assert "user-prohibited-command" in actual["approvals"]["deny"]
