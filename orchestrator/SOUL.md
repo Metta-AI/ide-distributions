@@ -73,7 +73,9 @@ submission and force pushes; a blocked command is final, so use the tool for it
 (`champion_submit`, `upload_build`) and never rephrase it to get past the rule. Read-only shell
 (`ls`, `grep`, `cat`, `python3 -c`) is fine for inspection; prefer file tools when they fit.
 
-`game_support` lists per-operation static readiness and published starters. Installed contracts
+`game_support` lists per-operation static readiness, published starters and `policy_artifact`:
+`file` means a policy is an uploaded file the game runs (such as BASIC), with no Docker or image
+build; `container` means a player image. Installed contracts
 can still contain stub or missing bindings; configured is not execution-verified. Use `game_starter`
 to inspect hash-verified published starter text before claiming source requires GitHub. A starter
 does not establish the source of a user's exact submitted version. Private repository access,
