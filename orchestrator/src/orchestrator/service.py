@@ -14,11 +14,16 @@ RESEARCHER_MARKER = Path("plugins") / "researcher_guard"
 
 def dispatch_profiles(root):
     """The root Hermes config's ``kanban.dispatch_profiles``: the assignees this host's
-    dispatcher claims (a list or a comma-separated string), or None when it is not set."""
-    import yaml
+    dispatcher claims (a list or a comma-separated string), or None when it is not set.
 
+    This runs inside the Hermes process, whose interpreter has no PyYAML; Hermes' own YAML
+    module reads its config the way the dispatcher does."""
     path = root / "config.yaml"
-    config = yaml.safe_load(path.read_text()) if path.is_file() else None
+    if not path.is_file():
+        return None
+    import hermes_yaml
+
+    config = hermes_yaml.safe_load(path.read_text())
     value = ((config or {}).get("kanban") or {}).get("dispatch_profiles")
     if value is None:
         return None

@@ -165,13 +165,8 @@ def test_status_lists_every_researcher_with_its_open_cards(tmp_path):
         {"name": "researcher-1", "installed": True, "running": ["t_1"], "queued": ["t_2"]},
         {"name": "researcher-2", "installed": True, "running": [], "queued": []},
     ]
-    # Hosting names its workers in the dispatcher allowlist; one it names but has not
-    # installed is reported as such.
-    (tmp_path / "config.yaml").write_text("kanban:\n  dispatch_profiles: researcher-2,researcher-3\n")
-    hosted = Context(profiles / "orchestrator", {})
-    assert [(r["name"], r["installed"]) for r in researchers(hosted, cards)] == [
-        ("researcher-2", True), ("researcher-3", False),
-    ]
+    # The dispatcher allowlist is read by Hermes' own YAML module inside the gateway:
+    # test_hermes.py::test_status_roster_reads_the_dispatcher_allowlist_in_hermes.
 
 
 def test_card_bodies_may_cite_only_records_on_their_games_canonical_main(tmp_path):
