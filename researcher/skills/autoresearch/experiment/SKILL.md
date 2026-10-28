@@ -54,7 +54,7 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    `"$RESEARCH_CLI" game show`
    Use `data.game_version`, the `outcome_metrics` (names and directions) and the
    `performance_guardrails`. A performance guardrail is checked automatically; do not list it
-   again as a primary metric or an agent guardrail.
+   again as an agent guardrail. It can also be a primary metric when the change targets it.
 7. Write the decision rule in the experiment body before any result exists (D-09). Use this
    default unless the Topic needs another:
    - `submit`: `stats evaluate` reports `submit_eligible: true` and the Result is valid.
