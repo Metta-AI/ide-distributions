@@ -282,3 +282,27 @@ Failures carry stable reasons: `card_not_completed`, `workspace_unavailable`, `a
 `invalid_artifact_path`, `invalid_artifact_selection`, `artifact_limit`, or `invalid_export_cache`.
 Refresh native task state, correct the selection, or reduce the batch according to that reason;
 these conditions do not imply missing account credentials.
+
+
+### On-demand policy evidence
+
+The coordinator can discover coaching sessions, their existing analyses and recordings, uploaded policy versions,
+and a policy's episodes. It can read arbitrary episode metadata and download replay/results bundles. These tools
+use the current workspace credential. The API verifies the workspace's owner grant; no user token is copied into
+Hermes. The backend evidence-read authorization must be deployed before coaching and owner-wide policy reads work.
+
+JSON responses are saved as private, hashed files. Read them with native file tools and follow the returned cursor
+for the next page. Recording and policy downloads verify the API's size and SHA-256; their signed URLs never receive
+the workspace bearer token. Binary downloads stop at 256 MiB. A bundle's manifest identifies which evidence was
+actually delivered; recorded episodes can contain a replay reference instead of replay bytes.
+
+Access does not require inspection. Hermes chooses whether a recording, replay, metadata, or source read helps the
+current task. These tools perform no analysis, code execution, upload, submission, or paid evaluation.
+
+The native system workflow uses a real local frontend proxy, API, PostgreSQL and object store. Prepare the private
+fixture described in `tests/test_evidence_system.py`, then run:
+
+```sh
+HERMES_PYTHON=/path/to/hermes/python SOFTMAX_EVIDENCE_SYSTEM_FIXTURE=/path/to/private-fixture.json \
+  uv run pytest -m hermes tests/test_evidence_system.py
+```
