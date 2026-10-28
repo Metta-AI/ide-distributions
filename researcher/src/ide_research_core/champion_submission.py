@@ -12,8 +12,9 @@ write-ahead order so an interrupted submit is never sent twice blindly:
 
 - ``intent``: committed and pushed before anything reaches the platform;
 - ``submitted``: the platform accepted the submission (``submission_id``);
-- ``recorded``: the league shows the policy as our champion; for an experiment the candidate
-  strategy is then copied to ``strategy/STRATEGY.md``;
+- ``recorded``: the league shows the policy as our champion; for an experiment (or a
+  requested version compiled from a STRATEGY.md) the strategy is then copied to
+  ``strategy/STRATEGY.md``. A requested prebuilt artifact keeps only its saved source;
 - ``published``: the champion file is on ``main``. Terminal, like ``aborted`` and ``rejected``.
 
 ``status`` advances the one submission in flight by at most one platform read and returns
@@ -243,6 +244,18 @@ def _strategy_source_hashes(meta: dict) -> list[str]:
     return hashes
 
 
+def _requested_source_matches(meta: dict, source: bytes) -> bool:
+    """Whether ``source`` is what the version's build was made from. A build compiled from a
+    STRATEGY.md must match that hash. A prebuilt artifact (no STRATEGY.md source, see
+    ``_strategy_source_hashes``) may match any committed input its build recorded: the
+    artifact and the input it was made from are both its source."""
+    digest = hashlib.sha256(source).hexdigest()
+    if _strategy_source_hashes(meta):
+        return digest == meta["strategy_sha256"]
+    recorded = ((meta.get("build") or {}).get("source_hashes") or {}).values()
+    return digest == meta["strategy_sha256"] or digest in recorded
+
+
 def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
     for event_id in store.find("version_event", version=version_id, kind="uploaded"):
         return store.load(event_id)[0]["data"]["policy_version_id"]
@@ -317,8 +330,14 @@ def submit_requested(
         source = gitops.show(clone, "HEAD", strategy)
         if source is None:
             raise Refused("no_candidate", f"{strategy} is not on canonical main")
-        if meta["strategy_sha256"] != hashlib.sha256(source).hexdigest():
-            raise Refused("strategy_mismatch", "The strategy does not match the uploaded build")
+        if not _requested_source_matches(meta, source):
+            source_path = (meta.get("build") or {}).get("source_path")
+            raise Refused(
+                "strategy_mismatch",
+                f"{strategy} does not match the uploaded build; its recorded source is "
+                f"{source_path or 'unknown'}",
+                {"source_path": source_path},
+            )
         _require_identity(sm, player_id)
         disagreement = conflict(clone, sm, league_id, player_id)
         if disagreement is not None:
@@ -476,12 +495,17 @@ def _advance_recorded(clone: Path, submission: ChampionSubmission) -> None:
             else f"{SUBMISSIONS_DIR}/sources/{submission.id}.md"
         )
         content = (clone / source).read_bytes()
+        compiled = True
         if submission.kind == "requested":
             meta, _ = RecordStore(Layout(clone)).load(submission.version_id)
-            if meta["strategy_sha256"] != hashlib.sha256(content).hexdigest():
+            if not _requested_source_matches(meta, content):
                 raise Refused("strategy_mismatch", "The saved submission source does not match the build")
-        (clone / CHAMPION_PATH).write_bytes(content)
-        extra = (CHAMPION_PATH,)
+            compiled = bool(_strategy_source_hashes(meta))
+        # A prebuilt artifact is not a STRATEGY.md: as at bootstrap, strategy/STRATEGY.md keeps
+        # the strategy candidates build from, and the saved source is the provenance.
+        if compiled:
+            (clone / CHAMPION_PATH).write_bytes(content)
+            extra = (CHAMPION_PATH,)
     _move(clone, submission, "published", "champion recorded on main", extra)
 
 

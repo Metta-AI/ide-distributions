@@ -345,7 +345,9 @@ TOOLS = {
         (
             "Submit an integrated uploaded version directly, without an improvement claim: when the user asked, "
             "or when you judge it should compete. request states the reason (quote the user, or give yours). "
-            "For autonomous research champion use champion_submit instead. Strategy must match the build."
+            "For autonomous research champion use champion_submit instead. Strategy is the build's recorded "
+            "source on canonical main: its STRATEGY.md, or for a prebuilt artifact (e.g. a .bas) the "
+            "artifact or its committed input. Only a STRATEGY.md replaces strategy/STRATEGY.md."
         ),
         {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
         ["id", "run_id", "version", "strategy", "request", "league_id"],
