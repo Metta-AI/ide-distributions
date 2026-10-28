@@ -96,8 +96,8 @@ def test_container_build_only_emits_publishable_receipt_on_success(
     else:
         assert code == 0
         receipt = json.loads((output / "version.json").read_text())
-        assert receipt["source_path"] == "player/Dockerfile"
-        assert set(receipt["source_hashes"]) == {
+        assert (output / receipt["source_path"]).read_bytes() == (context / "Dockerfile").read_bytes()
+        assert {"/".join(name.split("/")[2:]) for name in receipt["source_hashes"]} == {
             "player/Dockerfile",
             "player/player.py",
             "STRATEGY.md",

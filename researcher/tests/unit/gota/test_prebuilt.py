@@ -321,9 +321,9 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert meta['policy_name'] == policy_name('opening-rush', PLAYER)
     assert meta['artifact_sha256'] == meta['strategy_sha256'] == sha(artifact)
     assert meta['source_commit'] == input_commit
-    assert meta['build']['source_path'] == str(artifact.relative_to(worker.worktree))
+    assert meta['build']['source_path'] == version['source_path']
     assert meta['build']['source_hashes'] == version['source_hashes']
-    assert meta['build']['source_hashes'][str(source.relative_to(worker.worktree))] == sha(source)
+    assert next(value for name, value in meta['build']['source_hashes'].items() if name.endswith('/' + source.name)) == sha(source)
     assert meta['build']['compiler']['mode'] == 'prebuilt'
     assert meta['build']['compiler']['prebuilt_provenance'] == version['prebuilt']
     assert meta['build']['engine'] == version['engine']

@@ -66,6 +66,9 @@ def build(candidate: Path, out: Path) -> dict:
         "gates": {"local_check": {"passed": True}},
     }
     (out / "version.json").write_text(json.dumps(version, indent=2, sort_keys=True) + "\n")
+    from ide_research_core.build_sources import capture
+
+    version = capture(out.resolve(), strategy.resolve().parent)
     return {**version, "parameters": policy["parameters"]}
 
 

@@ -190,6 +190,9 @@ def build(candidate, out, artifact, identity, *, started=None, full_evaluation=F
         lines.extend(['', '## Tool error', '', '```json', json.dumps(error, indent=2), '```'])
     (scratch / 'report.md').write_text('\n'.join(lines) + '\n')
     dump(scratch / 'version.json', version)
+    from ide_research_core.build_sources import capture
+    if status == "passed":
+        capture(scratch, Path(source_root))
     scratch.rename(out)
     return {'ok': status == 'passed', 'build_id': out.name, 'status': status,
             'validation_scope': version['validation_scope'], 'evaluation': version['evaluation'],

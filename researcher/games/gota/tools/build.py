@@ -152,6 +152,9 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
                          'installed_commit': None if installed else version['source_commit']}
     compiler.dump(target / 'version.json', version)
     shutil.copyfile(manifest, target / 'coworld_manifest.json')
+    from ide_research_core.build_sources import capture
+    if version["status"] == "passed":
+        version = capture(target, Path(repo))
     target.rename(out)
     keep_compiler_sessions(home, scratch, profile_home)
     shutil.rmtree(scratch)

@@ -237,6 +237,9 @@ def _build_container(args) -> dict:
         "evaluation": {"status": "not_run"},
     }
     (out / "version.json").write_text(json.dumps(version, indent=2) + "\n")
+    from ide_research_core.build_sources import capture
+
+    version = capture(out, root)
     return {"build_dir": str(out), **version}
 
 

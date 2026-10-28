@@ -11,10 +11,10 @@ class HermesPolicyFiles(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["sources", "tree", "read", "write"]
+    action: Literal["sources", "tree", "read", "write", "register_project"]
     policy_name: str = Field(min_length=1, max_length=200)
     version_id: str = Field(default="", max_length=200)
-    record_id: str = Field(default="", pattern=r"^(V-[A-Za-z0-9]+)?$")
+    record_id: str = Field(default="", pattern=r"^([VP]-[A-Za-z0-9-]+)?$")
     path: str = Field(default="", max_length=1024)
     offset: int = Field(default=0, ge=0, le=10000)
     content: str = Field(default="", max_length=60000)
@@ -24,13 +24,18 @@ class HermesPolicyFiles(BaseModel):
 
     @model_validator(mode="after")
     def source_target(self) -> Self:
+        if self.action == "register_project":
+            if not self.record_id.startswith("P-") or not self.version_id or not self.base_sha256:
+                raise ValueError("Publication registration requires a project, policy version and source revision")
+            UUID(self.record_id[2:])
+            UUID(self.version_id)
         if self.action != "sources" and not self.record_id:
             raise ValueError("File operations require an original version provenance record")
         if self.action in {"read", "write"} and not self.path:
             raise ValueError("File operations require a relative source file")
         if self.action == "write" and not self.base_sha256:
             raise ValueError("Writes require the SHA256 observed by the editor")
-        if self.action != "write" and (self.content or self.base_sha256):
+        if self.action not in {"write", "register_project"} and (self.content or self.base_sha256):
             raise ValueError("Read operations cannot carry a write")
         if self.path and (
             self.path.startswith("/")

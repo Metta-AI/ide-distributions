@@ -102,8 +102,8 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 `workspace stage` preserves hash-checked source snapshots for new passing build receipts before
 native completion can remove the worker checkout. It commits the build, retained inputs, and
 receipt-bound source evidence together, including inputs inside nested repositories or ignored paths.
-Receipts with repository-relative source paths name their absolute `source_root`; retention resolves
-those paths against the build repository, even when publication uses another workspace.
+Completed builds capture their hash-checked inputs inside the build directory. The receipt’s
+`source_root` is relative to that directory, so relocation before staging needs no old host path.
 Publication registers those staged snapshots in the game's canonical workspace. Integrate the
 publication receipt before reporting that Code is ready. Code searches native records across game
 workspaces; it does not require an IDE project.
