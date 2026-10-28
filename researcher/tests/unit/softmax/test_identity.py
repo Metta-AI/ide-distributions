@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from ide_research_core.softmax_tool.identity import (
     CredentialRejected,
     IdentityError,

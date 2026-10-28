@@ -10,8 +10,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-from ide_research_core.games.scope import check_game_name, clone_for, locate_game
 from pydantic import BaseModel, ConfigDict, Field
+
+from ide_research_core.games.scope import check_game_name, clone_for, locate_game
 
 from .context import Context
 from .research import Research, ResearchError

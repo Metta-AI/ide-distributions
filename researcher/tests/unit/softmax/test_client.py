@@ -3,6 +3,7 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+
 from ide_research_core.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from ide_research_core.softmax_tool.fake import FakeSoftmax
 from ide_research_core.softmax_tool.identity import IdentityError

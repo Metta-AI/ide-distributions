@@ -164,8 +164,8 @@ def test_starter_read_verifies_bytes_and_pins_pagination(discovery):
 
 
 def test_static_readiness_detects_stubs_and_host_dependencies(tmp_path):
-    from ide_research_core.games.readiness import binding_readiness
     from ide_research_core.games.loader import BINDING_NAMES
+    from ide_research_core.games.readiness import binding_readiness
 
     (tmp_path / "stub.py").write_text('raise NotImplementedError("TODO")')
     (tmp_path / "evaluate.py").write_text('print("real evaluator")')

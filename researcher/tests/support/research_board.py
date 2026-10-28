@@ -10,14 +10,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from unit.records.fixtures import HYP, JOURNAL, JOURNAL_BODY
 from ulid import ULID
+from unit.records.fixtures import HYP, JOURNAL, JOURNAL_BODY
 
 from ide_research_core import workspace
+from ide_research_core.champion_submission import CHAMPION_PATH, SUBMISSIONS_DIR
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_json
 from ide_research_core.paths import Layout
-from ide_research_core.champion_submission import CHAMPION_PATH, SUBMISSIONS_DIR
 from ide_research_core.records.store import RecordStore
 from ide_research_core.softmax_tool.fake import DEFAULT_PLAYER_ID, FakeSoftmax
 from ide_research_core.stats.design import EvaluationDesign, MetricSpec, design_sha256

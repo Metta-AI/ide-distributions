@@ -228,8 +228,8 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     from games.gota.gates.limits import POLYWORLD_COMMIT
     from games.gota.tools import native_build
     from ide_research_core import workspace
-    from ide_research_core.io import gitops
     from ide_research_core.champion_submission import CHAMPION_PATH, in_flight, latest_champion
+    from ide_research_core.io import gitops
     from ide_research_core.softmax_tool.upload import policy_name
 
     board = ResearchBoard(tmp_path, seed_champion=False)
