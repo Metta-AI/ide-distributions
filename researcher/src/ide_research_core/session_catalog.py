@@ -16,9 +16,11 @@ What it reports, and from where (Hermes v0.21.6):
   as the researcher's installed games, and plugin skills), minus platform-disabled ones.
 
 A tool handler is not told the session's tool list, so this recomputes it from the profile
-config. It does not see tools a session adds on its own outside ``platform_toolsets``: the
-``memory`` tool appended by the agent loop, a per-job ``enabled_toolsets`` override on a cron
-job, or desktop GUI toolsets.
+config. Built-in toolsets the config enables are included, ``memory`` among them (its
+availability check follows ``memory.memory_enabled`` / ``user_profile_enabled``). It does not
+see tools a session adds on its own outside ``platform_toolsets``: an external memory
+provider's or a context engine's tools appended by the agent loop, a per-job
+``enabled_toolsets`` override on a cron job, or desktop GUI toolsets.
 """
 
 import json
