@@ -86,3 +86,21 @@ def test_version_is_a_single_integer():
 
 def test_version_bumped_for_native_card_contract():
     assert int((DOCTRINE / "VERSION").read_text(encoding="utf-8")) >= 12
+
+
+def test_skills_record_only_decision_values_the_schema_accepts():
+    """The experiment decision enum was renamed (promote -> submit, #59) while skills kept the
+    old value; shipped instructions must name only values the schema accepts."""
+    import json
+
+    schema = json.loads(
+        (ROOT / "src/ide_research_core/schemas/entity/experiment.json").read_text(encoding="utf-8")
+    )
+    text = json.dumps(schema)
+    for value in ("submit", "hold", "refute", "invalid"):
+        assert f'"{value}"' in text
+    shipped = [*(ROOT / "skills").rglob("*.md"), *DOCTRINE.glob("*.md"), *(ROOT / "games").rglob("*.md")]
+    offenders = [str(path) for path in shipped if "`promote`" in path.read_text(encoding="utf-8")]
+    assert not offenders, offenders
+    review = (ROOT / "skills/autoresearch/review-xp/SKILL.md").read_text(encoding="utf-8")
+    assert all(f"`{value}`" in review for value in ("submit", "hold", "refute", "invalid"))

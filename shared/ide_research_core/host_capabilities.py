@@ -31,7 +31,8 @@ DESCRIPTION = (
     "(git, python3, uv, gcc, make, nim, node, curl, docker, softmax, coworld), whether Docker "
     "has a daemon, which places are writable (home, profile, workspace, TMPDIR, /tmp, the "
     "installed games/ and venv, the profile cache), whether /tmp forbids running programs, "
-    "whether this is a hosted workspace, and which installed or shipped games are missing a "
+    "whether this is a hosted workspace and which ide-distributions commit it runs, and which "
+    "installed or shipped games are missing a "
     "host requirement. runtime contains exact executable and location paths; games include "
     "binding argv and cwd. execution reports the current session approval constraints; "
     "discovery does not grant permission. Returns no credentials."
@@ -90,6 +91,18 @@ def _games(home: Path, env: Mapping[str, str]) -> dict:
     return games
 
 
+def installed_commit(home: Path) -> str | None:
+    """The ide-distributions commit this profile's installed code came from, when the host
+    records one: a hosted image installs each distribution at ``/opt/ide-distributions/<name>``
+    (the profile's ``src`` links into it) and writes ``<name>.commit`` beside it."""
+    installed = (home / "src").resolve().parent
+    record = installed.parent / f"{installed.name}.commit"
+    try:
+        return record.read_text().strip() or None
+    except OSError:
+        return None
+
+
 def host_capabilities(home: Path, env: Mapping[str, str]) -> dict:
     executables = {name: _executable(name, home, env) for name in EXECUTABLES}
     cli = env.get("RESEARCH_CLI")
@@ -106,6 +119,7 @@ def host_capabilities(home: Path, env: Mapping[str, str]) -> dict:
     tmp_options = _mount_options("/tmp")
     return {
         "hosted": HOSTED_PROFILES.is_dir(),
+        "distribution_commit": installed_commit(home),
         "executables": {name: path is not None for name, path in executables.items()},
         "runtime": RuntimePaths(
             executables=executables,

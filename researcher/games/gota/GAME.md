@@ -150,7 +150,7 @@ an immutable build or upgrades a failed build into an uploadable one.
 Read the build's report, version, artifact hash, manifest and native receipts.
 An evaluation receipt applies only to its artifact, engine, manifest, baseline,
 seeds and ticks. Reuse complete matching evaluation evidence instead of repeating it.
-Neither compilation nor evaluation proves competitive strength or authorizes promotion.
+Neither compilation nor evaluation proves competitive strength or authorizes a champion submission.
 G3's 80,000 instruction / 200,000 work soft ceilings are local headroom checks;
 the engine enforces its actual runtime limits when executing an uploaded policy.
 No evaluation seeds, tick budgets or native runtime limits are reduced.
@@ -221,16 +221,15 @@ structural policy error remains `failed`. Tool timeouts never request a repair, 
 when some budget remains. Prebuilt builds ignore both settings because they run no
 compiler agent.
 
-The card's configured 5400-second run budget is soft: Hermes injects a wrap-up notice
-at 80%, or 4320 seconds, rather than enforcing a build deadline. The card's runtime cap
-is hard: the orchestrator creates cards with `max_runtime_seconds` 7200 by default, and
+The card's configured 12600-second run budget is soft: Hermes injects a wrap-up notice
+at 80%, or 10080 seconds, rather than enforcing a build deadline. The card's runtime cap
+is hard: the orchestrator creates cards with `max_runtime_seconds` 14400 by default, and
 the Hermes dispatcher then stops the worker and re-queues the card. The documented G3/G4
 workload takes about 3300 seconds on the test box. The default 1800-second cumulative
-generation allowance plus that estimate totals 5100 seconds, leaving about 300 seconds
-for other work but exceeding the wrap-up threshold. A repair after a G3 failure repeats
-the roughly 55-minute gate workload; two gate runs alone take about 6600 seconds and
-can exceed the card budget whatever generation timeout is chosen. Setup overhead,
-host speed, and separate local checks can increase the total further.
+generation allowance plus that estimate totals 5100 seconds. A repair after a G3 failure
+repeats the roughly 55-minute gate workload, so two gate runs plus generation take about
+8400 seconds, inside the run budget; hosted builds have taken 6600 to 8400 seconds. Setup
+overhead, host speed, and separate local checks can increase the total further.
 
 The timeout choice is informed by timings measured on the EC2 test box, 2026-10-09.
 Passed builds had intervals between stream creation and last write of 691 and 185 seconds
@@ -387,7 +386,7 @@ The default build records G1 compilation and explicitly marks evaluation not run
 receipts under **Local validation**; G5 compiler coverage does not apply to prebuilt
 artifacts. After a successful build and evidence review, follow the core `candidate` skill's
 "Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
-no promotion in flight exist. Copy the complete passing build into tracked
+no champion submission in flight exist. Copy the complete passing build into tracked
 `build-evidence/<build-id>`, stage the task branch, and complete with the build path,
 artifact hash and suggested name `opening-rush`. The coordinator calls `upload_build`,
 integrates the receipt commit, and uses `bootstrap_champion` for the first submission.
