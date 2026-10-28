@@ -66,8 +66,8 @@ paused supervisor preservation, and repeat preparation. Development verification
 workspaces using real Git; commands and results are retained in PR evidence.
 
 Metta's image qualification must also run its retained-state and chat proofs with both repositories'
-changes. Land the distribution entrypoint before the Metta caller and pin a distribution commit that
-contains it. Older images keep their existing preparation code; no runtime fallback is needed.
+changes. Normal release resolution records immutable distribution inputs. Follow the instruction
+ownership sequence below when adopting the platform skill contract.
 
 ## Instruction ownership
 

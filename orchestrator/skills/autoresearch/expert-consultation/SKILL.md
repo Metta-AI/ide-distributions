@@ -1,9 +1,11 @@
 ---
 name: expert-consultation
-description: Decide when to seek another model's advice on policy research and how to verify it.
+description: Use when research needs expert advice.
 ---
 
 # Expert consultation
+
+Apply D-13 when progress stalls and D-07 when assessing advice: a recommendation is not evidence.
 
 Use expert advice for a concrete unresolved question: difficult policy design, ambiguous evidence,
 or a repair that failed twice. Routine work does not require a consultation. Discover the current

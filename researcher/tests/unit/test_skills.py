@@ -23,6 +23,7 @@ CORE_SKILLS = {
     "report",
     "replay-diagnosis",
     "diagnose",
+    "expert-consultation",
     "league-watch",
     "opponent-profile",
     "meta-recon",
@@ -388,8 +389,7 @@ SKILL_REFERENCE = re.compile(
 
 
 def test_every_skill_named_in_a_soul_or_game_file_exists():
-    """No SOUL.md or GAME.md may send a mind to a skill that does not ship (the hosted
-    transcript asked for a nonexistent `research` skill)."""
+    """References resolve to shipped skills or the explicit platform hosting contract."""
     shipped = {path.parent.name for path in skill_files()} | {
         frontmatter.loads(path.read_text(encoding="utf-8")).metadata["name"] for path in skill_files()
     }
@@ -401,4 +401,7 @@ def test_every_skill_named_in_a_soul_or_game_file_exists():
             names = [match.group(1), match.group(3)]
             names += re.findall(r'"([a-z][a-z0-9-]+)"', match.group(2) or "")
             named |= {name for name in names if name}
-    assert named <= shipped, named - shipped
+    # Metta publishes this native skill at startup for fresh and retained profiles.
+    # Its installation/discovery is verified by the hosted runtime image contract.
+    platform_skills = {"softmax-host"}
+    assert named <= shipped | platform_skills, named - shipped - platform_skills
