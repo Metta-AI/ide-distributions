@@ -11,6 +11,16 @@ from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Repor
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .context import profile_context
+from .evidence import (
+    CoachingAnalysisRead,
+    CoachingList,
+    CoachingRead,
+    EpisodeList,
+    EpisodeRead,
+    Evidence,
+    PolicyList,
+    PolicyRead,
+)
 from .github import GitHub
 from .ide import IDE
 from .research import Research, ResearchError
@@ -29,6 +39,60 @@ GAME = {
 
 # name: (owner, description, parameters, required)
 TOOLS = {
+    "coaching_sessions": (
+        Evidence,
+        "List owned coaching sessions, optionally by episode or policy version. Returns a private JSON file and next_cursor for pagination. Read the file to choose session IDs; does not fetch recordings or run analysis.",
+        CoachingList.model_json_schema()["properties"],
+        [],
+    ),
+    "coaching_session": (
+        Evidence,
+        "Read coaching session metadata, timeline, moments, corrections, analysis summaries and media references into a private JSON file. Inspect with read_file. Does not download or analyze video; coaching_recording is an optional next step.",
+        CoachingRead.model_json_schema()["properties"],
+        ["coaching_session_id"],
+    ),
+    "coaching_analysis": (
+        Evidence,
+        "Read an existing coaching analysis, its phase and results into a private JSON file. This never starts paid synthesis. Use analysis IDs from coaching_session.",
+        CoachingAnalysisRead.model_json_schema()["properties"],
+        ["coaching_session_id", "analysis_id"],
+    ),
+    "coaching_recording": (
+        Evidence,
+        "Download the original recording for an owned coaching session on demand. Verifies recorded size and SHA-256, returns a private local video path; max 256 MiB. Does not watch, transcribe or analyze it. Missing recording returns status=not_available.",
+        CoachingRead.model_json_schema()["properties"],
+        ["coaching_session_id"],
+    ),
+    "policy_versions": (
+        Evidence,
+        "Discover the owner's uploaded policy versions, optionally filtered by player ID or name. Returns a private JSON file and next_cursor. Read it to choose exact policy version UUIDs; does not change the active policy.",
+        PolicyList.model_json_schema()["properties"],
+        [],
+    ),
+    "policy_file": (
+        Evidence,
+        "Download an exact owned uploaded policy version on demand. Verifies size and SHA-256; returns a private local file, at most 256 MiB. This is the actual submitted file, not a published starter. Never executes, uploads or submits code.",
+        PolicyRead.model_json_schema()["properties"],
+        ["policy_version_id"],
+    ),
+    "policy_episodes": (
+        Evidence,
+        "List visible episodes and results for a policy version, newest first. Returns a private JSON file including the API pagination data. Choose an episode UUID for episode or episode_replay. Does not watch replays.",
+        EpisodeList.model_json_schema()["properties"],
+        ["policy_version_id"],
+    ),
+    "episode": (
+        Evidence,
+        "Read an arbitrary visible episode's metadata, game/version, replay reference, tags and round into a private JSON file. No replay download or analysis. Use IDs from policy_episodes or latest_league_result.",
+        EpisodeRead.model_json_schema()["properties"],
+        ["episode_id"],
+    ),
+    "episode_replay": (
+        Evidence,
+        "Download a visible episode's replay, results and error information as a private ZIP, at most 256 MiB. Inspect manifest.json inside the ZIP for delivered and missing evidence. Never executes, extracts or analyzes it; choose whether replay inspection helps the current task.",
+        EpisodeRead.model_json_schema()["properties"],
+        ["episode_id"],
+    ),
     "attachment_download": (
         Attachments,
         "Download a conversation attachment by its SHA-256 from the current workspace. Returns a local path after verifying its size and hash (maximum 25 MiB). Use the hash from attachment context; no URL, credential, or destination argument is needed. Read the returned file with native file or terminal tools. Never executes its contents.",
@@ -417,7 +481,7 @@ def handler(name):
                     "ok": False,
                     "error": {
                         "reason": "http",
-                        "message": f"cogents API returned HTTP {error.code}",
+                        "message": f"Softmax API returned HTTP {error.code}",
                         "details": details,
                     },
                 }

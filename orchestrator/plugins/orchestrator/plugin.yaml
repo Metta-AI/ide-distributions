@@ -3,6 +3,15 @@ version: 0.2.0
 description: Research lead tools for the native autoresearch board and shared research CLI.
 author: ide-distributions
 provides_tools:
+  - coaching_sessions
+  - coaching_session
+  - coaching_analysis
+  - coaching_recording
+  - policy_versions
+  - policy_file
+  - policy_episodes
+  - episode
+  - episode_replay
   - attachment_download
   - github_repositories
   - github_clone
