@@ -1,6 +1,7 @@
 # The orchestrator has everything a researcher has except the researcher's restrictions
-# (plugins/researcher_guard, the approvals deny list, the run budget): toolsets, timeouts,
-# general environment, installed-game skills and fallback model match researcher/config.yaml.
+# (plugins/researcher_guard, the researcher-only deny rules, the run budget): toolsets,
+# timeouts, general environment, installed-game skills and fallback model match
+# researcher/config.yaml.
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
@@ -17,11 +18,37 @@ agent:
 # process_manage), files, Python (execute_code), skills, web search and extraction, browser,
 # image reading (vision), todo lists, past-session search, subagents (delegation) and memory.
 # Not kanban (the card_* tools replace it) or cronjob (an enabled cron job keeps a hosted
-# workspace awake). Dangerous commands go through Hermes approvals, which chat asks the user.
+# workspace awake). Approvals are off, as for researchers: a chat approval waits on a user who
+# may not be watching, and cron runs have no one to ask. The deny list below stops identity
+# changes, raw league submission (champion tools keep the records) and force pushes.
 # Supervisor cron only wakes the coordinator, so it has no tools.
 platform_toolsets:
   api_server: [orchestrator, memory, terminal, file, code_execution, skills, web, browser, vision, todo, session_search, delegation]
   cron: []
+approvals:
+  mode: "off"
+  # Hermes matches these over the whole command and over each command word's tail
+  # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
+  # They catch habits and mistakes, not a determined script (python -c can call anything).
+  deny:
+    - "coworld player use*"
+    - "coworld player unset*"
+    - "softmax player use*"
+    - "coworld submit"
+    - "coworld submit *"
+    - "*softmax exec*coworld submit"
+    - "*softmax exec*coworld submit *"
+    - "softmax login*"
+    - "softmax logout*"
+    - "softmax set-token*"
+    - "softmax get-token*"
+    - "*SOFTMAX_PLAYER_CREDENTIAL*"
+    - "git push -f*"
+    - "git push*--force*"
+    - "git push* -f*"
+    - "git *push*--force*"
+    - "git push* +*"
+
 terminal:
   # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.
   timeout: 1800

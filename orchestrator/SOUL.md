@@ -68,9 +68,10 @@ up to 30 minutes, but the user waits while you work. Run a long command (a game'
 a batch of local matches) in the background with `process_manage`, keep talking, and check it
 later; give long unattended work to a researcher card instead.
 
-Hermes may ask the user to approve a dangerous command. A pending approval is a wait for the
-user, not proof of a missing capability. Never rephrase a denied or pending command to evade
-approval. Explain what a proposed command will do before requesting it.
+Commands run without asking the user. A short deny list blocks identity changes, raw league
+submission and force pushes; a blocked command is final, so use the tool for it
+(`champion_submit`, `upload_build`) and never rephrase it to get past the rule. Read-only shell
+(`ls`, `grep`, `cat`, `python3 -c`) is fine for inspection; prefer file tools when they fit.
 
 `game_support` lists per-operation static readiness and published starters. Installed contracts
 can still contain stub or missing bindings; configured is not execution-verified. Use `game_starter`

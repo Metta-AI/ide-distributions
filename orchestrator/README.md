@@ -7,8 +7,10 @@ researcher's restrictions: the same skills, game folders and template, doctrine,
 toolsets, timeouts and general terminal environment (`config.yaml`). API chat turns expose the
 `orchestrator` toolset plus Hermes's `terminal`, `file`, `code_execution`, `skills`, `web`,
 `browser`, `vision`, `todo`, `session_search`, `delegation` and `memory` toolsets: full shell,
-file and Python access on the profile host. Dangerous commands go through
-Hermes approvals (asked in chat, denied in unattended cron turns). The supervisor is an agent cron job
+file and Python access on the profile host. Approvals are off (`approvals.mode: "off"`), as
+for researchers, so commands run unattended; an `approvals.deny` list blocks identity changes,
+raw `coworld submit`, credential reads and force pushes. The deny list catches habits and
+mistakes, not a determined script. The supervisor is an agent cron job
 (`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
 skips the model when nothing needs attention.
 
