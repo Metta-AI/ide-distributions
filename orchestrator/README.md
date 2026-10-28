@@ -100,7 +100,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
 | `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
 | `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
-| `accept_champion(game?)` | Record the league's current champion after the user confirms. |
+| `accept_champion(game?)` | Record the league's current champion as the loop's; resolves a champion conflict without asking the user. |
 | `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
 | `game_list` | Shipped and installed games with each one's `league_id`, whether each has a research workspace yet, and how an installed one was installed. |
 | `game_prepare(game)` | Create a game's research workspace (canonical repository seeded from the game folder, plus this profile's clone), or refresh it. Idempotent; no card or researcher needed. |
@@ -167,9 +167,11 @@ with `card_answer`; task completion never depends on Git ancestry.
 
 Researchers build, smoke-test, and commit the complete artifact. The coordinator calls
 `upload_build` on the latest completed native run, integrates its receipt commit, and
-uses `submit_requested_version` for an explicitly requested submission. Cancellation
-revokes publication before stopping the native worker. Requested submission is not
-statistical improvement; an autonomous champion submission still requires reviewed evidence.
+uses `submit_requested_version` for a direct submission (the user asked, or the coordinator
+chose to compete a verified version; `request` records why). Cancellation revokes
+publication before stopping the native worker. A direct submission claims no statistical
+improvement; `champion_submit` submits a reviewed improvement. The coordinator does all of
+this without asking the user for approval (SOUL "Act without asking").
 
 ## Development and verification
 
@@ -192,7 +194,7 @@ a separate integration check that these tests do not establish.
 For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's
 "Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
 without an experiment, evaluation or league submission. Require the intended source change in
-the generated artifact and both returned version IDs; champion submission remains a separate authorized action.
+the generated artifact and both returned version IDs; champion submission is a separate step, which the coordinator takes on its own judgment.
 
 ## Conversation context and game support
 

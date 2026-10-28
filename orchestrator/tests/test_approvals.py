@@ -21,8 +21,12 @@ def denied(command):
     return any(fnmatch.fnmatchcase(variant, rule) for variant in variants for rule in DENY)
 
 
-def test_the_orchestrator_runs_unattended():
-    assert yaml.safe_load(CONFIG.read_text())["approvals"]["mode"] == "off"
+@pytest.mark.parametrize("config", [CONFIG, CONFIG.parents[1] / "researcher/config.yaml"])
+def test_profiles_never_prompt_for_approval(config):
+    approvals = yaml.safe_load(config.read_text())["approvals"]
+    assert approvals["mode"] == "off"  # Hermes's yolo mode
+    for context in ("cron_mode", "single_query_mode", "unattended_mode"):
+        assert approvals[context] == "approve"
 
 
 @pytest.mark.parametrize("command", [

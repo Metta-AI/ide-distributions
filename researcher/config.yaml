@@ -29,6 +29,11 @@ agent:
 
 approvals:
   mode: "off"
+  # Never prompt: "off" is Hermes's yolo mode. The per-context modes are backstops so an
+  # unattended run approves rather than blocks if the mode is ever reset.
+  cron_mode: approve
+  single_query_mode: approve
+  unattended_mode: approve
   # Hermes matches these over the whole command and over each command word's tail
   # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
   # Champion submission and other league submission belong to the orchestrator.

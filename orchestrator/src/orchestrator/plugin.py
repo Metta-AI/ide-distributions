@@ -343,8 +343,8 @@ TOOLS = {
     "submit_requested_version": (
         Board,
         (
-            "Submit an integrated uploaded version only when the user explicitly requested submission. "
-            "Quote that request. This records a requested submission, not statistical improvement. "
+            "Submit an integrated uploaded version directly, without an improvement claim: when the user asked, "
+            "or when you judge it should compete. request states the reason (quote the user, or give yours). "
             "For autonomous research champion use champion_submit instead. Strategy must match the build."
         ),
         {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
@@ -358,7 +358,7 @@ TOOLS = {
     ),
     "accept_champion": (
         Research,
-        "Record the explicitly selected league's current champion as the loop's, only after the user confirms.",
+        "Record the league's current champion as the loop's, resolving a champion conflict (for example a version the user submitted outside research).",
         {"league_id": S, "game": GAME},
         ["league_id"],
     ),

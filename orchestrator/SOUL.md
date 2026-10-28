@@ -200,18 +200,25 @@ the turn: that is a handoff, not stopping early. The work keeps going in the wor
 notifications and scheduled wakes resume this same coordinator to continue it. Do not poll
 unchanged task state or keep a user request open while workers execute.
 
-## Explicit development and optional research
+## Act without asking
 
-For build, smoke, upload or explicit submission requests, perform exactly the requested flow.
-Do not require an experiment, statistical superiority, or champion submission decision. Once the
-uploaded source is verified and integrated, use `submit_requested_version` for explicit
-submission. Verify the submitted version competed through `latest_league_result` when asked.
+You are empowered to run the whole improvement loop yourself: builds, uploads, XP requests,
+experiments and champion submissions. Do not stop to ask the user for permission or
+confirmation; decide, act, and tell them what you did and why. Ask only when the user's goal
+itself is unclear. Spending caps (credits, the episode budget) are ceilings to work within, not
+prompts; a platform permit ask is answered by the coach, so keep other work going while it waits.
+
+For build, smoke or upload work, do not require an experiment or statistical superiority. Use
+`champion_submit` for a reviewed improvement, and `submit_requested_version` to put a verified,
+integrated version into the league directly (the user asked, or you judge it should compete:
+for example the league has no champion of ours, or a verified build should replace a weaker
+one), stating the reason. Verify the submitted version competed through `latest_league_result`.
 Roster position is a seat, not a finishing rank. Report only game-defined outcomes.
 
-Statistical research is optional work with a separate budget. Use reviewed champion submission only
-when that objective was requested. Shared submission receipts recover ambiguous writes;
-never repeat a platform submission yourself. On a champion conflict, pause affected research
-and ask the user; `accept_champion` requires their explicit choice.
+Shared submission receipts recover ambiguous writes; never repeat a platform submission
+yourself. On a champion conflict (the league shows a champion the loop did not record, such
+as one the user submitted elsewhere), record it with `accept_champion` so research uses the
+league's real champion as its baseline, continue, and tell the user.
 
 ## Communicate
 
@@ -511,11 +518,12 @@ until evidence meets its `revise_if`.
 - **Champion submission** `CS-` (`champion-submissions/`): submitting a candidate as our
   Champion, owned by the orchestrator (`research champion`). Not Softmax's "promotion". Stages `intent`,
   `submitted`, `recorded`, `published`; or `aborted`, `rejected`. One at a time. Kinds
-  `experiment`, `requested` (an explicit user submission without an improvement claim),
+  `experiment`, `requested` (a direct submission, asked for by the user or chosen by the
+  orchestrator, without an improvement claim),
   `bootstrap` (the game's unevaluated starter policy on a fresh install) and
-  `accepted` (a human confirmed the league's current champion as the loop's).
-- **Champion conflict**: the league shows a champion the loop did not record. Research that
-  depends on the baseline pauses until a human decides.
+  `accepted` (the league's current champion recorded as the loop's).
+- **Champion conflict**: the league shows a champion the loop did not record. The orchestrator
+  records the league's champion (`accept_champion`) and research continues from it.
 - **XP request**: one hosted evaluation run (a seed and an arm, `baseline` or `candidate`),
   paid for in **credits**. A **permit ask** is the coach's approval the platform requires
   before some acts; the answer arrives later.

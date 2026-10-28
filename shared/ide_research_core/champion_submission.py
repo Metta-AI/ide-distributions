@@ -300,11 +300,12 @@ def submit_requested(
     clone: Path, sm: Softmax, version: str, strategy: str,
     request: str, league_id: str, player_id: str,
 ) -> dict:
-    """Submit an uploaded version at the user's explicit request, without an improvement claim."""
+    """Submit an uploaded version directly (the user asked, or the orchestrator chose it), without an
+    improvement claim; ``request`` records why."""
     with _one_at_a_time(clone):
         _refuse_if_busy(clone)
         if not request.strip():
-            raise Refused("missing_request", "Quote the user's explicit submission request")
+            raise Refused("missing_request", "State why this version should compete (quote the user or give the reason)")
         path = Path(strategy)
         if path.is_absolute() or ".." in path.parts:
             raise Refused("bad_strategy_path", "The strategy must be a repository-relative path")
@@ -406,7 +407,7 @@ def _send(clone: Path, sm: Softmax, submission: ChampionSubmission) -> dict:
 
 
 def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
-    """Record the league's current champion as the loop's (a human said so)."""
+    """Record the league's current champion as the loop's (resolves a champion conflict)."""
     with _one_at_a_time(clone):
         return _accept(clone, sm, league_id, player_id)
 
