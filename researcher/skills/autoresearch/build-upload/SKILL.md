@@ -11,6 +11,23 @@ For other artifact types, discover the appropriate tool and applicable procedure
 Build and verify through the game’s `build` binding. The coordinator owns upload after
 the native task completes; researchers never publish artifacts directly.
 
+## Explicit build/upload assignment
+
+For a build/upload request without an experiment, follow `candidate`'s explicit build/upload-only
+procedure. Do not create an experiment or run statistical evaluation just to publish an artifact.
+Verify the requested source change in the generated artifact; passed gates alone do not establish it.
+Preserve evaluation `not_run` when the game's build contract separates it from build checks.
+
+The researcher commits the complete passing build, including `version.json`, and completes the native task.
+The coordinator calls the existing `upload_build` tool and integrates its receipt before any requested submission.
+That tool supplies player authentication, records the version and its uploaded event, and reuses them on retry.
+A raw Coworld upload bypasses these records; do not substitute it or return a platform ID as a local version record.
+
+Use the installed game's build binding and declared host requirements. These instructions do not assume Docker,
+a BuildKit endpoint, or commands absent from the installed CLI. If a required capability is unavailable,
+report it through `help_request:` before starting the build. A Kubernetes runtime change alone does not add
+archive publication support to the installed game binding and record-owning upload tool.
+
 Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 
 ## Reads and writes
