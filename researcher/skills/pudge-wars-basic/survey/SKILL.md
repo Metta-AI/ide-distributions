@@ -108,11 +108,17 @@ Use core `league-watch`, `opponent-profile` or `meta-recon` for scouting and cor
 ```sh
 "$RESEARCH_CLI" records find evidence --where kind=xp-result
 "$RESEARCH_CLI" softmax leaderboard
-"$RESEARCH_CLI" softmax league-results --league league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0 --limit 50 --dest .scratch/league
+"$RESEARCH_CLI" softmax league-results --league league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0 --limit 50 --dest .scratch/league --replays
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/evaluate.py" --results <ABS_RESULTS_JSON> --json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/replay_inspect.py" <ABS_EPISODE_DIR> --json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/compare.py" <ABS_BATCH_A> <ABS_BATCH_B> --group seat --json
 ```
+
+`--replays` saves each episode's public replay beside its results, so `replay_inspect.py
+<ABS_EPISODE_DIR>` decodes every seat, ours and the opponents': run it over the whole batch to
+fill the enemy-hit-rate and deaths-by-cause columns for every policy in the field (seat →
+policy from that folder's `episode.json`). Read `sigma` and `settling` from `softmax
+standings` beside each policy's MMR (GAME.md **What predicts league rating**).
 
 Build the table, verify replay hashes ("every tick matched") before using replay
 fields, and list sample size and teammate aggregation. A flag chooses a witness; it is

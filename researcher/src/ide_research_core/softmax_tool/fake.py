@@ -152,6 +152,7 @@ def _league_episode(league_id: str, index: int, game_version: str) -> dict:
             {"position": seat, "policy_version_id": policy, "player_id": None, "is_filler": False}
             for seat, policy in enumerate(policies)
         ],
+        "replay_url": None,
         "results": {
             "seed": seed,
             "game_version": game_version,
@@ -551,7 +552,14 @@ class FakeSoftmax:
                 "player_id": player_id,
                 "player_name": name,
                 "score": score,
+                "score_label": "MMR",
                 "rounds_played": rounds,
+                "sigma": 1.5,
+                "policy_label": None,
+                "version_rounds_played": rounds,
+                "settling": False,
+                "win_rate": None,
+                "episode_wins": None,
             }
             for rank, (player_id, name, score, rounds) in enumerate(board, start=1)
         ]

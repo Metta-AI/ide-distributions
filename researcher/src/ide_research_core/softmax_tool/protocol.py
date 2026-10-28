@@ -200,6 +200,7 @@ class Softmax(Protocol):
 
             {episode_id, round_id, seed, game_version, coworld_id,
              seats: [{position, policy_version_id, player_id, is_filler}],
+             replay_url: <the public replay, or None>,
              results: <the game's raw results.json object>}
 
         ``policy_version_id`` is the opaque ``<name>:v<N>`` label (None for a human seat).
@@ -210,7 +211,11 @@ class Softmax(Protocol):
         """League standings, read-only: one row per (division, player)::
 
         {division_id, division_name, level, rank, player_id, player_name, score,
-         rounds_played}
+         score_label, rounds_played, sigma, policy_label, version_rounds_played, settling,
+         win_rate, episode_wins}
+
+        ``sigma`` is the OpenSkill rating uncertainty (null on other ranking algorithms);
+        ``policy_label`` is the version the rating row is for (``client.StandingEntry``).
         """
         ...
 

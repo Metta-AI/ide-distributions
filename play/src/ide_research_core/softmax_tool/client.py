@@ -30,8 +30,9 @@ League reads (read-only, coworld 0.1.57 ``tournament_cli.py``):
   minutes on the box (about 2 s each); with 4 workers the fetch is about 4 times faster.
 - ``standings``: ``coworld results <league_id> --json`` (the division ladder:
   ``[{id, name, level, member_count}]``) → ``coworld results <div_id> --json`` per division
-  (``LeaderboardEntryPublic``: ``rank``, ``player_id``, ``player_name``, ``score``,
-  ``rounds_played``).
+  (``LeaderboardEntryPublic``, validated as ``StandingEntry``: ``rank``, ``player_id``,
+  ``player_name``, ``score`` and ``score_label``, ``rounds_played``, the OpenSkill ``sigma``,
+  ``policy_label``, ``version_rounds_played``, ``settling``, ``win_rate``, ``episode_wins``).
 """
 
 import json
@@ -43,6 +44,8 @@ from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+
+from pydantic import BaseModel, TypeAdapter
 
 from ide_research_core.budget import EpisodeBudget
 from ide_research_core.games.scope import budget_path
@@ -428,27 +431,49 @@ class SoftmaxClient:
             "game_version": str(version).strip() if version else None,
             "coworld_id": coworld_id,
             "seats": [_seat(p) for p in sorted(detail["participants"], key=_position)],
+            "replay_url": detail["replay_url"],
             "results": results,
         }
 
     def standings(self, league_id: str) -> list[dict]:
         rows = []
         for division in self._cli.run_json("coworld", ["results", league_id]):
-            board = self._cli.run_json("coworld", ["results", division["id"]]) or []
-            for index, entry in enumerate(board, start=1):
+            board = TypeAdapter(list[StandingEntry]).validate_python(
+                self._cli.run_json("coworld", ["results", division["id"]]) or []
+            )
+            for entry in board:
                 rows.append(
                     {
                         "division_id": division["id"],
-                        "division_name": division.get("name"),
-                        "level": division.get("level"),
-                        "rank": entry.get("rank") if entry.get("rank") is not None else index,
-                        "player_id": entry["player_id"],
-                        "player_name": entry.get("player_name"),
-                        "score": entry.get("score"),
-                        "rounds_played": entry.get("rounds_played"),
+                        "division_name": division["name"],
+                        "level": division["level"],
+                        **entry.model_dump(),
                     }
                 )
         return rows
+
+
+class StandingEntry(BaseModel):
+    """One ``coworld results <div_id> --json`` row (metta ``LeaderboardEntryPublic``), the
+    fields a researcher judges a rating by. ``score`` is the board's headline value (for an
+    OpenSkill ladder the MMR, mu - 3 sigma); ``sigma`` is the OpenSkill uncertainty (null on
+    other ranking algorithms); ``policy_label`` is the policy version the rating row is for,
+    which can trail a just-promoted champion until its first round; ``version_rounds_played``
+    counts rounds of that version; ``settling`` is true while a new version's rating is still
+    settling."""
+
+    rank: int
+    player_id: str
+    player_name: str | None
+    score: float
+    score_label: str
+    rounds_played: int
+    sigma: float | None
+    policy_label: str | None
+    version_rounds_played: int | None
+    settling: bool | None
+    win_rate: float | None
+    episode_wins: float | None
 
 
 def _position(participant: dict) -> int:

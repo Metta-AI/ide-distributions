@@ -21,8 +21,9 @@ Doctrine upheld: D-03, D-04, D-07.
    `"$RESEARCH_CLI" softmax leaderboard`
    The data has `league_id`, `player_id`, `current_champion` (the policy the league
    shows competing for us, or null), and `conflict` when league and canonical state disagree.
-2. Read the full league standings (every division, every player, with rank, score and
-   rounds played):
+2. Read the full league standings (every division, every player, with rank, score,
+   rounds played, the rating uncertainty `sigma`, the rated `policy_label` and its
+   `version_rounds_played`, and `settling` for a new version still settling):
    `"$RESEARCH_CLI" softmax standings`
 3. Save both outputs in one file, for example `evidence/league/<timestamp>.json`
    (`{"leaderboard": <data of step 1>, "standings": <data of step 2>}`), in the worktree.

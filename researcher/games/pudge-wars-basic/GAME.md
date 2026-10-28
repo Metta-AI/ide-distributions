@@ -59,6 +59,94 @@ other five are other players' policies chosen by matchmaking, which balances tea
 The `duel-1v1` variant (two seats, slot 0 West, slot 1 East, first to 10) is useful for local
 diagnosis only; the league plays `league-3v3`.
 
+## What predicts league rating
+
+The league rates each player with OpenSkill over `league-3v3` episodes in which the six seats
+hold six different players' champions (mixed teams; never two copies of one policy). Three
+copies of a candidate against three copies of a baseline, locally or hosted, plays another
+game and is not evidence about the rating (a 20–10 copies-against-copies win, 2026-10-27, told
+the climb nothing). Use these three reads, in this order of cost:
+
+1. **Standings with uncertainty.** `league_players` (or `"$RESEARCH_CLI" softmax standings`)
+   gives each player's `score` (MMR, which is μ − 3σ), `sigma`, `policy_label` (the version
+   the rating is for; it can trail a just-promoted champion until that version's first
+   round), `version_rounds_played` and `settling`. σ was 1.4–1.7 for versions with 10 or more
+   rounds and 2.9 for a 5-round version (2026-10-28). A new version starts low and climbs as
+   σ falls, so compare μ = `score` + 3·`sigma`, and treat neighbours whose μ differ by less
+   than their σ as unresolved.
+2. **Opponent profiles from league replays.** `"$RESEARCH_CLI" softmax league-results
+   --league league_84ab9f1e-5fb8-4b62-a3ac-e49026bd12d0 --limit N --dest DIR --replays`
+   writes each episode's `results.json`, `episode.json` (seat → policy, `coworld_id`) and its
+   public replay `replay.gz`. `tools/replay_inspect.py DIR/<episode> --json` re-simulates it
+   (192 of 192 hosted league scores matched, 2026-10-27) and reports, per seat, damage taken
+   and dealt by cause, deaths by cause, hooks aimed at the seat and dodged, river time, runes
+   and upgrades. That profiles every opponent, not only our seats; aggregate by
+   `policy_version_id` across episodes.
+3. **Hosted A/B against the live field, with a measured noise floor** (a screen, not the
+   verdict). What the platform holds fixed: the seed fixes terrain, trees and spawn lanes
+   (`docs/mechanics.md` **Randomness**), the rune schedule is fixed, BASIC has no `RND`, and
+   the roster pins each seat. An A/A control (the same policy in both arms) matched on 54 of
+   54 pairs (2026-10-27). Nothing is re-randomized, but every policy reacts to what it sees,
+   so one changed action in our seat changes the whole match: a candidate and its baseline
+   play different games on the same seed. Measured on 150-pair sets (2026-10-27/28):
+   - 124–129 of 150 pairs had the same win outcome for both arms (the line-up decides most
+     games), so a result rests on the 20–25 pairs that flip.
+   - The baseline arm is one draw. On set 3 the v4 baseline won 56.0%; four different
+     candidates won 48.0–50.7%, and their losing flips overlapped on 7–10 pairs per
+     candidate pair (about 3 expected if independent). The shared baseline's luck, not the
+     candidates, explains much of that common −5 to −8 points.
+   - Per arm, the standard error of a win rate is about 0.48/√n: 3.9 points at 150
+     episodes, so a difference of two arms has a 95% interval of about ±11 points. Resolving
+     5 points takes about 1,500 episodes per arm.
+
+   Method:
+   - The field is the latest completed round's champions:
+     `"$RESEARCH_CLI" softmax exec -- coworld rounds --league <league> --status completed
+     --limit 1 --json`, `entries[0].round_config.entrant_policy_version_ids`, minus our own
+     versions. For pair *i*, a seeded RNG draws 5 field policies and seed *s_i*; our policy
+     sits in one fixed subject seat for the whole batch (run a second batch on the other
+     side, e.g. seat 0 then seat 3).
+   - Arms on the same pairs: `base` (the current champion, `player_champion`), at least
+     three **neutral replicates** of it (one threshold moved by its smallest step, e.g.
+     `holdBack = 16` to `17`; check locally with `tools/match.py` that its results differ from
+     the champion's on some seeds, or it is an A/A copy that measures nothing), and each
+     candidate.
+   - One request per arm and pair, created with `"$RESEARCH_CLI" softmax exec -- coworld
+     xp-request create body.json`:
+
+     ```json
+     {"idempotency_key": "<tag>-<i>-<arm>", "private": true,
+      "coworld_id": "<game_support league.game.coworld_id>", "variant_id": "league-3v3",
+      "game_config_overrides": {"seed": 1001}, "num_episodes": 1,
+      "roster": [{"slot": 0, "player": {"policy_ref": "<policy version UUID or name:vN>"}}, "... slots 1-5"],
+      "title": "<tag> <arm> pair <i>"}
+     ```
+
+   - Read each request (each through `"$RESEARCH_CLI" softmax exec --`) with `coworld
+     xp-request get <xreq> --json` until `completed`, then `coworld xp-request episodes <xreq>
+     --json` and `coworld episode-results <ereq> > <ARM_DIR>/<i>.json`, one directory per arm.
+   - Compare unpaired, with the floor: `tools/compare.py <BASE_DIR> <CAND_DIR> --seats <seat>
+     --group all --replicate <NF1> --replicate <NF2> --replicate <NF3> --json`. Report
+     `difference_vs_replicate_mean` and `noise_floor`; a candidate inside the floor
+     (`within_noise_floor`) is not better or worse. Never report one candidate's paired win
+     flips as its strength, and do not count several candidates against one baseline arm as
+     independent confirmations.
+   - Cost and limits: 0.5 credits per episode. At most 300 undispatched XP episodes per user
+     (`429 Too many pending experience-request episodes`): create in batches and retry after
+     about 30 s. A `403 permit_required` means the coach must approve the spend: report the ask
+     to the user and stop; do not retry around it.
+
+   **League episodes decide.** A candidate that clears the floor is a submission candidate,
+   not a result. After it competes, its rating (μ, σ falling over rounds) and its league
+   episodes (`league-results` and `replay_inspect.py` per seat, read 1 and 2 above) are the
+   evidence of strength.
+
+   A research card runs the same line-ups through its frozen design (one subject seat,
+   `opponent_count: 5` sampled from the league per seed, `"$RESEARCH_CLI" softmax xp create`).
+   Its paired `stats evaluate` takes the one baseline draw as given, so run the replicate
+   arms too and check its verdict with `compare.py --replicate` on the downloaded arms. The
+   steps above are for a conversation that has no experiment record.
+
 ## Commands
 
 Run every tool from `"$RESEARCH_HOME"` (the installed profile directory) with
