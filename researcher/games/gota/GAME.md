@@ -421,7 +421,7 @@ Initial caller-input validation returns `status: rejected`, `error.reason: inval
 provides no uploadable artifact. Correct and commit truthful inputs, preserve the
 rejected report, and retry with a new output directory. A rejection is not policy
 evidence. Engine, native receipt, unexpected runtime, and post-start input-integrity
-faults remain `errored` and stop the build; do not retry those as input corrections.
+faults remain `errored`: they are tool faults (doctrine D-26), not input corrections.
 
 Only explicit input rejections have this recovery contract. Malformed provenance
 JSON or missing schema fields are not classified by this change; unexpected parser

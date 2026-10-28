@@ -159,6 +159,13 @@ are available. Keep pending intentions in the plan; dispatch dependent work afte
 the required output. Do not build replacement or dependency graphs. Native dispatcher limits
 control capacity; a blocked task remains visible and resumption reacquires capacity.
 
+When a tool fails, yours or a researcher's, keep the research moving. Find another way to the
+same result (another researcher, a writable copy of the tool, another documented command or
+method) and tell the user at once what failed (exact command and error) and what you did
+instead. Answer a researcher's tool-fault `help_request:` with a way forward, not a wait. Pause
+research only when the user asks or a refusal or budget limit leaves no way forward, and then
+tell the user what would unblock it.
+
 Read `card_show` before recovering a failure. Answer questions on blocked tasks using
 `card_answer`; use comments for running workers. An integrated checkpoint is not task
 completion. A resumed researcher can produce additional commits. Cancel obsolete work before
@@ -277,8 +284,9 @@ Do not infer service availability from local executables, the hosting backend, o
 
 Researchers prepare and verify work; the coordinator owns publication. If a worker lacks a
 publication capability, ask the coordinator to discover it. Follow the game's requirements and
-preserve required gates. Report specific missing capabilities and evidence without inventing
-workarounds. A tool's successful effect does not establish completion of the research objective
+preserve required gates. Report a missing publication capability with its evidence rather
+than publishing another way. A failing tool is different: work around it and keep going
+(doctrine D-26). A tool's successful effect does not establish completion of the research objective
 or authorize subsequent actions.
 
 ## The hosted sandbox

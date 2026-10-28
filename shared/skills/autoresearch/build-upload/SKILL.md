@@ -94,5 +94,5 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 - A gate fails: do not upload. Fix the candidate within the experiment's one change, or
   finish `failed` with the gate output in the journal. Never edit the design.
-- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `card`, "Tool fault").
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: follow D-26 (work around it, keep going and report it). A failed gate verdict is a result, not a fault: never skip or weaken a gate.
 

@@ -106,14 +106,16 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 For either compiler or prebuilt builds, read the build JSON and retained reports
 before continuing. A build with `status: errored` is a tool fault, not a strategy
-problem. Stop this build path; do not retry the build or rewrite the candidate or
-STRATEGY to repair it. Preserve the build directory and reports.
+problem. Do not rewrite the candidate or STRATEGY to get around it: that would change
+what you are measuring. Preserve the build directory and reports, then follow D-26: get the
+build working another way (rerun after a transient network error, a writable copy of the
+tool, a missing dependency in an environment on the workspace disk) with a new output
+directory, keeping every gate.
 
-Follow core `report`: send a `help_request:` comment on your own card with the
-exact error (type, message and traceback summary), the absolute build directory,
-and the attempted command. Record the same facts in the journal's Decisions.
-Use `card`'s tool-fault handoff; leave the build blocked pending a tooling fix.
-Do not treat its error as policy evidence or a strategy repair task.
+Report it either way: a `help_request:` or `note:` comment on your own card with the exact
+error (type, message and traceback summary), the absolute build directory, the attempted
+command and what you did instead. Record the same facts in the journal's Decisions. Block
+only when no way works. Do not treat its error as policy evidence or a strategy repair task.
 
 ## Explicit bootstrap card: exact prebuilt starter
 

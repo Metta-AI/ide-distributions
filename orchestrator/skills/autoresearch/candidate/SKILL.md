@@ -71,6 +71,6 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
   appropriate review/build work. Do not fabricate the promote decision.
 - Identity refusal: report to the orchestrator and block; never change Player.
 - A game check fails: retain the evidence and report the policy/build failure. An `errored`
-  check or tooling traceback instead follows D-26 in `card`; do not retry the faulty tool.
+  check or tooling traceback instead follows D-26: work around it and report it.
 - A staging failure must be reported with the retained artifacts. Never claim the candidate
   is delivered to the orchestrator until the task branch is staged.

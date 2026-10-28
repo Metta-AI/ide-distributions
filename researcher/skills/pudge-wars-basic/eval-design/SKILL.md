@@ -161,11 +161,13 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 Read the build JSON and retained reports before continuing. A build with
 `status: errored` (exit 3) is a tool fault, not a strategy problem: a native build that
-cannot fetch `github.com`, a missing Nim toolchain, a decoder crash. Stop this build
-path; do not retry it or rewrite the candidate to repair it. Preserve the build
-directory. Follow core `report` and `card`'s tool-fault handoff (D-26): a
-`help_request:` comment on your own card with the exact error, the absolute build
-directory and the command; record the same facts in the journal.
+cannot fetch `github.com`, a missing Nim toolchain, a decoder crash. Do not rewrite the
+candidate to get around it. Preserve the build directory, then follow D-26: get the build
+working another way (rerun after a transient network error, a writable copy of the tool,
+a toolchain on the workspace disk) with a new output directory, keeping every gate. Report
+it either way: a `help_request:` or `note:` comment on your own card with the exact error,
+the absolute build directory, the command and what you did instead; record the same facts
+in the journal. Block only when no way works.
 
 ## Explicit bootstrap card: the Base starter
 
