@@ -62,7 +62,7 @@ with (Path(os.environ['HERMES_HOME']) / 'calls.jsonl').open('a') as output:
 if args == ['champion', 'migrate']:
     print(json.dumps({'ok': True, 'data': None}))
     raise SystemExit(0)
-if args == ['champion', 'pending']:
+if args in (['champion', 'pending'], ['champion', 'submitted']):
     print(json.dumps({'ok': True, 'data': None}))
     raise SystemExit(0)
 if 'refuse' in args:
