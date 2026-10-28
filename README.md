@@ -29,6 +29,10 @@ optimizer-seed's mixin method) and installed.
 [Implementation notes](docs/designs/orchestrator-implementation-notes.md) record where the
 code differs from it.
 
+The [IDE profile refactor](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it in a
+browser) is the final design for the next iteration of the Orchestrator and Researcher profiles.
+It is not implemented yet. Where it conflicts with the two designs above, it supersedes them.
+
 Softmax hosting runs these distributions in its sandboxes. The metta changes it needs are in
 the [hosting handoff](docs/hosting.md).
 
