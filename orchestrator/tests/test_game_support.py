@@ -121,6 +121,16 @@ def test_document_arguments_survive_subprocess_adapter(shared_fixture):
     ]
 
 
+def test_player_champion_reads_one_player_and_points_to_standings(shared_fixture):
+    result = Research(shared_fixture).player_champion("league_pudge", "player_x")
+    assert result["args"] == [
+        "softmax", "player-champion", "--league", "league_pudge", "--player", "player_x",
+    ]
+    # The tool was called leaderboard while returning one champion; standings are league_players.
+    assert "leaderboard" not in TOOLS
+    assert "league_players" in TOOLS["player_champion"][1]
+
+
 def test_advertised_filters_reject_the_observed_sort_error():
     # The filters are top-level parameters, so the natural card_list(limit=5) validates.
     schema = {"type": "object", "properties": TOOLS["card_list"][2], "required": TOOLS["card_list"][3]}

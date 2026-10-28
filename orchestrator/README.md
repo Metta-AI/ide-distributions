@@ -108,7 +108,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
 | `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
 | `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
-| `leaderboard(league_id, player_id)` | Read the selected player's current champion; never defaults to the workspace carrier. |
+| `player_champion(league_id, player_id)` | Read the selected player's current champion (one entry, not standings; `league_players` lists the ranked players); never defaults to the workspace carrier. |
 | `xp_status(experiment, game?)`, `credits` | Shared research platform reads. |
 | `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
 

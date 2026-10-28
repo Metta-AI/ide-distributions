@@ -191,7 +191,7 @@ class Research:
             "--expected-sha256", expected_sha256, "--offset", offset, "--limit", limit,
         )
 
-    def leaderboard(self, league_id, player_id):
+    def player_champion(self, league_id, player_id):
         return self.call("softmax", "player-champion", "--league", league_id, "--player", player_id)
 
     def latest_league_result(self, league_id, player_id):

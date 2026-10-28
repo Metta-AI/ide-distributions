@@ -415,9 +415,9 @@ TOOLS = {
         SupportRead.model_json_schema()["properties"],
         ["league_id"],
     ),
-    "leaderboard": (
+    "player_champion": (
         Research,
-        "Read an explicitly selected player's champion in an explicitly selected league. This does not bind the conversation or change the research team's identity.",
+        "Read an explicitly selected player's current champion policy in an explicitly selected league. This is one player's entry, not standings: league_players lists the ranked players. This does not bind the conversation or change the research team's identity.",
         {"league_id": S, "player_id": S},
         ["league_id", "player_id"],
     ),

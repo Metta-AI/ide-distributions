@@ -835,7 +835,7 @@ hermes profile update researcher-1 &amp;&amp; hermes profile update researcher-2
         <tr><td><code>control_write(pause | resume)</code></td><td>Records the pause decision. It lives on canonical <code>main</code>, because a prose pause was once overwritten by an agent in PlayerADE.<sup class="ref"><a href="#src-51" title="Codex round 6 attack on v4, CODEX-R6-attack-v4.md, §I.3">51</a></sup><sup class="ref"><a href="#src-52" title=".orchestrator-research/playerade.md">52</a></sup></td><td><code>control/pause.json</code> on canonical <code>main</code>.</td></tr>
         <tr><td><code>promotion_submit(experiment)</code>, <code>bootstrap_champion()</code></td><td>Promotion and the starter-policy bootstrap (section 11).</td><td>Promotion records on canonical <code>main</code>; the platform submission.</td></tr>
         <tr><td><code>workspace_integrate(card)</code></td><td>Integrates a card that ended without integrating, from its pushed branch.</td><td>Canonical <code>main</code> (merge).</td></tr>
-        <tr><td><code>xp_status</code>, <code>credits</code>, <code>leaderboard</code></td><td>Platform reads.</td><td>Read only.</td></tr>
+        <tr><td><code>xp_status</code>, <code>credits</code>, <code>player_champion</code></td><td>Platform reads.</td><td>Read only.</td></tr>
       </tbody>
     </table>
 
