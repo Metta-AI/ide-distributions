@@ -99,9 +99,12 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 ### Published source and Code recovery
 
-Native uploads register their hash-checked source manifest in the game's canonical workspace.
-Stage and integrate the source files and publication events before reporting that Code is ready.
-Code searches native records across game workspaces; it does not require an IDE project.
+`workspace stage` preserves hash-checked source snapshots for new passing build receipts before
+native completion can remove the worker checkout. It commits the build, retained inputs, and
+receipt-bound source evidence together, including inputs inside nested repositories or ignored paths.
+Publication registers those staged snapshots in the game's canonical workspace. Integrate the
+publication receipt before reporting that Code is ready. Code searches native records across game
+workspaces; it does not require an IDE project.
 
 When Code cannot find an existing publication, search prior chats and the game's version/build
 receipts before asking the user for source. If the checked build remains available, retry

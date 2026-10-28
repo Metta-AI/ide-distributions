@@ -180,15 +180,27 @@ def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
     return None
 
 
-def register_sources(ctx: RunContext, store: RecordStore, version_id: str, build: dict) -> None:
+def register_sources(
+    ctx: RunContext, store: RecordStore, version_id: str, build: dict, build_dir: Path
+) -> None:
     """Attach verified source evidence without changing an immutable publication record."""
     if "source_path" not in build or "source_hashes" not in build:
         return
     if store.find("version_event", version=version_id, kind="sources_registered"):
         return
-    source_path, source_hashes = build_sources.retain(
-        ctx.worker, build["source_path"], build["source_hashes"]
-    )
+    handoff = build_dir / "retained-sources.json"
+    if handoff.exists():
+        retained = build_sources.StagedSources.model_validate_json(handoff.read_bytes())
+        retained.verify(
+            ctx.worker,
+            (build_dir / "version.json").read_bytes(),
+            store.load(version_id)[0]["artifact_sha256"],
+        )
+        source_path, source_hashes = retained.source_path, retained.source_hashes
+    else:
+        source_path, source_hashes = build_sources.retain(
+            ctx.worker, build["source_path"], build["source_hashes"]
+        )
     gitops.git(ctx.worker, "--literal-pathspecs", "add", "-f", "--", *source_hashes)
     store.add_event(
         version_id,
@@ -242,7 +254,7 @@ def upload(
     if binding:
         bound = store.load(binding["version_id"])[0]
         if bound["artifact_sha256"] == artifact_hash:
-            register_sources(ctx, store, binding["version_id"], build)
+            register_sources(ctx, store, binding["version_id"], build, build_dir)
             return binding["version_id"]
         raise Refused(
             "binding_conflict",
@@ -258,7 +270,7 @@ def upload(
     if version_id is None:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
-    register_sources(ctx, store, version_id, build)
+    register_sources(ctx, store, version_id, build, Path(build_dir))
     platform_id = _upload_once(store, sm, version_id, artifact, build.get("artifact_type", "file"))
     patch = {
         "candidate_binding": {
@@ -292,7 +304,7 @@ def upload_build(
     else:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": None})
-    register_sources(ctx, store, version_id, build)
+    register_sources(ctx, store, version_id, build, Path(build_dir))
     return version_id, _upload_once(
         store, sm, version_id, artifact, build.get("artifact_type", "file")
     )

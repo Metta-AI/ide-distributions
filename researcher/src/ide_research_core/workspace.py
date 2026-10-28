@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 
 import frontmatter
 
+from ide_research_core import build_sources
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_text
 from ide_research_core.io.locks import file_lock
@@ -223,6 +224,10 @@ def _current_branch(worktree: Path) -> str:
 def stage(worktree: Path) -> dict:
     """Preserve an assignment's output without accepting it into canonical main."""
     branch = _current_branch(worktree)
+    base = gitops.git(worktree, "merge-base", "HEAD", f"{REMOTE}/{MAIN}")
+    retained = build_sources.stage(worktree, base)
+    if retained:
+        gitops.git(worktree, "--literal-pathspecs", "add", "-f", "--", *retained)
     result = _commit_worktree(worktree, branch)
     pushed, rejected = gitops.push_with_rejections(
         worktree, REMOTE, [f"{branch}:{branch}"]
