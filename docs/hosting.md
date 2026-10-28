@@ -66,5 +66,19 @@ paused supervisor preservation, and repeat preparation. Development verification
 workspaces using real Git; commands and results are retained in PR evidence.
 
 Metta's image qualification must also run its retained-state and chat proofs with both repositories'
-changes. Land the distribution entrypoint before the Metta caller and pin a distribution commit that
-contains it. Older images keep their existing preparation code; no runtime fallback is needed.
+changes. Normal release resolution records immutable distribution inputs. Follow the instruction
+ownership sequence below when adopting the platform skill contract.
+
+## Instruction ownership
+
+Metta publishes `softmax-host` through native skill discovery during profile installation and every
+retained startup. It owns resource allocations, platform storage/lifecycle and CLI authentication.
+The distribution discovers that contract; it keeps local host observations, research wrappers,
+canonical policy repositories, worktrees, identity isolation, receipts and research acceptance.
+Workspace operation schemas own scope, revisions, conflicts and retries. Research prompts say when
+and why to use them without copying their protocol. Expert-consultation strategy is a shared research
+skill; the advisory service owns available models, costs, limits and execution authority.
+
+Deploy the platform skill publisher before adopting distributions that refer to it. Qualify fresh
+and retained coordinator/researcher skill discovery, preserved configuration and policy repository
+flows. This does not require changing credentials or reconnecting the user's repositories.
