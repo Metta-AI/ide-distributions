@@ -65,7 +65,7 @@ def test_worker_capabilities_uses_assigned_installation(tmp_path):
         check=True, capture_output=True, text=True, timeout=300,
     )
     code = """
-import json, sys, subprocess
+import json, os, sys, subprocess
 from pathlib import Path
 from hermes_cli.plugins import get_plugin_manager
 from tools.registry import registry
@@ -76,6 +76,9 @@ worker = profile.parent / 'researcher-1'
 # real installed files, and verify that coordinator files cannot mask the worker.
 script = 'games/pudge-wars-basic/tools/build.py'
 (profile / script).unlink()
+manifest = worker / 'games/pudge-wars-basic/GAME.md'
+manifest.write_text(manifest.read_text().replace('host_requirements:', 'host_requirements:\\n  env: [BUILDKIT_HOST]'))
+os.environ['BUILDKIT_HOST'] = 'tcp://127.0.0.1:1234'
 args = {'assignee': 'researcher-1', 'game': 'pudge-wars-basic'}
 schema = registry.get_schema('worker_capabilities')
 assert schema['parameters']['required'] == ['assignee']
@@ -107,6 +110,10 @@ assert 'worker-secret-sentinel' not in json.dumps(current)
 game = data['game']
 assert game['root'] == str(worker), game
 assert game['status'] == 'installed', game
+assert game['readiness']['missing_environment'] == [], game
+del os.environ['BUILDKIT_HOST']
+without_builder = json.loads(registry.dispatch('worker_capabilities', args))
+assert without_builder['data']['game']['readiness']['missing_environment'] == ['BUILDKIT_HOST']
 assert all('missing_script' not in binding['reasons']
            for binding in game['readiness']['operations'].values()), game
 assert not (profile / script).exists()
