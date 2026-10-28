@@ -199,7 +199,10 @@ def register_sources(
         source_path, source_hashes = retained.source_path, retained.source_hashes
     else:
         source_path, source_hashes = build_sources.retain(
-            ctx.worker, build["source_path"], build["source_hashes"]
+            ctx.worker,
+            build["source_path"],
+            build["source_hashes"],
+            source_root=Path(build["source_root"]) if "source_root" in build else ctx.worker,
         )
     gitops.git(ctx.worker, "--literal-pathspecs", "add", "-f", "--", *source_hashes)
     store.add_event(

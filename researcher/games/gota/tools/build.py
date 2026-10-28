@@ -140,6 +140,7 @@ def build(candidate, out, manifest=None, *, timeout=None, budget=None, offline=F
     if analysis.exists():
         analysis.rename(target / 'analysis')
     version = compiler.read(target / 'version.json')
+    version['source_root'] = repo
     version['engine'] = identity
     version['artifact'] = 'policy.bas'
     version['started'], version['finished'] = started, now_iso()

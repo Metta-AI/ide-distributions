@@ -18,7 +18,12 @@ from ide_research_core.source_io import (
 
 
 def retain(
-    root: Path, source_path: str, hashes: dict[str, str], *, build_identity: str = ""
+    root: Path,
+    source_path: str,
+    hashes: dict[str, str],
+    *,
+    source_root: Path | None = None,
+    build_identity: str = "",
 ) -> tuple[str, dict[str, str]]:
     """Snapshot build inputs into the canonical workspace, including nested or ignored sources.
 
@@ -28,7 +33,10 @@ def retain(
     if source_path not in hashes:
         raise SourceError("The build's primary source must be included in its source hashes")
     root = root.resolve()
-    originals = {name: Path(name) if Path(name).is_absolute() else root / name for name in hashes}
+    source_root = root if source_root is None else source_root.resolve()
+    originals = {
+        name: Path(name) if Path(name).is_absolute() else source_root / name for name in hashes
+    }
     modes = {name: path.lstat().st_mode & (0o170000 | 0o777) for name, path in originals.items()}
     manifest_hash = hashlib.sha256(
         json.dumps(
@@ -155,6 +163,7 @@ def stage(worktree: Path, base: str) -> list[str]:
                 worktree,
                 build["source_path"],
                 build["source_hashes"],
+                source_root=Path(build["source_root"]) if "source_root" in build else worktree,
                 build_identity=f"{receipt_hash}:{artifact_hash}",
             )
             retained = StagedSources(

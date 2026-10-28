@@ -162,7 +162,9 @@ def build(candidate, out, artifact, identity, *, started=None, full_evaluation=F
         status, error = 'errored', result.details['error']
     driver = {str(path): digest(path) for path in (Path(__file__), Path(__file__).with_name('build.py'))}
     retain_episode_locators(gates, scratch)
-    version = {'build_id': out.name, 'backend': 'gota', 'status': status, 'gates': gates,
+    source_root = subprocess.check_output(
+        ['git', '-C', str(candidate), 'rev-parse', '--show-toplevel'], text=True).strip()
+    version = {'source_root': source_root, 'build_id': out.name, 'backend': 'gota', 'status': status, 'gates': gates,
                'validation_scope': 'full' if full_evaluation else 'build',
                'evaluation': {'status': status if full_evaluation else 'not_run'},
                'artifact': 'policy.bas', 'policy_sha256': digest(frozen),
