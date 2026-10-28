@@ -243,10 +243,10 @@ TOOLS = {
     "card_list": (
         Board,
         (
-            "List cards; filters accept native status, assignee, include_archived, "
-            "session_id, tenant, limit and order_by."
+            "List cards, optionally filtered by native status, assignee, include_archived, "
+            "session_id or tenant; limit (default 20, at most 200) and order_by page and sort."
         ),
-        {"filters": CardFilters.model_json_schema()},
+        CardFilters.model_json_schema()["properties"],
         [],
     ),
     "card_comment": (
@@ -287,7 +287,12 @@ TOOLS = {
         {"entity": S, "filters": O, "game": GAME},
         ["entity"],
     ),
-    "records_show": (Research, "Read a game's canonical record.", {"id": S, "game": GAME}, ["id"]),
+    "records_show": (
+        Research,
+        "Read a game's canonical record by id (T-, E-, C-, ...), an ar:// reference, or a champion submission by its CS- id, legacy P- promotion id or platform sub_ submission id.",
+        {"id": S, "game": GAME},
+        ["id"],
+    ),
     "plan_write": (
         Research,
         "Publish a game's plan.md to its canonical main.",
@@ -410,9 +415,9 @@ TOOLS = {
         SupportRead.model_json_schema()["properties"],
         ["league_id"],
     ),
-    "leaderboard": (
+    "player_champion": (
         Research,
-        "Read an explicitly selected player's champion in an explicitly selected league. This does not bind the conversation or change the research team's identity.",
+        "Read an explicitly selected player's current champion policy in an explicitly selected league. This is one player's entry, not standings: league_players lists the ranked players. This does not bind the conversation or change the research team's identity.",
         {"league_id": S, "player_id": S},
         ["league_id", "player_id"],
     ),

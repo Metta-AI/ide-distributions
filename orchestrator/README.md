@@ -91,12 +91,12 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
-| `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
+| `card_show`, `card_list` | Read native cards, runs and comments. `card_list` takes its filters as top-level parameters (`status`, `assignee`, `limit`, `order_by`, ...) with typed sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
 | `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
 | `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). |
-| `records_find`, `records_show` (`game?`) | Shared canonical record reads. |
+| `records_find`, `records_show` (`game?`) | Shared canonical record reads. `records_show` also takes an `ar://` reference and a champion submission by `CS-`, legacy `P-` or platform `sub_` id. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
 | `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
 | `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
@@ -108,7 +108,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
 | `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
 | `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
-| `leaderboard(league_id, player_id)` | Read the selected player's current champion; never defaults to the workspace carrier. |
+| `player_champion(league_id, player_id)` | Read the selected player's current champion (one entry, not standings; `league_players` lists the ranked players); never defaults to the workspace carrier. |
 | `xp_status(experiment, game?)`, `credits` | Shared research platform reads. |
 | `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
 

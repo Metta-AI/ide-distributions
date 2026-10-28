@@ -354,6 +354,8 @@ def main():
         with closing(connection()) as conn:
             assert kb.claim_task(conn, card["id"]) is not None
             assert kb.claim_task(conn, card["id"]) is None
+    assert len(board.card_list(limit=2)) == 2
+    assert len(board.card_list(filters={"limit": 1})) == 1  # the older nested form
     print(json.dumps({"ok": True, "tasks": len(board.card_list()), "historical_cases": [20, 26]}))
 
 

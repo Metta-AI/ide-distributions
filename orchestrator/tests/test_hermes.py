@@ -233,7 +233,8 @@ assert set(schema['parameters']['required']) == {'id', 'run_id', 'version', 'str
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())
 # capabilities resolves the api_server session's toolsets from config.yaml.
 listing = json.loads(registry.dispatch('capabilities', {'kind': 'tools'}))
-assert {'orchestrator', 'terminal', 'file', 'code_execution'} <= set(listing['tools']), listing
+# memory is enabled by platform_toolsets and memory.memory_enabled, and must be listed.
+assert {'orchestrator', 'memory', 'terminal', 'file', 'code_execution'} <= set(listing['tools']), listing
 assert 'skills' not in listing
 
 # Complete a real native task, let Hermes clean its worktree, then review its

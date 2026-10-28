@@ -95,7 +95,7 @@ configuration, existing cards, canonical records or champion submission state wh
 
 Use `discover_leagues` when the requested game or ID needs resolving, `league_players` for candidates,
 and owned-player summaries to identify “my player”; rank does not establish ownership. Ask
-only if discovery leaves several plausible choices. Pass explicit IDs to `leaderboard` and
+only if discovery leaves several plausible choices. Pass explicit IDs to `player_champion` and
 `latest_league_result`. Check hosted activity before claiming absence or prescribing a new
 recording: empty local projects/records/boards and failed reads do not establish absence.
 
