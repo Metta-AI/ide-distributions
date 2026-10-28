@@ -59,6 +59,11 @@ def test_worker_capabilities_uses_assigned_installation(tmp_path):
     )
     (worker / ".env").write_text("SOFTMAX_PLAYER_CREDENTIAL=worker-secret-sentinel\n")
     profile = host / "profiles/orchestrator"
+    subprocess.run(
+        ["uv", "sync", "--frozen", "--no-dev"], cwd=profile,
+        env={**env, "UV_PROJECT_ENVIRONMENT": str(profile / "local/venv")},
+        check=True, capture_output=True, text=True, timeout=300,
+    )
     code = """
 import json, sys, subprocess
 from pathlib import Path
@@ -266,8 +271,9 @@ git(seed, 'add', '.')
 git(seed, 'commit', '-m', 'canonical update')
 git(seed, 'push', str(remote), 'main')
 canonical_head = git(seed, 'rev-parse', 'HEAD')
-from ide_research_core.workspace import write_cli_shim
-write_cli_shim(worker)
+subprocess.run([str(worker / 'local/venv/bin/python'), '-I', '-c',
+                'from pathlib import Path; from ide_research_core.workspace import write_cli_shim; '
+                'import sys; write_cli_shim(Path(sys.argv[1]))', str(worker)], check=True)
 create_board('autoresearch')
 created = json.loads(registry.dispatch('card_create', {
     'command_id': 'artifact-system:create', 'assignee': 'researcher-1',

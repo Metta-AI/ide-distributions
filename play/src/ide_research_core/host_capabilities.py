@@ -1,6 +1,7 @@
 """``host_capabilities``: what this profile's host has and where it can write.
 
-It only looks: executables on ``PATH``, file permissions and mount options. It runs no command
+It inspects executables on ``PATH``, file permissions and mount options in the profile interpreter.
+It executes no game binding
 and returns only executable/location paths and approval modes, never credentials. Both research profiles
 register it (the orchestrator plugin and ``researcher_tools``).
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -25,7 +27,7 @@ DOCKER_SOCKET = Path("/var/run/docker.sock")
 HOSTED_PROFILES = Path("/opt/data/profiles")
 
 DESCRIPTION = (
-    "Check this profile's host without running anything: which executables are installed "
+    "Inspect this profile's runtime without executing game bindings: which executables are installed "
     "(git, python3, uv, gcc, make, nim, node, curl, docker, softmax, coworld), whether Docker "
     "has a daemon, which places are writable (home, profile, workspace, TMPDIR, /tmp, the "
     "installed games/ and venv, the profile cache), whether /tmp forbids running programs, "
@@ -138,7 +140,20 @@ def handle(args: dict | None = None, **_kwargs) -> str:
         from tools.approval import _unattended_contexts
         from tools.approval_context import _get_approval_mode, _get_session_platform
 
-        data = host_capabilities(*_session())
+        home, env = _session()
+        python = home / "local/venv/bin/python"
+        if not python.is_file():
+            return json.dumps({"ok": False, "error": {
+                "reason": "missing_profile_runtime",
+                "message": "Prepare this profile before runtime discovery.",
+                "path": str(python),
+            }})
+        inspection = subprocess.run(
+            [str(python), "-I", "-m", "ide_research_core.host_capabilities"],
+            env={**env, "HERMES_HOME": str(home)}, cwd=home,
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        data = json.loads(inspection.stdout)
         data["execution"] = {
             "platform": _get_session_platform(),
             "approval_mode": _get_approval_mode(),
@@ -168,3 +183,7 @@ def register(ctx, toolset: str) -> None:
         handler=handle,
         description=DESCRIPTION,
     )
+
+
+if __name__ == "__main__":
+    print(json.dumps(host_capabilities(Path(os.environ["HERMES_HOME"]), os.environ)))
