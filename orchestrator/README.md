@@ -91,7 +91,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
-| `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
+| `card_show`, `card_list` | Read native cards, runs and comments. `card_list` takes its filters as top-level parameters (`status`, `assignee`, `limit`, `order_by`, ...) with typed sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
 | `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |

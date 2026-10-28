@@ -243,10 +243,10 @@ TOOLS = {
     "card_list": (
         Board,
         (
-            "List cards; filters accept native status, assignee, include_archived, "
-            "session_id, tenant, limit and order_by."
+            "List cards, optionally filtered by native status, assignee, include_archived, "
+            "session_id or tenant; limit (default 20, at most 200) and order_by page and sort."
         ),
-        {"filters": CardFilters.model_json_schema()},
+        CardFilters.model_json_schema()["properties"],
         [],
     ),
     "card_comment": (

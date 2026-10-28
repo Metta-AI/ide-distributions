@@ -314,8 +314,11 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 "subscribed": subscribe(conn, task_id),
             }
 
-    def card_list(self, filters=None):
-        filters = CardFilters.model_validate(filters or {}).model_dump(exclude_none=True)
+    def card_list(self, filters=None, **fields):
+        """``fields`` are CardFilters' fields as the tool passes them; ``filters`` is the
+        older nested form of the same, still accepted."""
+        filters = CardFilters.model_validate({**(filters or {}), **fields})
+        filters = filters.model_dump(exclude_none=True)
         from hermes_cli import kanban_db as kb
 
         with closing(connection()) as conn:
