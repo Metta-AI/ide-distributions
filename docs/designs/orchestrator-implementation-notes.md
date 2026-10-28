@@ -90,6 +90,18 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   listed "XP polling" as moving to shared code without saying who turns results into rows;
   doing it by hand in a skill would risk the paired comparison. The polling half is the
   orchestrator's supervisor gate.
+- **League-result wake** (#19): nothing woke the coordinator after a submission played, so
+  follow-up waited for the user. On its 10-minute poll the gate reads, per game, the newest
+  submission the platform accepted (`research champion submitted`, a local git read). If the
+  coordinator was not yet woken for it, the gate reads `softmax player-result` (the
+  `latest_league_result` platform read) and, once the result names the submission's
+  `platform_policy_version_id` anywhere in it, queues one `league_result` wake. The match is
+  a search of every string in the result because the gate does not depend on the
+  latest-replay response's exact shape. The wake goes to the session that made the submission
+  (recorded as `submission_session:<CS-id>` in coordinator storage by `champion_submit`,
+  `submit_requested_version` and `bootstrap_champion`, including a permit refusal), else to
+  the latest session. After the inbox accepts the wake, `league_result_seen:<CS-id>` is
+  stored, so each submission wakes once and later polls make no platform read.
 - **Bootstrap is split**: the researcher's bootstrap card builds the starter policy and runs
   `softmax upload-build`; the orchestrator submits that version with
   `champion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,
@@ -136,12 +148,27 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   outcome is `aborted` when the platform has no submission, never resent blindly.
 - **Champion conflict** = the league shows a champion the loop did not record as its latest
   `published` promotion (a `submitted` promotion explains a gap). A host migrated from
-  autoresearch starts in conflict until a human confirms the league's champion:
-  **`champion accept`** (new) records it.
-- The guards of the old submit path are kept: decision `promote`, a candidate binding, an
+  autoresearch starts in conflict; **`champion accept`** (new) records the league's champion.
+  Since 2026-10-27 the orchestrator resolves a conflict itself with `accept_champion` and
+  continues, instead of pausing until a human confirms.
+- The guards of the old submit path are kept: decision `submit` (renamed from `promote` in #59), a candidate binding, an
   eligible and current `stats evaluate` outcome (rows and design hashes), identity, no
   conflict, outcome champion == league champion, one promotion at a time, the candidate
   strategy on `main`.
+
+## Changes on 2026-10-27 (problem triage)
+
+- **No approvals, no ask-first rules.** Both profiles run `approvals.mode: off` with the
+  per-context modes set to `approve`; only Hermes's hardline floor and the deny lists block.
+  The orchestrator builds, uploads, requests XP and submits on its own judgment (SOUL "Act
+  without asking"); `submit_requested_version` records a reason, not a quoted user request.
+- **Keep going when a tool fails** (doctrine 16, D-26): work around a broken tool, report it,
+  block only when no way remains.
+- **`ide_say` is retired.** No current client shows `/say`; a background wake's final reply
+  is the user-facing update, as a chat turn's is.
+- **Wakes route to the card's creating session**, and card events carry a `source_event`
+  that makes `card_create` idempotent.
+- **`status` lists the researchers** (from `kanban.dispatch_profiles`) with their cards.
 
 ## Hosting (§13)
 

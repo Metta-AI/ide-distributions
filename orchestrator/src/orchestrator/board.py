@@ -35,6 +35,39 @@ class CardFilters(BaseModel):
     ] | None = None
 
 
+# A stored record id (``ide_research_core.ids``: the record types of ``records.registry``) or a
+# champion submission id (``CS-``). Not imported: ``ids`` needs python-ulid, which Hermes's
+# interpreter, where this plugin runs, does not have.
+RECORD_ID = re.compile(
+    r"(?<![A-Za-z0-9])(?:HUB|EV|VE|CS|[THERVCLJ])-[0-9A-HJKMNP-TV-Z]{26}(?![A-Za-z0-9])"
+)
+FILE_REF = re.compile(r"ar://file/([^\s<>()\[\]`'\"]+)")
+
+
+def unknown_references(clone, body):
+    """Record ids and ``ar://file/`` paths that ``body`` cites but canonical ``main`` (the
+    bare repository ``clone`` tracks as ``origin``) lacks.
+
+    At most two git reads, none for a body that cites nothing. ``ar://<type>/<id>`` and
+    ``ar://wiki/<id>`` are checked through their ids; content searches (xreq, episode,
+    opponent) and game reference types are not checked."""
+    cited = set(RECORD_ID.findall(body))
+    files = {path.rstrip(".,;:") for path in FILE_REF.findall(body)}
+    if not cited and not files:
+        return []
+    canonical = git(clone, "remote", "get-url", "origin")
+    listing = subprocess.run(
+        ["git", "--git-dir", canonical, "ls-tree", "-r", "--name-only", "main"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    paths = set(listing.stdout.splitlines()) if listing.returncode == 0 else set()
+    present = {found for path in paths for found in RECORD_ID.findall(path)}
+    return sorted(cited - present) + sorted(f"ar://file/{path}" for path in files - paths)
+
+
 def git(clone, *args):
     return subprocess.run(
         ["git", "-C", str(clone), *args], check=True, capture_output=True, text=True, timeout=60
@@ -45,6 +78,21 @@ def connection():
     from hermes_cli.kanban_db_connect import connect
 
     return connect(board=BOARD)
+
+
+def creation_command(conn, key):
+    """The native task created under idempotency ``key`` and its recorded creation arguments."""
+    from hermes_cli import kanban_db as kb
+
+    task = next(
+        (t for t in kb.list_tasks(conn, include_archived=True) if t.idempotency_key == key), None
+    )
+    if task is None:
+        return None, None
+    prior = conn.execute(
+        "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command'", (task.id,)
+    ).fetchone()
+    return task, json.loads(prior["payload"])
 
 
 def subscribe(conn, task_id):
@@ -133,16 +181,23 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         body,
         priority=0,
         skills=None,
-        max_runtime_seconds=7200,
+        # GotA native builds took 6,600-8,400 s on hosted workspaces (10-27 sessions).
+        max_runtime_seconds=14400,
         failure_limit=2,
         session_id=None,
         game=None,
+        source_event=None,
     ):
         """Replay an execution command; native Hermes owns task and worktree identity.
 
         ``game`` (a shipped or installed game; omit for the neutral workspace) selects
         the assignee's clone of that game, which Hermes makes the card worktree from. It is
-        recorded in the creation command, where every card-scoped effect reads it."""
+        recorded in the creation command, where every card-scoped effect reads it.
+
+        ``source_event`` (a pending event's key from ``status`` or a wake) identifies the card
+        instead of ``command_id``: a chat turn and a background wake acting on the same event
+        get the one card, whatever arguments each chose. The later call replays the recorded
+        command."""
         from agent.secret_scope import build_profile_secret_scope
         from gateway.session_context import get_session_env
         from hermes_cli import kanban_db as kb
@@ -154,6 +209,29 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
 
         if not command_id or len(command_id) > 200:
             raise ValueError("command_id must contain 1-200 characters")
+        if source_event is not None and not 0 < len(source_event) <= 200:
+            raise ValueError("source_event must contain 1-200 characters")
+        command = {
+            "assignee": assignee,
+            "title": title,
+            "body": body,
+            "priority": priority,
+            "skills": skills or [],
+            "max_runtime_seconds": max_runtime_seconds,
+            "failure_limit": failure_limit,
+        }
+        if game is not None:
+            # Store the explicit choice; profile settings never select or move a card.
+            command["game"] = game
+        key = f"event:{source_event}" if source_event else f"command:{command_id}"
+        if source_event:
+            with closing(connection()) as conn:
+                recorded = creation_command(conn, key)[1]
+            if recorded is not None and recorded != command:
+                # Another turn already acted on this event: replay its command, not a second card.
+                return self.card_create(
+                    command_id, session_id=session_id, source_event=source_event, **recorded
+                )
         if skills:
             available = self.worker_skills(assignee)["skills"]
             names = {skill["name"] for skill in available}
@@ -175,47 +253,43 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 )
         profile = get_profile_dir(assignee)
         env = {**build_profile_secret_scope(profile), "HERMES_HOME": str(profile)}
-        command = {
-            "assignee": assignee,
-            "title": title,
-            "body": body,
-            "priority": priority,
-            "skills": skills or [],
-            "max_runtime_seconds": max_runtime_seconds,
-            "failure_limit": failure_limit,
-        }
         if game is None:  # a host with no default game: the assignee's own clone
             clone = Path(env.get("RESEARCH_WORKSPACE") or profile / "workspace")
         else:
-            # Store the explicit choice; profile settings never select or move a card.
-            command["game"] = game
             clone = clone_for(env, game)
             if game != env.get("RESEARCH_GAME"):
                 locate_game(game, self.context.env)
-            # Refresh default-game clones too before native Hermes branches the task.
-            prepare_clone(profile, env, game)
+            # Tasks branch from fetched origin/main, not the retained checkout.
+            # Bootstrap only a missing clone; never sync over its local work.
+            if not (clone / ".git").exists():
+                prepare_clone(profile, env, game)
+        # A card may cite only records that exist in its game: the worker reads them there.
+        unknown = unknown_references(clone, body)
+        if unknown:
+            raise ResearchError(
+                {
+                    "ok": False,
+                    "error": {
+                        "reason": "unknown_records",
+                        "message": "The body cites records that are not on this game's "
+                        "canonical main. Cite only ids from records_find/records_show "
+                        "for the card's game, or describe the work without them.",
+                        "details": {"game": game, "unknown": unknown},
+                    },
+                }
+            )
         payload = json.dumps(command, sort_keys=True)
         with closing(connection()) as conn:
             # Serialize lookup and creation in the native task database. The task
             # and its immutable creation arguments commit together.
             with kb.write_txn(conn):
-                key = f"command:{command_id}"
-                existing = next(
-                    (
-                        task
-                        for task in kb.list_tasks(conn, include_archived=True)
-                        if task.idempotency_key == key
-                    ),
-                    None,
-                )
+                existing, recorded = creation_command(conn, key)
                 if existing:
                     task_id = existing.id
-                    prior = conn.execute(
-                        "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command'",
-                        (task_id,),
-                    ).fetchone()
-                    recorded = json.loads(prior["payload"])
                     if recorded != json.loads(payload):
+                        if source_event:
+                            # Another first creation won the race; a retry replays its command.
+                            raise ValueError("source_event was just used; retry to get its card")
                         raise ValueError("command_id was already used with different arguments")
                 else:
                     git(clone, "fetch", "origin")
@@ -288,8 +362,11 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 "subscribed": subscribe(conn, task_id),
             }
 
-    def card_list(self, filters=None):
-        filters = CardFilters.model_validate(filters or {}).model_dump(exclude_none=True)
+    def card_list(self, filters=None, **fields):
+        """``fields`` are CardFilters' fields as the tool passes them; ``filters`` is the
+        older nested form of the same, still accepted."""
+        filters = CardFilters.model_validate({**(filters or {}), **fields})
+        filters = filters.model_dump(exclude_none=True)
         from hermes_cli import kanban_db as kb
 
         with closing(connection()) as conn:
@@ -344,8 +421,12 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 raise ValueError("outcome must be done or archived")
             return {"changed": changed}
 
-    def _admit_effect(self, id, run_id, kind, payload):
-        """Native archive and publication admission use the same transaction boundary."""
+    def _admit_effect(self, id, run_id, kind, payload, allow_blocked=False):
+        """Native archive and publication admission use the same transaction boundary.
+
+        Effects require the card's latest native run. ``allow_blocked`` (upload only) also
+        admits a blocked card whose latest run has ended, so a verified build staged before
+        the worker blocked can be uploaded; a running card never publishes."""
         from hermes_cli import kanban_db as kb
 
         with closing(connection()) as conn, kb.write_txn(conn):
@@ -355,12 +436,19 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 "SELECT 1 FROM task_events WHERE task_id=? AND kind='publication_revoked' LIMIT 1",
                 (id,),
             ).fetchone()
+            latest = max(runs, key=lambda run: run.id) if runs else None
+            blocked = allow_blocked and task.status == "blocked" and task.current_run_id is None
             if (
                 revoked
-                or task.status != "done"
-                or not runs
-                or max(run.id for run in runs) != run_id
+                or not (task.status == "done" or blocked)
+                or latest is None
+                or latest.id != run_id
+                or latest.ended_at is None
             ):
+                if allow_blocked:
+                    raise ValueError(
+                        "Only the latest ended native run of a completed or blocked card may upload"
+                    )
                 raise ValueError("Only the latest completed native run may publish")
             kb._append_event(conn, id, kind, payload, run_id=run_id)
             return task
@@ -389,8 +477,17 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             run_id,
             "upload_admitted",
             {"build_dir": build_dir, "name": name, "experiment": experiment},
+            allow_blocked=True,
         )
         worktree = resolve_workspace(task, board=BOARD)
+        # Native completion can remove the checkout and its local branch. The researcher
+        # staged its result on origin; restore that published result before reading artifacts.
+        git(worktree, "fetch", "origin", f"{task.branch_name}:refs/remotes/origin/{task.branch_name}")
+        git(worktree, "merge", "--ff-only", f"origin/{task.branch_name}")
+        # Upload only the staged branch, never local commits the worker did not push
+        # (a blocked worker's checkout is still its own).
+        if git(worktree, "rev-parse", "HEAD") != git(worktree, "rev-parse", f"origin/{task.branch_name}"):
+            raise ValueError("The task checkout has commits that are not staged; upload only staged builds")
         artifact = (worktree / build_dir).resolve()
         if Path(build_dir).is_absolute() or not artifact.is_relative_to(worktree.resolve()):
             raise ValueError("build_dir must be inside the task's committed worktree")

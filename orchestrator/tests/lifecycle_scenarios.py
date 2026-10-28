@@ -77,10 +77,13 @@ def game_cards(root, home, args):
         board.card_create(**{**game_args, "game": None})
     with TestCase().assertRaisesRegex(Exception, "not found"):
         board.card_create(**{**game_args, "command_id": "game:absent", "game": "absent"})
+    with TestCase().assertRaisesRegex(Exception, "not on this game's canonical main"):
+        board.card_create(**{**game_args, "command_id": "game:invented",
+                             "body": "Extend E-01K6Z3V8QXA1B2C3D4E5F6G7H8."})
     # An omitted game stays neutral, even when a caller still carries an old profile default.
     default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
     assert board._card_game(default_card["id"]) is None
-    # Explicitly choosing the assignee's configured game still refreshes its doctrine.
+    # Explicitly choosing the assignee's configured game preserves task scope.
     with patch(
         "agent.secret_scope.build_profile_secret_scope",
         return_value={**env, "RESEARCH_WORKSPACE": str(researcher / "workspace")},
@@ -89,10 +92,6 @@ def game_cards(root, home, args):
             **{**args, "command_id": "game:selected-default", "game": "default-game"}
         )["card"]
     assert board._card_game(selected_card["id"]) == "default-game"
-    assert (
-        git(researcher / "workspace", "show", f"{selected_card['branch_name']}:AGENTS.md")
-        == "current doctrine"
-    )
     legacy = Board(Context(home, dict(os.environ))).card_create(
         **{**args, "command_id": "game:legacy"}
     )["card"]
@@ -116,6 +115,68 @@ def game_cards(root, home, args):
         ("newgame", ("workspace", "bootstrap")),
         ("newgame", ("workspace", "integrate")),
     ], calls
+
+
+def blocked_upload(board, args):
+    """#29: a worker that staged a verified build and then blocked (e.g. waiting on
+    experiment results) can have that build uploaded. Other publication effects still
+    need a completed card, and a running run never publishes."""
+    card = board.card_create(**{**args, "command_id": "blocked:upload"})["card"]
+    with closing(connection()) as conn:
+        task = kb.claim_task(conn, card["id"])
+        worktree = resolve_workspace(task, board="autoresearch")
+        set_workspace_path(conn, task.id, worktree)
+    git(worktree, "config", "user.name", "Lifecycle test")
+    git(worktree, "config", "user.email", "test@example.invalid")
+    build = worktree / "build-evidence/verified"
+    build.mkdir(parents=True)
+    (build / "version.json").write_text('{"artifact": "policy.bas"}\n')
+    git(worktree, "add", ".")
+    git(worktree, "commit", "-m", "stage verified build")
+    git(worktree, "push", "origin", task.branch_name)
+    staged = git(worktree, "rev-parse", "HEAD")
+    with patch("orchestrator.board.Research.call") as effect:
+        with TestCase().assertRaisesRegex(ValueError, "may upload"):
+            board.upload_build(task.id, task.current_run_id, "build-evidence/verified", "policy")
+        effect.assert_not_called()
+    with closing(connection()) as conn:
+        assert kb.block_task(conn, task.id, reason="Waiting on XP results", kind="needs_input")
+        ended = kb.get_task(conn, task.id)
+        assert ended.status == "blocked" and ended.current_run_id is None
+    with patch("orchestrator.board.Research.call") as effect:
+        for operation, arguments in (
+            (board.workspace_integrate, (staged,)),
+            (board.submit_requested_version, ("V-blocked", "strategy.md", "Submit it", "league_selected")),
+            (board.champion_submit, ("E-blocked", "league_selected")),
+            (board.bootstrap_champion, ("V-blocked", "league_selected")),
+            (board.game_install, ("newgame",)),
+        ):
+            with TestCase().assertRaisesRegex(ValueError, "latest completed"):
+                operation(task.id, task.current_run_id, *arguments)
+        effect.assert_not_called()
+    # A local commit the blocked worker never staged is not uploadable.
+    (worktree / "scratch").write_text("unstaged\n")
+    git(worktree, "add", "scratch")
+    git(worktree, "commit", "-m", "local only")
+    with patch("orchestrator.board.Research.call") as effect:
+        with TestCase().assertRaisesRegex(ValueError, "not staged"):
+            board.upload_build(task.id, task.current_run_id, "build-evidence/verified", "policy")
+        effect.assert_not_called()
+    git(worktree, "reset", "--hard", staged)
+    with patch("orchestrator.board.Research.call", return_value={"accepted": True}) as effect:
+        result = board.upload_build(task.id, task.current_run_id, "build-evidence/verified", "policy")
+        assert result == {"accepted": True}
+        assert effect.call_args_list[0].args[:2] == ("softmax", "upload-build")
+    # Once the worker resumes, the ended run can no longer publish.
+    assert board.card_answer(task.id, "Results are in")["unblocked"]
+    with closing(connection()) as conn:
+        resumed = kb.claim_task(conn, task.id)
+    with patch("orchestrator.board.Research.call") as effect:
+        for run_id in (task.current_run_id, resumed.current_run_id):
+            with TestCase().assertRaisesRegex(ValueError, "may upload"):
+                board.upload_build(task.id, run_id, "build-evidence/verified", "policy")
+        effect.assert_not_called()
+    board.card_close(task.id, "archived")
 
 
 def main():
@@ -192,6 +253,22 @@ def main():
     assert task_id in cards[0]["branch_name"]
     with TestCase().assertRaisesRegex(ValueError, "different arguments"):
         board.card_create(**{**args, "body": "Different work under the same command"})
+    # #18: a chat turn and a background wake acting on one event get one card, even with
+    # their own command IDs and wording.
+    chat = board.card_create(
+        **{**args, "command_id": "chat:follow-up", "source_event": "task_runs:9:xp_terminal"}
+    )["card"]
+    wake = board.card_create(
+        **{
+            **args,
+            "command_id": "wake:follow-up",
+            "source_event": "task_runs:9:xp_terminal",
+            "title": "Follow up the finished experiment",
+            "body": "Differently worded by the wake turn",
+        }
+    )["card"]
+    assert wake["id"] == chat["id"] and wake["title"] == chat["title"]
+    board.card_close(chat["id"], "archived")
     with closing(connection()) as conn:
         assert kb.parent_ids(conn, task_id) == []
         task = kb.claim_task(conn, task_id)
@@ -333,6 +410,7 @@ def main():
                 publisher.id, publisher_run, "V-ready", "strategy.md", "Submit", "league_selected"
             )
         remote.assert_not_called()
+    blocked_upload(board, args)
     game_cards(root, home, args)
     # Independent assignments coexist, with native ownership of each run.
     for index in range(1, 4):
@@ -342,6 +420,8 @@ def main():
         with closing(connection()) as conn:
             assert kb.claim_task(conn, card["id"]) is not None
             assert kb.claim_task(conn, card["id"]) is None
+    assert len(board.card_list(limit=2)) == 2
+    assert len(board.card_list(filters={"limit": 1})) == 1  # the older nested form
     print(json.dumps({"ok": True, "tasks": len(board.card_list()), "historical_cases": [20, 26]}))
 
 

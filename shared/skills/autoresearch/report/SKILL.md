@@ -21,7 +21,7 @@ Read `doctrine/communication.md`. The orchestrator is the reader; it talks to th
    `note: noted`. It outranks your own plan. Do not ask the user directly.
 5. Continue independent work. If an answer is necessary to proceed, follow `card` to preserve
    work and call `kanban_block` with the question as its reason. Never wait for XP this way.
-6. Send one `highlight:` per supported/falsified hypothesis, verified claim, observed promotion
+6. Send one `highlight:` per supported/falsified hypothesis, verified claim, observed champion change
    or surprising result. Do not describe a candidate upload as a promotion.
 7. Put proposed follow-up work in a `suggestion:` or `metadata.next`, with purpose and refs.
    The orchestrator decides what runs next; do not create a card yourself.

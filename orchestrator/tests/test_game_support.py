@@ -49,6 +49,18 @@ def test_summary_omits_documents_and_reads_exact_coworld(discovery):
     assert calls == ["/observatory/v2/leagues/league_pudge", "/observatory/v2/coworlds/cow_pudge"]
 
 
+@pytest.mark.parametrize("game,artifact", [
+    (None, "container"),  # Coworld's default player_runtime is platform-hosted
+    ({"player_runtime": "platform-hosted"}, "container"),
+    ({"player_runtime": "game-hosted"}, "file"),
+])
+def test_policy_artifact_follows_the_manifest_player_runtime(discovery, game, artifact):
+    client, _, coworld, _ = discovery
+    if game is not None:
+        coworld["manifest"]["game"] = game
+    assert client.game_support("league_pudge")["policy_artifact"] == artifact
+
+
 def test_unicode_pages_reconstruct_document_and_changed_release_fails(discovery):
     client, _, coworld, _ = discovery
     index = client.game_support("league_pudge")
@@ -121,13 +133,27 @@ def test_document_arguments_survive_subprocess_adapter(shared_fixture):
     ]
 
 
+def test_player_champion_reads_one_player_and_points_to_standings(shared_fixture):
+    result = Research(shared_fixture).player_champion("league_pudge", "player_x")
+    assert result["args"] == [
+        "softmax", "player-champion", "--league", "league_pudge", "--player", "player_x",
+    ]
+    # The tool was called leaderboard while returning one champion; standings are league_players.
+    assert "leaderboard" not in TOOLS
+    assert "league_players" in TOOLS["player_champion"][1]
+
+
 def test_advertised_filters_reject_the_observed_sort_error():
-    schema = TOOLS["card_list"][2]["filters"]
+    # The filters are top-level parameters, so the natural card_list(limit=5) validates.
+    schema = {"type": "object", "properties": TOOLS["card_list"][2], "required": TOOLS["card_list"][3]}
+    assert Draft202012Validator(schema).is_valid({"limit": 5})
     assert Draft202012Validator(schema).is_valid({"order_by": "updated", "limit": 10})
     assert not Draft202012Validator(schema).is_valid({"order_by": "updated_at"})
+    assert not Draft202012Validator(schema).is_valid({"limit": 0})
     with pytest.raises(ValidationError):
         CardFilters(order_by="updated_at")
-    assert not Draft202012Validator(schema).is_valid({"league_id": "invented"})
+    with pytest.raises(ValidationError):
+        CardFilters(league_id="invented")
     assert CardFilters().limit == 20
 
 
@@ -164,8 +190,8 @@ def test_starter_read_verifies_bytes_and_pins_pagination(discovery):
 
 
 def test_static_readiness_detects_stubs_and_host_dependencies(tmp_path):
-    from ide_research_core.games.readiness import binding_readiness
     from ide_research_core.games.loader import BINDING_NAMES
+    from ide_research_core.games.readiness import binding_readiness
 
     (tmp_path / "stub.py").write_text('raise NotImplementedError("TODO")')
     (tmp_path / "evaluate.py").write_text('print("real evaluator")')

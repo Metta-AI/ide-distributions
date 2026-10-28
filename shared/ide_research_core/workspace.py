@@ -434,6 +434,9 @@ def agents_md(root: Path) -> str | None:
         f"<!-- doctrine-version: {version} -->\n"
         "# Research doctrine\n\n"
         f'Doctrine version {version}. Run the research CLI as `"$RESEARCH_CLI"`.\n\n'
+        "These are the rules for a researcher working a claimed card. The orchestrator does not\n"
+        "claim cards: it reviews researchers' work against these rules, and where they conflict\n"
+        "with its own SOUL, the SOUL wins.\n\n"
     )
     parts = [
         (root / "doctrine" / name).read_text(encoding="utf-8")

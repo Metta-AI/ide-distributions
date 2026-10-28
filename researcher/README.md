@@ -39,16 +39,19 @@ What a researcher may and may not do:
 | | Researcher | Enforced by |
 |---|---|---|
 | Upload builds, launch and read XP, write records, KB and stats in its worktree | yes | |
-| Submit to the league, bootstrap or accept a champion (`promotion ...`) | no | `approvals.deny` in `config.yaml` |
+| Submit to the league, bootstrap or accept a champion (`champion ...`) | no | `approvals.deny` in `config.yaml` |
 | Integrate into `main` (`workspace integrate`) or install a game folder (`game install`) | no | `approvals.deny`, and the commands refuse in a researcher profile |
 | Create, link or schedule cards | no | the `researcher_guard` plugin |
 | Run `git push` (any branch) | no, `workspace stage` pushes the card branch | the `researcher_guard` plugin |
-| Change `strategy/STRATEGY.md`, `control/`, `promotions/` | no | `workspace integrate` refuses |
+| Change `strategy/STRATEGY.md`, `control/`, `champion-submissions/` | no | `workspace integrate` refuses |
 | Force pushes, `coworld` platform mutations, `softmax login`, `player use` | no | `approvals.deny` |
 
 The `researcher_tools` plugin adds `capabilities` (every tool and skill in the session) and
 `host_capabilities` (installed executables, writable places, missing game host requirements;
-it runs nothing).
+it executes no game binding). Exact executable/location paths are in `runtime`; game binding prefixes
+include `argv` and `cwd`. Append arguments to those prefixes instead of guessing the
+interpreter under the game installation. `execution` reports the current session approval
+mode and active unattended contexts; these observations do not approve commands.
 
 There is no spend management in this profile on purpose: the hosting allowance and Hermes's
 own limits (`agent.max_turns`, `agent.run_budget_seconds`, card runtime and retry limits) are
@@ -164,7 +167,7 @@ Then, for example:
 | `source` | `fetch` | read-only snapshots of public GitHub repositories |
 | `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-build`, `leaderboard`, `game-version`, `standings`, `league-episodes`, `league-results`, and the discovery reads (`discover-leagues`, `league-players`, `game-support`, `player-champion`, `player-result`) | every platform action of a researcher; `exec -- <coworld\|softmax> <args>` runs any other real CLI command as the Player (identity switches and `--server` refused) |
 | `workspace` | `stage`, `integrate`, `merged`, `publish`, `bootstrap` | `integrate` and `publish` are the orchestrator's; `bootstrap --game G` prepares another game's clone |
-| `promotion` | `submit`, `bootstrap`, `status`, `accept` | the orchestrator's; denied to researchers |
+| `champion` | `submit`, `submit-requested`, `bootstrap`, `pending`, `submitted`, `status`, `accept`, `migrate` | the orchestrator's; denied to researchers |
 
 Every command prints one JSON object: `{"ok": true, "data": ...}` or
 `{"ok": false, "error": {"reason", "message", "details"?}}`.

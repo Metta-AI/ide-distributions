@@ -116,6 +116,7 @@ COMMAND_FLAGS = {
     "kb hubs": "--size-limit-tokens",
     "kb index": "--token-budget",
     "game show": "",
+    "game build-container": "--context --strategy --out --dockerfile",
     "game list": "",
     "game new": "--name --league --title --source --source-ref --mixin --mixin-ref --out",
     "game check": "--name --root",

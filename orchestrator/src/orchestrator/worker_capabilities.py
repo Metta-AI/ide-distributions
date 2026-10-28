@@ -34,6 +34,8 @@ class WorkerCapabilities:
         # Do not inherit the coordinator's modules, platform, task or credentials.
         env = {
             "PATH": os.environ["PATH"],
+            # The endpoint is workspace configuration, not a profile credential.
+            **{key: os.environ[key] for key in ("BUILDKIT_HOST",) if key in os.environ},
             **build_profile_secret_scope(profile),
             "HERMES_HOME": str(profile),
             "HERMES_PROFILE": request.assignee,
@@ -58,7 +60,8 @@ class WorkerCapabilities:
 from hermes_cli.plugins import discover_plugins
 discover_plugins()
 from ide_research_core.session_catalog import capabilities
-print(json.dumps(capabilities(query=sys.argv[1])))
+from ide_research_core.host_capabilities import handle
+print(json.dumps({"catalog": capabilities(query=sys.argv[1]), "host": json.loads(handle())}))
 """,
                 request.query,
             ],
@@ -69,10 +72,14 @@ print(json.dumps(capabilities(query=sys.argv[1])))
             text=True,
             timeout=60,
         )
+        discovered = json.loads(catalog.stdout)
+        if not discovered["host"]["ok"]:
+            raise RuntimeError(discovered["host"]["error"])
         result = {
             "status": "available",
             "assignee": request.assignee,
-            "catalog": json.loads(catalog.stdout),
+            "catalog": discovered["catalog"],
+            "host": discovered["host"]["data"],
             "scope": "Installed worker CLI configuration; task overrides and approval gates still apply.",
             "execution_verified": False,
         }

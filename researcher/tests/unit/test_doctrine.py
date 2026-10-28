@@ -37,16 +37,21 @@ def test_every_rule_code_used_in_src_exists():
     assert used <= set(rule_ids())
 
 
-def test_tool_fault_rule_preserves_work_and_blocks():
+def test_tool_fault_rule_keeps_going_and_reports():
     text = (DOCTRINE / "research-agent.md").read_text(encoding="utf-8")
     rule = text[text.index("\nD-26.") : text.index("\nD-27.")]
     for required in (
+        "Keep going when a tool fails",
+        "Never edit the installed",  # work around a broken tool with a copy, never patch it
+        "preserve failed reports",
+        "Report what failed",
         "help_request:",
         "kanban_block",
-        "Preserve failed reports",
-        "Do not change installed game tools",
+        "only when no reasonable way remains",
     ):
         assert required in rule
+    refusals = text[text.index("\nD-27.") :]
+    assert "A crashing or broken tool is not a refusal" in refusals
 
 
 def test_worker_roles_and_communication_channels():
@@ -81,3 +86,21 @@ def test_version_is_a_single_integer():
 
 def test_version_bumped_for_native_card_contract():
     assert int((DOCTRINE / "VERSION").read_text(encoding="utf-8")) >= 12
+
+
+def test_skills_record_only_decision_values_the_schema_accepts():
+    """The experiment decision enum was renamed (promote -> submit, #59) while skills kept the
+    old value; shipped instructions must name only values the schema accepts."""
+    import json
+
+    schema = json.loads(
+        (ROOT / "src/ide_research_core/schemas/entity/experiment.json").read_text(encoding="utf-8")
+    )
+    text = json.dumps(schema)
+    for value in ("submit", "hold", "refute", "invalid"):
+        assert f'"{value}"' in text
+    shipped = [*(ROOT / "skills").rglob("*.md"), *DOCTRINE.glob("*.md"), *(ROOT / "games").rglob("*.md")]
+    offenders = [str(path) for path in shipped if "`promote`" in path.read_text(encoding="utf-8")]
+    assert not offenders, offenders
+    review = (ROOT / "skills/autoresearch/review-xp/SKILL.md").read_text(encoding="utf-8")
+    assert all(f"`{value}`" in review for value in ("submit", "hold", "refute", "invalid"))

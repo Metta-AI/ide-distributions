@@ -61,6 +61,7 @@ from ide_research_core.softmax_tool.protocol import (
     ANSWER_USED,
     ANSWER_WAITING,
     ANSWER_YES,
+    ArtifactType,
     CreditDenied,
     Identity,
     LeagueNotChosen,
@@ -82,7 +83,7 @@ CREDITS_PATH = "/observatory/usage/me/credits"
 # ``cogent_get``): a player credential reads its own cogent (``cogents/queries._owned``). The
 # body is a ``PermitAsk``: ``{kind, action, ref, why, at, amount?, answer?: {yes, at},
 # used?: {at}}``.
-ASK_PATH = "/v2/cogents/{player}/c/asks/{key}"
+ASK_PATH = "/observatory/v2/cogents/{player}/c/asks/{key}"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
@@ -106,7 +107,8 @@ class SoftmaxClient:
         self._clock = clock
         self._budget = (
             EpisodeBudget(budget_path(env), int(env["RESEARCH_EPISODE_LIMIT"]))
-            if "RESEARCH_EPISODE_LIMIT" in env else None
+            if "RESEARCH_EPISODE_LIMIT" in env
+            else None
         )
 
     def _require_player(self) -> Identity:
@@ -215,7 +217,9 @@ class SoftmaxClient:
         if self._budget is not None:
             self._budget.reserve(key, spec)
         result = xp.create(self._cli, experiment, batch, attempt, spec, seed, arm)
-        if self._budget is not None and isinstance(result, (CreditDenied, PermitRequired, LeagueNotChosen)):
+        if self._budget is not None and isinstance(
+            result, (CreditDenied, PermitRequired, LeagueNotChosen)
+        ):
             self._budget.release_refused(key)
         return result
 
@@ -230,10 +234,11 @@ class SoftmaxClient:
 
     # --- policies -------------------------------------------------------
 
-    def upload(self, artifact: Path, name: str) -> str:
-        """Upload a game-hosted policy file or directory; return its ``<name>:v<N>`` label."""
+    def upload(self, artifact: Path, name: str, *, artifact_type: ArtifactType = "file") -> str:
+        """Upload a game-hosted file or OCI image archive; return its ``<name>:v<N>`` label."""
         self._require_player()
-        args = ["upload-policy", "--file", str(Path(artifact).resolve()), "--name", name]
+        option = "--image-archive" if artifact_type == "oci-image" else "--file"
+        args = ["upload-policy", option, str(Path(artifact).resolve()), "--name", name]
         result = self._cli.run("coworld", args, timeout=UPLOAD_TIMEOUT_S)
         label = _line_value(result.stdout, "Upload complete:")
         if label is None:

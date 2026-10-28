@@ -1,12 +1,11 @@
 ---
 name: build-upload
-description: Use when preparing file policies for coordinator upload.
+description: Use when preparing file or container policies for upload.
 ---
 
 # Build and hand off
 
-Use this procedure when the selected publication tool accepts verified file artifacts.
-For other artifact types, discover the appropriate tool and applicable procedure before acting.
+Use this procedure for verified game-hosted files and OCI container archives.
 
 Build and verify through the game’s `build` binding. The coordinator owns upload after
 the native task completes; researchers never publish artifacts directly.
@@ -25,8 +24,26 @@ A raw Coworld upload bypasses these records; do not substitute it or return a pl
 
 Use the installed game's build binding and declared host requirements. These instructions do not assume Docker,
 a BuildKit endpoint, or commands absent from the installed CLI. If a required capability is unavailable,
-report it through `help_request:` before starting the build. A Kubernetes runtime change alone does not add
-archive publication support to the installed game binding and record-owning upload tool.
+report it through `help_request:` before starting the build.
+
+## Dockerfile policies on a configured BuildKit host
+
+Use the installed CLI binding, which writes both the archive and `version.json`:
+
+```bash
+"$RESEARCH_CLI" game build-container --context player --strategy strategy/STRATEGY.md --out build-evidence/candidate
+```
+
+The output must be a new directory outside the Dockerfile context. This command uses the installed
+`coworld build-policy`, preserves native build logs, and records the archive hash, strategy hash,
+source commit, required build result, and evaluation `not_run`. Failed builds have no publishable receipt.
+Review the requested change in the artifact and run the game's additional required checks before completion.
+Stage the complete build as usual. The coordinator's existing `upload_build` reads `artifact_type: oci-image`,
+uploads with the assigned Player credential, and writes the ordinary version record and uploaded event.
+No manual archive conversion, credential setup, raw upload, or additional queue is needed.
+
+The host must provide `BUILDKIT_HOST`, `buildctl`, and a Coworld CLI with `build-policy` and
+`upload-policy --image-archive`. File-policy builds on existing hosts keep their game binding and upload behavior.
 
 Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 
@@ -77,5 +94,5 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 - A gate fails: do not upload. Fix the candidate within the experiment's one change, or
   finish `failed` with the gate output in the journal. Never edit the design.
-- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `card`, "Tool fault").
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: follow D-26 (work around it, keep going and report it). A failed gate verdict is a result, not a fault: never skip or weaken a gate.
 

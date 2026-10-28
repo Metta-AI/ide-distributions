@@ -12,7 +12,7 @@ dependencies = [
     "python-ulid",
     "scipy",
     "pandas",
-    "coworld>=0.1.64,<0.2",
+    "coworld>=0.1.66,<0.2",
     "softmax-cli>=0.26.40,<0.27",
 ]
 
@@ -38,3 +38,5 @@ addopts = "-m 'not hermes'"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored with SHA-256 provenance (PROVENANCE.md); keep bytes as pinned.
+extend-exclude = ["games/gota/compiler"]

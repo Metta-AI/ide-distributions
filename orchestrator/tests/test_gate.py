@@ -11,6 +11,7 @@ import pytest
 from conftest import add_wait
 
 from orchestrator.gate import evaluate
+from orchestrator.storage import mark_league_result_seen
 
 QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
@@ -18,9 +19,12 @@ QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 class Platform:
     def __init__(
         self, *, xp=None, credits=0, answer=None, conflict=None, in_flight=None, paused=False,
-        migration=None,
+        migration=None, submitted=None, league_result=None,
     ):
         self.migration = migration
+        self.submitted = submitted
+        self.league_result = league_result
+        self.league_reads = []
         self.xp = xp or []
         self.balance = credits
         self.answer = answer
@@ -39,6 +43,10 @@ class Platform:
         assert experiment == "E-1"
         return self.xp
 
+    def latest_league_result(self, league_id, player_id):
+        self.league_reads.append((league_id, player_id))
+        return {"available": self.league_result is not None, "result": self.league_result}
+
     def credits(self):
         return {"available": True, "credits": self.balance}
 
@@ -51,6 +59,8 @@ class Platform:
             return self.migration
         if args == ("champion", "pending"):
             return self.in_flight
+        if args == ("champion", "submitted"):
+            return self.submitted
         if args == ("records", "summary"):
             return {"champion": None}
         assert args == ("champion", "status")
@@ -86,6 +96,8 @@ def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, p
     assert result["wakeAgent"] is True
     event = result["context"]["pending"][0]
     assert event["kind"] == kind
+    # #18: status and wakes name the event the same way, for card_create(source_event=...).
+    assert event["source_event"] == f"task_runs:1:{kind}"
     assert evaluate(context, platform, platform, QUIET_MINUTE) == result
 
 
@@ -227,3 +239,55 @@ def test_a_migration_on_the_poll_wakes_the_coordinator(context, board_file):
     now = QUIET_MINUTE.replace(minute=10)
     pending = evaluate(context, platform, platform, now)["context"]["pending"]
     assert pending == [{"kind": "records_migrated", "tick": now.isoformat(), "migration": migration}]
+
+
+SUBMITTED = {
+    "id": "CS-1",
+    "submission_id": "sub_1",
+    "league_id": "lg_1",
+    "platform_policy_version_id": "pv-ours",
+    "stage": "published",
+}
+OUR_MATCH = {"episode": {"id": "ep_1", "policy_versions": [{"id": "pv-other"}, {"id": "pv-ours"}]}}
+
+
+def test_first_league_match_after_a_submission_wakes_once(context, board_file):
+    platform = Platform(submitted=SUBMITTED, league_result=OUR_MATCH)
+    now = QUIET_MINUTE.replace(minute=10)
+    pending = evaluate(context, platform, platform, now)["context"]["pending"]
+    assert pending == [
+        {
+            "kind": "league_result",
+            "champion_submission": "CS-1",
+            "submission_id": "sub_1",
+            "league_id": "lg_1",
+            "policy_version_id": "pv-ours",
+            "result": OUR_MATCH,
+            "next": pending[0]["next"],
+            "source_event": "champion_submissions:CS-1:league_result",
+        }
+    ]
+    assert "without asking" in pending[0]["next"]
+    assert platform.league_reads == [("lg_1", "ply_test")]
+    # The wake records the submission as followed up; later matches neither wake nor read.
+    mark_league_result_seen(context, "CS-1")
+    assert evaluate(context, platform, platform, now) == {"wakeAgent": False}
+    assert platform.league_reads == [("lg_1", "ply_test")]
+
+
+def test_no_league_result_wake_before_our_version_plays(context, board_file):
+    now = QUIET_MINUTE.replace(minute=10)
+    for result in (None, {"episode": {"policy_versions": [{"id": "pv-previous"}]}}):
+        platform = Platform(submitted=SUBMITTED, league_result=result)
+        assert evaluate(context, platform, platform, now) == {"wakeAgent": False}
+        assert platform.league_reads == [("lg_1", "ply_test")]
+
+
+def test_no_platform_read_without_a_submission_awaiting_a_match(context, board_file):
+    platform = Platform(league_result=OUR_MATCH)
+    for now in (QUIET_MINUTE, QUIET_MINUTE.replace(minute=10)):
+        assert evaluate(context, platform, platform, now) == {"wakeAgent": False}
+    assert platform.league_reads == []
+    platform = Platform(submitted=SUBMITTED, league_result=OUR_MATCH)
+    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    assert platform.league_reads == []

@@ -11,6 +11,7 @@ the canonical workspace.
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from ide_research_core import runctx
@@ -108,6 +109,13 @@ def _new(args, store: RecordStore) -> int:
 
 
 def _show(args, store: RecordStore) -> int:
+    """A record by id. Also takes the other references the system hands out: an ``ar://``
+    reference (resolved like ``resolve`` in ``$RESEARCH_GAME``), a champion submission id
+    (``CS-``), its legacy promotion id (``P-``) or the platform ``sub_`` id it recorded."""
+    if args.id.startswith("ar://"):
+        return _ok(_resolve_uri(store, args.id, None, os.environ.get("RESEARCH_GAME")))
+    if args.id.startswith(("CS-", "P-", "sub_")):
+        return _show_champion_submission(args.id, store)
     id_ = _check_id(args.id)
     meta, body = store.load(id_)
     data = {"id": id_, "entity": entity_of_id(id_).name, "path": str(store.path_of(id_))}
@@ -146,7 +154,9 @@ def _find(args, store: RecordStore) -> int:
 def _summary(args, store: RecordStore) -> int:
     """Topic and experiment ids by status, the loop's champion and when the plan last changed:
     what the orchestrator's ``status`` tool reads from the workspace."""
-    from ide_research_core import champion_submission  # the records group loads without the platform
+    from ide_research_core import (
+        champion_submission,  # the records group loads without the platform
+    )
 
     def by_status(entity: str) -> dict[str, list[str]]:
         grouped: dict[str, list[str]] = {}
@@ -170,8 +180,29 @@ def _summary(args, store: RecordStore) -> int:
     )
 
 
-def _resolve(args, store: RecordStore) -> int:
-    """The content an ``ar://`` reference names, at a workspace commit."""
+def _show_champion_submission(id_: str, store: RecordStore) -> int:
+    # Imported here, like _summary does: the records group loads without the platform.
+    from ide_research_core import champion_submission
+
+    # legacy_promotions renamed P-<ulid> to CS-<ulid>; free text still holds the old ids.
+    wanted = "CS-" + id_.removeprefix("P-") if id_.startswith("P-") else id_
+    for submission in champion_submission.load_all(store.layout.root):
+        if wanted in (submission.id, submission.submission_id):
+            path = f"{champion_submission.SUBMISSIONS_DIR}/{submission.id}.json"
+            data = {"id": submission.id, "entity": "champion_submission", "path": path}
+            return _ok({**data, "meta": submission.to_dict(), "body": ""})
+    if id_.startswith("sub_"):
+        raise RecordNotFound(
+            f"{id_} is a Softmax platform submission id that no champion submission in this "
+            "workspace recorded; read the league's live state with latest_league_result or "
+            "league_players instead"
+        )
+    raise RecordNotFound(
+        f"champion submission {wanted} not found on canonical main; status shows the current one"
+    )
+
+
+def _resolve_uri(store: RecordStore, uri: str, rev: str | None, game_name: str | None) -> dict:
     import base64
 
     from ide_research_core.games.loader import GameError
@@ -179,18 +210,23 @@ def _resolve(args, store: RecordStore) -> int:
     from ide_research_core.refs import resolve
 
     game = None
-    if args.game:
+    if game_name:
         try:
-            game = load_named_game(args.game)
+            game = load_named_game(game_name)
         except GameError as error:
             raise BadArguments(str(error)) from None
-    resolved = resolve(store.layout.root, args.uri, args.rev, game=game)
-    data = {"uri": args.uri, "path": resolved.path, "rev": resolved.rev}
+    resolved = resolve(store.layout.root, uri, rev, game=game)
+    data = {"uri": uri, "path": resolved.path, "rev": resolved.rev}
     try:
         data["content"] = resolved.content.decode("utf-8")
     except UnicodeDecodeError:
         data["content_base64"] = base64.b64encode(resolved.content).decode("ascii")
-    return _ok(data)
+    return data
+
+
+def _resolve(args, store: RecordStore) -> int:
+    """The content an ``ar://`` reference names, at a workspace commit."""
+    return _ok(_resolve_uri(store, args.uri, args.rev, args.game))
 
 
 def _validate(args, store: RecordStore) -> int:
@@ -253,7 +289,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     body_args(sub)
     sub.add_argument("--slug")
 
-    sub = command("show", _show, "print a record")
+    sub = command("show", _show, "print a record, an ar:// reference or a champion submission")
     sub.add_argument("id")
 
     sub = command("update", _update, "merge a patch into a record's front matter / body")

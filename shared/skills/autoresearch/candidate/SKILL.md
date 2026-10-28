@@ -21,12 +21,12 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 3. Keep the uploaded candidate binding and `strategy/candidates/<E-id>/STRATEGY.md` intact.
    They must describe the candidate actually evaluated. Read
    `"$RESEARCH_CLI" softmax leaderboard`; if the baseline changed, report that fact and
-   propose re-evaluation. Do not rewrite a frozen decision or promote against a different baseline.
+   propose re-evaluation. Do not rewrite a frozen decision or submit against a different baseline.
 4. Prepare the handoff fields for `card`. Set `experiment` to `{"id":"<E-id>","status":"reviewed","decision":"submit"}`,
    list the changed records, and put the candidate version and Result refs in `next`.
    The orchestrator receives the staged decision, stats, binding and candidate strategy.
 5. A `highlight:` reports the supported finding, not a submission that has not happened.
-   Leave `strategy/STRATEGY.md`, promotion records and platform submissions to the orchestrator.
+   Leave `strategy/STRATEGY.md`, champion-submission records and platform submissions to the orchestrator.
 6. After the review and comments are finished, follow `card` once: stage artifacts as the
    last workspace step, and complete with the prepared metadata.
 
@@ -68,9 +68,9 @@ When explicitly assigned a bootstrap card for a fresh installation with no champ
 ## When the handoff is not ready
 
 - Missing/invalid evaluation or candidate binding: report what is missing and recommend the
-  appropriate review/build work. Do not fabricate the promote decision.
+  appropriate review/build work. Do not fabricate the `submit` decision.
 - Identity refusal: report to the orchestrator and block; never change Player.
 - A game check fails: retain the evidence and report the policy/build failure. An `errored`
-  check or tooling traceback instead follows D-26 in `card`; do not retry the faulty tool.
+  check or tooling traceback instead follows D-26: work around it and report it.
 - A staging failure must be reported with the retained artifacts. Never claim the candidate
   is delivered to the orchestrator until the task branch is staged.

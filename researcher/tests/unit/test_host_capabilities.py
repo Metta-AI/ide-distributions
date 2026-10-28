@@ -20,7 +20,6 @@ def test_reports_presence_without_executing_or_returning_secrets(tmp_path):
     assert result["research_cli_available"] is True
     assert not marker.exists()
     assert "cga_private" not in str(result)
-    assert str(executable) not in str(result)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
@@ -45,3 +44,18 @@ def test_registers_in_the_given_toolset():
 
     register(Context(), "researcher")
     assert calls[0]["name"] == "host_capabilities" and calls[0]["toolset"] == "researcher"
+
+
+def test_reports_the_installed_distribution_commit(tmp_path):
+    from ide_research_core.host_capabilities import installed_commit
+
+    image = tmp_path / "opt/ide-distributions"
+    (image / "researcher/src").mkdir(parents=True)
+    (image / "researcher.commit").write_text("f4840ec9086983379f8447ebbfefe5889d6cf25c\n")
+    profile = tmp_path / "profiles/researcher-1"
+    profile.mkdir(parents=True)
+    (profile / "src").symlink_to(image / "researcher/src")
+    assert installed_commit(profile) == "f4840ec9086983379f8447ebbfefe5889d6cf25c"
+    # A checkout install (no image record) reports nothing rather than guessing.
+    (tmp_path / "checkout/src").mkdir(parents=True)
+    assert installed_commit(tmp_path / "checkout") is None

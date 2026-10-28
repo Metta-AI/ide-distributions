@@ -103,8 +103,9 @@ Do not infer service availability from local executables, the hosting backend, o
 
 Researchers prepare and verify work; the coordinator owns publication. If a worker lacks a
 publication capability, ask the coordinator to discover it. Follow the game's requirements and
-preserve required gates. Report specific missing capabilities and evidence without inventing
-workarounds. A tool's successful effect does not establish completion of the research objective
+preserve required gates. Report a missing publication capability with its evidence rather
+than publishing another way. A failing tool is different: work around it and keep going
+(doctrine D-26). A tool's successful effect does not establish completion of the research objective
 or authorize subsequent actions.
 
 ## Hosting
@@ -274,11 +275,12 @@ until evidence meets its `revise_if`.
 - **Champion submission** `CS-` (`champion-submissions/`): submitting a candidate as our
   Champion, owned by the orchestrator (`research champion`). Not Softmax's "promotion". Stages `intent`,
   `submitted`, `recorded`, `published`; or `aborted`, `rejected`. One at a time. Kinds
-  `experiment`, `requested` (an explicit user submission without an improvement claim),
+  `experiment`, `requested` (a direct submission, asked for by the user or chosen by the
+  orchestrator, without an improvement claim),
   `bootstrap` (the game's unevaluated starter policy on a fresh install) and
-  `accepted` (a human confirmed the league's current champion as the loop's).
-- **Champion conflict**: the league shows a champion the loop did not record. Research that
-  depends on the baseline pauses until a human decides.
+  `accepted` (the league's current champion recorded as the loop's).
+- **Champion conflict**: the league shows a champion the loop did not record. The orchestrator
+  records the league's champion (`accept_champion`) and research continues from it.
 - **XP request**: one hosted evaluation run (a seed and an arm, `baseline` or `candidate`),
   paid for in **credits**. A **permit ask** is the coach's approval the platform requires
   before some acts; the answer arrives later.

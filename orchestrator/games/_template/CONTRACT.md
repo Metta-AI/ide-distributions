@@ -139,3 +139,13 @@ placeholder.
 
 Gaps are reported and do not block: a binding or skill that is still the template's stub, a
 guide section still holding template text, and host requirements this host does not meet.
+
+## Container build artifacts
+
+For Dockerfile players on BuildKit hosts, a build binding may invoke
+`research game build-container --context DIR --strategy STRATEGY.md --out BUILD_DIR`.
+Declare `BUILDKIT_HOST` in `host_requirements.env` and `buildctl` in `host_requirements.tools`.
+The command writes the existing `version.json` contract with `artifact_type: oci-image` and the archive hash.
+Add any game-specific required gates before publication. The coordinator's `upload_build` authenticates and
+registers the archive through Coworld, preserving the normal version record and uploaded event.
+Omitted `artifact_type` continues to mean a game-hosted file; unknown types are rejected before upload.

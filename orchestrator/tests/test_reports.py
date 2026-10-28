@@ -49,7 +49,7 @@ def test_report_rejects_unsafe_or_nonregular_paths(report, path):
 
 def test_report_rejects_other_runs_commits_and_foreign_workspaces(report):
     reader, commit, snapshot = report
-    with pytest.raises(ValueError, match="latest completed"):
+    with pytest.raises(ValueError, match="latest ended run"):
         reader.card_report("t_test", 2, commit, "report.md")
     with pytest.raises(ValueError, match="not available"):
         reader.card_report("t_test", 3, "0" * 40, "report.md")
@@ -73,3 +73,29 @@ def test_report_refuses_existing_unrelated_commit_and_oversized_content(report, 
     git("commit", "-m", "large report")
     with pytest.raises(ValueError, match="read limit"):
         reader.card_report("t_test", 3, git("rev-parse", "HEAD"), "large.md")
+
+
+def test_blocked_card_reads_only_staged_commits_of_its_ended_run(report, context, tmp_path):
+    reader, commit, snapshot = report
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(context.workspace), *args], text=True).strip()
+    origin = tmp_path / "origin.git"
+    subprocess.check_call(["git", "init", "-q", "--bare", str(origin)])
+    git("remote", "add", "origin", str(origin))
+    git("push", "-q", "origin", "card/test")
+    (context.workspace / "local.md").write_text("not staged\n")
+    git("add", "local.md")
+    git("commit", "-m", "local only")
+    local = git("rev-parse", "HEAD")
+    snapshot["card"].update(status="blocked", current_run_id=None)
+    snapshot["runs"][0].update(status="blocked")
+    assert reader.card_report("t_test", 3, commit, "report.md", 0, 10)["commit"] == commit
+    with pytest.raises(ValueError, match="not available"):
+        reader.card_report("t_test", 3, local, "local.md")
+    snapshot["runs"][0].update(ended_at=None)
+    with pytest.raises(ValueError, match="latest ended run"):
+        reader.card_report("t_test", 3, commit, "report.md")
+    snapshot["runs"][0].update(ended_at=123)
+    snapshot["card"].update(status="running", current_run_id=3)
+    with pytest.raises(ValueError, match="latest ended run"):
+        reader.card_report("t_test", 3, commit, "report.md")

@@ -75,6 +75,7 @@ from ide_research_core.softmax_tool.protocol import (
     PERMIT_DECLINED,
     PERMIT_OVER_CAP,
     PERMIT_WAITING,
+    ArtifactType,
     CoachRefusal,
     CreditDenied,
     Identity,
@@ -446,7 +447,7 @@ class FakeSoftmax:
 
     # --- policies -------------------------------------------------------
 
-    def upload(self, artifact: Path, name: str) -> str:
+    def upload(self, artifact: Path, name: str, *, artifact_type: ArtifactType = "file") -> str:
         self._require_player()
         parameters = _artifact_parameters(Path(artifact))
 

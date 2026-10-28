@@ -23,10 +23,17 @@ tool_loop_guardrails:
 
 agent:
   max_turns: 150
-  run_budget_seconds: 5400
+  # Below card_create's default max_runtime_seconds (14,400), so a run ends before its card is
+  # killed; long enough for a hosted GotA native build (6,600-8,400 s).
+  run_budget_seconds: 12600
 
 approvals:
   mode: "off"
+  # Never prompt: "off" is Hermes's yolo mode. The per-context modes are backstops so an
+  # unattended run approves rather than blocks if the mode is ever reset.
+  cron_mode: approve
+  single_query_mode: approve
+  unattended_mode: approve
   # Hermes matches these over the whole command and over each command word's tail
   # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
   # Champion submission and other league submission belong to the orchestrator.
@@ -45,9 +52,15 @@ approvals:
     - "*softmax exec*coworld upload-policy*"
     - "*softmax exec*coworld xp-request create*"
     - "softmax login*"
+    - "softmax logout*"
+    - "softmax set-token*"
+    - "softmax get-token*"
+    - "*SOFTMAX_PLAYER_CREDENTIAL*"
     - "git push -f*"
     - "git push*--force*"
     - "git push* -f*"
+    - "git *push*--force*"
+    - "git push* +*"
     - "hermes kanban create*"
     - "hermes kanban link*"
     - "hermes kanban --board * create*"

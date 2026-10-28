@@ -143,3 +143,63 @@ def test_orchestrator_seeds_a_shipped_game_without_a_researcher(tmp_path):
     assert actions[1] == f"seeded {bare} from games/pudge-wars-basic/seed"
     assert (clone / "strategy/policy.bas").is_file()
     assert gitops.git(bare, "for-each-ref", "refs/heads/main")
+
+
+def test_status_lists_every_researcher_with_its_open_cards(tmp_path):
+    from orchestrator.context import Context
+    from orchestrator.service import researchers
+
+    profiles = tmp_path / "profiles"
+    for name, marker in (("orchestrator", False), ("researcher-1", True), ("researcher-2", True)):
+        (profiles / name).mkdir(parents=True)
+        (profiles / name / "config.yaml").write_text("{}")
+        if marker:
+            (profiles / name / "plugins" / "researcher_guard").mkdir(parents=True)
+    cards = [
+        {"id": "t_1", "assignee": "researcher-1", "status": "running"},
+        {"id": "t_2", "assignee": "researcher-1", "status": "ready"},
+        {"id": "t_3", "assignee": "researcher-1", "status": "done"},
+    ]
+    found = researchers(Context(profiles / "orchestrator", {}), cards)
+    assert found == [
+        {"name": "researcher-1", "installed": True, "running": ["t_1"], "queued": ["t_2"]},
+        {"name": "researcher-2", "installed": True, "running": [], "queued": []},
+    ]
+    # Hosting names its workers in the dispatcher allowlist; one it names but has not
+    # installed is reported as such.
+    (tmp_path / "config.yaml").write_text("kanban:\n  dispatch_profiles: researcher-2,researcher-3\n")
+    hosted = Context(profiles / "orchestrator", {})
+    assert [(r["name"], r["installed"]) for r in researchers(hosted, cards)] == [
+        ("researcher-2", True), ("researcher-3", False),
+    ]
+
+
+def test_card_bodies_may_cite_only_records_on_their_games_canonical_main(tmp_path):
+    from orchestrator.board import unknown_references
+
+    def git(cwd, *args):
+        subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+
+    known_experiment = "E-01K6Z3V8QXA1B2C3D4E5F6G7H8"
+    known_submission = "CS-01K6Z3V8QXA1B2C3D4E5F6G7H9"
+    canonical, clone = tmp_path / "canonical.git", tmp_path / "clone"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(canonical))
+    git(tmp_path, "clone", "-q", str(canonical), str(clone))
+    for path in (f"experiments/{known_experiment}--rush.md", f"champion-submissions/{known_submission}.json", "plan.md"):
+        (clone / path).parent.mkdir(parents=True, exist_ok=True)
+        (clone / path).write_text("x\n")
+    git(clone, "add", "-A")
+    git(clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "records")
+    git(clone, "push", "-q", "origin", "HEAD:main")
+
+    assert unknown_references(clone, "Plain work with no citations; see the rush notes.") == []
+    body = (
+        f"Follow ar://experiment/{known_experiment} after {known_submission}; read ar://file/plan.md.\n"
+        "Compare with H-01K6Z3V8QXA1B2C3D4E5F6G7HA (ar://result/R-01K6Z3V8QXA1B2C3D4E5F6G7HB) "
+        "and ar://file/notes/missing.md."
+    )
+    assert unknown_references(clone, body) == [
+        "H-01K6Z3V8QXA1B2C3D4E5F6G7HA",
+        "R-01K6Z3V8QXA1B2C3D4E5F6G7HB",
+        "ar://file/notes/missing.md",
+    ]

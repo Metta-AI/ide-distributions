@@ -61,7 +61,7 @@ satisfy a full-batch assignment. Do not wait in the session for admitted request
   holder and block with the exact dependency; do not loop or take its lock.
 - A retryable `platform` refusal or interrupted launch can replay the same batch/attempt to
   create only missing requests. If it still fails, preserve the state and block with the exact outstanding requests.
-- A tooling traceback, an `errored` check or `tool_missing` follows D-26 in `card`. Do not retry it.
+- A tooling traceback, an `errored` check or `tool_missing` follows D-26: work around it and report it.
 
 For a launch-only assignment completed with pending results, include optional native completion
 metadata naming the domain wait: `{"experiment":{"id":"E-..."},"awaiting":{"xp":["request-id"]}}`.

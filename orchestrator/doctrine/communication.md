@@ -16,7 +16,7 @@ Do not set another board or comment on another card.
 | `question:` | An answer needed from the orchestrator. Explain the choice, options and recommendation. |
 | `suggestion:` | Follow-up work, a priority change, or a skill/doctrine proposal with evidence. |
 | `help_request:` | Work cannot proceed. State what failed, what you tried and the command/error or missing information. |
-| `highlight:` | One supported/falsified hypothesis, newly verified claim, promotion observed in the field, or surprising result. |
+| `highlight:` | One supported/falsified hypothesis, newly verified claim, champion change observed in the field, or surprising result. |
 
 Example `kanban_comment` arguments:
 
@@ -35,7 +35,8 @@ your own plan and acknowledge it in a `note:` on your card. An unanswered questi
 2. Teach before you ask: explain any mechanics needed to understand the choice, or cite the
    claim that does. Include your recommendation.
 3. Keep internal steps out of the report unless they affect the next decision. Tool faults
-   need the exact command, error and affected refs so the orchestrator can arrange repair.
+   need the exact command, error and affected refs, and what you did instead, so the tool
+   gets fixed.
 4. Never send an empty comment. Use plain words and define unfamiliar terms.
 5. Point to records with `ar://` refs rather than copying their contents.
 6. Send one `highlight:` per event, not a second report of the same event. Correct an earlier

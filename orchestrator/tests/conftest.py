@@ -35,13 +35,14 @@ def board_file(context):
     path.parent.mkdir(parents=True)
     with sqlite3.connect(path) as conn:
         conn.executescript("""
-            CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, branch_name TEXT, body TEXT);
+            CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, branch_name TEXT, body TEXT,
+                                session_id TEXT);
             CREATE TABLE task_events (id INTEGER PRIMARY KEY, task_id TEXT, kind TEXT,
                                       payload TEXT);
             CREATE TABLE task_comments (id INTEGER PRIMARY KEY, task_id TEXT, author TEXT, body TEXT);
             CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, ended_at INTEGER,
                                     metadata TEXT);
-            INSERT INTO tasks VALUES ('card-1', 'done', 'card/test', '');
+            INSERT INTO tasks VALUES ('card-1', 'done', 'card/test', '', NULL);
         """)
     return path
 
@@ -61,7 +62,7 @@ with (Path(os.environ['HERMES_HOME']) / 'calls.jsonl').open('a') as output:
 if args == ['champion', 'migrate']:
     print(json.dumps({'ok': True, 'data': None}))
     raise SystemExit(0)
-if args == ['champion', 'pending']:
+if args in (['champion', 'pending'], ['champion', 'submitted']):
     print(json.dumps({'ok': True, 'data': None}))
     raise SystemExit(0)
 if 'refuse' in args:

@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-
 DISTRIBUTION_ROOT = Path(__file__).resolve().parents[2]  # .../researcher
 REPO_ROOT = DISTRIBUTION_ROOT.parent
 BOARD = "autoresearch"  # the Kanban board slug: fixed, whatever the install name

@@ -37,12 +37,11 @@ A user who asks the orchestrator about another coworld gets platform reads (`dis
 - Play has no default league. Its bundled build tools support explicitly selected GotA BASIC programs.
 - Private repositories. Sandboxes have no GitHub credential; a private repository fails with a
   plain reason.
-- Building or uploading container (Docker image) players. Most coworlds other than GotA use
-  them; hosted sandboxes have no Docker and `softmax upload` sends a file or directory
-  (`coworld upload-policy --file`). A game folder for such a game declares `docker` in
-  `host_requirements`, so a build card blocks with a clear `help_request:` instead of failing.
-- Raising the pinned `coworld` (0.1.58) and `softmax-cli` (0.26.38) versions; latest are 0.1.61
-  and 0.26.39. Separate change.
+- Building container (Docker image) players on every host. Superseded in part: since #77,
+  `research game build-container` builds an image with Coworld's BuildKit command and
+  `upload_build` publishes it as an archive (`artifact_type: oci-image`), on hosts that
+  provide BuildKit (the opted-in Kubernetes workspaces, metta #29703). EC2 workspaces have no
+  BuildKit or Docker daemon, so a container build there still fails with a clear reason.
 
 ## Design
 

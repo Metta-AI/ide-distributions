@@ -49,6 +49,8 @@ jobs:
           python ../tools/sync_shared.py
           git -C "$GITHUB_WORKSPACE" diff --exit-code
       - run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check .
       - run: uv run pytest -q
       - name: Validate Pudge tools from a read-only installation
         if: matrix.distribution == 'researcher'

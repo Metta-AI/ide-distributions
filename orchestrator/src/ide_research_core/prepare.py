@@ -31,22 +31,45 @@ class Jobs(BaseModel):
     jobs: list[Job]
 
 
+def _canonical_agents_md(remote: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "--git-dir", str(remote), "show", "main:AGENTS.md"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def publish_doctrine(profile: Path, remote: Path, source: Path) -> str | None:
+    """Commit current doctrine to ``remote``'s main through a temporary clone and return
+    canonical ``AGENTS.md``. No retained clone is touched; each gets it on its next fetch."""
+    canonical = _canonical_agents_md(remote)
+    wanted = workspaces.agents_md(source)
+    if wanted is not None and wanted != canonical:
+        with TemporaryDirectory(prefix="doctrine-", dir=profile / "local") as temporary:
+            workspaces.bootstrap(Path(temporary), remote, None, source)
+        canonical = _canonical_agents_md(remote)
+    return canonical
+
+
+def publish_game_doctrine(profile: Path, remote: Path, source: Path) -> None:
+    """Publish current doctrine to every existing game repository beside the neutral one.
+
+    New cards branch from freshly fetched ``origin/main``, so they get it. Retained
+    ``workspace-<game>`` clones may be dirty or busy and are left alone."""
+    for game_remote in sorted(remote.parent.glob("canonical-*.git")):
+        if game_remote.resolve() != remote.resolve() and (game_remote / "HEAD").exists():
+            publish_doctrine(profile, game_remote, source)
+
+
 def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Path) -> None:
     """Publish current doctrine and merge it without discarding retained edits."""
     workspaces.write_cli_shim(profile)
     warning = profile / "local/doctrine-migration-warning.txt"
     if not (workspace / ".git").exists():
         workspaces.bootstrap(workspace, remote, None, source)
-    canonical = subprocess.check_output(
-        ["git", "--git-dir", str(remote), "show", "main:AGENTS.md"], text=True
-    )
-    wanted = workspaces.agents_md(source)
-    if wanted is not None and wanted != canonical:
-        with TemporaryDirectory(prefix="doctrine-", dir=profile / "local") as temporary:
-            workspaces.bootstrap(Path(temporary), remote, None, source)
-        canonical = subprocess.check_output(
-            ["git", "--git-dir", str(remote), "show", "main:AGENTS.md"], text=True
-        )
+    canonical = publish_doctrine(profile, remote, source)
     git = ["git", "-C", str(workspace)]
     agents = workspace / "AGENTS.md"
     conflicts = subprocess.check_output([*git, "diff", "--name-only", "--diff-filter=U"], text=True)
@@ -90,9 +113,16 @@ def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Pa
 # a value the owner chose survives.
 EARLIER_DEFAULTS = {
     "agent.max_turns": {40},  # the orchestrator shipped 40 before matching the researcher
+    "agent.run_budget_seconds": {5400},  # researchers shipped 5,400 before GotA builds needed more
     "terminal.timeout": {180},  # Hermes's default
     "timeouts.tools.sequential_call": {420},  # Hermes's default
     "timeouts.tools.concurrent_batch": {420},
+    # Hermes's default. Both profiles run unattended (chat approvals expire after 5 minutes and
+    # cron/worker runs have no one to ask), so they ship "off" plus a deny list.
+    "approvals.mode": {"smart"},
+    "approvals.cron_mode": {"deny"},  # Hermes's defaults for the per-context modes
+    "approvals.single_query_mode": {"deny"},
+    "approvals.unattended_mode": {"deny"},
 }
 
 
@@ -121,7 +151,10 @@ def reconcile_settings(defaults: dict, hermes: str) -> None:
             continue
         current = _retained(hermes, key)
         if current != shipped and (current is None or current in earlier):
-            subprocess.run([hermes, "config", "set", key, json.dumps(shipped)], check=True)
+            # Hermes stores a string-typed setting's text verbatim (so "off" stays a string);
+            # JSON-quoting it would store the quotes.
+            value = shipped if isinstance(shipped, str) else json.dumps(shipped)
+            subprocess.run([hermes, "config", "set", key, value], check=True)
     fallback = defaults.get("fallback_providers")
     if fallback and not _retained(hermes, "fallback_providers"):
         subprocess.run(
@@ -137,6 +170,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     (profile / "local").mkdir(exist_ok=True)
     (home / "games").mkdir(exist_ok=True)
     reconcile_workspace(profile, workspace, remote, source)
+    publish_game_doctrine(profile, remote, source)
     defaults = yaml.safe_load((source / "config.yaml").read_text())
     append = {"terminal.env_passthrough": defaults["terminal"]["env_passthrough"]}
     if _shipped(defaults, "skills.external_dirs"):
@@ -144,7 +178,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     coordinator = (source / "coordinator.json").exists()
     if coordinator:
         append["platform_toolsets.api_server"] = defaults["platform_toolsets"]["api_server"]
-    else:
+    if _shipped(defaults, "approvals.deny"):  # an older source may predate it
         append["approvals.deny"] = defaults["approvals"]["deny"]
     for key, required in append.items():
         current = _retained(hermes, key) or []  # an older profile may not have the key

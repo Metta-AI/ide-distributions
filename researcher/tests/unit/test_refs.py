@@ -7,11 +7,11 @@ import pytest
 from support.canonical import DISTRIBUTION_DIR, Canonical
 
 from ide_research_core import refs as resolver
-from ide_research_core.refs import CORE_TYPES, ResolveError, resolve
 from ide_research_core.games.loader import load_game
 from ide_research_core.ids import new_id
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_doc, write_json
+from ide_research_core.refs import CORE_TYPES, ResolveError, resolve
 
 XREQ = "xreq_b0c4ff36-2d9e-4ddb-8224-9ba8fa0c2fd5"
 EPISODE = "ep_7f1c"

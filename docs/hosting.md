@@ -28,7 +28,10 @@ No credentials are embedded in distribution sources.
 Prepare creates a neutral workspace when absent and reconciles doctrine by full content, including
 same-version changes. It publishes through the distribution's workspace operations and merges
 canonical history. Conflicting committed or dirty edits defer reconciliation without discarding work.
-Existing unresolved conflicts remain untouched. The host can surface
+Existing unresolved conflicts remain untouched. Prepare also publishes current doctrine to every
+existing `canonical-<game>.git` beside `RESEARCH_CANONICAL` through a temporary clone, so new cards
+(branched from fetched `origin/main`) get it; retained `workspace-<game>` clones are never modified.
+The host can surface
 `local/doctrine-migration-warning.txt`; successful reconciliation clears it and its reported marker.
 
 Prepare adds required worker denials and environment passthrough from shipped config while retaining

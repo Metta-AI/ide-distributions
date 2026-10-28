@@ -35,9 +35,9 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    competing for us, A9) as the baseline. Never use another version record as the
    baseline, even when the card, the plan or a version record names one (for example a
    version uploaded by an earlier card, or a title that says "baseline exists"): an
-   experiment against anything but the champion can never promote, and `stats design`
+   experiment against anything but the champion can never be submitted, and `stats design`
    refuses it (`baseline_not_champion`). Uploading a version does not make it the champion;
-   only an orchestrator promotion does. If `conflict` is set, report it to the orchestrator
+   only an orchestrator champion submission does. If `conflict` is set, report it to the orchestrator
    and block. If `current_champion` is null, report that a starter-policy bootstrap is
    needed and propose the follow-up experiment in `metadata.next`; do not design against an
    arbitrary uploaded version or bootstrap opportunistically. The orchestrator commissions
@@ -54,10 +54,10 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    `"$RESEARCH_CLI" game show`
    Use `data.game_version`, the `outcome_metrics` (names and directions) and the
    `performance_guardrails`. A performance guardrail is checked automatically; do not list it
-   again as a primary metric or an agent guardrail.
+   again as an agent guardrail. It can also be a primary metric when the change targets it.
 7. Write the decision rule in the experiment body before any result exists (D-09). Use this
    default unless the Topic needs another:
-   - `promote`: `stats evaluate` reports `submit_eligible: true` and the Result is valid.
+   - `submit`: `stats evaluate` reports `submit_eligible: true` and the Result is valid.
    - `refute`: N is met and the bootstrap CI of every primary metric lies at or below 0.
    - `invalid`: the Result is not valid (wrong versions, failed episodes, the change did not
      activate).
@@ -88,7 +88,7 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
    the rule after (D-09).
 10. Make the candidate: copy `strategy/STRATEGY.md` to
    `strategy/candidates/<E-id>/STRATEGY.md` and edit only the named components there. The
-   champion `strategy/STRATEGY.md` does not change until a promotion (D-25).
+   champion `strategy/STRATEGY.md` does not change until a champion submission (D-25).
 11. Move the hypothesis to under-test and link the experiment (the card names it, D-23):
     `"$RESEARCH_CLI" records status <H-id> under-test --reason "experiment registered" --ref ar://experiment/<E-id>`
     `"$RESEARCH_CLI" records link <H-id> experiments <E-id>`
@@ -123,4 +123,4 @@ Doctrine upheld: D-06, D-08, D-09, D-10, D-11, D-23, D-25.
 - The hypothesis is not in the card refs: do not change it. Suggest work that names it.
 - If the build cannot finish in this card, complete `partial` with the experiment state and
   a bounded build recommendation in `metadata.next`.
-- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: do not retry it. Follow the D-26 sequence (see `card`, "Tool fault").
+- A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: follow D-26 (work around it, keep going and report it). A failed gate verdict is a result, not a fault: never skip or weaken a gate.
