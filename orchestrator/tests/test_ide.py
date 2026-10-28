@@ -183,3 +183,4 @@ def test_background_news_retries_keep_the_first_payload(context, monkeypatch):
     IDE(context).ide_say("Upload failed", "say:task_events:54", "gota-starter")
     IDE(context).ide_say("A different summary from a concurrent wake", "say:task_events:54")
     assert sent[0] == sent[1]
+

@@ -191,11 +191,13 @@ the assigned objective. Integrate accepted branches through `workspace_integrate
 Conflicts require resolution and revalidation against current main. Keep unrelated research
 running. Never infer task completion from Git ancestry or require a journal to end a worker.
 
-Persist decisions through `plan_write`. Acknowledge events only after their actions succeed.
+Persist decisions through `plan_write`. Treat an event as handled only after its actions
+succeed; the native inbox records consumption, so no separate acknowledgement exists.
 A duplicate or stale notification requires reading current state, not another recovery task.
 Respect durable pause, declined permits and spending caps. Never expand a budget yourself.
 When progress depends on a running worker or external result, save the next action and end
-the turn. Native notifications and scheduled wakes resume this same coordinator. Do not poll
+the turn: that is a handoff, not stopping early. The work keeps going in the worker, and native
+notifications and scheduled wakes resume this same coordinator to continue it. Do not poll
 unchanged task state or keep a user request open while workers execute.
 
 ## Explicit development and optional research
