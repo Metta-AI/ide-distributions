@@ -287,7 +287,12 @@ TOOLS = {
         {"entity": S, "filters": O, "game": GAME},
         ["entity"],
     ),
-    "records_show": (Research, "Read a game's canonical record.", {"id": S, "game": GAME}, ["id"]),
+    "records_show": (
+        Research,
+        "Read a game's canonical record by id (T-, E-, C-, ...), an ar:// reference, or a champion submission by its CS- id, legacy P- promotion id or platform sub_ submission id.",
+        {"id": S, "game": GAME},
+        ["id"],
+    ),
     "plan_write": (
         Research,
         "Publish a game's plan.md to its canonical main.",

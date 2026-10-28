@@ -96,7 +96,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
 | `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). |
-| `records_find`, `records_show` (`game?`) | Shared canonical record reads. |
+| `records_find`, `records_show` (`game?`) | Shared canonical record reads. `records_show` also takes an `ar://` reference and a champion submission by `CS-`, legacy `P-` or platform `sub_` id. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
 | `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
 | `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |

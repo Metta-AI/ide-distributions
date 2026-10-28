@@ -400,3 +400,37 @@ def test_requested_submission_recovers_lost_response_without_resubmitting(board,
     assert report["champion"]["platform_policy_version_id"] == PV_A
     assert len(board.sm.submissions(PLAYER)) == len(before) + 1
     assert gitops.show(board.origin, "main", champion_submission.CHAMPION_PATH) == source
+
+
+def _records_show(capsys, board, id_):
+    from ide_research_core.cli import main
+
+    code = main(["records", "show", id_, "--root", str(board.canonical)])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_records_show_reads_champion_submissions_by_cs_legacy_p_and_platform_ids(board, capsys):
+    experiment, _ = board.reviewed_experiment()
+    submitted = champion_submission.submit(board.canonical, board.sm, experiment, LEAGUE, PLAYER)
+    cs_id = submitted["id"]
+
+    for id_ in (cs_id, "P-" + cs_id.removeprefix("CS-"), submitted["submission_id"]):
+        code, env = _records_show(capsys, board, id_)
+        assert code == 0, env
+        assert env["data"]["id"] == cs_id and env["data"]["entity"] == "champion_submission"
+        assert env["data"]["meta"]["experiment"] == experiment
+
+
+def test_records_show_names_the_right_tool_for_an_unrecorded_platform_id(board, capsys):
+    code, env = _records_show(capsys, board, "sub_unknown")
+    assert code == 1 and "latest_league_result" in env["error"]["message"]
+    code, env = _records_show(capsys, board, "CS-01K6Z3V8QX0000000000000000")
+    assert code == 1 and "not found" in env["error"]["message"]
+
+
+def test_records_show_resolves_an_ar_reference(board, capsys, monkeypatch):
+    monkeypatch.delenv("RESEARCH_GAME", raising=False)
+    code, env = _records_show(capsys, board, f"ar://hypothesis/{board.hypothesis}")
+    assert code == 0, env
+    assert env["data"]["path"] == f"hypotheses/{board.hypothesis}.md"
+    assert "Mechanism." in env["data"]["content"]
