@@ -39,16 +39,9 @@ def test_bridge_request_shapes(context, credential):
             SOFTMAX_PLAYER_CREDENTIAL=credential,
         )
         ide = IDE(context)
-        ide.ide_say("Finished", "say:task_events:3", "goal-1")
         patch = {"set": {"state": "done"}, "base_rev": 7, "idempotency_key": "task:7"}
         ide.ide_task_update("task/1", patch)
         assert seen == [
-            (
-                "POST",
-                "/api/observatory/v2/cogents/ply_test/say",
-                "Bearer cga_fake",
-                {"text": "Finished", "idempotency_key": "say:task_events:3", "goal_id": "goal-1"},
-            ),
             (
                 "PATCH",
                 "/api/observatory/v2/cogents/ply_test/c/tasks/task%2F1",
@@ -60,44 +53,6 @@ def test_bridge_request_shapes(context, credential):
         server.shutdown()
         thread.join()
         server.server_close()
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "valid"),
-    [
-        ("text", "", False),
-        ("text", "x" * 20_000, True),
-        ("text", "x" * 20_001, False),
-        ("key", "", False),
-        ("key", "x" * 200, True),
-        ("key", "x" * 201, False),
-        ("key", "permit:reserved", False),
-        ("key", "say:\x00", False),
-        ("goal_id", "", True),
-        ("goal_id", "x" * 200, True),
-        ("goal_id", "x" * 201, False),
-    ],
-)
-def test_say_exported_schema(field, value, valid):
-    from jsonschema import Draft202012Validator
-
-    from orchestrator.plugin import register
-
-    class Registry:
-        def __init__(self):
-            self.tools = {}
-
-        def register_tool(self, **tool):
-            self.tools[tool["name"]] = tool
-
-        def register_middleware(self, kind, callback):
-            pass
-
-    registry = Registry()
-    register(registry)
-    schema = registry.tools["ide_say"]["schema"]["parameters"]
-    arguments = {"text": "Finished", "key": "say:task_events:121", field: value}
-    assert Draft202012Validator(schema).is_valid(arguments) is valid
 
 
 @pytest.mark.parametrize(
@@ -126,7 +81,7 @@ def test_say_exported_schema(field, value, valid):
         ("unrecognized secret error", {}),
     ],
 )
-def test_say_validation_details_are_safe(context, monkeypatch, detail, expected):
+def test_ide_validation_details_are_safe(context, monkeypatch, detail, expected):
     from email.message import Message
     from io import BytesIO
     from urllib.error import HTTPError
@@ -147,7 +102,9 @@ def test_say_validation_details_are_safe(context, monkeypatch, detail, expected)
 
     monkeypatch.setattr(plugin, "profile_context", lambda: context)
     monkeypatch.setattr(IDE, "request", rejected)
-    result = plugin.handler("ide_say")({"text": "Finished", "key": "say:task_events:121"})
+    result = plugin.handler("ide_task_update")(
+        {"task_id": "t1", "patch": {"set": {"state": "done"}, "base_rev": 1, "idempotency_key": "k"}}
+    )
     assert json.loads(result)["error"]["details"] == {"status": 422, **expected}
     assert "secret" not in result
 
@@ -155,7 +112,7 @@ def test_say_validation_details_are_safe(context, monkeypatch, detail, expected)
 @pytest.mark.parametrize(
     ("status", "content_type"), [(422, "text/html"), (503, "application/json")]
 )
-def test_say_other_http_errors_keep_status(context, monkeypatch, status, content_type):
+def test_ide_other_http_errors_keep_status(context, monkeypatch, status, content_type):
     from email.message import Message
     from io import BytesIO
     from urllib.error import HTTPError
@@ -170,20 +127,11 @@ def test_say_other_http_errors_keep_status(context, monkeypatch, status, content
 
     monkeypatch.setattr(plugin, "profile_context", lambda: context)
     monkeypatch.setattr(IDE, "request", rejected)
-    result = plugin.handler("ide_say")({"text": "Finished", "key": "say:task_events:121"})
+    result = plugin.handler("ide_task_update")(
+        {"task_id": "t1", "patch": {"set": {"state": "done"}, "base_rev": 1, "idempotency_key": "k"}}
+    )
     assert json.loads(result)["error"]["details"] == {"status": status}
     assert "secret" not in result
-
-
-def test_background_news_retries_keep_the_first_payload(context, monkeypatch):
-    sent = []
-    monkeypatch.setattr(
-        IDE, "request", lambda self, method, path, payload: sent.append(payload) or {"seq": 123}
-    )
-    IDE(context).ide_say("Upload failed", "say:task_events:54", "gota-starter")
-    IDE(context).ide_say("A different summary from a concurrent wake", "say:task_events:54")
-    assert sent[0] == sent[1]
-
 
 
 def test_refusals_say_what_they_mean():

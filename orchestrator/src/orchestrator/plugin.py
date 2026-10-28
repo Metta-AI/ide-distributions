@@ -166,25 +166,6 @@ TOOLS = {
         {"request_id": S, "operation": O},
         ["request_id", "operation"],
     ),
-    "ide_say": (
-        IDE,
-        (
-            "Publish background news once with key say:<table>:<rowid>. Never use "
-            "for a coach chat reply; the bridge publishes that reply. Retry with the same "
-            "key and identical text and goal_id; a changed message needs its own event."
-        ),
-        {
-            "text": {"type": "string", "minLength": 1, "maxLength": 20_000},
-            "key": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200,
-                "pattern": r"^(?!permit:)[^\x00]*$",
-            },
-            "goal_id": {"type": "string", "maxLength": 200},
-        },
-        ["text", "key"],
-    ),
     "ide_task_update": (
         IDE,
         (

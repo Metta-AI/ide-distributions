@@ -1,17 +1,14 @@
 """The bridge's authenticated cogents request shapes, using stdlib HTTP."""
 
 import json
-from contextlib import closing
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .context import Context
-from .storage import open_storage
 
 
 class IDE:
     def __init__(self, context: Context):
-        self.storage_path = context.storage_path
         env = context.env
         credential = env["SOFTMAX_PLAYER_CREDENTIAL"]
         self.token = json.loads(credential)["token"] if credential.startswith("{") else credential
@@ -32,22 +29,6 @@ class IDE:
         with urlopen(request, timeout=30) as response:
             body = response.read()
             return json.loads(body) if body else {}
-
-    def ide_say(self, text, key, goal_id=None):
-        payload = {"text": text, "idempotency_key": key}
-        if goal_id is not None:
-            payload["goal_id"] = goal_id
-        # Persist before HTTP: concurrent wakes and lost acknowledgements reuse identical bytes.
-        with closing(open_storage(self.storage_path)) as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS news (key TEXT PRIMARY KEY, payload TEXT NOT NULL)"
-            )
-            with conn:
-                conn.execute("INSERT OR IGNORE INTO news VALUES (?, ?)", (key, json.dumps(payload)))
-                payload = json.loads(
-                    conn.execute("SELECT payload FROM news WHERE key=?", (key,)).fetchone()[0]
-                )
-        return self.request("POST", "say", payload)
 
     def ide_task_update(self, task_id, patch):
         """Patch carries set, base_rev and idempotency_key as in the bridge."""

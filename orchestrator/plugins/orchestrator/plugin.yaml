@@ -24,7 +24,6 @@ provides_tools:
   - card_artifacts
   - ide_workspace
   - ide_workspace_schema
-  - ide_say
   - ide_task_update
   - worker_skills
   - card_create

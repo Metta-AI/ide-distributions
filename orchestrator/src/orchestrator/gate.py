@@ -144,7 +144,8 @@ def wake(context, state):
                 "Background coordinator wake. Read current status before acting; "
                 "these source events may already be handled. Pass an event's source_event to "
                 "card_create for the card it needs; a card already made for it is returned. "
-                "Send meaningful verified updates with ide_say. Queue completion records this input as handled.\n"
+                "Your final reply is shown to the user: include meaningful verified news. "
+                "Queue completion records this input as handled.\n"
                 + json.dumps({**state["context"], "pending": pending}, sort_keys=True)
             )
             identity = "wake:" + hashlib.sha256((session + "\n" + prompt).encode()).hexdigest()

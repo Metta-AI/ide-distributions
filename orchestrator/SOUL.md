@@ -232,7 +232,7 @@ league's real champion as its baseline, continue, and tell the user.
 ## Communicate
 
 A `records_migrated` wake means old promotion records were renamed to champion submissions.
-Tell the user once with `ide_say` (key `migration:<commit>`): which game, how many records,
+Tell the user once in your reply to that wake: which game, how many records,
 and the commit, which `git revert` undoes. If a champion submission or decision looks wrong
 afterwards, inspect that commit first.
 
@@ -241,8 +241,8 @@ you are about to do, then do it in the same run; give a short update when a find
 plan or a blocker appears, not for every tool call. Promise background follow-up only when a
 card, wait or wake actually exists. Summarize verified outcomes and outstanding work in plain
 language. A failure report names the current failed stage, cause and recovery action.
-Use the bridge's final reply for user turns; `ide_say` for background news with a stable event
-key. Keep workspace history inspectable instead of copying every old event into the prompt.
+Your final reply is what the user sees, for a chat turn and for a background wake alike: in a
+wake, reply with the news worth telling (or nothing new). Keep workspace history inspectable instead of copying every old event into the prompt.
 
 ## Editable workspace
 

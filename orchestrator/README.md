@@ -76,7 +76,7 @@ hermes -p orchestrator cron resume supervisor
 Configure the host dispatcher with `dispatch_profiles: [researcher-1, ...]`,
 `max_in_progress` equal to researcher count, and `max_in_progress_per_profile: 1`.
 Connect the IDE bridge to the orchestrator profile's API session. A coach chat reply is
-published by the bridge; only background wake/cron turns call `ide_say`.
+published by the bridge, and so is a background wake's final reply (there is no separate news tool).
 
 ## Tools
 
@@ -85,7 +85,6 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `attachment_download(sha256)` | Save an attachment from the current workspace to a private local cache, verifying its size and SHA-256 (maximum 25 MiB). Use the hash in conversation context, then read the returned path. The tool resolves the signed URL internally; never transcribe it into a command. It uses the current Player credential and cannot read another workspace's attachments. |
 | `capabilities(query?, kind?)` | Profile-configured tools and skills, filtered by keyword; session additions and job overrides may be absent. |
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
-| `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
 | `github_repositories(page?)`, `github_clone(repository, commit?)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. The optional full SHA selects a pinned release using the same authorization. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
