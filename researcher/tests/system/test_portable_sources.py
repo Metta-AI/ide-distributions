@@ -80,7 +80,7 @@ def test_published_project_remains_editable_after_relocation(tmp_path):
         "action": "register_project",
         "policy_name": "portable-source",
         "version_id": version,
-        "record_id": "P-" + project,
+        "project_id": project,
         "base_sha256": seeded["source_revision"],
         "request_id": "publication",
     }

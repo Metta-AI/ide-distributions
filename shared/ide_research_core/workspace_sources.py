@@ -29,9 +29,7 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
             continue
         clone = root.parent / f"workspace-{game}"
         if clone.is_symlink():
-            raise workspace.WorkspaceError(
-                "forbidden", "Game workspaces cannot be symlinks"
-            )
+            raise workspace.WorkspaceError("forbidden", "Game workspaces cannot be symlinks")
         with workspace.canonical_lock(bare):
             if not clone.exists():
                 gitops.git(root.parent, "clone", "-q", str(bare), str(clone))
@@ -42,9 +40,7 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
             )
         roots.append(clone)
     matches: list[tuple[Path, policy_files.PolicySource]] = []
-    discovery = command.model_copy(
-        update={"action": "sources", "path": "", "offset": 0}
-    )
+    discovery = command.model_copy(update={"action": "sources", "path": "", "offset": 0})
     for clone in roots:
         offset = 0
         while True:
@@ -57,9 +53,9 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
             if result.next_offset is None:
                 break
             offset = result.next_offset
-    if len(
-        {(source.record_id, tuple(source.version_ids)) for _, source in matches}
-    ) != len(matches):
+    if len({(source.record_id, tuple(source.version_ids)) for _, source in matches}) != len(
+        matches
+    ):
         return policy_files.FileResult(
             kind="conflict",
             error="The source record exists in more than one game workspace.",
@@ -75,17 +71,17 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
     return execute(matches[0][0], command, request_id)
 
 
-def execute(
-    root: Path, command: HermesPolicyFiles | HermesProjectSource, request_id: str
-) -> dict:
+def execute(root: Path, command: HermesPolicyFiles | HermesProjectSource, request_id: str) -> dict:
     head = workspace.sync(root)
     writing = command.action in {"seed", "write", "patch"}
-    fingerprint = hashlib.sha256(
-        (type(command).__name__ + command.model_dump_json()).encode()
-    ).hexdigest()
-    receipt_path = (
-        f"control/ide/requests/{hashlib.sha256(request_id.encode()).hexdigest()}.json"
+    # An absent registration target is not part of a file-edit identity.
+    identity = command.model_dump_json(
+        exclude={"project_id"}
+        if isinstance(command, HermesPolicyFiles) and command.project_id is None
+        else set()
     )
+    fingerprint = hashlib.sha256((type(command).__name__ + identity).encode()).hexdigest()
+    receipt_path = f"control/ide/requests/{hashlib.sha256(request_id.encode()).hexdigest()}.json"
     if writing:
         if not request_id:
             raise workspace.WorkspaceError(
@@ -191,22 +187,22 @@ def register_project(root: Path, command: HermesPolicyFiles, request_id: str) ->
         raise workspace.WorkspaceError(
             "bad_arguments", "Publication registration requires an operation ID"
         )
+    assert command.project_id is not None
+    project_id = str(command.project_id)
+    record_id = f"P-{project_id}"
     binding_path = f"source-publications/{command.version_id}.json"
     existing = gitops.show(root, head, binding_path)
     if existing is not None:
         source = policy_files.PolicySource.model_validate_json(existing)
         if (source.record_id, source.policy_name, source.published_revision) != (
-            command.record_id,
+            record_id,
             command.policy_name,
             command.base_sha256,
         ):
             raise workspace.WorkspaceError(
                 "request_conflict", "Publication already names another source"
             )
-        return policy_files.FileResult(kind="ok", sources=[source]).model_dump(
-            mode="json"
-        )
-    project_id = command.record_id[2:]
+        return policy_files.FileResult(kind="ok", sources=[source]).model_dump(mode="json")
     prefix = f"projects/{project_id}"
     revisions = gitops.git(root, "log", "--format=%H", head, "--", prefix).splitlines()
     for revision in revisions:
@@ -216,9 +212,7 @@ def register_project(root: Path, command: HermesPolicyFiles, request_id: str) ->
         metadata = project_source.ProjectIdentity.model_validate_json(identity)
         with tempfile.TemporaryDirectory(prefix="publication-source-") as directory:
             snapshot = Path(directory).resolve()
-            entries = gitops._run(
-                root, "ls-tree", "-rz", revision, "--", f"{prefix}/files"
-            ).stdout
+            entries = gitops._run(root, "ls-tree", "-rz", revision, "--", f"{prefix}/files").stdout
             for entry in entries.split(b"\0"):
                 if not entry:
                     continue
@@ -238,7 +232,7 @@ def register_project(root: Path, command: HermesPolicyFiles, request_id: str) ->
         if result.kind != "ok" or result.source_revision != command.base_sha256:
             continue
         source = policy_files.PolicySource(
-            record_id=command.record_id,
+            record_id=record_id,
             policy_name=command.policy_name,
             version_ids=[command.version_id],
             path=f"{prefix}/files",
@@ -256,9 +250,7 @@ def register_project(root: Path, command: HermesPolicyFiles, request_id: str) ->
             "Register published project source",
             expected_head=head,
         )
-        return policy_files.FileResult(kind="ok", sources=[source]).model_dump(
-            mode="json"
-        )
+        return policy_files.FileResult(kind="ok", sources=[source]).model_dump(mode="json")
     raise workspace.WorkspaceError(
         "not_found", "Published source revision is absent from workspace history"
     )

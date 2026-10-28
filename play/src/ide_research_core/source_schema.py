@@ -14,7 +14,8 @@ class HermesPolicyFiles(BaseModel):
     action: Literal["sources", "tree", "read", "write", "register_project"]
     policy_name: str = Field(min_length=1, max_length=200)
     version_id: str = Field(default="", max_length=200)
-    record_id: str = Field(default="", pattern=r"^([VP]-[A-Za-z0-9-]+)?$")
+    record_id: str = Field(default="", pattern=r"^[A-Za-z0-9_-]{0,200}$")
+    project_id: UUID | None = None
     path: str = Field(default="", max_length=1024)
     offset: int = Field(default=0, ge=0, le=10000)
     content: str = Field(default="", max_length=60000)
@@ -25,11 +26,12 @@ class HermesPolicyFiles(BaseModel):
     @model_validator(mode="after")
     def source_target(self) -> Self:
         if self.action == "register_project":
-            if not self.record_id.startswith("P-") or not self.version_id or not self.base_sha256:
+            if self.project_id is None or not self.version_id or not self.base_sha256:
                 raise ValueError("Publication registration requires a project, policy version and source revision")
-            UUID(self.record_id[2:])
             UUID(self.version_id)
-        if self.action != "sources" and not self.record_id:
+        elif self.project_id is not None:
+            raise ValueError("Only publication registration names a project")
+        if self.action not in {"sources", "register_project"} and not self.record_id:
             raise ValueError("File operations require an original version provenance record")
         if self.action in {"read", "write"} and not self.path:
             raise ValueError("File operations require a relative source file")
