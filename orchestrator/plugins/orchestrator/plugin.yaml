@@ -15,7 +15,6 @@ provides_tools:
   - attachment_download
   - github_repositories
   - github_clone
-  - coworld_repository
   - capabilities
   - host_capabilities
   - game_starter

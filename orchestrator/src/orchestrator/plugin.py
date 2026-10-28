@@ -11,7 +11,6 @@ from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Repor
 from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .context import profile_context
-from .coworld_context import CoworldContext, Selection, repository_context_middleware
 from .evidence import (
     CoachingAnalysisRead,
     CoachingList,
@@ -93,12 +92,6 @@ TOOLS = {
         "Download a visible episode's replay, results and error information as a private ZIP, at most 256 MiB. Inspect manifest.json inside the ZIP for delivered and missing evidence. Never executes, extracts or analyzes it; choose whether replay inspection helps the current task.",
         EpisodeRead.model_json_schema()["properties"],
         ["episode_id"],
-    ),
-    "coworld_repository": (
-        CoworldContext,
-        "Load the selected Coworld's source at its full GitHub commit SHA. Returns a reusable checkout and bounded COWORLD.md with document/skill links and a content hash. Pass the current desktop repository selection verbatim. Public source needs no GitHub connection; private source uses the owner's consented broker. Never executes repo code, installs global skills, changes game defaults, or resets candidate edits. Missing guides and unpinned source are explicit statuses. This game source is not the player's submitted policy.",
-        {"selection": Selection.model_json_schema()},
-        ["selection"],
     ),
     "attachment_download": (
         Attachments,
@@ -502,7 +495,6 @@ def handler(name):
 
 
 def register(ctx):
-    ctx.register_middleware("llm_request", repository_context_middleware)
     for name, (_, description, properties, required) in TOOLS.items():
         schema = {
             "name": name,
