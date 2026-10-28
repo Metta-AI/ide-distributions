@@ -70,6 +70,18 @@ def matches(query: str, *values: str) -> bool:
     )
 
 
+def policy_artifact(coworld):
+    """``file`` or ``container``: what a policy for this Coworld is. The manifest's
+    ``game.player_runtime`` decides it, as Coworld's own manifest validation does: a
+    ``game-hosted`` game runs player files (e.g. BASIC), the default ``platform-hosted`` one
+    runs player images. None without a Coworld."""
+    if coworld is None:
+        return None
+    game = coworld.manifest.get("game")
+    runtime = game.get("player_runtime") if isinstance(game, dict) else None
+    return "file" if runtime == "game-hosted" else "container"
+
+
 def published_starters(coworld):
     if coworld is None:
         return []
@@ -213,6 +225,7 @@ class Discovery:
         return {
             "league": league.model_dump(),
             "coworld": coworld.model_dump(exclude={"manifest"}) if coworld is not None else None,
+            "policy_artifact": policy_artifact(coworld),
             "documents": index,
             "document": page,
             "installed_research_support": support,

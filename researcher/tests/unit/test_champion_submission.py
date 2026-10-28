@@ -194,12 +194,19 @@ def test_the_cli_prints_the_envelope(board):
         "RESEARCH_SOFTMAX": "fake",
         "RESEARCH_PLAYER_ID": PLAYER,
     }
-    run = subprocess.run(
-        [sys.executable, "-m", "ide_research_core", "champion", "submit", experiment, "--league", LEAGUE],
-        capture_output=True, text=True, env=env, check=False,
-    )
-    assert run.returncode == 0, run.stdout + run.stderr
-    assert json.loads(run.stdout)["data"]["stage"] == "submitted"
+    def cli(*args):
+        run = subprocess.run(
+            [sys.executable, "-m", "ide_research_core", "champion", *args],
+            capture_output=True, text=True, env=env, check=False,
+        )
+        assert run.returncode == 0, run.stdout + run.stderr
+        return json.loads(run.stdout)["data"]
+
+    # `submitted` (the supervisor's league-result poll) reads only accepted submissions.
+    assert cli("submitted") is None
+    submitted = cli("submit", experiment, "--league", LEAGUE)
+    assert submitted["stage"] == "submitted"
+    assert cli("submitted")["id"] == submitted["id"]
 
 
 def test_a_send_that_dies_after_an_approved_permit_is_recovered_not_asked_again(board):
@@ -307,6 +314,7 @@ def test_requested_version_submission_needs_no_experiment_and_preserves_strategy
     board = ResearchBoard(tmp_path, seed_champion=seed_champion)
     version, source_path, source = uploaded_requested_version(board, source_path)
     path = board.canonical / source_path
+    shipped = gitops.show(board.origin, "main", champion_submission.CHAMPION_PATH)
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"}) if permit else board.sm
     if permit:
         with pytest.raises(Refused) as refused:
@@ -332,7 +340,11 @@ def test_requested_version_submission_needs_no_experiment_and_preserves_strategy
     gitops.git(board.canonical, "push", "-q", "origin", "main")
     report = champion_submission.status(board.canonical, board.sm, LEAGUE, PLAYER)
     assert report["champion"]["platform_policy_version_id"] == PV_A
-    assert gitops.show(board.origin, "main", champion_submission.CHAMPION_PATH) == source
+    # Only a build compiled from a STRATEGY.md replaces it; a .bas source is a prebuilt artifact.
+    expected = source if source_path.endswith("STRATEGY.md") else shipped
+    assert gitops.show(board.origin, "main", champion_submission.CHAMPION_PATH) == expected
+    saved = f"champion-submissions/sources/{result['id']}.md"
+    assert gitops.show(board.origin, "main", saved) == source
     assert not board.store.find("experiment")
     before = board.sm.submissions(PLAYER)
     repeated = champion_submission.submit_requested(
@@ -359,6 +371,41 @@ def uploaded_requested_version(board, source_path="strategy/requested/STRATEGY.m
     gitops.commit_all(board.canonical, "uploaded requested version")
     gitops.git(board.canonical, "push", "-q", "origin", "main")
     return version, source_path, source
+
+
+@pytest.mark.parametrize("strategy", ["strategy/requested/input.bas", "strategy/requested/live.bas"])
+def test_requested_prebuilt_version_accepts_its_recorded_inputs_and_keeps_strategy(board, strategy):
+    """A prebuilt build (GotA ``--prebuilt``) records the artifact as ``source_path`` and its
+    hash as ``strategy_sha256``, plus the committed input it was made from. Either is its
+    source, and neither may replace ``strategy/STRATEGY.md``."""
+    import hashlib
+
+    files = {"strategy/requested/input.bas": b"10 PRINT 1\n", "strategy/requested/live.bas": b"10 PRINT 2\n"}
+    for name, content in files.items():
+        (board.canonical / name).parent.mkdir(parents=True, exist_ok=True)
+        (board.canonical / name).write_bytes(content)
+    hashes = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
+    version = board.store.create("version", {
+        "parents": [], "strategy_sha256": hashes["strategy/requested/live.bas"],
+        "source_commit": "2" * 40, "artifact_sha256": hashes["strategy/requested/live.bas"],
+        "policy_name": "requested",
+        "build": {"source_path": "strategy/requested/live.bas", "source_hashes": hashes,
+                  "compiler": {"mode": "prebuilt"}},
+    })
+    board.store.add_event(version, "uploaded", {"policy_version_id": PV_A})
+    gitops.commit_all(board.canonical, "uploaded prebuilt version")
+    gitops.git(board.canonical, "push", "-q", "origin", "main")
+    shipped = gitops.show(board.origin, "main", champion_submission.CHAMPION_PATH)
+
+    result = champion_submission.submit_requested(
+        board.canonical, board.sm, version, strategy, "Submit this BASIC policy", LEAGUE, PLAYER,
+    )
+    assert result["stage"] == "submitted"
+    report = champion_submission.status(board.canonical, board.sm, LEAGUE, PLAYER)
+    assert report["champion"]["platform_policy_version_id"] == PV_A
+    assert gitops.show(board.origin, "main", champion_submission.CHAMPION_PATH) == shipped
+    saved = f"champion-submissions/sources/{result['id']}.md"
+    assert gitops.show(board.origin, "main", saved) == files[strategy]
 
 
 @pytest.mark.parametrize("fault,reason", [("source", "strategy_mismatch"), ("request", "missing_request")])

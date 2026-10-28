@@ -105,7 +105,7 @@ assert (location / 'proof').read_text() == 'writable'
 assert host['execution']['platform'] == 'cli', host
 current = json.loads(registry.dispatch('host_capabilities', {}))['data']
 assert current['execution']['platform'] == 'api_server', current
-assert {'context': 'unattended', 'mode': 'deny'} in current['execution']['unattended']
+assert {'context': 'unattended', 'mode': 'approve'} in current['execution']['unattended']  # never blocks unattended work
 assert 'worker-secret-sentinel' not in json.dumps(current)
 game = data['game']
 assert game['root'] == str(worker), game

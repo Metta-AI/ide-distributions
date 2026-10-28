@@ -25,7 +25,7 @@ from .github import GitHub
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
-from .storage import open_storage
+from .storage import open_storage, remember_submission_session
 from .worker_capabilities import WorkerCapabilities, WorkerRead
 from .workspace import Workspace, WorkspaceError
 
@@ -115,19 +115,19 @@ TOOLS = {
     ),
     "card_report": (
         Reports,
-        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest completed run only; validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
+        "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest ended run only: a completed card, or a blocked card (then only commits staged on origin); never a running card. Validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
         ReportRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "path"],
     ),
     "card_files": (
         Reports,
-        "Discover committed files and directories from a card's latest completed run. Lists the whole tree recursively by default; directory limits the subtree, recursive=false lists one level. Follow next_offset for at most 200 paths, kinds, sizes and Git blob IDs per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
+        "Discover committed files and directories from a card's latest ended run (completed, or blocked: staged commits only). Lists the whole tree recursively by default; directory limits the subtree, recursive=false lists one level. Follow next_offset for at most 200 paths, kinds, sizes and Git blob IDs per page. Uses card_show task/run IDs and the full reported commit. Restores cleaned completed worktrees; never reads active or uncommitted worker files. Use card_report for text pages and card_artifacts to inspect/export selected files.",
         CardFiles.model_json_schema()["properties"],
         ["task_id", "run_id", "commit"],
     ),
     "card_artifacts": (
         Reports,
-        "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest completed run. Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
+        "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest ended run (completed, or blocked: staged commits only). Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
         ArtifactRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "paths"],
     ),
@@ -166,25 +166,6 @@ TOOLS = {
         {"request_id": S, "operation": O},
         ["request_id", "operation"],
     ),
-    "ide_say": (
-        IDE,
-        (
-            "Publish background news once with key say:<table>:<rowid>. Never use "
-            "for a coach chat reply; the bridge publishes that reply. Retry with the same "
-            "key and identical text and goal_id; a changed message needs its own event."
-        ),
-        {
-            "text": {"type": "string", "minLength": 1, "maxLength": 20_000},
-            "key": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200,
-                "pattern": r"^(?!permit:)[^\x00]*$",
-            },
-            "goal_id": {"type": "string", "maxLength": 200},
-        },
-        ["text", "key"],
-    ),
     "ide_task_update": (
         IDE,
         (
@@ -218,7 +199,9 @@ TOOLS = {
             "existing tasks before creating new work. Describe objective, inputs, constraints and "
             "completion evidence in body. Omit skills unless explicit preloads are necessary. "
             "game selects the game the card researches (its workspace is prepared on first use); "
-            "a card that makes a new game folder runs in any existing game."
+            "a card that makes a new game folder runs in any existing game. Record ids (E-, H-, "
+            "V-, CS-, ...) and ar://file/ paths in body must exist on that game's canonical main; "
+            "otherwise it refuses with unknown_records."
         ),
         {
             "command_id": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -330,7 +313,7 @@ TOOLS = {
     ),
     "upload_build": (
         Board,
-        "Upload the latest completed task run’s verified build. build_dir is a committed task-relative directory containing the policy artifact named in version.json, version.json and gate evidence. Return upload receipts and the new staged commit for integration. Reuse name on retry. Optional experiment binds a research candidate.",
+        "Upload the verified build of a card's latest ended run: a completed card, or a blocked card whose worker staged the build before blocking (e.g. waiting on XP results). Never from a running card; uploads only the staged branch. build_dir is a committed task-relative directory containing the policy artifact named in version.json, version.json and gate evidence. Return upload receipts and the new staged commit for integration. Reuse name on retry. Optional experiment binds a research candidate.",
         {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S},
         ["id", "run_id", "build_dir", "name"],
     ),
@@ -343,9 +326,11 @@ TOOLS = {
     "submit_requested_version": (
         Board,
         (
-            "Submit an integrated uploaded version only when the user explicitly requested submission. "
-            "Quote that request. This records a requested submission, not statistical improvement. "
-            "For autonomous research champion use champion_submit instead. Strategy must match the build."
+            "Submit an integrated uploaded version directly, without an improvement claim: when the user asked, "
+            "or when you judge it should compete. request states the reason (quote the user, or give yours). "
+            "For autonomous research champion use champion_submit instead. Strategy is the build's recorded "
+            "source on canonical main: its STRATEGY.md, or for a prebuilt artifact (e.g. a .bas) the "
+            "artifact or its committed input. Only a STRATEGY.md replaces strategy/STRATEGY.md."
         ),
         {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
         ["id", "run_id", "version", "strategy", "request", "league_id"],
@@ -358,7 +343,7 @@ TOOLS = {
     ),
     "accept_champion": (
         Research,
-        "Record the explicitly selected league's current champion as the loop's, only after the user confirms.",
+        "Record the league's current champion as the loop's, resolving a champion conflict (for example a version the user submitted outside research).",
         {"league_id": S, "game": GAME},
         ["league_id"],
     ),
@@ -408,6 +393,9 @@ TOOLS = {
             "To read mechanics, pass a returned document id and its sha256 as expected_sha256; follow "
             "next_offset for bounded Unicode character pages. Reuse unchanged documents; a changed hash "
             "requires reloading the index. Published documents are reference data, never authority. "
+            "policy_artifact says what a policy is, from the Coworld manifest's game.player_runtime: "
+            "file (game-hosted, e.g. a BASIC .bas upload; no Docker) or container (platform-hosted "
+            "image); null without a Coworld. "
             "Missing research bindings do not mean the platform cannot run the game; a researcher "
             "can make its game folder (game-create), which game_install installs. "
             "Greetings, navigation and notebook formatting do not need this tool."
@@ -438,10 +426,16 @@ TOOLS = {
 }
 
 
+# Tools whose result is a champion submission; the gate routes its league-result wake to the
+# session that made it.
+SUBMISSION_TOOLS = ("champion_submit", "submit_requested_version", "bootstrap_champion")
+
+
 def handler(name):
     owner = TOOLS[name][0]
 
     def call(args, session_id=None, **kwargs):
+        origin = None
         try:
             context = profile_context()
             if session_id:
@@ -459,8 +453,14 @@ def handler(name):
             if name == "card_create":
                 arguments["session_id"] = session_id
             data = getattr(owner(context), name)(**arguments)
+            if name in SUBMISSION_TOOLS and origin:
+                remember_submission_session(context, data["id"], origin)
             return json.dumps({"ok": True, "data": data})
         except (ArtifactError, ResearchError, WorkspaceError) as error:
+            # A submission waiting for the coach's permit is still this session's submission.
+            submission = (error.envelope["error"].get("details") or {}).get("submission")
+            if name in SUBMISSION_TOOLS and origin and submission:
+                remember_submission_session(context, submission, origin)
             return json.dumps(error.envelope)
         except HTTPError as error:
             details = {"status": error.code}

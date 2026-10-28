@@ -76,7 +76,7 @@ hermes -p orchestrator cron resume supervisor
 Configure the host dispatcher with `dispatch_profiles: [researcher-1, ...]`,
 `max_in_progress` equal to researcher count, and `max_in_progress_per_profile: 1`.
 Connect the IDE bridge to the orchestrator profile's API session. A coach chat reply is
-published by the bridge; only background wake/cron turns call `ide_say`.
+published by the bridge, and so is a background wake's final reply (there is no separate news tool).
 
 ## Tools
 
@@ -85,29 +85,28 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `attachment_download(sha256)` | Save an attachment from the current workspace to a private local cache, verifying its size and SHA-256 (maximum 25 MiB). Use the hash in conversation context, then read the returned path. The tool resolves the signed URL internally; never transcribe it into a command. It uses the current Player credential and cannot read another workspace's attachments. |
 | `capabilities(query?, kind?)` | Profile-configured tools and skills, filtered by keyword; session additions and job overrides may be absent. |
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
-| `ide_say(text, key, goal_id?)` | POST a chat line with a stable event key, normally `say:<table>:<rowid>`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
 | `github_repositories(page?)`, `github_clone(repository, commit?)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. The optional full SHA selects a pinned release using the same authorization. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
-| `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
+| `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. A body citing a record id (`E-`, `H-`, `V-`, `CS-`, ...) or `ar://file/` path that is not on that game's canonical `main` is refused with `unknown_records` listing them (content-search and game reference types are not checked). |
 | `card_show`, `card_list` | Read native cards, runs and comments. `card_list` takes its filters as top-level parameters (`status`, `assignee`, `limit`, `order_by`, ...) with typed sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
-| `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
+| `card_files`, `card_report`, `card_artifacts` | Discover committed files of a card's latest ended run (completed, or blocked: staged commits only), read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
 | `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). |
 | `records_find`, `records_show` (`game?`) | Shared canonical record reads. `records_show` also takes an `ar://` reference and a champion submission by `CS-`, legacy `P-` or platform `sub_` id. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
-| `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
+| `upload_build(id, run_id, build_dir, name, experiment?)` | Upload the staged, committed build of a card's latest ended run (completed, or blocked mid-experiment) in the card's game. Never from a running card. |
 | `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
-| `accept_champion(game?)` | Record the league's current champion after the user confirms. |
+| `accept_champion(game?)` | Record the league's current champion as the loop's; resolves a champion conflict without asking the user. |
 | `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
 | `game_list` | Shipped and installed games with each one's `league_id`, whether each has a research workspace yet, and how an installed one was installed. |
 | `game_prepare(game)` | Create a game's research workspace (canonical repository seeded from the game folder, plus this profile's clone), or refresh it. Idempotent; no card or researcher needed. |
 | `game_install(id, run_id, name, replace?)` | Install the `games/<name>/` folder a completed card committed, host-wide; returns its check report (problems refuse, gaps to report). |
 | `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
 | `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
-| `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
+| `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, `policy_artifact` (`file` for a game-hosted Coworld, `container` for platform-hosted, from the manifest's `game.player_runtime`), installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
 | `player_champion(league_id, player_id)` | Read the selected player's current champion (one entry, not standings; `league_players` lists the ranked players); never defaults to the workspace carrier. |
 | `xp_status(experiment, game?)`, `credits` | Shared research platform reads. |
 | `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
@@ -159,6 +158,11 @@ separate wake receipt, command ledger, event acknowledgement, or replacement-tas
 
 Native notifications alone deliver task events. Cron polls external XP, credit and
 permit waits, and periodically requests champion-submission review through the same inbox.
+Every 10 minutes it also checks whether our newest accepted champion submission has played
+its first league match (`latest_league_result` shows its policy version). If so, it wakes the
+coordinator once with a `league_result` item, which goes to the session that made the
+submission, and records that submission as followed up in coordinator storage. It makes
+this platform read only while a submission still waits for its first match.
 A card's wait events resume the session that created the card (native `session_id`),
 as native notifications do; events with no card, or a card without an origin session,
 resume the session that most recently called an orchestrator tool.
@@ -166,10 +170,13 @@ resume the session that most recently called an orchestrator tool.
 with `card_answer`; task completion never depends on Git ancestry.
 
 Researchers build, smoke-test, and commit the complete artifact. The coordinator calls
-`upload_build` on the latest completed native run, integrates its receipt commit, and
-uses `submit_requested_version` for an explicitly requested submission. Cancellation
-revokes publication before stopping the native worker. Requested submission is not
-statistical improvement; an autonomous champion submission still requires reviewed evidence.
+`upload_build` on the latest ended native run (completed, or blocked after staging a verified
+build; never a running one). Once the card completes it integrates the receipt commit, and
+uses `submit_requested_version` for a direct submission (the user asked, or the coordinator
+chose to compete a verified version; `request` records why). Cancellation revokes
+publication before stopping the native worker. A direct submission claims no statistical
+improvement; `champion_submit` submits a reviewed improvement. The coordinator does all of
+this without asking the user for approval (SOUL "Act without asking").
 
 ## Development and verification
 
@@ -192,7 +199,7 @@ a separate integration check that these tests do not establish.
 For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's
 "Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
 without an experiment, evaluation or league submission. Require the intended source change in
-the generated artifact and both returned version IDs; champion submission remains a separate authorized action.
+the generated artifact and both returned version IDs; champion submission is a separate step, which the coordinator takes on its own judgment.
 
 ## Conversation context and game support
 
@@ -286,13 +293,15 @@ cache), whether `/tmp` can run programs, whether this is a hosted workspace, and
 `game_support` reports static readiness per operation, including installed-template markers and missing host requirements.
 Configured bindings are not execution-verified. `game_starter` reads bounded UTF-8 pages of a published starter,
 verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.
-`card_report` reads a committed report from the recorded workspace of the latest completed card run,
-checks commit membership in that card branch, and never integrates or executes the report.
+`card_report` reads a committed report from the recorded workspace of the card's latest ended run,
+checks commit membership in that card branch, and never integrates or executes the report. A completed
+card reads its card branch; a blocked card (its run ended, e.g. waiting on XP results) reads only commits
+staged on origin. A running card is never read.
 If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.
 
 Review a completed experiment through these tools:
 
-1. Get its latest completed run and full commit from `card_show`.
+1. Get its latest ended run (completed, or blocked) and full commit from `card_show`.
 2. Call `card_files(task_id, run_id, commit)` to discover the tree recursively. `directory`
    restricts the subtree; `recursive=false` lists one level. Follow `next_offset` for bounded
    pages, rather than guessing report paths or making a separate call for every match folder.

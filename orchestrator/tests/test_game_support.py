@@ -49,6 +49,18 @@ def test_summary_omits_documents_and_reads_exact_coworld(discovery):
     assert calls == ["/observatory/v2/leagues/league_pudge", "/observatory/v2/coworlds/cow_pudge"]
 
 
+@pytest.mark.parametrize("game,artifact", [
+    (None, "container"),  # Coworld's default player_runtime is platform-hosted
+    ({"player_runtime": "platform-hosted"}, "container"),
+    ({"player_runtime": "game-hosted"}, "file"),
+])
+def test_policy_artifact_follows_the_manifest_player_runtime(discovery, game, artifact):
+    client, _, coworld, _ = discovery
+    if game is not None:
+        coworld["manifest"]["game"] = game
+    assert client.game_support("league_pudge")["policy_artifact"] == artifact
+
+
 def test_unicode_pages_reconstruct_document_and_changed_release_fails(discovery):
     client, _, coworld, _ = discovery
     index = client.game_support("league_pudge")

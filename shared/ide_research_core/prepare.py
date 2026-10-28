@@ -120,6 +120,9 @@ EARLIER_DEFAULTS = {
     # Hermes's default. Both profiles run unattended (chat approvals expire after 5 minutes and
     # cron/worker runs have no one to ask), so they ship "off" plus a deny list.
     "approvals.mode": {"smart"},
+    "approvals.cron_mode": {"deny"},  # Hermes's defaults for the per-context modes
+    "approvals.single_query_mode": {"deny"},
+    "approvals.unattended_mode": {"deny"},
 }
 
 

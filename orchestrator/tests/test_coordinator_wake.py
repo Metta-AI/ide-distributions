@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from orchestrator.gate import wake
-from orchestrator.storage import open_storage
+from orchestrator.storage import league_results_seen, open_storage, remember_submission_session
 
 
 @pytest.mark.parametrize("lost_path", ["/v1/coordinator/inputs", "/v1/runs"])
@@ -136,6 +136,23 @@ def test_card_events_wake_the_session_that_created_the_card(context, board_file)
             "chat-b": [card_2],
             "chat-latest": [poll, no_origin],
         }
+
+        # #19: a league result resumes the session that made the submission, then is marked
+        # followed up so the gate never wakes for that submission again.
+        inputs.clear()
+        remember_submission_session(context, "CS-1", "chat-submitter")
+        result = {"kind": "league_result", "champion_submission": "CS-1"}
+        unknown = {"kind": "league_result", "champion_submission": "CS-2"}
+        assert league_results_seen(context) == set()
+        wake(context, {"wakeAgent": True, "context": {"pending": [result, unknown]}})
+        routed = {
+            body["request"]["session_id"]: json.loads(body["request"]["input"].split("\n", 1)[1])[
+                "pending"
+            ]
+            for body in inputs
+        }
+        assert routed == {"chat-submitter": [result], "chat-latest": [unknown]}
+        assert league_results_seen(context) == {"CS-1", "CS-2"}
     finally:
         server.shutdown()
         worker.join()

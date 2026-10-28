@@ -6,6 +6,14 @@ from urllib.request import Request, urlopen
 
 from .context import Context
 
+# The desktop client talks to Hermes sessions directly; they are not web IDE conversations.
+UNBOUND_CONVERSATION = (
+    " 'Conversation not found' means this chat (a native Hermes session, e.g. from the desktop"
+    " client) is not registered as a web IDE conversation. It is not missing policy source, a"
+    " refused submission or a lost chat: continue with tools that do not need that binding"
+    " (upload_build, the submit tools, policy_versions)."
+)
+
 
 class WorkspaceError(RuntimeError):
     def __init__(self, response):
@@ -18,6 +26,7 @@ class WorkspaceError(RuntimeError):
                 "recovery": (
                     "Read ide_workspace_schema for supported arguments. Do not retry unsupported "
                     "scope or invent parameters. For uncertain effects, inspect the original request_id."
+                    + (UNBOUND_CONVERSATION if "conversation not found" in json.dumps(response).lower() else "")
                 ),
             },
         }
