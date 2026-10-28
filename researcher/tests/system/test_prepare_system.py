@@ -36,8 +36,9 @@ def test_retained_profile_upgrade(tmp_path):
         )
         # Retained profiles predate the game-context skill; updates must expose it
         # through native discovery rather than requiring a fresh profile.
-        context_skill = source / "skills/autoresearch/coworld-context"
-        shutil.rmtree(context_skill)
+        new_skills = ("coworld-context", "expert-consultation")
+        for skill in new_skills:
+            shutil.rmtree(source / "skills/autoresearch" / skill)
         # Retained source and installed config predate the new policy.
         config_path = source / "config.yaml"
         defaults = yaml.safe_load(config_path.read_text())
@@ -99,7 +100,10 @@ def test_retained_profile_upgrade(tmp_path):
             }
             jobs["jobs"].append(custom_job)
             jobs_path.write_text(json.dumps(jobs))
-        shutil.copytree(ROOT / kind / "skills/autoresearch/coworld-context", context_skill)
+        for skill in new_skills:
+            shutil.copytree(
+                ROOT / kind / "skills/autoresearch" / skill, source / "skills/autoresearch" / skill
+            )
         config_path.write_text(yaml.safe_dump(defaults))
         if kind == "researcher":
             shutil.copyfile(ROOT / kind / "doctrine/research-agent.md", doctrine)
@@ -107,11 +111,31 @@ def test_retained_profile_upgrade(tmp_path):
         # Native update preserves installed config; our operation must reconcile owned fields.
         assert yaml.safe_load((profile / "config.yaml").read_text())["agent"]["max_turns"] == 23
         subprocess.run(command, env=profile_env, check=True, timeout=300)
-        catalog = json.loads(subprocess.check_output(
-            [hermes_python(), "-c", "from tools.skills_tool import skills_list; print(skills_list())"],
-            env=profile_env, text=True,
-        ))
-        assert any(skill["name"] == "coworld-context" for skill in catalog["skills"])
+        catalog = json.loads(
+            subprocess.check_output(
+                [
+                    hermes_python(),
+                    "-c",
+                    "from tools.skills_tool import skills_list; print(skills_list())",
+                ],
+                env=profile_env,
+                text=True,
+            )
+        )
+        assert set(new_skills) <= {skill["name"] for skill in catalog["skills"]}
+        for skill in new_skills:
+            viewed = json.loads(
+                subprocess.check_output(
+                    [
+                        hermes_python(),
+                        "-c",
+                        f"from tools.skills_tool import skill_view; print(skill_view({skill!r}))",
+                    ],
+                    env=profile_env,
+                    text=True,
+                )
+            )
+            assert viewed["success"], viewed
         actual = yaml.safe_load((profile / "config.yaml").read_text())
         assert actual["agent"]["max_turns"] == 23
         assert (workspace / "notes.txt").read_text() == "uncommitted notes"
