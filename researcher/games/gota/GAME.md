@@ -189,7 +189,7 @@ command arguments and error tracebacks preserve their original paths.
 The output directory must not exist. Gate results record `outcome` as `passed`,
 `failed`, or `errored`, alongside the compatibility `passed` boolean. Failed
 policy checks can feed compiler repair rounds. A gate or harness tool fault stops
-the build immediately: `report.json`, `report.md`, `version.json` and the binding's
+that build (follow doctrine D-26 to get a build through another way): `report.json`, `report.md`, `version.json` and the binding's
 JSON output report status `errored`, with exception type, message and traceback
 summary. No later gate or model round runs after the fault, and errored evidence
 never becomes `repair_errors`. Startup faults retain an error report under the

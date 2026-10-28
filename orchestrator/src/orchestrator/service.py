@@ -12,18 +12,31 @@ from .storage import snapshot
 RESEARCHER_MARKER = Path("plugins") / "researcher_guard"
 
 
+def dispatch_profiles(root):
+    """The root Hermes config's ``kanban.dispatch_profiles``: the assignees this host's
+    dispatcher claims (a list or a comma-separated string), or None when it is not set."""
+    import yaml
+
+    path = root / "config.yaml"
+    config = yaml.safe_load(path.read_text()) if path.is_file() else None
+    value = ((config or {}).get("kanban") or {}).get("dispatch_profiles")
+    if value is None:
+        return None
+    items = value.split(",") if isinstance(value, str) else value
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
 def researchers(context, cards):
     """The researcher profiles cards can be assigned to, with each one's open cards.
 
-    Hosting names them in ``SOFTMAX_WORKER_PROFILES``; elsewhere, every installed profile
-    that ships the researcher's guard plugin is one."""
+    The host's dispatcher allowlist names them (hosting sets it); without one, every installed
+    profile that ships the researcher's guard plugin is one."""
     profiles = context.home.parent
-    named = context.env.get("SOFTMAX_WORKER_PROFILES", "")
-    names = [name.strip() for name in named.split(",") if name.strip()]
-    if not names and profiles.name == "profiles":
+    names = dispatch_profiles(context.root)
+    if names is None:
         names = sorted(
             entry.name for entry in profiles.iterdir() if (entry / RESEARCHER_MARKER).is_dir()
-        )
+        ) if profiles.name == "profiles" else []
     roster = []
     for name in names:
         own = [card for card in cards if card.get("assignee") == name]
@@ -44,7 +57,8 @@ class Service:
     def status(self, game=None):
         """Board-wide cards and waits, the host-wide budget, and one game's research
         (``game``; omit for the neutral workspace)."""
-        cards = Board(self.context).card_list()
+        # Every open and recent card, not card_list's default page of 20.
+        cards = Board(self.context).card_list({"limit": 200, "order_by": "created-desc"})
         by_state = {}
         for card in cards:
             by_state.setdefault(card["status"], []).append(card["id"])
