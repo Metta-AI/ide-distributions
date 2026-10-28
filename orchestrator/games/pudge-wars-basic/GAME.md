@@ -65,7 +65,7 @@ Run every tool from `"$RESEARCH_HOME"` (the installed profile directory) with
 `"$RESEARCH_PYTHON"` in place of `python3`, as the core `card` skill sets them, with absolute
 worktree paths. Each tool has `--help`; with `--json` it prints one envelope
 `{"ok": true, "data": ...}` or `{"ok": false, "error": {"reason", "message"}}`. Exit 0 passed,
-1 failed, 2 rejected input, 3 errored (a tool fault: report it, do not work around it).
+1 failed, 2 rejected input, 3 errored (a tool fault: work around it and report it, doctrine D-26).
 
 | Tool | Use |
 |---|---|

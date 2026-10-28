@@ -86,6 +86,8 @@ def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, p
     assert result["wakeAgent"] is True
     event = result["context"]["pending"][0]
     assert event["kind"] == kind
+    # #18: status and wakes name the event the same way, for card_create(source_event=...).
+    assert event["source_event"] == f"task_runs:1:{kind}"
     assert evaluate(context, platform, platform, QUIET_MINUTE) == result
 
 

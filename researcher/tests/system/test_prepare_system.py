@@ -52,7 +52,7 @@ def test_retained_profile_upgrade(tmp_path):
             old["platform_toolsets"]["api_server"] = ["orchestrator"]
             old["platform_toolsets"]["cron"] = ["orchestrator"]
             # An orchestrator installed before it matched the researcher's settings.
-            for key in ("fallback_providers", "skills", "timeouts"):
+            for key in ("fallback_providers", "skills", "timeouts", "approvals"):
                 old.pop(key)
             old["terminal"].pop("timeout")
         old["agent"]["max_turns"] = 23  # the owner's own choice: kept
@@ -130,6 +130,9 @@ def test_retained_profile_upgrade(tmp_path):
                 actual["platform_toolsets"]["api_server"]
             )
             assert actual["platform_toolsets"]["cron"] == []
+            # An orchestrator installed before it ran unattended gets the mode and deny list.
+            assert actual["approvals"]["mode"] == "off"
+            assert set(defaults["approvals"]["deny"]) <= set(actual["approvals"]["deny"])
             supervisor = next(
                 job
                 for job in json.loads(jobs_path.read_text())["jobs"]

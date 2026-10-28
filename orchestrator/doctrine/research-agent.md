@@ -16,7 +16,7 @@ D-04. **The live field is the only oracle.** Local runs are for debugging, not f
 
 D-05. **Pass the replay-analysis gate before you change strategy.** The gate needs a completed replay with hash and mechanics version verified. A committed tool decodes it. Actions map to stable player IDs. A concrete “before” metric and a named cause are recorded. If the replay cannot show the cause, add instrumentation first.
 
-D-06. **Only completed, inspected XP counts as evidence for promotion.** Pending rows, local wins, and “the version exists” do not count. A promotion also needs N completed episodes and every guardrail satisfied against the current champion. The one exception is the first champion: while no champion exists (the league shows no policy competing for our player), the orchestrator submits the game's starter policy once without evidence (A14). That promotion claims nothing and is evidence for nothing.
+D-06. **Only completed, inspected XP counts as evidence for a champion submission.** Pending rows, local wins, and “the version exists” do not count. A submission also needs N completed episodes and every guardrail satisfied against the current champion. The one exception is the first champion: while no champion exists (the league shows no policy competing for our player), the orchestrator submits the game's starter policy once without evidence (A14). That submission claims nothing and is evidence for nothing.
 
 D-07. **No claim without a citation.** The linter grades the evidence. A claim with only D or E evidence stays a belief, with confidence and “revise if”.
 
@@ -66,7 +66,7 @@ D-23. **Preserve outputs, then report native assignment completion.** Use `works
 
 D-24. **Never edit generated files by hand:** `kb/index.md`, backlinks, and contradiction lists. Maintenance cards use the KB commands in their worktrees; integration regenerates canonical views.
 
-D-25. **The coordinator owns integration and submission.** Prepare the requested artifact and evidence. Explicit build/upload work does not require statistical promotion. Use reviewed promotion evidence only for an assigned superiority evaluation.
+D-25. **The coordinator owns integration and submission.** Prepare the requested artifact and evidence. Explicit build/upload work does not require statistical evidence. Use reviewed submission evidence only for an assigned superiority evaluation.
 
 D-26. **Keep going when a tool fails.** A failing tool is an obstacle, not a stop. Retry once if the failure looks transient. Otherwise reach the same result another reasonable way: another documented option or command, a writable copy of the tool or game folder in your worktree or `$HERMES_HOME/cache/<game>/`, an interpreter or environment you make on the workspace disk, or the step done by hand with the CLI. Prefer the way that keeps the same inputs and engine version. Never edit the installed copy itself. Report what failed (exact command, error, affected refs), what you did instead and how it could change the result, so the tool gets fixed. Correct invalid inputs without bypassing checks and preserve failed reports. Send a `help_request:` and use `kanban_block` only when no reasonable way remains or every remaining way would cross D-27.
 

@@ -47,6 +47,21 @@ def connection():
     return connect(board=BOARD)
 
 
+def creation_command(conn, key):
+    """The native task created under idempotency ``key`` and its recorded creation arguments."""
+    from hermes_cli import kanban_db as kb
+
+    task = next(
+        (t for t in kb.list_tasks(conn, include_archived=True) if t.idempotency_key == key), None
+    )
+    if task is None:
+        return None, None
+    prior = conn.execute(
+        "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command'", (task.id,)
+    ).fetchone()
+    return task, json.loads(prior["payload"])
+
+
 def subscribe(conn, task_id):
     from hermes_cli.kanban_db_notify import add_notify_sub
     from tools.kanban_tools import _resolve_notify_target
@@ -137,12 +152,18 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         failure_limit=2,
         session_id=None,
         game=None,
+        source_event=None,
     ):
         """Replay an execution command; native Hermes owns task and worktree identity.
 
         ``game`` (a shipped or installed game; omit for the neutral workspace) selects
         the assignee's clone of that game, which Hermes makes the card worktree from. It is
-        recorded in the creation command, where every card-scoped effect reads it."""
+        recorded in the creation command, where every card-scoped effect reads it.
+
+        ``source_event`` (a pending event's key from ``status`` or a wake) identifies the card
+        instead of ``command_id``: a chat turn and a background wake acting on the same event
+        get the one card, whatever arguments each chose. The later call replays the recorded
+        command."""
         from agent.secret_scope import build_profile_secret_scope
         from gateway.session_context import get_session_env
         from hermes_cli import kanban_db as kb
@@ -154,6 +175,29 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
 
         if not command_id or len(command_id) > 200:
             raise ValueError("command_id must contain 1-200 characters")
+        if source_event is not None and not 0 < len(source_event) <= 200:
+            raise ValueError("source_event must contain 1-200 characters")
+        command = {
+            "assignee": assignee,
+            "title": title,
+            "body": body,
+            "priority": priority,
+            "skills": skills or [],
+            "max_runtime_seconds": max_runtime_seconds,
+            "failure_limit": failure_limit,
+        }
+        if game is not None:
+            # Store the explicit choice; profile settings never select or move a card.
+            command["game"] = game
+        key = f"event:{source_event}" if source_event else f"command:{command_id}"
+        if source_event:
+            with closing(connection()) as conn:
+                recorded = creation_command(conn, key)[1]
+            if recorded is not None and recorded != command:
+                # Another turn already acted on this event: replay its command, not a second card.
+                return self.card_create(
+                    command_id, session_id=session_id, source_event=source_event, **recorded
+                )
         if skills:
             available = self.worker_skills(assignee)["skills"]
             names = {skill["name"] for skill in available}
@@ -175,20 +219,9 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
                 )
         profile = get_profile_dir(assignee)
         env = {**build_profile_secret_scope(profile), "HERMES_HOME": str(profile)}
-        command = {
-            "assignee": assignee,
-            "title": title,
-            "body": body,
-            "priority": priority,
-            "skills": skills or [],
-            "max_runtime_seconds": max_runtime_seconds,
-            "failure_limit": failure_limit,
-        }
         if game is None:  # a host with no default game: the assignee's own clone
             clone = Path(env.get("RESEARCH_WORKSPACE") or profile / "workspace")
         else:
-            # Store the explicit choice; profile settings never select or move a card.
-            command["game"] = game
             clone = clone_for(env, game)
             if game != env.get("RESEARCH_GAME"):
                 locate_game(game, self.context.env)
@@ -201,23 +234,13 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             # Serialize lookup and creation in the native task database. The task
             # and its immutable creation arguments commit together.
             with kb.write_txn(conn):
-                key = f"command:{command_id}"
-                existing = next(
-                    (
-                        task
-                        for task in kb.list_tasks(conn, include_archived=True)
-                        if task.idempotency_key == key
-                    ),
-                    None,
-                )
+                existing, recorded = creation_command(conn, key)
                 if existing:
                     task_id = existing.id
-                    prior = conn.execute(
-                        "SELECT payload FROM task_events WHERE task_id=? AND kind='creation_command'",
-                        (task_id,),
-                    ).fetchone()
-                    recorded = json.loads(prior["payload"])
                     if recorded != json.loads(payload):
+                        if source_event:
+                            # Another first creation won the race; a retry replays its command.
+                            raise ValueError("source_event was just used; retry to get its card")
                         raise ValueError("command_id was already used with different arguments")
                 else:
                     git(clone, "fetch", "origin")

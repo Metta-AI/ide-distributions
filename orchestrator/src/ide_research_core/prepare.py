@@ -93,6 +93,9 @@ EARLIER_DEFAULTS = {
     "terminal.timeout": {180},  # Hermes's default
     "timeouts.tools.sequential_call": {420},  # Hermes's default
     "timeouts.tools.concurrent_batch": {420},
+    # Hermes's default. Both profiles run unattended (chat approvals expire after 5 minutes and
+    # cron/worker runs have no one to ask), so they ship "off" plus a deny list.
+    "approvals.mode": {"smart"},
 }
 
 
@@ -121,7 +124,10 @@ def reconcile_settings(defaults: dict, hermes: str) -> None:
             continue
         current = _retained(hermes, key)
         if current != shipped and (current is None or current in earlier):
-            subprocess.run([hermes, "config", "set", key, json.dumps(shipped)], check=True)
+            # Hermes stores a string-typed setting's text verbatim (so "off" stays a string);
+            # JSON-quoting it would store the quotes.
+            value = shipped if isinstance(shipped, str) else json.dumps(shipped)
+            subprocess.run([hermes, "config", "set", key, value], check=True)
     fallback = defaults.get("fallback_providers")
     if fallback and not _retained(hermes, "fallback_providers"):
         subprocess.run(
@@ -144,7 +150,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     coordinator = (source / "coordinator.json").exists()
     if coordinator:
         append["platform_toolsets.api_server"] = defaults["platform_toolsets"]["api_server"]
-    else:
+    if _shipped(defaults, "approvals.deny"):  # an older source may predate it
         append["approvals.deny"] = defaults["approvals"]["deny"]
     for key, required in append.items():
         current = _retained(hermes, key) or []  # an older profile may not have the key

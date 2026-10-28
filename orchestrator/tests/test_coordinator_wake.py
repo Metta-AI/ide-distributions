@@ -1,6 +1,7 @@
 """A fresh cron caller uses only the durable native inbox after lost responses."""
 
 import json
+import sqlite3
 import threading
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -64,7 +65,7 @@ def test_wake_recovers_without_a_local_receipt(context, lost_path):
         context.env["SOFTMAX_BRIDGE_DIRECTORY"] = str(binding)
         with closing(open_storage(context.storage_path)) as conn, conn:
             conn.execute("INSERT INTO coordinator VALUES ('session', 'session-1')")
-        event = {"wakeAgent": True, "context": {"events": [{"id": 1}], "pending": []}}
+        event = {"wakeAgent": True, "context": {"pending": [{"kind": "champion_submission_poll"}]}}
         with pytest.raises(ConnectionError):
             wake(context, event)
         assert "run_id" in wake(context, event)
@@ -77,6 +78,64 @@ def test_wake_recovers_without_a_local_receipt(context, lost_path):
                 row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
         assert tables == {"coordinator"}
+    finally:
+        server.shutdown()
+        worker.join()
+        server.server_close()
+
+
+def test_card_events_wake_the_session_that_created_the_card(context, board_file):
+    """#16: a card's events resume its origin chat, not whichever chat called a tool last."""
+    inputs = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"pending": None}).encode())
+
+        def do_POST(self):
+            assert self.path == "/v1/coordinator/inputs"
+            inputs.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(202)
+            self.end_headers()
+            self.wfile.write(json.dumps({"sequence": len(inputs)}).encode())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever)
+    worker.start()
+    try:
+        binding = context.home / "bridge"
+        binding.mkdir()
+        (binding / "config.json").write_text(
+            json.dumps(
+                {"hermes_url": f"http://127.0.0.1:{server.server_port}", "service_key": "test"}
+            )
+        )
+        context.env["SOFTMAX_BRIDGE_DIRECTORY"] = str(binding)
+        with sqlite3.connect(board_file) as conn:
+            conn.execute("UPDATE tasks SET session_id='chat-a' WHERE id='card-1'")
+            conn.execute("INSERT INTO tasks VALUES ('card-2', 'done', 'card/2', '', 'chat-b')")
+        with closing(open_storage(context.storage_path)) as conn, conn:
+            conn.execute("INSERT INTO coordinator VALUES ('session', 'chat-latest')")
+        card_1 = {"kind": "xp_terminal", "card": "card-1"}
+        card_2 = {"kind": "credits_available", "card": "card-2"}
+        no_origin = {"kind": "permit_answered", "card": "card-3"}
+        poll = {"kind": "champion_submission_poll", "tick": "t"}
+        pending = [card_1, poll, card_2, no_origin]
+        wake(context, {"wakeAgent": True, "context": {"pending": pending}})
+        routed = {}
+        for body in inputs:
+            prompt = body["request"]["input"]
+            routed[body["request"]["session_id"]] = json.loads(prompt.split("\n", 1)[1])["pending"]
+        assert routed == {
+            "chat-a": [card_1],
+            "chat-b": [card_2],
+            "chat-latest": [poll, no_origin],
+        }
     finally:
         server.shutdown()
         worker.join()
