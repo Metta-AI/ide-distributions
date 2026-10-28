@@ -31,6 +31,8 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from docker.utils.build import exclude_paths
+
 from ide_research_core import policy_files, sources
 from ide_research_core.cli import register_group
 from ide_research_core.games import authoring
@@ -123,20 +125,36 @@ def _install(args) -> dict:
     )
 
 
-def container_sources(root: Path, context: Path, strategy: Path) -> dict[str, str]:
-    """Record the build context, including ignored files; Git metadata is not editable code."""
-    paths = {strategy}
-    for directory, dirs, files in os.walk(context, followlinks=False):
-        dirs[:] = sorted(name for name in dirs if name != ".git")
-        for name in [*dirs, *files]:
-            if (Path(directory) / name).is_symlink():
-                raise authoring.AuthoringError(
-                    "bad_arguments", "Build sources cannot contain symlinks"
-                )
-        paths.update(Path(directory) / name for name in files if name != ".git")
+def container_sources(
+    root: Path, context: Path, strategy: Path, dockerfile: str = "Dockerfile"
+) -> dict[str, str]:
+    """Use Docker's context matcher, including the selected Dockerfile's ignore rules."""
+    ignore = context / f"{dockerfile}.dockerignore"
+    if not ignore.is_file():
+        ignore = context / ".dockerignore"
+    patterns = (
+        [
+            line.strip()
+            for line in ignore.read_text(encoding="utf-8-sig").splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        if ignore.is_file()
+        else []
+    )
+    selected = exclude_paths(str(context), patterns, dockerfile=dockerfile)
+    paths = {context / name for name in selected if ".git" not in Path(name).parts}
+    paths.add(strategy)
+    if ignore.is_file():
+        paths.add(ignore)
     hashes = {}
     for path in sorted(paths):
         relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            raise authoring.AuthoringError(
+                "bad_arguments", f"Build source is a symlink: {relative}"
+            )
+        if path.is_dir():
+            continue
         if not policy_files.source_path(relative) or not path.is_file():
             raise authoring.AuthoringError("bad_arguments", f"Unsupported build source: {relative}")
         with path.open("rb") as stream:
@@ -166,7 +184,7 @@ def _build_container(args) -> dict:
         raise authoring.AuthoringError(
             "bad_arguments", "Build inputs must be in the task workspace"
         )
-    source_hashes = container_sources(root, context, strategy)
+    source_hashes = container_sources(root, context, strategy, args.dockerfile)
     primary = (context / args.dockerfile).relative_to(root).as_posix()
     if primary not in source_hashes:
         raise authoring.AuthoringError(
@@ -191,7 +209,7 @@ def _build_container(args) -> dict:
     )
     if result.returncode:
         raise authoring.AuthoringError("build_failed", "Container build failed; see build output")
-    if container_sources(root, context, strategy) != source_hashes:
+    if container_sources(root, context, strategy, args.dockerfile) != source_hashes:
         raise authoring.AuthoringError("source_changed", "Source changed during the build")
     with artifact.open("rb") as stream:
         artifact_hash = hashlib.file_digest(stream, "sha256").hexdigest()

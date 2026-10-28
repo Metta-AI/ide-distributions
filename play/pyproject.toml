@@ -9,6 +9,7 @@ dependencies = [
     "PyYAML",
     "coworld>=0.1.64,<0.2",
     "softmax-cli>=0.26.40,<0.27",
+    "docker>=7.1,<8",
 ]
 
 [dependency-groups]

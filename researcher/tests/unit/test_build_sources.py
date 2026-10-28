@@ -24,14 +24,14 @@ def test_external_starter_is_retained_without_absolute_editor_paths(tmp_path):
         retain(root, str(starter), hashes)
 
 
-def test_workspace_source_keeps_its_editable_path(tmp_path):
+def test_workspace_source_retains_an_editable_snapshot(tmp_path):
     source = tmp_path / "player.py"
     source.write_text("source")
     hashes = {str(source): hashlib.sha256(source.read_bytes()).hexdigest()}
-    assert retain(tmp_path, str(source), hashes) == (
-        "player.py",
-        {"player.py": hashes[str(source)]},
-    )
+    primary, manifest = retain(tmp_path, str(source), hashes)
+    assert primary.startswith("sources/") and primary.endswith("/player.py")
+    assert manifest == {primary: hashes[str(source)]}
+    assert (tmp_path / primary).read_text() == "source"
 
 
 def test_retention_rejects_linked_destination(tmp_path):

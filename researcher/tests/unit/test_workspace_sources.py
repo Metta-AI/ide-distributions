@@ -300,3 +300,52 @@ def test_policy_discovery_and_edits_follow_game_canonical_not_neutral(source, tm
     assert execute_policy(root, write, "edit-game") == saved
     assert execute_policy(root, write, "stale-edit")["kind"] == "conflict"
     assert execute_policy(root, read, "")["content"] == "edited\n"
+
+
+def test_uploaded_nested_and_ignored_sources_survive_stage_and_integration(source, tmp_path):
+    from ide_research_core.games.cli import container_sources
+    from ide_research_core.runctx import RunContext
+    from ide_research_core.softmax_tool.fake import FakeSoftmax
+    from ide_research_core.softmax_tool.upload import upload_build
+    from ide_research_core.workspace_sources import execute_policy
+
+    root, bare = source
+    worker = tmp_path / "worker"
+    gitops.git(root, "worktree", "add", "-b", "source-proof", str(worker))
+    context = worker / "player"
+    context.mkdir()
+    gitops.git(context, "init", "-q", "-b", "main")
+    gitops.git(context, "config", "user.name", "Test")
+    gitops.git(context, "config", "user.email", "test@example.com")
+    (context / "Dockerfile").write_text("FROM scratch\nCOPY generated.py /player.py\n")
+    (context / ".gitignore").write_text("generated.py\n")
+    (context / ".dockerignore").write_text(".git\n")
+    (context / "generated.py").write_text("original generated source\n")
+    gitops.git(context, "add", ".")
+    gitops.git(context, "commit", "-qm", "nested source")
+    strategy = worker / "STRATEGY.md"
+    strategy.write_text("strategy")
+    manifest = container_sources(worker, context, strategy)
+    build = tmp_path / "build"
+    build.mkdir()
+    artifact = b"archive fixture"
+    (build / "policy.tar").write_bytes(artifact)
+    (build / "version.json").write_text(json.dumps({
+        "artifact": "policy.tar", "artifact_type": "oci-image",
+        "policy_sha256": hashlib.sha256(artifact).hexdigest(),
+        "strategy_sha256": manifest["STRATEGY.md"],
+        "source_path": "player/Dockerfile", "source_hashes": manifest,
+        "source_commit": gitops.head(worker), "gates": {"container_build": {"passed": True}},
+    }))
+    version, platform = upload_build(RunContext(root.parent, bare, worker), FakeSoftmax(bare, {}), build, "ply_fake", "source-proof")
+    staged = workspace.stage(worker)
+    workspace.integrate(root, branch=staged["branch"], commit=staged["card_sha"])
+    query = HermesPolicyFiles(action="sources", policy_name="source-proof-ply_fake", version_id=platform)
+    found = execute_policy(root, query, "")
+    assert len(found["sources"]) == 1
+    files = found["sources"][0]["files"]
+    for suffix in ("/player/generated.py", "/player/.dockerignore"):
+        path = next(path for path in files if path.endswith(suffix))
+        read = execute_policy(root, query.model_copy(update={"action": "read", "record_id": version, "path": path}), "")
+        assert read["kind"] == "ok", read
+        assert read["content"] == (context / Path(path).name).read_text()

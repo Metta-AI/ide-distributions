@@ -132,3 +132,23 @@ def test_container_manifest_includes_nested_clone_and_ignored_inputs(tmp_path):
     (context / "new.py").unlink()
     (context / "generated.py").unlink()
     assert container_sources(tmp_path, context, strategy) != before
+
+
+def test_container_manifest_honors_dockerfile_specific_ignore_and_negation(tmp_path):
+    from ide_research_core.games.cli import container_sources
+
+    context = tmp_path / "player"
+    context.mkdir()
+    (context / "Dockerfile.test").write_text("FROM scratch\nCOPY . /\n")
+    (context / ".dockerignore").write_text("keep.py\n")
+    (context / "Dockerfile.test.dockerignore").write_text(".venv\n*.py\n!keep.py\n")
+    (context / ".venv").mkdir()
+    (context / ".venv/python").symlink_to("/not-a-source")
+    (context / "keep.py").write_text("kept")
+    (context / "skip.py").write_text("not built")
+    strategy = tmp_path / "STRATEGY.md"
+    strategy.write_text("strategy")
+    manifest = container_sources(tmp_path, context, strategy, "Dockerfile.test")
+    assert "player/keep.py" in manifest
+    assert "player/skip.py" not in manifest
+    assert not any(".venv" in path for path in manifest)

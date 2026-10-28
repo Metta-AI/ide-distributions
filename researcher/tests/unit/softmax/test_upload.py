@@ -29,6 +29,10 @@ class Workspace:
         self.worker = tmp_path / "worker"
         self.build = tmp_path / "build"
         self.canonical.mkdir()
+        self.worker.mkdir()
+        gitops.git(self.worker, "init", "-q", "-b", "main")
+        gitops.git(self.worker, "config", "user.email", "t@example.com")
+        gitops.git(self.worker, "config", "user.name", "T")
         self.store = RecordStore(Layout(self.worker))
         self.experiment = self.store.create("experiment", dict(EXP_DESIGNED))
         for state in ("built", "uploaded")[: ("designed", "built", "uploaded").index(status)]:

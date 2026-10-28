@@ -189,6 +189,7 @@ def register_sources(ctx: RunContext, store: RecordStore, version_id: str, build
     source_path, source_hashes = build_sources.retain(
         ctx.worker, build["source_path"], build["source_hashes"]
     )
+    gitops.git(ctx.worker, "--literal-pathspecs", "add", "-f", "--", *source_hashes)
     store.add_event(
         version_id,
         "sources_registered",

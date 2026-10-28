@@ -14,24 +14,19 @@ class SourceError(ValueError):
 
 
 def retain(root: Path, source_path: str, hashes: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """Keep local source paths; copy external compiler inputs into the canonical workspace.
+    """Snapshot build inputs into the canonical workspace, including nested or ignored sources.
 
     The manifest hash names the imported source directory. Never overwrite it: edits there
     belong to the user, even when the same starter is published again.
     """
     root = root.resolve()
     manifest_hash = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
-    external = [
-        Path(name).resolve()
-        for name in hashes
-        if Path(name).is_absolute() and not Path(name).resolve().is_relative_to(root)
-    ]
-    # Preserve each external input's relative layout, including sibling strategy files.
-    common = Path(os.path.commonpath([str(path.parent) for path in external])) if external else root
+    originals = {name: Path(name) if Path(name).is_absolute() else root / name for name in hashes}
+    common = Path(os.path.commonpath([str(path.parent) for path in originals.values()]))
     mapped: dict[str, str] = {}
     result: dict[str, str] = {}
     for name, expected in hashes.items():
-        original = Path(name) if Path(name).is_absolute() else root / name
+        original = originals[name]
         snapshot = policy_files.read_file(
             Path(original.anchor),
             original.relative_to(original.anchor).as_posix(),
@@ -43,12 +38,7 @@ def retain(root: Path, source_path: str, hashes: dict[str, str]) -> tuple[str, d
         data = snapshot.data
         if hashlib.sha256(data).hexdigest() != expected:
             raise SourceError(f"Build source changed since compilation: {name}")
-        if original.resolve().is_relative_to(root):
-            relative = original.resolve().relative_to(root).as_posix()
-        else:
-            relative = (
-                f"sources/{manifest_hash}/{original.resolve().relative_to(common).as_posix()}"
-            )
+        relative = f"sources/{manifest_hash}/{original.relative_to(common).as_posix()}"
         if not policy_files.source_path(relative) or relative.split("/")[0] == "versions":
             raise SourceError(f"Build source must have a visible workspace-relative path: {name}")
         target = root / relative
