@@ -96,7 +96,9 @@ def _new(args) -> dict:
     out = Path(args.out or os.environ.get(WORKER_ENV) or Path.cwd())
     source = sources.fetch(args.source, args.source_ref) if args.source else None
     mixin = sources.fetch(args.mixin, args.mixin_ref) if args.mixin else None
-    return authoring.new(args.name, args.league, out, title=args.title, source=source, mixin=mixin)
+    return authoring.new(
+        args.name, args.league, out, title=args.title, source=source, mixin=mixin
+    )
 
 
 def _check(args) -> dict:
@@ -150,13 +152,15 @@ def container_sources(
     for path in sorted(paths):
         relative = path.relative_to(root).as_posix()
         if path.is_symlink():
-            raise authoring.AuthoringError(
-                "bad_arguments", f"Build source is a symlink: {relative}"
-            )
+            target = os.readlink(path)
+            hashes[relative] = hashlib.sha256(os.fsencode(target)).hexdigest()
+            continue
         if path.is_dir():
             continue
         if not policy_files.source_path(relative) or not path.is_file():
-            raise authoring.AuthoringError("bad_arguments", f"Unsupported build source: {relative}")
+            raise authoring.AuthoringError(
+                "bad_arguments", f"Unsupported build source: {relative}"
+            )
         with path.open("rb") as stream:
             hashes[relative] = hashlib.file_digest(stream, "sha256").hexdigest()
     return hashes
@@ -172,9 +176,13 @@ def _build_container(args) -> dict:
     strategy = Path(args.strategy).resolve()
     out = Path(args.out).resolve()
     if out.is_relative_to(context):
-        raise authoring.AuthoringError("bad_arguments", "--out must be outside --context")
+        raise authoring.AuthoringError(
+            "bad_arguments", "--out must be outside --context"
+        )
     if out.exists():
-        raise authoring.AuthoringError("bad_arguments", "--out must be a new build directory")
+        raise authoring.AuthoringError(
+            "bad_arguments", "--out must be a new build directory"
+        )
     root = (
         Path(os.environ[WORKER_ENV]).resolve()
         if WORKER_ENV in os.environ
@@ -208,9 +216,13 @@ def _build_container(args) -> dict:
         check=False,
     )
     if result.returncode:
-        raise authoring.AuthoringError("build_failed", "Container build failed; see build output")
+        raise authoring.AuthoringError(
+            "build_failed", "Container build failed; see build output"
+        )
     if container_sources(root, context, strategy, args.dockerfile) != source_hashes:
-        raise authoring.AuthoringError("source_changed", "Source changed during the build")
+        raise authoring.AuthoringError(
+            "source_changed", "Source changed during the build"
+        )
     with artifact.open("rb") as stream:
         artifact_hash = hashlib.file_digest(stream, "sha256").hexdigest()
     version = {
@@ -251,22 +263,36 @@ def _run(handler):
 
 def setup(parser: argparse.ArgumentParser) -> None:
     commands = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
-    sub = commands.add_parser("show", help="print the game contract (GAME.md front matter)")
-    sub.add_argument("--name", help=f"game directory under games/ (default ${GAME_ENV})")
+    sub = commands.add_parser(
+        "show", help="print the game contract (GAME.md front matter)"
+    )
+    sub.add_argument(
+        "--name", help=f"game directory under games/ (default ${GAME_ENV})"
+    )
     sub.set_defaults(func=_show)
 
     sub = commands.add_parser("list", help="list shipped and installed games")
     sub.set_defaults(func=_run(_list))
 
-    sub = commands.add_parser("new", help="scaffold games/<name>/ from the game template")
+    sub = commands.add_parser(
+        "new", help="scaffold games/<name>/ from the game template"
+    )
     sub.add_argument("--name", required=True, help="the new game's folder name")
-    sub.add_argument("--league", required=True, help="the league its evaluations play in")
+    sub.add_argument(
+        "--league", required=True, help="the league its evaluations play in"
+    )
     sub.add_argument("--title", help="the game's display name (default: --name)")
-    sub.add_argument("--source", help="the game source: https://github.com/<owner>/<repo>")
+    sub.add_argument(
+        "--source", help="the game source: https://github.com/<owner>/<repo>"
+    )
     sub.add_argument("--source-ref", help="branch, tag or commit of --source")
-    sub.add_argument("--mixin", help="a mixin to install: https://github.com/<owner>/<repo>")
+    sub.add_argument(
+        "--mixin", help="a mixin to install: https://github.com/<owner>/<repo>"
+    )
     sub.add_argument("--mixin-ref", help="branch, tag or commit of --mixin")
-    sub.add_argument("--out", help="directory that receives games/<name>/ (default: worktree)")
+    sub.add_argument(
+        "--out", help="directory that receives games/<name>/ (default: worktree)"
+    )
     sub.set_defaults(func=_run(_new))
 
     sub = commands.add_parser("check", help="check a game folder before installation")
@@ -281,14 +307,22 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument(
         "--context", required=True, help="Dockerfile build context in the task worktree"
     )
-    sub.add_argument("--strategy", required=True, help="STRATEGY.md describing the candidate")
-    sub.add_argument("--out", required=True, help="new build directory outside the context")
+    sub.add_argument(
+        "--strategy", required=True, help="STRATEGY.md describing the candidate"
+    )
+    sub.add_argument(
+        "--out", required=True, help="new build directory outside the context"
+    )
     sub.add_argument("--dockerfile", default="Dockerfile")
     sub.set_defaults(func=_run(_build_container))
 
-    sub = commands.add_parser("install", help="install a card's game folder (orchestrator)")
+    sub = commands.add_parser(
+        "install", help="install a card's game folder (orchestrator)"
+    )
     sub.add_argument("--name", required=True)
-    sub.add_argument("--worktree", required=True, help="the card worktree holding games/<name>/")
+    sub.add_argument(
+        "--worktree", required=True, help="the card worktree holding games/<name>/"
+    )
     sub.add_argument("--commit", required=True, help="the reviewed commit to install")
     sub.add_argument("--replace", action="store_true", help="replace an installed game")
     sub.add_argument("--card")
