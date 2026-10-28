@@ -10,9 +10,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from ide_research_core.games.scope import check_game_name, clone_for, locate_game
+from pydantic import BaseModel, ConfigDict, Field
 
 from .context import Context
 from .research import Research, ResearchError
@@ -391,6 +390,10 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             {"build_dir": build_dir, "name": name, "experiment": experiment},
         )
         worktree = resolve_workspace(task, board=BOARD)
+        # Native completion can remove the checkout and its local branch. The researcher
+        # staged its result on origin; restore that published result before reading artifacts.
+        git(worktree, "fetch", "origin", f"{task.branch_name}:refs/remotes/origin/{task.branch_name}")
+        git(worktree, "merge", "--ff-only", f"origin/{task.branch_name}")
         artifact = (worktree / build_dir).resolve()
         if Path(build_dir).is_absolute() or not artifact.is_relative_to(worktree.resolve()):
             raise ValueError("build_dir must be inside the task's committed worktree")

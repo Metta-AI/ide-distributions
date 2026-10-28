@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 
+ArtifactType = Literal["file", "oci-image"]
+
 
 @dataclass(frozen=True)
 class Identity:
@@ -169,7 +171,7 @@ class Softmax(Protocol):
 
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...
     def xp_recover(self, experiment: str) -> list[XpHandle]: ...
-    def upload(self, artifact: Path, name: str) -> str: ...
+    def upload(self, artifact: Path, name: str, *, artifact_type: ArtifactType = "file") -> str: ...
     def submit(
         self, policy_version_id: str, league_id: str
     ) -> str | PermitRequired | LeagueNotChosen:

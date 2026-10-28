@@ -23,8 +23,11 @@ Every command prints one JSON object, ``{"ok": true, "data": ...}`` or ``{"ok": 
 """
 
 import argparse
+import hashlib
 import json
 import os
+import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -91,9 +94,7 @@ def _new(args) -> dict:
     out = Path(args.out or os.environ.get(WORKER_ENV) or Path.cwd())
     source = sources.fetch(args.source, args.source_ref) if args.source else None
     mixin = sources.fetch(args.mixin, args.mixin_ref) if args.mixin else None
-    return authoring.new(
-        args.name, args.league, out, title=args.title, source=source, mixin=mixin
-    )
+    return authoring.new(args.name, args.league, out, title=args.title, source=source, mixin=mixin)
 
 
 def _check(args) -> dict:
@@ -120,6 +121,55 @@ def _install(args) -> dict:
         card=args.card,
         run_id=args.run,
     )
+
+
+def _build_container(args) -> dict:
+    """Build an OCI archive and the existing publication receipt; no queue or service."""
+    if not os.environ.get("BUILDKIT_HOST"):
+        raise authoring.AuthoringError(
+            "missing_buildkit", "This host has no configured BuildKit endpoint"
+        )
+    context = Path(args.context).resolve()
+    strategy = Path(args.strategy).resolve()
+    out = Path(args.out).resolve()
+    if out.is_relative_to(context):
+        raise authoring.AuthoringError("bad_arguments", "--out must be outside --context")
+    if out.exists():
+        raise authoring.AuthoringError("bad_arguments", "--out must be a new build directory")
+    strategy_hash = hashlib.sha256(strategy.read_bytes()).hexdigest()
+    source_commit = gitops.head(context)
+    out.mkdir(parents=True)
+    artifact = out / "policy.tar"
+    result = subprocess.run(
+        [
+            str(Path(sys.executable).parent / "coworld"),
+            "build-policy",
+            str(context),
+            "--dockerfile",
+            args.dockerfile,
+            "--output",
+            str(artifact),
+        ],
+        stdout=sys.stderr,
+        check=False,
+    )
+    if result.returncode:
+        raise authoring.AuthoringError("build_failed", "Container build failed; see build output")
+    if hashlib.sha256(strategy.read_bytes()).hexdigest() != strategy_hash:
+        raise authoring.AuthoringError("source_changed", "Strategy changed during the build")
+    with artifact.open("rb") as stream:
+        artifact_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+    version = {
+        "artifact": artifact.name,
+        "artifact_type": "oci-image",
+        "policy_sha256": artifact_hash,
+        "strategy_sha256": strategy_hash,
+        "source_commit": source_commit,
+        "gates": {"container_build": {"passed": True}},
+        "evaluation": {"status": "not_run"},
+    }
+    (out / "version.json").write_text(json.dumps(version, indent=2) + "\n")
+    return {"build_dir": str(out), **version}
 
 
 def _run(handler):
@@ -167,6 +217,17 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--name", required=True)
     sub.add_argument("--root", help="directory that holds games/<name>/")
     sub.set_defaults(func=_run(_check))
+
+    sub = commands.add_parser(
+        "build-container", help="build an OCI policy and publication evidence using BuildKit"
+    )
+    sub.add_argument(
+        "--context", required=True, help="Dockerfile build context in the task worktree"
+    )
+    sub.add_argument("--strategy", required=True, help="STRATEGY.md describing the candidate")
+    sub.add_argument("--out", required=True, help="new build directory outside the context")
+    sub.add_argument("--dockerfile", default="Dockerfile")
+    sub.set_defaults(func=_run(_build_container))
 
     sub = commands.add_parser("install", help="install a card's game folder (orchestrator)")
     sub.add_argument("--name", required=True)

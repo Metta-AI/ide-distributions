@@ -36,9 +36,10 @@ from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
 from ide_research_core.runctx import RunContext
-from ide_research_core.softmax_tool.protocol import Refused, Softmax
+from ide_research_core.softmax_tool.protocol import ArtifactType, Refused, Softmax
 
 PROVENANCE_FIELDS = (
+    "artifact_type",
     "build_id",
     "compiler",
     "source_hashes",
@@ -111,6 +112,8 @@ def _read_build(build_dir: Path) -> tuple[dict, Path]:
         raise Refused("bad_build", f"{build_dir}/version.json is unreadable: {error}") from None
     if not isinstance(build, dict) or not isinstance(build.get("artifact"), str):
         raise Refused("bad_build", f"{build_dir}/version.json names no artifact")
+    if build.get("artifact_type", "file") not in ("file", "oci-image"):
+        raise Refused("bad_build", "artifact_type must be file or oci-image")
     failures = _gate_failures(build)
     if failures:
         raise Refused("gates_failed", f"build gates did not pass: {', '.join(failures)}")
@@ -158,8 +161,12 @@ def _version_meta(
     }
 
 
-def _existing_version(store: RecordStore, experiment: str, artifact_hash: str, name: str) -> str | None:
-    found = store.find("version", experiment=experiment, artifact_sha256=artifact_hash, policy_name=name)
+def _existing_version(
+    store: RecordStore, experiment: str, artifact_hash: str, name: str
+) -> str | None:
+    found = store.find(
+        "version", experiment=experiment, artifact_sha256=artifact_hash, policy_name=name
+    )
     return found[0] if found else None
 
 
@@ -169,13 +176,15 @@ def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
     return None
 
 
-def _upload_once(store: RecordStore, sm: Softmax, version_id: str, artifact: Path) -> str:
+def _upload_once(
+    store: RecordStore, sm: Softmax, version_id: str, artifact: Path, artifact_type: ArtifactType
+) -> str:
     """The platform id of ``version_id``: its ``uploaded`` event, or a new upload (C6 is
     checked by the client) recorded as that event."""
     platform_id = _uploaded_policy(store, version_id)
     if platform_id is None:
         name = store.load(version_id)[0]["policy_name"]
-        platform_id = sm.upload(artifact, name)
+        platform_id = sm.upload(artifact, name, artifact_type=artifact_type)
         store.add_event(version_id, "uploaded", {"policy_version_id": platform_id})
     return platform_id
 
@@ -191,7 +200,9 @@ def upload(
     """Upload the build in ``build_dir`` as ``experiment``'s candidate; return the version id.
     Raises ``Refused`` (nothing uploaded) or the platform's errors (``IdentityError``, ...)."""
     if (ctx.hermes_home / "plugins/researcher_guard").is_dir():
-        raise Refused("coordinator_required", "Stage the verified build; the coordinator owns upload")
+        raise Refused(
+            "coordinator_required", "Stage the verified build; the coordinator owns upload"
+        )
     store = worker_store(ctx)
     build_dir = Path(build_dir)
     build, artifact, artifact_hash = checked_build(build_dir)
@@ -216,7 +227,7 @@ def upload(
     if version_id is None:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
-    platform_id = _upload_once(store, sm, version_id, artifact)
+    platform_id = _upload_once(store, sm, version_id, artifact, build.get("artifact_type", "file"))
     patch = {
         "candidate_binding": {"version_id": version_id, "platform_policy_version_id": platform_id}
     }
@@ -233,7 +244,9 @@ def upload_build(
     return ``(version id, platform policy version id)``. Raises ``Refused`` (nothing
     uploaded) or the platform's errors (``IdentityError``, ...)."""
     if (ctx.hermes_home / "plugins/researcher_guard").is_dir():
-        raise Refused("coordinator_required", "Stage the verified build; the coordinator owns upload")
+        raise Refused(
+            "coordinator_required", "Stage the verified build; the coordinator owns upload"
+        )
     store = worker_store(ctx)
     build, artifact, artifact_hash = checked_build(Path(build_dir))
     name = policy_name(name, player_id)
@@ -243,4 +256,6 @@ def upload_build(
     else:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": None})
-    return version_id, _upload_once(store, sm, version_id, artifact)
+    return version_id, _upload_once(
+        store, sm, version_id, artifact, build.get("artifact_type", "file")
+    )
