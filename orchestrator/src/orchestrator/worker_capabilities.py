@@ -34,6 +34,8 @@ class WorkerCapabilities:
         # Do not inherit the coordinator's modules, platform, task or credentials.
         env = {
             "PATH": os.environ["PATH"],
+            # The endpoint is workspace configuration, not a profile credential.
+            **{key: os.environ[key] for key in ("BUILDKIT_HOST",) if key in os.environ},
             **build_profile_secret_scope(profile),
             "HERMES_HOME": str(profile),
             "HERMES_PROFILE": request.assignee,
