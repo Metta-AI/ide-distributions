@@ -59,8 +59,13 @@ def test_worker_capabilities_uses_assigned_installation(tmp_path):
     )
     (worker / ".env").write_text("SOFTMAX_PLAYER_CREDENTIAL=worker-secret-sentinel\n")
     profile = host / "profiles/orchestrator"
+    subprocess.run(
+        ["uv", "sync", "--frozen", "--no-dev"], cwd=profile,
+        env={**env, "UV_PROJECT_ENVIRONMENT": str(profile / "local/venv")},
+        check=True, capture_output=True, text=True, timeout=300,
+    )
     code = """
-import json, sys
+import json, sys, subprocess
 from pathlib import Path
 from hermes_cli.plugins import get_plugin_manager
 from tools.registry import registry
@@ -83,6 +88,22 @@ assert data['status'] == 'available', data
 assert data['catalog']['tools_count'] > 0 and data['catalog']['skills_count'] > 0, data
 assert any('terminal:' in item for group in data['catalog']['tools'].values() for item in group)
 assert not data['execution_verified']
+host = data['host']
+python = host['runtime']['executables']['python3']
+assert Path(python).is_relative_to(worker / 'local/venv'), host
+command = host['games']['pudge-wars-basic']['commands']['build']
+help_run = subprocess.run([*command['argv'], '--help'], cwd=command['cwd'],
+                          capture_output=True, text=True, check=True)
+assert '--source' in help_run.stdout and '--out' in help_run.stdout
+location = Path(host['runtime']['locations']['game_cache'])
+location.mkdir(parents=True, exist_ok=True)
+(location / 'proof').write_text('writable')
+assert (location / 'proof').read_text() == 'writable'
+assert host['execution']['platform'] == 'cli', host
+current = json.loads(registry.dispatch('host_capabilities', {}))['data']
+assert current['execution']['platform'] == 'api_server', current
+assert {'context': 'unattended', 'mode': 'deny'} in current['execution']['unattended']
+assert 'worker-secret-sentinel' not in json.dumps(current)
 game = data['game']
 assert game['root'] == str(worker), game
 assert game['status'] == 'installed', game
@@ -104,7 +125,7 @@ print(json.dumps({'ok': True}))
 """
     result = subprocess.run(
         [hermes_python(), "-c", code, str(profile)],
-        env=clean_env(profile),
+        env={**clean_env(profile), "HERMES_SESSION_PLATFORM": "api_server"},
         check=False,
         capture_output=True,
         text=True,
@@ -135,7 +156,7 @@ def test_clean_export_installs_paused(tmp_path):
     exported = tmp_path / "export"
     exported.mkdir()
     archive = subprocess.run(
-        ["git", "-C", str(DISTRIBUTION.parent), "archive", "HEAD", "orchestrator"],
+        ["git", "-C", str(DISTRIBUTION.parent), "archive", "HEAD", "orchestrator", "researcher"],
         check=True,
         capture_output=True,
     ).stdout
@@ -160,6 +181,16 @@ def test_clean_export_installs_paused(tmp_path):
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    worker = home / "profiles/researcher-1"
+    subprocess.run(
+        ["hermes", "profile", "install", str(exported / "researcher"), "--name", "researcher-1", "--yes"],
+        env=env, check=True, capture_output=True, text=True, timeout=120,
+    )
+    subprocess.run(
+        ["uv", "sync", "--frozen", "--no-dev"], cwd=worker,
+        env={**env, "UV_PROJECT_ENVIRONMENT": str(worker / "local/venv")},
+        check=True, capture_output=True, text=True, timeout=300,
+    )
     profile = home / "profiles/orchestrator"
     jobs = json.loads((profile / "cron/jobs.json").read_text())["jobs"]
     assert len(jobs) == 1 and jobs[0]["name"] == "supervisor"
@@ -210,25 +241,61 @@ git(seed, 'init', '-b', 'main')
 git(seed, 'config', 'user.name', 'Artifact system test')
 git(seed, 'config', 'user.email', 'test@example.invalid')
 (seed / 'seed.txt').write_text('initial')
+(seed / 'plan.md').write_text('old plan')
+(seed / 'AGENTS.md').write_text('retained doctrine')
 git(seed, 'add', '.')
 git(seed, 'commit', '-m', 'seed')
-remote = root / 'evidence.git'
+remote = root / 'canonical-fakegame.git'
 git(root, 'clone', '--bare', str(seed), str(remote))
 worker = root / 'profiles/researcher-1'
-worker.mkdir()
-clone = worker / 'workspace'
+(worker / '.env').write_text('RESEARCH_CANONICAL=' + str(root / 'canonical.git') + '\\n')
+clone = worker / 'workspace-fakegame'
 git(root, 'clone', str(remote), str(clone))
+# Leave a genuine divergent commit, staged/unstaged edits and an untracked file.
+git(clone, 'config', 'user.name', 'Retained owner')
+git(clone, 'config', 'user.email', 'test@example.invalid')
+(clone / 'local.txt').write_text('unpublished work')
+git(clone, 'add', 'local.txt')
+git(clone, 'commit', '-m', 'retained local commit')
+(clone / 'AGENTS.md').write_text('local doctrine edit')
+git(clone, 'add', 'AGENTS.md')
+(clone / 'plan.md').write_text('local plan edit')
+(clone / 'notes.txt').write_text('untracked notes')
+retained_head = git(clone, 'rev-parse', 'HEAD')
+retained_status = git(clone, 'status', '--porcelain')
+retained_index = (clone / '.git/index').read_bytes()
+# Advance the canonical branch with overlapping changes.
+(seed / 'plan.md').write_text('current canonical plan')
+(seed / 'AGENTS.md').write_text('current canonical doctrine')
+git(seed, 'add', '.')
+git(seed, 'commit', '-m', 'canonical update')
+git(seed, 'push', str(remote), 'main')
+canonical_head = git(seed, 'rev-parse', 'HEAD')
+subprocess.run([str(worker / 'local/venv/bin/python'), '-I', '-c',
+                'from pathlib import Path; from ide_research_core.workspace import write_cli_shim; '
+                'import sys; write_cli_shim(Path(sys.argv[1]))', str(worker)], check=True)
 create_board('autoresearch')
 created = json.loads(registry.dispatch('card_create', {
     'command_id': 'artifact-system:create', 'assignee': 'researcher-1',
     'title': 'Produce verifiable evidence', 'body': 'Commit the report and binary artifact',
+    'game': 'fakegame',
 }))
 assert created['ok'], created
 task_id = created['data']['card']['id']
+assert git(clone, 'status', '--porcelain') == retained_status
+assert (clone / '.git/index').read_bytes() == retained_index
 with closing(connection()) as conn:
     task = kb.claim_task(conn, task_id)
     worktree = resolve_workspace(task, board='autoresearch')
     set_workspace_path(conn, task_id, worktree)
+assert git(worktree, 'rev-parse', 'HEAD') == canonical_head
+assert (worktree / 'plan.md').read_text() == 'current canonical plan'
+assert (worktree / 'AGENTS.md').read_text() == 'current canonical doctrine'
+assert not (worktree / 'local.txt').exists()
+assert git(clone, 'rev-parse', 'HEAD') == retained_head
+assert (clone / 'plan.md').read_text() == 'local plan edit'
+assert (clone / 'AGENTS.md').read_text() == 'local doctrine edit'
+assert (clone / 'notes.txt').read_text() == 'untracked notes'
 payload = bytes(range(256)) * 4096
 (worktree / 'evidence/nested').mkdir(parents=True)
 (worktree / 'evidence/nested/replay.bin').write_bytes(payload)
@@ -261,7 +328,7 @@ while listing['data']['next_offset'] is not None:
     assert listing['ok'], listing
     files.extend(listing['data']['files'])
 assert {item['path']: item['kind'] for item in files} == {
-    'seed.txt': 'blob', 'evidence': 'tree', 'link': 'symlink', 'policy.bas': 'blob', 'report.md': 'blob',
+    'seed.txt': 'blob', 'plan.md': 'blob', 'AGENTS.md': 'blob', 'evidence': 'tree', 'link': 'symlink', 'policy.bas': 'blob', 'report.md': 'blob',
 }, files
 tree = json.loads(registry.dispatch('card_files', identity))
 assert tree['ok'] and set(request['paths']) <= {item['path'] for item in tree['data']['files']}, tree

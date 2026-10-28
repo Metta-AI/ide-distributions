@@ -192,8 +192,10 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             clone = clone_for(env, game)
             if game != env.get("RESEARCH_GAME"):
                 locate_game(game, self.context.env)
-            # Refresh default-game clones too before native Hermes branches the task.
-            prepare_clone(profile, env, game)
+            # Tasks branch from fetched origin/main, not the retained checkout.
+            # Bootstrap only a missing clone; never sync over its local work.
+            if not (clone / ".git").exists():
+                prepare_clone(profile, env, game)
         payload = json.dumps(command, sort_keys=True)
         with closing(connection()) as conn:
             # Serialize lookup and creation in the native task database. The task

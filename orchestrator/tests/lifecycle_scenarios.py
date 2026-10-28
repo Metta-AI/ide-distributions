@@ -80,7 +80,7 @@ def game_cards(root, home, args):
     # An omitted game stays neutral, even when a caller still carries an old profile default.
     default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
     assert board._card_game(default_card["id"]) is None
-    # Explicitly choosing the assignee's configured game still refreshes its doctrine.
+    # Explicitly choosing the assignee's configured game preserves task scope.
     with patch(
         "agent.secret_scope.build_profile_secret_scope",
         return_value={**env, "RESEARCH_WORKSPACE": str(researcher / "workspace")},
@@ -89,10 +89,6 @@ def game_cards(root, home, args):
             **{**args, "command_id": "game:selected-default", "game": "default-game"}
         )["card"]
     assert board._card_game(selected_card["id"]) == "default-game"
-    assert (
-        git(researcher / "workspace", "show", f"{selected_card['branch_name']}:AGENTS.md")
-        == "current doctrine"
-    )
     legacy = Board(Context(home, dict(os.environ))).card_create(
         **{**args, "command_id": "game:legacy"}
     )["card"]
