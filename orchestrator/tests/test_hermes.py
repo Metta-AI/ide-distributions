@@ -65,7 +65,7 @@ def test_worker_capabilities_uses_assigned_installation(tmp_path):
         check=True, capture_output=True, text=True, timeout=300,
     )
     code = """
-import json, sys, subprocess
+import json, os, sys, subprocess
 from pathlib import Path
 from hermes_cli.plugins import get_plugin_manager
 from tools.registry import registry
