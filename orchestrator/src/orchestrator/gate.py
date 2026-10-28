@@ -60,7 +60,12 @@ def transitions(state, research, ide):
                         "answer": body["answer"],
                     }
                 )
-    return pending
+    # The same key in every status read and wake, so card_create(source_event=...) from a chat
+    # turn and from a background wake resolve to one card.
+    return [
+        {**event, "source_event": f"{event['table']}:{event['id']}:{event['kind']}"}
+        for event in pending
+    ]
 
 
 def other_research_games(env):
@@ -137,7 +142,8 @@ def wake(context, state):
         for session, pending in sorted(sessions.items()):
             prompt = (
                 "Background coordinator wake. Read current status before acting; "
-                "these source events may already be handled. Reuse event-derived command IDs. "
+                "these source events may already be handled. Pass an event's source_event to "
+                "card_create for the card it needs; a card already made for it is returned. "
                 "Send meaningful verified updates with ide_say. Queue completion records this input as handled.\n"
                 + json.dumps({**state["context"], "pending": pending}, sort_keys=True)
             )

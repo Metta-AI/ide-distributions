@@ -128,6 +128,11 @@ before creating a branch or task. Cards without preloads do not query the worker
 command returns the same native task, including after archive. Reusing its ID with
 different arguments fails. Creation and its immutable arguments commit in one native
 transaction. Serial reconciliation does not serialize the workers themselves.
+Work caused by a pending event passes the event's `source_event` (shown on each
+`status.pending` and wake item, `task_runs:<run>:<kind>`). It then identifies the card
+instead of `command_id`: a chat turn and a background wake acting on the same event get
+one card, and the later call returns the first card's recorded command whatever arguments
+it passed.
 
 New task branches start at fetched canonical `origin/main`. A retained worker clone can
 have local commits, staged changes, modified doctrine/plan files, or untracked notes;

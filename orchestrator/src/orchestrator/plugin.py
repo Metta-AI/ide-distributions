@@ -211,7 +211,10 @@ TOOLS = {
         Board,
         (
             "Create native researcher work. command_id identifies this execution command, not a "
-            "topic or task family. Replay identical arguments after a lost response. Choose relevant "
+            "topic or task family. Replay identical arguments after a lost response. For work "
+            "caused by a pending event from status or a wake, pass its source_event: it identifies "
+            "the card instead of command_id, and a card already created for that event is "
+            "returned unchanged whatever arguments you pass. Choose relevant "
             "existing tasks before creating new work. Describe objective, inputs, constraints and "
             "completion evidence in body. Omit skills unless explicit preloads are necessary. "
             "game selects the game the card researches (its workspace is prepared on first use); "
@@ -219,6 +222,7 @@ TOOLS = {
         ),
         {
             "command_id": {"type": "string", "minLength": 1, "maxLength": 200},
+            "source_event": {"type": "string", "minLength": 1, "maxLength": 200},
             "game": GAME,
             "assignee": S,
             "title": S,

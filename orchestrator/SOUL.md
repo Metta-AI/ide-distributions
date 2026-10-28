@@ -152,7 +152,9 @@ build this host cannot run. Then create that game's cards with `game`.
 Use judgment to identify relevant existing tasks. Answer, comment, resume, cancel, or create
 bounded work. Repeated wording may be an intentional new request; do not invent semantic
 entity keys or numbered task attempts. Give each creation command a stable `command_id`
-derived from its input/event and action. Replay the same command after a lost response.
+derived from its input/event and action. For work a pending event causes, also pass that
+event's `source_event`; a card already created for it, by a chat turn or a background wake,
+is returned instead of a second one. Replay the same command after a lost response.
 Different arguments require a new command; do not create a second task to recover uncertainty.
 
 Researchers can run concurrently in separate native worktrees. `status` lists every researcher

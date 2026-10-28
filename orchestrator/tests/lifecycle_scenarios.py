@@ -188,6 +188,22 @@ def main():
     assert task_id in cards[0]["branch_name"]
     with TestCase().assertRaisesRegex(ValueError, "different arguments"):
         board.card_create(**{**args, "body": "Different work under the same command"})
+    # #18: a chat turn and a background wake acting on one event get one card, even with
+    # their own command IDs and wording.
+    chat = board.card_create(
+        **{**args, "command_id": "chat:follow-up", "source_event": "task_runs:9:xp_terminal"}
+    )["card"]
+    wake = board.card_create(
+        **{
+            **args,
+            "command_id": "wake:follow-up",
+            "source_event": "task_runs:9:xp_terminal",
+            "title": "Follow up the finished experiment",
+            "body": "Differently worded by the wake turn",
+        }
+    )["card"]
+    assert wake["id"] == chat["id"] and wake["title"] == chat["title"]
+    board.card_close(chat["id"], "archived")
     with closing(connection()) as conn:
         assert kb.parent_ids(conn, task_id) == []
         task = kb.claim_task(conn, task_id)
