@@ -17,6 +17,7 @@ provides_tools:
   - github_clone
   - capabilities
   - host_capabilities
+  - worker_capabilities
   - game_starter
   - card_report
   - card_files

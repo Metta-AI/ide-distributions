@@ -87,6 +87,7 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
 | `github_repositories(page?)`, `github_clone(repository, commit?)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. The optional full SHA selects a pinned release using the same authorization. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
+| `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (its own idempotent `research workspace bootstrap --game`, which also refreshes doctrine) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. |
 | `card_show`, `card_list` | Read native cards, runs and comments. List filters expose typed fields and sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
 | `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
@@ -110,6 +111,11 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
 
 Describe the objective, inputs, constraints and completion criteria in the card body.
+Use `worker_capabilities` to investigate an execution blocker in the assigned profile.
+Retained coordinator and researcher installations may differ; the coordinator's
+`game_support` readiness cannot establish a worker's readiness. Discovery checks the
+worker's CLI configuration and research interpreter without creating cards, installing tools,
+or consuming evaluation budget. Configured bindings still need a real build and evaluation.
 Omit `skills` by default: the researcher discovers and loads its own procedures, or reports
 why it cannot complete the task. Task skills are optional preloads, not capability grants.
 When a task requires a specific procedure, call `worker_skills` before requesting that

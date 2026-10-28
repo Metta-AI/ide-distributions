@@ -28,6 +28,93 @@ def clean_env(home):
 
 
 @pytest.mark.hermes
+def test_worker_capabilities_uses_assigned_installation(tmp_path):
+    exported = tmp_path / "export"
+    exported.mkdir()
+    archive = subprocess.check_output(
+        ["git", "-C", str(DISTRIBUTION.parent), "archive", "HEAD", "orchestrator", "researcher"]
+    )
+    subprocess.run(["tar", "-x", "-C", str(exported)], input=archive, check=True)
+    host = tmp_path / "host"
+    host.mkdir()
+    env = clean_env(host)
+    for source, name in (("researcher", "researcher-1"), ("orchestrator", "orchestrator")):
+        subprocess.run(
+            ["hermes", "profile", "install", str(exported / source), "--name", name, "--yes"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    worker = host / "profiles/researcher-1"
+    subprocess.run(
+        ["uv", "sync", "--frozen", "--no-dev"],
+        cwd=worker,
+        env={**env, "UV_PROJECT_ENVIRONMENT": str(worker / "local/venv")},
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    (worker / ".env").write_text("SOFTMAX_PLAYER_CREDENTIAL=worker-secret-sentinel\n")
+    profile = host / "profiles/orchestrator"
+    code = """
+import json, sys
+from pathlib import Path
+from hermes_cli.plugins import get_plugin_manager
+from tools.registry import registry
+get_plugin_manager().discover_and_load()
+profile = Path(sys.argv[1])
+worker = profile.parent / 'researcher-1'
+# Retained profiles may be from different releases. Model that difference using
+# real installed files, and verify that coordinator files cannot mask the worker.
+script = 'games/pudge-wars-basic/tools/build.py'
+(profile / script).unlink()
+args = {'assignee': 'researcher-1', 'game': 'pudge-wars-basic'}
+schema = registry.get_schema('worker_capabilities')
+assert schema['parameters']['required'] == ['assignee']
+response = registry.dispatch('worker_capabilities', args)
+assert 'worker-secret-sentinel' not in response
+result = json.loads(response)
+assert result['ok'], result
+data = result['data']
+assert data['status'] == 'available', data
+assert data['catalog']['tools_count'] > 0 and data['catalog']['skills_count'] > 0, data
+assert any('terminal:' in item for group in data['catalog']['tools'].values() for item in group)
+assert not data['execution_verified']
+game = data['game']
+assert game['root'] == str(worker), game
+assert game['status'] == 'installed', game
+assert all('missing_script' not in binding['reasons']
+           for binding in game['readiness']['operations'].values()), game
+assert not (profile / script).exists()
+# A real broken worker installation is visible on the next call, without making
+# a task or consulting the coordinator's different game copy.
+(worker / script).unlink()
+broken = json.loads(registry.dispatch('worker_capabilities', args))
+assert broken['ok'], broken
+assert 'missing_script' in broken['data']['game']['readiness']['operations']['build']['reasons']
+missing = json.loads(registry.dispatch('worker_capabilities', {'assignee': 'not-installed'}))
+assert missing['data']['status'] == 'missing_profile', missing
+unknown = json.loads(registry.dispatch('worker_capabilities', {**args, 'game': 'unknown-game'}))
+assert unknown['data']['game']['status'] == 'missing_game', unknown
+assert not (profile.parent.parent / 'kanban').exists()
+print(json.dumps({'ok': True}))
+"""
+    result = subprocess.run(
+        [hermes_python(), "-c", code, str(profile)],
+        env=clean_env(profile),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["ok"]
+
+
+@pytest.mark.hermes
 def test_native_board_behaviour(tmp_path):
     env = clean_env(tmp_path / "host/profiles/orchestrator")
     env["PYTHONPATH"] = str(DISTRIBUTION / "src")

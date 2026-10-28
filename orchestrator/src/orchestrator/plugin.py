@@ -26,6 +26,7 @@ from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
 from .storage import open_storage
+from .worker_capabilities import WorkerCapabilities, WorkerRead
 from .workspace import Workspace, WorkspaceError
 
 S = {"type": "string"}
@@ -129,6 +130,12 @@ TOOLS = {
         "Inspect or export up to 64 committed files totaling 256 MiB from a card's latest completed run. Pass paths discovered by card_files or a report. Returns SHA-256, size and Git blob for each file. Optional expected_sha256 maps selected paths to reported hashes; a mismatch returns status=mismatch and exports nothing. Set export=true to copy the complete batch into a new private cache in THIS coordinator profile, with relative paths preserved and a provenance manifest. Read/analyze those local files with native file/terminal tools; copied artifacts are never executed by this tool. Supports policy source, reports, large logs, JSON/CSV results and binary replays. Ignores uncommitted changes, rejects symlinks/unsafe paths, and never integrates a branch. Hashes establish byte identity, not evaluation correctness.",
         ArtifactRead.model_json_schema()["properties"],
         ["task_id", "run_id", "commit", "paths"],
+    ),
+    "worker_capabilities": (
+        WorkerCapabilities,
+        "Inspect an assigned worker's installed tools and skills before planning policy work. Optional game returns its build, local_check, upload, evaluate and replay_inspect bindings, missing scripts, executables and environment requirements. query filters tools and skills only. Uses the worker's own profile and research interpreter, not this coordinator's installation. Read-only: creates no task, runs no binding, spends no evaluation budget, and returns no credentials. Configured bindings are not execution proof or permission to publish; task restrictions still apply. Missing profile/runtime/game have explicit status values.",
+        WorkerRead.model_json_schema()["properties"],
+        ["assignee"],
     ),
     "game_starter": (
         Research,
