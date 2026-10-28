@@ -3,7 +3,6 @@ import urllib.error
 from pathlib import Path
 
 import pytest
-
 from ide_research_core.softmax_tool.client import CREDITS_PATH, SoftmaxClient
 from ide_research_core.softmax_tool.fake import FakeSoftmax
 from ide_research_core.softmax_tool.identity import IdentityError
@@ -90,18 +89,19 @@ def test_wrong_identity_refuses_before_any_mutating_call(
     assert ["softmax", "status"] in runner.argvs()
 
 
-def test_upload_checks_identity_immediately_before_and_returns_label(env, runner, tmp_path):
+@pytest.mark.parametrize("artifact_type, flag", [("file", "--file"), ("oci-image", "--image-archive")])
+def test_upload_checks_identity_immediately_before_and_returns_label(env, runner, tmp_path, artifact_type, flag):
     with_mutations(runner)
     artifact = tmp_path / "policy.bas"
     artifact.write_text("10 PRINT 1\n")
-    label = make(env, runner, tmp_path).upload(artifact, "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA")
+    label = make(env, runner, tmp_path).upload(artifact, "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA", artifact_type=artifact_type)
     assert label == LABEL
     assert runner.argvs() == [
         ["softmax", "status"],
         [
             "coworld",
             "upload-policy",
-            "--file",
+            flag,
             str(artifact.resolve()),
             "--name",
             "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA",
