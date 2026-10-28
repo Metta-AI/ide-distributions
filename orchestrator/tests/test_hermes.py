@@ -96,7 +96,7 @@ help_run = subprocess.run([*command['argv'], '--help'], cwd=command['cwd'],
                           capture_output=True, text=True, check=True)
 assert '--source' in help_run.stdout and '--out' in help_run.stdout
 location = Path(host['runtime']['locations']['game_cache'])
-location.mkdir(parents=True)
+location.mkdir(parents=True, exist_ok=True)
 (location / 'proof').write_text('writable')
 assert (location / 'proof').read_text() == 'writable'
 assert host['execution']['platform'] == 'cli', host
@@ -282,6 +282,8 @@ created = json.loads(registry.dispatch('card_create', {
 }))
 assert created['ok'], created
 task_id = created['data']['card']['id']
+assert git(clone, 'status', '--porcelain') == retained_status
+assert (clone / '.git/index').read_bytes() == retained_index
 with closing(connection()) as conn:
     task = kb.claim_task(conn, task_id)
     worktree = resolve_workspace(task, board='autoresearch')
@@ -291,8 +293,6 @@ assert (worktree / 'plan.md').read_text() == 'current canonical plan'
 assert (worktree / 'AGENTS.md').read_text() == 'current canonical doctrine'
 assert not (worktree / 'local.txt').exists()
 assert git(clone, 'rev-parse', 'HEAD') == retained_head
-assert git(clone, 'status', '--porcelain') == retained_status
-assert (clone / '.git/index').read_bytes() == retained_index
 assert (clone / 'plan.md').read_text() == 'local plan edit'
 assert (clone / 'AGENTS.md').read_text() == 'local doctrine edit'
 assert (clone / 'notes.txt').read_text() == 'untracked notes'
