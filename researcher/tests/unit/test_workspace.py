@@ -387,6 +387,41 @@ def test_cli_shim_ignores_parent_pythonpath(tmp_path, monkeypatch):
     assert "usage: research" in result.stdout
 
 
+def _shim_home(tmp_path):
+    home = tmp_path / "profile"
+    (home / "local").mkdir(parents=True)
+    (home / "local/venv").symlink_to(sys.prefix, target_is_directory=True)
+    return home
+
+
+def test_cli_shim_runs_the_profiles_own_src(tmp_path):
+    """Hosted profiles edit their own src; the CLI must run it, not the image's editable install."""
+    home = _shim_home(tmp_path)
+    package = home / "src/ide_research_core"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "cli.py").write_text("def main():\n    print('agent copy')\n    return 0\n")
+    (package / "__main__.py").write_text("from ide_research_core.cli import main\nraise SystemExit(main())\n")
+    result = subprocess.run(
+        [str(workspace.write_cli_shim(home))], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "agent copy"
+
+
+def test_cli_shim_falls_back_when_the_profiles_src_is_broken(tmp_path):
+    home = _shim_home(tmp_path)
+    package = home / "src/ide_research_core"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("raise SyntaxError('agent edit')\n")
+    result = subprocess.run(
+        [str(workspace.write_cli_shim(home)), "--help"], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert "usage: research" in result.stdout
+    assert "failed to import" in result.stderr and "running the image copy" in result.stderr
+
+
 def test_conditional_publish_preserves_concurrent_profile_edits(tmp_path, bare):
     first = clone_for(tmp_path, bare, "orchestrator")
     second = clone_for(tmp_path, bare, "other-session")

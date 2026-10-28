@@ -203,3 +203,19 @@ def test_card_bodies_may_cite_only_records_on_their_games_canonical_main(tmp_pat
         "R-01K6Z3V8QXA1B2C3D4E5F6G7HB",
         "ar://file/notes/missing.md",
     ]
+
+
+def test_status_reports_tooling_notices_from_every_profile(tmp_path):
+    from orchestrator.context import Context
+    from orchestrator.service import tooling
+
+    profiles = tmp_path / "profiles"
+    for name in ("orchestrator", "researcher-1", "researcher-2"):
+        (profiles / name / "local").mkdir(parents=True)
+    (profiles / "researcher-1/local/tooling-update.json").write_text('{"status": "deferred", "release": "abc"}')
+    (profiles / "orchestrator/local/tooling-fallback.json").write_text('{"error": "SyntaxError: x"}')
+    found = tooling(Context(profiles / "orchestrator", {}))
+    assert found == [
+        {"profile": "orchestrator", "kind": "fallback", "error": "SyntaxError: x"},
+        {"profile": "researcher-1", "kind": "update", "status": "deferred", "release": "abc"},
+    ]
