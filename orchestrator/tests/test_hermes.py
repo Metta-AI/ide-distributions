@@ -158,6 +158,49 @@ def test_native_board_behaviour(tmp_path):
     assert json.loads(result.stdout.splitlines()[-1])["ok"]
 
 
+ROSTER = """
+import json, sys
+from pathlib import Path
+sys.modules['yaml'] = None  # the gateway's interpreter has no PyYAML; status must not need it
+from orchestrator.context import Context
+from orchestrator.service import researchers
+root = Path(sys.argv[1])
+profiles = root / 'profiles'
+for name, marker in (('orchestrator', False), ('researcher-1', True), ('researcher-2', True)):
+    (profiles / name).mkdir(parents=True)
+    (profiles / name / 'config.yaml').write_text('{}')
+    if marker:
+        (profiles / name / 'plugins' / 'researcher_guard').mkdir(parents=True)
+cards = [{'id': 't_1', 'assignee': 'researcher-2', 'status': 'running'}]
+context = Context(profiles / 'orchestrator', {})
+assert [r['name'] for r in researchers(context, cards)] == ['researcher-1', 'researcher-2']
+# Hosting names its workers in the dispatcher allowlist; one it names but has not
+# installed is reported as such.
+(root / 'config.yaml').write_text('kanban:\\n  dispatch_profiles: researcher-2,researcher-3\\n')
+found = researchers(context, cards)
+assert [(r['name'], r['installed'], r['running']) for r in found] == [
+    ('researcher-2', True, ['t_1']), ('researcher-3', False, []),
+], found
+print(json.dumps({'ok': True}))
+"""
+
+
+@pytest.mark.hermes
+def test_status_roster_reads_the_dispatcher_allowlist_in_hermes(tmp_path):
+    env = clean_env(tmp_path / "host/profiles/orchestrator")
+    env["PYTHONPATH"] = str(DISTRIBUTION / "src")
+    result = subprocess.run(
+        [hermes_python(), "-c", ROSTER, str(tmp_path / "host")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["ok"]
+
+
 @pytest.mark.hermes
 def test_clean_export_installs_paused(tmp_path):
     exported = tmp_path / "export"
