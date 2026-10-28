@@ -78,7 +78,6 @@ terminal:
     - OPENROUTER_MODEL
     - TMPDIR
     - GOTA_G2_RUNNER
-    - GOTA_HERMES_PYTHON
 
 # Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
 # process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin.

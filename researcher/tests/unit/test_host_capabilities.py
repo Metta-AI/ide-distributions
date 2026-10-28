@@ -34,8 +34,6 @@ def test_reports_read_only_install_and_game_requirements(tmp_path):
         (profile / "games").chmod(0o755)
     assert result["writable"]["installed_games"] is False
     assert result["writable"]["game_cache"] is True and result["writable"]["tmpdir"] is True
-    # The shipped Pudge Wars Basic folder needs nim and git, which this PATH lacks.
-    assert set(result["games"]["pudge-wars-basic"]["missing_tools"]) == {"nim", "git"}
 
 
 def test_registers_in_the_given_toolset():

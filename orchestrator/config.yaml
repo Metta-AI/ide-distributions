@@ -1,6 +1,6 @@
 # The orchestrator has everything a researcher has except the researcher's restrictions
 # (plugins/researcher_guard, the approvals deny list, the run budget): toolsets, timeouts,
-# environment, installed-game skills and the fallback model below match researcher/config.yaml.
+# general environment, installed-game skills and fallback model match researcher/config.yaml.
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
@@ -39,8 +39,6 @@ terminal:
     - SOFTMAX_BRIDGE_DIRECTORY
     - OPENROUTER_MODEL
     - TMPDIR
-    - GOTA_G2_RUNNER
-    - GOTA_HERMES_PYTHON
 # Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
 # process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin.
 timeouts:

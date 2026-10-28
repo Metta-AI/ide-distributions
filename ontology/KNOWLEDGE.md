@@ -74,11 +74,9 @@ discover platform services.
 
 **Builds and software.**
 
-- Game tools keep downloads and builds in `$HERMES_HOME/cache/<game>/` when their own folder
-  is read-only; the first build of a game takes minutes. A
-  shipped tool that fails with "Read-only file system" has a bug: report the command and the
-  error. Until it is fixed you may copy the game folder to the disk and run the copy; say so
-  in your report.
+- Use writable output and work directories on the workspace disk for builds. Check each
+  tool's documented output options; installed code is read-only. Report the command and error
+  if a shipped tool tries to write into its installed folder.
 - You have no root: no `sudo`, `apt` or system installs. The profile's Python environment is
   read-only and there is no `pip`. For another Python package, make an environment on the
   disk (`uv venv <dir>`, then `uv pip install --python <dir>/bin/python <package>`).
