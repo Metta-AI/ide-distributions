@@ -80,10 +80,14 @@ the game, for its league, from ``RESEARCH_GAME``):
   yet, written into this worktree (``softmax_tool.evidence``). Prints ``{experiment,
   collected, already, pending, failed, complete, rows}``; ``complete`` means the review can
   run ``stats ingest`` on ``rows``.
-- ``upload <E> --name NAME --build-dir D``: ``softmax_tool.upload``.
-- ``upload-build --name NAME --build-dir D``: upload a checked build as a version with no experiment;
-  prints ``{version_id, platform_policy_version_id}``. Supports explicit build/upload-only requests
-  and starter builds. It does not evaluate or submit; submitting a starter remains explicit.
+- ``upload <E> --name NAME --build-dir D [--player P]``: ``softmax_tool.upload``.
+- ``upload-build --name NAME --build-dir D [--player P]``: upload a checked build as a version with
+  no experiment; prints ``{version_id, platform_policy_version_id, player_id}``. Supports explicit
+  build/upload-only requests and starter builds. It does not evaluate or submit; submitting a
+  starter remains explicit.
+- ``--player P`` names the player the upload publishes for (default ``RESEARCH_PLAYER_ID``, the
+  credential's own player). On Softmax hosting it is the player the conversation selected: the IDE
+  workspace credential may publish for any enabled player of the same owner.
 - ``leaderboard``: ``{league_id, player_id, current_champion, conflict}``. The champion is the
   policy the league shows competing for our player (A9; null: none). ``conflict`` is null, or
   why the league and the loop's recorded champion disagree (``champion_submission.conflict``).
@@ -1019,7 +1023,7 @@ def _xp_artifacts(ctx, sm, args) -> dict:
 
 
 def _upload(ctx, sm, args) -> dict:
-    player = os.environ[PLAYER_ENV]
+    player = args.player or os.environ[PLAYER_ENV]
     with experiment_lock(ctx, args.experiment, "upload"):
         version_id = upload(ctx, sm, Path(args.build_dir), args.experiment, player_id=player, name=args.name)
     binding = worker_store(ctx).load(args.experiment)[0]["candidate_binding"]
@@ -1027,13 +1031,14 @@ def _upload(ctx, sm, args) -> dict:
         "experiment": args.experiment,
         "version_id": version_id,
         "platform_policy_version_id": binding["platform_policy_version_id"],
+        "player_id": player,
     }
 
 
 def _upload_build(ctx, sm, args) -> dict:
-    player = os.environ[PLAYER_ENV]
+    player = args.player or os.environ[PLAYER_ENV]
     version_id, platform_id = upload_build(ctx, sm, Path(args.build_dir), player, args.name)
-    return {"version_id": version_id, "platform_policy_version_id": platform_id}
+    return {"version_id": version_id, "platform_policy_version_id": platform_id, "player_id": player}
 
 
 def _leaderboard(ctx, sm, args) -> dict:
@@ -1229,6 +1234,10 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "--name", required=True,
         help="Chosen lowercase policy name; scoped to the player. Reuse on retry.",
     )
+    sub.add_argument(
+        "--player",
+        help="Player to publish for (default: RESEARCH_PLAYER_ID); an owned player the conversation selected.",
+    )
 
 
     sub = command(
@@ -1241,6 +1250,10 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument(
         "--name", required=True,
         help="Chosen lowercase policy name; scoped to the player. Reuse on retry.",
+    )
+    sub.add_argument(
+        "--player",
+        help="Player to publish for (default: RESEARCH_PLAYER_ID); an owned player the conversation selected.",
     )
 
     command(commands, "leaderboard", _leaderboard, "our leaderboard and current champion")

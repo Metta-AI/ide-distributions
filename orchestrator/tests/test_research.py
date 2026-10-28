@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from orchestrator.plugin import GAME, TOOLS
+from orchestrator.plugin import GAME, PLAYER, TOOLS
 from orchestrator.research import Research, ResearchError
 
 
@@ -40,7 +40,12 @@ def test_subprocess_contract_and_refusal(shared_fixture):
     ]
     assert TOOLS["bootstrap_champion"][3] == ["id", "run_id", "version", "league_id"]
     assert research.accept_champion("league_selected")["args"] == ["champion", "accept", "--league", "league_selected"]
-    assert TOOLS["accept_champion"][2:] == ({"league_id": {"type": "string"}, "game": GAME}, ["league_id"])
+    assert research.accept_champion("league_selected", player_id="ply_selected")["args"] == [
+        "champion", "accept", "--league", "league_selected", "--player", "ply_selected",
+    ]
+    assert TOOLS["accept_champion"][2:] == (
+        {"league_id": {"type": "string"}, "game": GAME, "player_id": PLAYER}, ["league_id"]
+    )
 
 
 def test_publish_writes_exact_contract_files(shared_fixture):

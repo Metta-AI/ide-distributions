@@ -131,7 +131,7 @@ def test_retry_after_success_returns_binding_without_reupload(ws):
 def test_retry_after_crash_in_upload_reuses_the_version_record(ws, monkeypatch):
     ws.write_build()
 
-    def lost(artifact, name, *, artifact_type="file"):
+    def lost(artifact, name, *, player_id, artifact_type="file"):
         raise RuntimeError("network lost")
 
     monkeypatch.setattr(ws.sm, "upload", lost)
@@ -336,7 +336,7 @@ def test_failed_legacy_record_does_not_force_retry_of_conflicting_name(ws, monke
     with monkeypatch.context() as patch:
         patch.setattr("ide_research_core.softmax_tool.upload.policy_name",
                       lambda name, player: "ar-bootstrap-1637c5604a52")
-        def conflict(artifact, name, *, artifact_type="file"):
+        def conflict(artifact, name, *, player_id, artifact_type="file"):
             raise RuntimeError("409 name taken")
         patch.setattr(ws.sm, "upload", conflict)
         with pytest.raises(RuntimeError, match="409"):
@@ -389,14 +389,17 @@ def test_build_publication_preserves_artifact_type_and_deduplicates(ws, monkeypa
     calls = []
     original = ws.sm.upload
 
-    def publish(artifact, name, *, artifact_type):
-        calls.append(artifact_type)
-        return original(artifact, name, artifact_type=artifact_type)
+    def publish(artifact, name, *, player_id, artifact_type):
+        calls.append((artifact_type, player_id))
+        return original(artifact, name, player_id=player_id, artifact_type=artifact_type)
 
     monkeypatch.setattr(ws.sm, "upload", publish)
-    first = upload_build(ws.ctx, ws.sm, ws.build, player_id="ply_fake", name="build")
-    assert upload_build(ws.ctx, ws.sm, ws.build, player_id="ply_fake", name="build") == first
-    assert calls == [artifact_type]
+    # A player the conversation selected: the upload names it while the credential stays ply_fake's.
+    selected = "ply_selected"
+    first = upload_build(ws.ctx, ws.sm, ws.build, player_id=selected, name="build")
+    assert upload_build(ws.ctx, ws.sm, ws.build, player_id=selected, name="build") == first
+    assert calls == [(artifact_type, selected)]
+    assert ws.store.load(first[0])[0]["player_id"] == selected
     assert ws.store.load(first[0])[0]["build"]["artifact_type"] == artifact_type
 
 

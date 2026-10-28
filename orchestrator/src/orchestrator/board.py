@@ -468,15 +468,16 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         """Shared research for the card's game, in this profile's clone of it."""
         return Research(self.context).in_game(self._card_game(id))
 
-    def upload_build(self, id, run_id, build_dir, name, experiment=None):
-        """Publish a committed artifact. Retry only with identical arguments; upload owns deduplication."""
+    def upload_build(self, id, run_id, build_dir, name, experiment=None, player_id=None):
+        """Publish a committed artifact for ``player_id`` (default: the workspace's own player).
+        Retry only with identical arguments; upload owns deduplication."""
         from hermes_cli.kanban_db_workspace import resolve_workspace
 
         task = self._admit_effect(
             id,
             run_id,
             "upload_admitted",
-            {"build_dir": build_dir, "name": name, "experiment": experiment},
+            {"build_dir": build_dir, "name": name, "experiment": experiment, "player_id": player_id},
             allow_blocked=True,
         )
         worktree = resolve_workspace(task, board=BOARD)
@@ -508,7 +509,8 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
         context = Context(scoped.home, {**scoped.env, "HERMES_KANBAN_WORKSPACE": str(worktree)})
         research = Research(context)
         command = ("upload", experiment) if experiment else ("upload-build",)
-        receipt = research.call("softmax", *command, "--build-dir", artifact, "--name", name)
+        player = ("--player", player_id) if player_id else ()
+        receipt = research.call("softmax", *command, "--build-dir", artifact, "--name", name, *player)
         staged = research.call("workspace", "stage", "--worktree", worktree)
         return {**receipt, **staged}
 
@@ -519,10 +521,13 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             "workspace", "integrate", "--branch", task.branch_name, "--commit", commit
         )
 
-    def submit_requested_version(self, id, run_id, version, strategy, request, league_id):
+    def submit_requested_version(self, id, run_id, version, strategy, request, league_id, player_id=None):
         """Submit explicit user intent. Retry identical arguments; champion submission owns deduplication."""
         self._admit_effect(
-            id, run_id, "submission_admitted", {"version": version, "request": request, "league_id": league_id}
+            id,
+            run_id,
+            "submission_admitted",
+            {"version": version, "request": request, "league_id": league_id, "player_id": player_id},
         )
         return self._research(id).call(
             "champion",
@@ -535,15 +540,27 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             strategy,
             "--request",
             request,
+            *(("--player", player_id) if player_id else ()),
         )
 
-    def champion_submit(self, id, run_id, experiment, league_id):
-        self._admit_effect(id, run_id, "champion_submission_admitted", {"experiment": experiment, "league_id": league_id})
-        return self._research(id).call("champion", "submit", experiment, "--league", league_id)
+    def champion_submit(self, id, run_id, experiment, league_id, player_id=None):
+        self._admit_effect(
+            id,
+            run_id,
+            "champion_submission_admitted",
+            {"experiment": experiment, "league_id": league_id, "player_id": player_id},
+        )
+        player = ("--player", player_id) if player_id else ()
+        return self._research(id).call("champion", "submit", experiment, "--league", league_id, *player)
 
-    def bootstrap_champion(self, id, run_id, version, league_id):
-        self._admit_effect(id, run_id, "bootstrap_admitted", {"version": version, "league_id": league_id})
-        return self._research(id).call("champion", "bootstrap", "--version", version, "--league", league_id)
+    def bootstrap_champion(self, id, run_id, version, league_id, player_id=None):
+        self._admit_effect(
+            id, run_id, "bootstrap_admitted", {"version": version, "league_id": league_id, "player_id": player_id}
+        )
+        player = ("--player", player_id) if player_id else ()
+        return self._research(id).call(
+            "champion", "bootstrap", "--version", version, "--league", league_id, *player
+        )
 
     def game_install(self, id, run_id, name, replace=False):
         """Install the game folder a completed card committed at ``games/<name>/`` host-wide.

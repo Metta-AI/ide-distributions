@@ -44,7 +44,7 @@ def test_fake_standings_add_our_player_after_a_submission(tmp_path):
         "ply_house_a",
         "ply_house_b",
     ]
-    sm.submit("pv_x", "fake-league")
+    sm.submit("pv_x", "fake-league", "ply_fake")
     rows = sm.standings("fake-league")
     assert [row["rank"] for row in rows] == [1, 2, 3]
     assert "ply_fake" in {row["player_id"] for row in rows}

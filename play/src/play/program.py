@@ -9,7 +9,7 @@ cogent names things as the user does ("towerless v2") and never needs a platform
 Every platform call goes through the shared ``softmax_tool`` client: the credential is installed
 into the profile-local Softmax home before each CLI call, and every mutating call (upload,
 practice, release) first runs ``whoami`` and refuses unless the credential is the Player
-``RESEARCH_PLAYER_ID`` (``SoftmaxClient._require_player``). The league is the one the coach chose
+``RESEARCH_PLAYER_ID`` (``SoftmaxClient.require_player``). The league is the one the coach chose
 (the cogent's ``state/league`` record); an absent choice never falls back to a game adapter.
 
 The coach's refusals come back as data, never as an error and never retried:
@@ -622,7 +622,7 @@ class Program:
 
     def _upload(self, platform: str, change: str) -> str | None:
         """The new ``<name>:v<N>`` label, or None when the name belongs to someone else."""
-        self.client._require_player()
+        self.client.require_player()
         args = ["upload-policy", "--file", str(self.program_file.resolve()), "--name", platform]
         args += ["--title", change[:50]]
         result = self.client._cli.run("coworld", args, timeout=UPLOAD_TIMEOUT_S, ok_codes=(0, 1))
@@ -761,7 +761,7 @@ class Program:
             "title": title,
             "idempotency_key": key,
         }
-        self.client._require_player()
+        self.client.require_player()
         args = ["xp-request", "create", "-", "--json"]
         result = self.client._cli.run("coworld", args, input=json.dumps(body), ok_codes=(0, 1))
         out = {"program": display}
@@ -907,7 +907,7 @@ class Program:
         display, label, entry = ref.display, ref.label, ref.entry
         league = self.league_id()
         out = {"program": display}
-        self.client._require_player()
+        self.client.require_player()
         found = [
             row
             for row in self.client.submissions(self.player)
@@ -916,7 +916,7 @@ class Program:
         if found:
             return {**out, "outcome": "released", "already": True, **self._replaced(label, league)}
         try:
-            result = self.client.submit(label, league)
+            result = self.client.submit(label, league, self.player)
         except SoftmaxCliError as error:
             # The shared client raises a 402 as a failure; it is the same refusal as practice's.
             if not xp.CREDIT_DENIAL.search(str(error)):
