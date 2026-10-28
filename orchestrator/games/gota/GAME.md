@@ -150,7 +150,7 @@ an immutable build or upgrades a failed build into an uploadable one.
 Read the build's report, version, artifact hash, manifest and native receipts.
 An evaluation receipt applies only to its artifact, engine, manifest, baseline,
 seeds and ticks. Reuse complete matching evaluation evidence instead of repeating it.
-Neither compilation nor evaluation proves competitive strength or authorizes promotion.
+Neither compilation nor evaluation proves competitive strength or authorizes a champion submission.
 G3's 80,000 instruction / 200,000 work soft ceilings are local headroom checks;
 the engine enforces its actual runtime limits when executing an uploaded policy.
 No evaluation seeds, tick budgets or native runtime limits are reduced.
@@ -386,7 +386,7 @@ The default build records G1 compilation and explicitly marks evaluation not run
 receipts under **Local validation**; G5 compiler coverage does not apply to prebuilt
 artifacts. After a successful build and evidence review, follow the core `candidate` skill's
 "Bootstrap card" procedure. The orchestrator makes a bootstrap card only when no champion and
-no promotion in flight exist. Copy the complete passing build into tracked
+no champion submission in flight exist. Copy the complete passing build into tracked
 `build-evidence/<build-id>`, stage the task branch, and complete with the build path,
 artifact hash and suggested name `opening-rush`. The coordinator calls `upload_build`,
 integrates the receipt commit, and uses `bootstrap_champion` for the first submission.
