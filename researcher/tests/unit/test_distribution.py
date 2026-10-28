@@ -130,22 +130,12 @@ def _is_denied(command: str) -> bool:
     ("command", "blocked"),
     [
         ('"$RESEARCH_CLI" softmax xp create E-1', False),
-        (
-            '"$RESEARCH_CLI" softmax upload E-1 --build-dir d',
-            True,
-        ),  # upload belongs to the orchestrator
+        ('"$RESEARCH_CLI" softmax upload E-1 --build-dir d', True),  # upload belongs to the orchestrator
         ('"$RESEARCH_CLI" workspace integrate', True),
         ('"$RESEARCH_CLI" game install --name x --worktree w --commit c', True),
         ('"$RESEARCH_CLI" game new --name x --league l', False),
         ('"$RESEARCH_CLI" source fetch --repo https://github.com/a/b', False),
         ('git commit -m "avoid coworld submit"', False),
-        ("coworld build-policy . --output /tmp/player.tar", False),
-        ("coworld upload-policy --image-archive /tmp/player.tar --name test", False),
-        ("coworld upload-policy --file player.py --name test", False),
-        (
-            '"$RESEARCH_CLI" softmax exec -- coworld upload-policy --image-archive /tmp/player.tar',
-            False,
-        ),
         ("coworld submit pv_1 league_x", True),
         ("cd /tmp && coworld player use ply_1", True),
         ("softmax login", True),
@@ -157,7 +147,7 @@ def _is_denied(command: str) -> bool:
         ("hermes kanban --board autoresearch link t_1 t_2", True),
         ('"$RESEARCH_CLI" champion submit E-1', True),
         ('"$RESEARCH_CLI" champion submit-requested --version V-1', True),
-        ("cd /tmp && research champion submit-requested --version V-1", True),
+        ('cd /tmp && research champion submit-requested --version V-1', True),
         ('"$RESEARCH_CLI" champion bootstrap --version V-1', True),
         ("cd /x && research champion accept", True),
         ('git commit -m "the orchestrator runs champion submit"', False),

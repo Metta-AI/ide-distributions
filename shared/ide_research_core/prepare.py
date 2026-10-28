@@ -59,10 +59,7 @@ def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Pa
     if not agents.exists() or agents.read_text() != canonical:
         subprocess.run([*git, "fetch", "origin", "main"], check=True)
         result = subprocess.run(
-            [*git, "merge", "--no-edit", "origin/main"],
-            capture_output=True,
-            text=True,
-            check=False,
+            [*git, "merge", "--no-edit", "origin/main"], capture_output=True, text=True, check=False
         )
         if result.returncode:
             merge_head = subprocess.run(
@@ -108,16 +105,6 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
             subprocess.check_output([hermes, "config", "get", key, "--json"], text=True)
         )
         desired = list(dict.fromkeys([*current, *required]))
-        if key == "approvals.deny":
-            desired = [
-                rule
-                for rule in desired
-                if rule
-                not in (
-                    "coworld upload-policy*",
-                    "*softmax exec*coworld upload-policy*",
-                )
-            ]
         if desired != current:
             subprocess.run([hermes, "config", "set", key, json.dumps(desired)], check=True)
     if not coordinator:

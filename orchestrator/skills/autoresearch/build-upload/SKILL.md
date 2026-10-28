@@ -1,20 +1,32 @@
 ---
 name: build-upload
-description: Use when building or uploading a policy artifact.
+description: Use when preparing file policies for coordinator upload.
 ---
 
-# Build and upload
+# Build and hand off
 
-For an explicit build/upload assignment, run the game's documented build command in the assigned worktree.
-For a Dockerfile policy, use `coworld build-policy . --output /tmp/player.tar`, then
-`coworld upload-policy --image-archive /tmp/player.tar --name NAME --server SERVER`.
-For a game-hosted file, use `coworld upload-policy --file PATH --name NAME --server SERVER`.
-Use the assigned name, server, and existing player credentials. Consult CLI help and the game's Coworld instructions
-for arguments. Wait for each command's exit status; upload only a successful build. Return the registered version ID.
-An explicit upload assignment does not require a statistical experiment. League submission remains coordinator-owned.
+Use this procedure when the selected publication tool accepts verified file artifacts.
+For other artifact types, discover the appropriate tool and applicable procedure before acting.
 
-For a research experiment requiring a local candidate binding, use the existing procedure below. The coordinator
-records that binding and accepts the completed evidence.
+Build and verify through the game’s `build` binding. The coordinator owns upload after
+the native task completes; researchers never publish artifacts directly.
+
+## Explicit build/upload assignment
+
+For a build/upload request without an experiment, follow `candidate`'s explicit build/upload-only
+procedure. Do not create an experiment or run statistical evaluation just to publish an artifact.
+Verify the requested source change in the generated artifact; passed gates alone do not establish it.
+Preserve evaluation `not_run` when the game's build contract separates it from build checks.
+
+The researcher commits the complete passing build, including `version.json`, and completes the native task.
+The coordinator calls the existing `upload_build` tool and integrates its receipt before any requested submission.
+That tool supplies player authentication, records the version and its uploaded event, and reuses them on retry.
+A raw Coworld upload bypasses these records; do not substitute it or return a platform ID as a local version record.
+
+Use the installed game's build binding and declared host requirements. These instructions do not assume Docker,
+a BuildKit endpoint, or commands absent from the installed CLI. If a required capability is unavailable,
+report it through `help_request:` before starting the build. A Kubernetes runtime change alone does not add
+archive publication support to the installed game binding and record-owning upload tool.
 
 Doctrine upheld: D-03, D-04, D-08, D-09, D-25.
 

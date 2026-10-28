@@ -6,7 +6,7 @@ description: Use when preparing builds or handing off candidates.
 # Prepare the candidate for the orchestrator
 
 Implements the researcher's side of System Design §5.5 and design v4.4 §9. The researcher
-prepares committed evidence; the coordinator owns acceptance, league submission and champion changes.
+prepares committed evidence; the coordinator owns upload, submission and champion changes.
 Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 
 ## Reviewed candidate
@@ -34,10 +34,15 @@ Doctrine upheld: D-01, D-03, D-06, D-09, D-20, D-25.
 
 When the coach requests a source change and upload without evaluation or league submission:
 
-1. Follow `build-upload`'s explicit assignment procedure. Run the required build checks; evaluation is required only when assigned.
-2. Upload the successful artifact with the Coworld CLI using the assigned policy name and existing credentials.
-3. Follow `card` to stage source and build evidence, then return the registered version ID with `experiment: null`.
-   Do not invent an experiment or submit to a league.
+1. Build the committed source with the installed game binding and review all required build evidence.
+   Follow the game's build validation contract in `GAME.md`. When it separates build checks
+   from evaluation, preserve evaluation `not_run`. Request full evaluation only when the task calls for it.
+   Check the generated artifact implements the requested change before uploading; passed gates alone
+   do not prove the intended value changed.
+2. Copy the complete passing build into tracked `build-evidence/<build-id>`, preserving every file.
+3. Follow `card` to stage artifacts and complete with `experiment: null`. Report the task-relative
+   build directory, suggested upload name, artifact hash and source verification. The coordinator
+   calls `upload_build` after native completion. Do not claim upload completion or invent an experiment.
 
 ## Bootstrap card: prepare the starter policy
 
