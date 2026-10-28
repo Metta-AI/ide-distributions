@@ -158,6 +158,11 @@ separate wake receipt, command ledger, event acknowledgement, or replacement-tas
 
 Native notifications alone deliver task events. Cron polls external XP, credit and
 permit waits, and periodically requests champion-submission review through the same inbox.
+Every 10 minutes it also checks whether our newest accepted champion submission has played
+its first league match (`latest_league_result` shows its policy version). If so, it wakes the
+coordinator once with a `league_result` item, which goes to the session that made the
+submission, and records that submission as followed up in coordinator storage. It makes
+this platform read only while a submission still waits for its first match.
 A card's wait events resume the session that created the card (native `session_id`),
 as native notifications do; events with no card, or a card without an origin session,
 resume the session that most recently called an orchestrator tool.

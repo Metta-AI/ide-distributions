@@ -194,12 +194,19 @@ def test_the_cli_prints_the_envelope(board):
         "RESEARCH_SOFTMAX": "fake",
         "RESEARCH_PLAYER_ID": PLAYER,
     }
-    run = subprocess.run(
-        [sys.executable, "-m", "ide_research_core", "champion", "submit", experiment, "--league", LEAGUE],
-        capture_output=True, text=True, env=env, check=False,
-    )
-    assert run.returncode == 0, run.stdout + run.stderr
-    assert json.loads(run.stdout)["data"]["stage"] == "submitted"
+    def cli(*args):
+        run = subprocess.run(
+            [sys.executable, "-m", "ide_research_core", "champion", *args],
+            capture_output=True, text=True, env=env, check=False,
+        )
+        assert run.returncode == 0, run.stdout + run.stderr
+        return json.loads(run.stdout)["data"]
+
+    # `submitted` (the supervisor's league-result poll) reads only accepted submissions.
+    assert cli("submitted") is None
+    submitted = cli("submit", experiment, "--league", LEAGUE)
+    assert submitted["stage"] == "submitted"
+    assert cli("submitted")["id"] == submitted["id"]
 
 
 def test_a_send_that_dies_after_an_approved_permit_is_recovered_not_asked_again(board):

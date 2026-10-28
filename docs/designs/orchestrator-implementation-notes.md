@@ -90,6 +90,18 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   listed "XP polling" as moving to shared code without saying who turns results into rows;
   doing it by hand in a skill would risk the paired comparison. The polling half is the
   orchestrator's supervisor gate.
+- **League-result wake** (#19): nothing woke the coordinator after a submission played, so
+  follow-up waited for the user. On its 10-minute poll the gate reads, per game, the newest
+  submission the platform accepted (`research champion submitted`, a local git read). If the
+  coordinator was not yet woken for it, the gate reads `softmax player-result` (the
+  `latest_league_result` platform read) and, once the result names the submission's
+  `platform_policy_version_id` anywhere in it, queues one `league_result` wake. The match is
+  a search of every string in the result because the gate does not depend on the
+  latest-replay response's exact shape. The wake goes to the session that made the submission
+  (recorded as `submission_session:<CS-id>` in coordinator storage by `champion_submit`,
+  `submit_requested_version` and `bootstrap_champion`, including a permit refusal), else to
+  the latest session. After the inbox accepts the wake, `league_result_seen:<CS-id>` is
+  stored, so each submission wakes once and later polls make no platform read.
 - **Bootstrap is split**: the researcher's bootstrap card builds the starter policy and runs
   `softmax upload-build`; the orchestrator submits that version with
   `champion bootstrap --version V-...` (§9 said the orchestrator runs `bootstrap_champion()`,

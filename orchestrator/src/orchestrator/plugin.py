@@ -25,7 +25,7 @@ from .github import GitHub
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
-from .storage import open_storage
+from .storage import open_storage, remember_submission_session
 from .worker_capabilities import WorkerCapabilities, WorkerRead
 from .workspace import Workspace, WorkspaceError
 
@@ -426,10 +426,16 @@ TOOLS = {
 }
 
 
+# Tools whose result is a champion submission; the gate routes its league-result wake to the
+# session that made it.
+SUBMISSION_TOOLS = ("champion_submit", "submit_requested_version", "bootstrap_champion")
+
+
 def handler(name):
     owner = TOOLS[name][0]
 
     def call(args, session_id=None, **kwargs):
+        origin = None
         try:
             context = profile_context()
             if session_id:
@@ -447,8 +453,14 @@ def handler(name):
             if name == "card_create":
                 arguments["session_id"] = session_id
             data = getattr(owner(context), name)(**arguments)
+            if name in SUBMISSION_TOOLS and origin:
+                remember_submission_session(context, data["id"], origin)
             return json.dumps({"ok": True, "data": data})
         except (ArtifactError, ResearchError, WorkspaceError) as error:
+            # A submission waiting for the coach's permit is still this session's submission.
+            submission = (error.envelope["error"].get("details") or {}).get("submission")
+            if name in SUBMISSION_TOOLS and origin and submission:
+                remember_submission_session(context, submission, origin)
             return json.dumps(error.envelope)
         except HTTPError as error:
             details = {"status": error.code}

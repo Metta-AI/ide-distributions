@@ -229,6 +229,9 @@ For build, smoke or upload work, do not require an experiment or statistical sup
 integrated version into the league directly (the user asked, or you judge it should compete:
 for example the league has no champion of ours, or a verified build should replace a weaker
 one), stating the reason. Verify the submitted version competed through `latest_league_result`.
+A `league_result` wake means a submission's first league match finished: read the result,
+decide the next step yourself (keep it, research a fix, or submit another version), act, and
+tell the user.
 Roster position is a seat, not a finishing rank. Report only game-defined outcomes.
 
 Shared submission receipts recover ambiguous writes; never repeat a platform submission

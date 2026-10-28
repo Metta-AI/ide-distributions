@@ -167,7 +167,7 @@ Then, for example:
 | `source` | `fetch` | read-only snapshots of public GitHub repositories |
 | `softmax` | `whoami`, `credits`, `xp create/status/recover/evidence/artifacts`, `upload`, `upload-build`, `leaderboard`, `game-version`, `standings`, `league-episodes`, `league-results`, and the discovery reads (`discover-leagues`, `league-players`, `game-support`, `player-champion`, `player-result`) | every platform action of a researcher; `exec -- <coworld\|softmax> <args>` runs any other real CLI command as the Player (identity switches and `--server` refused) |
 | `workspace` | `stage`, `integrate`, `merged`, `publish`, `bootstrap` | `integrate` and `publish` are the orchestrator's; `bootstrap --game G` prepares another game's clone |
-| `champion` | `submit`, `submit-requested`, `bootstrap`, `pending`, `status`, `accept`, `migrate` | the orchestrator's; denied to researchers |
+| `champion` | `submit`, `submit-requested`, `bootstrap`, `pending`, `submitted`, `status`, `accept`, `migrate` | the orchestrator's; denied to researchers |
 
 Every command prints one JSON object: `{"ok": true, "data": ...}` or
 `{"ok": false, "error": {"reason", "message", "details"?}}`.

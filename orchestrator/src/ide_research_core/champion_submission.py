@@ -57,6 +57,7 @@ SUBMISSIONS_DIR = "champion-submissions"
 CHAMPION_PATH = "strategy/STRATEGY.md"
 SUBMISSION_LOCK = "champion-submission.lock"
 IN_FLIGHT = ("intent", "submitted", "recorded")
+ACCEPTED = ("submitted", "recorded", "published")  # the platform holds the submission
 CHAMPIONS = ("published",)  # the stage that makes a submission's policy the loop's champion
 
 

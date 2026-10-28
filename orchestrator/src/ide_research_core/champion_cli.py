@@ -1,4 +1,4 @@
-"""``research champion``: submit, bootstrap, status and accept (see ``champion_submission``).
+"""``research champion``: submit, bootstrap, status, submitted and accept (see ``champion_submission``).
 
 The orchestrator runs these in its own clone; researchers' deny list blocks them. Every
 command prints one JSON object: ``{"ok": true, "data": ...}`` or
@@ -48,6 +48,15 @@ def _run(handler):
                     ),
                     None,
                 )
+            elif args.command == "submitted":
+                data = next(
+                    (
+                        p.to_dict()
+                        for p in reversed(champion_submission.load_all(clone))
+                        if p.submission_id and p.stage in champion_submission.ACCEPTED
+                    ),
+                    None,
+                )
             else:
                 player_id = os.environ[PLAYER_ENV]
                 sm = from_env(os.environ, clone)
@@ -75,7 +84,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
 
     def command(name: str, handler, help_text: str) -> argparse.ArgumentParser:
         sub = commands.add_parser(name, parents=[common], help=help_text)
-        if name not in ("pending", "migrate"):
+        if name not in ("pending", "migrate", "submitted"):
             sub.add_argument(
                 "--league",
                 required=True,
@@ -119,6 +128,11 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "pending",
         None,
         "read an in-flight champion submission without advancing or submitting it",
+    )
+    command(
+        "submitted",
+        None,
+        "read the newest submission the platform accepted (submitted, recorded or published), or null",
     )
     command(
         "status",

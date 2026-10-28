@@ -10,7 +10,20 @@ from urllib.request import Request, urlopen
 from .context import subprocess_context
 from .ide import IDE
 from .research import Research
-from .storage import card_sessions, open_storage, snapshot
+from .storage import (
+    card_sessions,
+    league_results_seen,
+    mark_league_result_seen,
+    open_storage,
+    snapshot,
+    submission_sessions,
+)
+
+LEAGUE_RESULT_NEXT = (
+    "Our champion submission played its first league match. Read the result (and its replay "
+    "if useful) and decide the next step yourself: keep it, research a fix, or submit another "
+    "version. Act without asking the user, then tell them what happened and what you did."
+)
 
 
 def transitions(state, research, ide):
@@ -81,6 +94,38 @@ def other_research_games(env):
     return [game for game in games if game != env.get("RESEARCH_GAME")]
 
 
+def mentions(value, needle):
+    """Whether ``needle`` is any string inside the JSON value (the result's shape is the
+    platform's; our policy version can appear as a seat, a participant or the replay's policy)."""
+    if isinstance(value, dict):
+        return any(mentions(item, needle) for item in value.values())
+    if isinstance(value, list):
+        return any(mentions(item, needle) for item in value)
+    return value == needle
+
+
+def first_league_result(context, research, game=None):
+    """A ``league_result`` event when our newest accepted champion submission has played its
+    first league match, else None. A submission already woken for makes no platform call."""
+    submission = research.call("champion", "submitted")
+    if submission is None or submission["id"] in league_results_seen(context):
+        return None
+    read = research.latest_league_result(submission["league_id"], context.env["RESEARCH_PLAYER_ID"])
+    if not mentions(read.get("result"), submission["platform_policy_version_id"]):
+        return None
+    event = {
+        "kind": "league_result",
+        "champion_submission": submission["id"],
+        "submission_id": submission["submission_id"],
+        "league_id": submission["league_id"],
+        "policy_version_id": submission["platform_policy_version_id"],
+        "result": read["result"],
+        "next": LEAGUE_RESULT_NEXT,
+        "source_event": f"champion_submissions:{submission['id']}:league_result",
+    }
+    return {**event, "game": game} if game else event
+
+
 def evaluate(context, research=None, ide=None, now=None):
     state = snapshot(context)
     now = now or datetime.now(UTC)
@@ -108,6 +153,11 @@ def evaluate(context, research=None, ide=None, now=None):
         for game in other_research_games(context.env):
             if research.in_game(game).call("champion", "pending") is not None:
                 pending.append({"kind": "champion_submission_poll", "tick": tick, "game": game})
+        # Wake once on the first league match after each champion submission.
+        for game in [None, *other_research_games(context.env)]:
+            result = first_league_result(context, research.in_game(game), game)
+            if result is not None:
+                pending.append(result)
     # Native notifications alone deliver task events; cron only polls external waits.
     if not pending:
         return {"wakeAgent": False}
@@ -132,11 +182,17 @@ def wake(context, state):
             latest = conn.execute("SELECT value FROM coordinator WHERE key='session'").fetchone()
         # A card's events resume the session that created the card, as native notifications
         # do. Only events with no origin (no card, or a card created outside a session) go to
-        # the session that most recently called a tool.
+        # the session that most recently called a tool. A league result resumes the session
+        # that made its champion submission.
         origins = card_sessions(context)
+        submitters = submission_sessions(context)
         sessions = {}
         for event in state["context"]["pending"]:
-            session = origins.get(event.get("card")) or (latest and latest[0])
+            session = (
+                submitters.get(event.get("champion_submission"))
+                or origins.get(event.get("card"))
+                or (latest and latest[0])
+            )
             if session:
                 sessions.setdefault(session, []).append(event)
         for session, pending in sorted(sessions.items()):
@@ -158,6 +214,10 @@ def wake(context, state):
             )
             with urlopen(request, timeout=30) as response:
                 json.load(response)
+        # Only once the inbox holds the wake: a failed post retries on the next poll.
+        for event in state["context"]["pending"]:
+            if event["kind"] == "league_result":
+                mark_league_result_seen(context, event["champion_submission"])
     # The inbox owns both deduplication and recovery. Each cron tick may launch
     # the oldest abandoned input; duplicate launches cannot claim it twice.
     with urlopen(Request(url + "/v1/coordinator/pending", headers=headers), timeout=30) as response:
