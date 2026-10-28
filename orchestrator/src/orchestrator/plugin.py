@@ -218,7 +218,9 @@ TOOLS = {
             "existing tasks before creating new work. Describe objective, inputs, constraints and "
             "completion evidence in body. Omit skills unless explicit preloads are necessary. "
             "game selects the game the card researches (its workspace is prepared on first use); "
-            "a card that makes a new game folder runs in any existing game."
+            "a card that makes a new game folder runs in any existing game. Record ids (E-, H-, "
+            "V-, CS-, ...) and ar://file/ paths in body must exist on that game's canonical main; "
+            "otherwise it refuses with unknown_records."
         ),
         {
             "command_id": {"type": "string", "minLength": 1, "maxLength": 200},

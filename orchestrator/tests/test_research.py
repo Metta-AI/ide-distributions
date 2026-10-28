@@ -172,3 +172,34 @@ def test_status_lists_every_researcher_with_its_open_cards(tmp_path):
     assert [(r["name"], r["installed"]) for r in researchers(hosted, cards)] == [
         ("researcher-2", True), ("researcher-3", False),
     ]
+
+
+def test_card_bodies_may_cite_only_records_on_their_games_canonical_main(tmp_path):
+    from orchestrator.board import unknown_references
+
+    def git(cwd, *args):
+        subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+
+    known_experiment = "E-01K6Z3V8QXA1B2C3D4E5F6G7H8"
+    known_submission = "CS-01K6Z3V8QXA1B2C3D4E5F6G7H9"
+    canonical, clone = tmp_path / "canonical.git", tmp_path / "clone"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(canonical))
+    git(tmp_path, "clone", "-q", str(canonical), str(clone))
+    for path in (f"experiments/{known_experiment}--rush.md", f"champion-submissions/{known_submission}.json", "plan.md"):
+        (clone / path).parent.mkdir(parents=True, exist_ok=True)
+        (clone / path).write_text("x\n")
+    git(clone, "add", "-A")
+    git(clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "records")
+    git(clone, "push", "-q", "origin", "HEAD:main")
+
+    assert unknown_references(clone, "Plain work with no citations; see the rush notes.") == []
+    body = (
+        f"Follow ar://experiment/{known_experiment} after {known_submission}; read ar://file/plan.md.\n"
+        "Compare with H-01K6Z3V8QXA1B2C3D4E5F6G7HA (ar://result/R-01K6Z3V8QXA1B2C3D4E5F6G7HB) "
+        "and ar://file/notes/missing.md."
+    )
+    assert unknown_references(clone, body) == [
+        "H-01K6Z3V8QXA1B2C3D4E5F6G7HA",
+        "R-01K6Z3V8QXA1B2C3D4E5F6G7HB",
+        "ar://file/notes/missing.md",
+    ]

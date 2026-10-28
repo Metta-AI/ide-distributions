@@ -77,6 +77,9 @@ def game_cards(root, home, args):
         board.card_create(**{**game_args, "game": None})
     with TestCase().assertRaisesRegex(Exception, "not found"):
         board.card_create(**{**game_args, "command_id": "game:absent", "game": "absent"})
+    with TestCase().assertRaisesRegex(Exception, "not on this game's canonical main"):
+        board.card_create(**{**game_args, "command_id": "game:invented",
+                             "body": "Extend E-01K6Z3V8QXA1B2C3D4E5F6G7H8."})
     # An omitted game stays neutral, even when a caller still carries an old profile default.
     default_card = board.card_create(**{**args, "command_id": "game:default"})["card"]
     assert board._card_game(default_card["id"]) is None

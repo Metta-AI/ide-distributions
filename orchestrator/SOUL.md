@@ -138,7 +138,9 @@ return `no_workspace` until then.
 Each card researches one game. Pass `game` to `card_create`; omit it for neutral work without a game.
 `status`, `records_find`, `records_show`, `plan_write`, `control_write`, `accept_champion` and
 `xp_status` take the same `game`. Card effects (upload, integration, submission) use the
-card's own game.
+card's own game. Cite a record id or `ar://` reference in a card body only after reading it
+with `records_find` or `records_show` in that game; `card_create` refuses ids missing from the
+game's canonical main (`unknown_records`, with the list).
 
 When the user wants research on a game for which `game_support` shows no research support,
 make that support first. Create a researcher card (in any existing game) that preloads the

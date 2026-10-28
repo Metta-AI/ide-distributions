@@ -35,6 +35,39 @@ class CardFilters(BaseModel):
     ] | None = None
 
 
+# A stored record id (``ide_research_core.ids``: the record types of ``records.registry``) or a
+# champion submission id (``CS-``). Not imported: ``ids`` needs python-ulid, which Hermes's
+# interpreter, where this plugin runs, does not have.
+RECORD_ID = re.compile(
+    r"(?<![A-Za-z0-9])(?:HUB|EV|VE|CS|[THERVCLJ])-[0-9A-HJKMNP-TV-Z]{26}(?![A-Za-z0-9])"
+)
+FILE_REF = re.compile(r"ar://file/([^\s<>()\[\]`'\"]+)")
+
+
+def unknown_references(clone, body):
+    """Record ids and ``ar://file/`` paths that ``body`` cites but canonical ``main`` (the
+    bare repository ``clone`` tracks as ``origin``) lacks.
+
+    At most two git reads, none for a body that cites nothing. ``ar://<type>/<id>`` and
+    ``ar://wiki/<id>`` are checked through their ids; content searches (xreq, episode,
+    opponent) and game reference types are not checked."""
+    cited = set(RECORD_ID.findall(body))
+    files = {path.rstrip(".,;:") for path in FILE_REF.findall(body)}
+    if not cited and not files:
+        return []
+    canonical = git(clone, "remote", "get-url", "origin")
+    listing = subprocess.run(
+        ["git", "--git-dir", canonical, "ls-tree", "-r", "--name-only", "main"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    paths = set(listing.stdout.splitlines()) if listing.returncode == 0 else set()
+    present = {found for path in paths for found in RECORD_ID.findall(path)}
+    return sorted(cited - present) + sorted(f"ar://file/{path}" for path in files - paths)
+
+
 def git(clone, *args):
     return subprocess.run(
         ["git", "-C", str(clone), *args], check=True, capture_output=True, text=True, timeout=60
@@ -230,6 +263,21 @@ print(json.dumps([{"name": s["name"], "description": s["description"]}
             # Bootstrap only a missing clone; never sync over its local work.
             if not (clone / ".git").exists():
                 prepare_clone(profile, env, game)
+        # A card may cite only records that exist in its game: the worker reads them there.
+        unknown = unknown_references(clone, body)
+        if unknown:
+            raise ResearchError(
+                {
+                    "ok": False,
+                    "error": {
+                        "reason": "unknown_records",
+                        "message": "The body cites records that are not on this game's "
+                        "canonical main. Cite only ids from records_find/records_show "
+                        "for the card's game, or describe the work without them.",
+                        "details": {"game": game, "unknown": unknown},
+                    },
+                }
+            )
         payload = json.dumps(command, sort_keys=True)
         with closing(connection()) as conn:
             # Serialize lookup and creation in the native task database. The task
