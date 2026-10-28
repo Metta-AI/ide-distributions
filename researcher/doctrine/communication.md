@@ -16,7 +16,7 @@ Do not set another board or comment on another card.
 | `question:` | An answer needed from the orchestrator. Explain the choice, options and recommendation. |
 | `suggestion:` | Follow-up work, a priority change, or a skill/doctrine proposal with evidence. |
 | `help_request:` | Work cannot proceed. State what failed, what you tried and the command/error or missing information. |
-| `highlight:` | One supported/falsified hypothesis, newly verified claim, promotion observed in the field, or surprising result. |
+| `highlight:` | One supported/falsified hypothesis, newly verified claim, champion change observed in the field, or surprising result. |
 
 Example `kanban_comment` arguments:
 

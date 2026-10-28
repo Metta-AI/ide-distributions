@@ -15,7 +15,7 @@ Doctrine upheld: D-06, D-09.
 
 - Reads: the episode rows of the baseline and candidate arms, the frozen evaluation design.
 - Writes: `stats/rows/<E-id>.jsonl` and `stats/outcomes/<E-id>.json` (the stored outcome
-  that the orchestrator's promotion workflow checks), and the metrics of the Result.
+  that the orchestrator's champion-submission workflow checks), and the metrics of the Result.
 
 ## Procedure
 
@@ -45,4 +45,4 @@ Doctrine upheld: D-06, D-09.
   design), or `stats evaluate` exits 2 "champion unknown" (the league shows no champion for
   us): record it; the review decision is `hold` and a re-evaluation against the current
   champion is the follow-up card.
-- Never edit `stats/rows/` or `stats/outcomes/` by hand. The promotion workflow checks their hashes.
+- Never edit `stats/rows/` or `stats/outcomes/` by hand. The champion-submission workflow checks their hashes.

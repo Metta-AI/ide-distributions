@@ -42,5 +42,5 @@ Doctrine upheld: D-04, D-05, D-06, D-09.
 - `softmax xp evidence` exits 1 (a binding error, an unknown arm, a missing binding): that is
   a tool fault (D-26 in `card`), not a measurement; never patch rows by hand.
 - Failed episodes are worker/platform failures, not measurements of policy behavior. Count
-  them separately; insufficient completed evidence cannot support a promote decision.
+  them separately; insufficient completed evidence cannot support a `submit` decision.
 - Tool faults follow D-26 in `card`; platform failures and incomplete evidence remain explicit.

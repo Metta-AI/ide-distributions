@@ -93,11 +93,11 @@ published by the bridge; only background wake/cron turns call `ide_say`.
 | `card_files`, `card_report`, `card_artifacts` | Discover completed committed files, read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
-| `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and promotion state. |
+| `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). |
 | `records_find`, `records_show` (`game?`) | Shared canonical record reads. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
 | `upload_build(id, run_id, build_dir, name, experiment?)` | Upload a completed run's committed build in the card's game. |
-| `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared promotion workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
+| `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
 | `accept_champion(game?)` | Record the league's current champion after the user confirms. |
 | `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
 | `game_list` | Shipped and installed games with each one's `league_id`, whether each has a research workspace yet, and how an installed one was installed. |
@@ -151,7 +151,7 @@ same row recoverable. Completing the turn acknowledges it automatically. There i
 separate wake receipt, command ledger, event acknowledgement, or replacement-task graph.
 
 Native notifications alone deliver task events. Cron polls external XP, credit and
-permit waits, and periodically requests promotion review through the same inbox.
+permit waits, and periodically requests champion-submission review through the same inbox.
 `status` reads native tasks and current external waits. Resume blocked or triaged tasks
 with `card_answer`; task completion never depends on Git ancestry.
 
@@ -159,7 +159,7 @@ Researchers build, smoke-test, and commit the complete artifact. The coordinator
 `upload_build` on the latest completed native run, integrates its receipt commit, and
 uses `submit_requested_version` for an explicitly requested submission. Cancellation
 revokes publication before stopping the native worker. Requested submission is not
-statistical improvement; autonomous promotion still requires reviewed evidence.
+statistical improvement; an autonomous champion submission still requires reviewed evidence.
 
 ## Development and verification
 
@@ -182,7 +182,7 @@ a separate integration check that these tests do not establish.
 For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's
 "Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
 without an experiment, evaluation or league submission. Require the intended source change in
-the generated artifact and both returned version IDs; promotion remains a separate authorized action.
+the generated artifact and both returned version IDs; champion submission remains a separate authorized action.
 
 ## Conversation context and game support
 
@@ -212,7 +212,7 @@ PR is not proof that image qualification or rollout has completed.
 A shipped or installed contract is matched by
 its exact declared league ID, not by guessed directory paths. Missing bindings are reported separately
 from platform availability. This permits research and match analysis for games without a
-local build/evaluation adapter. The existing automated promotion loop still uses its installed
+local build/evaluation adapter. The existing automated champion-submission loop still uses its installed
 game contract and scoped credential; using a different player for writes requires the proper
 credential and authorization, not a prompt override.
 
@@ -221,7 +221,7 @@ credential and authorization, not a prompt override.
 A host researches any shipped or installed game, each in its own canonical repository
 (`canonical-<game>.git` beside `RESEARCH_CANONICAL`) with a clone per profile
 (`workspace-<game>`). Cards and tools without a game use the neutral workspace; `RESEARCH_GAME` scopes selected tasks only.
-The minute supervisor reads each waiting run's game from its card and polls promotion in
+The minute supervisor reads each waiting run's game from its card and polls champion submissions in
 every game that has a workspace. The design is
 [docs/designs/multi-game-research.md](../docs/designs/multi-game-research.md).
 

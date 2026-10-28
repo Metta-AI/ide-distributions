@@ -32,7 +32,7 @@ Doctrine upheld: D-01, D-06, D-09, D-14, D-15, D-17, D-20, D-22, D-23.
    observation gaps. A Result never changes after creation. Link it:
    `"$RESEARCH_CLI" records link <E-id> results <R-id>`
 5. Apply the pre-registered rule in the experiment body exactly (D-09). No new thresholds
-   after seeing data. Choose `promote`, `hold`, `refute`, or `invalid`. `promote` needs
+   after seeing data. Choose `submit`, `hold`, `refute`, or `invalid`. `submit` needs
    `submit_eligible: true` from `stats evaluate` and a valid Result.
 6. Record the decision with its reason and the Result ref (set once, D-01), then close the
    experiment:
@@ -42,7 +42,7 @@ Doctrine upheld: D-01, D-06, D-09, D-14, D-15, D-17, D-20, D-22, D-23.
    the experiment, version, hypothesis and Topics here only when the card names them. Claims and hubs
    change only when the refs name them (D-23); for others, suggest maintenance to the orchestrator
    with those refs and the decision:
-   - `promote` → the hypothesis becomes `supported`; `refute` → `falsified`; `hold` and
+   - `submit` → the hypothesis becomes `supported`; `refute` → `falsified`; `hold` and
      `invalid` do not move it:
      `"$RESEARCH_CLI" records status <H-id> supported --reason "<decision>" --ref ar://result/<R-id>`
    - Add the Result as B-tier evidence to the claims it bears on; supersede claims it
@@ -51,9 +51,9 @@ Doctrine upheld: D-01, D-06, D-09, D-14, D-15, D-17, D-20, D-22, D-23.
      mechanism claim (kind `mechanism`, status `refuted`) whose `revise_if` says what
      reopens the lever (D-17).
    - Count lesson recurrences (see `lessons`).
-8. If the decision is `promote`, check `candidate`'s reviewed-candidate requirements and prepare the decision,
+8. If the decision is `submit`, check `candidate`'s reviewed-candidate requirements and prepare the decision,
    stored statistics, uploaded binding and candidate strategy for the orchestrator. Set the
-   handoff's `experiment.decision` to `promote`; never submit the policy yourself.
+   handoff's `experiment.decision` to `submit`; never submit the policy yourself.
 9. Send one `highlight` per event (D-20): a supported or falsified hypothesis, a surprising
    result. See `report`.
 10. Finish with `card`.
