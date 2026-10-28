@@ -145,11 +145,11 @@ def _project_source(args) -> dict:
 
 def _policy_files(args) -> dict:
     from ide_research_core.source_schema import HermesPolicyFiles
-    from ide_research_core.workspace_sources import execute
+    from ide_research_core.workspace_sources import execute_policy
 
     payload = json.loads(sys.stdin.buffer.read(100001))
     request_id = payload.pop("request_id", "")
-    return execute(_clone(args), HermesPolicyFiles.model_validate(payload), request_id)
+    return execute_policy(_clone(args), HermesPolicyFiles.model_validate(payload), request_id)
 
 
 def _bootstrap(args) -> dict:

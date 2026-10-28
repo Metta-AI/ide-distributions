@@ -22,7 +22,8 @@
     "kind": {
       "enum": [
         "uploaded",
-        "submitted"
+        "submitted",
+        "sources_registered"
       ]
     },
     "recorded_at": {

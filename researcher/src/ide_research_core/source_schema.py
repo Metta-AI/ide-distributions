@@ -25,9 +25,7 @@ class HermesPolicyFiles(BaseModel):
     @model_validator(mode="after")
     def source_target(self) -> Self:
         if self.action != "sources" and not self.record_id:
-            raise ValueError(
-                "File operations require an original version provenance record"
-            )
+            raise ValueError("File operations require an original version provenance record")
         if self.action in {"read", "write"} and not self.path:
             raise ValueError("File operations require a relative source file")
         if self.action == "write" and not self.base_sha256:
@@ -38,7 +36,7 @@ class HermesPolicyFiles(BaseModel):
             self.path.startswith("/")
             or "\\" in self.path
             or "\x00" in self.path
-            or any(not part or part.startswith(".") for part in self.path.split("/"))
+            or any(not part or part in {".", "..", ".git"} for part in self.path.split("/"))
         ):
             raise ValueError("Source paths must be relative without traversal")
         return self
@@ -85,14 +83,8 @@ class HermesProjectSource(BaseModel):
         if self.include_contents and self.action != "read":
             raise ValueError("Only reads can request a full source snapshot")
         if self.action == "seed":
-            if (
-                self.config is None
-                or not self.archive_base64
-                or not self.archive_sha256
-            ):
-                raise ValueError(
-                    "Seed requires published starter metadata and exact archive bytes"
-                )
+            if self.config is None or not self.archive_base64 or not self.archive_sha256:
+                raise ValueError("Seed requires published starter metadata and exact archive bytes")
         elif self.config is not None or self.archive_base64 or self.archive_sha256:
             raise ValueError("Existing projects retain their original starter identity")
         if self.action in {"write", "patch"} and (

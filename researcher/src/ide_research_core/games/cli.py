@@ -31,7 +31,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from ide_research_core import sources
+from ide_research_core import policy_files, sources
 from ide_research_core.cli import register_group
 from ide_research_core.games import authoring
 from ide_research_core.games.loader import GameError, load_game
@@ -123,6 +123,27 @@ def _install(args) -> dict:
     )
 
 
+def container_sources(root: Path, context: Path, strategy: Path) -> dict[str, str]:
+    """Record the build context, including ignored files; Git metadata is not editable code."""
+    paths = {strategy}
+    for directory, dirs, files in os.walk(context, followlinks=False):
+        dirs[:] = sorted(name for name in dirs if name != ".git")
+        for name in [*dirs, *files]:
+            if (Path(directory) / name).is_symlink():
+                raise authoring.AuthoringError(
+                    "bad_arguments", "Build sources cannot contain symlinks"
+                )
+        paths.update(Path(directory) / name for name in files if name != ".git")
+    hashes = {}
+    for path in sorted(paths):
+        relative = path.relative_to(root).as_posix()
+        if not policy_files.source_path(relative) or not path.is_file():
+            raise authoring.AuthoringError("bad_arguments", f"Unsupported build source: {relative}")
+        with path.open("rb") as stream:
+            hashes[relative] = hashlib.file_digest(stream, "sha256").hexdigest()
+    return hashes
+
+
 def _build_container(args) -> dict:
     """Build an OCI archive and the existing publication receipt; no queue or service."""
     if not os.environ.get("BUILDKIT_HOST"):
@@ -136,6 +157,21 @@ def _build_container(args) -> dict:
         raise authoring.AuthoringError("bad_arguments", "--out must be outside --context")
     if out.exists():
         raise authoring.AuthoringError("bad_arguments", "--out must be a new build directory")
+    root = (
+        Path(os.environ[WORKER_ENV]).resolve()
+        if WORKER_ENV in os.environ
+        else Path(gitops.git(context, "rev-parse", "--show-toplevel")).resolve()
+    )
+    if not context.is_relative_to(root) or not strategy.is_relative_to(root):
+        raise authoring.AuthoringError(
+            "bad_arguments", "Build inputs must be in the task workspace"
+        )
+    source_hashes = container_sources(root, context, strategy)
+    primary = (context / args.dockerfile).relative_to(root).as_posix()
+    if primary not in source_hashes:
+        raise authoring.AuthoringError(
+            "bad_arguments", "The Dockerfile must be retained in the workspace"
+        )
     strategy_hash = hashlib.sha256(strategy.read_bytes()).hexdigest()
     source_commit = gitops.head(context)
     out.mkdir(parents=True)
@@ -155,8 +191,8 @@ def _build_container(args) -> dict:
     )
     if result.returncode:
         raise authoring.AuthoringError("build_failed", "Container build failed; see build output")
-    if hashlib.sha256(strategy.read_bytes()).hexdigest() != strategy_hash:
-        raise authoring.AuthoringError("source_changed", "Strategy changed during the build")
+    if container_sources(root, context, strategy) != source_hashes:
+        raise authoring.AuthoringError("source_changed", "Source changed during the build")
     with artifact.open("rb") as stream:
         artifact_hash = hashlib.file_digest(stream, "sha256").hexdigest()
     version = {
@@ -165,6 +201,8 @@ def _build_container(args) -> dict:
         "policy_sha256": artifact_hash,
         "strategy_sha256": strategy_hash,
         "source_commit": source_commit,
+        "source_path": primary,
+        "source_hashes": source_hashes,
         "gates": {"container_build": {"passed": True}},
         "evaluation": {"status": "not_run"},
     }
@@ -219,7 +257,8 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.set_defaults(func=_run(_check))
 
     sub = commands.add_parser(
-        "build-container", help="build an OCI policy and publication evidence using BuildKit"
+        "build-container",
+        help="build an OCI policy and publication evidence using BuildKit",
     )
     sub.add_argument(
         "--context", required=True, help="Dockerfile build context in the task worktree"

@@ -53,16 +53,22 @@ def test_list_names_each_games_league(capsys, monkeypatch):
 
 
 @pytest.mark.parametrize("returncode", [0, 1])
-def test_container_build_only_emits_publishable_receipt_on_success(tmp_path, monkeypatch, capsys, returncode):
+def test_container_build_only_emits_publishable_receipt_on_success(
+    tmp_path, monkeypatch, capsys, returncode
+):
     from ide_research_core.games import cli
 
     context = tmp_path / "player"
     context.mkdir()
+    (context / "Dockerfile").write_text("FROM scratch\nCOPY player.py /player.py\n")
+    (context / "player.py").write_text("print('player')\n")
     strategy = tmp_path / "STRATEGY.md"
     strategy.write_text("Play the supported starter")
     output = tmp_path / "build"
     monkeypatch.setenv("BUILDKIT_HOST", "tcp://127.0.0.1:1234")
+    monkeypatch.delenv("HERMES_KANBAN_WORKSPACE", raising=False)
     monkeypatch.setattr(cli.gitops, "head", lambda path: "a" * 40)
+    monkeypatch.setattr(cli.gitops, "git", lambda *args: str(tmp_path))
 
     def build(argv, **kwargs):
         assert argv[1:3] == ["build-policy", str(context)]
@@ -71,7 +77,18 @@ def test_container_build_only_emits_publishable_receipt_on_success(tmp_path, mon
         return subprocess.CompletedProcess(argv, returncode)
 
     monkeypatch.setattr(cli.subprocess, "run", build)
-    code = main(["game", "build-container", "--context", str(context), "--strategy", str(strategy), "--out", str(output)])
+    code = main(
+        [
+            "game",
+            "build-container",
+            "--context",
+            str(context),
+            "--strategy",
+            str(strategy),
+            "--out",
+            str(output),
+        ]
+    )
     result = json.loads(capsys.readouterr().out)
     if returncode:
         assert code == 1 and result["error"]["reason"] == "build_failed"
@@ -79,7 +96,39 @@ def test_container_build_only_emits_publishable_receipt_on_success(tmp_path, mon
     else:
         assert code == 0
         receipt = json.loads((output / "version.json").read_text())
+        assert receipt["source_path"] == "player/Dockerfile"
+        assert set(receipt["source_hashes"]) == {
+            "player/Dockerfile",
+            "player/player.py",
+            "STRATEGY.md",
+        }
         assert receipt["artifact_type"] == "oci-image"
         assert receipt["policy_sha256"] == hashlib.sha256(b"archive").hexdigest()
         assert receipt["strategy_sha256"] == hashlib.sha256(strategy.read_bytes()).hexdigest()
         assert receipt["evaluation"] == {"status": "not_run"}
+
+
+def test_container_manifest_includes_nested_clone_and_ignored_inputs(tmp_path):
+    from ide_research_core.games.cli import container_sources
+
+    context = tmp_path / "player"
+    context.mkdir()
+    (context / ".git").mkdir()
+    (context / ".git/config").write_text("not source")
+    (context / ".gitignore").write_text("generated.py\n")
+    (context / ".dockerignore").write_text(".git\n")
+    (context / "generated.py").write_text("generated source")
+    strategy = tmp_path / "STRATEGY.md"
+    strategy.write_text("strategy")
+    before = container_sources(tmp_path, context, strategy)
+    assert set(before) == {
+        "STRATEGY.md",
+        "player/.gitignore",
+        "player/.dockerignore",
+        "player/generated.py",
+    }
+    (context / "new.py").write_text("new input")
+    assert container_sources(tmp_path, context, strategy) != before
+    (context / "new.py").unlink()
+    (context / "generated.py").unlink()
+    assert container_sources(tmp_path, context, strategy) != before

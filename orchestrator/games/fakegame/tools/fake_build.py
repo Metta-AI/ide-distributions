@@ -61,8 +61,8 @@ def build(candidate: Path, out: Path) -> dict:
         "strategy_sha256": artifact_hash,
         # The compiled source is a STRATEGY.md: the bootstrap check compares its hash with the
         # shipped champion STRATEGY (the starter policy; a bootstrap card, A14).
-        "source_path": "STRATEGY.md",
-        "source_hashes": {"STRATEGY.md": artifact_hash},
+        "source_path": str(strategy.resolve()),
+        "source_hashes": {str(strategy.resolve()): artifact_hash},
         "gates": {"local_check": {"passed": True}},
     }
     (out / "version.json").write_text(json.dumps(version, indent=2, sort_keys=True) + "\n")

@@ -233,3 +233,70 @@ def test_project_inventory_tracks_native_file_additions_and_removals(source):
     removed = execute(root, read, "")
     assert removed["source_revision"] == original["source_revision"]
     assert "player/helper.py" not in removed["project"]["files"]
+
+
+def test_policy_discovery_and_edits_follow_game_canonical_not_neutral(source, tmp_path):
+    from ide_research_core.workspace_sources import execute_policy
+
+    root, bare = source
+    game = root.parent / "workspace-fakegame"
+    game_bare = bare.parent / "canonical-fakegame.git"
+    workspace.bootstrap(game, game_bare, "fakegame", DISTRIBUTION)
+    workspace.publish(
+        game,
+        {
+            "versions/V-game/version.json": json.dumps(
+                {
+                    "id": "V-game",
+                    "policy_name": "policy",
+                    "build": {
+                        "source_path": "src/player.py",
+                        "source_hashes": {"src/player.py": "a" * 64},
+                    },
+                }
+            ).encode(),
+            "versions/V-game/events/VE-upload.json": json.dumps(
+                {
+                    "version": "V-game",
+                    "kind": "uploaded",
+                    "data": {"policy_version_id": "policy:v1"},
+                }
+            ).encode(),
+            "src/player.py": b"original\n",
+        },
+        "publish game source",
+    )
+    # A container publication without source provenance must not break other records.
+    workspace.publish(
+        root,
+        {
+            "versions/V-uneditable/version.json": json.dumps(
+                {
+                    "id": "V-uneditable",
+                    "policy_name": "other",
+                    "build": {"artifact_type": "oci-image"},
+                }
+            ).encode()
+        },
+        "publish without sources",
+    )
+    import shutil
+    shutil.rmtree(game)  # Only durable canonical state survives workspace recreation.
+    query = HermesPolicyFiles(action="sources", policy_name="policy", version_id="policy:v1")
+    discovered = execute_policy(root, query, "")
+    assert [item["record_id"] for item in discovered["sources"]] == ["V-game"]
+    read = query.model_copy(
+        update={"action": "read", "record_id": "V-game", "path": "src/player.py"}
+    )
+    original = execute_policy(root, read, "")
+    assert original["content"] == "original\n"
+    write = read.model_copy(
+        update={"action": "write", "content": "edited\n", "base_sha256": original["sha256"]}
+    )
+    saved = execute_policy(root, write, "edit-game")
+    assert saved["kind"] == "ok"
+    assert gitops.show(game_bare, "main", "src/player.py") == b"edited\n"
+    assert gitops.show(bare, "main", "src/player.py") is None
+    assert execute_policy(root, write, "edit-game") == saved
+    assert execute_policy(root, write, "stale-edit")["kind"] == "conflict"
+    assert execute_policy(root, read, "")["content"] == "edited\n"

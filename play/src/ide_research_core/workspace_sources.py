@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, JsonValue
 
 from ide_research_core import policy_files, project_source, workspace
+from ide_research_core.games.scope import GAME_NAME
 from ide_research_core.io import gitops
 from ide_research_core.source_schema import HermesPolicyFiles, HermesProjectSource
 
@@ -16,17 +17,63 @@ class SourceReceipt(BaseModel):
     result: dict[str, JsonValue]
 
 
-def execute(
-    root: Path, command: HermesPolicyFiles | HermesProjectSource, request_id: str
-) -> dict:
+def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> dict:
+    """Resolve upload records across this profile's canonical game workspaces."""
+    canonical = workspace.canonical_of(root).resolve()
+    roots = [root]
+    for bare in sorted(canonical.parent.glob("canonical-*.git")):
+        game = bare.name.removeprefix("canonical-").removesuffix(".git")
+        if bare == canonical or bare.is_symlink() or not GAME_NAME.fullmatch(game):
+            continue
+        clone = root.parent / f"workspace-{game}"
+        if clone.is_symlink():
+            raise workspace.WorkspaceError("forbidden", "Game workspaces cannot be symlinks")
+        with workspace.canonical_lock(bare):
+            if not clone.exists():
+                gitops.git(root.parent, "clone", "-q", str(bare), str(clone))
+                workspace._ensure_committer(clone)
+        if workspace.canonical_of(clone).resolve() != bare:
+            raise workspace.WorkspaceError(
+                "forbidden", "Game workspace has another canonical repository"
+            )
+        roots.append(clone)
+    matches: list[tuple[Path, policy_files.PolicySource]] = []
+    discovery = command.model_copy(update={"action": "sources", "path": "", "offset": 0})
+    for clone in roots:
+        offset = 0
+        while True:
+            result = policy_files.FileResult.model_validate(
+                execute(clone, discovery.model_copy(update={"offset": offset}), "")
+            )
+            if result.kind != "ok":
+                return result.model_dump(mode="json")
+            matches.extend((clone, source) for source in result.sources)
+            if result.next_offset is None:
+                break
+            offset = result.next_offset
+    if len({source.record_id for _, source in matches}) != len(matches):
+        return policy_files.FileResult(
+            kind="conflict",
+            error="The source record exists in more than one game workspace.",
+        ).model_dump(mode="json")
+    if command.action == "sources":
+        return policy_files.source_page(
+            [source for _, source in matches], command.offset
+        ).model_dump(mode="json")
+    if len(matches) != 1:
+        return policy_files.FileResult(
+            kind="not_found", error="The original policy source record is unavailable."
+        ).model_dump(mode="json")
+    return execute(matches[0][0], command, request_id)
+
+
+def execute(root: Path, command: HermesPolicyFiles | HermesProjectSource, request_id: str) -> dict:
     head = workspace.sync(root)
     writing = command.action in {"seed", "write", "patch"}
     fingerprint = hashlib.sha256(
         (type(command).__name__ + command.model_dump_json()).encode()
     ).hexdigest()
-    receipt_path = (
-        f"control/ide/requests/{hashlib.sha256(request_id.encode()).hexdigest()}.json"
-    )
+    receipt_path = f"control/ide/requests/{hashlib.sha256(request_id.encode()).hexdigest()}.json"
     if writing:
         if not request_id:
             raise workspace.WorkspaceError(

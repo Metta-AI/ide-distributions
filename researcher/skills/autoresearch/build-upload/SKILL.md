@@ -96,3 +96,24 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
   finish `failed` with the gate output in the journal. Never edit the design.
 - A traceback, an `errored` gate, or a CLI failure of our own tooling is a tool fault: follow D-26 (work around it, keep going and report it). A failed gate verdict is a result, not a fault: never skip or weaken a gate.
 
+
+### Published source and Code recovery
+
+Native uploads register their hash-checked source manifest in the game's canonical workspace.
+Stage and integrate the source files and publication events before reporting that Code is ready.
+Code searches native records across game workspaces; it does not require an IDE project.
+
+When Code cannot find an existing publication, search prior chats and the game's version/build
+receipts before asking the user for source. If the checked build remains available, retry
+`research softmax upload-build` with the original build directory and policy name. A retry
+reuses the existing publication and can register its verified source without changing its
+immutable version record. If the old receipt has no source manifest, rebuild the retained
+source using the game's supported build binding, then publish under the same policy name.
+Report the new version when the rebuilt artifact differs. Do not infer source from an OCI
+image, invent source hashes, or rewrite version records. Missing original source is an explicit
+recovery failure, not permission to fabricate an implementation.
+
+Check `research workspace policy-files` with a `sources` request for the published policy name
+and confirm the intended record and files after integration. Then read a listed file. Neither
+an upload success nor finding files on disk proves that Code can expose them. Recovery does not
+require evaluation, training, or league submission.
