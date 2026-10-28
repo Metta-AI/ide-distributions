@@ -21,7 +21,6 @@ from .evidence import (
     PolicyList,
     PolicyRead,
 )
-from .github import GitHub
 from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
@@ -99,19 +98,6 @@ TOOLS = {
         "Download a conversation attachment by its SHA-256 from the current workspace. Returns a local path after verifying its size and hash (maximum 25 MiB). Use the hash from attachment context; no URL, credential, or destination argument is needed. Read the returned file with native file or terminal tools. Never executes its contents.",
         AttachmentDownload.model_json_schema()["properties"],
         ["sha256"],
-    ),
-    "github_repositories": (
-        GitHub,
-        "List public and private GitHub repositories authorized by the workspace owner in Softmax IDEa. Follow nextPage for more results; never ask for a token in chat.",
-        {"page": {"type": "integer", "minimum": 1, "maximum": 1000}},
-        [],
-    ),
-    "github_clone": (
-        GitHub,
-        "Clone a GitHub repository through the owner's connected account into a new hosted checkout. Accepts owner/repository or its HTTPS GitHub URL and an optional full commit SHA for a pinned release. Returns the path and exact commit for native file inspection. Provider credentials never enter tool results. Later terminal fetches do not retain authorization; use this tool with commit to obtain another revision. Use terminal git clone directly for public repos when no connection exists.",
-        {"repository": {"type": "string", "maxLength": 200},
-         "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
-        ["repository"],
     ),
     "card_report": (
         Reports,

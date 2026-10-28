@@ -13,8 +13,6 @@ provides_tools:
   - episode
   - episode_replay
   - attachment_download
-  - github_repositories
-  - github_clone
   - capabilities
   - host_capabilities
   - worker_capabilities
