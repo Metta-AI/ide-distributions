@@ -30,6 +30,7 @@ KINDS: frozenset[str] = frozenset(
         "goal.updated",
         "goal.status",
         "task.created",
+        "task.updated",
         "task.proposed",
         "task.approved",
         "task.claimed",
