@@ -40,6 +40,7 @@ def _run(handler):
                 _goals,
                 _project_source,
                 _policy_files,
+                _publication,
             ):
                 home = Path(os.environ["HERMES_HOME"])
                 if (home / "plugins/researcher_guard").is_dir():
@@ -141,6 +142,23 @@ def _policy_files(args) -> dict:
     return execute_policy(_clone(args), HermesPolicyFiles.model_validate(payload), request_id)
 
 
+def _publication(args) -> dict:
+    from uuid import UUID
+
+    from ide_research_core.publication import reconcile, recover
+    from ide_research_core.softmax_tool.protocol import from_env
+
+    clone = _clone(args)
+    storage = workspace.canonical_of(clone).resolve().parent / "policy-sources"
+    client = from_env(os.environ, clone)
+    receipts = (
+        [recover(storage, UUID(args.operation_id), client)]
+        if args.operation_id
+        else reconcile(storage, client)
+    )
+    return {"publications": [receipt.model_dump(mode="json") for receipt in receipts]}
+
+
 def _source_snapshot(args) -> dict:
     from ide_research_core.source_snapshots import (
         StagePublicationRequest,
@@ -232,6 +250,12 @@ def setup(parser: argparse.ArgumentParser) -> None:
         "goals",
         _goals,
         "read or evaluate native research goal context from JSON on stdin",
+    )
+    sub = command(
+        "publication", _publication, "recover retained publication operations without uploading"
+    )
+    sub.add_argument(
+        "--operation-id", help="recover one original operation; otherwise reconcile all"
     )
     command(
         "source-snapshot", _source_snapshot, "stage immutable inputs or promote a platform version"

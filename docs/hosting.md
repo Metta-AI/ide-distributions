@@ -128,10 +128,31 @@ source operations remain served by the existing workspace CLI; this removal does
 
 The current supervisor and native inbox own task follow-up. Native goal records are retained,
 but no profile replacement for the IDE goal runner is introduced. Synchronous build/upload
-completion uses native run/task results; asynchronous publication waits require the future
-workspace-local publication contract, not the former platform build tables.
+completion uses native run/task results; asynchronous publication waits use the retained
+workspace-local publication receipts described below.
 
 Release verification must exercise chat, delegation, XP/credit waits and submission completion
 without an IDE database or cogent callback. Validate native inbox recovery separately from the
 transport fake used by the profile tests. Platform authentication, inference, evaluation jobs,
 policy uploads and submissions remain external services; their refusals are still enforced.
+### Publication recovery
+
+The coordinator persists each immutable publication intent under
+`policy-sources/operations/<operation-uuid>.json` before invoking upload. Both file and
+OCI uploads use that original operation UUID. A missing acknowledgement remains pending;
+reconciliation queries the platform and never repeats an upload. The coordinator's minute
+supervisor runs reconciliation, including after restart. Operators can invoke the same path:
+
+```sh
+research workspace publication
+research workspace publication --operation-id <original-operation-uuid>
+```
+
+A recovered policy UUID promotes the staged source snapshot before the receipt becomes
+completed. Old builds without retained source still publish, with the existing explicit
+source-unavailable diagnostic. They do not receive fabricated source pointers.
+
+This path requires a released Coworld CLI providing `upload-policy --operation-id` and
+`publication-status`, and the corresponding deployed platform endpoints for both artifact
+types. Recovery is checked before admitting a new intent, so an unsupported installed CLI
+fails before uploading. Updating source alone does not satisfy the packaging requirement.

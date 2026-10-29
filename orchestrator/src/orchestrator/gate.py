@@ -227,6 +227,9 @@ def wake(context, state):
 
 def main():
     context = subprocess_context()
+    # Reconcile durable publication intent before polling model-facing work. This is
+    # read-only at the platform and runs again after a coordinator or pod restart.
+    Research(context).call("workspace", "publication")
     print(json.dumps(wake(context, evaluate(context))))
 
 

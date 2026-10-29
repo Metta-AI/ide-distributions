@@ -46,6 +46,7 @@ from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 from ide_research_core.budget import EpisodeBudget
 from ide_research_core.games.scope import budget_path
@@ -69,6 +70,7 @@ from ide_research_core.softmax_tool.protocol import (
     Identity,
     LeagueNotChosen,
     PermitRequired,
+    PublishedPolicy,
     SubmissionState,
     XpHandle,
     XpStatus,
@@ -211,7 +213,13 @@ class SoftmaxClient:
     # --- policies -------------------------------------------------------
 
     def upload(
-        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+        self,
+        artifact: Path,
+        name: str,
+        *,
+        player_id: str,
+        artifact_type: ArtifactType = "file",
+        operation_id: UUID | None = None,
     ) -> str:
         """Upload a game-hosted file or OCI image archive for ``player_id``; return its
         ``<name>:v<N>`` label."""
@@ -220,11 +228,24 @@ class SoftmaxClient:
             raise IdentityError("Uploads must use the workspace credential's player")
         option = "--image-archive" if artifact_type == "oci-image" else "--file"
         args = ["upload-policy", option, str(Path(artifact).resolve()), "--name", name]
+        if operation_id is not None:
+            args += ["--operation-id", str(operation_id)]
         result = self._cli.run("coworld", args, timeout=UPLOAD_TIMEOUT_S)
         label = _line_value(result.stdout, "Upload complete:")
         if label is None:
             raise SoftmaxCliError(f"upload-policy printed no 'Upload complete:' line for {name}")
         return label
+
+    def publication_status(self, operation_id: UUID) -> PublishedPolicy | None:
+        self.require_player()
+        response = json.loads(
+            self._cli.run("coworld", ["publication-status", str(operation_id)]).stdout
+        )
+        if response["kind"] == "not_found":
+            return None
+        if response["kind"] != "ok":
+            raise SoftmaxCliError("Unexpected publication recovery result")
+        return PublishedPolicy.model_validate(response["policy"])
 
     def submit(
         self, policy_version_id: str, league_id: str, player_id: str

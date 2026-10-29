@@ -59,6 +59,7 @@ import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID, uuid4
 
 from ide_research_core.io.docs import read_json, write_json
 from ide_research_core.io.locks import file_lock
@@ -80,6 +81,7 @@ from ide_research_core.softmax_tool.protocol import (
     Identity,
     LeagueNotChosen,
     PermitRequired,
+    PublishedPolicy,
     SubmissionState,
     XpHandle,
     XpStatus,
@@ -438,19 +440,45 @@ class FakeSoftmax:
     # --- policies -------------------------------------------------------
 
     def upload(
-        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+        self,
+        artifact: Path,
+        name: str,
+        *,
+        player_id: str,
+        artifact_type: ArtifactType = "file",
+        operation_id: UUID | None = None,
     ) -> str:
         self.require_player()
         parameters = _artifact_parameters(Path(artifact))
 
         def action(state: dict) -> str:
-            policy_version_id = f"pv_{_short_hash(name, len(state['uploads']))}"
-            state["uploads"][policy_version_id] = {"name": name, "player_id": player_id}
+            version = 1 + sum(entry["name"] == name for entry in state["uploads"].values())
+            policy_version_id = f"{name}:v{version}"
+            state["uploads"][policy_version_id] = {
+                "name": name,
+                "player_id": player_id,
+                "operation_id": str(operation_id),
+                "id": str(uuid4()),
+                "version": version,
+            }
             if parameters is not None:
                 state["uploads"][policy_version_id]["parameters"] = parameters
             return policy_version_id
 
         return self._operate("upload", action)
+
+    def publication_status(self, operation_id: UUID) -> PublishedPolicy | None:
+        self.require_player()
+
+        def action(state: dict) -> PublishedPolicy | None:
+            for entry in state["uploads"].values():
+                if entry["operation_id"] == str(operation_id):
+                    return PublishedPolicy(
+                        id=entry["id"], name=entry["name"], version=entry["version"]
+                    )
+            return None
+
+        return self._operate("publication_status", action, persist=False)
 
     def submit(
         self, policy_version_id: str, league_id: str, player_id: str

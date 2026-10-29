@@ -1,8 +1,7 @@
 """Upload checked builds under an agent-chosen, player-scoped policy lineage.
 
-The player is the one the upload publishes for, recorded on the version: by default this
-workspace's own player, or an explicitly selected player of the same owner (on Softmax hosting,
-the player a conversation selected; the IDE workspace bridge credential may publish for it).
+The workspace's fixed player owns every publication. Durable intent and recovery live
+beside the canonical repository, so worker checkout cleanup cannot cause another upload.
 
 Both upload commands require a name. The full player id scopes that name globally;
 the artifact hash remains provenance, not a naming input. Version records persist the
@@ -38,7 +37,7 @@ import re
 import sys
 from pathlib import Path
 
-from ide_research_core import build_sources
+from ide_research_core import build_sources, publication, workspace
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
@@ -222,8 +221,12 @@ def register_sources(
         source_path, source_hashes = retained.source_path, retained.source_hashes
     else:
         input_root = build_dir / build["source_root"] if "source_root" in build else ctx.worker
-        if "source_root" not in build and all(Path(name).is_absolute() for name in build["source_hashes"]):
-            input_root = Path(os.path.commonpath([str(Path(name).parent) for name in build["source_hashes"]]))
+        if "source_root" not in build and all(
+            Path(name).is_absolute() for name in build["source_hashes"]
+        ):
+            input_root = Path(
+                os.path.commonpath([str(Path(name).parent) for name in build["source_hashes"]])
+            )
         source_path, source_hashes = build_sources.retain(
             ctx.worker,
             build["source_path"],
@@ -243,6 +246,7 @@ def register_sources(
 
 
 def _upload_once(
+    ctx: RunContext,
     store: RecordStore,
     sm: Softmax,
     version_id: str,
@@ -254,12 +258,28 @@ def _upload_once(
     platform_id = _uploaded_policy(store, version_id)
     if platform_id is None:
         version = store.load(version_id)[0]
-        platform_id = sm.upload(
-            artifact,
-            version["policy_name"],
+        intent = publication.PublicationIntent(
             player_id=version["player_id"],
+            policy_name=version["policy_name"],
             artifact_type=artifact_type,
+            artifact_sha256=version["artifact_sha256"],
+            source_snapshot=version["build"].get("source_snapshot"),
         )
+        receipt = publication.publish(
+            workspace.canonical_of(ctx.canonical).resolve().parent / "policy-sources",
+            intent,
+            artifact,
+            sm,
+        )
+        if isinstance(receipt, publication.PendingPublication):
+            raise Refused(
+                "publication_pending",
+                "Publication is unresolved; recover the original operation without uploading again",
+                {"operation_id": str(receipt.operation_id)},
+            )
+        # Research/league records use the CLI label; the durable receipt and source
+        # pointer retain the exact platform UUID. Submission still consumes labels.
+        platform_id = f"{receipt.policy.name}:v{receipt.policy.version}"
         store.add_event(version_id, "uploaded", {"policy_version_id": platform_id})
     return platform_id
 
@@ -305,7 +325,9 @@ def upload(
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
     register_sources(ctx, store, version_id, build, Path(build_dir))
-    platform_id = _upload_once(store, sm, version_id, artifact, build.get("artifact_type", "file"))
+    platform_id = _upload_once(
+        ctx, store, sm, version_id, artifact, build.get("artifact_type", "file")
+    )
     patch = {
         "candidate_binding": {
             "version_id": version_id,
@@ -340,5 +362,5 @@ def upload_build(
         version_id = store.create("version", {**version_meta, "experiment": None})
     register_sources(ctx, store, version_id, build, Path(build_dir))
     return version_id, _upload_once(
-        store, sm, version_id, artifact, build.get("artifact_type", "file")
+        ctx, store, sm, version_id, artifact, build.get("artifact_type", "file")
     )
