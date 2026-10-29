@@ -12,16 +12,18 @@ Error messages never name the store path (B.10).
 
 from __future__ import annotations
 
+import json
 import secrets
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from research_core.store import migrate
-from research_core.store._common import Clock, json_field, now_iso
+from research_core.store._common import Clock, json_field, now_iso, parse_iso
 from research_core.store.actors import Actor
 from research_core.store.errors import SchemaMismatch, SchemaNewer
 from research_core.store.events import Event
@@ -32,6 +34,38 @@ STATE_README = """\
 Records live in store.db and are changed through the profile tools (goal, task, claim, ...).
 Direct edits are detected and reported. Do not edit files here.
 """
+# ``research store quiesce`` writes this file in the workspace's ``.state`` while it holds every
+# database's write lock for a volume snapshot, and removes it when it releases them.
+QUIESCE_MARKER = "quiesce.json"
+
+
+def quiesce_busy_timeout_ms(store_path: Path, now: datetime | None = None) -> int | None:
+    """The busy timeout a fresh quiesce marker asks for; ``None`` when there is none.
+
+    A store opened while ``research store quiesce`` holds the write locks waits the quiesce's
+    ``max_hold_s`` plus the usual 5 s, so its first write lands after the release instead of
+    failing. The marker is looked for in the store's own ``.state`` (the workspace store) and in
+    the workspace's ``.state`` two folders up (a Coworld store). A marker older than its own
+    max hold is a leftover of a quiesce that did not clean up, and is ignored.
+    """
+    for marker in _quiesce_markers(store_path):
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            held_at = parse_iso(data["held_at"])
+            max_hold_s = float(data["max_hold_s"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        age_s = ((now or datetime.now(UTC)) - held_at).total_seconds()
+        if age_s <= max_hold_s:
+            return int(max_hold_s * 1000) + migrate.BUSY_TIMEOUT_MS
+    return None
+
+
+def _quiesce_markers(store_path: Path) -> list[Path]:
+    markers = [store_path.parent / QUIESCE_MARKER]
+    if len(store_path.parents) > 2:
+        markers.append(store_path.parents[2] / ".state" / QUIESCE_MARKER)
+    return markers
 
 
 @dataclass(frozen=True)
@@ -95,9 +129,10 @@ class Store:
     ) -> Store:
         """Open (creating and migrating if needed), check the schema, write the README.
 
-        WAL journal, ``synchronous=FULL``, foreign keys on, a 5 s busy timeout. Pending
-        migrations are applied; a store a newer release wrote raises ``SchemaNewer`` and a
-        schema that differs from the migrations raises ``SchemaMismatch`` with every difference.
+        WAL journal, ``synchronous=FULL``, foreign keys on, a 5 s busy timeout (longer while a
+        ``research store quiesce`` holds the write locks, see ``quiesce_busy_timeout_ms``).
+        Pending migrations are applied; a store a newer release wrote raises ``SchemaNewer`` and
+        a schema that differs from the migrations raises ``SchemaMismatch`` with every difference.
         """
         if kind not in migrate.KINDS:
             raise ValueError(f"not a store kind: {kind!r}")
@@ -106,6 +141,9 @@ class Store:
         conn = migrate.connect_writable(path)
         conn.row_factory = sqlite3.Row
         try:
+            quiesce_timeout = quiesce_busy_timeout_ms(path)
+            if quiesce_timeout is not None:
+                conn.execute(f"PRAGMA busy_timeout = {quiesce_timeout}")
             conn.execute("PRAGMA foreign_keys = ON")
             if migrate.user_version(conn) < migrate.latest_version(kind):
                 migrate.apply_migrations(conn, kind)

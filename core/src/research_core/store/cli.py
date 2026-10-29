@@ -10,10 +10,13 @@ the seam: a client loads a snapshot, then streams from its ``seq``; each store h
 sequence, so both commands work on one store at a time. ``export`` dumps every table of both
 stores as JSON lines for debugging. ``backup`` copies every database of the workspace with
 SQLite's backup API into a timestamped folder with a manifest, and ``restore-check`` is the
-restore test for such a folder (design R6 as amended by the data-loss review).
+restore test for such a folder (design R6 as amended by the data-loss review). ``quiesce``
+checkpoints, write-locks and fsyncs the same databases and holds them for the moment a volume
+snapshot is initiated, so the snapshot is one recovery point across the databases and the files.
 
 Every result is one JSON line on stdout: ``{"ok": true, ...}`` or ``{"ok": false, "error",
-"problems"}`` with exit code 1. The commands never show a traceback.
+"problems"}`` with exit code 1 (``quiesce`` prints one line when it holds and one when it
+releases). The commands never show a traceback.
 """
 
 from __future__ import annotations
@@ -23,9 +26,11 @@ import hashlib
 import inspect
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -34,9 +39,9 @@ from typing import Any
 
 from research_core import layout
 from research_core.store import coworlds, directives, goals, migrate, settings, tasks, ui_state
-from research_core.store._common import parse_display_id, require
+from research_core.store._common import now_iso, parse_display_id, require
 from research_core.store.actors import Actor
-from research_core.store.db import Store, schema_status
+from research_core.store.db import QUIESCE_MARKER, Store, schema_status
 from research_core.store.errors import StoreError
 from research_core.store.migrate import _copyable_tables
 from research_core.store.registry import RECORDS, RecordSpec, record_from_row
@@ -543,6 +548,192 @@ def _fsync(path: Path) -> None:
         os.close(fd)
 
 
+# --- quiesce --------------------------------------------------------------------------------
+
+DEFAULT_MAX_HOLD_S = 30.0
+# How many times the checkpoint is redone when a writer commits between it and the lock.
+CHECKPOINT_ATTEMPTS = 3
+
+
+def run_quiesce(args: argparse.Namespace) -> int:
+    if args.max_hold <= 0:
+        return _fail("--max-hold must be a positive number of seconds")
+    if args.then is not None and not args.then:
+        return _fail("--then needs a command to run while the locks are held")
+    ws = layout.from_env()
+    try:
+        databases = [path for _, _, path in backup_sources(ws, os.environ)]
+    except (sqlite3.Error, OSError) as error:
+        return _fail(f"quiesce failed: {error}")
+    return quiesce(ws, databases, max_hold_s=args.max_hold, then=args.then)
+
+
+def quiesce(
+    ws: layout.Workspace, databases: list[Path], *, max_hold_s: float, then: list[str] | None
+) -> int:
+    """Checkpoint, write-lock and fsync every database, hold, then release the locks.
+
+    The databases are those ``backup`` copies, in that fixed order, so two quiesces cannot
+    deadlock each other. Readers continue throughout; a writer waits on its busy timeout, which
+    the marker file raises for stores opened during the hold (``Store.open``). The hold is the
+    ``--then`` command bounded by ``max_hold_s`` (killed when it runs over) or a plain sleep of
+    ``max_hold_s``. The locks are released however the hold ends: a failing or killed command,
+    SIGTERM, or Ctrl-C.
+    """
+    marker = ws.state / QUIESCE_MARKER
+    held_at = now_iso()
+    started = time.monotonic()
+    write_marker(marker, held_at, max_hold_s)
+    locks: list[sqlite3.Connection] = []
+    outcome: dict[str, Any] = {"then_exit": None}
+    try:
+        with _sigterm_raises_keyboard_interrupt():
+            checkpoints = {}
+            for path in databases:
+                conn, report = checkpoint_and_lock(path)
+                locks.append(conn)
+                checkpoints[str(path)] = report
+            flush_to_disk(databases)
+            held = {"quiesced": [str(p) for p in databases], "checkpoints": checkpoints}
+            print(json.dumps({**held, "held_at": held_at}), flush=True)
+            deadline = started + max_hold_s
+            if then:
+                outcome.update(run_then(then, deadline))
+            else:
+                time.sleep(max(0.0, deadline - time.monotonic()))
+    except KeyboardInterrupt:
+        outcome["interrupted"] = True
+    except (sqlite3.Error, OSError, subprocess.SubprocessError) as error:
+        return _fail(f"quiesce failed: {error}")
+    finally:
+        release_locks(locks)
+        marker.unlink(missing_ok=True)
+    ok = outcome["then_exit"] in (None, 0) and not outcome.get("interrupted")
+    released = {"ok": ok, "released_at": now_iso(), "held_s": round(time.monotonic() - started, 3)}
+    print(json.dumps({**released, **outcome}), flush=True)
+    return 0 if ok else 1
+
+
+def write_marker(marker: Path, held_at: str, max_hold_s: float) -> None:
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    content = {"held_at": held_at, "max_hold_s": max_hold_s, "pid": os.getpid()}
+    partial = marker.with_name(marker.name + ".tmp")
+    partial.write_text(json.dumps(content) + "\n", encoding="utf-8")
+    os.replace(partial, marker)
+
+
+def checkpoint_and_lock(path: Path) -> tuple[sqlite3.Connection, dict[str, Any]]:
+    """Move the WAL into the database file, then hold the write lock on a dedicated connection.
+
+    SQLite refuses a checkpoint inside a transaction, so the checkpoint comes first; when a
+    writer commits in the gap before the lock (the WAL is no longer empty) the lock is dropped
+    and both are redone. A checkpoint that could not finish (``busy``, a long reader) is
+    reported, not retried. A database in rollback-journal mode reports ``-1`` frames.
+    """
+    conn = sqlite3.connect(path, isolation_level=None)
+    wal_bytes_before = _wal_bytes(path)
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {migrate.BUSY_TIMEOUT_MS}")
+        for _ in range(CHECKPOINT_ATTEMPTS):
+            # TRUNCATE resets the WAL header before the frame counts are read, so the row's
+            # counts are always 0; the WAL's size before and after says what happened.
+            busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            conn.execute("BEGIN IMMEDIATE")
+            wal_bytes = _wal_bytes(path)
+            if busy or wal_bytes == 0:
+                break
+            conn.execute("ROLLBACK")
+    except sqlite3.Error:
+        conn.close()
+        raise
+    report = {"busy": bool(busy), "wal_bytes_before": wal_bytes_before, "wal_bytes": wal_bytes}
+    return conn, report
+
+
+def _wal_path(path: Path) -> Path:
+    return path.with_name(path.name + "-wal")
+
+
+def _wal_bytes(path: Path) -> int:
+    wal = _wal_path(path)
+    return wal.stat().st_size if wal.exists() else 0
+
+
+# Run by ``flush_to_disk`` in a child process: fsync every path given.
+FSYNC_SCRIPT = """
+import os, sys
+for path in sys.argv[1:]:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+"""
+
+
+def flush_to_disk(databases: list[Path]) -> None:
+    """fsync every database file, its WAL when there is one, and the directories holding them.
+
+    A child process does the fsyncs on purpose: closing any descriptor of a file releases every
+    POSIX lock this process holds on that file, so an fsync from here would silently drop the
+    write lock just taken on a rollback-journal database (the WAL stores keep their locks in
+    the ``-shm`` file and would not show the problem).
+    """
+    paths: list[Path] = []
+    for path in databases:
+        paths.append(path)
+        if _wal_path(path).exists():
+            paths.append(_wal_path(path))
+        paths.append(path.parent)
+    unique = [str(path) for path in dict.fromkeys(paths)]
+    subprocess.run([sys.executable, "-c", FSYNC_SCRIPT, *unique], check=True)
+
+
+def run_then(command: list[str], deadline: float) -> dict[str, Any]:
+    """Run the snapshot command with the inherited environment; kill it at the deadline."""
+    child = subprocess.Popen(command)
+    try:
+        child.wait(timeout=max(0.0, deadline - time.monotonic()))
+        return {"then_exit": child.returncode}
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
+        return {"then_exit": child.returncode, "then_killed": "ran past --max-hold"}
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def release_locks(locks: list[sqlite3.Connection]) -> None:
+    for conn in locks:
+        try:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+        finally:
+            conn.close()
+
+
+class _sigterm_raises_keyboard_interrupt:
+    """While active, SIGTERM raises ``KeyboardInterrupt`` so the ``finally`` releases the locks.
+
+    Signal handlers can only be set from the main thread; elsewhere this does nothing.
+    """
+
+    def __enter__(self) -> None:
+        self.previous = None
+        if threading.current_thread() is threading.main_thread():
+            self.previous = signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self.previous is not None:
+            signal.signal(signal.SIGTERM, self.previous)
+
+
+def _raise_keyboard_interrupt(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt
+
+
 # --- snapshot -------------------------------------------------------------------------------
 
 
@@ -686,6 +877,36 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         "backup_dir", metavar="<backup-dir>", help="One <dest-dir>/<timestamp>/ folder"
     )
     restore_check_parser.set_defaults(run=run_restore_check)
+
+    quiesce_parser = commands.add_parser(
+        "quiesce",
+        help="Checkpoint, write-lock and fsync every database while a volume snapshot starts",
+        description=(
+            "Pauses writes to the workspace store, every registered Coworld store and, with"
+            " HERMES_HOME set, that profile's Hermes state.db: PRAGMA wal_checkpoint(TRUNCATE),"
+            " then a held write lock and an fsync of each file and its directory. Readers"
+            " continue. Prints one JSON line when the hold is in place and one when it is"
+            " released. With --then, runs that command (the snapshot initiation) during the"
+            " hold and reports its exit code; otherwise holds for --max-hold seconds."
+        ),
+    )
+    quiesce_parser.add_argument(
+        "--max-hold",
+        type=float,
+        default=DEFAULT_MAX_HOLD_S,
+        metavar="<seconds>",
+        help=f"The longest the locks are held; a --then command still running is killed"
+        f" (default {DEFAULT_MAX_HOLD_S:g})",
+    )
+    quiesce_parser.add_argument(
+        "--then",
+        nargs=argparse.REMAINDER,
+        default=None,
+        metavar="<command>",
+        help="A command to run while the locks are held, with the inherited environment;"
+        " everything after --then is the command",
+    )
+    quiesce_parser.set_defaults(run=run_quiesce)
 
     snapshot_parser = commands.add_parser(
         "snapshot", help="Print one store's records, settings, UI state and last seq as JSON"

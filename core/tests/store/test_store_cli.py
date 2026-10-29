@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
 import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -21,8 +24,9 @@ import pytest
 from research_core import cli, layout
 from research_core.store import cli as store_cli
 from research_core.store import coworlds, directives, goals, settings, tasks, ui_state
+from research_core.store._common import now_iso
 from research_core.store.actors import Actor
-from research_core.store.db import Store
+from research_core.store.db import Store, quiesce_busy_timeout_ms
 from research_core.store.migrate import _copyable_tables
 
 COWORLD_ID = "cow-x"
@@ -546,6 +550,199 @@ def test_restore_check_fails_on_a_truncated_copy(workspace, capsys, tmp_path):
     assert code == 1 and out["databases"][1]["integrity"] == "missing"
     code, out = run(capsys, "restore-check", str(tmp_path / "nowhere"))
     assert code == 1 and "restore-check failed" in out["error"]
+
+
+# --- quiesce --------------------------------------------------------------------------------
+
+# Exits 3 when every database given is write-locked, 7 when any is free.
+LOCK_PROBE = """
+import sqlite3, sys
+for path in sys.argv[1:]:
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute("PRAGMA busy_timeout = 0")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        continue
+    sys.exit(7)
+sys.exit(3)
+"""
+
+
+def run_lines(capsys, *argv: str) -> tuple[int, list[dict]]:
+    """Run ``research store ...``; the exit code and every stdout line parsed as JSON."""
+    code = cli.main(["store", *argv])
+    out = capsys.readouterr().out.strip().splitlines()
+    return code, [json.loads(line) for line in out]
+
+
+def start_quiesce(*argv: str) -> subprocess.Popen:
+    """``research store quiesce`` in its own process, its stdout a pipe of JSON lines."""
+    command = [sys.executable, "-m", "research_core.cli", "store", "quiesce", *argv]
+    return subprocess.Popen(command, stdout=subprocess.PIPE, text=True)
+
+
+def assert_write_lock_free(path: Path) -> None:
+    conn = sqlite3.connect(path, isolation_level=None)
+    try:
+        conn.execute("PRAGMA busy_timeout = 0")
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("ROLLBACK")
+    finally:
+        conn.close()
+
+
+def assert_intact(store: Store) -> None:
+    assert store.one("PRAGMA integrity_check")[0] == "ok"
+    assert store.unmarked_changes() == []
+
+
+def test_quiesce_holds_a_writer_until_release_and_empties_the_wal(workspace):
+    make_goal(workspace.store)
+    wal = workspace.store.path.with_name("store.db-wal")
+    assert wal.stat().st_size > 0  # the open connection leaves the goal in the WAL
+    marker = workspace.ws.state / "quiesce.json"
+    proc = start_quiesce("--max-hold", "2")
+    try:
+        held = json.loads(proc.stdout.readline())
+        assert held["quiesced"] == [str(workspace.ws.store_path), str(workspace.store.path)]
+        for report in held["checkpoints"].values():
+            assert report["busy"] is False and report["wal_bytes"] == 0
+        assert held["checkpoints"][str(workspace.store.path)]["wal_bytes_before"] > 0
+        assert wal.stat().st_size == 0
+        written = json.loads(marker.read_text())
+        assert written["pid"] == proc.pid and written["max_hold_s"] == 2
+        assert written["held_at"] == held["held_at"]
+        # Readers continue; a store opened during the hold waits for the release to write.
+        assert goals.read(workspace.store, 1)["title"] == "Beat the starter"
+        late = Store.open(workspace.store.path, kind="coworld")
+        try:
+            assert late.one("PRAGMA busy_timeout")[0] == 2 * 1000 + 5000
+            started = time.monotonic()
+            goals.update(late, HARNESS, 1, title="written during the hold")
+            write_took = time.monotonic() - started
+        finally:
+            late.close()
+        released = json.loads(proc.stdout.readline())
+        assert proc.wait() == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert released["ok"] is True and released["then_exit"] is None
+    assert released["held_s"] >= 2 and write_took >= 1
+    assert released["released_at"] > held["held_at"]
+    assert not marker.exists()
+    assert goals.read(workspace.store, 1)["title"] == "written during the hold"
+    assert [e.kind for e in workspace.store.events_after(0)][-1] == "goal.updated"
+    assert_intact(workspace.store)
+    assert_intact(workspace.wstore)
+    assert_write_lock_free(workspace.store.path)
+
+
+def test_quiesce_then_runs_with_every_lock_held_and_reports_its_exit_code(
+    workspace, capsys, tmp_path, monkeypatch
+):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    state = sqlite3.connect(profile / "state.db")
+    state.execute("CREATE TABLE sessions (id TEXT)")
+    state.commit()
+    state.close()
+    monkeypatch.setenv("HERMES_HOME", str(profile))
+    paths = [workspace.ws.store_path, workspace.store.path, profile / "state.db"]
+
+    probe = [sys.executable, "-c", LOCK_PROBE, *map(str, paths)]
+    code, (held, released) = run_lines(capsys, "quiesce", "--max-hold", "10", "--then", *probe)
+    assert code == 1  # the command's non-zero exit is the quiesce's
+    assert held["quiesced"] == [str(path) for path in paths]
+    hermes_report = held["checkpoints"][str(profile / "state.db")]  # rollback journal, no WAL
+    assert hermes_report == {"busy": False, "wal_bytes_before": 0, "wal_bytes": 0}
+    assert released["then_exit"] == 3 and released["ok"] is False
+    assert "then_killed" not in released and released["held_s"] < 10
+    assert not (workspace.ws.state / "quiesce.json").exists()
+    for path in paths:
+        assert_write_lock_free(path)
+
+    code, (held, released) = run_lines(
+        capsys, "quiesce", "--then", sys.executable, "-c", "raise SystemExit(0)"
+    )
+    assert code == 0 and released["ok"] is True and released["then_exit"] == 0
+    assert_intact(workspace.store)
+
+
+def test_quiesce_kills_a_then_command_that_runs_past_max_hold(workspace, capsys):
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    started = time.monotonic()
+    code, (held, released) = run_lines(capsys, "quiesce", "--max-hold", "0.5", "--then", *sleeper)
+    assert time.monotonic() - started < 5
+    assert code == 1 and released["ok"] is False
+    assert released["then_exit"] == -signal.SIGKILL
+    assert released["then_killed"] == "ran past --max-hold"
+    assert 0.5 <= released["held_s"] < 5
+    assert not (workspace.ws.state / "quiesce.json").exists()
+    assert_write_lock_free(workspace.ws.store_path)
+    assert_write_lock_free(workspace.store.path)
+
+
+def test_quiesce_releases_the_locks_on_sigterm(workspace):
+    proc = start_quiesce("--max-hold", "30")
+    try:
+        held = json.loads(proc.stdout.readline())
+        assert len(held["quiesced"]) == 2
+        proc.send_signal(signal.SIGTERM)
+        released = json.loads(proc.stdout.readline())
+        assert proc.wait(timeout=10) == 1
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert released["interrupted"] is True and released["ok"] is False
+    assert released["held_s"] < 30
+    assert not (workspace.ws.state / "quiesce.json").exists()
+    assert_write_lock_free(workspace.ws.store_path)
+    assert_write_lock_free(workspace.store.path)
+
+
+def test_quiesce_refusals(workspace, capsys):
+    code, out = run(capsys, "quiesce", "--max-hold", "0")
+    assert code == 1 and "--max-hold" in out["error"]
+    code, out = run(capsys, "quiesce", "--then")
+    assert code == 1 and "--then needs a command" in out["error"]
+    assert not (workspace.ws.state / "quiesce.json").exists()
+
+
+def test_a_fresh_quiesce_marker_raises_the_busy_timeout_of_stores_opened_during_the_hold(
+    workspace,
+):
+    marker = workspace.ws.state / "quiesce.json"
+    marker.write_text(json.dumps({"held_at": now_iso(), "max_hold_s": 30, "pid": 1}))
+    stores = ((workspace.ws.store_path, "workspace"), (workspace.store.path, "coworld"))
+    for path, kind in stores:
+        with Store.open(path, kind=kind) as late:
+            assert late.one("PRAGMA busy_timeout")[0] == 30 * 1000 + 5000
+            assert late.one("PRAGMA synchronous")[0] == 2  # the rest of the setup is unchanged
+    assert quiesce_busy_timeout_ms(workspace.store.path) == 35000
+    marker.unlink()
+    assert quiesce_busy_timeout_ms(workspace.store.path) is None
+    with Store.open(workspace.store.path, kind="coworld") as late:
+        assert late.one("PRAGMA busy_timeout")[0] == 5000
+
+
+def test_a_stale_or_unreadable_quiesce_marker_is_ignored(workspace):
+    marker = workspace.ws.state / "quiesce.json"
+    stale_at = now_iso(lambda: datetime.now(UTC) - timedelta(seconds=31))
+    marker.write_text(json.dumps({"held_at": stale_at, "max_hold_s": 30, "pid": 1}))
+    assert quiesce_busy_timeout_ms(workspace.store.path) is None
+    assert quiesce_busy_timeout_ms(workspace.ws.store_path) is None
+    marker.write_text("not json")
+    assert quiesce_busy_timeout_ms(workspace.store.path) is None
+    marker.write_text(json.dumps({"held_at": "yesterday", "max_hold_s": 30}))
+    assert quiesce_busy_timeout_ms(workspace.store.path) is None
+    marker.write_text(json.dumps({"max_hold_s": 30}))
+    assert quiesce_busy_timeout_ms(workspace.store.path) is None
+    with Store.open(workspace.store.path, kind="coworld") as late:
+        assert late.one("PRAGMA busy_timeout")[0] == 5000
 
 
 # --- snapshot -------------------------------------------------------------------------------

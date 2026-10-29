@@ -140,6 +140,22 @@ process). Nothing on the volume survives losing the volume, so backups are part 
 - Monitor the age of the latest restorable backup (the newest folder whose `restore-check`
   passed) and alert when it exceeds the loss window.
 
+Before initiating a volume snapshot, run `research store quiesce --then <snapshot command>`, or
+run `research store quiesce` in the background and initiate the snapshot when its first JSON
+line appears. It checkpoints each database's WAL into its file, takes and holds the write lock
+on the workspace store, every Coworld store and (with `HERMES_HOME` set) that profile's Hermes
+`state.db`, fsyncs each file and its directory, and holds for at most 30 seconds (`--max-hold`;
+a `--then` command still running is killed). Readers continue and writers wait, so the snapshot
+is one consistent recovery point across the databases and the ordinary files on the volume.
+Keep the hold short: a connection opened before the hold began (the seam server's, Hermes's own
+to `state.db`) waits only its usual five seconds before reporting "database is locked", so
+initiate the snapshot within that time; stores opened during the hold wait for the whole of
+it. One
+bounded risk remains: a repository may have a git write in flight from a tool process at that
+moment. Git writes objects and refs through temporary files and renames, so such a snapshot
+still restores to a readable repository, at worst with a stale `.lock` file or an unfinished
+temporary object to remove.
+
 The watcher's schema repair never replaces the store file: it rewrites the schema inside the
 file in one transaction and first saves a copy next to it (`store.before-repair-<timestamp>.db`),
 named in the notice. A store written by a newer release than the running image is left
