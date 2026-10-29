@@ -99,18 +99,20 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 ### Published source and Code recovery
 
-`workspace stage` preserves hash-checked source snapshots for new passing build receipts before
-native completion can remove the worker checkout. It commits the build, retained inputs, and
-receipt-bound source evidence together, including inputs inside nested repositories or ignored paths.
-Completed builds capture their hash-checked inputs inside the build directory. The receipt’s
-`source_root` is relative to that directory, so relocation before staging needs no old host path.
-Publication registers those staged snapshots in the game's canonical workspace. Integrate the
-publication receipt before reporting that Code is ready. Code searches native records across game
-workspaces; it does not require an IDE project.
+New Git-backed builds record `source_snapshot` in their build receipt. The snapshot retains
+exact input bytes in the shared workspace volume before the worker checkout can disappear.
+Container builds run from those retained inputs. `workspace stage` preserves the artifact and
+receipt for coordinator handoff; it does not establish platform publication success.
+
+After upload or supported read-only recovery returns the platform policy version UUID, the
+publication runtime must promote that exact snapshot under the UUID. Code discovers the promoted
+source independently of any chat. Preserve the snapshot digest and build evidence; do not replace
+them with a current checkout path. Old receipts that cannot locate their inputs may still upload,
+but source remains explicitly unavailable until rebuilt with complete provenance.
 
 When Code cannot find an existing publication, inspect the game's version and build receipts.
 Do not retry an upload or publish a new version to discover the old publication's identity.
-The current CLI does not recover a policy version UUID by upload operation ID. If an upload
+The currently locked CLI does not recover a policy version UUID by upload operation ID. If an upload
 response was lost, report the unresolved publication and preserve its build evidence.
 Missing source is a recovery failure, not permission to invent source hashes or rewrite records.
 
