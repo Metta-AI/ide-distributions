@@ -26,9 +26,9 @@ def capture(build_dir: Path, source_root: Path) -> dict:
                 continue
             path = path.relative_to(source_root)
         hashes[path.as_posix()] = digest
-    # Standalone compiler invocations predate hosted workspaces. They can still build
-    # artifacts, but cannot promise workspace retention without a workspace volume.
-    if "RESEARCH_CANONICAL" not in os.environ and "HERMES_HOME" not in os.environ:
+    # HERMES_HOME identifies a profile, not a configured research workspace.
+    # Standalone builds retain source only when workspace storage is configured.
+    if "RESEARCH_CANONICAL" not in os.environ:
         build.update(source_path=primary.as_posix(), source_hashes=hashes)
         receipt.write_text(json.dumps(build, sort_keys=True, indent=2) + "\n")
         return build
