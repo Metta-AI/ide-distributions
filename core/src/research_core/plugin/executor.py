@@ -21,8 +21,36 @@ from research_core.tools.catalog import Role
 TOOL_TIMEOUT_S = 400  # under Hermes's 420 s tool deadline
 
 
+def profile_env(**overrides: str) -> dict[str, str]:
+    """The environment the profile's code runs with: the process environment plus the routed
+    profile's secret scope, plus ``overrides``.
+
+    Under a multiplexing gateway Hermes keeps each profile's ``.env`` out of ``os.environ`` (so
+    one profile's keys never leak into another's turns) and exposes the routed profile's values
+    per task through ``agent.secret_scope``. Everything the plugin reads from the environment,
+    in process or for a workspace subprocess, goes through here so a profile's ``.env`` reaches
+    the tools the way the design assumes.
+    """
+    merged = dict(os.environ)
+    merged.update(_secret_scope())
+    merged.update(overrides)
+    return merged
+
+
+def _secret_scope() -> dict[str, str]:
+    try:
+        from agent.secret_scope import current_secret_scope
+    except ImportError:  # outside Hermes: tests and the CLI
+        return {}
+    try:
+        scope = current_secret_scope()
+    except Exception:  # a scope API change must never take the tools down
+        return {}
+    return {str(k): str(v) for k, v in (scope or {}).items() if v is not None}
+
+
 def tool_env(role: Role, session_id: str, env: dict[str, str] | None = None) -> dict[str, str]:
-    merged = dict(os.environ if env is None else env)
+    merged = profile_env() if env is None else dict(env)
     merged["IDE_ROLE"] = role
     if session_id:
         merged["IDE_SESSION_ID"] = session_id

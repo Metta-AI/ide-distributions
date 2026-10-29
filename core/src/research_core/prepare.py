@@ -60,6 +60,9 @@ PROTECTED_KEYS: dict[str, Any] = {
     "memory.memory_enabled": False,
     "memory.user_profile_enabled": False,
     "tools.tool_search.enabled": "off",
+    # Hermes's post-turn self-improvement review patches skills in skills.external_dirs: the
+    # shipped skills are release content, not a notebook.
+    "auxiliary.background_review.enabled": False,
     "cron.catch_up_missed": True,
     "plugins.enabled": ["<role>"],
     "platform_toolsets.api_server": ["hermes-api-server", "ide-<role>"],

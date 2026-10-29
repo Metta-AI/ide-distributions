@@ -53,12 +53,11 @@ def make_section(role: str):
         if role != "orchestrator":
             return ""
         try:
-            import os
-
+            from research_core.plugin.executor import profile_env
             from research_core.tools.base import ToolContext
 
             session_id = (info or {}).get("session_id", "") if isinstance(info, dict) else ""
-            ctx = ToolContext.from_env(role, dict(os.environ, IDE_SESSION_ID=session_id))
+            ctx = ToolContext.from_env(role, profile_env(IDE_SESSION_ID=session_id))
             return render(ctx, session_id)
         except Exception as error:
             return f"[session context] unavailable: {type(error).__name__}"

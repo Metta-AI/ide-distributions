@@ -347,6 +347,22 @@ def _cost(raw: object, problems: list[str]) -> float | None:
 # --- commands -----------------------------------------------------------------------------
 
 
+def with_workspace_bin(env: Mapping[str, str] | None) -> dict[str, str]:
+    """The environment for a mixin command, with the workspace environment's ``bin`` first on
+    ``PATH``: a command's ``python3``, ``coworld`` and ``softmax`` are then the workspace's own
+    (the interpreter the lock pins), not whatever the host puts first."""
+    from research_core import layout
+
+    merged = dict(os.environ if env is None else env)
+    try:
+        bin_dir = layout.from_env(merged).venv / "bin"
+    except Exception:  # no workspace in this environment: leave PATH alone
+        return merged
+    if bin_dir.is_dir():
+        merged["PATH"] = f"{bin_dir}{os.pathsep}{merged.get('PATH', '')}"
+    return merged
+
+
 def run_command(
     mixin: Mixin,
     name: str,
@@ -379,7 +395,7 @@ def run_command(
         process = subprocess.Popen(
             ["sh", "-c", _WRAPPER, "ide-mixin-command", command, str(exit_path)],
             cwd=str(cwd),
-            env=dict(env) if env is not None else None,
+            env=with_workspace_bin(env),
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,

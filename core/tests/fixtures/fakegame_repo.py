@@ -425,7 +425,7 @@ def _check_py() -> str:
             found = [f"{path}: parameter {name!r} is missing" for name in REQUIRED
                      if name not in parameters]
             found += [f"{path}: parameter {name!r} is not a number" for name, value
-                      in parameters.items() if not isinstance(value, int | float)]
+                      in parameters.items() if not isinstance(value, (int, float))]
             return found
 
 

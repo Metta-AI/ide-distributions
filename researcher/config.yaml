@@ -53,3 +53,8 @@ updates:
   check: false
 curator:
   prune_builtins: false
+# Hermes's post-turn self-improvement review would patch the shipped skills (release content
+# under skills.external_dirs); prepare.py keeps it off.
+auxiliary:
+  background_review:
+    enabled: false

@@ -11,7 +11,6 @@ Stdlib only: this runs inside Hermes and must never fail a turn.
 from __future__ import annotations
 
 import logging
-import os
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -225,10 +224,12 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
         if role != "orchestrator" or not session_id:
             return None
         try:
+            from research_core.plugin.executor import profile_env
             from research_core.store import sessions
             from research_core.tools.base import ToolContext
 
-            ctx = ToolContext.from_env(role, dict(os.environ, IDE_SESSION_ID=session_id))
+            env = profile_env(IDE_SESSION_ID=session_id)
+            ctx = ToolContext.from_env(role, env)
             session = sessions.read(ctx.wstore, session_id)
             if session is not None and session.get("kind") != "chat":
                 return None
@@ -237,7 +238,7 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
                     ctx.wstore,
                     ctx.actor,
                     session_id=session_id,
-                    profile=os.environ.get("HERMES_PROFILE_NAME") or "orchestrator",
+                    profile=env.get("HERMES_PROFILE_NAME") or "orchestrator",
                     kind="chat",
                 )
             parts = []

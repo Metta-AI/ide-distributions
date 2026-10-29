@@ -269,7 +269,10 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
         return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
     action, problems = validate_args(spec, ctx.role, args)
     if problems:
-        return json.dumps(error_payload(problems, {"tool": name, "action": action}))
+        # The fields that did arrive, so a model that keeps omitting one sees its own call.
+        received = sorted(k for k in args if k != "action")
+        context = {"tool": name, "action": action, "received": received}
+        return json.dumps(error_payload(problems, context))
     try:
         call = ToolCall(spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action)
         result = spec.handler(call)

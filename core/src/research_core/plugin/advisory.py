@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from collections.abc import Callable
 from typing import Any
 
 from research_core.plugin import rules
+from research_core.plugin.executor import profile_env
 from research_core.tools.catalog import Role
 
 log = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def _broken_capabilities(role: Role, session_id: str) -> dict[str, str]:
         from research_core.store import capabilities
         from research_core.tools.base import ToolContext
 
-        ctx = ToolContext.from_env(role, dict(os.environ, IDE_SESSION_ID=session_id))
+        ctx = ToolContext.from_env(role, profile_env(IDE_SESSION_ID=session_id))
         if ctx.coworld_or_none() is None:
             return {}
         out: dict[str, str] = {}
@@ -93,7 +93,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., Any]]:
             from research_core.store import sessions, tasks
             from research_core.tools.base import ToolContext
 
-            ctx = ToolContext.from_env(role, dict(os.environ, IDE_SESSION_ID=session_id))
+            ctx = ToolContext.from_env(role, profile_env(IDE_SESSION_ID=session_id))
             session = sessions.read(ctx.wstore, session_id)
             if not session or not session.get("task_id") or ctx.coworld_or_none() is None:
                 return

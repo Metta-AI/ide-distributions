@@ -284,6 +284,14 @@ def _spike(host: Host, outcome: dict) -> None:
     steps.append(f"stop of run 2 answered {stopped.status}; it ended {second.status}")
     assert second.status in ("cancelled", "completed"), second
 
+    # Run 1 must end before the gateway dies: a kill interrupts every live run, and the steer
+    # is checked on its output.
+    first_final = wait_terminal(runs, run_ids[0])
+    steps.append(f"run 1 ended {first_final.status}")
+    assert first_final.status == "completed", first_final
+    if steered:
+        assert "STEERED" in (first_final.output or "").upper(), first_final.output
+
     # Kill the gateway while the third runs, restart, read the status back, resume the session.
     third = wait_running(runs, run_ids[2])
     steps.append(f"run 3 was {third.status} when the gateway was killed")
@@ -300,12 +308,6 @@ def _spike(host: Host, outcome: dict) -> None:
     resumed = wait_terminal(runs, resumed_id)
     steps.append(f"resumed session 3 as run {resumed_id}: {resumed.status}")
     assert resumed.status == "completed", resumed
-
-    first_final = wait_terminal(runs, run_ids[0])
-    steps.append(f"run 1 ended {first_final.status}")
-    assert first_final.status == "completed", first_final
-    if steered:
-        assert "STEERED" in (first_final.output or "").upper(), first_final.output
 
     # Isolation: each session's history holds its own user turns and nothing of the others.
     histories = {sid: runs.session_messages(sid, profile="researcher") for sid in sids}

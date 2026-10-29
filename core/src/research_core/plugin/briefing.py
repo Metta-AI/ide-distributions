@@ -28,11 +28,11 @@ Watcher bookkeeping read from ``meta`` (the watcher and the doctor write these k
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from research_core.plugin.executor import profile_env
 from research_core.store._common import parse_display_id, parse_iso
 from research_core.tools.catalog import Role
 
@@ -146,7 +146,7 @@ def make_section(role: Role):
         try:
             from research_core.tools.base import ToolContext
 
-            ctx = ToolContext.from_env(role, dict(os.environ, IDE_SESSION_ID=session_id))
+            ctx = ToolContext.from_env(role, profile_env(IDE_SESSION_ID=session_id))
             return render(ctx, session_id, role=role)
         except Exception as error:
             text = f"Briefing unavailable: {type(error).__name__}: {error}"

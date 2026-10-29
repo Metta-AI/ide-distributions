@@ -86,9 +86,20 @@ def scenario_env(host: Host, role: str = "orchestrator") -> dict[str, str]:
     }
 
 
-def submission_count(ws: layout.Workspace, env: dict[str, str]) -> int:
-    platform = FakePlatform(ws.state / "fake_platform.json", env)
-    return len(platform.submissions(mine=True))
+def submissions_by_player(ws: layout.Workspace) -> dict[str, int]:
+    """Every submission on the fake platform, counted per Player id. The tools must have run as
+    the profile's ``SOFTMAX_PLAYER_ID``; a count under the fake's default Player means the
+    profile's ``.env`` did not reach them."""
+    path = ws.state / "fake_platform.json"
+    if not path.exists():
+        return {}
+    state = json.loads(path.read_text())
+    rows = state.get("submissions") or {}
+    rows = list(rows.values()) if isinstance(rows, dict) else list(rows)
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[str(row.get("player_id"))] = counts.get(str(row.get("player_id")), 0) + 1
+    return counts
 
 
 def test_submit_the_starter_on_a_real_gateway(host: Host):
@@ -116,7 +127,7 @@ def test_submit_the_starter_on_a_real_gateway(host: Host):
         started = time.monotonic()
         ticks = 0
         while time.monotonic() - started < SCENARIO_TIMEOUT_S:
-            if submission_count(ws, env) >= 1:
+            if submissions_by_player(ws):
                 break
             ctx = watcher_context.build(env, hermes=hermes)
             try:
@@ -138,9 +149,15 @@ def test_submit_the_starter_on_a_real_gateway(host: Host):
             texts = [n["text"] for n in notices.unread(wstore, limit=50)]
         finally:
             wstore.close()
+        submissions = submissions_by_player(ws)
         print(f"active Coworld: {active and active['coworld_id']}\nnotices: {texts}")
-        assert submission_count(ws, env) >= 1, (
+        print(f"submissions by Player: {submissions}")
+        assert submissions, (
             f"no submission after {elapsed} s; gateway log {host.log}, notices {texts}"
+        )
+        assert submissions.get(PLAYER_ID), (
+            f"the submission was not made as the profile's Player {PLAYER_ID}: {submissions}; "
+            "the profile .env did not reach the tools"
         )
         assert active is not None and active["coworld_id"] == COWORLD_ID
     finally:
