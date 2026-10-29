@@ -289,6 +289,7 @@ def _spike(host: Host, outcome: dict) -> None:
     first_final = wait_terminal(runs, run_ids[0])
     steps.append(f"run 1 ended {first_final.status}")
     assert first_final.status == "completed", first_final
+    applied = False
     if steered:
         # A steer accepted while the model is already writing its one-step reply is kept as
         # ``pending_steer`` on the run instead of being applied; either is the gateway honouring
@@ -321,7 +322,9 @@ def _spike(host: Host, outcome: dict) -> None:
         texts = user_texts(messages)
         assert PROMPT in texts, (sid, texts)
         outcome.setdefault("history_sizes", {})[sid] = len(messages)
-    assert STEER in user_texts(histories[sids[0]]) if steered else True
+    # An applied steer is a user turn of session 1 only; a pending one is on the run, not in
+    # the history. Either way it never appears in the other sessions.
+    assert STEER in user_texts(histories[sids[0]]) if applied else True
     assert STEER not in user_texts(histories[sids[1]]) + user_texts(histories[sids[2]])
     assert RESUME in user_texts(histories[sids[2]])
     assert RESUME not in user_texts(histories[sids[0]]) + user_texts(histories[sids[1]])

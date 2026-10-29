@@ -59,10 +59,31 @@ cd ~/coding/metta && python3 scripts/token_broker_client.py exec --scope openrou
 ## Result
 
 <!-- s1:begin -->
-Not run yet in this checkout: `HERMES_BIN` and `OPENROUTER_API_KEY` were absent when entry 5
-was built (2026-10-28), so the test skipped cleanly. The test rewrites this block with the
-outcome, the timings (install and prepare, gateway ready, three starts, gateway restart,
-kill-to-resume) and the per-step notes when it runs.
+Last run: 2026-10-28 21:49 PDT — **PASS**
+
+Timings (seconds):
+
+- install_and_prepare_s: 66.9
+- gateway_ready_s: 3.2
+- three_starts_s: 0.96
+- gateway_restart_s: 2.7
+- kill_to_resume_s: 3.4
+
+Steps:
+
+- started three runs in profile researcher: ['run_8284165751c74af98b872731bf7db4b7', 'run_6e9dc6e9e30344f6addb4893a04f19f4', 'run_b99d7046ebb44027a3b2c94d8b61a6ed']
+- steer of run 1 while running: accepted=True
+- stop of run 2 answered stopping; it ended cancelled
+- run 1 ended completed
+- steer of run 1 was left pending
+- run 3 was completed when the gateway was killed
+- after the restart run 3 reads completed (durable through the key)
+- resumed session 3 as run run_abff52b805c54a8e949f2ec43d72ad66: completed
+- isolation held: no session saw another's steer or resume text
+- reusing an idempotency key with the same body replayed the run id
+- reusing it with another body answered 409 idempotency_key_conflict
+
+History sizes: `{"api_1793249333_f3ac1bcd": 2, "api_1793249333_a7600792": 2, "api_1793249333_986ac6d6": 4}`
 <!-- s1:end -->
 
 If the result is FAIL on isolation (a session's history shows another session's text, or the

@@ -43,14 +43,35 @@ Every stack entry of the plan is implemented and committed:
 | `uv run pytest -q` | 1,447 passed, 2 skipped (model-gated), 6 deselected (hermes) |
 | `python tools/build_prompts.py --check`, `python tools/check_prompts.py` | pass |
 | `cd play && uv run pytest -q` | 81 passed |
-| `HERMES_BIN=… uv run pytest -m hermes core/tests/hermes` (real Hermes v0.21.6) | 3 passed (install and prepare), S1 skipped without a key |
-| S1 spike and the real-Hermes acceptance run (model key from the token broker) | see "Real model runs" below |
+| `HERMES_BIN=… uv run pytest -m hermes core/tests/hermes/test_prepare_real.py` (real Hermes v0.21.6) | 3 passed (install and prepare) |
+| S1 spike and the real-Hermes acceptance run (model key from the token broker) | both passed; see "Real model runs" below |
 
 ## Real model runs
 
-Recorded when the run ends; `docs/spikes/s1-dispatch.md` holds the S1 outcome between its
-markers, and `core/tests/hermes/test_seam_real_hermes.py` prints the gateway log, profile and
-workspace paths of the acceptance run.
+Both ran on the evening of October 28, 2026 (Pacific) against Hermes v0.21.6 in an isolated
+environment, with `moonshotai/kimi-k3` through an OpenRouter key from the token broker.
+
+- **Acceptance scenario on a real gateway** (`core/tests/hermes/test_seam_real_hermes.py`):
+  **passed**. "Submit the starter as my champion" on a new workspace: the Orchestrator's chat
+  run switched to `cow_fake` with the request pending, the setup wake built V-1, uploaded it
+  and submitted it, and the fake platform held the submission as the profile's Player after
+  7 watcher ticks (38 s). The first attempt had surfaced three defects, all fixed before the
+  passing run: the plugin read `os.environ`, which a multiplexing gateway keeps free of the
+  profile's `.env` (now `executor.profile_env` merges Hermes's secret scope); Hermes's
+  post-turn self-improvement review patched four shipped skills (now a protected key, off);
+  and the model called `ui.notify` without `text` repeatedly (validation errors now list the
+  fields received, and the descriptions name the field).
+- **S1 dispatch spike** (`core/tests/hermes/test_spike_s1.py`, report in
+  `docs/spikes/s1-dispatch.md`): **passed**. Three Researcher Sessions in one profile started,
+  one steered (accepted; kept pending when the one-step reply finished first), one stopped
+  (cancelled), the gateway killed and restarted in 2.7 s, the third run's status durable
+  through the key, its Session resumed and completed, each Session's history holding only its
+  own turns, and the idempotency key replaying the run id for the same body and answering
+  409 for another. In the passing run the model had answered before the kill; the 21:16 run
+  exercised the kill under a live run (it read `interrupted` after the restart and the Session
+  resumed and completed). Two harness defects were fixed on the way: a kill interrupts every
+  live run, so run 1 is awaited first; and the history route answers in `data`, which the
+  runs client now reads.
 
 ## Open items and known seams
 
