@@ -1,0 +1,504 @@
+"""``research store`` apply, export, snapshot and events (plan Task 2.10, design A.10, A.11).
+
+Every test goes through ``cli.main`` with ``IDE_WORKSPACE`` pointing at a fresh workspace that
+has one registered, active Coworld, so the commands pick their stores the way the bridge's calls
+will.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import threading
+from dataclasses import dataclass
+
+import pytest
+
+from research_core import cli, layout
+from research_core.store import coworlds, directives, goals, settings, tasks, ui_state
+from research_core.store.actors import Actor
+from research_core.store.db import Store
+from research_core.store.migrate import _copyable_tables
+
+COWORLD_ID = "cow-x"
+HARNESS = Actor.harness()
+USER = "user:james"
+
+
+@dataclass
+class Workspace:
+    ws: layout.Workspace
+    wstore: Store
+    store: Store
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch) -> Workspace:
+    """A workspace at ``tmp_path`` with ``cow-x`` registered and active; both stores open."""
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    ws = layout.from_env()
+    wstore = Store.open(ws.store_path, kind="workspace")
+    coworlds.register(wstore, HARNESS, COWORLD_ID, folder="cow_x")
+    coworlds.activate(wstore, HARNESS, COWORLD_ID)
+    store = Store.open(ws.coworld(COWORLD_ID).store_path, kind="coworld")
+    yield Workspace(ws, wstore, store)
+    store.close()
+    wstore.close()
+
+
+def make_goal(store: Store) -> dict:
+    return goals.create(
+        store, HARNESS, title="Beat the starter", end_state="margin > 0", reason="r"
+    )
+
+
+def run(capsys, *argv: str) -> tuple[int, dict]:
+    """Run ``research store ...``; the exit code and the last stdout line parsed as JSON."""
+    code = cli.main(["store", *argv])
+    out = capsys.readouterr().out.strip().splitlines()
+    return code, json.loads(out[-1]) if out else {}
+
+
+def apply(capsys, op: str, args: dict, *extra: str, actor: str = USER) -> tuple[int, dict]:
+    return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+
+
+# --- apply ----------------------------------------------------------------------------------
+
+
+def test_apply_goal_set_status_round_trip_with_a_user_actor(workspace, capsys):
+    goal = make_goal(workspace.store)
+    before = workspace.store.last_seq()
+    code, out = apply(
+        capsys,
+        "goals.set_status",
+        {"goal_id": goal["id"], "status": "parked", "status_reason": "holiday"},
+    )
+    assert code == 0, out
+    assert out["ok"] is True and out["op"] == "goals.set_status" and out["store"] == "coworld"
+    assert out["record"]["id"] == "G-1" and out["record"]["status"] == "parked"
+    assert out["seq"] == workspace.store.last_seq() == before + 1
+    event = workspace.store.events_after(before)[0]
+    assert (event.kind, event.actor) == ("goal.status", USER)
+    assert goals.read(workspace.store, 1)["status"] == "parked"
+    assert workspace.store.unmarked_changes() == []
+
+
+def test_apply_takes_integer_ids_too_and_goals_update(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(capsys, "goals.update", {"goal_id": 1, "title": "Beat the champion"})
+    assert code == 0, out
+    assert out["record"]["title"] == "Beat the champion"
+
+
+def test_apply_refuses_an_op_outside_the_allow_list(workspace, capsys):
+    code, out = apply(capsys, "goals.create", {"title": "x"})
+    assert code == 1
+    assert out["ok"] is False
+    assert "goals.create" in out["error"] and "not an op store apply runs" in out["error"]
+    assert "goals.set_status" in out["error"]
+    assert workspace.store.q("SELECT * FROM goals") == []
+
+
+def test_apply_refuses_a_session_actor(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(
+        capsys,
+        "goals.set_status",
+        {"goal_id": 1, "status": "parked", "status_reason": "r"},
+        actor="session:api_1761690245_0badcafe",
+    )
+    assert code == 1
+    assert "sessions use the tools" in out["error"]
+    assert goals.read(workspace.store, 1)["status"] == "active"
+
+
+def test_apply_harness_actor_is_allowed(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(
+        capsys,
+        "goals.set_status",
+        {"goal_id": 1, "status": "parked", "status_reason": "r"},
+        actor="harness",
+    )
+    assert code == 0, out
+    assert out["record"]["status"] == "parked"
+
+
+def test_apply_bad_actor_and_bad_json_are_refusals_not_tracebacks(workspace, capsys):
+    code, out = run(capsys, "apply", "--actor", "nobody", "goals.update", "{}")
+    assert code == 1 and "not an actor" in out["error"]
+    code, out = run(capsys, "apply", "--actor", USER, "goals.update", "{not json")
+    assert code == 1 and "not JSON" in out["error"]
+    code, out = run(capsys, "apply", "--actor", USER, "goals.update", "[1, 2]")
+    assert code == 1 and "JSON object" in out["error"]
+
+
+def test_apply_arguments_that_do_not_fit_are_a_refusal(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(capsys, "goals.set_status", {"goal_id": 1, "status": "parked"})
+    assert code == 1
+    assert "arguments do not fit goals.set_status" in out["error"]
+    assert "status_reason" in out["error"]
+
+
+def test_apply_reports_every_library_problem(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(
+        capsys, "goals.set_status", {"goal_id": 1, "status": "done", "status_reason": " "}
+    )
+    assert code == 1
+    assert out["error"] == "goals.set_status refused"
+    assert len(out["problems"]) == 2, out["problems"]
+
+
+def test_apply_wrong_kind_of_display_id_is_refused(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(
+        capsys, "goals.set_status", {"goal_id": "T-1", "status": "parked", "status_reason": "r"}
+    )
+    assert code == 1
+    assert out["problems"] == ["goal_id is 'T-1', a task id; expected a goal id"]
+
+
+def test_apply_settings_update_routes_by_the_keys_scope(workspace, capsys):
+    code, out = apply(capsys, "settings.update", {"key": "paused", "value": True, "cites": "m1"})
+    assert code == 0, out
+    assert out["store"] == "workspace" and out["record"]["scope"] == "workspace"
+    assert settings.get([workspace.wstore, workspace.store], "paused") is True
+    assert out["seq"] == workspace.wstore.last_seq()
+
+    code, out = apply(
+        capsys, "settings.update", {"key": "submissions.mode", "value": "ask", "cites": "m2"}
+    )
+    assert code == 0, out
+    assert out["store"] == "coworld"
+    assert settings.get(workspace.store, "submissions.mode") == "ask"
+    assert out["seq"] == workspace.store.last_seq()
+
+    code, out = apply(capsys, "settings.update", {"key": "no.such", "value": 1, "cites": "m3"})
+    assert code == 1 and "unknown setting" in out["problems"][0]
+    code, out = apply(capsys, "settings.update", {"value": 1, "cites": "m3"})
+    assert code == 1 and out["problems"] == ["key is required: the setting to change"]
+
+
+def test_apply_pause_and_resume_set_paused_citing_the_ui_action(workspace, capsys):
+    code, out = apply(capsys, "workspace.pause", {"cites": "ui:action:7"})
+    assert code == 0, out
+    assert out["store"] == "workspace"
+    assert out["record"]["key"] == "paused" and out["record"]["value"] is True
+    assert settings.get(workspace.wstore, "paused") is True
+    event = workspace.wstore.events_after(out["seq"] - 1)[0]
+    assert event.kind == "settings.updated" and event.payload["cites"] == "ui:action:7"
+    assert event.actor == USER
+
+    code, out = apply(capsys, "workspace.resume", {"cites": "ui:action:8"})
+    assert code == 0, out
+    assert out["record"]["value"] is False and out["record"]["previous"] is True
+    assert settings.get(workspace.wstore, "paused") is False
+
+    code, out = apply(capsys, "workspace.pause", {})
+    assert code == 1 and "cites is required" in out["problems"][0]
+    code, out = apply(capsys, "workspace.pause", {"cites": "x", "value": True})
+    assert code == 1 and "arguments do not fit workspace.pause" in out["error"]
+
+
+def test_apply_tasks_reject_and_approve(workspace, capsys):
+    make_goal(workspace.store)
+    researcher = Actor.session("api_1761690300_researcher1")
+    first = tasks.propose(
+        workspace.store, researcher, goal_id=1, type="research", title="t", description="d"
+    )
+    second = tasks.propose(
+        workspace.store, researcher, goal_id=1, type="research", title="u", description="d"
+    )
+    code, out = apply(capsys, "tasks.reject", {"task_id": first["id"], "next_step": "ask again"})
+    assert code == 0, out
+    assert out["record"]["status"] == "abandoned"
+    assert out["record"]["failure"] == {
+        "what_failed": "rejected by the user",
+        "next_step": "ask again",
+    }
+    code, out = apply(capsys, "tasks.approve", {"task_id": second["id"]})
+    assert code == 0, out
+    assert out["record"]["status"] == "unclaimed" and out["record"]["approved_by"] == USER
+
+
+def test_apply_tasks_update_and_abandon(workspace, capsys):
+    make_goal(workspace.store)
+    task = tasks.create(
+        workspace.store, HARNESS, goal_id=1, type="research", title="t", description="d"
+    )
+    code, out = apply(capsys, "tasks.update", {"task_id": task["id"], "title": "better"})
+    assert code == 0, out
+    assert out["record"]["title"] == "better"
+    failure = {"what_failed": "no longer wanted", "next_step": "nothing"}
+    code, out = apply(capsys, "tasks.abandon", {"task_id": task["id"], "failure": failure})
+    assert code == 0, out
+    assert out["record"]["status"] == "abandoned"
+
+
+def test_apply_directives_add_routes_by_scope_and_update_retire_by_home(workspace, capsys):
+    make_goal(workspace.store)
+    code, out = apply(
+        capsys, "directives.add", {"text": "No Fridays", "scope": "workspace", "source": "m1"}
+    )
+    assert code == 0, out
+    assert out["store"] == "workspace" and out["record"]["id"] == "D-1"
+    code, out = apply(
+        capsys, "directives.add", {"text": "Prefer small diffs", "scope": "goal:1", "source": "m2"}
+    )
+    assert code == 0, out
+    assert out["store"] == "coworld" and out["record"]["id"] == "D-1"
+
+    # D-1 exists in both stores: the op cannot tell where the edit belongs without --store.
+    code, out = apply(capsys, "directives.update", {"directive_id": "D-1", "text": "Never Fridays"})
+    assert code == 1
+    assert "D-1 exists in both" in out["problems"][0] and "--store" in out["problems"][0]
+    code, out = apply(
+        capsys,
+        "directives.update",
+        {"directive_id": "D-1", "text": "Never Fridays"},
+        "--store",
+        "workspace",
+    )
+    assert code == 0, out
+    assert directives.read(workspace.wstore, 1)["text"] == "Never Fridays"
+    assert directives.read(workspace.store, 1)["text"] == "Prefer small diffs"
+
+    # Once the Goal directive is retired through the coworld store, D-1 has one home again.
+    code, out = apply(capsys, "directives.retire", {"directive_id": 1}, "--store", "coworld")
+    assert code == 0, out
+    assert out["record"]["status"] == "retired"
+    code, out = apply(capsys, "directives.update", {"directive_id": 1, "text": "No Fridays"})
+    assert code == 0, out
+    assert out["store"] == "workspace"
+
+    code, out = apply(capsys, "directives.retire", {"directive_id": 9})
+    assert code == 1 and out["problems"] == ["D-9 does not exist"]
+    code, out = apply(capsys, "directives.retire", {})
+    assert code == 1 and "directive_id is required" in out["problems"][0]
+
+
+def test_apply_coworld_switch_delegates_to_the_coworld_command(workspace, capsys, monkeypatch):
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(
+            argv, 0, stdout='log line\n{"coworld_id": "cow-y", "active": true}\n', stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    code, out = apply(capsys, "workspace.coworld_switch", {"coworld": "cow-y", "cites": "m9"})
+    assert code == 0, out
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == [
+        sys.executable,
+        "-m",
+        "research_core.cli",
+        "coworld",
+        "switch",
+        "cow-y",
+        "--cites",
+        "m9",
+    ]
+    assert kwargs["env"]["IDE_ACTOR"] == USER
+    assert kwargs["env"]["IDE_WORKSPACE"] == str(workspace.ws.root)
+    assert kwargs["capture_output"] is True and kwargs["text"] is True
+    assert out["store"] == "workspace"
+    assert out["record"] == {"coworld_id": "cow-y", "active": True}
+    assert out["seq"] == workspace.wstore.last_seq()
+
+    code, out = apply(capsys, "workspace.coworld_switch", {"coworld": "cow-z"})
+    assert code == 0, out
+    assert calls[1][0][-1] == "cow-z"  # no --cites when none was given
+
+
+def test_apply_coworld_switch_failure_carries_the_output(workspace, capsys, monkeypatch):
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 3, stdout="partial\n", stderr="boom: no such")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    code, out = apply(capsys, "workspace.coworld_switch", {"coworld": "cow-y"})
+    assert code == 1
+    assert out["error"] == "workspace.coworld_switch refused"
+    assert out["problems"][0] == "research coworld switch cow-y exited 3"
+    assert "boom: no such" in out["problems"] and "partial" in out["problems"]
+
+    code, out = apply(capsys, "workspace.coworld_switch", {"cites": "m"})
+    assert code == 1 and out["problems"] == ["coworld is required: the Coworld id to switch to"]
+    code, out = apply(capsys, "workspace.coworld_switch", {"coworld": "cow-y", "source": "x"})
+    assert code == 1 and "unknown arguments: source" in out["problems"]
+
+
+def test_apply_without_an_active_coworld_says_so(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    code, out = apply(capsys, "goals.update", {"goal_id": 1, "title": "x"})
+    assert code == 1
+    assert "no active Coworld" in out["problems"][0]
+    # Workspace-scoped ops still work without one.
+    code, out = apply(capsys, "workspace.pause", {"cites": "ui:action:1"})
+    assert code == 0, out
+
+
+# --- export ---------------------------------------------------------------------------------
+
+
+def test_export_writes_every_table_of_both_stores(workspace, capsys, tmp_path):
+    make_goal(workspace.store)
+    out_dir = tmp_path / "dump"
+    code, out = run(capsys, "export", "--out", str(out_dir))
+    assert code == 0, out
+    for store, folder in ((workspace.wstore, "workspace"), (workspace.store, COWORLD_ID)):
+        tables = _copyable_tables(store.conn, "main")
+        assert {"events", "change_log", "handled_events", "meta", "settings"} <= set(tables)
+        written = sorted(p.stem for p in (out_dir / folder).glob("*.jsonl"))
+        assert written == sorted(tables)
+        summary = out["stores"][folder]
+        assert summary["seq"] == store.last_seq()
+        assert summary["tables"] == {
+            table: store.one(f"SELECT COUNT(*) FROM {table}")[0] for table in tables
+        }
+    goal_rows = (out_dir / COWORLD_ID / "goals.jsonl").read_text().splitlines()
+    assert json.loads(goal_rows[0])["title"] == "Beat the starter"
+    event_rows = (out_dir / "workspace" / "events.jsonl").read_text().splitlines()
+    assert [json.loads(line)["kind"] for line in event_rows] == [
+        "coworld.registered",
+        "coworld.switched",
+    ]
+    assert out["out"] == str(out_dir)
+
+
+def test_export_a_named_coworld_must_have_a_store(workspace, capsys, tmp_path):
+    code, out = run(capsys, "export", "--coworld", "cow-nope", "--out", str(tmp_path / "d"))
+    assert code == 1
+    assert out["error"] == "Coworld cow-nope has no store in this workspace"
+    assert not (workspace.ws.root / "cow_nope").exists()
+
+
+def test_export_without_a_coworld_dumps_the_workspace_store(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    code, out = run(capsys, "export", "--out", str(tmp_path / "dump"))
+    assert code == 0, out
+    assert list(out["stores"]) == ["workspace"]
+
+
+# --- snapshot -------------------------------------------------------------------------------
+
+
+def test_snapshot_has_records_settings_ui_state_and_seq(workspace, capsys):
+    make_goal(workspace.store)
+    settings.update(workspace.store, HARNESS, "submissions.mode", "ask", cites="m")
+    ui_state.patch(
+        workspace.wstore,
+        HARNESS,
+        "workspace",
+        [{"op": "add", "path": "/panels", "value": [{"kind": "text", "content": "hi"}]}],
+    )
+
+    code, out = run(capsys, "snapshot")
+    assert code == 0, out
+    assert out["store"] == "coworld" and out["coworld_id"] == COWORLD_ID
+    assert out["seq"] == workspace.store.last_seq()
+    records = out["records"]
+    assert list(records) == [
+        "goals",
+        "tasks",
+        "versions",
+        "claims",
+        "experiments",
+        "directives",
+        "champion",
+        "capabilities",
+        "intents",
+        "settings",
+    ]
+    assert records["goals"][0]["id"] == "G-1" and records["goals"][0]["tags"] == []
+    assert records["settings"]["submissions.mode"] == "ask"
+    assert records["settings"]["submissions.quality_bar"] is True
+    assert "paused" not in records["settings"]
+    assert out["ui_state"] == []
+
+    code, out = run(capsys, "snapshot", "--store", "workspace")
+    assert code == 0, out
+    assert out["store"] == "workspace" and out["seq"] == workspace.wstore.last_seq()
+    assert list(out["records"]) == ["directives", "notices", "sessions", "coworlds", "settings"]
+    assert out["records"]["coworlds"][0]["coworld_id"] == COWORLD_ID
+    assert out["records"]["settings"]["paused"] is False
+    assert out["ui_state"] == [
+        {
+            "conversation": "workspace",
+            "doc": {"panels": [{"kind": "text", "content": "hi"}]},
+            "version": 1,
+            "updated": out["ui_state"][0]["updated"],
+        }
+    ]
+
+
+# --- events ---------------------------------------------------------------------------------
+
+
+def events_lines(capsys) -> list[dict]:
+    return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+
+
+def test_events_after_returns_rows_greater_than_seq(workspace, capsys):
+    goal = make_goal(workspace.store)
+    goals.set_status(workspace.store, HARNESS, 1, "parked", "r")
+    goals.set_status(workspace.store, HARNESS, 1, "active", "r")
+    assert cli.main(["store", "events", "--after", "1"]) == 0
+    lines = events_lines(capsys)
+    assert [line["seq"] for line in lines] == [2, 3]
+    assert lines[0] == {
+        "store": "coworld",
+        "seq": 2,
+        "at": lines[0]["at"],
+        "actor": "harness",
+        "kind": "goal.status",
+        "subject": goal["id"],
+        "payload": {"from": "active", "to": "parked", "reason": "r"},
+    }
+    assert cli.main(["store", "events", "--after", "0", "--limit", "1"]) == 0
+    assert [line["seq"] for line in events_lines(capsys)] == [1]
+    assert cli.main(["store", "events", "--after", "0", "--store", "workspace"]) == 0
+    assert [line["kind"] for line in events_lines(capsys)] == [
+        "coworld.registered",
+        "coworld.switched",
+    ]
+    assert cli.main(["store", "events", "--after", "3"]) == 0
+    assert events_lines(capsys) == []
+
+
+def test_events_follow_streams_a_row_written_by_another_thread(workspace, capsys):
+    make_goal(workspace.store)
+    path = workspace.store.path
+
+    def write_later() -> None:
+        store = Store.open(path, kind="coworld")
+        try:
+            goals.set_status(store, HARNESS, 1, "parked", "later")
+        finally:
+            store.close()
+
+    writer = threading.Timer(0.15, write_later)
+    writer.start()
+    try:
+        code = cli.main(
+            ["store", "events", "--after", "1", "--follow", "--interval", "0.02", "--max-rows", "1"]
+        )
+    finally:
+        writer.join()
+    assert code == 0
+    lines = events_lines(capsys)
+    assert len(lines) == 1
+    assert lines[0]["kind"] == "goal.status" and lines[0]["payload"]["reason"] == "later"
+
+
+def test_events_without_an_active_coworld_names_the_fix(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    code, out = run(capsys, "events", "--after", "0")
+    assert code == 1
+    assert "no active Coworld" in out["error"] and "--store workspace" in out["error"]
