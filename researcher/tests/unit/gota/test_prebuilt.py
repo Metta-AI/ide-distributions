@@ -314,7 +314,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     assert code == 0, response
     data = response['data']
     assert data['version_id'].startswith('V-')
-    assert data['platform_policy_version_id'].startswith('pv_')
+    assert data['platform_policy_version_id'] == f"{policy_name('opening-rush', PLAYER)}:v1"
     assert data['version_id'] != data['platform_policy_version_id']
     meta = worker.store.load(data['version_id'])[0]
     assert meta['experiment'] is None and meta['player_id'] == PLAYER
