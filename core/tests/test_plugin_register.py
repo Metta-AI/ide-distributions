@@ -30,6 +30,7 @@ def test_make_register_builds_a_callable_per_role():
         for tool in ctx.tools:
             assert tool["toolset"] == f"ide-{role}"
             assert set(tool["schema"]) >= {"name", "description", "parameters"}
+        assert {name for name, _ in ctx.hooks} >= {"transform_tool_result", "post_tool_call"}
 
 
 def test_plugin_imports_are_stdlib_only():
@@ -37,7 +38,8 @@ def test_plugin_imports_are_stdlib_only():
         "import sys\n"
         f"sys.path.insert(0, {str(CORE_SRC)!r})\n"
         "import research_core.plugin.register, research_core.plugin.executor\n"
-        "import research_core.layout\n"
+        "import research_core.plugin.advisory, research_core.plugin.rules\n"
+        "import research_core.layout, research_core.tools.base\n"
         "third = sorted(m for m in sys.modules if m.split('.')[0] in "
         "{'yaml','numpy','coworld','softmax_client','softmax','httpx','pydantic','jsonschema'})\n"
         "assert not third, third\n"

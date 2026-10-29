@@ -19,6 +19,7 @@ def toolset_name(role: Role) -> str:
 
 def make_register(role: Role) -> Callable[[Any], None]:
     def register(ctx: Any) -> None:
+        from research_core.plugin.advisory import make_hooks
         from research_core.plugin.executor import make_handler
 
         for spec in tools_for(role):
@@ -29,6 +30,8 @@ def make_register(role: Role) -> Callable[[Any], None]:
                 handler=make_handler(spec, role),
                 description=spec.description,
             )
+        for hook_name, callback in make_hooks(role).items():
+            ctx.register_hook(hook_name, callback)
 
     register.__name__ = f"register_{role}"
     return register
