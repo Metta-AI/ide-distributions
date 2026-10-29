@@ -29,6 +29,7 @@ def commit(candidate):
 @pytest.fixture
 def candidate(tmp_path, monkeypatch):
     directory = tmp_path / 'candidate'
+    monkeypatch.setenv('RESEARCH_CANONICAL', str(tmp_path / 'canonical.git'))
     directory.mkdir()
     subprocess.run(['git', 'init', str(directory)], check=True, capture_output=True)
     artifact = directory / 'baseline.bas'
@@ -233,6 +234,7 @@ def test_real_prebuilt_bootstrap_champion_with_recorded_episode_and_mock_screen(
     from ide_research_core.softmax_tool.upload import policy_name
 
     board = ResearchBoard(tmp_path, seed_champion=False)
+    monkeypatch.setenv('RESEARCH_CANONICAL', str(board.origin))
     (board.canonical / CHAMPION_PATH).write_text((ROOT / 'games/gota/seed/strategy/STRATEGY.md').read_text())
     with (board.canonical / '.gitignore').open('a') as ignore:
         ignore.write('.scratch/\n')

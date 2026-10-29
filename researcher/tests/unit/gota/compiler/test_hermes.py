@@ -386,6 +386,7 @@ def test_real_binding_seed_from_archive_and_separate_worker(generation, monkeypa
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, destination)
     worker = tmp_path / 'worker'
+    monkeypatch.setenv('RESEARCH_CANONICAL', str(tmp_path / 'canonical.git'))
     candidate = worker / 'strategy/candidates/E'
     candidate.mkdir(parents=True)
     source = candidate / 'STRATEGY.md'

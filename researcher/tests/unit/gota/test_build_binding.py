@@ -118,6 +118,7 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
     else:
         monkeypatch.setenv('GOTA_AGENT_BUDGET_S', budget_env)
     repository = tmp_path / 'repository'
+    monkeypatch.setenv('RESEARCH_CANONICAL', str(repository))
     subprocess.run(['git', 'init', str(repository)], check=True, capture_output=True)
     subprocess.run(['git', '-C', str(repository), '-c', 'user.name=Test',
                     '-c', 'user.email=test@invalid', 'commit', '--allow-empty', '-m', 'base'],

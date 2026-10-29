@@ -39,6 +39,7 @@ def base_env(board, worker=None, **extra) -> dict:
         "PATH": os.environ.get("PATH", ""),
         "HERMES_HOME": str(board.tmp_path / "home"),
         "RESEARCH_WORKSPACE": str(board.canonical),
+        "RESEARCH_CANONICAL": str(board.origin),
         "RESEARCH_SOFTMAX": "fake",
         "RESEARCH_GAME": "fakegame",
         "RESEARCH_PLAYER_ID": PLAYER,
@@ -877,6 +878,7 @@ def test_upload_from_fakegame_build(board):
     # the worktree's strategy/STRATEGY.md is the champion seeded by SubmitBoard
     subprocess.run(
         [sys.executable, str(tool), str(worker.worktree), "--out", str(build_dir), "--json"],
+        env={**os.environ, **base_env(board, worker)},
         check=True,
         capture_output=True,
     )
@@ -1026,6 +1028,7 @@ def test_upload_build_without_experiment_does_not_evaluate_or_submit(board):
     tool = REPO / "games" / "fakegame" / "tools" / "fake_build.py"
     subprocess.run(
         [sys.executable, str(tool), str(worker.worktree), "--out", str(build_dir), "--json"],
+        env={**os.environ, **base_env(board, worker)},
         check=True, capture_output=True,
     )
     env = base_env(board, worker)

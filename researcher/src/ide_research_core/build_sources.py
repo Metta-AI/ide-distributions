@@ -126,7 +126,7 @@ def capture(build_dir: Path, source_root: Path) -> dict:
         prefix = source_root.relative_to(repo)
         logical = {(prefix / name).as_posix(): digest for name, digest in hashes.items()}
         primary_name = (prefix / primary).as_posix()
-        canonical = Path(os.environ.get("RESEARCH_CANONICAL", str(repo.parent / "canonical.git")))
+        canonical = Path(os.environ["RESEARCH_CANONICAL"])
         snapshot = stage_sources(
             canonical.resolve().parent / "policy-sources",
             repo,
