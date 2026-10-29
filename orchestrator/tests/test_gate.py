@@ -18,7 +18,7 @@ QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
 class Platform:
     def __init__(
-        self, *, xp=None, credits=0, answer=None, conflict=None, in_flight=None, paused=False,
+        self, *, xp=None, credits=0, conflict=None, in_flight=None, paused=False,
         migration=None, submitted=None, league_result=None,
     ):
         self.migration = migration
@@ -27,7 +27,6 @@ class Platform:
         self.league_reads = []
         self.xp = xp or []
         self.balance = credits
-        self.answer = answer
         self.conflict = conflict
         self.in_flight = in_flight
         self.paused = paused
@@ -49,10 +48,6 @@ class Platform:
 
     def credits(self):
         return {"available": True, "credits": self.balance}
-
-    def permit(self, ask):
-        assert ask == "ask-1"
-        return {"body": {"kind": "permit", "answer": self.answer}}
 
     def call(self, *args):
         if args == ("champion", "migrate"):
@@ -87,6 +82,7 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
             "xp_terminal",
         ),
         ({"credits": True}, Platform(credits=30), "credits_available"),
+        ({"permit": "ask-1"}, Platform(), "bad_handoff"),
     ],
 )
 def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, platform, kind):
@@ -100,7 +96,7 @@ def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, p
     assert evaluate(context, platform, QUIET_MINUTE) == result
 
 
-@pytest.mark.parametrize("awaiting", [{"xp": ["xp-1"]}, {"credits": True}, {"permit": "ask-1"}])
+@pytest.mark.parametrize("awaiting", [{"xp": ["xp-1"]}, {"credits": True}])
 def test_unresolved_wait_does_not_wake(context, board_file, awaiting):
     add_wait(board_file, awaiting, {"id": "E-1"})
     platform = Platform(xp=[{"request_id": "xp-1", "state": "running"}])

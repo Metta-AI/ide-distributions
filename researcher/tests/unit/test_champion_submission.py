@@ -88,9 +88,10 @@ def test_permit_refusal_is_recorded_without_polling_or_automatic_retry(board):
         champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
     assert refused.value.reason == "permit_required"
     record = champion_submission.load_all(board.canonical)[-1]
-    assert record.stage == "aborted" and record.waiting["ask"]
+    assert record.stage == "aborted" and record.waiting is None
+    assert refused.value.details["ask"] in record.history[-1]["detail"]
     state = fake_state(board)
-    state["answers"] = {record.waiting["ask"]: "yes"}
+    state["answers"] = {refused.value.details["ask"]: "yes"}
     write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
     assert champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)["in_flight"] is None
     assert not any(row["policy_version_id"] == PV_A for row in sm.submissions(PLAYER))
@@ -190,11 +191,10 @@ def test_a_send_that_dies_after_an_approved_permit_is_recovered_not_asked_again(
     ``submitted``: the next status finds the submission instead of asking again (R12 #4)."""
     experiment, _ = board.reviewed_experiment()
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
-    with pytest.raises(Refused):
+    with pytest.raises(Refused) as refused:
         champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
     state = fake_state(board)
-    refused_record = champion_submission.load_all(board.canonical)[-1]
-    state["answers"] = {refused_record.waiting["ask"]: "yes"}
+    state["answers"] = {refused.value.details["ask"]: "yes"}
     write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
     real_submit = sm.submit
 
@@ -300,9 +300,8 @@ def test_requested_version_submission_needs_no_experiment_and_preserves_strategy
                 "Build and submit this policy to my league", LEAGUE, PLAYER,
             )
         assert refused.value.reason == "permit_required"
-        waiting = champion_submission.load_all(board.canonical)[-1]
         state = fake_state(board)
-        state["answers"] = {waiting.waiting["ask"]: "yes"}
+        state["answers"] = {refused.value.details["ask"]: "yes"}
         write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
         result = champion_submission.submit_requested(
             board.canonical, sm, version, source_path,

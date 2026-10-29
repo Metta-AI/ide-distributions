@@ -123,7 +123,7 @@ def test_card_events_wake_the_session_that_created_the_card(context, board_file)
             conn.execute("INSERT INTO coordinator VALUES ('session', 'chat-latest')")
         card_1 = {"kind": "xp_terminal", "card": "card-1"}
         card_2 = {"kind": "credits_available", "card": "card-2"}
-        no_origin = {"kind": "permit_answered", "card": "card-3"}
+        no_origin = {"kind": "bad_handoff", "card": "card-3"}
         poll = {"kind": "champion_submission_poll", "tick": "t"}
         pending = [card_1, poll, card_2, no_origin]
         wake(context, {"wakeAgent": True, "context": {"pending": pending}})

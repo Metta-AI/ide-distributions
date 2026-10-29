@@ -51,8 +51,7 @@ Game selection comes from the conversation and task; never supply a default `RES
 ## Platform capabilities
 
 Providers own operation schemas, input semantics, limits, effects, status and recovery instructions.
-The distribution uses its existing `capabilities` index, native deferred-tool discovery, and
-`ide_workspace_schema`/`ide_workspace` client. Do not copy provider protocols into profile prompts
+The distribution uses its existing `capabilities` index and native deferred-tool discovery. Do not copy provider protocols into profile prompts
 or add a second discovery catalog. Local executable absence does not establish hosted availability.
 
 The runtime may install provider plugins through supported Hermes APIs. Generic discovery,

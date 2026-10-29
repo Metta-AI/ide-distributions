@@ -37,6 +37,14 @@ def transitions(state, research):
             # A card of another game: its experiments live in that game's workspace.
             event["game"] = run["game"]
             research = default.in_game(run["game"])
+        if awaiting.get("permit"):
+            pending.append({
+                **event,
+                "kind": "bad_handoff",
+                "reason": "awaiting.permit is unsupported; tell the user to answer the ask "
+                "and explicitly request a relaunch",
+            })
+            continue
         if awaiting.get("xp"):
             # xp status takes an experiment ID; handoffs name it separately from request IDs.
             experiment = (metadata.get("experiment") or {}).get("id")

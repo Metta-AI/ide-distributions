@@ -413,7 +413,7 @@ def handler(name):
                 remember_submission_session(context, data["id"], origin)
             return json.dumps({"ok": True, "data": data})
         except (ArtifactError, ResearchError) as error:
-            # A submission waiting for the coach's permit is still this session's submission.
+            # Keep the originating session for refused attempts too; this does not schedule retries.
             submission = (error.envelope["error"].get("details") or {}).get("submission")
             if name in SUBMISSION_TOOLS and origin and submission:
                 remember_submission_session(context, submission, origin)

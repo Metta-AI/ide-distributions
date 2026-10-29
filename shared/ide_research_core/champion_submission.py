@@ -78,7 +78,7 @@ class ChampionSubmission:
     stage: str
     experiment: str | None = None
     submission_id: str | None = None
-    waiting: dict | None = None  # the coach's refusal while at intent
+    waiting: dict | None = None  # league-selection refusal while at intent
     # The player submitted for: the workspace's own player, or an owned player the conversation
     # selected (the IDE workspace credential may publish for it). None only in records written
     # before submissions named their player; those were all for the workspace's own player.
@@ -403,10 +403,14 @@ def _send(clone: Path, sm: Softmax, submission: ChampionSubmission) -> dict:
     """The single platform submit of an ``intent`` submission."""
     result = sm.submit(submission.platform_policy_version_id, submission.league_id, submission.player_id)
     if isinstance(result, PermitRequired):
-        submission.waiting = {"reason": "permit_required", "ask": result.ask, "detail": result.reason}
-        _move(clone, submission, "aborted", "platform refused submission; requires user action")
+        submission.waiting = None
+        _move(
+            clone, submission, "aborted",
+            f"platform refused submission (ask {result.ask}): {result.reason}",
+        )
         raise Refused(
-            "permit_required", f"the coach must approve the submission: {result.reason}",
+            "permit_required", f"this attempt ended: {result.reason}; after the user answers "
+            "the ask, an explicit submit is a new attempt",
             {"submission": submission.id, "ask": result.ask},
         )
     if isinstance(result, LeagueNotChosen):

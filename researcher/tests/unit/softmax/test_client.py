@@ -427,8 +427,3 @@ def test_an_unknown_membership_status_is_unknown_not_pending(env, runner):
     runner.on("coworld", "memberships", response=completed(json.dumps(page)))
     state = make(env, runner, None).submission_state(PLAYER_ID, GOTA, "games-bond-gota:v8")
     assert state.stage == "unknown" and "retired" in state.detail
-
-
-# --- the coach's answer to a permit ask (GET /observatory/v2/cogents/{player}/c/asks/{key}) ---
-
-ASK = "permit-spend-8c5edbef63cc84a1-1"
