@@ -102,6 +102,8 @@ def capture(build_dir: Path, source_root: Path) -> dict:
         path = Path(name)
         if path.is_absolute():
             if not path.is_relative_to(source_root):
+                if build["compiler"]["installed_source_hashes"][name] != digest:
+                    raise SourceError("Installed compiler provenance disagrees with build inputs")
                 continue
             path = path.relative_to(source_root)
         hashes[path.as_posix()] = digest
