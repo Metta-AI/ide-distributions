@@ -1,4 +1,4 @@
-"""Refresh ``core/src/research_core/prompts/vocabulary.md`` from metta's canonical Softmax vocabulary.
+"""Refresh ``core/src/research_core/prompts/vocabulary.md`` from metta's Softmax vocabulary.
 
 The source, metta's ``docs/ai/design/vocabulary.md``, is not on a profile host, so its
 entity hierarchy and term table are copied here; ``tools/build_prompts.py`` renders them into
@@ -27,7 +27,7 @@ Notes for these profiles:
 
 
 def section(text: str, title: str) -> str:
-    match = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    match = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
     if not match:
         raise SystemExit(f"{SOURCE} has no section '## {title}'")
     return match.group(1).strip()
@@ -42,7 +42,10 @@ def main() -> int:
         import subprocess
 
         commit = subprocess.run(
-            ["git", "-C", str(metta), "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+            ["git", "-C", str(metta), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
     parts = [
         "# Softmax vocabulary",
@@ -57,7 +60,8 @@ def main() -> int:
         section(text, SECTIONS[1]),
         NOTES,
     ]
-    (REPO / "core/src/research_core/prompts/vocabulary.md").write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
+    target = REPO / "core/src/research_core/prompts/vocabulary.md"
+    target.write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
     print("wrote core/src/research_core/prompts/vocabulary.md")
     return 0
 
