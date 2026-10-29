@@ -76,6 +76,36 @@ environment, with `moonshotai/kimi-k3` through an OpenRouter key from the token 
   live run, so run 1 is awaited first; and the history route answers in `data`, which the
   runs client now reads.
 
+## Review decisions (October 29, 2026, Pacific)
+
+Rohit's review of PR #106 (a data-loss review of the store, upload recovery, and three
+acceptance cases from the superseded #91) was taken decision by decision with James:
+
+1. **Store repair stays automatic, done in place.** The design's rebuild of a mismatched store
+   keeps, but as one exclusive transaction inside the same file (no file swap), with a copy of
+   the original saved first. A store from a newer release is refused, never rebuilt, and the
+   workspace is paused until the matching runtime runs. Snapshots and exports read inside one
+   read transaction. Every writable connection sets `synchronous=FULL`.
+2. **Loss window: one hour.** The handoff requires hourly volume snapshots (the daily history
+   kept); `research store backup` and `research store restore-check` are provided for
+   database-aware copies hosting may run more often. Replaces the design's accepted daily bound
+   (R6).
+3. **Lost uploads.** Exact upload inputs are saved with the intent and recovery uses Coworld
+   0.1.67's read-only lookup as the Player. The design's rule stands: one automatic retry only
+   when that lookup answers definitively "no such version"; any error or refusal leaves the
+   Version unresolved with a notice; an explicit user request always uploads again. (Rohit
+   asked that even a definitive miss stay unresolved; James kept the design's rule.)
+4. **Image policies: follow-up PR before metta's pin moves.** The design's deferral stands;
+   `docs/designs/image-versions-2026-10-29.md` is the proposal.
+5. **Build inputs git does not track.** `version.create` refuses ignored inputs and nested
+   repositories (caches, the artifact output and submodules excepted) so the commit stays the
+   single source of truth.
+6. **Source editing after a pod replacement.** Proven now as a scenario test (worktree removed,
+   workspace moved, Version resolved from the platform policy version id, source read from the
+   tagged commit, an edit built as a new Version with the original unchanged); the seam's
+   read/edit routes with stale-edit rejection belong to the contract-layer stack the design
+   planned.
+
 ## Open items and known seams
 
 - `claim` exposes no `update` action although the store has one; the skills say a claim's
