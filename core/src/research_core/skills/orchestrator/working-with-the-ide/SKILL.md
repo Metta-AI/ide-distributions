@@ -70,6 +70,11 @@ message) and notifying. Never make the user wait for setup, and never refuse bec
 running. Questions that need only platform reads (`platform.standings`, `platform.leagues`) are
 answered now.
 
+The switch takes the source repository from the Coworld's platform manifest. When the platform
+does not list the Coworld, or the user names a fork or a branch, pass `source` (a git URL) and
+`commit` to the switch instead of giving up; the setup wake builds a mixin from scratch when the
+repository has none.
+
 ## Skill overrides
 
 The code repository may override a core skill under `.agents/skills/<skill>/`. The briefing and
