@@ -5,8 +5,7 @@ from __future__ import annotations
 import pytest
 
 from research_core.store import evidence_types
-from research_core.store.errors import NotFound
-from research_core.store.evidence_types import EVIDENCE_TYPES, EvidenceType
+from research_core.store.evidence_types import EVIDENCE_TYPES, EvidenceType, InspectEnv
 
 SHA = "0123abcd"
 SHA256 = "a" * 64
@@ -149,28 +148,46 @@ def test_record_inspectors_return_the_record_summary(coworld_store, harness):
             " VALUES ('a version', 'adopted', ?, 'harness')",
             (tx.at,),
         )
-    assert EVIDENCE_TYPES["claim"].inspect(coworld_store, "C-1") == {
+    env = InspectEnv(store=coworld_store)
+    assert EVIDENCE_TYPES["claim"].inspect("C-1", env) == {
+        "type": "claim",
+        "ref": "C-1",
         "id": "C-1",
         "summary": "a claim",
         "status": "active",
     }
-    assert EVIDENCE_TYPES["experiment"].inspect(coworld_store, "X-1#methods") == {
+    assert EVIDENCE_TYPES["experiment"].inspect("X-1#methods", env) == {
+        "type": "experiment",
+        "ref": "X-1#methods",
         "id": "X-1",
         "summary": "an experiment",
         "status": "running",
     }
-    assert EVIDENCE_TYPES["version"].inspect(coworld_store, "V-1") == {
+    assert EVIDENCE_TYPES["version"].inspect("V-1", env) == {
+        "type": "version",
+        "ref": "V-1",
         "id": "V-1",
         "summary": "a version",
     }
-    with pytest.raises(NotFound):
-        EVIDENCE_TYPES["claim"].inspect(coworld_store, "C-9")
+    missing = evidence_types.inspect_evidence("claim", "C-9", env)
+    assert missing["problem"] == "C-9 does not exist" and missing["skill"] == "claim"
 
 
-def test_non_record_inspectors_are_wired_elsewhere():
-    for name in ("code", "doc", "transcript", "measurement", "replay", "annotation"):
-        assert EVIDENCE_TYPES[name].inspect is None
-        assert EVIDENCE_TYPES[name].resolve is None
+def test_every_type_has_an_inspector_and_only_records_resolve():
+    for name, kind in EVIDENCE_TYPES.items():
+        assert callable(kind.inspect), name
+        assert (kind.resolve is not None) == (name in ("claim", "experiment", "version")), name
+
+
+def test_inspect_evidence_never_raises(coworld_store):
+    env = InspectEnv(store=coworld_store)
+    unknown = evidence_types.inspect_evidence("screenshot", "x", env)
+    assert unknown["type"] == "screenshot" and "not registered" in unknown["problem"]
+    malformed = evidence_types.inspect_evidence("code", "agent.py", env)
+    assert "<path>:<a>-<b>@<sha>" in malformed["problem"] and malformed["skill"] == "code-citations"
+    for name, ref in VALID_REFS:
+        result = evidence_types.inspect_evidence(name, ref, env)
+        assert {"type", "ref", "summary", "skill"} <= set(result), (name, ref)
 
 
 def test_register_type_adds_a_type_and_refuses_duplicates(coworld_store, monkeypatch):

@@ -35,6 +35,8 @@ def tools_for(role: Role) -> list[ToolSpec]:
 TOOL_MODULES: tuple[str, ...] = (
     "research_core.tools.goal",
     "research_core.tools.directive",
+    "research_core.tools.claim",
+    "research_core.tools.ui",
 )
 _loaded = False
 
