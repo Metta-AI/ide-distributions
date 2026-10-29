@@ -95,6 +95,12 @@ Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job pe
 distribution folder. The tests of the shared package run in `researcher/`, against its copy,
 so run the sync script before testing a change under `shared/`.
 
+On a pull request, CI skips the tests of a distribution that the change cannot affect: a change
+only to `docs/`, `README.md` or the image-release workflows skips all three, and `play` skips
+changes to `researcher/`, `orchestrator/` and `ontology/`. The three checks still report, so the
+required checks on `main` pass. Pushes to `main` always test everything. The filters are in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
 ```bash
 cd researcher
 uv sync --frozen
