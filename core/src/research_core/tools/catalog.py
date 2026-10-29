@@ -31,12 +31,27 @@ def tools_for(role: Role) -> list[ToolSpec]:
     return sorted((spec for spec in TOOLS.values() if role in spec.roles), key=lambda s: s.name)
 
 
-# Tool modules, imported on first use so that importing the catalog stays cheap.
+# Tool modules, imported on first use so that importing the catalog stays cheap. A module that
+# does not exist yet is skipped; the tool-budget test catches a missing tool.
 TOOL_MODULES: tuple[str, ...] = (
     "research_core.tools.goal",
-    "research_core.tools.directive",
+    "research_core.tools.task",
     "research_core.tools.claim",
+    "research_core.tools.experiment",
+    "research_core.tools.version",
+    "research_core.tools.directive",
+    "research_core.tools.settings",
     "research_core.tools.ui",
+    "research_core.tools.workspace",
+    "research_core.tools.upload",
+    "research_core.tools.submit",
+    "research_core.tools.xp",
+    "research_core.tools.platform",
+    "research_core.tools.forum_post",
+    "research_core.tools.wiki_edit",
+    "research_core.tools.softmax_api",
+    "research_core.tools.github",
+    "research_core.tools.attachment_download",
 )
 _loaded = False
 
@@ -47,6 +62,11 @@ def _load_tool_modules() -> None:
         return
     import importlib
 
-    for module_name in TOOL_MODULES:
-        importlib.import_module(module_name)
+    for module_name in dict.fromkeys(TOOL_MODULES):
+        try:
+            importlib.import_module(module_name)
+        except ModuleNotFoundError as error:
+            if error.name and error.name.startswith("research_core.tools"):
+                continue  # not built yet
+            raise
     _loaded = True
