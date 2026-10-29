@@ -83,10 +83,24 @@ class Platform(BaseHTTPRequestHandler):
         if terminal:
             assert COMPLETED.is_set(), "coordinator resumed before the external job completed"
             RESUMED.set()
-        called = {
-            call["function"]["name"]
+        offered = {item["function"]["name"] for item in body.get("tools", [])}
+        prior = [
+            call["function"]
             for message in body["messages"]
             for call in message.get("tool_calls", [])
+        ]
+        called = {call["name"] for call in prior}
+        called.update(
+            entry["name"]
+            for call in prior
+            if call["name"] == "tool_call"
+            for entry in json.loads(call["arguments"])["calls"]
+        )
+        described = {
+            name
+            for call in prior
+            if call["name"] == "tool_describe"
+            for name in json.loads(call["arguments"])["names"]
         }
         message = {
             "role": "assistant",
@@ -94,7 +108,7 @@ class Platform(BaseHTTPRequestHandler):
         }
         tool = None
         arguments = {}
-        if body["model"] == "fixture-researcher":
+        if offered and body["model"] == "fixture-researcher":
             if "terminal" not in called:
                 tool = "terminal"
                 arguments = {"command": '"$RESEARCH_CLI" softmax credits'}
@@ -108,7 +122,7 @@ class Platform(BaseHTTPRequestHandler):
                     "metadata": {"awaiting": {"credits": True}},
                 }
                 HANDOFF.set()
-        elif not terminal and "background-proof-start" in json.dumps(body["messages"]):
+        elif offered and not terminal and "background-proof-start" in json.dumps(body["messages"]):
             if "card_create" not in called:
                 tool = "card_create"
                 arguments = {
@@ -123,7 +137,16 @@ class Platform(BaseHTTPRequestHandler):
                 CARD = json.loads(result["content"])["data"]["card"]["id"]
         calls = []
         if tool is not None:
-            assert any(item["function"]["name"] == tool for item in body["tools"]), tool
+            # Follow the installed discovery bridge; never enable deferred tools in test config.
+            if tool not in offered:
+                assert {"tool_describe", "tool_call"} <= offered, (tool, offered)
+                if tool not in described:
+                    tool, arguments = "tool_describe", {"names": [tool]}
+                else:
+                    tool, arguments = (
+                        "tool_call",
+                        {"calls": [{"name": tool, "arguments": arguments}]},
+                    )
             calls = [
                 {
                     "id": "proof-" + tool,
