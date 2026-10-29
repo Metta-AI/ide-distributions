@@ -29,6 +29,12 @@ class Workspace:
         self.worker = tmp_path / "worker"
         self.build = tmp_path / "build"
         self.canonical.mkdir()
+        gitops.git(self.canonical, "init", "-q", "-b", "main")
+        gitops.git(self.canonical, "remote", "add", "origin", str(tmp_path / "canonical.git"))
+        self.worker.mkdir()
+        gitops.git(self.worker, "init", "-q", "-b", "main")
+        gitops.git(self.worker, "config", "user.email", "t@example.com")
+        gitops.git(self.worker, "config", "user.name", "T")
         self.store = RecordStore(Layout(self.worker))
         self.experiment = self.store.create("experiment", dict(EXP_DESIGNED))
         for state in ("built", "uploaded")[: ("designed", "built", "uploaded").index(status)]:
@@ -103,8 +109,8 @@ def test_upload_creates_version_event_and_binding(ws):
 
 
 def test_policy_name_is_player_scoped():
-    assert policy_name("opening-rush", "ply_one") == "opening-rush-ply_one"
-    assert policy_name("opening-rush", "ply_one") != policy_name("opening-rush", "ply_two")
+    assert policy_name("opening-rush", "ply_fake") == "opening-rush-ply_fake"
+    assert policy_name("opening-rush", "ply_fake") != policy_name("opening-rush", "ply_two")
 
 
 @pytest.mark.parametrize("name", ["", "UPPER", "with spaces", "with:colon", "x" * 60])
@@ -131,16 +137,18 @@ def test_retry_after_success_returns_binding_without_reupload(ws):
 def test_retry_after_crash_in_upload_reuses_the_version_record(ws, monkeypatch):
     ws.write_build()
 
-    def lost(artifact, name, *, player_id, artifact_type="file"):
+    def lost(artifact, name, *, player_id, artifact_type="file", operation_id=None):
         raise RuntimeError("network lost")
 
     monkeypatch.setattr(ws.sm, "upload", lost)
     with pytest.raises(RuntimeError, match="network lost"):
         ws.run()
     monkeypatch.undo()
-    version_id = ws.run(sm=FakeSoftmax(ws.canonical, {}))
-    assert ws.store.find("version") == [version_id]
-    assert len(ws.uploads()) == 1
+    with pytest.raises(Refused) as pending:
+        ws.run(sm=FakeSoftmax(ws.canonical, {}))
+    assert pending.value.reason == "publication_pending"
+    assert len(ws.store.find("version")) == 1
+    assert len(ws.uploads()) == 0
 
 
 def test_retry_after_event_before_binding_does_not_reupload(ws, monkeypatch):
@@ -305,30 +313,27 @@ def test_advisory_failure_upload_reader_accepts(tmp_path, name):
     assert artifact == ws.build / 'policy.bas'
 
 
-def test_identical_unbound_builds_have_distinct_player_names_and_stable_retries(ws):
+def test_unbound_build_rejects_other_player_and_keeps_stable_retries(ws):
     from ide_research_core.softmax_tool.upload import upload_build
 
     ws.write_build()
-    first = upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
-    second = upload_build(ws.ctx, ws.sm, ws.build, "ply_two", "opening-rush")
-    assert first != second
-    assert {item["name"] for item in ws.uploads().values()} == {
-        "opening-rush-ply_one", "opening-rush-ply_two"
-    }
-    assert upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush") == first
-    assert len(ws.uploads()) == 2
+    first = upload_build(ws.ctx, ws.sm, ws.build, "ply_fake", "opening-rush")
+    with pytest.raises(Refused, match="workspace player"):
+        upload_build(ws.ctx, ws.sm, ws.build, "ply_two", "opening-rush")
+    assert upload_build(ws.ctx, ws.sm, ws.build, "ply_fake", "opening-rush") == first
+    assert len(ws.uploads()) == 1
 
 
 def test_unbound_new_artifact_keeps_lineage_but_gets_new_version(ws):
     from ide_research_core.softmax_tool.upload import upload_build
 
     ws.write_build()
-    first = upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    first = upload_build(ws.ctx, ws.sm, ws.build, "ply_fake", "opening-rush")
     ws.write_build(artifact=b"changed policy")
-    second = upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "opening-rush")
+    second = upload_build(ws.ctx, ws.sm, ws.build, "ply_fake", "opening-rush")
     assert first != second
     assert len(ws.uploads()) == 2
-    assert {item["name"] for item in ws.uploads().values()} == {"opening-rush-ply_one"}
+    assert {item["name"] for item in ws.uploads().values()} == {"opening-rush-ply_fake"}
 
 
 def test_failed_legacy_record_does_not_force_retry_of_conflicting_name(ws, monkeypatch):
@@ -336,7 +341,7 @@ def test_failed_legacy_record_does_not_force_retry_of_conflicting_name(ws, monke
     with monkeypatch.context() as patch:
         patch.setattr("ide_research_core.softmax_tool.upload.policy_name",
                       lambda name, player: "ar-bootstrap-1637c5604a52")
-        def conflict(artifact, name, *, player_id, artifact_type="file"):
+        def conflict(artifact, name, *, player_id, artifact_type="file", operation_id=None):
             raise RuntimeError("409 name taken")
         patch.setattr(ws.sm, "upload", conflict)
         with pytest.raises(RuntimeError, match="409"):
@@ -361,7 +366,7 @@ def test_upload_build_rejects_unchecked_or_changed_artifact(ws, invalid):
 
     ws.write_build(**invalid)
     with pytest.raises(Refused):
-        upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "requested-change")
+        upload_build(ws.ctx, ws.sm, ws.build, "ply_fake", "requested-change")
     assert ws.uploads() == {}
     assert ws.store.find("version") == []
 
@@ -376,7 +381,7 @@ def test_research_worker_cannot_upload_directly(ws, experiment):
         if experiment:
             ws.run()
         else:
-            upload_build(ws.ctx, ws.sm, ws.build, "ply_one", "requested-change")
+            upload_build(ws.ctx, ws.sm, ws.build, "ply_fake", "requested-change")
     assert error.value.reason == "coordinator_required"
     assert ws.uploads() == {}
 
@@ -394,8 +399,7 @@ def test_build_publication_preserves_artifact_type_and_deduplicates(ws, monkeypa
         return original(artifact, name, player_id=player_id, artifact_type=artifact_type)
 
     monkeypatch.setattr(ws.sm, "upload", publish)
-    # A player the conversation selected: the upload names it while the credential stays ply_fake's.
-    selected = "ply_selected"
+    selected = "ply_fake"
     first = upload_build(ws.ctx, ws.sm, ws.build, player_id=selected, name="build")
     assert upload_build(ws.ctx, ws.sm, ws.build, player_id=selected, name="build") == first
     assert calls == [(artifact_type, selected)]

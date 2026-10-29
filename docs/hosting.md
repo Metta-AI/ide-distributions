@@ -92,13 +92,25 @@ source operations remain served by the existing workspace CLI; this removal does
 
 The current supervisor and native inbox own task follow-up. Native goal records are retained,
 but no profile replacement for the IDE goal runner is introduced. Synchronous build/upload
-completion uses native run/task results; asynchronous publication waits require the future
-workspace-local publication contract, not the former platform build tables.
+completion uses native run/task results; asynchronous publication waits use the retained
+workspace-local publication receipts described below.
 
 Release verification must exercise chat, delegation, XP/credit waits and submission completion
 without an IDE database or cogent callback. Validate native inbox recovery separately from the
 transport fake used by the profile tests. Platform authentication, inference, evaluation jobs,
 policy uploads and submissions remain external services; their refusals are still enforced.
+
+### Publication recovery
+
+The workspace saves exact upload inputs and the eventual policy UUID in
+`policy-publications/<local-operation-id>.json` beside its canonical repository.
+Retries query existing platform publication rows; they never repeat an ambiguous upload.
+`research workspace publication --operation-id UUID` performs the same read-only recovery
+when the original artifact or worker checkout is gone. Missing results remain unresolved.
+There is no polling process, platform receipt table, or source-retention dependency.
+
+Requires the released Coworld `policy-lookup` command and its platform lookup endpoint.
+Deploy that endpoint, release Coworld, then update the profile locks before shipping this runtime.
 
 ### Background activity and autosleep
 

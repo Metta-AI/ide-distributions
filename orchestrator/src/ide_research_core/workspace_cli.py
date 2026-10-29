@@ -41,6 +41,7 @@ def _run(handler):
                 _goals,
                 _project_source,
                 _policy_files,
+                _publication,
             ):
                 home = Path(os.environ["HERMES_HOME"])
                 if (home / "plugins/researcher_guard").is_dir():
@@ -152,6 +153,24 @@ def _policy_files(args) -> dict:
     return execute(_clone(args), HermesPolicyFiles.model_validate(payload), request_id)
 
 
+def _publication(args) -> dict:
+    from uuid import UUID
+
+    from ide_research_core.publication import recover
+    from ide_research_core.softmax_tool.protocol import from_env
+
+    clone = _clone(args)
+    receipt = recover(
+        workspace.canonical_of(clone).resolve().parent / "policy-publications",
+        UUID(args.operation_id),
+        from_env(os.environ, clone),
+    )
+    return {
+        "kind": "ok" if receipt.policy else "not_found",
+        "publication": receipt.model_dump(mode="json"),
+    }
+
+
 def _bootstrap(args) -> dict:
     """``--game G`` prepares this profile's clone of another game than ``RESEARCH_GAME``
     (``games.scope``: ``canonical-G.git`` beside ``RESEARCH_CANONICAL``, ``workspace-G``)."""
@@ -230,6 +249,8 @@ def setup(parser: argparse.ArgumentParser) -> None:
     command(
         "records", _records, "read or update native research records from JSON on stdin"
     )
+    sub = command("publication", _publication, "query an original upload without uploading again")
+    sub.add_argument("--operation-id", required=True)
     sub = command(
         "bootstrap",
         _bootstrap,
