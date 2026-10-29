@@ -281,7 +281,19 @@ def source_commit(checkout: Path | None) -> str | None:
     """``git rev-parse --short HEAD`` of the checkout, or None when it is not a repository."""
     if checkout is None:
         return None
-    result = gitops.git(checkout, "rev-parse", "--short", "HEAD", check=False, timeout_s=10)
+    # The release checkout is read-only in hosting and often owned by another user (root in
+    # the image, the runner in CI); git refuses such a repository as "dubious ownership" unless
+    # it is marked safe. Reading HEAD runs nothing from the repository, so mark it for this call.
+    result = gitops.git(
+        checkout,
+        "-c",
+        "safe.directory=*",
+        "rev-parse",
+        "--short",
+        "HEAD",
+        check=False,
+        timeout_s=10,
+    )
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
