@@ -12,6 +12,9 @@ from typing import Any
 
 from research_core.tools.catalog import Role, tools_for
 
+# Two plugin sections share Hermes's 8,000-character budget, headings included (A3.3).
+SECTION_MAX_CHARS = 3800
+
 
 def toolset_name(role: Role) -> str:
     return f"ide-{role}"
@@ -32,6 +35,14 @@ def make_register(role: Role) -> Callable[[Any], None]:
             )
         for hook_name, callback in make_hooks(role).items():
             ctx.register_hook(hook_name, callback)
+        if role == "orchestrator":
+            from research_core.plugin.session_context import make_section
+            from research_core.plugin.turn import make_pre_llm_call
+
+            ctx.register_hook("pre_llm_call", make_pre_llm_call(role))
+            ctx.register_system_prompt_section(
+                "ide-session-context", make_section(role), max_chars=SECTION_MAX_CHARS
+            )
 
     register.__name__ = f"register_{role}"
     return register
