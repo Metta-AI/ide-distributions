@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchestrator desk</title>
+<meta name="description" content="A client of the research seam: chat with the Orchestrator, watch the event stream, answer its asks, browse the records and make user edits.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%231a3875' stroke-width='2.5'/%3E%3C/svg%3E">
+<style>
+/* Ink & Print tokens (the Softmax house style). Every colour below is one of these. */
+:root {
+  --bg: #fffdf4;
+  --surface: #fffaf0;
+  --surface-alt: #f8f6ef;
+  --fg: #111827;
+  --fg-subtle: #555555;
+  --fg-muted: #6b6560;
+  --ink-navy: #1a3875;
+  --ink-sage: #5d6d41;
+  --ink-terracotta: #945637;
+  --ink-gold: #80601f;
+  --ink-silver: #8a8a8a;
+  --accent: #5573a0;
+  --accent-strong: #1a3875;
+  --accent-soft: #eef2f7;
+  --cta: #0e2758;
+  --cta-hover: #1a3875;
+  --cta-active: #0a1c42;
+  --cta-foreground: #fffdf4;
+  --border: #e4dac8;
+  --border-strong: #d4c9b5;
+  --border-subtle: #f0ebe1;
+  --control-border: #8a8a8a;
+  --hover: rgba(26, 56, 117, 0.06);
+  --tint-ok: rgba(110, 128, 80, 0.14);
+  --tint-info: rgba(133, 158, 190, 0.18);
+  --tint-warn: rgba(128, 96, 31, 0.14);
+  --tint-err: rgba(179, 110, 78, 0.14);
+  --tint-muted: rgba(107, 101, 96, 0.10);
+  --serif: Merriweather, Georgia, "Times New Roman", serif;
+  --sans: "Merriweather Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.9375rem;
+  --text-xl: 2rem;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-control: 3px;
+  --radius-pill: 999px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #030712;
+    --surface: #111827;
+    --surface-alt: #1f2937;
+    --fg: #f3f4f6;
+    --fg-subtle: #c9c4ba;
+    --fg-muted: #a8a39a;
+    --ink-navy: #bacbf5;
+    --ink-sage: #a3b88c;
+    --ink-terracotta: #d9a081;
+    --ink-gold: #d4b26a;
+    --accent: #8fa6cc;
+    --accent-strong: #bacbf5;
+    --accent-soft: #1a2740;
+    --cta: #bacbf5;
+    --cta-hover: #d2ddf7;
+    --cta-active: #a3b7e6;
+    --cta-foreground: #0e2758;
+    --border: #374151;
+    --border-strong: #4b5563;
+    --border-subtle: #1f2937;
+    --hover: rgba(186, 203, 245, 0.08);
+    --tint-ok: rgba(110, 128, 80, 0.22);
+    --tint-info: rgba(133, 158, 190, 0.22);
+    --tint-warn: rgba(128, 96, 31, 0.25);
+    --tint-err: rgba(179, 110, 78, 0.22);
+    --tint-muted: rgba(168, 163, 154, 0.14);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-12);
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 var(--text-sm)/1.5 var(--sans);
+}
+.page { max-width: 1280px; margin: 0 auto; }
+h1 { font: 700 var(--text-xl)/1.15 var(--serif); margin: 0; }
+h2 {
+  font: 700 var(--text-sm)/1.2 var(--serif);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-navy);
+  margin: 0 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--border-strong);
+}
+h3 { font: 700 var(--text-sm)/1.3 var(--serif); margin: 0; }
+.eyebrow, dt, th, label > span, .msg-speaker {
+  font: 700 var(--text-xs)/1.3 var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-subtle);
+}
+.mono, code, pre, td.num, .msg-meta { font-family: var(--mono); font-feature-settings: "tnum" 1; }
+.muted { color: var(--fg-muted); }
+.empty em { color: var(--fg-muted); }
+p { margin: 0; }
+a { color: var(--ink-navy); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skip {
+  position: absolute; left: -999px; top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface); color: var(--fg);
+  border: 1px solid var(--control-border); border-radius: var(--radius-control);
+}
+.skip:focus { left: var(--space-4); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* masthead and the health strip */
+.masthead { padding-top: var(--space-6); }
+.masthead-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-6); }
+.deck { color: var(--fg-subtle); max-width: 72ch; overflow-wrap: anywhere; }
+.health {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6);
+  margin: var(--space-4) 0 0; padding: var(--space-3) 0;
+  border-top: 1px solid var(--border); border-bottom: 2px solid var(--border-strong);
+}
+.health > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.health dd { margin: 0; overflow-wrap: anywhere; }
+
+/* layout */
+main { display: grid; gap: var(--space-8); margin-top: var(--space-8); }
+.columns { display: grid; gap: var(--space-8); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) {
+  .columns { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .columns.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+section { min-width: 0; }
+.stack > section + section { margin-top: var(--space-8); }
+
+/* controls */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 32px; padding: var(--space-1) var(--space-3);
+  font: 700 var(--text-sm)/1.2 var(--sans);
+  color: var(--fg); background: var(--surface);
+  border: 1px solid var(--control-border); border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.btn:hover { background: var(--surface-alt); }
+.btn:active { background: var(--hover); }
+.btn.primary { color: var(--cta-foreground); background: var(--cta); border-color: var(--cta); }
+.btn.primary:hover { background: var(--cta-hover); border-color: var(--cta-hover); }
+.btn.primary:active { background: var(--cta-active); border-color: var(--cta-active); }
+.btn.small { min-height: 24px; padding: 2px var(--space-2); font-size: var(--text-xs); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+label { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+input, select, textarea {
+  font: 400 var(--text-sm)/1.4 var(--sans);
+  color: var(--fg); background: var(--surface-alt);
+  border: 1px solid var(--control-border); border-radius: var(--radius-control);
+  padding: var(--space-1) var(--space-2); min-height: 32px; min-width: 0; width: 100%;
+}
+textarea { resize: vertical; font-size: var(--text-md); }
+.fields { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+.hint { margin-top: var(--space-2); color: var(--fg-muted); }
+.hint + form { margin-top: var(--space-3); }
+.ok-text { color: var(--ink-sage); }
+.err-text { color: var(--ink-terracotta); }
+.result {
+  margin-top: var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: var(--mono); font-size: var(--text-xs); line-height: 1.5;
+  max-height: 320px; overflow: auto;
+}
+
+/* status chips: the word carries the meaning, the tint only repeats it */
+.chip {
+  display: inline-block; padding: var(--space-1) var(--space-2); border-radius: var(--radius-pill);
+  font: 700 var(--text-xs)/1 var(--sans); text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap; vertical-align: middle;
+  background: var(--tint-muted); color: var(--fg-subtle);
+}
+.chip.ok { background: var(--tint-ok); color: var(--ink-sage); }
+.chip.info { background: var(--tint-info); color: var(--accent-strong); }
+.chip.warn { background: var(--tint-warn); color: var(--ink-gold); }
+.chip.err { background: var(--tint-err); color: var(--ink-terracotta); }
+.pulse {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-gold); margin-right: var(--space-1); vertical-align: 1px;
+  animation: pulse-dot 1.5s ease infinite;
+}
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+/* record references: G-1, T-3, V-1, ... jump to the record */
+.ref {
+  font: 700 var(--text-xs)/1 var(--mono); color: var(--ink-navy);
+  background: none; border: 0; border-bottom: 1px solid var(--ink-navy); border-radius: 0;
+  padding: 0 1px 1px; cursor: pointer;
+}
+.ref:hover { background: var(--hover); }
+td > .ref { padding: 6px 2px; }  /* a standalone target: at least 24px tall (WCAG 2.5.8) */
+tr.target > td { background: var(--accent-soft); }
+
+/* the conversation */
+.messages { list-style: none; margin: 0; padding: 0; }
+.msg { padding: var(--space-3) 0; border-bottom: 1px solid var(--border-subtle); }
+.msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); }
+.msg.assistant .msg-speaker { color: var(--ink-navy); }
+.msg-meta { font-size: var(--text-xs); color: var(--fg-muted); overflow-wrap: anywhere; }
+.msg-text {
+  margin-top: var(--space-1); font-size: var(--text-md); line-height: 1.55;
+  max-width: 70ch; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.msg-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.composer { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.composer .fields { margin-top: var(--space-3); }
+details { margin-top: var(--space-4); }
+summary { cursor: pointer; font-weight: 700; }
+details ul { margin: var(--space-2) 0 0; padding-left: var(--space-4); }
+details li + li { margin-top: var(--space-1); }
+
+/* lists */
+.plain { list-style: none; margin: 0; padding: 0; }
+.plain > li { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); }
+.ask-options { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); align-items: center; }
+.ask-options form { display: flex; gap: var(--space-2); flex: 1 1 220px; }
+pre.doc {
+  margin: var(--space-1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: var(--text-xs); line-height: 1.5; max-height: 240px; overflow: auto;
+}
+pre.prose { font-family: var(--sans); font-size: var(--text-sm); max-width: 70ch; }
+li.target { background: var(--accent-soft); }
+
+/* tables */
+.scroll-x { overflow-x: auto; position: relative; }  /* contains the sr-only header text too */
+table { width: 100%; min-width: 640px; border-collapse: collapse; }  /* narrow screens scroll the table, not squeeze it */
+th { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
+td { padding: var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; overflow-wrap: anywhere; }
+td.num, th.num { text-align: right; }
+td.nowrap { white-space: nowrap; }
+.log { max-height: 400px; overflow-y: auto; }
+.log .num { min-width: 3ch; text-align: right; }
+.event-summary { font-size: var(--text-xs); overflow-wrap: anywhere; }
+.tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-bottom: var(--space-3); }
+.tab {
+  min-height: 32px; padding: var(--space-1) var(--space-3);
+  font: 700 var(--text-sm)/1.2 var(--sans); color: var(--fg-subtle);
+  background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer;
+}
+.tab:hover { color: var(--fg); background: var(--hover); }
+.tab[aria-selected="true"] { color: var(--ink-navy); border-bottom-color: var(--ink-navy); }
+.count { font-weight: 400; color: var(--fg-muted); }
+tr.detail > td { background: var(--surface-alt); }
+footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1px solid var(--border); color: var(--fg-muted); max-width: 72ch; }
+</style>
+</head>
+<body>
+<a class="skip" href="#composer-input">Skip to the message box</a>
+<div class="page">
+
+<header class="masthead">
+  <div class="masthead-row">
+    <h1>Orchestrator</h1>
+    <p class="deck">A client of the seam at <span id="origin" class="mono"></span>. Session <span id="session-id" class="mono">opening…</span></p>
+  </div>
+  <dl class="health" id="health" aria-live="polite">
+    <div><dt>Profile</dt><dd id="h-profile">…</dd></div>
+    <div><dt>Active Coworld</dt><dd id="h-coworld">…</dd></div>
+    <div><dt>Contract</dt><dd id="h-contract">…</dd></div>
+    <div><dt>Watcher heartbeat</dt><dd id="h-heartbeat">…</dd></div>
+    <div><dt>Has work</dt><dd id="h-work">…</dd></div>
+    <div><dt>Paused</dt><dd id="h-paused">…</dd></div>
+    <div><dt>Streams</dt><dd id="h-streams">…</dd></div>
+  </dl>
+  <p class="hint err-text" id="page-error" role="alert" hidden></p>
+</header>
+
+<main>
+  <div class="columns">
+    <section aria-labelledby="h-conversation">
+      <h2 id="h-conversation">Conversation</h2>
+      <ol class="messages" id="messages" role="log" aria-live="polite">
+        <li class="msg empty"><em>No messages yet. Say something below.</em></li>
+      </ol>
+      <form class="composer" id="composer">
+        <label for="composer-input"><span>Message to the Orchestrator</span>
+          <textarea id="composer-input" rows="3" required autocomplete="off"></textarea>
+        </label>
+        <div class="fields">
+          <label for="ctx-mode"><span>Mode (any name, up to 40 characters)</span>
+            <input id="ctx-mode" list="mode-names" maxlength="40" autocomplete="off">
+            <datalist id="mode-names">
+              <option value="research"></option>
+              <option value="coach"></option>
+              <option value="review"></option>
+              <option value="plan"></option>
+            </datalist>
+          </label>
+          <label for="ctx-instruction"><span>Mode instruction</span>
+            <input id="ctx-instruction" maxlength="1000" autocomplete="off">
+          </label>
+          <label for="ctx-on-screen"><span>On screen (references, comma separated)</span>
+            <input id="ctx-on-screen" autocomplete="off" placeholder="G-1, T-3">
+          </label>
+          <label for="ctx-view"><span>View id</span>
+            <input id="ctx-view" maxlength="120" autocomplete="off" placeholder="leaderboard">
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary" id="send">Send</button>
+          <span class="muted">Enter sends; Shift+Enter starts a new line. Sent as user:local with the context fields above.</span>
+        </div>
+        <p class="hint" id="composer-status" aria-live="polite"></p>
+      </form>
+      <details>
+        <summary>Try these against the scripted Orchestrator (tools/ui_dev.py)</summary>
+        <ul>
+          <li><strong>Submit the starter as my champion.</strong> Switches to the fake Coworld; the setup wake uploads and submits the starter within a few watcher ticks and sends a notice.</li>
+          <li>A message containing <strong>ask me</strong> opens a question with two options; answer it under Asks.</li>
+          <li>A message containing <strong>notify</strong> sends a notice.</li>
+          <li>A message containing <strong>goal</strong> creates a Goal (once a Coworld is active), brings it into view under Now showing and sets a markdown panel about it.</li>
+          <li>Anything else is answered with <strong>Noted: …</strong>. A real Orchestrator (Options A to C in docs/local-end-to-end.md) answers as the model sees fit.</li>
+        </ul>
+      </details>
+    </section>
+
+    <div class="stack">
+      <section aria-labelledby="h-show">
+        <h2 id="h-show">Now showing</h2>
+        <p id="show" class="empty"><em>Nothing brought into view yet.</em></p>
+      </section>
+      <section aria-labelledby="h-asks">
+        <h2 id="h-asks">Asks</h2>
+        <ul class="plain" id="asks"><li class="empty"><em>No questions yet.</em></li></ul>
+      </section>
+      <section aria-labelledby="h-panels">
+        <h2 id="h-panels">Panels</h2>
+        <div id="panels"><p class="empty"><em>No panels set yet.</em></p></div>
+      </section>
+      <section aria-labelledby="h-notices">
+        <h2 id="h-notices">Notices</h2>
+        <ol class="plain" id="notices"><li class="empty"><em>No notices yet.</em></li></ol>
+      </section>
+      <section aria-labelledby="h-events">
+        <h2 id="h-events">Events</h2>
+        <p class="hint" id="events-note">Newest first, from both stores' streams; the last 300 are kept. Each line: seq, time, store, kind, subject, then a summary of the payload.</p>
+        <ol class="plain log" id="events" aria-labelledby="h-events"><li class="empty"><em>No events yet.</em></li></ol>
+      </section>
+    </div>
+  </div>
+
+  <section aria-labelledby="h-records" id="records">
+    <h2 id="h-records">Records</h2>
+    <p class="hint" id="records-note"></p>
+    <div class="tabs" role="tablist" aria-label="Record kinds" id="tabs"></div>
+    <div id="tab-panels"></div>
+  </section>
+
+  <div class="columns even">
+    <section aria-labelledby="h-edits">
+      <h2 id="h-edits">Edits as user:local</h2>
+      <p class="hint">Each goes through POST /store/apply, the user-edit allow-list; the store answers with the record or a refusal.</p>
+      <form id="edit-form">
+        <div class="fields">
+          <label for="edit-op"><span>Operation</span>
+            <select id="edit-op">
+              <option value="directives.add">Add a Directive</option>
+              <option value="goals.update">Rename a Goal</option>
+              <option value="goals.set_status">Set a Goal's status</option>
+              <option value="settings.update">Change a setting</option>
+              <option value="workspace.pause">Pause the watcher</option>
+              <option value="workspace.resume">Resume the watcher</option>
+            </select>
+          </label>
+        </div>
+        <div class="fields" id="edit-fields" style="margin-top: var(--space-3)"></div>
+        <div class="actions">
+          <button type="submit" class="btn" id="edit-apply">Apply</button>
+          <span class="muted" id="edit-op-note"></span>
+        </div>
+        <p class="result" id="edit-result" role="status"></p>
+      </form>
+    </section>
+
+    <section aria-labelledby="h-raw">
+      <h2 id="h-raw">Raw request</h2>
+      <p class="hint">Any route of the seam, for what the page does not cover.</p>
+      <form id="raw-form">
+        <div class="fields">
+          <label for="raw-method"><span>Method</span>
+            <select id="raw-method"><option>GET</option><option>POST</option></select>
+          </label>
+          <label for="raw-path"><span>Path</span>
+            <input id="raw-path" value="/health" autocomplete="off" required>
+          </label>
+        </div>
+        <label for="raw-body" style="margin-top: var(--space-3)"><span>JSON body (POST)</span>
+          <textarea id="raw-body" rows="4">{}</textarea>
+        </label>
+        <div class="actions">
+          <button type="submit" class="btn" id="raw-send">Send request</button>
+          <span class="muted">session_id is filled in when the body leaves it empty.</span>
+        </div>
+        <p class="result" id="raw-result" role="status"></p>
+      </form>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <p>Reads GET /health, /status, /snapshot and /stream (Server-Sent Events); writes POST /session-open, /message, /ui-action and /store/apply as user:local; polls GET /runs/&lt;id&gt; while a run is live. Times are shown in this browser's time zone.</p>
+</footer>
+</div>
+
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const ACTOR = "user:local";
+  const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "unknown"]);
+  const STATUS_POLL_MS = 5000;
+  const RUN_POLL_MS = 500;
+  const EVENT_CAP = 300;
+  const WORKSPACE = "workspace";
+  // Which snapshot table each Records tab shows, with its columns. "store" is where the rows
+  // come from (the registry: Goals, Tasks, Versions, Claims and Experiments live in the Coworld
+  // store; Directives and settings in both).
+  const TABS = [
+    {key: "goals", label: "Goals", stores: ["coworld"], table: "goals", columns: ["id", "title", "status", "updated"]},
+    {key: "tasks", label: "Tasks", stores: ["coworld"], table: "tasks", columns: ["id", "title", "type", "status", "updated"]},
+    {key: "versions", label: "Versions", stores: ["coworld"], table: "versions", columns: ["id", "summary", "source", "uploaded", "created"]},
+    {key: "claims", label: "Claims", stores: ["coworld"], table: "claims", columns: ["id", "summary", "status", "updated"]},
+    {key: "experiments", label: "Experiments", stores: ["coworld"], table: "experiments", columns: ["id", "summary", "status", "created"]},
+    {key: "directives", label: "Directives", stores: ["workspace", "coworld"], table: "directives", columns: ["id", "text", "scope", "status", "store", "created"]},
+    {key: "settings", label: "Settings", stores: ["workspace", "coworld"], table: "settings", columns: ["key", "value", "scope"]},
+  ];
+  const COLUMN_LABELS = {id: "Id", title: "Title", status: "Status", updated: "Last update", type: "Type", summary: "Summary", source: "Source", uploaded: "Uploaded", created: "Created", text: "Text", scope: "Scope", store: "Store", key: "Key", value: "Value"};
+  const REF_TABS = {G: "goals", T: "tasks", V: "versions", C: "claims", X: "experiments", D: "directives"};
+  const TONES = {
+    ok: ["active", "complete", "completed", "confirmed", "done", "ok", "champion", "placed", "answered", "merged"],
+    info: ["running", "in-progress", "processing", "queued", "open", "qualifying", "competing", "submitted", "uploaded", "start", "steer"],
+    warn: ["pending", "proposed", "unclaimed", "parked", "waiting", "inconclusive", "unknown", "stopping"],
+    err: ["failed", "abandoned", "refuted", "rejected", "broken", "cancelled", "interrupted", "retired", "superseded", "unreachable"],
+  };
+
+  const state = {
+    session: null,
+    health: null,
+    status: null,
+    messages: [],
+    nextMessage: 1,
+    tracked: {},          // run id -> the assistant message that shows its output
+    events: [],
+    notices: new Map(),   // display id -> notice
+    docs: {},             // conversation -> UI state document
+    docVersions: {},      // conversation -> the document version the page holds
+    snapshots: {workspace: null, coworld: null},
+    seen: {},             // store -> the seq of its last snapshot (events up to it are history)
+    coworldMissing: false,
+    streams: {},
+    streamState: {},
+    snapshotTimers: {},
+    tab: "goals",
+  };
+
+  // --- helpers --------------------------------------------------------------------------
+
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const truncate = (text, n) => (text.length > n ? text.slice(0, n - 1) + "…" : text);
+  const toneFor = (status) => {
+    const s = String(status ?? "").toLowerCase();
+    for (const [tone, words] of Object.entries(TONES)) if (words.includes(s)) return tone;
+    return "";
+  };
+  const chip = (status, live) => status == null || status === "" ? "" :
+    `<span class="chip ${toneFor(status)}">${live ? '<span class="pulse" aria-hidden="true"></span>' : ""}${esc(status)}</span>`;
+  const fmtTime = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+    return Number.isNaN(d.getTime()) ? esc(iso) : `<time datetime="${esc(iso)}" title="${esc(iso)}">${d.toLocaleTimeString([], {hour12: false})}</time>`;
+  };
+  const linkify = (text) => esc(text).replace(/\b([GTVCXDN])-(\d+)\b/g, (m) => `<button type="button" class="ref" data-ref="${m}">${m}</button>`);
+  const json = (value) => esc(JSON.stringify(value, null, 2));
+  const setText = (id, html) => { $(id).innerHTML = html; };
+  const showError = (message) => { const el = $("page-error"); el.textContent = message; el.hidden = false; };
+
+  async function api(method, path, body) {
+    const init = {method, headers: {Accept: "application/json"}};
+    if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
+    const response = await fetch(path, init);
+    let payload = {};
+    try { payload = await response.json(); } catch (error) { payload = {error: `no JSON body (${error.message})`}; }
+    if (!response.ok) {
+      const problems = (payload.problems || []).length ? ` — ${payload.problems.join("; ")}` : "";
+      const error = new Error(`${method} ${path} → HTTP ${response.status}: ${payload.error || "error"}${problems}`);
+      error.status = response.status; error.body = payload;
+      throw error;
+    }
+    return payload;
+  }
+
+  // --- health and the watcher's status ---------------------------------------------------
+
+  async function pollHealth() {
+    try {
+      const [health, status] = await Promise.all([api("GET", "/health"), api("GET", "/status")]);
+      const hadCoworld = state.health && state.health.coworld;
+      state.health = health; state.status = status;
+      renderHealth();
+      if (health.coworld && !hadCoworld && state.coworldMissing) loadSnapshot("coworld");
+    } catch (error) {
+      setText("h-heartbeat", `<span class="err-text">unreachable: ${esc(error.message)}</span>`);
+    }
+  }
+
+  function renderHealth() {
+    const h = state.health || {}, s = state.status || {};
+    setText("h-profile", esc(h.profile || "…"));
+    setText("h-coworld", h.coworld ? linkify(h.coworld) : '<em class="muted">none active</em>');
+    setText("h-contract", h.contract_version ? `v${esc(h.contract_version)}` : "…");
+    if (s.heartbeat) {
+      const age = s.heartbeat_age_s;
+      const shown = age < 90 ? `${Math.round(age)} s ago` : `${Math.round(age / 60)} min ago`;
+      setText("h-heartbeat", `${shown} <span class="muted">(${fmtTime(s.heartbeat)}, polled every ${STATUS_POLL_MS / 1000} s)</span>`);
+    } else {
+      setText("h-heartbeat", '<em class="muted">no tick yet</em>');
+    }
+    const reasons = (s.waiting_on || []).length ? `: ${esc(s.waiting_on.join(", "))}` : "";
+    setText("h-work", s.has_work ? `yes${reasons}` : "no");
+    setText("h-paused", s.paused ? `yes${s.paused_drained ? " (drained)" : " (draining)"}` : "no");
+    const streams = Object.entries(state.streamState).map(([store, st]) => `${esc(store)} ${esc(st)}`);
+    setText("h-streams", streams.length ? streams.join(" · ") : '<em class="muted">none open</em>');
+  }
+
+  // --- the session and the conversation ---------------------------------------------------
+
+  async function openSession() {
+    const reply = await api("POST", "/session-open", {
+      client: {id: "ui", kind: "web-ide"},
+      actor: ACTOR,
+      capabilities: {ui: ["ask", "show", "panel_set", "notify"], panels: ["markdown"], reactions: true},
+    });
+    state.session = reply.session_id;
+    setText("session-id", esc(reply.session_id));
+    if ((reply.problems || []).length) showError(`session-open problems: ${reply.problems.join("; ")}`);
+  }
+
+  function buildContext() {
+    const context = {contract_version: 1};
+    const mode = $("ctx-mode").value.trim(), instruction = $("ctx-instruction").value.trim();
+    if (mode) { context.mode = {name: mode}; if (instruction) context.mode.instruction = instruction; }
+    const onScreen = $("ctx-on-screen").value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20);
+    if (onScreen.length) context.on_screen = onScreen;
+    const view = $("ctx-view").value.trim();
+    if (view) context.view = {id: view};
+    return context;
+  }
+
+  function addMessage(message) {
+    message.id = `m-${state.nextMessage++}`;
+    state.messages.push(message);
+    renderMessages();
+    return message;
+  }
+
+  async function send(event) {
+    event.preventDefault();
+    const input = $("composer-input");
+    const text = input.value.trim();
+    if (!text || !state.session) return;
+    const button = $("send");
+    button.disabled = true;
+    setText("composer-status", "Sending…");
+    try {
+      const context = buildContext();
+      const reply = await api("POST", "/message", {session_id: state.session, message: text, actor: ACTOR, context});
+      input.value = "";
+      addMessage({role: "user", text, run_id: reply.run_id, delivered: reply.delivered, context});
+      const problems = (reply.problems || []).length ? ` Problems: ${reply.problems.join("; ")}.` : "";
+      setText("composer-status", `Delivered as <strong>${esc(reply.delivered)}</strong> to <span class="mono">${esc(reply.run_id)}</span> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
+      trackRun(reply.run_id);
+    } catch (error) {
+      setText("composer-status", `<span class="err-text">Not sent: ${esc(error.message)}</span>`);
+    } finally {
+      button.disabled = false;
+      input.focus();
+    }
+  }
+
+  function trackRun(runId) {
+    if (state.tracked[runId]) return;
+    const message = addMessage({role: "assistant", text: "", run_id: runId, status: "running", done: false});
+    state.tracked[runId] = message;
+    (async () => {
+      for (;;) {
+        let run;
+        try { run = await api("GET", `/runs/${encodeURIComponent(runId)}`); }
+        catch (error) { message.status = "unreachable"; message.text = error.message; message.done = true; renderMessages(); return; }
+        message.status = run.status;
+        if (run.terminal || TERMINAL.has(run.status)) {
+          message.text = run.output || (run.error ? `Run ${run.status}: ${run.error}` : `Run ${run.status} with no output.`);
+          message.done = true;
+          renderMessages();
+          return;
+        }
+        renderMessages();
+        await sleep(RUN_POLL_MS);
+      }
+    })();
+  }
+
+  async function react(message, value, button) {
+    try {
+      const reply = await api("POST", "/ui-action", {session_id: state.session, action: "reaction", payload: {message_id: message.id, value}, actor: ACTOR});
+      message.reaction = {value, ack: `Reaction ${value} recorded as ${ACTOR} in UI state version ${reply.version}; the agent sees it at its next turn (no run started).`};
+    } catch (error) {
+      message.reaction = {value, ack: `Reaction refused: ${error.message}`, failed: true};
+    }
+    renderMessages();
+    if (button) { const again = document.querySelector(`[data-react="${message.id}:${value}"]`); if (again) again.focus(); }
+  }
+
+  function renderMessages() {
+    const list = $("messages");
+    if (!state.messages.length) { list.innerHTML = '<li class="msg empty"><em>No messages yet. Say something below.</em></li>'; return; }
+    list.innerHTML = state.messages.map((m) => {
+      if (m.role === "user") {
+        const ctx = Object.keys(m.context || {}).filter((k) => k !== "contract_version");
+        const meta = `${esc(m.delivered)} · ${esc(m.run_id)}${ctx.length ? ` · context: ${esc(ctx.join(", "))}` : ""}`;
+        return `<li class="msg user" id="${m.id}"><div class="msg-head"><span class="msg-speaker">You</span><span class="msg-meta">${meta}</span></div><p class="msg-text">${linkify(m.text)}</p></li>`;
+      }
+      const live = !m.done;
+      const text = m.done ? linkify(m.text) : '<em class="muted">Waiting for the run to finish…</em>';
+      const reactions = m.done ? `<div class="msg-foot">
+        <span class="muted">React:</span>
+        <button type="button" class="btn small" data-react="${m.id}:thumbs_up" aria-pressed="${m.reaction && m.reaction.value === "thumbs_up"}">Helpful</button>
+        <button type="button" class="btn small" data-react="${m.id}:thumbs_down" aria-pressed="${m.reaction && m.reaction.value === "thumbs_down"}">Not helpful</button>
+        ${m.reaction ? `<span class="${m.reaction.failed ? "err-text" : "ok-text"}">${esc(m.reaction.ack)}</span>` : ""}
+      </div>` : "";
+      return `<li class="msg assistant" id="${m.id}"><div class="msg-head"><span class="msg-speaker">Orchestrator</span><span class="msg-meta">${esc(m.id)} · ${esc(m.run_id)}</span>${chip(m.status, live)}</div><p class="msg-text">${text}</p>${reactions}</li>`;
+    }).join("");
+  }
+
+  // --- the streams ----------------------------------------------------------------------
+
+  function openStream(store, after) {
+    // The browser reconnects on its own and sends Last-Event-ID with the last `id:` it saw,
+    // so a dropped connection resumes where it stopped; `after` only matters for the first open.
+    const source = new EventSource(`/stream?store=${encodeURIComponent(store)}&after=${after}`);
+    state.streams[store] = source;
+    state.streamState[store] = "connecting";
+    source.onopen = () => { state.streamState[store] = "open"; renderHealth(); };
+    source.onerror = () => { state.streamState[store] = "reconnecting"; renderHealth(); };
+    source.onmessage = (frame) => {
+      let event;
+      try { event = JSON.parse(frame.data); } catch (error) { return; }
+      if (event.seq == null && frame.lastEventId) event.seq = Number(frame.lastEventId);
+      handleEvent(event);
+    };
+    renderHealth();
+  }
+
+  function handleEvent(event) {
+    // The stream starts at 0 so the log shows the store's history; an event at or before the
+    // snapshot's seq is history the snapshot already reflects, so it changes no state here.
+    const historical = event.seq <= (state.seen[event.store] || 0);
+    state.events.unshift(event);
+    if (state.events.length > EVENT_CAP) state.events.length = EVENT_CAP;
+    renderEvents();
+    if (event.kind === "notice") {
+      if (!state.notices.has(event.subject)) state.notices.set(event.subject, {id: event.subject, at: event.at, ...event.payload});
+      renderNotices();
+      return;
+    }
+    if (event.kind === "ui.patch") {
+      const {conversation, version, ops} = event.payload;
+      if (!(version > (state.docVersions[conversation] || 0))) return;  // the page holds a newer document
+      try {
+        state.docs[conversation] = applyOps(state.docs[conversation] || {}, ops || []);
+        state.docVersions[conversation] = version;
+        renderUiState();
+      } catch (error) {
+        scheduleSnapshot(WORKSPACE);  // the document drifted; the snapshot is the truth
+      }
+      return;
+    }
+    if (historical) return;
+    if (event.kind === "coworld.switched" || event.kind === "coworld.registered") {
+      pollHealth();
+      loadSnapshot("coworld");
+    }
+    if (event.kind !== "watcher.heartbeat" && event.kind !== "turn.rendered") scheduleSnapshot(event.store);
+  }
+
+  function applyOps(doc, ops) {
+    // RFC 6902 add, replace, remove and test on a copy, as the store applies them.
+    doc = JSON.parse(JSON.stringify(doc));
+    for (const op of ops) {
+      if (op.op === "test") continue;
+      const tokens = op.path.split("/").slice(1).map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+      if (!tokens.length) { doc = op.op === "remove" ? {} : op.value; continue; }
+      let parent = doc;
+      for (const token of tokens.slice(0, -1)) {
+        if (parent == null || typeof parent !== "object") throw new Error(`no ${token} in ${op.path}`);
+        parent = parent[token];
+      }
+      if (parent == null || typeof parent !== "object") throw new Error(`no parent for ${op.path}`);
+      const last = tokens[tokens.length - 1];
+      if (Array.isArray(parent)) {
+        if (op.op === "remove") parent.splice(Number(last), 1);
+        else if (last === "-") parent.push(op.value);
+        else if (op.op === "add") parent.splice(Number(last), 0, op.value);
+        else parent[Number(last)] = op.value;
+      } else if (op.op === "remove") delete parent[last];
+      else parent[last] = op.value;
+    }
+    return doc;
+  }
+
+  function summarize(event) {
+    const p = event.payload || {};
+    if (event.kind === "notice") return esc(p.text || "");
+    if (event.kind === "ui.patch") return esc(`v${p.version} · ${(p.ops || []).map((o) => `${o.op} ${o.path}`).join(", ")}`);
+    const parts = Object.entries(p).slice(0, 3).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`);
+    return esc(truncate(parts.join(" · "), 110));
+  }
+
+  function renderEvents() {
+    const list = $("events");
+    if (!state.events.length) { list.innerHTML = '<li class="empty"><em>No events yet.</em></li>'; return; }
+    list.innerHTML = state.events.map((e) => `<li><div class="row"><span class="mono num">${esc(e.seq)}</span><span class="muted">${fmtTime(e.at)}</span><span class="muted">${esc(e.store)}</span><span class="mono">${esc(e.kind)}</span><span class="mono">${linkify(e.subject)}</span></div><p class="muted event-summary">${summarize(e)}</p></li>`).join("");
+  }
+
+  // --- notices and UI state ----------------------------------------------------------------
+
+  function renderNotices() {
+    const list = $("notices");
+    const items = [...state.notices.values()].sort((a, b) => (a.at < b.at ? 1 : -1));
+    if (!items.length) { list.innerHTML = '<li class="empty"><em>No notices yet.</em></li>'; return; }
+    list.innerHTML = items.map((n) => `<li data-id="${esc(n.id)}"><div class="row"><span class="mono muted">${esc(n.id)}</span>${chip(n.urgency)}<span class="muted">${fmtTime(n.at || n.created)}</span>${(n.refs || []).length ? `<span class="muted">about ${(n.refs || []).map(linkify).join(", ")}</span>` : ""}</div><p>${linkify(n.text)}</p></li>`).join("");
+  }
+
+  function renderUiState() {
+    const docs = Object.entries(state.docs);
+    // Now showing: the newest `show` of any conversation.
+    const shows = docs.filter(([, d]) => d.show).map(([c, d]) => ({conversation: c, ...d.show})).sort((a, b) => (a.at < b.at ? 1 : -1));
+    if (shows.length) {
+      const s = shows[0];
+      setText("show", `${s.ref ? `record ${linkify(s.ref)}` : `view <span class="mono">${esc(s.view)}</span>`} <span class="muted">· ${esc(s.conversation === state.session ? "this conversation" : s.conversation)} · ${fmtTime(s.at)}</span>`);
+      $("show").classList.remove("empty");
+    } else {
+      $("show").innerHTML = "<em>Nothing brought into view yet.</em>"; $("show").classList.add("empty");
+    }
+    // Asks: open first, then answered, newest first.
+    const asks = [];
+    for (const [conversation, doc] of docs) for (const [id, ask] of Object.entries(doc.asks || {})) asks.push({id, conversation, ...ask});
+    asks.sort((a, b) => (a.status !== b.status ? (a.status === "open" ? -1 : 1) : (a.at < b.at ? 1 : -1)));
+    const askList = $("asks");
+    if (!asks.length) askList.innerHTML = '<li class="empty"><em>No questions yet.</em></li>';
+    else askList.innerHTML = asks.map((a) => {
+      const head = `<div class="row"><span class="mono muted">${esc(a.id)}</span>${chip(a.status)}<span class="muted">${esc(a.conversation === state.session ? "this conversation" : a.conversation)} · ${fmtTime(a.at)}</span></div><p>${linkify(a.question)}</p>${(a.refs || []).length ? `<p class="muted">about ${a.refs.map(linkify).join(", ")}</p>` : ""}`;
+      if (a.status !== "open") return `<li>${head}<p class="ok-text">Answered <strong>${esc(typeof a.answer === "string" ? a.answer : JSON.stringify(a.answer))}</strong> by ${esc(a.answered_by || "?")}.</p></li>`;
+      const options = (a.options || []).map((o) => `<button type="button" class="btn small" data-answer="${esc(a.id)}" data-value="${esc(o)}">${esc(o)}</button>`).join("");
+      return `<li>${head}<div class="ask-options">${options}<form data-answer-form="${esc(a.id)}"><label for="answer-${esc(a.id)}" class="sr-only">Another answer</label><input id="answer-${esc(a.id)}" placeholder="Another answer" autocomplete="off"><button type="submit" class="btn small">Answer</button></form></div><p class="hint" id="ask-status-${esc(a.id)}"></p></li>`;
+    }).join("");
+    // Panels
+    const panels = [];
+    for (const [conversation, doc] of docs) for (const [name, panel] of Object.entries(doc.panels || {})) panels.push({name, conversation, ...panel});
+    const panelBox = $("panels");
+    if (!panels.length) panelBox.innerHTML = '<p class="empty"><em>No panels set yet.</em></p>';
+    else panelBox.innerHTML = panels.map((p) => `<div style="margin-bottom: var(--space-3)"><div class="row"><h3>${esc(p.name)}</h3><span class="muted">${esc(p.kind)} panel · ${esc(p.conversation === state.session ? "this conversation" : p.conversation)}${p.at ? ` · ${fmtTime(p.at)}` : ""}</span></div>${p.kind === "markdown" ? `<pre class="doc prose">${linkify(String(p.content ?? ""))}</pre>` : `<pre class="doc">${json(p.content)}</pre>`}</div>`).join("");
+  }
+
+  async function answer(askId, value) {
+    const status = $(`ask-status-${askId}`);
+    if (status) status.textContent = "Sending the answer…";
+    try {
+      const reply = await api("POST", "/ui-action", {session_id: state.session, action: "answer", payload: {ask_id: askId, value}, actor: ACTOR});
+      addMessage({role: "user", text: `Answer to ${askId}: ${value}`, run_id: reply.run_id, delivered: reply.delivered, context: {}});
+      trackRun(reply.run_id);
+    } catch (error) {
+      if (status) { status.textContent = `Not accepted: ${error.message}`; status.classList.add("err-text"); }
+    }
+  }
+
+  // --- snapshots and records --------------------------------------------------------------
+
+  function scheduleSnapshot(store) {
+    clearTimeout(state.snapshotTimers[store]);
+    state.snapshotTimers[store] = setTimeout(() => loadSnapshot(store), 300);
+  }
+
+  async function loadSnapshot(store) {
+    try {
+      const snapshot = await api("GET", `/snapshot?store=${encodeURIComponent(store)}`);
+      state.snapshots[store] = snapshot;
+      state.seen[store] = snapshot.seq;
+      if (store === "coworld") state.coworldMissing = false;
+      if (store === WORKSPACE) {
+        for (const entry of snapshot.ui_state || []) { state.docs[entry.conversation] = entry.doc; state.docVersions[entry.conversation] = entry.version; }
+        for (const n of (snapshot.records.notices || [])) if (!state.notices.has(n.id)) state.notices.set(n.id, {...n, at: n.created});
+        renderUiState(); renderNotices();
+      }
+      renderRecords();
+      if (!state.streams[store]) openStream(store, 0);
+    } catch (error) {
+      if (store === "coworld" && error.status === 404) { state.coworldMissing = true; state.snapshots.coworld = null; renderRecords(); return; }
+      showError(`snapshot ${store}: ${error.message}`);
+    }
+  }
+
+  function rowsFor(tab) {
+    const rows = [];
+    for (const store of tab.stores) {
+      const snapshot = state.snapshots[store];
+      if (!snapshot) continue;
+      if (tab.table === "settings") {
+        for (const [key, value] of Object.entries(snapshot.records.settings || {})) rows.push({key, value, scope: store, _store: store});
+      } else {
+        for (const record of snapshot.records[tab.table] || []) rows.push({...record, store, _store: store});
+      }
+    }
+    return rows;
+  }
+
+  function cell(tab, row, column) {
+    const value = row[column];
+    if (column === "id") return linkify(value);
+    if (column === "status") return chip(value) || '<span class="muted">—</span>';
+    if (column === "updated") return fmtTime(row.updated || row.created);
+    if (column === "created") return fmtTime(value);
+    if (column === "uploaded") return value ? `yes, ${esc(value.policy_version_id || "")}` : "no";
+    if (column === "value") return `<span class="mono">${esc(JSON.stringify(value))}</span>`;
+    if (column === "scope") return linkify(value);
+    return value == null ? '<span class="muted">—</span>' : esc(String(value));
+  }
+
+  function renderRecords() {
+    const tabs = $("tabs"), panels = $("tab-panels");
+    tabs.innerHTML = TABS.map((t) => {
+      const n = rowsFor(t).length;
+      return `<button type="button" role="tab" class="tab" id="tab-${t.key}" aria-selected="${t.key === state.tab}" aria-controls="panel-${t.key}" data-tab="${t.key}">${esc(t.label)} <span class="count">· ${n}</span></button>`;
+    }).join("");
+    panels.innerHTML = TABS.map((t) => {
+      const rows = rowsFor(t);
+      const idField = t.table === "settings" ? "key" : "id";
+      const header = t.columns.map((c) => `<th scope="col">${esc(COLUMN_LABELS[c])}</th>`).join("") + (t.table === "settings" ? "" : '<th scope="col"><span class="sr-only">Detail</span></th>');
+      const body = rows.length ? rows.map((r) => {
+        const id = `${r._store}:${r[idField]}`;
+        const cells = t.columns.map((c) => `<td${c === "status" || c === "updated" || c === "created" ? ' class="nowrap"' : ""}>${cell(t, r, c)}</td>`).join("");
+        const detail = t.table === "settings" ? "" : `<td class="nowrap"><button type="button" class="btn small" data-detail="${esc(id)}" aria-expanded="false">Details</button></td>`;
+        const detailRow = t.table === "settings" ? "" : `<tr class="detail" data-detail-row="${esc(id)}" hidden><td colspan="${t.columns.length + 1}"><pre class="doc">${json(Object.fromEntries(Object.entries(r).filter(([k]) => k !== "_store")))}</pre></td></tr>`;
+        return `<tr data-id="${esc(String(r[idField]))}" data-store="${esc(r._store)}">${cells}${detail}</tr>${detailRow}`;
+      }).join("") : `<tr class="empty"><td colspan="${t.columns.length + 1}"><em>No ${esc(t.label)} yet.</em></td></tr>`;
+      return `<div role="tabpanel" id="panel-${t.key}" aria-labelledby="tab-${t.key}" ${t.key === state.tab ? "" : "hidden"}><div class="scroll-x"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+    }).join("");
+    const note = $("records-note");
+    if (state.coworldMissing) note.textContent = "No active Coworld yet: Goals, Tasks, Versions, Claims and Experiments appear once one is set up. Ask the Orchestrator to submit the starter.";
+    else if (state.snapshots.coworld) note.textContent = `Coworld ${state.snapshots.coworld.coworld_id} at seq ${state.snapshots.coworld.seq}; workspace at seq ${state.snapshots.workspace ? state.snapshots.workspace.seq : "?"}. Refreshed when a record event arrives.`;
+    else note.textContent = "Loading the snapshots…";
+    renderSettingKeys();
+  }
+
+  function setTab(key) {
+    state.tab = key;
+    for (const tab of document.querySelectorAll("#tabs .tab")) tab.setAttribute("aria-selected", String(tab.dataset.tab === key));
+    for (const panel of document.querySelectorAll("#tab-panels [role=tabpanel]")) panel.hidden = panel.id !== `panel-${key}`;
+  }
+
+  function jumpTo(ref) {
+    const prefix = ref.split("-")[0];
+    if (prefix === "N") {
+      const item = document.querySelector(`#notices li[data-id="${ref}"]`);
+      if (!item) return;
+      item.scrollIntoView({block: "center"});
+      item.classList.add("target"); setTimeout(() => item.classList.remove("target"), 3000);
+      return;
+    }
+    const tab = REF_TABS[prefix];
+    if (!tab) return;
+    setTab(tab);
+    $("records").scrollIntoView({block: "start"});
+    const row = document.querySelector(`#panel-${tab} tr[data-id="${ref}"]`);
+    const note = $("records-note");
+    if (!row) { note.textContent = `${ref} is not in the current snapshot.`; return; }
+    row.classList.add("target"); row.tabIndex = -1; row.focus({preventScroll: true});
+    row.scrollIntoView({block: "center"});
+    setTimeout(() => row.classList.remove("target"), 3000);
+  }
+
+  // --- edits ---------------------------------------------------------------------------
+
+  const FIELD = (id, label, attrs = "", tag = "input") => `<label for="${id}"><span>${label}</span>${tag === "textarea" ? `<textarea id="${id}" rows="2" ${attrs}></textarea>` : tag === "select" ? `<select id="${id}" ${attrs}></select>` : `<input id="${id}" autocomplete="off" ${attrs}>`}</label>`;
+  const EDIT_FORMS = {
+    "directives.add": {note: "A standing instruction, on the workspace or on a Goal.", fields: () => FIELD("f-text", "Instruction, word for word", "required", "textarea") + FIELD("f-scope", "Scope (workspace or goal:&lt;n&gt;)", 'value="workspace" required') + FIELD("f-source", "Source (the message it came from)", 'value="ui:edits" required'),
+      args: () => ({text: $("f-text").value.trim(), scope: $("f-scope").value.trim(), source: $("f-source").value.trim()})},
+    "goals.update": {note: "goals.update with a new title.", fields: () => FIELD("f-goal", "Goal", 'placeholder="G-1" required') + FIELD("f-title", "New title", "required"),
+      args: () => ({goal_id: $("f-goal").value.trim(), title: $("f-title").value.trim()})},
+    "goals.set_status": {note: "Every status change needs a reason.", fields: () => FIELD("f-goal", "Goal", 'placeholder="G-1" required') + FIELD("f-status", "Status", "", "select") + FIELD("f-reason", "Reason", "required"),
+      after: () => { $("f-status").innerHTML = ["active", "parked", "completed", "abandoned"].map((s) => `<option>${s}</option>`).join(""); },
+      args: () => ({goal_id: $("f-goal").value.trim(), status: $("f-status").value, status_reason: $("f-reason").value.trim()})},
+    "settings.update": {note: "The key's scope picks the store; the value is parsed as JSON when it is JSON.", fields: () => FIELD("f-key", "Setting", "", "select") + FIELD("f-value", "Value", 'placeholder="true, 3, \\"ask\\" or [\\"research\\"]" required') + FIELD("f-cites", "Cites (the message that asked)", 'value="ui:edits" required'),
+      after: renderSettingKeys,
+      args: () => { const raw = $("f-value").value.trim(); let value = raw; try { value = JSON.parse(raw); } catch (error) { value = raw; } return {key: $("f-key").value, value, cites: $("f-cites").value.trim()}; }},
+    "workspace.pause": {note: "Sets the workspace setting paused; the watcher drains running Sessions.", fields: () => FIELD("f-cites", "Cites", 'value="ui:pause-button" required'), args: () => ({cites: $("f-cites").value.trim()})},
+    "workspace.resume": {note: "Clears paused; drained Sessions resume at the next tick.", fields: () => FIELD("f-cites", "Cites", 'value="ui:resume-button" required'), args: () => ({cites: $("f-cites").value.trim()})},
+  };
+
+  function renderEditFields() {
+    const op = $("edit-op").value, form = EDIT_FORMS[op];
+    $("edit-fields").innerHTML = form.fields();
+    $("edit-op-note").textContent = form.note;
+    if (form.after) form.after();
+  }
+
+  function renderSettingKeys() {
+    const select = $("f-key");
+    if (!select) return;
+    const current = select.value;
+    const keys = [];
+    for (const store of ["workspace", "coworld"]) for (const key of Object.keys((state.snapshots[store] || {records: {}}).records.settings || {})) keys.push({key, store});
+    select.innerHTML = keys.length ? keys.map((k) => `<option value="${esc(k.key)}">${esc(k.key)} (${k.store})</option>`).join("") : '<option value="">no snapshot yet</option>';
+    if (current) select.value = current;
+  }
+
+  async function applyEdit(event) {
+    event.preventDefault();
+    const op = $("edit-op").value, form = EDIT_FORMS[op];
+    const result = $("edit-result");
+    result.className = "result";
+    result.textContent = `Applying ${op}…`;
+    try {
+      const reply = await api("POST", "/store/apply", {actor: ACTOR, op, args: form.args()});
+      const record = reply.record || {};
+      const label = record.id || record.key || "";
+      result.className = "result ok-text";
+      result.textContent = `Applied ${op}${label ? ` → ${label}` : ""} in the ${reply.store} store (seq ${reply.seq}).\n${JSON.stringify(record, null, 2)}`;
+    } catch (error) {
+      result.className = "result err-text";
+      const problems = (error.body && error.body.problems) || [];
+      result.textContent = `Refused: ${error.body && error.body.error ? error.body.error : error.message}${problems.length ? `\n- ${problems.join("\n- ")}` : ""}`;
+    }
+  }
+
+  // --- the raw request ---------------------------------------------------------------------
+
+  async function sendRaw(event) {
+    event.preventDefault();
+    const method = $("raw-method").value, path = $("raw-path").value.trim(), result = $("raw-result");
+    result.className = "result";
+    let body;
+    if (method === "POST") {
+      try { body = JSON.parse($("raw-body").value || "{}"); } catch (error) { result.className = "result err-text"; result.textContent = `The body is not JSON: ${error.message}`; return; }
+      if (body && typeof body === "object" && !body.session_id && state.session && ["/message", "/ui-action"].includes(path)) body.session_id = state.session;
+    }
+    result.textContent = `${method} ${path}…`;
+    try {
+      const response = await fetch(path, {method, headers: method === "POST" ? {"Content-Type": "application/json"} : {}, body: method === "POST" ? JSON.stringify(body) : undefined});
+      const text = await response.text();
+      let shown = text;
+      try { shown = JSON.stringify(JSON.parse(text), null, 2); } catch (error) { shown = text.slice(0, 4000); }
+      result.className = response.ok ? "result" : "result err-text";
+      result.textContent = `HTTP ${response.status} ${response.statusText} · ${response.headers.get("Content-Type") || ""}\n${shown}`;
+    } catch (error) {
+      result.className = "result err-text"; result.textContent = `Request failed: ${error.message}`;
+    }
+  }
+
+  // --- wiring ----------------------------------------------------------------------------
+
+  document.addEventListener("click", (event) => {
+    const ref = event.target.closest(".ref");
+    if (ref) { jumpTo(ref.dataset.ref); return; }
+    const tab = event.target.closest("[data-tab]");
+    if (tab) { setTab(tab.dataset.tab); return; }
+    const detail = event.target.closest("[data-detail]");
+    if (detail) {
+      const row = document.querySelector(`[data-detail-row="${CSS.escape(detail.dataset.detail)}"]`);
+      const open = row.hidden; row.hidden = !open; detail.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    const reaction = event.target.closest("[data-react]");
+    if (reaction) { const [id, value] = reaction.dataset.react.split(":"); react(state.messages.find((m) => m.id === id), value, reaction); return; }
+    const option = event.target.closest("[data-answer]");
+    if (option) answer(option.dataset.answer, option.dataset.value);
+  });
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-answer-form]");
+    if (!form) return;
+    event.preventDefault();
+    const value = form.querySelector("input").value.trim();
+    if (value) answer(form.dataset.answerForm, value);
+  });
+  $("composer").addEventListener("submit", send);
+  $("composer-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); }
+  });
+  $("edit-op").addEventListener("change", renderEditFields);
+  $("edit-form").addEventListener("submit", applyEdit);
+  $("raw-form").addEventListener("submit", sendRaw);
+
+  $("origin").textContent = location.origin;
+  renderEditFields();
+  renderRecords();
+  (async () => {
+    try { await openSession(); } catch (error) { showError(`session-open failed: ${error.message}`); setText("session-id", '<span class="err-text">none</span>'); }
+    await pollHealth();
+    await loadSnapshot(WORKSPACE);
+    if (state.health && state.health.coworld) await loadSnapshot("coworld");
+    else { state.coworldMissing = true; renderRecords(); }
+    setInterval(pollHealth, STATUS_POLL_MS);
+  })();
+})();
+</script>
+</body>
+</html>

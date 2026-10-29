@@ -13,6 +13,11 @@ note, so the server never duplicates them. Threads, not async: ``ThreadingHTTPSe
 each request its own thread, and each request opens its own store connections (SQLite
 connections are per thread). Steer-or-start runs under one lock so two messages to one Session
 never start two runs.
+
+Two conveniences sit beside the contract's routes: ``GET /`` (and ``/ui``) serves the client
+page ``ui/index.html``, a self-contained page that exercises every route from a browser, and
+``GET /status`` answers what ``research watcher status`` prints, read from the workspace store,
+so the page can show the watcher's liveness without a shell.
 """
 
 from __future__ import annotations
@@ -27,21 +32,26 @@ import time
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from research_core import contract, layout
 from research_core.store import cli as store_cli
-from research_core.store import coworlds, sessions, ui_state
+from research_core.store import coworlds, sessions, settings, ui_state
+from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
 from research_core.tools.ui import WORKSPACE_CONVERSATION, pointer_token
 from research_core.watcher import hermes_api
+from research_core.watcher.heartbeat import HAS_WORK_KEY, HAS_WORK_REASONS_KEY, HEARTBEAT_KEY
 from research_core.watcher.hermes_api import HermesRuns, RunsBusy, RunsError
+from research_core.watcher.tick import PAUSED_DRAINED_KEY
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +63,8 @@ DEFAULT_PORT = 8650
 DEFAULT_ACTOR = "user:local"
 RETRY_AFTER_S = 1
 UI_ACTIONS = ("answer", "reaction")
+PAGE_PATHS = ("/", "/ui")
+PAGE_FILE = resources.files("research_core").joinpath("ui", "index.html")
 
 
 class Refused(Exception):
@@ -180,6 +192,31 @@ class SeamServer:
                 "coworld": stores.coworld_id,
                 "contract_version": contract.CONTRACT_VERSION,
             }
+
+    def status(self) -> dict:
+        """What ``research watcher status`` prints (``watcher/cli.py``): the last heartbeat and
+        its age, the has-work signal with its reasons, and the pause state, from the workspace
+        store's meta and the ``paused`` setting. Nothing else is read."""
+        with self.stores() as stores:
+            wstore = stores.wstore
+            heartbeat = wstore.get_meta(HEARTBEAT_KEY)
+            age_s = None
+            if heartbeat is not None:
+                age_s = round((datetime.now(UTC) - parse_iso(heartbeat)).total_seconds(), 1)
+            return {
+                "ok": True,
+                "heartbeat": heartbeat,
+                "heartbeat_age_s": age_s,
+                "has_work": wstore.get_meta(HAS_WORK_KEY) == "1",
+                "waiting_on": json.loads(wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"),
+                "paused": bool(settings.get(wstore, "paused")),
+                "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
+            }
+
+    @staticmethod
+    def page() -> bytes:
+        """The client page, read from the package on each request so edits show on reload."""
+        return PAGE_FILE.read_bytes()
 
     def session_open(self, body: dict) -> dict:
         """Mint a session id and register a chat Session with the client's context (A.2)."""
@@ -440,8 +477,12 @@ class _Handler(BaseHTTPRequestHandler):
         query = {key: values[-1] for key, values in parse_qs(url.query).items()}
         seam = self.server.seam
         try:
-            if url.path == "/health":
+            if url.path in PAGE_PATHS:
+                self._html(HTTPStatus.OK, seam.page())
+            elif url.path == "/health":
                 self._json(HTTPStatus.OK, seam.health())
+            elif url.path == "/status":
+                self._json(HTTPStatus.OK, seam.status())
             elif url.path == "/snapshot":
                 self._json(HTTPStatus.OK, seam.snapshot(query.get("store", "workspace")))
             elif url.path == "/stream":
@@ -490,6 +531,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         for name, value in (headers or {}).items():
             self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _html(self, status: int, data: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
 
@@ -610,7 +659,8 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Serve the client seam locally: sessions, messages, UI actions, the event stream",
         description=(
             "The local stand-in for the bridge (design §10, A.11): POST /session-open, /message,"
-            " /ui-action and /store/apply; GET /snapshot, /stream, /runs/<id> and /health."
+            " /ui-action and /store/apply; GET /snapshot, /stream, /runs/<id> and /health;"
+            " plus GET / (the client page) and GET /status (what watcher status prints)."
         ),
     )
     _add_arguments(parser)

@@ -440,6 +440,57 @@ def test_health_and_run_status(seam):
     assert seam.client.run("run_missing")["status"] == "unknown"
 
 
+def test_client_page_is_served_at_root_and_ui(seam):
+    for path in ("/", "/ui"):
+        with urllib.request.urlopen(f"{seam.server.url}{path}", timeout=2) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"] == "text/html; charset=utf-8"
+            page = response.read().decode("utf-8")
+        assert "<title>Orchestrator desk</title>" in page
+        # The page opens a Session on load and reads the two routes added for it.
+        assert "/session-open" in page and "/status" in page and "/stream?store=" in page
+
+
+def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkeypatch, capsys):
+    from research_core.store import settings
+    from research_core.store._common import now_iso
+    from research_core.watcher import cli as watcher_cli
+
+    assert seam.client._get("/status") == {
+        "ok": True,
+        "heartbeat": None,
+        "heartbeat_age_s": None,
+        "has_work": False,
+        "waiting_on": [],
+        "paused": False,
+        "paused_drained": False,
+    }
+    seam.wstore.set_meta("heartbeat", now_iso())
+    seam.wstore.set_meta("has_work", "1")
+    seam.wstore.set_meta("has_work_reasons", json.dumps(["wake:queued", "task:T-1 xp"]))
+    seam.wstore.set_meta("paused_drained", "1")
+    settings.update(seam.wstore, HARNESS, "paused", True, cites="test")
+    status = seam.client._get("/status")
+    assert status["has_work"] is True and status["waiting_on"] == ["wake:queued", "task:T-1 xp"]
+    assert status["paused"] is True and status["paused_drained"] is True
+    assert 0 <= status["heartbeat_age_s"] < 60
+    # It is what ``research watcher status`` prints for the same workspace.
+    monkeypatch.setenv("IDE_WORKSPACE", str(seam.ctx.workspace.root))
+    assert watcher_cli.run_status(None) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert set(printed) == set(status)
+    assert {k: v for k, v in printed.items() if k != "heartbeat_age_s"} == {
+        k: v for k, v in status.items() if k != "heartbeat_age_s"
+    }
+
+
+def test_unknown_get_paths_still_404_beside_the_page(seam):
+    for path in ("/nowhere", "/ui/anything", "/index.html", "/ui.html"):
+        with pytest.raises(SeamError) as info:
+            seam.client._get(path)
+        assert info.value.status == 404, path
+
+
 def test_unknown_routes_and_bad_json_are_json_errors(seam):
     with pytest.raises(SeamError) as info:
         seam.client._get("/nowhere")

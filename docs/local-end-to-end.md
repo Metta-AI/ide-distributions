@@ -6,16 +6,17 @@ profiles with one API key, one shared `IDE_WORKSPACE`, a per-profile `.env`, the
 bridge speaks, and the watcher ticking. `docs/hosting.md` says what production provides; this
 page says how to stand the same thing up locally and what still differs.
 
-Everything here runs through one harness, `core/tests/hermes/test_seam_real_hermes.py`, which
+Options A and B run through one harness, `core/tests/hermes/test_seam_real_hermes.py`, which
 is also the acceptance scenario ("submit the starter as my champion" ends in a submission). It
 passed on October 28, 2026 (Pacific) with Hermes v0.21.6 and `moonshotai/kimi-k3` through
-OpenRouter: 7 watcher ticks, 38 seconds after the gateway was ready.
+OpenRouter: 7 watcher ticks, 38 seconds after the gateway was ready. Option C runs the same
+profiles inside the hosted image through `tools/local_stack.py`; it passed on October 29.
 
 | Option | What you get | When |
 |---|---|---|
 | A. One command | The acceptance scenario on a real gateway with the fake platform; exits when done | A quick check that the whole chain works |
 | B. Interactive session | The same setup kept running: seam URL, `curl` lines, the watcher every minute, Ctrl-C to stop; optionally the real platform | Poking at the profiles by hand |
-| C. Inside the hosted image | Option A or B inside the Hermes image CI uses, with the checkout mounted read-only and the state on a volume | The closest to production on a laptop |
+| C. Inside the hosted image | `tools/local_stack.py`: the same stack inside the Hermes image CI uses, the checkout mounted read-only, the state on a volume, the watcher as a real cron job; stays up until `down` | The closest to production on a laptop |
 
 ## Prerequisites
 
@@ -233,89 +234,308 @@ holds; the fake run checks that. The harness never prints the credential; it is 
 `SOFTMAX_USER_CREDENTIAL` is not written: User-identity reads report themselves unavailable,
 as in a sandbox before provisioning.
 
+## A client page
+
+`research serve` also serves a browser client at `GET /` (and `/ui`):
+`core/src/research_core/ui/index.html`, one self-contained page (inline CSS and JavaScript, no
+build step, nothing fetched from outside the seam) in the Ink & Print house style. It is a
+developer's view of the seam, not the IDE: every part of it maps to one route, so it is the
+quickest way to watch a Session, the watcher and the stores at once.
+
+Open it against any of the options, or without a model at all:
+
+| Against | URL |
+|---|---|
+| Option B (`IDE_E2E_KEEP=1`) | The seam URL the banner prints, `http://127.0.0.1:<seam>/` |
+| Option C | The seam URL that option prints, reachable the way its "Attaching a client" section says |
+| A `research serve` of your own (`IDE_WORKSPACE` and `HERMES_HOME` exported, from the workspace environment) | `http://127.0.0.1:8650/` (or the `--port` given) |
+| No gateway and no model: `uv run python tools/ui_dev.py [--port 8650]` | The URL it prints; a temporary workspace on the fake platform, the watcher ticking every 5 seconds on a thread, and `research_core.scripted_agent.ScriptedAgent` playing the Orchestrator (removed on Ctrl-C) |
+
+What each part of the page exercises:
+
+| Part | Routes | What to look for |
+|---|---|---|
+| Masthead and health strip | `POST /session-open` on load (client `ui`, kind `web-ide`), `GET /health`, `GET /status` every 5 seconds | The session id; profile, active Coworld and contract version; the watcher's heartbeat age, `has_work` with its `waiting_on` reasons, `paused`; whether each stream is open |
+| Conversation | `POST /message` with a context block (`mode`, `on_screen`, `view` from the fields under the box), `GET /runs/<id>` every half second until the run is terminal, `POST /ui-action` `reaction` | `delivered` (`start` or `steer`) and the run id on your message; the run's status chip, then its output as the Orchestrator's message; "Helpful" / "Not helpful" write a reaction and show the UI-state version it landed in (no run starts) |
+| Now showing, Asks, Panels | The `ui_state` documents of `GET /snapshot?store=workspace`, then `ui.patch` events; `POST /ui-action` `answer` | The last `ui.show`; open asks with their options as buttons (a free-text answer too), answered asks with the answer and who gave it; markdown panels as text, other kinds as JSON |
+| Notices and Events | `GET /stream?store=workspace&after=0` and `GET /stream?store=coworld&after=0` (Server-Sent Events; the browser reconnects with `Last-Event-ID`) | `notice` events as a list, newest first; every event as one line (seq, time, store, kind, subject) with a payload summary, the last 300 kept |
+| Records | `GET /snapshot?store=coworld` (Goals, Tasks, Versions, Claims, Experiments) and `?store=workspace` (both stores for Directives and settings), refreshed when a record event arrives | Tabs with counts, each record's id, title, status and last update, a Details button with the record as JSON; any `G-1`, `T-3`, `V-1`, `C-2`, `X-1`, `D-1` or `N-1` on the page jumps to its record |
+| Edits as user:local | `POST /store/apply` | Add a Directive, rename a Goal, set a Goal's status, change a setting, pause or resume the watcher; the store's record or its refusal with the problems. Creating a Goal is not a user edit (`goals.create` is not in the allow-list): ask the Orchestrator for one |
+| Raw request | Any route | Method, path and JSON body; the status and the response. `session_id` is filled in for `/message` and `/ui-action` when the body leaves it empty |
+
+Against `tools/ui_dev.py`'s scripted Orchestrator (a real one answers as the model sees fit):
+
+- **Submit the starter as my champion.** switches to the fake Coworld; within a few ticks the
+  setup wake uploads and submits the starter, and a notice about `V-1` arrives.
+- A message containing **ask me** opens a question with two options; answer it under Asks and
+  the answer goes into a run of the same Session.
+- A message containing **notify** sends a notice.
+- A message containing **goal** creates a Goal (once a Coworld is active), brings it into view
+  under Now showing and sets a markdown panel about it.
+- Anything else is answered with `Noted: <the first 80 characters>`.
+
+The routes are tested in `core/tests/test_serve.py`; the page itself was checked by hand in a
+browser at 390, 1000 and 1280 pixels wide, in light and dark mode.
+
 ## Option C: inside the hosted Hermes image
 
 CI runs the `hermes`-marked tests inside `nousresearch/hermes-agent@sha256:9774f4f3...` (the
 digest in `.github/workflows/ci.yml`), whose Python runs the plugin and `prepare.py` exactly as
-hosting does. The same harness runs there on your Mac, with the checkout mounted read-only like
-the release checkout and the homes, the workspace and the gateway log on a volume.
+hosting does. `tools/local_stack.py` runs the whole stack in that image on your Mac: the checkout
+mounted read-only at `/src` like the release checkout, the profile homes, the workspace and the
+logs on a Docker volume, the multiplexing gateway with the watcher as a real cron job, and
+`research serve` as the seam, both published on this machine's loopback.
 
-**Not verified on this machine.** The Docker daemon was not running when this page was written,
-so the steps below are assembled from `ci.yml` and the image's Dockerfile, not from a run. What
-is known: the digest is a multi-arch manifest list with `linux/amd64` and `linux/arm64` images,
-so it runs natively on Apple silicon; CI runs `prepare.py` end to end in it
-(`test_prepare_real.py`), but CI has no model key, so the gateway part of the harness has only
-run on the Mac. Expect to adjust.
+**Verified on October 29, 2026 (Pacific)** with OrbStack (Docker server 29.8.2, linux/arm64; the
+digest is a multi-arch manifest, so the image runs natively on Apple silicon) and the Hermes the
+image ships (v0.21.6, 2026.9.24). `up --reset` on a fresh volume had the gateway and the seam
+answering 90 seconds after the container started and then ran the acceptance scenario through
+the seam, which ended in a submission by `ply_canary` 35 seconds after the request, inside the
+chat run itself (seq 12 of the Coworld store, before the cron job's first tick); a second run
+of the same scenario on another fresh volume took 33 seconds. The exact output is below.
+
+### Prerequisites
+
+- OrbStack (or another Docker) running: `open -a OrbStack`. The first `up` pulls the image when
+  it is missing (4.5 GB).
+- `OPENROUTER_API_KEY` in the environment of the first `up` on a volume. The broker shape from
+  the prerequisites above works unchanged:
+
+  ```bash
+  cd ~/coding/metta && python3 scripts/token_broker_client.py exec --scope openrouter.inference \
+    --reason "local stack of the IDE research profiles in the Hermes image" -- \
+    uv run --project ~/coding/ide-distributions python ~/coding/ide-distributions/tools/local_stack.py up
+  ```
+
+  The key goes into the container only, into the `.env` files on the volume (that is how Hermes
+  reads it); the tool never prints it and writes nothing on this machine. A later `up` without
+  the key in the environment keeps the one already in the `.env` files.
+- For the real platform, the same variables as Option B: `SOFTMAX_PLAYER_ID`,
+  `SOFTMAX_PLAYER_CREDENTIAL`, optionally `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD`.
+
+### Commands
 
 ```bash
-docker volume create ide-e2e-data
-docker run --rm -it --name ide-e2e --user 0 --entrypoint /bin/bash \
-  -v "$HOME/coding/ide-distributions:/src:ro" \
-  -v ide-e2e-data:/opt/data \
-  -e HERMES_BIN=/opt/hermes/.venv/bin/hermes \
-  -e OPENROUTER_API_KEY \
-  -e IDE_E2E_KEEP=1 \
-  -e UV_PROJECT_ENVIRONMENT=/opt/data/dev-venv -e UV_CACHE_DIR=/opt/data/uv-cache \
-  -e GIT_AUTHOR_NAME="IDE local" -e GIT_AUTHOR_EMAIL=ide-local@example.invalid \
-  -e GIT_COMMITTER_NAME="IDE local" -e GIT_COMMITTER_EMAIL=ide-local@example.invalid \
-  nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+cd ~/coding/ide-distributions
+uv run python tools/local_stack.py up                 # fresh volume: set up, then run the scenario
+uv run python tools/local_stack.py up --no-scenario   # fresh volume: set up, leave the workspace empty
+uv run python tools/local_stack.py status             # container, seam /health, gateway /v1/capabilities, watcher status
+uv run python tools/local_stack.py scenario           # send "Submit the starter as my champion." and wait
+uv run python tools/local_stack.py logs [--follow]    # tail /opt/data/gateway.log and /opt/data/serve.log
+uv run python tools/local_stack.py shell              # a shell in the container with the Orchestrator's environment
+uv run python tools/local_stack.py down               # stop the services and the container; the volume stays
+uv run python tools/local_stack.py down --reset       # also remove the container and the volume
 ```
 
-Then, inside the container:
+`up` on an existing container restarts the gateway and the seam without reinstalling (70 to 90
+seconds, most of it `prepare.py` re-checking the config through `hermes config get`); `up
+--reset` starts over. `--platform real`, `--seam-port` (default 8650), `--gateway-port` (default
+8642) and `--name` (default `ide-local`; the volume is `<name>-stack`) are fixed when the
+container is created and read back from its labels afterwards. The scenario is written for a
+new workspace: run it once per volume, or `up --reset` first.
+
+### What `up` sets up
+
+One container from the image digest, as a GitHub Actions job container runs it (`--user 0`,
+the entrypoint replaced, here by `sleep` under `--init`), with `~/coding/ide-distributions` at
+`/src` read-only, the volume at `/opt/data`, both ports published on `127.0.0.1` only and the
+`GIT_*` identity CI sets. It writes two scripts into the volume and runs the first with `docker
+exec`:
+
+| Step inside the container (`/opt/data/local_stack/bootstrap.sh up`) | In hosting |
+|---|---|
+| Install `uv` into `/opt/data/.local/bin` (the image ships none, CI uses `astral-sh/setup-uv`) with a link from `/usr/local/bin/uv`, because the agents' terminal is a login shell whose `PATH` lacks the volume's directory; mark `/src` safe for git (it belongs to your Mac user) | The image has `uv` |
+| `hermes profile install /src/<role> --name <role> --yes` into `HERMES_HOME=/opt/data/host` for both roles; skipped when the profile exists | The same, from the release checkout |
+| Write `/opt/data/host/.env` and both profiles' `.env`: one random `API_SERVER_KEY` per volume (kept in `/opt/data/local_stack/api_key`), `API_SERVER_HOST=0.0.0.0` in the host home (the gateway binds from there, so the published port reaches it) and `127.0.0.1` in the profiles (where the watcher and the seam read the gateway's address), `GATEWAY_MULTIPLEX_PROFILES=true`, `IDE_WORKSPACE=/opt/data/workspace`, `IDE_PLATFORM`, `IDE_RESEARCHER_PROFILES=researcher`, `SOFTMAX_PLAYER_ID` (`ply_canary` for the fake), `OPENROUTER_API_KEY`, and for the real platform the Player credential, `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD` | The per-profile `.env` hosting writes |
+| `prepare.py --source /src/<role> --hermes /opt/hermes/.venv/bin/hermes` with the image's Python, `--activate-supervisor` for the Orchestrator, each with `HERMES_HOME=<profile home>` and that profile's `.env` exported (`as-profile.sh`); the first run builds the workspace environment with `uv sync` into `/opt/data/workspace/tools/venv` (uv's cache and the CPython 3.12 it fetches stay on the volume) | The same script; the environment is prebuilt at image build |
+| Fake platform: build the fakegame fixture repository at `/opt/data/upstream/fakegame_repo` and point the fake's manifest at it (`tools/local_stack/configure_fake_platform.py`, as the real-Hermes test does) | n/a |
+| `hermes gateway run` with the host home, in the background, log `/opt/data/gateway.log`; ready when `GET /v1/capabilities` answers 200 with the key. The watcher cron job is on, so the gateway ticks it every minute for real | The multiplexing gateway |
+| `research serve --host 0.0.0.0 --port 8650` from the workspace environment with the Orchestrator's environment, log `/opt/data/serve.log`; ready when `GET /health` answers | Metta's bridge |
+
+Timings on October 29, 2026 (Apple silicon, fast network), fresh volume: `uv` install 1 s,
+both profile installs 3 s, Orchestrator preparation 46 s including the `uv sync` (the CPython
+3.12 download included), Researcher preparation 33 s, fixture under a second, gateway ready 6 s
+after start, seam under a second: 90 s in all. With the environment already on the volume a
+re-`up` takes 70 to 90 seconds, almost all of it the two preparations.
+
+### Where things live in the volume (`ide-local-stack`, mounted at `/opt/data`)
+
+| Path | What |
+|---|---|
+| `host/` | The gateway's `HERMES_HOME`: `.env` and `profiles/orchestrator`, `profiles/researcher` |
+| `host/profiles/<role>/.env`, `config.yaml`, `local/core-path.txt` (`/src/core/src`), `state.db`, the Orchestrator's `cron/jobs.json` | What install, `prepare.py` and the gateway wrote; the watcher job reads `enabled: true, state: scheduled` |
+| `workspace/` | `IDE_WORKSPACE`: `tools/venv`, `.state/store.db`, `.state/fake_platform.json`, one folder per Coworld |
+| `upstream/fakegame_repo` | The fake Coworld's source repository (fake platform only) |
+| `local_stack/` | `bootstrap.sh`, `as-profile.sh`, `api_key`, the services' pid files |
+| `gateway.log`, `serve.log` | The gateway's and the seam's output, appended across restarts |
+| `uv-cache/`, `uv-python/`, `.local/bin/uv` | uv, its cache and the managed CPython 3.12 |
+
+`docker exec ide-local cat /opt/data/local_stack/api_key` prints the key. `shell` drops you
+into the container with `HERMES_HOME=/opt/data/host/profiles/orchestrator`, the profile's
+`.env` exported and the workspace environment first on `PATH`, so the commands under "What to
+look at" work as written with `RESEARCH=research`.
+
+### The output
+
+`up --reset` on October 29 (the `hermes profile install` banners and the `uv` installer's lines
+are left out; `prepare.py`'s JSON summary lines are shortened):
+
+```
+removing container ide-local
+removing volume ide-local-stack
+creating container ide-local from nousresearch/hermes-agent@sha256:9774f4f3... (volume ide-local-stack)
+[local-stack 0s] installing uv into /opt/data/.local/bin (the image ships none; CI uses astral-sh/setup-uv)
+[local-stack 1s] installing profile orchestrator from /src/orchestrator
+[local-stack 3s] installing profile researcher from /src/researcher
+[local-stack 4s] writing /opt/data/host/.env and both profiles' .env (one API_SERVER_KEY everywhere)
+[local-stack 4s] preparing profile orchestrator (the first run builds the workspace environment with uv sync)
+{"role": "orchestrator", ..., "actions": ["wrote local/core-path.txt", "workspace store ready", "config: set skills.external_dirs", "cron: watcher job unchanged", "cron: resumed the watcher job", "workspace environment synced"]}
+[local-stack 50s] preparing profile researcher (the first run builds the workspace environment with uv sync)
+{"role": "researcher", ..., "actions": ["wrote local/core-path.txt", "workspace store ready", "config: set skills.external_dirs", "workspace environment up to date"]}
+[local-stack 83s] pointing the fake platform at the fakegame fixture under /opt/data/upstream
+{"source_url": "file:///opt/data/upstream/fakegame_repo", "source_commit": "13170d61...", "state": "/opt/data/workspace/.state/fake_platform.json"}
+[local-stack 83s] starting the gateway on 0.0.0.0:8642 (log /opt/data/gateway.log)
+[local-stack 89s] the gateway is ready (pid 653)
+[local-stack 89s] starting research serve on 0.0.0.0:8650 (log /opt/data/serve.log)
+[local-stack 89s] the seam server is ready (pid 836)
+[local-stack 89s] up: seam http://127.0.0.1:8650, gateway http://127.0.0.1:8642
+bootstrap took 90 s
+
+=== local stack ide-local (platform fake) ===
+seam (research serve routes):  http://127.0.0.1:8650
+gateway (Hermes API server):   http://127.0.0.1:8642  routes under /p/<profile>/
+API key:                       /opt/data/local_stack/api_key in volume ide-local-stack (API_SERVER_KEY, same in every .env)
+                               docker exec ide-local cat /opt/data/local_stack/api_key
+gateway log:                   /opt/data/gateway.log      (tools/local_stack.py logs)
+seam log:                      /opt/data/serve.log
+profile homes:                 /opt/data/host/profiles
+workspace (IDE_WORKSPACE):     /opt/data/workspace
+checkout (read-only):          /src
+
+talk to it:
+  curl -s -X POST http://127.0.0.1:8650/session-open -H 'Content-Type: application/json' -d '{"client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}'
+  curl -s -X POST http://127.0.0.1:8650/message -H 'Content-Type: application/json' -d '{"session_id": "<session_id>", "message": "What is the state of the workspace?", "actor": "user:local", "context": {"contract_version": 1, "on_screen": []}}'
+  curl -s 'http://127.0.0.1:8650/snapshot?store=workspace'
+  curl -sN 'http://127.0.0.1:8650/stream?store=workspace&after=0'
+  uv run python tools/local_stack.py scenario | status | logs | shell | down
+
+fresh workspace: running the acceptance scenario (skip with --no-scenario)
+scenario on http://127.0.0.1:8650 (platform fake): 'Submit the starter as my champion.'
+session api_1793300437_df403177; chat run run_6cf635fe546d4167bb08c29ba02f28a1 (start)
+[   0 s] no active Coworld yet; watcher: has_work=False waiting_on=[] heartbeat_age_s=None
+version.submitted after 35 s (seq 12): {"store": "coworld", "seq": 12, "at": "2026-10-29T19:01:13.419698Z", "actor": "session:api_1793300437_df403177", "kind": "version.submitted", "subject": "V-1", "payload": {"auto_champion": "always", "autonomous": false, "cites": "User: \"Submit the starter as my champion.\"", "league": "league_fake", ...
+[  35 s] Coworld cow_fake: 0 tasks, 1 versions, seq 12; watcher: has_work=False waiting_on=[] heartbeat_age_s=None
+submissions by Player: {'ply_canary': 1}
+```
+
+`heartbeat_age_s=None` there is the cron job not having ticked yet: the gateway was 40 seconds
+old, and the job runs every minute.
+
+`status`, a minute later on an earlier stack:
+
+```
+container ide-local: running
+platform: fake; volume: ide-local-stack
+seam http://127.0.0.1:8650/health: 200 {"ok": true, "profile": "orchestrator", "coworld": null, "contract_version": 1}
+gateway http://127.0.0.1:8642/v1/capabilities: 200
+watcher: {"ok": true, "heartbeat": "2026-10-29T18:53:55.478290Z", "heartbeat_age_s": 10.7, "has_work": false, "waiting_on": [], "paused": false, "paused_drained": false}
+```
+
+`scenario` run by hand, on a stack brought up with `--no-scenario`: it opens a Session, sends
+the request, then reads the active Coworld's event stream through the seam until a
+`version.submitted` event arrives, with a progress line every 30 seconds (the Coworld's record
+counts and `research watcher status` from inside the container).
+
+```
+scenario on http://127.0.0.1:8650 (platform fake): 'Submit the starter as my champion.'
+session api_1793300060_8892c812; chat run run_a1277fdd02bf48ac96625021eb6c479a (start)
+[   0 s] no active Coworld yet; watcher: has_work=False waiting_on=[] heartbeat_age_s=25.6
+version.submitted after 33 s (seq 12): {"store": "coworld", "seq": 12, "at": "2026-10-29T18:54:50.456767Z", "actor": "session:api_1793300060_8892c812", "kind": "version.submitted", "subject": "V-1", "payload": {"auto_champion": "always", "autonomous": false, "cites": "user: \"Submit the starter as my champion.\"", "league": "league_fake", "league_name": "Fake League", "policy_version_id": "pv_14cd6cc64c32", ...
+[  33 s] Coworld cow_fake: 0 tasks, 1 versions, seq 12; watcher: has_work=False waiting_on=[] heartbeat_age_s=58.5
+submissions by Player: {'ply_canary': 1}
+```
+
+The Orchestrator switched to `cow_fake`, made Version `V-1` from the starter, uploaded and
+submitted it in one turn; the Oct 28 run of Option A took 38 seconds for the same request, so
+the "7 ticks" there were the harness polling every 5 seconds, not watcher work. The setup
+wake that followed ran under the cron job a minute later (`logs` shows its tool calls).
+
+How to read a failure: `the gateway exited; see /opt/data/gateway.log` or `not ready within 180
+s` come with the log's last 40 lines (a gateway that refuses to start prints why there);
+`prepare.py` failures print the script's output (most often `uv sync`: network, or a lock that
+does not match); `no version.submitted after <n> s` means the chat run or the wakes did not get
+to a submission in time: `logs`, then from `shell` the commands under "What to look at"
+(`research store events --after 0`, the fake platform's state file).
+
+### Attaching a client
+
+The seam is `research serve` on `http://127.0.0.1:8650` with the routes of Option B (`POST
+/session-open`, `/message`, `/ui-action`, `/store/apply`; `GET /snapshot`, `/stream`,
+`/runs/<id>`, `/health`), so the `curl` lines above, `ScriptedClient("http://127.0.0.1:8650")`
+from `core/src/research_core/client.py`, and any client of the seam contract talk to it from
+the Mac. The gateway is `http://127.0.0.1:8642` with the routes under `/p/<profile>/` and the
+key from the volume:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH=/root/.local/bin:$PATH
-git config --global --add safe.directory /src
-cd /src && uv sync --frozen
-uv run pytest -q -m hermes core/tests/hermes/test_seam_real_hermes.py -s \
-  -p no:cacheprovider --basetemp=/opt/data/e2e/$(date +%Y%m%d-%H%M%S)
+KEY=$(docker exec ide-local cat /opt/data/local_stack/api_key)
+curl -s http://127.0.0.1:8642/v1/capabilities -H "Authorization: Bearer $KEY"
+curl -s -X POST http://127.0.0.1:8642/p/orchestrator/v1/runs -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"input": "Reply with READY and stop.", "session_id": "api_local_1"}'
 ```
 
-What each piece is for:
+Both ports are bound to `127.0.0.1` on the Mac; inside the container the two servers listen on
+`0.0.0.0` of a network namespace in which nothing else runs.
 
-- `--user 0 --entrypoint /bin/bash`: what a GitHub Actions job container does with this image
-  (CI passes `--user 0` and does not run the image's s6 init). Everything runs as root and
-  `HERMES_BIN` is the venv binary directly, as in CI, not the `hermes` shim on `PATH` that drops
-  to the image's `hermes` user.
-- `/src:ro`: the checkout the way hosting mounts the release checkout; `workspace.doctor` then
-  reports `core_path.writable: false` as in production. `prepare.py` writes nothing there; it
-  records the core path in the profile and builds the workspace environment under the
-  workspace. The S1 spike (`test_spike_s1.py`) writes its report into `docs/spikes/`, so it
-  cannot run against a read-only mount.
-- `UV_PROJECT_ENVIRONMENT=/opt/data/dev-venv`: `uv sync` for the dev environment cannot write
-  `/src/.venv`. `prepare.py` sets its own `UV_PROJECT_ENVIRONMENT` for the workspace
-  environment, so this does not interfere. `UV_CACHE_DIR` on the volume keeps the downloads
-  (including the CPython 3.12 uv fetches for the workspace environment) across containers.
-- `uv` is not on the image's `PATH`; CI installs it with `astral-sh/setup-uv`, the installer
-  line does the same for the container.
-- `GIT_*`: the Orchestrator commits in the workspace's code repository; the container has no git
-  identity of its own (CI sets the same variables).
-- `-p no:cacheprovider`: pytest cannot write `.pytest_cache` under a read-only root directory.
-- `--basetemp` on the volume: the run's `host/`, `workspace/` and `gateway.log` survive the
-  container. Inspect a running session from a second shell with `docker exec -it ide-e2e bash`
-  and the commands the banner printed; the seam and the gateway listen on the container's
-  loopback only.
+### The real platform
 
-What still differs from production, even here:
+```bash
+SOFTMAX_PLAYER_ID=ply_... SOFTMAX_PLAYER_CREDENTIAL=... COGAMES_API_URL=https://softmax.com/api \
+  IDE_DEFAULT_COWORLD=cow_... OPENROUTER_API_KEY=... \
+  uv run python tools/local_stack.py up --platform real --no-scenario
+uv run python tools/local_stack.py scenario --timeout 1800
+```
 
-- **gVisor.** Docker's default runtime, not gVisor; the S3 check (a second process reading a
-  WAL store under gVisor) is not exercised.
+As in Option B: `IDE_PLATFORM=real`, the Player and `IDE_DEFAULT_COWORLD` go into every `.env`
+(the credential single-quoted, so a player session as JSON survives), `prepare.py` registers
+and activates the default Coworld on the fresh workspace, and the scenario makes a real
+submission as that Player and spends model calls doing it. Without `IDE_DEFAULT_COWORLD` the
+request names no Coworld; send one that does through the seam instead. `scenario` waits for the
+`version.submitted` event in the active Coworld's store on either platform; the per-Player count
+it prints at the end is read from the fake platform's state file, so on the real platform check
+the ladder. The credential stays in the `.env` files on the volume until `down --reset`. This
+path was not run on October 29; the fake one was.
+
+### What still differs from production
+
+- **gVisor.** Docker's default runtime (OrbStack's), not gVisor; the S3 check (a second process
+  reading a WAL store under gVisor) is not exercised.
 - **Sleep and drain.** Nothing puts the container to sleep: `sleep_through_jobs`,
   `lifecycle.activity`, the cron catch-up after a wake and the first tick's resume of drained
-  Sessions do not run. `research workspace drain` can be run by hand from the workspace
-  environment with the Orchestrator's variables exported.
-- **The bridge.** `research serve`'s `SeamServer` in the pytest process plays metta's bridge;
-  the clients are `curl` and `ScriptedClient`, not the IDE.
+  Sessions do not run. From `shell`, `research workspace drain` drains by hand, and the host's
+  autosleep probe can be tried as hosting would run it, with the image's Python in the
+  Orchestrator profile: `/opt/hermes/.venv/bin/python $HERMES_HOME/scripts/activity.py` prints
+  `{"waiting_on": [...]}` from the watcher's last tick (an empty list permits sleep;
+  `docs/hosting.md`, "Background activity and autosleep").
+- **The bridge.** `research serve` plays metta's bridge; the clients are `curl` and
+  `ScriptedClient`, not the IDE.
 - **Player provisioning.** Hosting selects the Player at workspace creation and mints and
   refreshes `SOFTMAX_PLAYER_CREDENTIAL` (a player session lasts 24 hours); here you paste a test
-  Player's credential and nothing refreshes it. `SOFTMAX_USER_CREDENTIAL` is absent.
-- **The watcher.** Production runs it as a Hermes cron job every minute (enabled by
-  `prepare.py --activate-supervisor`); the harness leaves the job paused and ticks in process.
-- **The process model.** Production runs the image's s6 init with the supervised gateway as
-  the unprivileged `hermes` user and a prebuilt workspace environment (`IDE_WORKSPACE_ENV`);
-  this runs as root with the entrypoint replaced and builds the environment at prepare time.
-- **The release.** Options A and B use your checkout and the Hermes v0.21.6 environment you
-  built; Option C uses the checkout read-only and the Hermes the image ships.
+  Player's credential and nothing refreshes it. `SOFTMAX_USER_CREDENTIAL` is absent, so
+  User-identity reads report themselves unavailable.
+- **Root.** Production runs the image's s6 init, which drops to the unprivileged `hermes` user
+  before the gateway; this runs everything as root, as CI's job container does (`--user 0`), and
+  the gateway starts as root only with `HERMES_ALLOW_ROOT_GATEWAY=1`, which the bootstrap sets
+  (without it the gateway prints "Refusing to run the Hermes gateway as root inside the official
+  Docker image" and exits). Every file on the volume is root's.
+- **The workspace environment** is built by `prepare.py` on the first `up`, not prebuilt at image
+  build (`IDE_WORKSPACE_ENV`).
+- **Hermes's warnings.** The gateway logs that its API server is network-accessible with the
+  unsandboxed `local` terminal backend, and that it ingested `OPENROUTER_API_KEY` from the
+  environment; both are expected here.
+
+What is as in production here and was not in Options A and B: the image and the Hermes it ships,
+the read-only checkout, and the watcher as a Hermes cron job every minute (enabled by
+`prepare.py --activate-supervisor`; `research watcher status` shows its heartbeat).
 
 ## What to look at
 

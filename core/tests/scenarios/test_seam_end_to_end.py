@@ -2,18 +2,17 @@
 design H "Validation"): "submit the starter as my champion" on a new workspace ends in a
 submission.
 
-No model runs. A *scripted agent* stands in for it: the ``script`` hook of
-:class:`FakeHermesRuns` receives every run the seam server or the watcher starts and plays the
-Orchestrator with real tool calls (``run_tool``) as that run's Session, then completes the run.
-The watcher tick runs inline between the runs, as the cron job would. The seam server is
-``research serve`` on a thread; the client is the :class:`ScriptedClient`.
+No model runs. A *scripted agent* stands in for it (:mod:`research_core.scripted_agent`): the
+``script`` hook of :class:`FakeHermesRuns` receives every run the seam server or the watcher
+starts and plays the Orchestrator with real tool calls (``run_tool``) as that run's Session,
+then completes the run. The watcher tick runs inline between the runs, as the cron job would.
+The seam server is ``research serve`` on a thread; the client is the :class:`ScriptedClient`.
 """
 
 from __future__ import annotations
 
 import json
 import threading
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,119 +20,14 @@ import pytest
 from research_core import layout
 from research_core.client import ScriptedClient
 from research_core.platform.fake import FakePlatform
-from research_core.plugin import turn
+from research_core.scripted_agent import CITES, REQUEST, ScriptedAgent
 from research_core.serve import SeamServer
 from research_core.store import coworlds, notices
 from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher import context as watcher_context
 from research_core.watcher import tick as watcher_tick
-from research_core.watcher.hermes_api import FakeHermesRuns, FakeRun
+from research_core.watcher.hermes_api import FakeHermesRuns
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
-
-REQUEST = "Submit the starter as my champion."
-CITES = "msg:m-1"
-LEAGUE = "league_fake"
-
-
-class ScriptedAgent:
-    """Plays the Orchestrator for the runs the fake gateway starts.
-
-    A chat run with the user's request switches to the Coworld with the request pending; a
-    setup wake carries the pending request out (create, upload, submit, notify); any other
-    chat run renders its turn (what the plugin's hook would show the model) and says "Noted".
-    """
-
-    def __init__(self, env: dict[str, str], source: Path, commit: str) -> None:
-        self.env = env
-        self.source = source
-        self.commit = commit
-        self.hermes: FakeHermesRuns | None = None
-        self.rendered: dict[str, str] = {}
-        self.tool_results: list[dict] = []
-        self.seen_sessions: set[str] = set()
-        self.other_wakes: list[str] = []  # the first line of every other wake the watcher started
-        self.hold_chat_runs = (
-            False  # leave the chat run live (a long model turn) instead of ending it
-        )
-
-    def __call__(self, run: FakeRun) -> None:
-        ctx = ToolContext.from_env(
-            "orchestrator",
-            {**self.env, "IDE_SESSION_ID": run.session_id, "IDE_ROLE": "orchestrator"},
-        )
-        if "# Setup wake" in run.input:
-            self.setup(run, ctx)
-            return
-        if run.input.startswith("# ") and "wake" in run.input.splitlines()[0].lower():
-            # Another wake (review, management, anti-stall): a background Session. The
-            # plugin's turn hook renders only for chat Sessions, so this one renders nothing.
-            self.other_wakes.append(run.input.splitlines()[0])
-            self.hermes.complete(run.run_id, "Nothing to do.")
-            return
-        first = run.session_id not in self.seen_sessions
-        self.seen_sessions.add(run.session_id)
-        self.rendered[run.run_id] = turn.render_turn(
-            ctx, run.session_id, is_first_turn=first, now=datetime.now(UTC)
-        )
-        if REQUEST.lower().rstrip(".") in run.input.lower():
-            self.chat_request(run, ctx)
-        else:
-            self.hermes.complete(run.run_id, "Noted.")
-
-    def call(self, ctx: ToolContext, tool: str, args: dict) -> dict:
-        result = json.loads(run_tool(tool, args, ctx))
-        self.tool_results.append({"tool": tool, "args": args, "result": result})
-        assert result["ok"] is True, (tool, args, result)
-        return result
-
-    def chat_request(self, run: FakeRun, ctx: ToolContext) -> None:
-        self.call(
-            ctx,
-            "workspace",
-            {
-                "action": "coworld_switch",
-                "coworld": COWORLD_ID,
-                "source": self.source.as_uri(),
-                "commit": self.commit,
-                "cites": CITES,
-                "pending_request": {"text": REQUEST, "cites": CITES},
-            },
-        )
-        if self.hold_chat_runs:
-            return  # the run stays ``running`` until the test completes it
-        self.hermes.complete(
-            run.run_id, "Switching to fakegame; I will submit the starter as soon as it is set up."
-        )
-
-    def setup(self, run: FakeRun, ctx: ToolContext) -> None:
-        payload = json.loads(run.input.split("```json\n", 1)[1].split("\n```", 1)[0])
-        pending = payload["pending_request"]
-        assert pending["text"] == REQUEST
-        version = self.call(ctx, "version", {"action": "create", "summary": "The starter policy"})
-        vid = version["record"]["id"]
-        self.call(ctx, "upload", {"version": vid})
-        submitted = self.call(
-            ctx,
-            "submit",
-            {
-                "version": vid,
-                "league": LEAGUE,
-                "user_requested": True,
-                "cites": pending["cites"],
-                "reason": pending["text"],
-            },
-        )
-        assert submitted.get("refused") is None, submitted
-        self.call(
-            ctx,
-            "ui",
-            {
-                "action": "notify",
-                "text": f"Submitted {vid}, the starter, to {LEAGUE} as you asked.",
-                "refs": [vid],
-            },
-        )
-        self.hermes.complete(run.run_id, f"Set up {COWORLD_ID} and submitted {vid}.")
 
 
 class Scenario:
@@ -147,7 +41,7 @@ class Scenario:
         self.ws = layout.from_env(self.env)
         self.ws.ensure_dirs()
         source, commit = make_fakegame_repo(tmp_path / "upstream")
-        self.agent = ScriptedAgent(self.env, source, commit)
+        self.agent = ScriptedAgent(self.env, source, commit, coworld_id=COWORLD_ID)
         self.hermes = FakeHermesRuns(script=self.agent)
         self.agent.hermes = self.hermes
         self.server = SeamServer(ws=self.ws, hermes=self.hermes)
