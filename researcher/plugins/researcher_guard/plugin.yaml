@@ -1,6 +1,0 @@
-name: researcher_guard
-version: 0.4.0
-description: Researcher workspace and completion rules. Only the orchestrator creates, links or schedules cards; only `workspace integrate` pushes canonical main; completion requires a matching canonical journal.
-author: ide-distributions
-provides_hooks:
-  - pre_tool_call

@@ -1,11 +1,11 @@
-"""Refresh ``ontology/VOCABULARY.md`` from metta's canonical Softmax vocabulary.
+"""Refresh ``core/src/research_core/prompts/vocabulary.md`` from metta's canonical Softmax vocabulary.
 
 The source, metta's ``docs/ai/design/vocabulary.md``, is not on a profile host, so its
-entity hierarchy and term table are copied here and embedded in each research SOUL by
-``tools/sync_shared.py``. Run after the upstream file changes, then run sync_shared:
+entity hierarchy and term table are copied here; ``tools/build_prompts.py`` renders them into
+each profile's SOUL. Run after the upstream file changes, then rebuild the prompts:
 
     python3 tools/refresh_vocabulary.py ~/coding/metta
-    python3 tools/sync_shared.py
+    python3 tools/build_prompts.py --write
 """
 
 import re
@@ -57,8 +57,8 @@ def main() -> int:
         section(text, SECTIONS[1]),
         NOTES,
     ]
-    (REPO / "ontology" / "VOCABULARY.md").write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
-    print("wrote ontology/VOCABULARY.md")
+    (REPO / "core/src/research_core/prompts/vocabulary.md").write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")
+    print("wrote core/src/research_core/prompts/vocabulary.md")
     return 0
 
 

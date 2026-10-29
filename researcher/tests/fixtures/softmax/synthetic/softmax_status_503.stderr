@@ -1,5 +1,0 @@
-Error: Request failed: GET /whoami returned HTTP 503.
-Service Unavailable
-Next: retry with backoff. If it persists, report the request id below.
-Request id: 00000000-0000-4000-8000-000000000503
-Docs: https://softmax.com/docs/guides/error-handling

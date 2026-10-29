@@ -1,14 +1,9 @@
 import re
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
-import frontmatter
 import yaml
 
 from play import plugin
-from play.games import GOTA
 
 DISTRIBUTION = Path(__file__).resolve().parents[1]
 REPO = DISTRIBUTION.parent
@@ -49,34 +44,12 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
     )
 
 
-def test_gota_league_matches_the_game_contract():
-    contract = frontmatter.load(REPO / "researcher/games/gota/GAME.md")
-    assert GOTA.reference_league_id == contract["league_id"]
-
-
 def test_ide_profiles_do_not_import_play():
     for folder in ("orchestrator", "researcher"):
         for path in (REPO / folder).rglob("*.py"):
             if ".venv" in path.parts:
                 continue
             assert not re.search(r"^\s*(from|import) play\b", path.read_text(), re.MULTILINE), path
-
-
-def test_sync_regenerates_every_copy_identically(tmp_path):
-    """The committed copies, the IDE profiles' included, are what sync_shared.py makes."""
-    for name in ("shared", "ontology", "tools"):
-        shutil.copytree(REPO / name, tmp_path / name)
-    ignore = shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".ruff_cache")
-    for name in ("researcher", "orchestrator", "play"):
-        shutil.copytree(REPO / name, tmp_path / name, ignore=ignore)
-    result = subprocess.run(
-        [sys.executable, str(tmp_path / "tools/sync_shared.py")],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert result.stdout.strip() == "copies are up to date"
-    assert not (tmp_path / "play/SOUL.md").read_text().count("ontology")
 
 
 def test_play_lead_does_the_whole_loop_itself_in_plain_words():
