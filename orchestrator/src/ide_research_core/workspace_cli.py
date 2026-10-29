@@ -159,6 +159,10 @@ def _source_snapshot(args) -> dict:
     if isinstance(request, StageRequest):
         value = stage_sources(storage, **request.model_dump(exclude={"action"}))
         return {"snapshot": value.digest, **value.model_dump(mode="json")}
+    if (Path(os.environ["HERMES_HOME"]) / "plugins/researcher_guard").is_dir():
+        raise workspace.WorkspaceError(
+            "coordinator_required", "Only the coordinator promotes publications"
+        )
     return promote_sources(storage, **request.model_dump(exclude={"action"})).model_dump(
         mode="json"
     )

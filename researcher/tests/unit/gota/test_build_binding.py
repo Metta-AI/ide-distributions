@@ -134,7 +134,10 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
         'source_url': f'https://github.com/Metta-AI/polyworld/tree/{POLYWORLD_COMMIT}/examples/gods_of_the_arena'}}}))
     monkeypatch.setenv('GOTA_HERMES_PYTHON', '/fake/hermes/python')
     monkeypatch.setattr(subprocess, 'check_output', lambda argv, **kw: str(tmp_path / 'worker'))
+    real_run = subprocess.run
     def fake_process(argv, **kwargs):
+        if argv[0] == 'git':
+            return real_run(argv, **kwargs)
         raise AssertionError(f'unexpected external process: {argv}')
     monkeypatch.setattr(subprocess, 'run', fake_process)
     compiler = types.SimpleNamespace(read=lambda p: json.loads(p.read_text()),

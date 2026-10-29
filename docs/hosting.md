@@ -94,6 +94,7 @@ Publication callers use these operations:
 1. Before building, call `stage_sources(storage, repository, commit=..., source_path=...,
    source_hashes=...)`. Paths are repository-relative and hashes describe exact input bytes.
    It returns `SourceSnapshot`; persist its `digest` in the workspace operation receipt.
+   Build producers record it as `version.json.source_snapshot`; this is not an upload operation UUID.
    Tracked/new/dirty inputs become a retained Git commit. Only ignored inputs are copied separately.
 2. Build inside `with build_context(storage, snapshot) as root:`. This disposable tree contains
    the captured inputs, including modes and link metadata. Do not build from the mutable checkout.

@@ -2,19 +2,21 @@
 
 import hashlib
 import os
+import shutil
 import stat
+import subprocess
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from ide_research_core import policy_files
 from ide_research_core.io import gitops
-from ide_research_core.source_io import SourceError, write_file
+from ide_research_core.source_io import SourceError, retain_file, write_file
 from ide_research_core.workspace import canonical_lock
 
 
@@ -66,68 +68,92 @@ def stage_sources(
     with canonical_lock(storage):
         if not objects.exists():
             gitops.git(storage, "init", "--bare", str(objects))
+            gitops.git(objects, "config", "core.fsync", "committed")
         gitops.git(objects, "fetch", "--no-tags", str(repository), commit)
         ignored = []
-        copies = {}
         changes = {}
         modes = {}
         for name, expected in sorted(source_hashes.items()):
             if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
                 raise SourceError("Source hashes must be SHA256 values")
-            tracked = gitops.show(objects, commit, name)
-            if tracked is not None and hashlib.sha256(tracked).hexdigest() == expected:
-                mode = gitops.git(
-                    objects, "--literal-pathspecs", "ls-tree", commit, "--", name
-                ).split()[0]
-                modes[name] = int(mode, 8)
-                current = repository / name
-                if current.exists() or current.is_symlink():
-                    metadata = current.lstat()
-                    current_mode = (
-                        0o120000
-                        if stat.S_ISLNK(metadata.st_mode)
-                        else 0o100755
-                        if metadata.st_mode & 0o111
-                        else 0o100644
-                    )
-                    if current_mode != modes[name]:
-                        modes[name] = current_mode
-                        changes[name] = tracked
-                continue
-            with policy_files.parent_descriptor(repository, name) as (directory, filename):
-                metadata = os.stat(filename, dir_fd=directory, follow_symlinks=False)
-                if stat.S_ISLNK(metadata.st_mode):
-                    data = os.fsencode(os.readlink(filename, dir_fd=directory))
-                    modes[name] = 0o120000
+            entry = gitops.git(objects, "--literal-pathspecs", "ls-tree", commit, "--", name)
+            with tempfile.TemporaryFile() as captured:
+                with policy_files.parent_descriptor(repository, name) as (directory, filename):
+                    metadata = os.stat(filename, dir_fd=directory, follow_symlinks=False)
+                    digest = hashlib.sha256()
+                    if stat.S_ISLNK(metadata.st_mode):
+                        data = os.fsencode(os.readlink(filename, dir_fd=directory))
+                        captured.write(data)
+                        digest.update(data)
+                        modes[name] = 0o120000
+                    else:
+                        descriptor = os.open(
+                            filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                        )
+                        with os.fdopen(descriptor, "rb") as source:
+                            metadata = os.fstat(source.fileno())
+                            if not stat.S_ISREG(metadata.st_mode):
+                                raise SourceError("Build inputs must be files or symbolic links")
+                            modes[name] = 0o100755 if metadata.st_mode & 0o111 else 0o100644
+                            while chunk := source.read(1024 * 1024):
+                                digest.update(chunk)
+                                captured.write(chunk)
+                if digest.hexdigest() != expected:
+                    raise SourceError(f"Input changed since build: {name}")
+                captured.seek(0)
+                if (
+                    not entry
+                    and gitops._run(
+                        repository / Path(name).parent,
+                        "check-ignore",
+                        "--quiet",
+                        "--",
+                        Path(name).name,
+                        check=False,
+                    ).returncode
+                    == 0
+                ):
+                    ignored.append(name)
+                    retain_file(storage, f"ignored/{expected}", captured, expected, 0o600)
                 else:
-                    value = policy_files.read_file(repository, name, limit=1024 * 1024 * 1024)
-                    if isinstance(value, policy_files.FileResult):
-                        raise SourceError(f"Cannot retain build input {name}: {value.kind}")
-                    data = value.data
-                    modes[name] = 0o100755 if value.mode & 0o111 else 0o100644
-            if hashlib.sha256(data).hexdigest() != expected:
-                raise SourceError(f"Input changed since build: {name}")
-            if (
-                tracked is None
-                and gitops._run(
-                    repository, "check-ignore", "--quiet", "--", name, check=False
-                ).returncode
-                == 0
-            ):
-                ignored.append(name)
-                copies[name] = data
-            else:
-                changes[name] = data
+                    result = subprocess.run(
+                        ["git", "-C", str(objects), "hash-object", "-w", "--stdin"],
+                        stdin=captured,
+                        capture_output=True,
+                        check=True,
+                    )
+                    blob = result.stdout.decode().strip()
+                    if (
+                        not entry
+                        or entry.split()[2] != blob
+                        or int(entry.split()[0], 8) != modes[name]
+                    ):
+                        changes[name] = blob
         if changes:
             with tempfile.TemporaryDirectory(prefix="source-index-") as directory:
                 env = {**os.environ, "GIT_INDEX_FILE": str(Path(directory) / "index")}
                 gitops._run(objects, "read-tree", commit, env=env)
-                for name, data in changes.items():
-                    blob = (
-                        gitops._run(objects, "hash-object", "-w", "--stdin", input=data)
-                        .stdout.decode()
-                        .strip()
-                    )
+                for name, blob in changes.items():
+                    for parent in Path(name).parents:
+                        if parent == Path("."):
+                            continue
+                        entry = gitops.git(
+                            objects,
+                            "--literal-pathspecs",
+                            "ls-tree",
+                            commit,
+                            "--",
+                            parent.as_posix(),
+                        )
+                        if entry.startswith("160000 "):
+                            gitops._run(
+                                objects,
+                                "update-index",
+                                "-z",
+                                "--index-info",
+                                input=f"0 {entry.split()[2]}\t{parent.as_posix()}\0".encode(),
+                                env=env,
+                            )
                     gitops._run(
                         objects,
                         "update-index",
@@ -173,8 +199,6 @@ def stage_sources(
             if SourceSnapshot.model_validate_json(manifest.read_bytes()) != snapshot:
                 raise SourceError("Snapshot identity conflict")
         else:
-            for name, data in copies.items():
-                write_file(storage, f"{prefix}/ignored/{name}", data)
             # A ref, rather than FETCH_HEAD, keeps source reachable across later fetches and GC.
             gitops.git(objects, "update-ref", f"refs/snapshots/{snapshot.digest}", commit)
             write_file(storage, f"{prefix}/snapshot.json", snapshot.model_dump_json().encode())
@@ -212,27 +236,43 @@ def promote_sources(
     return publication
 
 
-def read_snapshot(storage: Path, snapshot: SourceSnapshot, name: str) -> bytes:
-    """Read immutable bytes without materializing a second source checkout."""
+@contextmanager
+def snapshot_input(storage: Path, snapshot: SourceSnapshot, name: str) -> Iterator[BinaryIO]:
+    """Stream and verify retained bytes, including large ignored build inputs."""
     storage = storage.resolve()
     if name not in snapshot.source_hashes or not policy_files.source_path(name):
         raise SourceError("Path is absent from published source")
-    if name in snapshot.ignored:
-        value = policy_files.read_file(
-            storage,
-            f"staged/{snapshot.digest}/ignored/{name}",
-            limit=1024 * 1024 * 1024,
-        )
-        if isinstance(value, policy_files.FileResult):
-            raise SourceError(f"Cannot read retained input: {value.kind}")
-        data = value.data
-    else:
-        data = gitops.show(storage / "objects.git", snapshot.commit, name)
-        if data is None:
-            raise SourceError("Published source commit is incomplete")
-    if hashlib.sha256(data).hexdigest() != snapshot.source_hashes[name]:
-        raise SourceError("Published source bytes do not match the build")
-    return data
+    with tempfile.TemporaryFile() as content:
+        if name in snapshot.ignored:
+            with policy_files.parent_descriptor(
+                storage, f"ignored/{snapshot.source_hashes[name]}"
+            ) as (directory, filename):
+                descriptor = os.open(
+                    filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                )
+                with os.fdopen(descriptor, "rb") as source:
+                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                        raise SourceError("Ignored input is not a regular retained blob")
+                    shutil.copyfileobj(source, content, length=1024 * 1024)
+        else:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(storage / "objects.git"),
+                    "cat-file",
+                    "blob",
+                    f"{snapshot.commit}:{name}",
+                ],
+                stdout=content,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        content.seek(0)
+        if hashlib.file_digest(content, "sha256").hexdigest() != snapshot.source_hashes[name]:
+            raise SourceError("Published source bytes do not match the build")
+        content.seek(0)
+        yield content
 
 
 class SourceEdits(BaseModel):
@@ -327,11 +367,11 @@ def execute_files(storage: Path, command, request_id: str) -> policy_files.FileR
                         kind="request_conflict", error="Operation ID names another edit"
                     )
                 return result
-        data = (
-            state.files[command.path].encode()
-            if command.path in state.files
-            else read_snapshot(storage, snapshot, command.path)
-        )
+        if command.path in state.files:
+            data = state.files[command.path].encode()
+        else:
+            with snapshot_input(storage, snapshot, command.path) as content:
+                data = content.read(60001)
         content = data.decode("utf8", errors="replace")
         if len(data) > 60000:
             result = policy_files.FileResult(
@@ -398,14 +438,15 @@ def build_context(storage: Path, snapshot: SourceSnapshot) -> Iterator[Path]:
         root = Path(directory)
         for name in snapshot.source_hashes:
             mode = snapshot.modes[name]
-            data = read_snapshot(storage, snapshot, name)
             target = root / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            if mode == 0o120000:
-                target.symlink_to(os.fsdecode(data))
-            else:
-                target.write_bytes(data)
-                target.chmod(mode & 0o777)
+            with snapshot_input(storage, snapshot, name) as source:
+                if mode == 0o120000:
+                    target.symlink_to(os.fsdecode(source.read()))
+                else:
+                    with target.open("wb") as output:
+                        shutil.copyfileobj(source, output, length=1024 * 1024)
+                    target.chmod(mode & 0o777)
         yield root
 
 
@@ -434,12 +475,13 @@ def stage_publication(storage: Path, version_id: UUID) -> SourceSnapshot:
             for name in original.ignored:
                 target = checkout / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                data = read_snapshot(storage, original, name)
-                if original.modes[name] == 0o120000:
-                    target.symlink_to(os.fsdecode(data))
-                else:
-                    target.write_bytes(data)
-                    target.chmod(original.modes[name] & 0o777)
+                with snapshot_input(storage, original, name) as source:
+                    if original.modes[name] == 0o120000:
+                        target.symlink_to(os.fsdecode(source.read()))
+                    else:
+                        with target.open("wb") as output:
+                            shutil.copyfileobj(source, output, length=1024 * 1024)
+                        target.chmod(original.modes[name] & 0o777)
             hashes = dict(original.source_hashes)
             for name, content in state.files.items():
                 write_file(checkout.resolve(), name, content.encode())

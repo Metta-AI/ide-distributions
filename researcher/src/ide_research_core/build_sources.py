@@ -117,6 +117,33 @@ def capture(build_dir: Path, source_root: Path) -> dict:
                 continue
             path = path.relative_to(source_root)
         hashes[path.as_posix()] = digest
+    from ide_research_core.io import gitops
+    from ide_research_core.source_snapshots import stage_sources
+
+    repository = gitops._run(source_root, "rev-parse", "--show-toplevel", check=False)
+    if repository.returncode == 0:
+        repo = Path(repository.stdout.decode().strip()).resolve()
+        prefix = source_root.relative_to(repo)
+        logical = {(prefix / name).as_posix(): digest for name, digest in hashes.items()}
+        primary_name = (prefix / primary).as_posix()
+        canonical = Path(os.environ.get("RESEARCH_CANONICAL", str(repo.parent / "canonical.git")))
+        snapshot = stage_sources(
+            canonical.resolve().parent / "policy-sources",
+            repo,
+            commit=gitops.head(repo),
+            source_path=primary_name,
+            source_hashes=logical,
+        )
+        build.pop("source_root", None)
+        build.update(
+            source_snapshot=snapshot.digest,
+            source_commit=snapshot.commit,
+            source_path=primary_name,
+            source_hashes=logical,
+        )
+        receipt.write_text(json.dumps(build, sort_keys=True, indent=2) + "\n")
+        return build
+    # Standalone non-Git build tools retain their inputs for the existing task handoff.
     retained, _ = retain(build_dir, primary.as_posix(), hashes, source_root=source_root)
     snapshot = "/".join(Path(retained).parts[:2])
     build.update(source_root=snapshot, source_path=primary.as_posix(), source_hashes=hashes)
@@ -186,6 +213,8 @@ def stage(worktree: Path, base: str) -> list[str]:
         if not isinstance(build, dict) or not fields.issubset(build) or _gate_failures(build):
             continue
         build, _artifact, artifact_hash = checked_build(receipt.parent)
+        if "source_snapshot" in build:
+            continue
         handoff = receipt.parent / "retained-sources.json"
         receipt_hash = hashlib.sha256(data).hexdigest()
         retained = (

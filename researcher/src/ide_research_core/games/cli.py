@@ -191,26 +191,31 @@ def _build_container(args) -> dict:
             "bad_arguments", "The Dockerfile must be retained in the workspace"
         )
     strategy_hash = hashlib.sha256(strategy.read_bytes()).hexdigest()
-    source_commit = gitops.head(context)
+    source_commit = gitops.head(root)
+    from ide_research_core.source_snapshots import build_context, stage_sources
+
+    storage = Path(os.environ["RESEARCH_CANONICAL"]).resolve().parent / "policy-sources"
+    snapshot = stage_sources(
+        storage, root, commit=source_commit, source_path=primary, source_hashes=source_hashes
+    )
     out.mkdir(parents=True)
     artifact = out / "policy.tar"
-    result = subprocess.run(
-        [
-            str(Path(sys.executable).parent / "coworld"),
-            "build-policy",
-            str(context),
-            "--dockerfile",
-            args.dockerfile,
-            "--output",
-            str(artifact),
-        ],
-        stdout=sys.stderr,
-        check=False,
-    )
+    with build_context(storage, snapshot) as retained:
+        result = subprocess.run(
+            [
+                str(Path(sys.executable).parent / "coworld"),
+                "build-policy",
+                str(retained / context.relative_to(root)),
+                "--dockerfile",
+                args.dockerfile,
+                "--output",
+                str(artifact),
+            ],
+            stdout=sys.stderr,
+            check=False,
+        )
     if result.returncode:
         raise authoring.AuthoringError("build_failed", "Container build failed; see build output")
-    if container_sources(root, context, strategy, args.dockerfile) != source_hashes:
-        raise authoring.AuthoringError("source_changed", "Source changed during the build")
     with artifact.open("rb") as stream:
         artifact_hash = hashlib.file_digest(stream, "sha256").hexdigest()
     version = {
@@ -218,16 +223,14 @@ def _build_container(args) -> dict:
         "artifact_type": "oci-image",
         "policy_sha256": artifact_hash,
         "strategy_sha256": strategy_hash,
-        "source_commit": source_commit,
+        "source_commit": snapshot.commit,
+        "source_snapshot": snapshot.digest,
         "source_path": primary,
         "source_hashes": source_hashes,
         "gates": {"container_build": {"passed": True}},
         "evaluation": {"status": "not_run"},
     }
     (out / "version.json").write_text(json.dumps(version, indent=2) + "\n")
-    from ide_research_core.build_sources import capture
-
-    version = capture(out, root)
     return {"build_dir": str(out), **version}
 
 

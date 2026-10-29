@@ -171,9 +171,9 @@ def test_completed_build_can_move_before_staging(tmp_path):
         check=True,
     )
     built = json.loads((output / "version.json").read_text())
-    assert built["source_path"] == "STRATEGY.md"
+    assert built["source_path"] == "candidate/STRATEGY.md"
     assert built["source_hashes"] == {
-        "STRATEGY.md": hashlib.sha256(source.read_bytes()).hexdigest()
+        "candidate/STRATEGY.md": hashlib.sha256(source.read_bytes()).hexdigest()
     }
     other = tmp_path / "same-input-in-another-directory"
     other.mkdir()
@@ -193,10 +193,8 @@ def test_completed_build_can_move_before_staging(tmp_path):
         check=True,
     )
     rebuilt = json.loads((other_output / "version.json").read_text())
-    assert rebuilt["source_root"] == built["source_root"], (
-        "Source identity must not contain host paths"
-    )
-    assert rebuilt["source_hashes"] == built["source_hashes"]
+    assert list(rebuilt["source_hashes"].values()) == list(built["source_hashes"].values())
+    assert not any(Path(name).is_absolute() for name in built["source_hashes"])
     relocated = tmp_path.resolve() / "after"
     profile.rename(relocated)
     clone = relocated / "workspace"
@@ -217,11 +215,14 @@ def test_completed_build_can_move_before_staging(tmp_path):
         check=True,
     )
     assert json.loads(staged.stdout)["ok"], staged.stdout
-    receipt = json.loads((clone / "build-evidence/policy/retained-sources.json").read_text())
+    objects = relocated / "policy-sources/objects.git"
     assert (
-        subprocess.check_output(["git", "-C", str(clone), "show", "HEAD:" + receipt["source_path"]])
+        subprocess.check_output(
+            ["git", "-C", str(objects), "show", built["source_commit"] + ":" + built["source_path"]]
+        )
         == b"- aggression: 3\n"
     )
+    assert not (clone / "build-evidence/policy/retained-sources.json").exists()
 
 
 def test_immutable_publication_survives_repository_removal_and_volume_relocation(tmp_path):
@@ -247,8 +248,9 @@ def test_immutable_publication_survives_repository_removal_and_volume_relocation
             text=True,
             capture_output=True,
             env=env,
-            check=True,
+            check=False,
         )
+        assert result.returncode == 0, (result.stdout, result.stderr)
         envelope = json.loads(result.stdout)
         assert envelope["ok"], envelope
         return envelope["data"]
@@ -265,13 +267,33 @@ def test_immutable_publication_survives_repository_removal_and_volume_relocation
     git("config", "user.email", "source@example.com")
     (repository / ".gitignore").write_text("input.bin\n")
     (repository / "player.py").write_text("original\n")
+    nested = repository / "nested"
+    nested.mkdir()
+    subprocess.run(["git", "-C", str(nested), "init", "-q"], check=True)
+    (nested / "Dockerfile").write_text("FROM scratch\n")
+    subprocess.run(["git", "-C", str(nested), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(nested),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "nested source",
+        ],
+        check=True,
+    )
     git("add", ".")
     git("commit", "-qm", "source")
     (repository / "player.py").write_text("built dirty input\n")
     (repository / "input.bin").write_bytes(b"\xff\x00ignored")
     hashes = {
         name: hashlib.sha256((repository / name).read_bytes()).hexdigest()
-        for name in ("player.py", "input.bin")
+        for name in ("player.py", "input.bin", "nested/Dockerfile")
     }
     request = {
         "action": "stage",
@@ -297,6 +319,18 @@ def test_immutable_publication_survives_repository_removal_and_volume_relocation
         "policy_name": "retained",
         "artifact_sha256": "a" * 64,
     }
+    worker_guard.mkdir()
+    denied = subprocess.run(
+        [sys.executable, "-m", "ide_research_core", "workspace", "source-snapshot"],
+        input=json.dumps(promotion),
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    assert denied.returncode != 0
+    assert json.loads(denied.stdout)["error"]["reason"] == "coordinator_required"
+    worker_guard.rmdir()
     promoted = cli("source-snapshot", promotion)
     import shutil
 
@@ -357,6 +391,18 @@ def test_immutable_publication_survives_repository_removal_and_volume_relocation
         ]
     )
     assert immutable == b"built dirty input\n"
+    assert (
+        subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(relocated / "policy-sources/objects.git"),
+                "show",
+                staged["commit"] + ":nested/Dockerfile",
+            ]
+        )
+        == b"FROM scratch\n"
+    )
     rebuild = cli("source-snapshot", {"action": "stage_publication", "version_id": version})
     edited_input = subprocess.check_output(
         [

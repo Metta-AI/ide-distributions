@@ -50,6 +50,7 @@ PROVENANCE_FIELDS = (
     "build_id",
     "compiler",
     "source_hashes",
+    "source_snapshot",
     "source_path",
     "created",
     "started",
@@ -190,6 +191,8 @@ def register_sources(
     ctx: RunContext, store: RecordStore, version_id: str, build: dict, build_dir: Path
 ) -> None:
     """Attach verified source evidence without changing an immutable publication record."""
+    if "source_snapshot" in build:
+        return
     if "source_path" not in build or "source_hashes" not in build:
         return
     if store.find("version_event", version=version_id, kind="sources_registered"):

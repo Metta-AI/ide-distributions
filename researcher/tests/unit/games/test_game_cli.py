@@ -67,11 +67,19 @@ def test_container_build_only_emits_publishable_receipt_on_success(
     output = tmp_path / "build"
     monkeypatch.setenv("BUILDKIT_HOST", "tcp://127.0.0.1:1234")
     monkeypatch.delenv("HERMES_KANBAN_WORKSPACE", raising=False)
-    monkeypatch.setattr(cli.gitops, "head", lambda path: "a" * 40)
-    monkeypatch.setattr(cli.gitops, "git", lambda *args: str(tmp_path))
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c",
+                    "user.email=test@example.com", "commit", "-qm", "inputs"], check=True)
+    monkeypatch.setenv("RESEARCH_CANONICAL", str(tmp_path / "canonical.git"))
+    real_run = subprocess.run
 
     def build(argv, **kwargs):
-        assert argv[1:3] == ["build-policy", str(context)]
+        if argv[0] == "git":
+            return real_run(argv, **kwargs)
+        assert argv[1] == "build-policy"
+        assert Path(argv[2]) != context
+        assert (Path(argv[2]) / "Dockerfile").read_bytes() == (context / "Dockerfile").read_bytes()
         assert "--dockerfile" in argv
         Path(argv[argv.index("--output") + 1]).write_bytes(b"archive")
         return subprocess.CompletedProcess(argv, returncode)
@@ -96,7 +104,8 @@ def test_container_build_only_emits_publishable_receipt_on_success(
     else:
         assert code == 0
         receipt = json.loads((output / "version.json").read_text())
-        assert (output / receipt["source_root"] / receipt["source_path"]).read_bytes() == (context / "Dockerfile").read_bytes()
+        assert (tmp_path / "policy-sources/staged" / receipt["source_snapshot"] / "snapshot.json").is_file()
+        assert receipt["source_path"] == "player/Dockerfile"
         assert set(receipt["source_hashes"]) == {
             "player/Dockerfile",
             "player/player.py",
