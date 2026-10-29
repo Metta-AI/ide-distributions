@@ -27,7 +27,9 @@ class HermesPolicyFiles(BaseModel):
     def source_target(self) -> Self:
         if self.action == "register_project":
             if self.project_id is None or not self.version_id or not self.base_sha256:
-                raise ValueError("Publication registration requires a project, policy version and source revision")
+                raise ValueError(
+                    "Publication registration requires a project, policy version and source revision"
+                )
             UUID(self.version_id)
         elif self.project_id is not None:
             raise ValueError("Only publication registration names a project")

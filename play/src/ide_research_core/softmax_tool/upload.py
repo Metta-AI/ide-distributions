@@ -233,7 +233,10 @@ def _upload_once(
     if platform_id is None:
         version = store.load(version_id)[0]
         platform_id = sm.upload(
-            artifact, version["policy_name"], player_id=version["player_id"], artifact_type=artifact_type
+            artifact,
+            version["policy_name"],
+            player_id=version["player_id"],
+            artifact_type=artifact_type,
         )
         store.add_event(version_id, "uploaded", {"policy_version_id": platform_id})
     return platform_id

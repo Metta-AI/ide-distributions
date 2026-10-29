@@ -108,15 +108,11 @@ Publication registers those staged snapshots in the game's canonical workspace. 
 publication receipt before reporting that Code is ready. Code searches native records across game
 workspaces; it does not require an IDE project.
 
-When Code cannot find an existing publication, search prior chats and the game's version/build
-receipts before asking the user for source. If the checked build remains available, retry
-`research softmax upload-build` with the original build directory and policy name. A retry
-reuses the existing publication and can register its verified source without changing its
-immutable version record. If the old receipt has no source manifest, rebuild the retained
-source using the game's supported build binding, then publish under the same policy name.
-Report the new version when the rebuilt artifact differs. Do not infer source from an OCI
-image, invent source hashes, or rewrite version records. Missing original source is an explicit
-recovery failure, not permission to fabricate an implementation.
+When Code cannot find an existing publication, inspect the game's version and build receipts.
+Do not retry an upload or publish a new version to discover the old publication's identity.
+The current CLI does not recover a policy version UUID by upload operation ID. If an upload
+response was lost, report the unresolved publication and preserve its build evidence.
+Missing source is a recovery failure, not permission to invent source hashes or rewrite records.
 
 Check `research workspace policy-files` with a `sources` request for the published policy name
 and confirm the intended record and files after integration. Then read a listed file. Neither

@@ -20,18 +20,14 @@ def parent_directory(root: Path, relative: str) -> Iterator[tuple[int, str]]:
     descriptor = os.open(root.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in root.parts[1:]:
-            child = os.open(
-                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
-            )
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
         parts = Path(relative).parts
         for part in parts[:-1]:
             if part not in os.listdir(descriptor):
                 os.mkdir(part, dir_fd=descriptor)
-            child = os.open(
-                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
-            )
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
         yield descriptor, parts[-1]
@@ -77,17 +73,13 @@ def retain_file(
                     digest.update(chunk)
                     target.write(chunk)
                 if digest.hexdigest() != expected_sha256:
-                    raise SourceError(
-                        f"Build source changed since compilation: {relative}"
-                    )
+                    raise SourceError(f"Build source changed since compilation: {relative}")
                 target.flush()
                 os.fsync(target.fileno())
             if name in os.listdir(directory):
                 existing = os.stat(name, dir_fd=directory, follow_symlinks=False)
                 if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1:
-                    raise SourceError(
-                        "Retained source must be a regular, unlinked file"
-                    )
+                    raise SourceError("Retained source must be a regular, unlinked file")
             else:
                 # Linking rather than replacing cannot overwrite a concurrent user edit.
                 os.link(

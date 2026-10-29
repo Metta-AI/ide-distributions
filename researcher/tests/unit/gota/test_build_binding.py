@@ -159,7 +159,8 @@ def test_adapter_publishes_shared_upload_envelope_with_fake_compiler(
         (target / 'policy.bas').write_text('fake immutable policy')
         data = {'build_id': target.name, 'status': status, 'gates': {'G1': {'passed': status == 'passed'}},
                 'validation_scope': 'build', 'evaluation': {'status': 'not_run'},
-                'compiler': {}, 'source_commit': 'abcdef12', 'source_hashes': {str(ROOT / 'driver'): 'hash'},
+                'compiler': {}, 'source_commit': 'abcdef12', 'source_path': str(source),
+                'source_hashes': {str(source): hashlib.sha256(source.read_bytes()).hexdigest()},
                 'policy_sha256': hashlib.sha256((target / 'policy.bas').read_bytes()).hexdigest()}
         compiler.dump(target / 'version.json', data)
         return {'build': str(target), 'error': {'type': 'ValueError', 'message': 'tool fault',

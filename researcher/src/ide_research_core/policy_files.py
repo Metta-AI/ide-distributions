@@ -107,14 +107,10 @@ def source_path(value: str, *, allow_hidden: bool = True) -> bool:
     )
 
 
-def check_path(
-    root: Path, relative: str, *, allow_hidden: bool = True
-) -> FileResult | None:
+def check_path(root: Path, relative: str, *, allow_hidden: bool = True) -> FileResult | None:
     """Reject static unsafe paths before opening; descriptor walks also prevent swap escapes."""
     if not source_path(relative, allow_hidden=allow_hidden):
-        return FileResult(
-            kind="invalid_path", error="Expected a visible relative source path."
-        )
+        return FileResult(kind="invalid_path", error="Expected a visible relative source path.")
     current = root
     parts = relative.split("/")
     for index, part in enumerate(parts):
@@ -147,9 +143,7 @@ def parent_descriptor(
     descriptor = os.open(root.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in parts[:-1]:
-            child = os.open(
-                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
-            )
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
         yield descriptor, parts[-1]
@@ -173,9 +167,7 @@ def read_file(
         directory,
         name,
     ):
-        descriptor = os.open(
-            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
-        )
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         with os.fdopen(descriptor, "rb") as stream:
             metadata = os.fstat(stream.fileno())
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
@@ -247,9 +239,7 @@ def sources(root: Path, command: HermesPolicyFiles) -> list[PolicySource] | File
                     return snapshot
                 event = VersionEvent.model_validate_json(snapshot.data)
                 if event.kind == "uploaded" and event.version == record.id:
-                    versions_ids.append(
-                        UploadData.model_validate(event.data).policy_version_id
-                    )
+                    versions_ids.append(UploadData.model_validate(event.data).policy_version_id)
                 if event.kind == "sources_registered" and event.version == record.id:
                     registered = RegisteredSource.model_validate(event.data)
                     if registered.artifact_sha256 != record.artifact_sha256:
@@ -258,10 +248,7 @@ def sources(root: Path, command: HermesPolicyFiles) -> list[PolicySource] | File
                             error="Source evidence names another artifact.",
                         )
                     build = registered
-        if (
-            not source_path(build.source_path)
-            or build.source_path.split("/")[0] == "versions"
-        ):
+        if not source_path(build.source_path) or build.source_path.split("/")[0] == "versions":
             continue
         if command.version_id and command.version_id not in versions_ids:
             continue
@@ -324,9 +311,7 @@ def source_page(matched: list[PolicySource], offset: int) -> FileResult:
 
 def execute(root: Path, command: HermesPolicyFiles) -> FileResult:
     if command.path and not source_path(command.path):
-        return FileResult(
-            kind="invalid_path", error="Expected a visible relative source path."
-        )
+        return FileResult(kind="invalid_path", error="Expected a visible relative source path.")
     matched = sources(root, command)
     if isinstance(matched, FileResult):
         return matched
@@ -361,9 +346,7 @@ def execute(root: Path, command: HermesPolicyFiles) -> FileResult:
         return FileResult(
             kind="ok",
             entries=entries[command.offset : command.offset + 200],
-            next_offset=command.offset + 200
-            if len(entries) > command.offset + 200
-            else None,
+            next_offset=command.offset + 200 if len(entries) > command.offset + 200 else None,
         )
     if command.path not in source.files or not source_path(command.path):
         return FileResult(
@@ -386,16 +369,12 @@ def execute(root: Path, command: HermesPolicyFiles) -> FileResult:
         )
     desired = command.content.encode("utf8")
     if len(desired) > 60000:
-        return FileResult(
-            kind="too_large", error="Source edits are limited to 60000 UTF-8 bytes."
-        )
+        return FileResult(kind="too_large", error="Source edits are limited to 60000 UTF-8 bytes.")
     snapshot = read_file(root, command.path, 60000)
     if isinstance(snapshot, FileResult):
         return snapshot
     if hashlib.sha256(snapshot.data).hexdigest() != command.base_sha256:
-        return FileResult(
-            kind="conflict", error="The source changed. Reload before saving."
-        )
+        return FileResult(kind="conflict", error="The source changed. Reload before saving.")
     with parent_descriptor(root, command.path) as (directory, name):
         replace_file(directory, name, desired, snapshot.mode & 0o777)
     return FileResult(
