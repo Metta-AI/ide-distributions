@@ -35,6 +35,11 @@ def make_register(role: Role) -> Callable[[Any], None]:
             )
         for hook_name, callback in make_hooks(role).items():
             ctx.register_hook(hook_name, callback)
+        from research_core.plugin.briefing import make_section as make_briefing_section
+
+        ctx.register_system_prompt_section(
+            "ide-briefing", make_briefing_section(role), max_chars=SECTION_MAX_CHARS
+        )
         if role == "orchestrator":
             from research_core.plugin.session_context import make_section
             from research_core.plugin.turn import make_pre_llm_call

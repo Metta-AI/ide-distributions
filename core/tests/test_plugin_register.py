@@ -31,6 +31,7 @@ def test_make_register_builds_a_callable_per_role():
             assert tool["toolset"] == f"ide-{role}"
             assert set(tool["schema"]) >= {"name", "description", "parameters"}
         assert {name for name, _ in ctx.hooks} >= {"transform_tool_result", "post_tool_call"}
+        assert "ide-briefing" in {section_id for section_id, _, _ in ctx.sections}
 
 
 def test_plugin_imports_are_stdlib_only():
