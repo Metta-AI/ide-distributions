@@ -163,7 +163,7 @@ class RecordStore:
         path.unlink()
         return target_dir / path.name
 
-    def add_event(self, version_id: str, kind: Literal["uploaded", "submitted", "sources_registered"], data: dict) -> str:
+    def add_event(self, version_id: str, kind: Literal["uploaded", "submitted"], data: dict) -> str:
         meta = {"version": version_id, "kind": kind, "recorded_at": _now(), "data": data}
         return self.create("version_event", meta)
 

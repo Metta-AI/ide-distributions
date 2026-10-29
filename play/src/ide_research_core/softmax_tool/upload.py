@@ -33,12 +33,9 @@ The artifact hash is the sha256 of the file, or for a directory the sha256 of th
 
 import hashlib
 import json
-import os
 import re
-import sys
 from pathlib import Path
 
-from ide_research_core import build_sources
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
@@ -173,10 +170,7 @@ def _existing_version(
     store: RecordStore, experiment: str, artifact_hash: str, name: str
 ) -> str | None:
     found = store.find(
-        "version",
-        experiment=experiment,
-        artifact_sha256=artifact_hash,
-        policy_name=name,
+        "version", experiment=experiment, artifact_sha256=artifact_hash, policy_name=name
     )
     return found[0] if found else None
 
@@ -187,67 +181,8 @@ def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
     return None
 
 
-def register_sources(
-    ctx: RunContext, store: RecordStore, version_id: str, build: dict, build_dir: Path
-) -> None:
-    """Attach verified source evidence without changing an immutable publication record."""
-    if "source_snapshot" in build:
-        return
-    if "source_path" not in build or "source_hashes" not in build:
-        return
-    if store.find("version_event", version=version_id, kind="sources_registered"):
-        return
-    handoff = build_dir / "retained-sources.json"
-    # Released receipts did not identify external source roots. Preserve their upload
-    # contract; absent evidence must not be replaced with a guessed checkout path.
-    if "source_root" not in build and not handoff.exists():
-        inputs = [
-            Path(name) if Path(name).is_absolute() else ctx.worker / name
-            for name in build["source_hashes"]
-        ]
-        if any(not path.is_file() for path in inputs):
-            print(
-                "Source unavailable: this older build receipt does not retain its inputs; "
-                "publication can proceed, but source recovery requires rebuilding.",
-                file=sys.stderr,
-            )
-            return
-    if handoff.exists():
-        retained = build_sources.StagedSources.model_validate_json(handoff.read_bytes())
-        retained.verify(
-            ctx.worker,
-            (build_dir / "version.json").read_bytes(),
-            store.load(version_id)[0]["artifact_sha256"],
-        )
-        source_path, source_hashes = retained.source_path, retained.source_hashes
-    else:
-        input_root = build_dir / build["source_root"] if "source_root" in build else ctx.worker
-        if "source_root" not in build and all(Path(name).is_absolute() for name in build["source_hashes"]):
-            input_root = Path(os.path.commonpath([str(Path(name).parent) for name in build["source_hashes"]]))
-        source_path, source_hashes = build_sources.retain(
-            ctx.worker,
-            build["source_path"],
-            build["source_hashes"],
-            source_root=input_root,
-        )
-    gitops.git(ctx.worker, "--literal-pathspecs", "add", "-f", "--", *source_hashes)
-    store.add_event(
-        version_id,
-        "sources_registered",
-        {
-            "artifact_sha256": store.load(version_id)[0]["artifact_sha256"],
-            "source_path": source_path,
-            "source_hashes": source_hashes,
-        },
-    )
-
-
 def _upload_once(
-    store: RecordStore,
-    sm: Softmax,
-    version_id: str,
-    artifact: Path,
-    artifact_type: ArtifactType,
+    store: RecordStore, sm: Softmax, version_id: str, artifact: Path, artifact_type: ArtifactType
 ) -> str:
     """The platform id of ``version_id``: its ``uploaded`` event, or a new upload (C6 is
     checked by the client) recorded as that event."""
@@ -255,10 +190,7 @@ def _upload_once(
     if platform_id is None:
         version = store.load(version_id)[0]
         platform_id = sm.upload(
-            artifact,
-            version["policy_name"],
-            player_id=version["player_id"],
-            artifact_type=artifact_type,
+            artifact, version["policy_name"], player_id=version["player_id"], artifact_type=artifact_type
         )
         store.add_event(version_id, "uploaded", {"policy_version_id": platform_id})
     return platform_id
@@ -276,8 +208,7 @@ def upload(
     Raises ``Refused`` (nothing uploaded) or the platform's errors (``IdentityError``, ...)."""
     if (ctx.hermes_home / "plugins/researcher_guard").is_dir():
         raise Refused(
-            "coordinator_required",
-            "Stage the verified build; the coordinator owns upload",
+            "coordinator_required", "Stage the verified build; the coordinator owns upload"
         )
     store = worker_store(ctx)
     build_dir = Path(build_dir)
@@ -288,7 +219,6 @@ def upload(
     if binding:
         bound = store.load(binding["version_id"])[0]
         if bound["artifact_sha256"] == artifact_hash:
-            register_sources(ctx, store, binding["version_id"], build, build_dir)
             return binding["version_id"]
         raise Refused(
             "binding_conflict",
@@ -304,13 +234,9 @@ def upload(
     if version_id is None:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
-    register_sources(ctx, store, version_id, build, Path(build_dir))
     platform_id = _upload_once(store, sm, version_id, artifact, build.get("artifact_type", "file"))
     patch = {
-        "candidate_binding": {
-            "version_id": version_id,
-            "platform_policy_version_id": platform_id,
-        }
+        "candidate_binding": {"version_id": version_id, "platform_policy_version_id": platform_id}
     }
     if meta["status"] == "built":
         patch["status"] = "uploaded"
@@ -326,8 +252,7 @@ def upload_build(
     uploaded) or the platform's errors (``IdentityError``, ...)."""
     if (ctx.hermes_home / "plugins/researcher_guard").is_dir():
         raise Refused(
-            "coordinator_required",
-            "Stage the verified build; the coordinator owns upload",
+            "coordinator_required", "Stage the verified build; the coordinator owns upload"
         )
     store = worker_store(ctx)
     build, artifact, artifact_hash = checked_build(Path(build_dir))
@@ -338,7 +263,6 @@ def upload_build(
     else:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": None})
-    register_sources(ctx, store, version_id, build, Path(build_dir))
     return version_id, _upload_once(
         store, sm, version_id, artifact, build.get("artifact_type", "file")
     )

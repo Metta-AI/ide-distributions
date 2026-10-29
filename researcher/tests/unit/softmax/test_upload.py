@@ -29,10 +29,6 @@ class Workspace:
         self.worker = tmp_path / "worker"
         self.build = tmp_path / "build"
         self.canonical.mkdir()
-        self.worker.mkdir()
-        gitops.git(self.worker, "init", "-q", "-b", "main")
-        gitops.git(self.worker, "config", "user.email", "t@example.com")
-        gitops.git(self.worker, "config", "user.name", "T")
         self.store = RecordStore(Layout(self.worker))
         self.experiment = self.store.create("experiment", dict(EXP_DESIGNED))
         for state in ("built", "uploaded")[: ("designed", "built", "uploaded").index(status)]:
@@ -206,16 +202,12 @@ def test_refuses_artifact_outside_build_dir(ws):
 
 
 def test_strategy_hash_from_source_hashes(ws):
-    source = ws.worker / "strategy/STRATEGY.md"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text("source")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
     ws.write_build(
         strategy_sha256=None,
         source_path="strategy/STRATEGY.md",
-        source_hashes={"strategy/STRATEGY.md": digest},
+        source_hashes={"strategy/STRATEGY.md": "c" * 64},
     )
-    assert ws.store.load(ws.run())[0]["strategy_sha256"] == digest
+    assert ws.store.load(ws.run())[0]["strategy_sha256"] == "c" * 64
 
 
 def test_refuses_without_strategy_hash(ws):
@@ -415,27 +407,3 @@ def test_unknown_artifact_type_is_rejected_before_upload(ws):
     ws.write_build(artifact_type="unknown")
     assert "artifact_type" in str(refused(ws))
     assert ws.uploads() == {}
-
-
-def test_republication_attaches_sources_to_existing_immutable_version(ws, tmp_path):
-    from ide_research_core import policy_files
-    from ide_research_core.source_schema import HermesPolicyFiles
-
-    ws.write_build()
-    version_id = ws.run()
-    original = ws.store.path_of(version_id).read_bytes()
-    starter = tmp_path / "installed/player.bas"
-    starter.parent.mkdir()
-    starter.write_bytes(b"policy-bytes")
-    ws.write_build(source_root=str(starter.parent), source_path=starter.name,
-                   source_hashes={starter.name: hashlib.sha256(starter.read_bytes()).hexdigest()})
-    assert ws.run() == version_id
-    assert ws.store.path_of(version_id).read_bytes() == original
-    assert len(ws.uploads()) == 1
-    found = policy_files.execute(ws.worker.resolve(), HermesPolicyFiles(action="sources", policy_name=policy_name("opening-rush", "ply_fake")))
-    assert found.kind == "ok" and len(found.sources) == 1
-    source = found.sources[0]
-    assert (ws.worker / source.path).read_bytes() == b"policy-bytes"
-    assert source.version_ids
-    assert ws.run() == version_id
-    assert len(ws.store.find("version_event", version=version_id, kind="sources_registered")) == 1

@@ -99,7 +99,7 @@ A build with `status: rejected` and `error.reason: invalid_input` is a correctab
 
 ### Published source and Code recovery
 
-New Git-backed builds record `source_snapshot` in their build receipt. The snapshot retains
+New workspace builds record `source_snapshot` in their build receipt. The snapshot retains
 exact input bytes in the shared workspace volume before the worker checkout can disappear.
 Container builds run from those retained inputs. `workspace stage` preserves the artifact and
 receipt for coordinator handoff; it does not establish platform publication success.

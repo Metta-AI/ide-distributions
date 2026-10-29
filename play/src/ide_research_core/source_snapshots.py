@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from ide_research_core import policy_files
 from ide_research_core.io import gitops
 from ide_research_core.source_io import SourceError, retain_file, write_file
+from ide_research_core.source_schema import SourceReceipt
 from ide_research_core.workspace import canonical_lock
 
 
@@ -62,14 +63,39 @@ def stage_sources(
         raise SourceError("Source manifest must include the primary input")
     if any(not policy_files.source_path(name) for name in source_hashes):
         raise SourceError("Source manifest names must be repository-relative")
-    commit = gitops.git(repository, "rev-parse", f"{commit}^{{commit}}")
     storage.mkdir(parents=True, exist_ok=True)
     objects = storage / "objects.git"
     with canonical_lock(storage):
         if not objects.exists():
             gitops.git(storage, "init", "--bare", str(objects))
             gitops.git(objects, "config", "core.fsync", "committed")
-        gitops.git(objects, "fetch", "--no-tags", str(repository), commit)
+        if commit:
+            commit = gitops.git(repository, "rev-parse", f"{commit}^{{commit}}")
+            gitops.git(objects, "fetch", "--no-tags", str(repository), commit)
+        else:
+            # Installed compiler tools also accept source directories without Git history.
+            # Give those inputs the same object store and immutable snapshot format.
+            tree = gitops._run(objects, "mktree", input=b"").stdout.decode().strip()
+            commit = (
+                gitops._run(
+                    objects,
+                    "commit-tree",
+                    tree,
+                    "-m",
+                    "Source inputs",
+                    env={
+                        **os.environ,
+                        "GIT_AUTHOR_NAME": "Source retention",
+                        "GIT_AUTHOR_EMAIL": "source@localhost",
+                        "GIT_COMMITTER_NAME": "Source retention",
+                        "GIT_COMMITTER_EMAIL": "source@localhost",
+                        "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z",
+                    },
+                )
+                .stdout.decode()
+                .strip()
+            )
         ignored = []
         changes = {}
         modes = {}
@@ -78,7 +104,10 @@ def stage_sources(
                 raise SourceError("Source hashes must be SHA256 values")
             entry = gitops.git(objects, "--literal-pathspecs", "ls-tree", commit, "--", name)
             with tempfile.TemporaryFile() as captured:
-                with policy_files.parent_descriptor(repository, name) as (directory, filename):
+                with policy_files.parent_descriptor(repository, name) as (
+                    directory,
+                    filename,
+                ):
                     metadata = os.stat(filename, dir_fd=directory, follow_symlinks=False)
                     digest = hashlib.sha256()
                     if stat.S_ISLNK(metadata.st_mode):
@@ -88,7 +117,9 @@ def stage_sources(
                         modes[name] = 0o120000
                     else:
                         descriptor = os.open(
-                            filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                            filename,
+                            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                            dir_fd=directory,
                         )
                         with os.fdopen(descriptor, "rb") as source:
                             metadata = os.fstat(source.fileno())
@@ -248,7 +279,9 @@ def snapshot_input(storage: Path, snapshot: SourceSnapshot, name: str) -> Iterat
                 storage, f"ignored/{snapshot.source_hashes[name]}"
             ) as (directory, filename):
                 descriptor = os.open(
-                    filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                    filename,
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=directory,
                 )
                 with os.fdopen(descriptor, "rb") as source:
                     if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
@@ -317,88 +350,51 @@ def execute_files(storage: Path, command, request_id: str) -> policy_files.FileR
     if len(matched) != 1:
         return policy_files.FileResult(kind="not_found", error="Published source is unavailable")
     source = matched[0]
-    if command.action == "tree":
-        prefix = command.path + "/" if command.path else ""
-        entries = {}
-        for path in source.files:
-            if path.startswith(prefix):
-                tail = path[len(prefix) :]
-                name = tail.split("/")[0]
-                entries[name] = policy_files.FileEntry(
-                    path=prefix + name,
-                    name=name,
-                    type="directory" if "/" in tail else "file",
-                )
-        ordered = sorted(
-            entries.values(), key=lambda entry: (entry.type != "directory", entry.name)
-        )
-        return policy_files.FileResult(
-            kind="ok",
-            entries=ordered[command.offset : command.offset + 200],
-            next_offset=command.offset + 200 if len(ordered) > command.offset + 200 else None,
-        )
-    if command.path not in source.files:
-        return policy_files.FileResult(
-            kind="forbidden", error="File is absent from published source"
-        )
     snapshot = SourceSnapshot.model_validate_json(
         (storage / "staged" / source.published_revision / "snapshot.json").read_bytes()
     )
-    if snapshot.modes[command.path] == 0o120000:
+    if command.path in snapshot.modes and snapshot.modes[command.path] == 0o120000:
         return policy_files.FileResult(
-            kind="forbidden", error="Symbolic links are build metadata, not editable files"
+            kind="forbidden",
+            error="Symbolic links are build metadata, not editable files",
         )
     state_path = f"edits/{source.record_id}.json"
-    fingerprint = hashlib.sha256(command.model_dump_json().encode()).hexdigest()
+
     with canonical_lock(storage):
         path = storage / state_path
         state = (
             SourceEdits.model_validate_json(path.read_bytes()) if path.exists() else SourceEdits()
         )
         if command.action == "write":
-            if not request_id:
-                return policy_files.FileResult(
-                    kind="request_conflict", error="Edits require an operation ID"
-                )
+            fingerprint = SourceReceipt.identity(command.model_dump_json(), request_id)
             if request_id in state.receipts:
                 previous, result = state.receipts[request_id]
-                if previous != fingerprint:
-                    return policy_files.FileResult(
-                        kind="request_conflict", error="Operation ID names another edit"
-                    )
-                return result
-        if command.path in state.files:
-            data = state.files[command.path].encode()
-        else:
-            with snapshot_input(storage, snapshot, command.path) as content:
-                data = content.read(60001)
-        content = data.decode("utf8", errors="replace")
-        if len(data) > 60000:
-            result = policy_files.FileResult(
-                kind="too_large", error="Source exceeds the editor limit"
-            )
-        elif content.encode() != data:
-            result = policy_files.FileResult(kind="not_text", error="Source is not UTF-8 text")
-        elif command.action == "write" and hashlib.sha256(data).hexdigest() != command.base_sha256:
-            result = policy_files.FileResult(
-                kind="conflict", error="Source changed; reload before saving"
-            )
-        elif command.action == "write" and len(command.content.encode()) > 60000:
-            result = policy_files.FileResult(
-                kind="too_large", error="Edit exceeds the editor limit"
-            )
-        else:
-            if command.action == "write":
-                content = command.content
-                data = content.encode()
-                state.files[command.path] = content
-            result = policy_files.FileResult(
-                kind="ok",
-                content=content,
-                size=len(data),
-                sha256=hashlib.sha256(data).hexdigest(),
-            )
+                receipt = SourceReceipt(fingerprint=previous, result=result.model_dump(mode="json"))
+                return policy_files.FileResult.model_validate(receipt.replay(fingerprint))
+        # The same bounded editor serves canonical files and retained publications.
+        # Materialize only the requested file, never the retained tree or large inputs.
+        with tempfile.TemporaryDirectory(prefix="source-edit-") as directory:
+            root = Path(directory).resolve()
+            if command.path in source.files:
+                target = root / command.path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if command.path in state.files:
+                    target.write_text(state.files[command.path])
+                else:
+                    with snapshot_input(storage, snapshot, command.path) as content:
+                        target.write_bytes(content.read(60001))
+                target.chmod(snapshot.modes[command.path] & 0o777)
+            elif (
+                command.action == "tree"
+                and command.path
+                and any(name.startswith(command.path + "/") for name in source.files)
+            ):
+                (root / command.path).mkdir(parents=True)
+            result = policy_files.execute(root, command, source=source)
+            result.modified_at = None  # Temporary materialization time is not source history.
         if command.action == "write":
+            if result.kind == "ok":
+                state.files[command.path] = command.content
             state.receipts[request_id] = (fingerprint, result)
             write_file(storage, state_path, state.model_dump_json().encode())
         return result

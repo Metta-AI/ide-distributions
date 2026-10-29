@@ -4,17 +4,14 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from pydantic import BaseModel, JsonValue
-
 from ide_research_core import policy_files, project_source, workspace
 from ide_research_core.games.scope import GAME_NAME
 from ide_research_core.io import gitops
-from ide_research_core.source_schema import HermesPolicyFiles, HermesProjectSource
-
-
-class SourceReceipt(BaseModel):
-    fingerprint: str
-    result: dict[str, JsonValue]
+from ide_research_core.source_schema import (
+    HermesPolicyFiles,
+    HermesProjectSource,
+    SourceReceipt,
+)
 
 
 def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> dict:
@@ -87,28 +84,17 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
 def execute(root: Path, command: HermesPolicyFiles | HermesProjectSource, request_id: str) -> dict:
     head = workspace.sync(root)
     writing = command.action in {"seed", "write", "patch"}
-    # An absent registration target is not part of a file-edit identity.
-    identity = command.model_dump_json(
-        exclude={"project_id"}
-        if isinstance(command, HermesPolicyFiles) and command.project_id is None
-        else set()
-    )
-    fingerprint = hashlib.sha256((type(command).__name__ + identity).encode()).hexdigest()
     receipt_path = f"control/ide/requests/{hashlib.sha256(request_id.encode()).hexdigest()}.json"
     if writing:
-        if not request_id:
-            raise workspace.WorkspaceError(
-                "bad_arguments", "Source changes require their original request ID"
-            )
+        identity = command.model_dump_json(
+            exclude={"project_id"}
+            if isinstance(command, HermesPolicyFiles) and command.project_id is None
+            else set()
+        )
+        fingerprint = SourceReceipt.identity(type(command).__name__ + identity, request_id)
         saved = gitops.show(root, head, receipt_path)
         if saved is not None:
-            receipt = SourceReceipt.model_validate_json(saved)
-            if receipt.fingerprint != fingerprint:
-                raise workspace.WorkspaceError(
-                    "request_conflict",
-                    "This request already names another source change",
-                )
-            return receipt.result
+            return SourceReceipt.model_validate_json(saved).replay(fingerprint)
     prefixes = (
         [f"projects/{command.project_id}"]
         if isinstance(command, HermesProjectSource)

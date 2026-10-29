@@ -111,9 +111,10 @@ never change. For a rebuild from Code edits, call `stage_publication(storage, ve
 its returned snapshot with `build_context`; using the original snapshot intentionally rebuilds the
 original publication, not its edits.
 
-Older completed builds can still upload when their receipts cannot locate source inputs. They emit
-an explicit unavailable-source diagnostic instead of guessing an external checkout or registering
-false source evidence. Such artifacts need rebuilding to acquire complete retained source.
+Older completed builds remain uploadable without source retention. Upload does not reconstruct
+missing source or register guessed checkout paths. Rebuild those artifacts in a workspace to retain
+their inputs. Standalone compiler invocations without workspace configuration still produce artifacts;
+only a configured workspace promises durable source retention.
 
 The source CLI relocation test is local persistence evidence. Image packaging, publication recovery,
 and a real Kubernetes pod replacement followed by public-route editing require combined verification.

@@ -309,10 +309,12 @@ def source_page(matched: list[PolicySource], offset: int) -> FileResult:
     )
 
 
-def execute(root: Path, command: HermesPolicyFiles) -> FileResult:
+def execute(
+    root: Path, command: HermesPolicyFiles, *, source: PolicySource | None = None
+) -> FileResult:
     if command.path and not source_path(command.path):
         return FileResult(kind="invalid_path", error="Expected a visible relative source path.")
-    matched = sources(root, command)
+    matched = [source] if source is not None else sources(root, command)
     if isinstance(matched, FileResult):
         return matched
     if command.action == "sources":
@@ -353,13 +355,13 @@ def execute(root: Path, command: HermesPolicyFiles) -> FileResult:
             kind="forbidden",
             error="This file is not part of the policy's recorded source manifest.",
         )
+    snapshot = read_file(root, command.path, 60000)
+    if isinstance(snapshot, FileResult):
+        return snapshot
+    content = snapshot.data.decode("utf8", errors="replace")
+    if content.encode("utf8") != snapshot.data:
+        return FileResult(kind="not_text", error="The source is not UTF-8 text.")
     if command.action == "read":
-        snapshot = read_file(root, command.path, 60000)
-        if isinstance(snapshot, FileResult):
-            return snapshot
-        content = snapshot.data.decode("utf8", errors="replace")
-        if content.encode("utf8") != snapshot.data:
-            return FileResult(kind="not_text", error="The source is not UTF-8 text.")
         return FileResult(
             kind="ok",
             content=content,
@@ -370,9 +372,6 @@ def execute(root: Path, command: HermesPolicyFiles) -> FileResult:
     desired = command.content.encode("utf8")
     if len(desired) > 60000:
         return FileResult(kind="too_large", error="Source edits are limited to 60000 UTF-8 bytes.")
-    snapshot = read_file(root, command.path, 60000)
-    if isinstance(snapshot, FileResult):
-        return snapshot
     if hashlib.sha256(snapshot.data).hexdigest() != command.base_sha256:
         return FileResult(kind="conflict", error="The source changed. Reload before saving.")
     with parent_descriptor(root, command.path) as (directory, name):

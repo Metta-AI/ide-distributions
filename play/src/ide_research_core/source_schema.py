@@ -1,9 +1,10 @@
 """Bounded source commands accepted by the installed profile CLI."""
 
+import hashlib
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 class HermesPolicyFiles(BaseModel):
@@ -112,3 +113,27 @@ class HermesProjectSource(BaseModel):
         elif self.old_text or self.new_text:
             raise ValueError("Only patches carry text replacements")
         return self
+
+
+class SourceReceipt(BaseModel):
+    fingerprint: str
+    result: dict[str, JsonValue]
+
+    @staticmethod
+    def identity(payload: str, request_id: str) -> str:
+        from ide_research_core.workspace import WorkspaceError
+
+        if not request_id:
+            raise WorkspaceError(
+                "bad_arguments", "Source changes require their original request ID"
+            )
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def replay(self, fingerprint: str) -> dict[str, JsonValue]:
+        from ide_research_core.workspace import WorkspaceError
+
+        if self.fingerprint != fingerprint:
+            raise WorkspaceError(
+                "request_conflict", "This request already names another source change"
+            )
+        return self.result

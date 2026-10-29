@@ -56,7 +56,7 @@ def replace_file(directory: int, name: str, content: bytes, mode: int) -> None:
 def retain_file(
     root: Path, relative: str, source: BinaryIO, expected_sha256: str, mode: int
 ) -> None:
-    """Stream and hash a build input before exposing it; never overwrite retained edits."""
+    """Stream and hash an immutable build input before exposing it."""
     with parent_directory(root, relative) as (directory, name):
         temporary = ".source-" + uuid4().hex
         descriptor = os.open(
@@ -81,7 +81,7 @@ def retain_file(
                 if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1:
                     raise SourceError("Retained source must be a regular, unlinked file")
             else:
-                # Linking rather than replacing cannot overwrite a concurrent user edit.
+                # Linking rather than replacing preserves an existing immutable blob.
                 os.link(
                     temporary,
                     name,
