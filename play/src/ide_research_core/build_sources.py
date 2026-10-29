@@ -23,6 +23,7 @@ def retain(
     hashes: dict[str, str],
     *,
     source_root: Path | None = None,
+    build_identity: str = "",
 ) -> tuple[str, dict[str, str]]:
     """Snapshot build inputs into the canonical workspace, including nested or ignored sources.
 
@@ -39,7 +40,16 @@ def retain(
     names = {name: path.relative_to(source_root).as_posix() for name, path in originals.items()}
     normalized = {names[name]: digest for name, digest in hashes.items()}
     modes = {name: path.lstat().st_mode & (0o170000 | 0o777) for name, path in originals.items()}
-    manifest_hash = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
+    manifest_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "hashes": normalized,
+                "modes": {names[name]: mode for name, mode in modes.items()},
+                "build": build_identity,
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
     mapped: dict[str, str] = {}
     result: dict[str, str] = {}
     for name, expected in hashes.items():
@@ -193,6 +203,7 @@ def stage(worktree: Path, base: str) -> list[str]:
                 source_root=receipt.parent / build["source_root"]
                 if "source_root" in build
                 else worktree,
+                build_identity=f"{receipt_hash}:{artifact_hash}",
             )
             retained = StagedSources(
                 receipt_sha256=receipt_hash,
