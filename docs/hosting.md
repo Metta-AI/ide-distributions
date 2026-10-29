@@ -99,3 +99,17 @@ Release verification must exercise chat, delegation, XP/credit waits and submiss
 without an IDE database or cogent callback. Validate native inbox recovery separately from the
 transport fake used by the profile tests. Platform authentication, inference, evaluation jobs,
 policy uploads and submissions remain external services; their refusals are still enforced.
+
+### Background activity and autosleep
+
+Hosts may run `scripts/activity.py` in the installed orchestrator profile with its normal
+profile environment. It prints `{"waiting_on": ["reason", ...]}` without polling external
+research services or changing local records. Nonempty results prevent automatic sleep;
+empty results permit it. Command failure or invalid output must prevent automatic sleep.
+Explicit user stops may suspend durable waits.
+
+The current supervisor requires an awake workspace while ended cards await external work,
+champion submission publication remains pending, a champion awaits its first league result,
+or the native coordinator inbox contains recoverable input. Pausing the supervisor explicitly
+permits sleeping through those waits. This read-only contract does not replace the supervisor
+or introduce platform-owned operational state.
