@@ -134,3 +134,18 @@ def candidate_task(ctx, *, versions: list[str]) -> None:
             " 'harness', ?, 'harness', ?)",
             (goal, json.dumps(checklist), tx.at, tx.at),
         )
+
+
+def test_work_reasons_name_each_cause(tmp_path):
+    ctx = make_ctx(tmp_path)
+    assert drain.work_reasons(ctx) == []
+
+    task, session, run_id = working_session(ctx)
+    assert drain.work_reasons(ctx) == [f"session:{session['id']}:running"]
+
+    ctx.hermes.complete(run_id)
+    holder = Actor.session(session["id"])
+    tasks.wait(ctx.store, holder, task_number(task), kind="credits", detail="402", ref=[])
+    with ctx.store.tx(ctx.actor) as tx:
+        tx.event("task.asked", task["id"], {"question": "which seed?"})
+    assert drain.work_reasons(ctx) == [f"task:{task['id']}:waiting:credits", "wake:queued"]

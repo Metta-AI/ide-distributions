@@ -113,17 +113,26 @@ def wait_quiet(
 
 def has_work(ctx: TickContext) -> bool:
     """Whether hosting should keep the workspace awake (see the module docstring)."""
-    if dispatch.live_task_sessions(ctx):
-        return True
+    return bool(work_reasons(ctx))
+
+
+def work_reasons(ctx: TickContext) -> list[str]:
+    """Why the workspace must stay awake, one short reason per cause, in a fixed order: live
+    Researcher runs (``session:<id>:running``), Tasks waiting on the platform or a process
+    (``task:T-n:waiting:<kind>``), an autonomous-submission candidate
+    (``submission:candidate``) and queued wakes (``wake:queued``). Empty means sleep is fine.
+    The heartbeat records the list; ``scripts/activity.py`` hands it to the host."""
+    reasons = [f"session:{sid}:running" for sid in dispatch.live_task_sessions(ctx)]
     if ctx.store is not None:
-        if any(
-            (task["waiting_on"] or {}).get("kind") in BUSY_WAIT_KINDS
-            for task in tasks.list(ctx.store, status="in-progress")
-        ):
-            return True
+        for task in tasks.list(ctx.store, status="in-progress"):
+            kind = (task["waiting_on"] or {}).get("kind")
+            if kind in BUSY_WAIT_KINDS:
+                reasons.append(f"task:{task['id']}:waiting:{kind}")
         if autonomous_candidate(ctx):
-            return True
-    return wakes.has_queued_wakes(ctx)
+            reasons.append("submission:candidate")
+    if wakes.has_queued_wakes(ctx):
+        reasons.append("wake:queued")
+    return reasons
 
 
 def autonomous_candidate(ctx: TickContext) -> bool:

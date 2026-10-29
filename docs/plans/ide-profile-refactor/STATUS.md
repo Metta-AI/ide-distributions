@@ -31,7 +31,10 @@ Every stack entry of the plan is implemented and committed:
    `prepare.py` with protected and retired keys, the active Coworld's directories for every
    profile, shipped values over earlier defaults, stores, the watcher job, the workspace
    environment, `IDE_DEFAULT_COWORLD` and `--check`.
-8. **Checks and docs**: `tools/check_prompts.py` (structural, plus a model check with a key),
+8. **Host autosleep probe**: `orchestrator/scripts/activity.py` prints `{"waiting_on": [...]}`
+   from the watcher's recorded reasons, the contract main's #105 introduced for the old
+   profiles, so metta's autosleep integration keeps working with the new distribution.
+9. **Checks and docs**: `tools/check_prompts.py` (structural, plus a model check with a key),
    `tools/build_prompts.py --check`, the nightly platform-check workflow, `docs/hosting.md`,
    `core/README.md`, the profile READMEs, banners on the retired docs.
 

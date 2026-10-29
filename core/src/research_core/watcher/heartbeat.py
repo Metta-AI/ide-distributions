@@ -13,6 +13,7 @@ or a queued wake; until ``drain`` is built, queued wakes alone decide.
 from __future__ import annotations
 
 import importlib
+import json
 from datetime import timedelta
 from typing import Any
 
@@ -22,6 +23,7 @@ from research_core.watcher.context import TickContext
 
 HEARTBEAT_KEY = "heartbeat"
 HAS_WORK_KEY = "has_work"
+HAS_WORK_REASONS_KEY = "has_work_reasons"
 HEARTBEAT_EVENT_KEY = "heartbeat_event_at"
 EVENT_INTERVAL = timedelta(minutes=10)
 DRAIN_MODULE = "research_core.watcher.drain"
@@ -31,8 +33,10 @@ def run(ctx: TickContext) -> dict[str, Any]:
     # The stamp goes first: it is the liveness signal, so a has-work failure cannot hide it.
     stamp = now_iso(lambda: ctx.now)
     ctx.set_meta(HEARTBEAT_KEY, stamp)
-    has_work = compute_has_work(ctx)
+    reasons = compute_work_reasons(ctx)
+    has_work = bool(reasons)
     ctx.set_meta(HAS_WORK_KEY, "1" if has_work else "0")
+    ctx.set_meta(HAS_WORK_REASONS_KEY, json.dumps(reasons))
     emitted = False
     last = ctx.meta(HEARTBEAT_EVENT_KEY)
     if last is None or ctx.now - parse_iso(last) >= EVENT_INTERVAL:
@@ -44,14 +48,15 @@ def run(ctx: TickContext) -> dict[str, Any]:
 
 
 def compute_has_work(ctx: TickContext) -> bool:
-    queued = wakes.has_queued_wakes(ctx)
+    return bool(compute_work_reasons(ctx))
+
+
+def compute_work_reasons(ctx: TickContext) -> list[str]:
+    """``drain.work_reasons``; a queued wake alone when the drain module cannot load."""
     try:
         drain = importlib.import_module(DRAIN_MODULE)
     except ModuleNotFoundError as error:
         if error.name != DRAIN_MODULE:
             raise
-        return queued
-    has_work = getattr(drain, "has_work", None)
-    if has_work is None:
-        return queued
-    return queued or bool(has_work(ctx))
+        return ["wake:queued"] if wakes.has_queued_wakes(ctx) else []
+    return list(drain.work_reasons(ctx))

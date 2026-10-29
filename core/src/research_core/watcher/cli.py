@@ -70,6 +70,7 @@ def run_status(args: argparse.Namespace) -> int:
             "heartbeat": heartbeat,
             "heartbeat_age_s": age_s,
             "has_work": wstore.get_meta("has_work") == "1",
+            "waiting_on": json.loads(wstore.get_meta("has_work_reasons") or "[]"),
             "paused": bool(settings.get(wstore, "paused")),
             "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
         }

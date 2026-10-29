@@ -18,6 +18,7 @@ Hermes distribution shell:
 | `plugins/orchestrator/` | The plugin entry (`plugin.yaml` lists the tools; `__init__.py` imports `research_core` from the path in `local/core-path.txt`). |
 | `scripts/prepare.py` | Preparation after install or update; see below. |
 | `scripts/watcher.py` | The cron job's script: runs one watcher tick in the workspace environment. |
+| `scripts/activity.py` | The host's autosleep probe: prints `{"waiting_on": [...]}` from the watcher's last tick (empty permits sleep). |
 | `cron/jobs.json` | The `watcher` job, every minute, installed paused. |
 | `.no-bundled-skills` | Hermes's bundled skills are not installed; the profile's skills come from `core/src/research_core/skills/` through `skills.external_dirs`. |
 | `local/` | Written at preparation (`core-path.txt`, the prepared marker); not shipped. |

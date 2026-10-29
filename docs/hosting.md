@@ -86,6 +86,18 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 - Container health stays as it is: the watcher reports through its heartbeat and
   `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop.
 
+### Background activity and autosleep
+
+The host may run `scripts/activity.py` in the installed Orchestrator profile with the
+profile's environment and Hermes's Python. It prints one JSON line, `{"waiting_on": [reason,
+...]}`, from the watcher's last tick without polling the platform or writing a record: a live
+Researcher run (`session:<id>:running`), a Task waiting on XP, credits, a submission or a
+process (`task:T-n:waiting:<kind>`), an autonomous-submission candidate
+(`submission:candidate`) or a queued wake (`wake:queued`). A non-empty list prevents automatic
+sleep; an empty list permits it, and so does an explicitly paused workspace. A workspace that
+was never prepared or has no store yet is empty. A non-zero exit or unreadable output must
+prevent automatic sleep. The same list is `waiting_on` in `research watcher status`.
+
 ## The bridge (the seam)
 
 The bridge does transport only. For each user message it POSTs `{"input": <message + "\n\nContext
