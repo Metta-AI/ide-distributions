@@ -251,6 +251,9 @@ def error_payload(problems: list[str], context: dict | None = None) -> dict:
 
 def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
     """Validate, run and render a tool call as JSON text. Never raises."""
+    from research_core.tools.catalog import _load_tool_modules
+
+    _load_tool_modules()
     spec = TOOLS.get(name)
     if spec is None or ctx.role not in spec.roles:
         return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
