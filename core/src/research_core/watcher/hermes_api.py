@@ -307,8 +307,14 @@ class HermesRuns:
             return []
         if isinstance(payload, list):
             return payload
-        messages = payload.get("messages") if isinstance(payload, dict) else None
-        return messages if isinstance(messages, list) else []
+        if not isinstance(payload, dict):
+            return []
+        # Hermes answers ``{"object": ..., "data": [messages], "pagination": {...}}``.
+        for key in ("data", "messages"):
+            messages = payload.get(key)
+            if isinstance(messages, list):
+                return messages
+        return []
 
     def create_session(self, session_id: str, *, profile: str) -> None:
         """``POST /p/<profile>/api/sessions``: create the session row now, before any run."""
