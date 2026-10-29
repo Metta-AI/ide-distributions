@@ -14,8 +14,10 @@ from .storage import (
     league_results_seen,
     mark_league_result_seen,
     open_storage,
+    remember_wait_delivery,
     snapshot,
     submission_sessions,
+    wait_deliveries,
 )
 
 LEAGUE_RESULT_NEXT = (
@@ -25,7 +27,7 @@ LEAGUE_RESULT_NEXT = (
 )
 
 
-def transitions(state, research):
+def transitions(state, research, delivered=()):
     pending = []
     default = research
     for run in state["awaiting"]:
@@ -37,15 +39,17 @@ def transitions(state, research):
             # A card of another game: its experiments live in that game's workspace.
             event["game"] = run["game"]
             research = default.in_game(run["game"])
-        if awaiting.get("permit"):
-            pending.append({
-                **event,
-                "kind": "bad_handoff",
-                "reason": "awaiting.permit is unsupported; tell the user to answer the ask "
-                "and explicitly request a relaunch",
-            })
+        if awaiting.get("permit") and f"task_runs:{run['id']}:bad_handoff" not in delivered:
+            pending.append(
+                {
+                    **event,
+                    "kind": "bad_handoff",
+                    "reason": "awaiting.permit is unsupported; tell the user to answer the ask "
+                    "and explicitly request a relaunch",
+                }
+            )
             continue
-        if awaiting.get("xp"):
+        if awaiting.get("xp") and f"task_runs:{run['id']}:xp_terminal" not in delivered:
             # xp status takes an experiment ID; handoffs name it separately from request IDs.
             experiment = (metadata.get("experiment") or {}).get("id")
             if not experiment:
@@ -64,7 +68,7 @@ def transitions(state, research):
                 pending.append(
                     {**event, "kind": "xp_terminal", "experiment": experiment, "requests": rows}
                 )
-        if awaiting.get("credits"):
+        if awaiting.get("credits") and f"task_runs:{run['id']}:credits_available" not in delivered:
             credits = research.credits()
             if credits.get("available") and credits["credits"] > 0:
                 pending.append({**event, "kind": "credits_available", "credits": credits})
@@ -126,7 +130,7 @@ def evaluate(context, research=None, now=None):
     now = now or datetime.now(UTC)
     research = research or Research(context)
 
-    pending = transitions(state, research)
+    pending = transitions(state, research, wait_deliveries(context))
     if now.minute % 10 == 0:
         tick = now.replace(second=0, microsecond=0).isoformat()
         # Old "promotion" records are rewritten on the first poll after an upgrade; the
@@ -137,7 +141,9 @@ def evaluate(context, research=None, now=None):
         for game in other_research_games(context.env):
             migration = research.in_game(game).call("champion", "migrate")
             if migration is not None:
-                pending.append({"kind": "records_migrated", "tick": tick, "game": game, "migration": migration})
+                pending.append(
+                    {"kind": "records_migrated", "tick": tick, "game": game, "migration": migration}
+                )
         if research.call("champion", "pending") is not None:
             pending.append({"kind": "champion_submission_poll", "tick": tick})
         for game in other_research_games(context.env):
@@ -204,6 +210,7 @@ def wake(context, state):
             )
             with urlopen(request, timeout=30) as response:
                 json.load(response)
+            remember_wait_delivery(context, pending, identity)
         # Only once the inbox holds the wake: a failed post retries on the next poll.
         for event in state["context"]["pending"]:
             if event["kind"] == "league_result":

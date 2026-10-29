@@ -125,3 +125,17 @@ champion submission publication remains pending, a champion awaits its first lea
 or the native coordinator inbox contains recoverable input. Pausing the supervisor explicitly
 permits sleeping through those waits. This read-only contract does not replace the supervisor
 or introduce platform-owned operational state.
+
+### Retiring external waits
+
+A native task run retains its `awaiting` handoff as history. The profile records which
+native coordinator input received each external-wait event, using its existing local
+coordinator store. The activity and status projections retire only the wait whose input
+finished successfully in the profile's native inbox. Queue admission, a running input,
+an interrupted result, or a missing input never establishes successful handling.
+
+Delivered waits are not enqueued again; the native inbox owns crash recovery. Unhandled
+waits remain sleep vetoes, including other wait kinds on the same card. Cards need not be
+archived to regain idle. Run `orchestrator/tests/system/wait_retirement_system.py` explicitly
+in a normally packaged runtime to verify public credits handoff, original-session wake,
+and natural return to idle with the completed card and its history retained.
