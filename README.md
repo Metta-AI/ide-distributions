@@ -29,6 +29,10 @@ optimizer-seed's mixin method) and installed.
 [Implementation notes](docs/designs/orchestrator-implementation-notes.md) record where the
 code differs from it.
 
+The [IDE profile refactor](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it in a
+browser) is the final design for the next iteration of the Orchestrator and Researcher profiles.
+It is not implemented yet. Where it conflicts with the two designs above, it supersedes them.
+
 Softmax hosting runs these distributions in its sandboxes. The metta changes it needs are in
 the [hosting handoff](docs/hosting.md).
 
@@ -90,6 +94,12 @@ hermes profile update researcher-1
 Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job per
 distribution folder. The tests of the shared package run in `researcher/`, against its copy,
 so run the sync script before testing a change under `shared/`.
+
+On a pull request, CI skips the tests of a distribution that the change cannot affect: a change
+only to `docs/`, `README.md` or the image-release workflows skips all three, and `play` skips
+changes to `researcher/`, `orchestrator/` and `ontology/`. The three checks still report, so the
+required checks on `main` pass. Pushes to `main` always test everything. The filters are in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ```bash
 cd researcher

@@ -58,7 +58,7 @@ def _run(handler):
                     None,
                 )
             else:
-                player_id = os.environ[PLAYER_ENV]
+                player_id = args.player or os.environ[PLAYER_ENV]
                 sm = from_env(os.environ, clone)
                 data = handler(args, clone, sm, args.league, player_id)
         except KeyError as error:
@@ -89,6 +89,13 @@ def setup(parser: argparse.ArgumentParser) -> None:
                 "--league",
                 required=True,
                 help="explicit target league from the conversation",
+            )
+            sub.add_argument(
+                "--player",
+                help=(
+                    "player the submission is for (default: RESEARCH_PLAYER_ID); an owned player "
+                    "the conversation selected"
+                ),
             )
         sub.set_defaults(func=_run(handler))
         return sub

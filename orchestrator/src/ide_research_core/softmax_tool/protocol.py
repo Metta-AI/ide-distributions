@@ -132,6 +132,12 @@ class Refused(RuntimeError):
 
 class Softmax(Protocol):
     def whoami(self) -> Identity: ...
+    def require_player(self) -> Identity:
+        """``whoami``, refused (``IdentityError``) unless it is this workspace's own Player
+        (``RESEARCH_PLAYER_ID``) with a live credential (C6). The credential player is the
+        transport identity; publication names its target player explicitly."""
+        ...
+
     def credits(self) -> float:
         """The XP credit balance the Player spends (the owning account's). Raises when it
         cannot be read."""
@@ -171,11 +177,19 @@ class Softmax(Protocol):
 
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...
     def xp_recover(self, experiment: str) -> list[XpHandle]: ...
-    def upload(self, artifact: Path, name: str, *, artifact_type: ArtifactType = "file") -> str: ...
+    def upload(
+        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+    ) -> str:
+        """Upload as a version of ``player_id``: this workspace's own player, or on Softmax
+        hosting another enabled player of the same owner (the IDE workspace bridge may select
+        one; the platform refuses every other player)."""
+        ...
+
     def submit(
-        self, policy_version_id: str, league_id: str
+        self, policy_version_id: str, league_id: str, player_id: str
     ) -> str | PermitRequired | LeagueNotChosen:
-        """The submission id, or the coach's refusal (nothing was submitted)."""
+        """Submit for ``player_id`` (as ``upload``); the submission id, or the coach's
+        refusal (nothing was submitted)."""
         ...
 
     def retire_other_memberships(

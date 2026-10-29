@@ -20,13 +20,8 @@ For agent-driven game discovery and release-pinned public repository reads, foll
 [Coworld repository context](../docs/coworld-context.md). Both profiles use the shared
 `coworld-context` skill and existing CLI; the IDE supplies conversation context only.
 
-Use `github_repositories` and `github_clone` for the owner's connected GitHub account.
-Pass `commit` with the full SHA when the league manifest pins a release. Authorization
-exists only during this tool call; later terminal fetches do not retain it. Request a new
-pinned clone through the tool when another revision is needed.
-Clones live under the hosted profile's `repositories/` directory, separate from canonical
-research. Private repositories require repository consent in Softmax IDEa; public HTTPS
-clones do not. Neither a local `gh` login nor a GitHub token on the host is required.
+Clone public repositories with `git clone` into any writable folder. The profile has no
+GitHub tools and does not use a GitHub connection, so private repositories are not available.
 
 ## Install and configure
 
@@ -86,7 +81,6 @@ published by the bridge, and so is a background wake's final reply (there is no 
 | `capabilities(query?, kind?)` | Profile-configured tools and skills, filtered by keyword; session additions and job overrides may be absent. |
 | `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
 | `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
-| `github_repositories(page?)`, `github_clone(repository, commit?)` | List and clone repositories through the owner’s GitHub connection in IDEa settings. The broker keeps provider credentials server-side and returns a separate checkout path and commit. The optional full SHA selects a pinned release using the same authorization. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. A body citing a record id (`E-`, `H-`, `V-`, `CS-`, ...) or `ar://file/` path that is not on that game's canonical `main` is refused with `unknown_records` listing them (content-search and game reference types are not checked). |
@@ -94,7 +88,7 @@ published by the bridge, and so is a background wake's final reply (there is no 
 | `card_files`, `card_report`, `card_artifacts` | Discover committed files of a card's latest ended run (completed, or blocked: staged commits only), read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
 | `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
 | `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
-| `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). |
+| `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). `tooling` lists writable-tooling problems on every profile: a release that could not merge into a profile's edits (`update`) or a profile `src` that failed to import, so its plugin loaded the image copy (`fallback`). |
 | `records_find`, `records_show` (`game?`) | Shared canonical record reads. `records_show` also takes an `ar://` reference and a champion submission by `CS-`, legacy `P-` or platform `sub_` id. |
 | `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
 | `upload_build(id, run_id, build_dir, name, experiment?)` | Upload the staged, committed build of a card's latest ended run (completed, or blocked mid-experiment) in the card's game. Never from a running card. |

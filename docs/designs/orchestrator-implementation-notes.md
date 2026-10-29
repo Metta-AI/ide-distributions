@@ -11,7 +11,13 @@ open. Each item names the reason. Section numbers refer to the design's brief (v
   `RESEARCH_SOFTMAX`), not `RESEARCHER_*` and `ORCHESTRATOR_*`. Both profiles describe the
   same research setup and run the same shared CLI; one set of names is simpler.
 - **The research CLI is `research`** (`$HERMES_HOME/bin/research`, `RESEARCH_CLI`), written
-  by `scripts/bootstrap.py`. The package is `ide_research_core`.
+  by `scripts/bootstrap.py`. The package is `ide_research_core`. The shim runs the profile's own
+  `src` first (on hosting, the agent's writable copy) and falls back to the environment's
+  installed copy if that fails to import; it prefers `local/venv-agent` when the agent built one.
+- **Writable tooling** (design: `writable-agent-tooling-2026-10-28.html`). On hosting, the
+  profile's code, skills and SOUL are a Git working tree merged with each release. The plugin
+  entries load the image copy recorded in `local/tooling-source.txt` when the profile's `src`
+  fails to import and write `local/tooling-fallback.json`; `status.tooling` reports it.
 
 ## Toolsets (decision A6)
 

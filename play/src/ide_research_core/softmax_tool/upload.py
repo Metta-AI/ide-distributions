@@ -1,5 +1,9 @@
 """Upload checked builds under an agent-chosen, player-scoped policy lineage.
 
+The player is the one the upload publishes for, recorded on the version: by default this
+workspace's own player, or an explicitly selected player of the same owner (on Softmax hosting,
+the player a conversation selected; the IDE workspace bridge credential may publish for it).
+
 Both upload commands require a name. The full player id scopes that name globally;
 the artifact hash remains provenance, not a naming input. Version records persist the
 resolved name before upload. Retrying the same build and name reuses that record and
@@ -147,7 +151,7 @@ def _strategy_sha256(build: dict) -> str:
 
 
 def _version_meta(
-    ctx: RunContext, build: dict, artifact_hash: str, name: str, player_id: str | None
+    ctx: RunContext, build: dict, artifact_hash: str, name: str, player_id: str
 ) -> dict:
     """The provenance every version record carries; callers add ``experiment``."""
     return {
@@ -227,8 +231,10 @@ def _upload_once(
     checked by the client) recorded as that event."""
     platform_id = _uploaded_policy(store, version_id)
     if platform_id is None:
-        name = store.load(version_id)[0]["policy_name"]
-        platform_id = sm.upload(artifact, name, artifact_type=artifact_type)
+        version = store.load(version_id)[0]
+        platform_id = sm.upload(
+            artifact, version["policy_name"], player_id=version["player_id"], artifact_type=artifact_type
+        )
         store.add_event(version_id, "uploaded", {"policy_version_id": platform_id})
     return platform_id
 

@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Writable Agent Tooling</title>
+<!--
+  Ink & Print design/plan document template (Softmax house style).
+
+  HOW TO USE (renderer subagent):
+  - Replace the contents of the article element (id "doc") with the real document.
+    The placeholder content below doubles as a component style guide — copy the
+    markup patterns (masthead, TOC, section, figure, table, callout, code,
+    citation) and delete what you don't use.
+  - Do NOT modify the two DC-COMMENTS blocks (styles, and markup + script). They
+    are the tested commenting system; copy them verbatim. The one thing you may fill
+    is the CONTENT of <script id="dc-preload" type="application/json">: a
+    dc-comments/1 `comments` array, each comment optionally carrying
+    `replies: [{author, text, created}]`, so the reader sees their comments and
+    the agent's replies together in the sidebar.
+  - Copy the DOC-NAV script (right after the article element) verbatim too. It opens
+    collapsed sections when a link points into them.
+  - Every h2 section is a fold: <section id="x"><details class="fold" open>
+    <summary><h2>…</h2></summary> … </details></section>. Appendix sections
+    carry class="appendix" (check_doc.py leaves them out of the word count) and use
+    <details class="fold"> without `open`, so they start collapsed.
+  - Open questions are numbered (id="oq-N"), each with Context / Options /
+    Recommendation labels (span.oq-label), and linked both ways with the body
+    markers <sup class="oq-ref" id="oq-N-from-<slug>">.
+  - Theme: Ink & Print by default; <html data-theme="cozy"> switches to the
+    cozy token set. Draw figure SVGs in the active theme's colors.
+  - The body describes the current design only. Settled decisions go in the
+    Decision Record appendix. Change logs do not go in the document at all.
+  - Keep the doc self-contained: inline SVG for figures, no JS deps beyond this
+    file. Google Fonts is the only permitted external fetch.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Merriweather+Sans:wght@400;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap" rel="stylesheet">
+<style>
+  /* ============ Ink & Print tokens ============ */
+  :root {
+    --bg: #fffdf4;            /* cream paper */
+    --surface: #fffaf0;
+    --surface-alt: #f8f6ef;
+    --fg: #111827;            /* warm near-black — never pure #000 */
+    --fg-subtle: #555555;
+    --fg-muted: #999999;
+    --ink-navy: #1a3875;
+    --ink-sage: #6e8050;
+    --ink-terracotta: #b36e4e;
+    --ink-gold: #d4a853;
+    --accent: #859ebe;
+    --accent-soft: #eef2f7;
+    --cta: #0e2758;
+    --cta-foreground: #fffdf4;
+    --border: #e4dac8;
+    --border-strong: #d4c9b5;
+    --border-subtle: #f0ebe1;
+    --serif: 'Merriweather', Georgia, serif;
+    --sans: 'Merriweather Sans', 'Helvetica Neue', sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  /* ============ Cozy theme (opt-in: <html data-theme="cozy">) ============
+     Warmer paper, brown-black ink, moss and honey accents, soft serif type,
+     sentence-case headings, rounded corners. Same components, same layout. */
+  :root[data-theme="cozy"] {
+    --bg: #fbf4e6;
+    --surface: #fdf8ee;
+    --surface-alt: #f4ead8;
+    --fg: #2e241c;
+    --fg-subtle: #6b5a4a;
+    --fg-muted: #a08f7c;
+    --ink-navy: #3d5a3a;        /* moss: headings and links */
+    --ink-sage: #6f8a4f;
+    --ink-terracotta: #b0603c;
+    --ink-gold: #d39b3a;        /* honey */
+    --accent: #b9a27a;
+    --accent-soft: #f1e8d3;
+    --cta: #4a3626;
+    --cta-foreground: #fdf8ee;
+    --border: #e6d7bd;
+    --border-strong: #d6c19d;
+    --border-subtle: #efe4cf;
+    --serif: 'Fraunces', Georgia, serif;
+    --sans: 'Literata', Georgia, serif;
+  }
+  :root[data-theme="cozy"] body { font-size: 16px; line-height: 1.75; }
+  :root[data-theme="cozy"] h2 {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  :root[data-theme="cozy"] header.masthead h1 { font-weight: 700; }
+  :root[data-theme="cozy"] .callout,
+  :root[data-theme="cozy"] pre,
+  :root[data-theme="cozy"] code { border-radius: 8px; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ============ Page grid: reading column + comment rail ============ */
+  .dc-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 0;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  article#doc {
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+    min-width: 0;
+  }
+
+  /* ============ Typography ============ */
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+  }
+  header.masthead { border-bottom: 2px solid var(--border-strong); padding-bottom: 20px; margin-bottom: 32px; }
+  header.masthead h1 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 8px 0 10px;
+  }
+  header.masthead .context { color: var(--fg-subtle); font-size: 13.5px; margin: 0; }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-navy);
+    margin: 48px 0 12px;
+  }
+  h3 { font-family: var(--serif); font-weight: 700; font-size: 16.5px; margin: 32px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--ink-navy); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--cta); }
+  strong { font-weight: 700; }
+  ul, ol { padding-left: 24px; margin: 0 0 14px; }
+  li { margin-bottom: 4px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* Key-points opener: every section starts with scannable bullets */
+  .key-points {
+    list-style: none;
+    padding: 0 0 0 2px;
+    margin: 0 0 18px;
+  }
+  .key-points li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+  .key-points li::before { content: '—'; position: absolute; left: 0; color: var(--ink-gold); font-weight: 700; }
+
+  /* ============ TOC ============ */
+  nav.toc { margin: 28px 0 8px; }
+  nav.toc ol { list-style: none; padding: 0; column-count: 2; column-gap: 40px; margin: 10px 0 0; }
+  nav.toc li { margin-bottom: 5px; break-inside: avoid; }
+  nav.toc a { text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
+  nav.toc .toc-num { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); margin-right: 8px; }
+
+  /* ============ Tables ============ */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 18px 0 22px;
+    font-size: 13.5px;
+  }
+  th {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    text-align: left;
+    padding: 6px 12px 6px 0;
+    border-bottom: 2px solid var(--border-strong);
+  }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; font-feature-settings: 'tnum' 1; }
+
+  /* ============ Figures ============ */
+  figure { margin: 24px 0 28px; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+  figcaption .fig-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    color: var(--ink-navy);
+    margin-right: 8px;
+  }
+
+  /* ============ Code & citations ============ */
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 16px 0 20px;
+  }
+  pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+  .cite {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg-subtle);
+    background: var(--surface-alt);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  /* Superscript source references — body prose never carries raw file paths.
+     Full citation lives in the title (hover) and in the numbered Sources list. */
+  sup.ref { line-height: 0; }
+  sup.ref a {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-navy);
+    text-decoration: none;
+    padding: 0 1px;
+  }
+  sup.ref a:hover { text-decoration: underline; }
+  ol.sources { margin: 12px 0; padding-left: 30px; }
+  ol.sources li {
+    font-size: 13px;
+    padding: 2px 0;
+  }
+  ol.sources li::marker {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--ink-navy);
+  }
+  ol.sources li:target { background: var(--accent-soft); }
+
+  /* ============ Callouts ============ */
+  .callout { padding: 12px 16px; margin: 18px 0; font-size: 13.5px; border-radius: 3px; }
+  .callout .callout-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .callout-info { background: var(--accent-soft); }
+  .callout-info .callout-label { color: var(--ink-navy); }
+  .callout-warn { background: rgba(179, 110, 78, 0.08); border-left: 3px solid var(--ink-terracotta); }
+  .callout-warn .callout-label { color: var(--ink-terracotta); }
+  .callout-open { background: rgba(212, 168, 83, 0.10); }
+  .callout-open .callout-label { color: #8a6a1f; }
+
+  /* ============ Collapsible sections (native <details class="fold">) ============
+     Every h2 section and every appendix is a fold; long h3 subsections may be.
+     The heading sits inside <summary>, so its text stays part of the document
+     for comment anchoring. */
+  details.fold > summary { list-style: none; cursor: pointer; }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold > summary > h2,
+  details.fold > summary > h3 { display: flex; align-items: baseline; gap: 10px; }
+  details.fold > summary > h2::before,
+  details.fold > summary > h3::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--fg-muted);
+    border-bottom: 1.5px solid var(--fg-muted);
+    transform: translateY(-2px) rotate(-45deg);
+    transition: transform 120ms ease-out;
+  }
+  details.fold[open] > summary > h2::before,
+  details.fold[open] > summary > h3::before { transform: translateY(-4px) rotate(45deg); }
+  details.fold > summary:hover > h2,
+  details.fold > summary:hover > h3 { color: var(--cta); }
+  details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .fold-controls { margin: 10px 0 0; font-size: 12px; color: var(--fg-muted); }
+  .fold-controls button {
+    font: inherit;
+    color: var(--ink-navy);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline dotted var(--border-strong);
+    text-underline-offset: 3px;
+  }
+  .appendix-label { color: var(--fg-muted); }
+
+  /* ============ Open questions: two-way links ============
+     In the body, a gold "Q1" marker sits where a section depends on an
+     unresolved question; the question's entry links back to each marker. */
+  sup.oq-ref { line-height: 0; }
+  sup.oq-ref a {
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 700;
+    color: #8a6a1f;
+    background: rgba(212, 168, 83, 0.16);
+    border-radius: 999px;
+    padding: 1px 5px;
+    margin-left: 2px;
+    text-decoration: none;
+  }
+  sup.oq-ref a:hover { background: rgba(212, 168, 83, 0.32); }
+  ol.open-questions { padding-left: 0; list-style: none; counter-reset: oq; }
+  ol.open-questions > li {
+    counter-increment: oq;
+    position: relative;
+    padding: 10px 0 10px 40px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  ol.open-questions > li::before {
+    content: 'Q' counter(oq);
+    position: absolute;
+    left: 0;
+    top: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #8a6a1f;
+  }
+  ol.open-questions p { margin: 0 0 6px; }
+  .oq-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    margin-right: 6px;
+  }
+  .oq-from { font-size: 12.5px; color: var(--fg-subtle); }
+  ol.open-questions > li:target,
+  sup.oq-ref:target a,
+  .oq-anchor:target { background: rgba(212, 168, 83, 0.28); }
+
+  /* Decision record — Decision Record appendix only. The body states the
+     current design; it never carries labeled decision callouts. */
+  .decision { border-top: 1px solid var(--border); padding: 14px 0 4px; margin: 14px 0; }
+  .decision .decision-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-sage); }
+  .decision p { margin-top: 6px; }
+
+  blockquote {
+    margin: 16px 0 20px;
+    padding: 2px 0 2px 16px;
+    border-left: 2px solid var(--border-strong);
+    color: var(--fg-subtle);
+    font-family: var(--serif);
+    font-size: 14px;
+  }
+  td, .cite, ol.sources li { overflow-wrap: anywhere; }
+  .cite { white-space: normal; }
+
+  @media (max-width: 1100px) {
+    .dc-page { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    article#doc { padding: 32px 16px 96px; }
+    header.masthead h1 { font-size: 26px; }
+    nav.toc ol { column-count: 1; }
+    table { display: block; overflow-x: auto; }
+  }
+  @media print {
+    #dc-sidebar, #dc-fab, #dc-toggle { display: none !important; }
+    .dc-page { grid-template-columns: 1fr; }
+  }
+
+  /* ================================================================
+     DC-COMMENTS BEGIN — styles (copy verbatim; do not modify)
+     ================================================================ */
+  ::highlight(dc-hl) { background: rgba(212, 168, 83, 0.28); }
+  ::highlight(dc-hl-active) { background: rgba(212, 168, 83, 0.6); }
+
+  #dc-fab {
+    position: absolute;
+    z-index: 40;
+    display: none;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--cta-foreground);
+    background: var(--cta);
+    border: 1px solid #0a1c42;
+    border-radius: 3px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #dc-fab:hover { background: var(--ink-navy); }
+
+  #dc-sidebar {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    padding: 24px 20px 60px;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  #dc-sidebar h2.dc-title {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+    margin: 0 0 4px;
+  }
+  .dc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 18px; }
+  .dc-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .dc-btn:hover { background: var(--surface-alt); }
+  .dc-btn:focus-visible, #dc-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dc-empty { color: var(--fg-muted); font-style: italic; }
+  .dc-item { border-top: 1px solid var(--border-subtle); padding: 12px 0; cursor: pointer; }
+  .dc-item.dc-resolved { opacity: 0.5; }
+  .dc-quote {
+    border-left: 2px solid var(--ink-gold);
+    padding-left: 8px;
+    color: var(--fg-subtle);
+    font-style: italic;
+    font-size: 12px;
+    margin-bottom: 6px;
+    overflow-wrap: break-word;
+  }
+  .dc-orphan-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-terracotta);
+    background: rgba(179, 110, 78, 0.12);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .dc-text { white-space: pre-wrap; overflow-wrap: break-word; }
+  .dc-item textarea {
+    width: 100%;
+    min-height: 64px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 6px 8px;
+    resize: vertical;
+  }
+  .dc-item textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dc-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--fg-muted); }
+  .dc-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .dc-meta .dc-del { margin-left: auto; color: var(--ink-terracotta); background: none; border: none; font-size: 11px; cursor: pointer; padding: 0; }
+  .dc-meta .dc-del:hover { text-decoration: underline; }
+  #dc-status { font-size: 11px; color: var(--ink-sage); min-height: 16px; margin-top: 8px; }
+
+  #dc-toggle { display: none; }
+  @media (max-width: 1100px) {
+    #dc-sidebar {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 320px;
+      max-width: 90vw;
+      transform: translateX(100%);
+      transition: transform 200ms ease-out;
+      z-index: 50;
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+    }
+    #dc-sidebar.dc-open { transform: translateX(0); }
+    #dc-toggle {
+      display: block;
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 51;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--cta-foreground);
+      background: var(--cta);
+      border: 1px solid #0a1c42;
+      border-radius: 999px;
+      padding: 9px 15px;
+      cursor: pointer;
+    }
+  }
+  /* replies rendered under a comment (from the comment's `replies` array) */
+  .dc-replies { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
+  .dc-reply-author { font-family: var(--sans); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-navy); }
+  .dc-reply-text { font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; margin-top: 2px; }
+  .dc-reply-text a { color: var(--ink-navy); word-break: break-all; }
+  /* ============ DC-COMMENTS END — styles ============ */
+</style>
+</head>
+<body>
+<div class="dc-page">
+<article id="doc">
+
+  <header class="masthead">
+    <span class="eyebrow">Design · 2026-10-28 · Proposed</span>
+    <h1>Writable Agent Tooling in Hosted Hermes Workspaces</h1>
+    <p class="context">Tooling that hosted agents can change, keep across releases, and run.</p>
+  </header>
+
+  <section id="summary">
+    <h2>Executive Summary</h2>
+    <p>Hosted research agents (the orchestrator and the researchers) cannot change their tools. Most of their code is links into the read-only image, and Hermes (the agent runtime) recopies skills and <code>SOUL.md</code> at each release. Thus an agent fix fails or disappears.</p>
+    <p>In this design, each profile folder is a git working tree on the workspace disk. Releases merge into the agent's <code>main</code>, and a conflict keeps the agent's version. Plugins fall back to the image copy when the writable copy fails. The GitHub tools go away. The main tradeoff: the design reverses a metta hosting rule, and agents can break their own tools.</p>
+  </section>
+
+  <nav class="toc">
+    <span class="eyebrow">Contents</span>
+    <ol>
+      <li><span class="toc-num">1</span><a href="#problem">Problem</a></li>
+      <li><span class="toc-num">2</span><a href="#design">Design</a></li>
+      <li><span class="toc-num">3</span><a href="#who-changes-what">Who Changes What</a></li>
+      <li><span class="toc-num">4</span><a href="#rollout">Rollout and Validation</a></li>
+      <li><span class="toc-num">5</span><a href="#risks">Risks</a></li>
+      <li><span class="toc-num">6</span><a href="#alternatives">Alternatives Considered</a></li>
+      <li><span class="toc-num">7</span><a href="#open-questions">Open Questions</a></li>
+      <li><span class="toc-num">A</span><a href="#decision-record">Appendix A · Decision Record</a></li>
+      <li><span class="toc-num">B</span><a href="#sources">Appendix B · Sources</a></li>
+    </ol>
+    <p class="fold-controls"><button type="button" data-fold="open">Expand all</button> · <button type="button" data-fold="close">Collapse all</button></p>
+  </nav>
+
+  <section id="problem">
+    <details class="fold" open>
+      <summary><h2>1 · Problem</h2></summary>
+      <ul class="key-points">
+        <li>Hosted agents cannot write their code, game folders or plugins, which are read-only image links.</li>
+        <li>Each release erases agent edits to skills and <code>SOUL.md</code>.</li>
+        <li>Goals: writable tooling that survives releases, and no agent use of Softmax's GitHub connection.</li>
+      </ul>
+      <p>On a hosted workspace, each profile folder (<code>/opt/data/profiles/&lt;name&gt;</code>, the home of one Hermes agent) holds links into the read-only image for <code>src</code>, <code>scripts</code>, <code>games</code>, <code>doctrine</code>, <code>docs</code>, <code>tests</code>, <code>pyproject.toml</code>, <code>uv.lock</code> and the shipped plugins<sup class="ref"><a href="#src-1" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:15-17">1</a></sup><sup class="ref"><a href="#src-2" title="metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:19-32">2</a></sup>. Metta's <code>prepare_code</code> replaces those paths with symlinks on every start<sup class="ref"><a href="#src-3" title="metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:152-203">3</a></sup>. The hosting contract states that "installed game source stays read-only and byte-identical to the pinned distribution"<sup class="ref"><a href="#src-4" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:109-115">4</a></sup>. Only GotA's generated <code>tools/.cache</code> and <code>tools/bin</code> in the researcher are bind-mounted writable<sup class="ref"><a href="#src-5" title="metta devops/hermes-fleet/applications/autoresearch/runtime_definition.py:31-34">5</a></sup>. The orchestrator's GotA copy has none, so orchestrator GotA builds fail.</p>
+      <p>Skills and <code>SOUL.md</code> (the agent's standing instructions) are writable copies. But Hermes's distribution updater deletes and recopies every distribution-owned path on each update<sup class="ref"><a href="#src-6" title="Hermes v0.21.6 hermes_cli/profile_distribution.py:377-384">6</a></sup>. Hosting declares <code>skills</code> and <code>SOUL.md</code> distribution-owned<sup class="ref"><a href="#src-7" title="metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:33,54-67">7</a></sup>. Thus skill edits disappear at the next release.</p>
+      <p>This week, a read-only cache in Pudge <code>replay_inspect</code> blocked three cards for about 2.5 hours. ide-distributions #73 reverted the GotA build relocation from #71. Doctrine 16 (an agent rule) tells agents to copy a broken game folder to disk and run the copy, which is a workaround, not a fix.</p>
+      <p>The goal: everything an agent uses to work on policies, reply to the user and use Softmax is writable by that agent, survives releases, and runs from the writable copy. This covers game folders (GAME.md, tools, game skills, guides), generic tools (the research CLI, <code>ide_research_core</code>, the orchestrator and researcher plugins), scripts, skills, SOUL, doctrine and knowledge.</p>
+      <p>The second goal is to remove <code>github_clone</code> and <code>github_repositories</code>. Agents must not use Softmax's GitHub connection.</p>
+    </details>
+  </section>
+
+  <section id="design">
+    <details class="fold" open>
+      <summary><h2>2 · Design</h2></summary>
+      <ul class="key-points">
+        <li>Each profile folder is a git clone of a per-distribution repository on disk.</li>
+        <li>Releases merge into the agent's <code>main</code>, and conflicts keep the agent's version.</li>
+        <li>Code runs from the profile copy, with an image fallback.</li>
+        <li>Agents use plain <code>git clone</code>, not the GitHub tools.</li>
+      </ul>
+
+      <figure>
+        <svg viewBox="0 0 640 300" role="img" aria-label="Release and merge flow: image tree commits to a release branch, which merges into the profile main working tree; on conflict the agent version stays; plugin import tries profile src first and falls back to image src">
+          <defs>
+            <marker id="arw" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8" fill="none" stroke="#859ebe" stroke-width="1.2"/>
+            </marker>
+            <marker id="arw-t" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8" fill="none" stroke="#b36e4e" stroke-width="1.2"/>
+            </marker>
+          </defs>
+          <rect x="10" y="20" width="170" height="60" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="95" y="45" text-anchor="middle" font-family="Merriweather Sans" font-size="13" fill="#111827" font-weight="600">Image tree</text>
+          <text x="95" y="64" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="#555555">/opt/ide-distributions/&lt;dist&gt;</text>
+          <line x1="180" y1="50" x2="232" y2="50" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arw)"/>
+          <text x="206" y="42" text-anchor="middle" font-family="Merriweather Sans" font-size="10" fill="#555555">commit</text>
+          <rect x="235" y="20" width="170" height="60" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+          <text x="320" y="45" text-anchor="middle" font-family="Merriweather Sans" font-size="13" fill="#1a3875" font-weight="600">release branch</text>
+          <text x="320" y="64" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="#555555">tooling-&lt;dist&gt;.git (bare)</text>
+          <line x1="405" y1="50" x2="457" y2="50" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arw)"/>
+          <text x="431" y="42" text-anchor="middle" font-family="Merriweather Sans" font-size="10" fill="#555555">merge</text>
+          <rect x="460" y="20" width="170" height="60" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+          <text x="545" y="45" text-anchor="middle" font-family="Merriweather Sans" font-size="13" fill="#1a3875" font-weight="600">Profile main</text>
+          <text x="545" y="64" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="#555555">working tree</text>
+          <line x1="545" y1="80" x2="545" y2="122" stroke="#b36e4e" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arw-t)"/>
+          <text x="553" y="105" font-family="Merriweather Sans" font-size="10" fill="#b36e4e">conflict</text>
+          <rect x="400" y="125" width="230" height="52" rx="3" fill="#fffaf0" stroke="#b36e4e"/>
+          <text x="515" y="146" text-anchor="middle" font-family="Merriweather Sans" font-size="11.5" fill="#111827">Keep agent version</text>
+          <text x="515" y="165" text-anchor="middle" font-family="Merriweather Sans" font-size="11.5" fill="#111827">notice in status</text>
+          <line x1="10" y1="200" x2="630" y2="200" stroke="#f0ebe1" stroke-width="1"/>
+          <rect x="10" y="225" width="170" height="56" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="95" y="249" text-anchor="middle" font-family="Merriweather Sans" font-size="12" fill="#111827" font-weight="600">Image src</text>
+          <text x="95" y="267" text-anchor="middle" font-family="Merriweather Sans" font-size="10" fill="#555555">fallback</text>
+          <rect x="235" y="225" width="170" height="56" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <text x="320" y="258" text-anchor="middle" font-family="Merriweather Sans" font-size="12" fill="#111827" font-weight="600">Plugin entry</text>
+          <rect x="460" y="225" width="170" height="56" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+          <text x="545" y="249" text-anchor="middle" font-family="Merriweather Sans" font-size="12" fill="#1a3875" font-weight="600">&lt;profile&gt;/src</text>
+          
+          <line x1="405" y1="253" x2="457" y2="253" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arw)"/>
+          <text x="431" y="245" text-anchor="middle" font-family="Merriweather Sans" font-size="10" fill="#555555">1. import</text>
+          <line x1="235" y1="253" x2="183" y2="253" stroke="#b36e4e" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arw-t)"/>
+          <text x="209" y="245" text-anchor="middle" font-family="Merriweather Sans" font-size="10" fill="#b36e4e">2. on failure</text>
+        </svg>
+        <figcaption><span class="fig-label">Figure 1</span>Top: at start, each release merges into the profile's <code>main</code>. Bottom: plugins use the image copy only when the writable import fails.</figcaption>
+      </figure>
+
+      <details class="fold" open>
+        <summary><h3>2.1 · Tooling as git working trees</h3></summary>
+        <p>Metta keeps one bare repository per distribution on the workspace volume: <code>/opt/data/tooling-orchestrator.git</code> and <code>/opt/data/tooling-researcher.git</code>. Metta commits each release onto a <code>release</code> branch there. The tree is the image's distribution folder, the parent is the previous release commit, and the message names the source commit.</p>
+        <p>Each profile folder is a clone of its distribution's repository, with <code>main</code> checked out. The paths that are image links today, plus <code>plugins/*</code>, <code>skills/</code> and <code>SOUL.md</code>, become ordinary tracked files.</p>
+        <p>The profile root does not move, so no lookup changes. The game loader's <code>DISTRIBUTION_ROOT</code><sup class="ref"><a href="#src-8" title="ide-distributions shared/ide_research_core/games/scope.py:44,65-70">8</a></sup> and the plugin entry's <code>&lt;profile&gt;/src</code><sup class="ref"><a href="#src-9" title="ide-distributions orchestrator/plugins/orchestrator/__init__.py:12-31">9</a></sup> already resolve inside the profile. An agent edit is a file edit plus a commit.</p>
+        <p>Researchers share edits by a push of <code>main</code> to the shared repository, which each researcher merges. The orchestrator has its own repository (different SOUL and plugin)<sup class="oq-ref" id="oq-2-from-git-trees"><a href="#oq-2" title="Open question 2 — share edits across distributions?">Q2</a></sup>.</p>
+      </details>
+
+      <details class="fold" open>
+        <summary><h3>2.2 · Releases merge into agent edits</h3></summary>
+        <p>At start, preparation commits the image tree onto <code>release</code>. Then it merges <code>release</code> into the profile's <code>main</code>. On a conflict, preparation aborts the merge, keeps the agent's version, and records a notice that <code>status</code> reports: "tooling update deferred; merge <code>release</code> yourself"<sup class="oq-ref" id="oq-3-from-release-merge"><a href="#oq-3" title="Open question 3 — should agent improvements flow back upstream?">Q3</a></sup>. <code>publish_game_doctrine</code> already applies the same rule to doctrine in game repositories<sup class="ref"><a href="#src-10" title="ide-distributions shared/ide_research_core/prepare.py:56-97">10</a></sup>.</p>
+        <p>Untracked files, such as agent-added skills, are never deleted. Hermes's own updater stops ownership of <code>skills</code> and <code>SOUL.md</code>. The hosted manifest projection lists only <code>config.yaml</code>, <code>cron</code> and <code>distribution.yaml</code> as distribution-owned<sup class="ref"><a href="#src-7" title="metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:33,54-67">7</a></sup>.</p>
+        <p>On an existing workspace, the first adoption replaces the image links with a checkout of the first <code>release</code> commit. Those paths were read-only, so no agent edits exist to keep.</p>
+      </details>
+
+      <details class="fold" open>
+        <summary><h3>2.3 · Code runs from the writable copy, with a fallback</h3></summary>
+        <p>Plugin entries import from <code>&lt;profile&gt;/src</code>, as today. If that import fails, the entry loads the image copy (<code>/opt/ide-distributions/&lt;distribution&gt;/src</code>) and records the error for <code>status</code> and the agent. Without it, one bad edit kills the agent's tools with no way to repair them. The PyYAML import fixed in ide-distributions #90 did exactly that to <code>status</code>.</p>
+        <p>The <code>research</code> CLI runs the profile's <code>src</code> first. The image venv's editable install points at the image path<sup class="ref"><a href="#src-11" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:29-32">11</a></sup>, so the launcher puts <code>&lt;profile&gt;/src</code> first on the import path.</p>
+        <p>The image venv (<code>/opt/ide-venvs/&lt;distribution&gt;</code>) stays the default source of dependencies. An agent that changes <code>pyproject.toml</code> builds its own venv on disk with <code>uv sync</code>. The launcher prefers <code>&lt;profile&gt;/local/venv-agent</code> when it exists and matches <code>uv.lock</code>.</p>
+        <p>Game builds write inside the game folder (<code>tools/.cache</code>, <code>tools/bin</code>), which is now writable. As a result, the GotA image volumes<sup class="ref"><a href="#src-5" title="metta devops/hermes-fleet/applications/autoresearch/runtime_definition.py:31-34">5</a></sup> go away. Build receipts and provenance checks key on the tools folder's git tree hash, not byte-identity with the image<sup class="ref"><a href="#src-4" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:109-115">4</a></sup>. The researcher guard plugin and the episode budget ledger become editable too<sup class="oq-ref" id="oq-1-from-writable-copy"><a href="#oq-1" title="Open question 1 — should guardrail code stay read-only?">Q1</a></sup>.</p>
+      </details>
+
+      <details class="fold" open>
+        <summary><h3>2.4 · Removing the GitHub tools</h3></summary>
+        <p>The change deletes the orchestrator's GitHub module (<code>github.py</code>) and the <code>github_repositories</code> and <code>github_clone</code> registrations<sup class="ref"><a href="#src-12" title="ide-distributions orchestrator/src/orchestrator/plugin.py:103-115, orchestrator/plugins/orchestrator/plugin.yaml:16-17">12</a></sup>. It also deletes their README rows and the SOUL "Repository review" text, which requires those tools and the <code>repositories/</code> folder<sup class="ref"><a href="#src-13" title="ide-distributions orchestrator/SOUL.md:28-36, orchestrator/README.md:23,89">13</a></sup>.</p>
+        <p>The new SOUL text says: clone public repositories with <code>git clone</code> into any writable folder. Private repositories are not available. <code>research source fetch</code><sup class="ref"><a href="#src-14" title="ide-distributions shared/ide_research_core/sources.py:1-10,122-170">14</a></sup> stays as an optional helper for pinned, cached snapshots. <code>game-create</code> and <code>coworld-context</code> use it, but nothing requires it<sup class="oq-ref" id="oq-4-from-github-tools"><a href="#oq-4" title="Open question 4 — remove the IDEa GitHub setting and broker endpoints?">Q4</a></sup>.</p>
+      </details>
+
+      <details class="fold" open>
+        <summary><h3>2.5 · Instructions</h3></summary>
+        <p>SOUL, KNOWLEDGE and doctrine say: your tools, skills and game folders are yours to read, fix, extend and build. Commit changes with a message that says why. Researchers push useful changes. In Doctrine 16, "fix the tool in place and commit" replaces "copy the game folder to disk and run the copy".</p>
+      </details>
+    </details>
+  </section>
+
+  <section id="who-changes-what">
+    <details class="fold" open>
+      <summary><h2>3 · Who Changes What</h2></summary>
+      <ul class="key-points">
+        <li>Metta owns the layout and release merge. ide-distributions owns plugins, launcher and instructions.</li>
+      </ul>
+      <table>
+        <thead>
+          <tr><th>Repository</th><th>Changes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>metta</td><td>The hosted worker layout module (<code>layout.py</code>): <code>prepare_code</code>, <code>IMAGE_PATHS</code>, <code>MUTABLE_PATHS</code> and the manifest projection<sup class="ref"><a href="#src-3" title="metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:152-203">3</a></sup><sup class="ref"><a href="#src-7" title="metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:33,54-67">7</a></sup>. The <code>STATE.md</code> path table and native-build-storage section<sup class="ref"><a href="#src-1" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:15-17">1</a></sup><sup class="ref"><a href="#src-4" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:109-115">4</a></sup>. The <code>runtime_definition.py</code> image volumes<sup class="ref"><a href="#src-5" title="metta devops/hermes-fleet/applications/autoresearch/runtime_definition.py:31-34">5</a></sup>. GotA provenance and receipt checks. Image tests for layout and build storage.</td></tr>
+          <tr><td>ide-distributions</td><td>Plugin entries (fallback). Launcher (<code>src</code> first, agent venv). Removal of the GitHub tools. SOUL, KNOWLEDGE and doctrine text. Tests<sup class="oq-ref" id="oq-1-from-who-changes"><a href="#oq-1" title="Open question 1 — should guardrail code stay read-only?">Q1</a></sup>.</td></tr>
+        </tbody>
+      </table>
+      <p>Non-hosted installs copy the whole distribution into the profile, so they are already writable and stay unchanged.</p>
+    </details>
+  </section>
+
+  <section id="rollout">
+    <details class="fold" open>
+      <summary><h2>4 · Rollout and Validation</h2></summary>
+      <ul class="key-points">
+        <li>Safe ide-distributions changes first, then metta, then instructions.</li>
+      </ul>
+      <ol>
+        <li>ide-distributions: remove the GitHub tools (independent, ships first).</li>
+        <li>ide-distributions: plugin import fallback and launcher <code>src</code>-first (harmless while paths are still links).</li>
+        <li>metta: tooling repositories, release merge, layout change, GotA provenance, image-volume removal. The existing Hermes release qualification (a canary chat before and after restart) qualifies it.</li>
+        <li>ide-distributions: instruction updates once step 3 is live.</li>
+      </ol>
+      <p>Validation: release qualification passes. On a canary, edit a game tool and a skill, commit, restart and release a new image, and make sure that the edits survive and merge. Break <code>src</code> on purpose and make sure that the fallback loads and <code>status</code> reports it. Build GotA from the orchestrator.</p>
+    </details>
+  </section>
+
+  <section id="risks">
+    <details class="fold" open>
+      <summary><h2>5 · Risks</h2></summary>
+      <ul class="key-points">
+        <li>Main risks: a reversed hosting rule, broken tools, and old tooling after a conflict.</li>
+      </ul>
+      <div class="callout callout-warn">
+        <span class="callout-label">Risk</span>
+        The change reverses an explicit metta hosting rule<sup class="ref"><a href="#src-4" title="metta devops/hermes-fleet/applications/autoresearch/STATE.md:109-115">4</a></sup> that Rohit owns. Agree on it with him first.
+      </div>
+      <ul>
+        <li>An agent can break its own tools. The fallback and git revert limit the damage.</li>
+        <li>A release conflict leaves a profile on old tooling until the agent merges. <code>status</code> must show this.</li>
+        <li>Tooling history uses disk, but little next to game caches.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="alternatives">
+    <details class="fold" open>
+      <summary><h2>6 · Alternatives Considered</h2></summary>
+      <ul class="key-points">
+        <li>Each alternative loses edits, solves only part, or keeps GitHub access.</li>
+      </ul>
+      <ul>
+        <li><strong>Copy the tooling to disk at each start, without git.</strong> Releases overwrite agent edits, as Hermes does to skills today, or never update them. No history, review or revert.</li>
+        <li><strong>Put game folders in each game's canonical research repository.</strong> This ties game tooling to research card integration, leaves generic tooling unsolved, and gives two mechanisms instead of one.</li>
+        <li><strong>Relocate caches per game (ide-distributions #71).</strong> This repairs builds only, one game at a time. #73 reverted it for that reason.</li>
+        <li><strong>Keep <code>github_clone</code> behind a git credential helper.</strong> Agents still go through Softmax's GitHub connection, which is not allowed.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="open-questions">
+    <details class="fold" open>
+      <summary><h2>7 · Open Questions</h2></summary>
+      <ol class="open-questions">
+        <li id="oq-1">
+          <p><strong>Should guardrail code stay read-only?</strong></p>
+          <p><span class="oq-label">Context</span> The researcher guard plugin and the episode budget ledger become editable. The <code>config.yaml</code> deny lists are already writable.</p>
+          <p><span class="oq-label">Options</span> (a) Everything is writable, and only server-side limits bind (credential scope, spending caps). (b) Keep <code>plugins/researcher_guard</code> and the budget code image-owned and read-only.</p>
+          <p><span class="oq-label">Recommendation</span> (a), consistent with the "act without asking" direction.</p>
+          <p class="oq-from">Raised in <a href="#oq-1-from-writable-copy">§2.3 Code runs from the writable copy</a>, <a href="#oq-1-from-who-changes">§3 Who Changes What</a></p>
+        </li>
+        <li id="oq-2">
+          <p><strong>Share edits across distributions?</strong></p>
+          <p><span class="oq-label">Context</span> Researcher and orchestrator ship separate copies of each game folder, so a researcher's game-tool fix does not reach the orchestrator.</p>
+          <p><span class="oq-label">Options</span> (a) Separate repositories, shared by hand. (b) One host repository with the whole ide-distributions tree, each profile a sparse checkout of its folder.</p>
+          <p><span class="oq-label">Recommendation</span> (a) now, and (b) later if divergence becomes a problem.</p>
+          <p class="oq-from">Raised in <a href="#oq-2-from-git-trees">§2.1 Tooling as git working trees</a></p>
+        </li>
+        <li id="oq-3">
+          <p><strong>Should agent improvements flow back upstream to ide-distributions?</strong></p>
+          <p><span class="oq-label">Context</span> Nothing sends agent edits back to the source repository.</p>
+          <p><span class="oq-label">Options</span> (a) No. (b) A periodic export of tooling diffs for human review.</p>
+          <p><span class="oq-label">Recommendation</span> (b), as a follow-up.</p>
+          <p class="oq-from">Raised in <a href="#oq-3-from-release-merge">§2.2 Releases merge into agent edits</a></p>
+        </li>
+        <li id="oq-4">
+          <p><strong>Remove the IDEa GitHub setting and broker endpoints?</strong></p>
+          <p><span class="oq-label">Context</span> The IDEa "Connect GitHub repositories" setting (coplay #9) and the Softmax GitHub broker endpoints lose their agent use.</p>
+          <p><span class="oq-label">Options</span> (a) Remove them. (b) Keep them for other clients.</p>
+          <p><span class="oq-label">Recommendation</span> Ask the coplay and metta owners. Out of scope here.</p>
+          <p class="oq-from">Raised in <a href="#oq-4-from-github-tools">§2.4 Removing the GitHub tools</a></p>
+        </li>
+      </ol>
+    </details>
+  </section>
+
+  <section id="decision-record" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix A ·</span> Decision Record</h2></summary>
+      <div class="decision">
+        <span class="decision-label">D1 · Settled</span>
+        <p><strong>Tooling lives in git: one bare repository per distribution, and the profile folder is the working tree.</strong> Lost: a plain copy, and per-game relocation. Why: releases must merge with edits, and git gives history and revert.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D2 · Settled</span>
+        <p><strong>Release conflicts keep the agent's version and defer the update with a notice.</strong> Lost: the release wins. Why: this matches doctrine handling and never discards agent work.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D3 · Settled</span>
+        <p><strong>The GitHub tools go away, and agents have no Softmax GitHub access.</strong> Lost: a credential helper. Why: agents must not use the connection.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D4 · Settled</span>
+        <p><strong>A failed plugin import falls back to the image copy.</strong> Lost: no fallback. Why: a broken edit must not leave the agent without tools.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D5 · Settled</span>
+        <p><strong><code>research source fetch</code> stays optional.</strong> Lost: removal. Why: it gives pinned, cached snapshots and does not use the GitHub connection.</p>
+      </div>
+    </details>
+  </section>
+
+  <section id="sources" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix B ·</span> Sources</h2></summary>
+      <ol class="sources">
+        <li id="src-1"><span class="cite">metta devops/hermes-fleet/applications/autoresearch/STATE.md:15-17</span> — profile paths are image links.</li>
+        <li id="src-2"><span class="cite">metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:19-32</span> — <code>IMAGE_PATHS</code>.</li>
+        <li id="src-3"><span class="cite">metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:152-203</span> — <code>prepare_code</code> replaces paths with symlinks.</li>
+        <li id="src-4"><span class="cite">metta devops/hermes-fleet/applications/autoresearch/STATE.md:109-115</span> — source read-only and byte-identical; receipts validate source identity.</li>
+        <li id="src-5"><span class="cite">metta devops/hermes-fleet/applications/autoresearch/runtime_definition.py:31-34</span> — GotA image volumes, researcher only.</li>
+        <li id="src-6"><span class="cite">Hermes v0.21.6 hermes_cli/profile_distribution.py:377-384</span> — <code>_replace_entry</code> removes and recopies.</li>
+        <li id="src-7"><span class="cite">metta packages/observatory-hosted-worker/src/observatory_hosted_worker/layout.py:33,54-67</span> — <code>MUTABLE_PATHS</code> become <code>distribution_owned</code>.</li>
+        <li id="src-8"><span class="cite">ide-distributions shared/ide_research_core/games/scope.py:44,65-70</span> — <code>DISTRIBUTION_ROOT</code>, <code>game_roots</code>.</li>
+        <li id="src-9"><span class="cite">ide-distributions orchestrator/plugins/orchestrator/__init__.py:12-31</span> — plugin imports <code>&lt;profile&gt;/src</code>.</li>
+        <li id="src-10"><span class="cite">ide-distributions shared/ide_research_core/prepare.py:56-97</span> — doctrine merge, deferred on conflict.</li>
+        <li id="src-11"><span class="cite">metta devops/hermes-fleet/applications/autoresearch/STATE.md:29-32</span> — editable package at image path.</li>
+        <li id="src-12"><span class="cite">ide-distributions orchestrator/src/orchestrator/plugin.py:103-115, orchestrator/plugins/orchestrator/plugin.yaml:16-17</span> — GitHub tool registrations.</li>
+        <li id="src-13"><span class="cite">ide-distributions orchestrator/SOUL.md:28-36, orchestrator/README.md:23,89</span> — SOUL "Repository review" text and README rows.</li>
+        <li id="src-14"><span class="cite">ide-distributions shared/ide_research_core/sources.py:1-10,122-170</span> — <code>research source fetch</code>.</li>
+      </ol>
+    </details>
+  </section>
+
+</article>
+
+<!-- ============ DOC-NAV: folds + in-page links (keep; outside DC-COMMENTS) ============
+     Opens any closed fold that contains a link target (TOC, citation, open-question
+     markers, back-links, URL hash), wires Expand/Collapse all, and opens every
+     fold for printing. -->
+<script>
+(() => {
+  'use strict';
+  const doc = document.getElementById('doc');
+  const folds = () => doc.querySelectorAll('details.fold');
+  function reveal(el) {
+    const own = el.querySelector(':scope > details.fold'); // a TOC link targets the <section> around a fold
+    if (own) own.open = true;
+    for (let n = el; n && n !== doc; n = n.parentElement) {
+      if (n.tagName === 'DETAILS') n.open = true;
+    }
+  }
+  function targetOf(hash) {
+    return hash && hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  }
+  // Runs before the browser's own jump, so the target is visible when it scrolls.
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) { const t = targetOf(a.getAttribute('href')); if (t) reveal(t); }
+  });
+  function revealHash() {
+    const t = targetOf(location.hash);
+    if (t) { reveal(t); t.scrollIntoView(); }
+  }
+  window.addEventListener('hashchange', revealHash);
+  revealHash();
+  doc.querySelectorAll('[data-fold]').forEach(b => b.addEventListener('click', () => {
+    const open = b.dataset.fold === 'open';
+    folds().forEach(d => { d.open = open; });
+  }));
+  window.addEventListener('beforeprint', () => folds().forEach(d => { d.open = true; }));
+  // Lets the comment sidebar reveal a comment that sits inside a closed fold.
+  window.dcReveal = reveal;
+})();
+</script>
+
+<!-- ================================================================
+     DC-COMMENTS BEGIN — markup + script (copy verbatim; do not modify)
+     ================================================================ -->
+<aside id="dc-sidebar" aria-label="Comments">
+  <h2 class="dc-title">Comments <span id="dc-count"></span></h2>
+  <div class="dc-actions">
+    <button class="dc-btn" id="dc-export">Export JSON</button>
+    <button class="dc-btn" id="dc-copy">Copy JSON</button>
+    <button class="dc-btn" id="dc-import">Import…</button>
+    <input type="file" id="dc-file" accept=".json,application/json" hidden>
+  </div>
+  <div id="dc-status" role="status"></div>
+  <div id="dc-list"><p class="dc-empty">No comments yet. Select text in the document to add one.</p></div>
+</aside>
+<button id="dc-fab" type="button">+ Comment</button>
+<button id="dc-toggle" type="button">Comments</button>
+<!-- Preload slot: a renderer may put a dc-comments/1 `comments` array here (each comment optionally carrying `replies`). Merged by id into the stored comments on load. Leave empty otherwise. -->
+<script id="dc-preload" type="application/json"></script>
+
+<script>
+(() => {
+  'use strict';
+  const FORMAT = 'dc-comments/1';
+  const CTX = 32; // prefix/suffix context length, chars
+  const doc = document.getElementById('doc');
+  const fab = document.getElementById('dc-fab');
+  const listEl = document.getElementById('dc-list');
+  const countEl = document.getElementById('dc-count');
+  const statusEl = document.getElementById('dc-status');
+  const sidebar = document.getElementById('dc-sidebar');
+  const storeKey = 'dc:' + location.pathname; // per file, so a new draft starts clean
+
+  let comments = []; // {id, exact, prefix, suffix, text, created, resolved}
+  let ranges = new Map(); // id -> Range (null if orphaned)
+  let seq = 0;
+
+  // ---- text indexing: one global string over #doc's text nodes ----
+  function docText() {
+    const r = document.createRange();
+    r.selectNodeContents(doc);
+    return r.toString();
+  }
+  function globalOffset(container, offset) {
+    const r = document.createRange();
+    r.setStart(doc, 0);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  }
+  function offsetsToRange(start, end) {
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    let pos = 0, range = document.createRange(), haveStart = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode, len = node.data.length;
+      if (!haveStart && pos + len >= start) {
+        range.setStart(node, start - pos);
+        haveStart = true;
+      }
+      if (haveStart && pos + len >= end) {
+        range.setEnd(node, end - pos);
+        return range;
+      }
+      pos += len;
+    }
+    return null;
+  }
+
+  // ---- anchoring: TextQuoteSelector-style exact + prefix/suffix ----
+  function selectorFromRange(range) {
+    const text = docText();
+    const start = globalOffset(range.startContainer, range.startOffset);
+    const end = globalOffset(range.endContainer, range.endOffset);
+    return {
+      exact: text.slice(start, end),
+      prefix: text.slice(Math.max(0, start - CTX), start),
+      suffix: text.slice(end, end + CTX),
+    };
+  }
+  function locate(c) {
+    const text = docText();
+    let i = text.indexOf(c.prefix + c.exact + c.suffix);
+    if (i >= 0) return offsetsToRange(i + c.prefix.length, i + c.prefix.length + c.exact.length);
+    i = text.indexOf(c.exact);
+    if (i >= 0) return offsetsToRange(i, i + c.exact.length);
+    return null;
+  }
+  function reanchorAll() {
+    ranges = new Map(comments.map(c => [c.id, locate(c)]));
+    paint();
+  }
+
+  // ---- painting via CSS Custom Highlight API ----
+  const hl = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  const hlActive = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  if (hl) { CSS.highlights.set('dc-hl', hl); CSS.highlights.set('dc-hl-active', hlActive); }
+  function paint(activeId) {
+    if (!hl) return;
+    hl.clear(); hlActive.clear();
+    for (const [id, r] of ranges) {
+      if (!r) continue;
+      (id === activeId ? hlActive : hl).add(r);
+    }
+  }
+
+  // ---- persistence (best-effort; file:// storage varies by browser) ----
+  function save() {
+    try { localStorage.setItem(storeKey, JSON.stringify(comments)); } catch (e) { /* unavailable on some file:// setups */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      if (raw) comments = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- sidebar rendering ----
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ''; }, 2500);
+  }
+  function sortedComments() {
+    const pos = c => {
+      const r = ranges.get(c.id);
+      return r ? globalOffset(r.startContainer, r.startOffset) : Infinity; // orphans last
+    };
+    return [...comments].sort((a, b) => pos(a) - pos(b));
+  }
+  function render(editingId) {
+    countEl.textContent = comments.length ? '(' + comments.length + ')' : '';
+    listEl.textContent = '';
+    if (!comments.length) {
+      const p = document.createElement('p');
+      p.className = 'dc-empty';
+      p.textContent = 'No comments yet. Select text in the document to add one.';
+      listEl.appendChild(p);
+      return;
+    }
+    for (const c of sortedComments()) {
+      const item = document.createElement('div');
+      item.className = 'dc-item' + (c.resolved ? ' dc-resolved' : '');
+      item.dataset.id = c.id;
+
+      const quote = document.createElement('div');
+      quote.className = 'dc-quote';
+      quote.textContent = c.exact.length > 90 ? c.exact.slice(0, 90) + '…' : c.exact;
+      if (!ranges.get(c.id)) {
+        const tag = document.createElement('span');
+        tag.className = 'dc-orphan-tag';
+        tag.textContent = 'orphaned';
+        quote.appendChild(tag);
+      }
+      item.appendChild(quote);
+
+      if (c.id === editingId) {
+        const ta = document.createElement('textarea');
+        ta.value = c.text;
+        ta.placeholder = 'Write a comment… (⌘/Ctrl+Enter to save, Esc to cancel)';
+        ta.addEventListener('keydown', e => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
+          if (e.key === 'Escape') cancel();
+        });
+        ta.addEventListener('click', e => e.stopPropagation());
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'dc-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.style.marginTop = '6px';
+        saveBtn.addEventListener('click', e => { e.stopPropagation(); commit(); });
+        function commit() {
+          c.text = ta.value.trim();
+          if (!c.text) return cancel();
+          save(); render();
+        }
+        function cancel() {
+          if (!c.text) { comments = comments.filter(x => x.id !== c.id); ranges.delete(c.id); paint(); }
+          save(); render();
+        }
+        item.appendChild(ta);
+        item.appendChild(saveBtn);
+        listEl.appendChild(item);
+        requestAnimationFrame(() => ta.focus());
+        continue;
+      }
+
+      const text = document.createElement('div');
+      text.className = 'dc-text';
+      text.textContent = c.text;
+      item.appendChild(text);
+
+      if (Array.isArray(c.replies) && c.replies.length) {
+        const box = document.createElement('div');
+        box.className = 'dc-replies';
+        for (const r of c.replies) {
+          const who = document.createElement('div');
+          who.className = 'dc-reply-author';
+          who.textContent = 'Reply from ' + (r.author || 'agent') + (r.created ? ' · ' + String(r.created).slice(0, 10) : '');
+          const body = document.createElement('div');
+          body.className = 'dc-reply-text';
+          for (const part of String(r.text || '').split(/(https?:\/\/[^\s)]+)/g)) {
+            if (/^https?:\/\//.test(part)) {
+              const a = document.createElement('a');
+              a.href = part; a.target = '_blank'; a.rel = 'noopener';
+              a.textContent = part;
+              a.addEventListener('click', e => e.stopPropagation());
+              body.appendChild(a);
+            } else body.appendChild(document.createTextNode(part));
+          }
+          box.append(who, body);
+        }
+        item.appendChild(box);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'dc-meta';
+      const when = document.createElement('span');
+      when.textContent = c.created.slice(0, 10);
+      const resolved = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!c.resolved;
+      cb.addEventListener('click', e => e.stopPropagation());
+      cb.addEventListener('change', () => { c.resolved = cb.checked; save(); render(); });
+      resolved.append(cb, 'resolved');
+      const del = document.createElement('button');
+      del.className = 'dc-del';
+      del.textContent = 'delete';
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        comments = comments.filter(x => x.id !== c.id);
+        ranges.delete(c.id);
+        paint(); save(); render();
+      });
+      meta.append(when, resolved, del);
+      item.appendChild(meta);
+
+      item.addEventListener('click', () => {
+        const r = ranges.get(c.id);
+        if (!r) return flash('Anchor not found in this version of the document.');
+        if (window.dcReveal) window.dcReveal(r.startContainer.parentElement); // open a closed fold first
+        const rect = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + rect.top - 160, behavior: 'smooth' });
+        paint(c.id);
+        setTimeout(() => paint(), 2000);
+      });
+      // double-click text to edit
+      text.addEventListener('dblclick', e => { e.stopPropagation(); render(c.id); });
+      listEl.appendChild(item);
+    }
+  }
+
+  // ---- selection -> floating Comment button ----
+  document.addEventListener('mouseup', e => {
+    if (fab.contains(e.target)) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { fab.style.display = 'none'; return; }
+      const range = sel.getRangeAt(0);
+      if (!doc.contains(range.commonAncestorContainer) || !range.toString().trim()) {
+        fab.style.display = 'none';
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      fab.style.display = 'block';
+      fab.style.left = Math.min(rect.right + 8 + window.scrollX, window.scrollX + document.documentElement.clientWidth - 120) + 'px';
+      fab.style.top = (rect.top + window.scrollY - 4) + 'px';
+      fab.dataset.pending = '1';
+    }, 0);
+  });
+  fab.addEventListener('click', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const c = Object.assign({ id: 'c' + Date.now().toString(36) + (seq++), text: '', created: new Date().toISOString(), resolved: false }, selectorFromRange(range));
+    comments.push(c);
+    ranges.set(c.id, range.cloneRange());
+    paint(c.id);
+    sel.removeAllRanges();
+    fab.style.display = 'none';
+    sidebar.classList.add('dc-open');
+    render(c.id);
+  });
+
+  // ---- export / import ----
+  function payload() {
+    return JSON.stringify({
+      format: FORMAT,
+      doc: document.title,
+      exported: new Date().toISOString(),
+      comments: comments,
+    }, null, 2);
+  }
+  document.getElementById('dc-export').addEventListener('click', () => {
+    const blob = new Blob([payload()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (document.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'doc') + '.comments.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash('Downloaded.');
+  });
+  document.getElementById('dc-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(payload()); flash('Copied to clipboard.'); }
+    catch (e) { flash('Clipboard blocked — use Export instead.'); }
+  });
+  document.getElementById('dc-import').addEventListener('click', () => document.getElementById('dc-file').click());
+  document.getElementById('dc-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(raw => {
+      const data = JSON.parse(raw);
+      if (data.format !== FORMAT || !Array.isArray(data.comments)) { flash('Not a dc-comments file.'); return; }
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of data.comments) byId.set(c.id, c);
+      comments = [...byId.values()];
+      reanchorAll(); save(); render();
+      flash('Imported ' + data.comments.length + ' comment(s).');
+    }).catch(() => flash('Could not parse that file.'));
+    e.target.value = '';
+  });
+
+  document.getElementById('dc-toggle').addEventListener('click', () => sidebar.classList.toggle('dc-open'));
+
+  // ---- init ----
+  load();
+  // Merge the renderer's preloaded comments (with replies) by id: a stored
+  // comment keeps its own text/resolved state and takes the preloaded replies.
+  try {
+    const pre = document.getElementById('dc-preload');
+    const preloaded = pre && pre.textContent.trim() ? JSON.parse(pre.textContent) : [];
+    if (Array.isArray(preloaded) && preloaded.length) {
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of preloaded) {
+        const existing = byId.get(c.id);
+        if (existing) { if (c.replies) existing.replies = c.replies; }
+        else byId.set(c.id, c);
+      }
+      comments = [...byId.values()];
+      save();
+    }
+  } catch (e) { /* malformed preload: ignore */ }
+  reanchorAll();
+  render();
+})();
+</script>
+<!-- ============ DC-COMMENTS END ============ -->
+</div>
+</body>
+</html>

@@ -2,7 +2,11 @@
 
 Every mutating method (``upload``, ``xp_create``, ``submit``) runs ``whoami`` with the same
 credential immediately before acting and raises ``IdentityError`` unless it is a Player whose id
-is ``RESEARCH_PLAYER_ID`` with an unexpired token (C6). Nothing about identity is cached.
+is ``RESEARCH_PLAYER_ID`` with an unexpired token (C6). Nothing about identity is cached. That
+credential player is the transport identity. ``upload`` and ``submit`` name the player they
+publish for (``--player``): on Softmax hosting the IDE workspace bridge credential may publish for
+another enabled player of the same owner, such as the player a conversation selected; the platform
+refuses any other player.
 
 Policy identifiers: ``upload-policy`` prints only ``Upload complete: <name>:v<N>`` and ``submit``
 takes ``<name>:v<N>`` (coworld 0.1.58 has no ``--json`` for either). The ``policy_version_id`` this
@@ -111,7 +115,7 @@ class SoftmaxClient:
             else None
         )
 
-    def _require_player(self) -> Identity:
+    def require_player(self) -> Identity:
         return require_player(self._cli, self._expected_player, self._clock())
 
     # --- identity and account -------------------------------------------
@@ -212,7 +216,7 @@ class SoftmaxClient:
                 arm,
             ):
                 return handle
-        self._require_player()
+        self.require_player()
         key = xp.tag(experiment, batch, attempt, seed, arm)
         if self._budget is not None:
             self._budget.reserve(key, spec)
@@ -234,11 +238,15 @@ class SoftmaxClient:
 
     # --- policies -------------------------------------------------------
 
-    def upload(self, artifact: Path, name: str, *, artifact_type: ArtifactType = "file") -> str:
-        """Upload a game-hosted file or OCI image archive; return its ``<name>:v<N>`` label."""
-        self._require_player()
+    def upload(
+        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+    ) -> str:
+        """Upload a game-hosted file or OCI image archive for ``player_id``; return its
+        ``<name>:v<N>`` label."""
+        self.require_player()
         option = "--image-archive" if artifact_type == "oci-image" else "--file"
         args = ["upload-policy", option, str(Path(artifact).resolve()), "--name", name]
+        args += ["--player", player_id]
         result = self._cli.run("coworld", args, timeout=UPLOAD_TIMEOUT_S)
         label = _line_value(result.stdout, "Upload complete:")
         if label is None:
@@ -246,13 +254,13 @@ class SoftmaxClient:
         return label
 
     def submit(
-        self, policy_version_id: str, league_id: str
+        self, policy_version_id: str, league_id: str, player_id: str
     ) -> str | PermitRequired | LeagueNotChosen:
-        """Submit ``<name>:v<N>`` as the expected player; return the submission id, or the
+        """Submit ``<name>:v<N>`` for ``player_id``; return the submission id, or the
         coach's refusal (``platform_cli.coach_refusal``: nothing was submitted)."""
-        self._require_player()
+        self.require_player()
         args = ["submit", policy_version_id, "--league", league_id]
-        args += ["--player", self._expected_player, "--no-open-browser"]
+        args += ["--player", player_id, "--no-open-browser"]
         result = self._cli.run("coworld", args, ok_codes=(0, 1))
         if result.returncode != 0:
             refusal = coach_refusal(result.stderr or "")
@@ -272,7 +280,7 @@ class SoftmaxClient:
         ``coworld retire-membership <id>``). Only rows whose policy version belongs to the
         expected player are retired. Returns the ``<name>:v<N>`` labels retired, and those the
         platform would not retire (said, not raised: the release itself stands)."""
-        self._require_player()
+        self.require_player()
         args = ["memberships", "--league", league_id, "--player", self._expected_player]
         rows = self._cli.run_json_pages("coworld", [*args, "--active-only"])
         retired: list[str] = []

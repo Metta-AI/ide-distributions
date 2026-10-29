@@ -133,8 +133,9 @@ class Research:
         target.write_text(text, encoding="utf-8")
         return self.call("workspace", "publish", "--message", message, "--path", path)
 
-    def accept_champion(self, league_id, game=None):
-        return self.in_game(game).call("champion", "accept", "--league", league_id)
+    def accept_champion(self, league_id, game=None, player_id=None):
+        player = ("--player", player_id) if player_id else ()
+        return self.in_game(game).call("champion", "accept", "--league", league_id, *player)
 
     def xp_status(self, experiment, game=None):
         return self.in_game(game).call("softmax", "xp", "status", experiment)

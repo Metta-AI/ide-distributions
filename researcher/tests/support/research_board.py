@@ -90,7 +90,7 @@ class ResearchBoard:
         self.hypothesis = self.store.create("hypothesis", dict(HYP), "Mechanism.")
         self.sm = FakeSoftmax(root, {})
         if seed_champion:
-            self.sm.submit(BASELINE_PV, LEAGUE)
+            self.sm.submit(BASELINE_PV, LEAGUE, PLAYER)
             self._accepted(BASELINE_PV)
         gitops.commit_all(root, "seed")
         gitops.git(root, "push", "-q", "origin", "main")

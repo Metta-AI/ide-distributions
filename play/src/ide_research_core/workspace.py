@@ -526,11 +526,39 @@ def bootstrap(
 SHIM_NAME = "research"
 
 
+# Run the profile's own ``src`` first: on a hosted workspace it is the agent's writable copy, and the
+# image environment's editable install points at the read-only image copy. If the agent's copy fails
+# to import, drop it and run the image copy, saying so on stderr.
+_SHIM_BOOT = """import importlib, runpy, sys
+src = sys.argv.pop(1)
+sys.argv[0] = "research"
+sys.path.insert(0, src)
+try:
+    importlib.import_module("ide_research_core.cli")
+except Exception as error:
+    sys.path.remove(src)
+    for name in [name for name in sys.modules if name.split(".")[0] == "ide_research_core"]:
+        del sys.modules[name]
+    print(f"research: {src} failed to import ({type(error).__name__}: {error}); "
+          "running the image copy. Fix it and commit.", file=sys.stderr)
+runpy.run_module("ide_research_core", run_name="__main__", alter_sys=True)
+"""
+
+
 def write_cli_shim(home: Path) -> Path:
-    """``$HERMES_HOME/bin/research``: the research CLI isolated from the parent Python environment."""
-    python = home / "local" / "venv" / "bin" / "python"
+    """``$HERMES_HOME/bin/research``: the research CLI isolated from the parent Python environment.
+
+    Uses ``local/venv-agent`` when the agent built one (after changing dependencies), otherwise
+    ``local/venv``."""
+    venv = home / "local" / "venv" / "bin" / "python"
+    agent = home / "local" / "venv-agent" / "bin" / "python"
     path = home / "bin" / SHIM_NAME
-    wanted = f'#!/bin/sh\nexec "{python}" -I -m ide_research_core "$@"\n'
+    wanted = (
+        "#!/bin/sh\n"
+        f'python="{venv}"\n'
+        f'[ -x "{agent}" ] && python="{agent}"\n'
+        f'exec "$python" -I -c \'{_SHIM_BOOT}\' "{home / "src"}" "$@"\n'
+    )
     if not path.exists() or path.read_text() != wanted:
         write_text(path, wanted)
     path.chmod(0o755)
