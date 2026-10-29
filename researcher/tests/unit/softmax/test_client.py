@@ -98,7 +98,7 @@ def test_upload_checks_identity_immediately_before_and_returns_label(env, runner
     artifact = tmp_path / "policy.bas"
     artifact.write_text("10 PRINT 1\n")
     label = make(env, runner, tmp_path).upload(
-        artifact, "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA", player_id=SELECTED, artifact_type=artifact_type
+        artifact, "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA", player_id=PLAYER_ID, artifact_type=artifact_type
     )
     assert label == LABEL
     assert runner.argvs() == [
@@ -110,8 +110,6 @@ def test_upload_checks_identity_immediately_before_and_returns_label(env, runner
             str(artifact.resolve()),
             "--name",
             "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA",
-            "--player",
-            SELECTED,
         ],
     ]
     _, kwargs = runner.calls[1]
