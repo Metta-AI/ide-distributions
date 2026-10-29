@@ -4,7 +4,6 @@ from pathlib import Path
 
 from .board import Board
 from .gate import transitions
-from .ide import IDE
 from .research import Research
 from .storage import snapshot
 
@@ -98,7 +97,7 @@ class Service:
             "researchers": researchers(self.context, cards),
             "tooling": tooling(self.context),
             "game": research.context.env.get("RESEARCH_GAME"),
-            "pending": transitions(snapshot(self.context), self.research, IDE(self.context)),
+            "pending": transitions(snapshot(self.context), self.research),
             "research": research.call("records", "summary"),
             "champion_submission": submission,
             "control": research.control_read(),

@@ -50,12 +50,11 @@ the game, for its league, from ``RESEARCH_GAME``):
   new ask. Any open ask keeps the experiment ``awaiting-permit``: a credit denial in the same
   run (``credit_denied: true`` too) is recorded as ``permit_wait.credits_short`` = ``{reason,
   credit_denials, credits_at_denial, next_launch_after}`` and does not change the status; only
-  a batch with no open ask goes ``awaiting-credits``. The orchestrator's supervisor reads each
-  ask's answer and has a researcher relaunch once all are yes and, with ``credits_short``, the
-  credits cover it; the relaunch sends the same body and idempotency key, so the server
-  decides it against the same ask. ``lifecycle.next_launch_after`` is the fallback for when
-  the answers cannot be read (and for a league refusal): the credit backoff, counted by
-  ``refusals`` of the same asks only. A ``stopped`` (the coach declined it) or ``reviewed``
+  a batch with no open ask goes ``awaiting-credits``. The user must answer the asks and
+  explicitly request a researcher relaunch; the supervisor does not poll answers or relaunch
+  permit waits. The relaunch sends the same body and idempotency key, so the server decides
+  it against the same ask. ``lifecycle.next_launch_after`` records the retry backoff (also
+  for league refusals), counted by ``refusals`` of the same asks only; it does not schedule work. A ``stopped`` (the coach declined it) or ``reviewed``
   experiment, or one whose wait records a declined ask, is refused (``experiment_closed``)
   before anything is created. A refusal that says the coach said no ends the batch at once
   (``permit_declined: true``). Each refusal is saved to ``permit_wait`` before the next
@@ -707,7 +706,9 @@ def check_new_attempt(
 
 
 def _check_permit_wait(experiment: str, meta: dict, args, league_id: str) -> None:
-    """While the experiment waits on open permit asks (``awaiting-permit`` with
+    """The user must answer the ask and explicitly request a relaunch; no supervisor polls it.
+
+    While the experiment waits on open permit asks (``awaiting-permit`` with
     ``lifecycle.permit_wait.asks``), only the exact batch they were filed for may run: the same
     ``--batch``, ``--attempt`` and ``--batches`` give the same requests and idempotency keys, so
     each one replays against its own ask (``permit_batch_mismatch`` otherwise). The league is

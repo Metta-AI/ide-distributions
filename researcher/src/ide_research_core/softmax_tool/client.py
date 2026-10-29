@@ -3,10 +3,9 @@
 Every mutating method (``upload``, ``xp_create``, ``submit``) runs ``whoami`` with the same
 credential immediately before acting and raises ``IdentityError`` unless it is a Player whose id
 is ``RESEARCH_PLAYER_ID`` with an unexpired token (C6). Nothing about identity is cached. That
-credential player is the transport identity. ``upload`` and ``submit`` name the player they
-publish for (``--player``): on Softmax hosting the IDE workspace bridge credential may publish for
-another enabled player of the same owner, such as the player a conversation selected; the platform
-refuses any other player.
+credential player owns uploads: the pinned upload CLI derives the publishing player from that
+credential and has no ``--player`` option. A requested upload player must match it. ``submit``
+still names its player explicitly through the submission CLI.
 
 Policy identifiers: ``upload-policy`` prints only ``Upload complete: <name>:v<N>`` and ``submit``
 takes ``<name>:v<N>`` (coworld 0.1.58 has no ``--json`` for either). The ``policy_version_id`` this
@@ -51,7 +50,11 @@ from pathlib import Path
 from ide_research_core.budget import EpisodeBudget
 from ide_research_core.games.scope import budget_path
 from ide_research_core.softmax_tool import xp
-from ide_research_core.softmax_tool.identity import require_player, whoami
+from ide_research_core.softmax_tool.identity import (
+    IdentityError,
+    require_player,
+    whoami,
+)
 from ide_research_core.softmax_tool.platform_cli import (
     HttpGet,
     PlatformCli,
@@ -61,10 +64,6 @@ from ide_research_core.softmax_tool.platform_cli import (
     describe_failure,
 )
 from ide_research_core.softmax_tool.protocol import (
-    ANSWER_NO,
-    ANSWER_USED,
-    ANSWER_WAITING,
-    ANSWER_YES,
     ArtifactType,
     CreditDenied,
     Identity,
@@ -83,11 +82,6 @@ LEAGUE_FETCH_WORKERS = 4  # concurrent episode fetches (each one runs two coworl
 
 
 CREDITS_PATH = "/observatory/usage/me/credits"
-# Our cogent's record ``asks/<key>`` (metta observatory-api routes/app/v2/cogents/records,
-# ``cogent_get``): a player credential reads its own cogent (``cogents/queries._owned``). The
-# body is a ``PermitAsk``: ``{kind, action, ref, why, at, amount?, answer?: {yes, at},
-# used?: {at}}``.
-ASK_PATH = "/observatory/v2/cogents/{player}/c/asks/{key}"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
@@ -133,28 +127,6 @@ class SoftmaxClient:
         except (KeyError, TypeError, ValueError):
             raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
 
-    def permit_answer(self, ask: str) -> str | None:
-        """The coach's answer to permit ask ``ask`` (``Softmax.permit_answer``), read as the
-        Player over HTTP (``ASK_PATH``); None when the read fails or the body is not an ask."""
-        path = ASK_PATH.format(
-            player=urllib.parse.quote(self._expected_player, safe=""),
-            key=urllib.parse.quote(ask, safe=""),
-        )
-        try:
-            record = self._cli.api_get_json(path)
-        except SoftmaxCliError:
-            return None
-        body = record.get("body") if isinstance(record, dict) else None
-        if not isinstance(body, dict) or body.get("kind") != "permit":
-            return None
-        answer = body.get("answer")
-        if answer is None:
-            return ANSWER_WAITING
-        if not isinstance(answer, dict) or not isinstance(answer.get("yes"), bool):
-            return None
-        if not answer["yes"]:
-            return ANSWER_NO
-        return ANSWER_USED if body.get("used") else ANSWER_YES
 
     def episode_cost(self) -> float | None:
         """Mean credits per episode over the account's recent XP requests (the same route's
@@ -243,10 +215,11 @@ class SoftmaxClient:
     ) -> str:
         """Upload a game-hosted file or OCI image archive for ``player_id``; return its
         ``<name>:v<N>`` label."""
-        self.require_player()
+        identity = self.require_player()
+        if player_id != identity.player_id:
+            raise IdentityError("Uploads must use the workspace credential's player")
         option = "--image-archive" if artifact_type == "oci-image" else "--file"
         args = ["upload-policy", option, str(Path(artifact).resolve()), "--name", name]
-        args += ["--player", player_id]
         result = self._cli.run("coworld", args, timeout=UPLOAD_TIMEOUT_S)
         label = _line_value(result.stdout, "Upload complete:")
         if label is None:

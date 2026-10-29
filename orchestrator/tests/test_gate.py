@@ -18,7 +18,7 @@ QUIET_MINUTE = datetime(2026, 10, 15, 12, 1, tzinfo=UTC)
 
 class Platform:
     def __init__(
-        self, *, xp=None, credits=0, answer=None, conflict=None, in_flight=None, paused=False,
+        self, *, xp=None, credits=0, conflict=None, in_flight=None, paused=False,
         migration=None, submitted=None, league_result=None,
     ):
         self.migration = migration
@@ -27,7 +27,6 @@ class Platform:
         self.league_reads = []
         self.xp = xp or []
         self.balance = credits
-        self.answer = answer
         self.conflict = conflict
         self.in_flight = in_flight
         self.paused = paused
@@ -50,10 +49,6 @@ class Platform:
     def credits(self):
         return {"available": True, "credits": self.balance}
 
-    def permit(self, ask):
-        assert ask == "ask-1"
-        return {"body": {"kind": "permit", "answer": self.answer}}
-
     def call(self, *args):
         if args == ("champion", "migrate"):
             return self.migration
@@ -68,13 +63,13 @@ class Platform:
 
 
 def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, Platform(), QUIET_MINUTE) == {"wakeAgent": False}
     with sqlite3.connect(board_file) as conn:
         conn.execute(
             "INSERT INTO task_comments VALUES (1, 'card-1', 'researcher-1', 'question: why?')"
         )
         conn.execute("INSERT INTO task_events (id, task_id, kind) VALUES (1, 'card-1', 'completed')")
-    first = evaluate(context, Platform(), Platform(), QUIET_MINUTE)
+    first = evaluate(context, Platform(), QUIET_MINUTE)
     assert first == {"wakeAgent": False}
 
 
@@ -87,33 +82,33 @@ def test_quiet_and_closed_card_comment_survive_observation(context, board_file):
             "xp_terminal",
         ),
         ({"credits": True}, Platform(credits=30), "credits_available"),
-        ({"permit": "ask-1"}, Platform(answer={"yes": False, "at": "now"}), "permit_answered"),
+        ({"permit": "ask-1"}, Platform(), "bad_handoff"),
     ],
 )
 def test_platform_waits_have_stable_queue_input(context, board_file, awaiting, platform, kind):
     add_wait(board_file, awaiting, {"id": "E-1"})
-    result = evaluate(context, platform, platform, QUIET_MINUTE)
+    result = evaluate(context, platform, QUIET_MINUTE)
     assert result["wakeAgent"] is True
     event = result["context"]["pending"][0]
     assert event["kind"] == kind
     # #18: status and wakes name the event the same way, for card_create(source_event=...).
     assert event["source_event"] == f"task_runs:1:{kind}"
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == result
+    assert evaluate(context, platform, QUIET_MINUTE) == result
 
 
-@pytest.mark.parametrize("awaiting", [{"xp": ["xp-1"]}, {"credits": True}, {"permit": "ask-1"}])
+@pytest.mark.parametrize("awaiting", [{"xp": ["xp-1"]}, {"credits": True}])
 def test_unresolved_wait_does_not_wake(context, board_file, awaiting):
     add_wait(board_file, awaiting, {"id": "E-1"})
     platform = Platform(xp=[{"request_id": "xp-1", "state": "running"}])
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, platform, QUIET_MINUTE) == {"wakeAgent": False}
 
 
 def test_cron_only_requests_coordinator_review_of_pending_champion_submission(context, board_file):
     platform = Platform(in_flight={"stage": "submitted"})
     now = QUIET_MINUTE.replace(minute=10)
-    result = evaluate(context, platform, platform, now)
+    result = evaluate(context, platform, now)
     assert result["context"]["pending"] == [{"kind": "champion_submission_poll", "tick": now.isoformat()}]
-    assert evaluate(context, Platform(), Platform(), now) == {"wakeAgent": False}
+    assert evaluate(context, Platform(), now) == {"wakeAgent": False}
 
 
 def test_gate_process_with_sanitized_passthrough(shared_fixture, board_file):
@@ -172,7 +167,7 @@ def test_bookkeeping_and_comments_do_not_wake_cron(context, board_file):
         )
         conn.execute("INSERT INTO task_comments VALUES (1, 'card-1', 'orchestrator', 'Answer')")
     for _ in range(2):
-        assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+        assert evaluate(context, Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
 @pytest.mark.parametrize(
@@ -191,17 +186,17 @@ def test_bookkeeping_and_comments_do_not_wake_cron(context, board_file):
 def test_native_decision_events_are_not_requeued_by_cron(context, board_file, kind):
     with sqlite3.connect(board_file) as conn:
         conn.execute("INSERT INTO task_events (id, task_id, kind) VALUES (1, 'card-1', ?)", (kind,))
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, Platform(), QUIET_MINUTE) == {"wakeAgent": False}
 
 
 @pytest.mark.parametrize("experiment", [None, {}, {"id": None}])
 def test_bad_xp_handoff_has_stable_queue_input(context, board_file, experiment):
     add_wait(board_file, {"xp": ["xp-1"]}, experiment)
-    event = evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"][0]
+    event = evaluate(context, Platform(), QUIET_MINUTE)["context"]["pending"][0]
     assert event["kind"] == "bad_handoff"
     assert event["table"] == "task_runs" and event["id"] == 1
     assert event["card"] == "card-1"
-    assert evaluate(context, Platform(), Platform(), QUIET_MINUTE)["context"]["pending"] == [event]
+    assert evaluate(context, Platform(), QUIET_MINUTE)["context"]["pending"] == [event]
 
 
 def test_a_card_of_another_game_waits_in_that_game(context, board_file):
@@ -213,7 +208,7 @@ def test_a_card_of_another_game_waits_in_that_game(context, board_file):
             (json.dumps({"assignee": "researcher-1", "game": "newgame"}),),
         )
     platform = Platform(xp=[{"request_id": "xp-1", "state": "completed"}])
-    result = evaluate(context, platform, platform, QUIET_MINUTE)
+    result = evaluate(context, platform, QUIET_MINUTE)
     assert result["context"]["pending"][0]["game"] == "newgame"
     assert platform.games == ["newgame"]
 
@@ -226,7 +221,7 @@ def test_every_game_with_a_workspace_is_polled_for_champion_submission(context, 
     context.env.update(RESEARCH_GAME="gota", RESEARCH_CANONICAL=str(host / "canonical-gota.git"))
     platform = Platform(in_flight={"stage": "submitted"})
     now = QUIET_MINUTE.replace(minute=10)
-    pending = evaluate(context, platform, platform, now)["context"]["pending"]
+    pending = evaluate(context, platform, now)["context"]["pending"]
     assert pending == [
         {"kind": "champion_submission_poll", "tick": now.isoformat()},
         {"kind": "champion_submission_poll", "tick": now.isoformat(), "game": "newgame"},
@@ -237,7 +232,7 @@ def test_a_migration_on_the_poll_wakes_the_coordinator(context, board_file):
     migration = {"commit": "abc123", "champion_submissions": 1}
     platform = Platform(migration=migration)
     now = QUIET_MINUTE.replace(minute=10)
-    pending = evaluate(context, platform, platform, now)["context"]["pending"]
+    pending = evaluate(context, platform, now)["context"]["pending"]
     assert pending == [{"kind": "records_migrated", "tick": now.isoformat(), "migration": migration}]
 
 
@@ -254,7 +249,7 @@ OUR_MATCH = {"episode": {"id": "ep_1", "policy_versions": [{"id": "pv-other"}, {
 def test_first_league_match_after_a_submission_wakes_once(context, board_file):
     platform = Platform(submitted=SUBMITTED, league_result=OUR_MATCH)
     now = QUIET_MINUTE.replace(minute=10)
-    pending = evaluate(context, platform, platform, now)["context"]["pending"]
+    pending = evaluate(context, platform, now)["context"]["pending"]
     assert pending == [
         {
             "kind": "league_result",
@@ -271,7 +266,7 @@ def test_first_league_match_after_a_submission_wakes_once(context, board_file):
     assert platform.league_reads == [("lg_1", "ply_test")]
     # The wake records the submission as followed up; later matches neither wake nor read.
     mark_league_result_seen(context, "CS-1")
-    assert evaluate(context, platform, platform, now) == {"wakeAgent": False}
+    assert evaluate(context, platform, now) == {"wakeAgent": False}
     assert platform.league_reads == [("lg_1", "ply_test")]
 
 
@@ -279,15 +274,15 @@ def test_no_league_result_wake_before_our_version_plays(context, board_file):
     now = QUIET_MINUTE.replace(minute=10)
     for result in (None, {"episode": {"policy_versions": [{"id": "pv-previous"}]}}):
         platform = Platform(submitted=SUBMITTED, league_result=result)
-        assert evaluate(context, platform, platform, now) == {"wakeAgent": False}
+        assert evaluate(context, platform, now) == {"wakeAgent": False}
         assert platform.league_reads == [("lg_1", "ply_test")]
 
 
 def test_no_platform_read_without_a_submission_awaiting_a_match(context, board_file):
     platform = Platform(league_result=OUR_MATCH)
     for now in (QUIET_MINUTE, QUIET_MINUTE.replace(minute=10)):
-        assert evaluate(context, platform, platform, now) == {"wakeAgent": False}
+        assert evaluate(context, platform, now) == {"wakeAgent": False}
     assert platform.league_reads == []
     platform = Platform(submitted=SUBMITTED, league_result=OUR_MATCH)
-    assert evaluate(context, platform, platform, QUIET_MINUTE) == {"wakeAgent": False}
+    assert evaluate(context, platform, QUIET_MINUTE) == {"wakeAgent": False}
     assert platform.league_reads == []

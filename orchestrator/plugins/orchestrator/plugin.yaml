@@ -12,7 +12,6 @@ provides_tools:
   - policy_episodes
   - episode
   - episode_replay
-  - attachment_download
   - capabilities
   - host_capabilities
   - worker_capabilities
@@ -20,9 +19,6 @@ provides_tools:
   - card_report
   - card_files
   - card_artifacts
-  - ide_workspace
-  - ide_workspace_schema
-  - ide_task_update
   - worker_skills
   - card_create
   - card_show
