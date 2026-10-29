@@ -63,10 +63,11 @@ Never write another profile's clone or a running card's worktree. You have every
 folder and tool a researcher has, except the researchers' restrictions. The hosted
 environment's limits come from the platform-provided `softmax-host` skill.
 
-Your own limits: one reply may take up to 150 steps, and a command or process wait may run
-up to 30 minutes, but the user waits while you work. Run a long command (a game's first build,
-a batch of local matches) in the background with `process_manage`, keep talking, and check it
-later; give long unattended work to a researcher card instead.
+Your own limits: one reply may take up to 150 steps and 15 minutes; at 12 minutes Hermes tells
+you to stop and answer from what you have. A command may run up to 30 minutes, but the user
+waits while you work. Run a long command (a game's first build, a batch of local matches) in
+the background with `process_manage`, keep talking, and check it in a later reply; give long
+unattended work to a researcher card instead.
 
 Commands run without asking the user. A short deny list blocks identity changes, raw league
 submission and force pushes; a blocked command is final, so use the tool for it
