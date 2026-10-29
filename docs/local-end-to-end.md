@@ -317,10 +317,10 @@ of the same scenario on another fresh volume took 33 seconds. The exact output i
 
 ```bash
 cd ~/coding/ide-distributions
-uv run python tools/local_stack.py up                 # fresh volume: set up, then run the scenario
-uv run python tools/local_stack.py up --no-scenario   # fresh volume: set up, leave the workspace empty
+uv run python tools/local_stack.py up                 # real platform as your Player (see below)
+uv run python tools/local_stack.py up --platform fake # no credentials, no network; runs the scenario once
 uv run python tools/local_stack.py status             # container, seam /health, gateway /v1/capabilities, watcher status
-uv run python tools/local_stack.py scenario           # send "Submit the starter as my champion." and wait
+uv run python tools/local_stack.py scenario           # fake: send "Submit the starter as my champion." and wait (real: add --really)
 uv run python tools/local_stack.py logs [--follow]    # tail /opt/data/gateway.log and /opt/data/serve.log
 uv run python tools/local_stack.py shell              # a shell in the container with the Orchestrator's environment
 uv run python tools/local_stack.py down               # stop the services and the container; the volume stays
@@ -329,7 +329,7 @@ uv run python tools/local_stack.py down --reset       # also remove the containe
 
 `up` on an existing container restarts the gateway and the seam without reinstalling (70 to 90
 seconds, most of it `prepare.py` re-checking the config through `hermes config get`); `up
---reset` starts over. `--platform real`, `--seam-port` (default 8650), `--gateway-port` (default
+--reset` starts over. `--platform`, `--seam-port` (default 8650), `--gateway-port` (default
 8642) and `--name` (default `ide-local`; the volume is `<name>-stack`) are fixed when the
 container is created and read back from its labels afterwards. The scenario is written for a
 new workspace: run it once per volume, or `up --reset` first.
@@ -488,22 +488,31 @@ Both ports are bound to `127.0.0.1` on the Mac; inside the container the two ser
 
 ### The real platform
 
+The default. The stack talks to `https://softmax.com/api` (or `COGAMES_API_URL`) as one of
+your Players:
+
 ```bash
-SOFTMAX_PLAYER_ID=ply_... SOFTMAX_PLAYER_CREDENTIAL=... COGAMES_API_URL=https://softmax.com/api \
-  IDE_DEFAULT_COWORLD=cow_... OPENROUTER_API_KEY=... \
-  uv run python tools/local_stack.py up --platform real --no-scenario
-uv run python tools/local_stack.py scenario --timeout 1800
+softmax player list                        # your Players; `softmax player use <id>` picks one
+OPENROUTER_API_KEY=... uv run python tools/local_stack.py up --reset            # the active Player
+OPENROUTER_API_KEY=... uv run python tools/local_stack.py up --reset --player ply_...
 ```
 
-As in Option B: `IDE_PLATFORM=real`, the Player and `IDE_DEFAULT_COWORLD` go into every `.env`
-(the credential single-quoted, so a player session as JSON survives), `prepare.py` registers
-and activates the default Coworld on the fresh workspace, and the scenario makes a real
-submission as that Player and spends model calls doing it. Without `IDE_DEFAULT_COWORLD` the
-request names no Coworld; send one that does through the seam instead. `scenario` waits for the
-`version.submitted` event in the active Coworld's store on either platform; the per-Player count
-it prints at the end is read from the fake platform's state file, so on the real platform check
-the ladder. The credential stays in the `.env` files on the volume until `down --reset`. This
-path was not run on October 29; the fake one was.
+Without `SOFTMAX_PLAYER_ID` and `SOFTMAX_PLAYER_CREDENTIAL` in the environment, `up` takes the
+Player from this machine's `softmax` login: the active Player's session (a 24-hour token
+`softmax player use` minted, kept in the CLI's `credentials.yaml`), or the `--player` id. It
+prints which Player and when the session expires; an expired session is refused with the
+command that mints a new one. The token goes into the `.env` files on the volume, as hosting
+would write it, and stays there until `down --reset` or until it expires, after which `up`
+again reads a fresh one. Set the two variables yourself to use a Player this machine is not
+logged in as.
+
+On the real platform `up` never runs the submission scenario on its own, and `scenario` refuses
+without `--really`, because the scenario uploads and submits the starter policy to a real
+league as your Player. Ask the Orchestrator for what you want through the seam instead; it
+finds Coworlds with `platform.leagues` and `platform.coworld`, and a switch clones the
+Coworld's source repository from the manifest (or from a `source` URL you name). With
+`IDE_DEFAULT_COWORLD=cow_...` in the environment, `prepare.py` registers and activates that
+Coworld on the fresh workspace before the first chat.
 
 ### What still differs from production
 

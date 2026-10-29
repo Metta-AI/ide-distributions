@@ -68,6 +68,7 @@ FAKE_PLAYER_ID = "ply_canary"
 REQUEST = "Submit the starter as my champion."
 SUBMITTED = "version.submitted"
 REAL_REQUIRED = ("SOFTMAX_PLAYER_ID", "SOFTMAX_PLAYER_CREDENTIAL")
+DEFAULT_SERVER = "https://softmax.com/api"
 # The Orchestrator commits in the workspace's code repository; the container has no identity.
 GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "IDE local",
@@ -226,14 +227,76 @@ def render(template: str, values: dict[str, str]) -> str:
     return text
 
 
-def check_secrets(platform: str, fresh: bool) -> None:
+def check_secrets(platform: str, fresh: bool, player: str | None = None) -> None:
     missing = []
     if fresh and not os.environ.get("OPENROUTER_API_KEY"):
         missing.append("OPENROUTER_API_KEY")
     if platform == "real":
+        if not all(os.environ.get(name) for name in REAL_REQUIRED):
+            player_from_local_login(player)
         missing.extend(name for name in REAL_REQUIRED if not os.environ.get(name))
     if missing:
         raise StackError(f"set {', '.join(missing)} in the environment (see the module docstring)")
+
+
+def player_from_local_login(player: str | None) -> None:
+    """Take the Player from this machine's ``softmax`` login when the environment has none.
+
+    ``softmax player use <id>`` keeps a player session (a 24-hour token) per server in the
+    CLI's ``credentials.yaml``; the active one is the default, ``--player`` picks another by its
+    full id. The token goes into the process environment for the bootstrap only (docker
+    copies it into the container's ``.env`` files, as hosting would).
+    """
+    try:
+        from softmax_client import credentials
+    except ImportError as error:
+        raise StackError(
+            "SOFTMAX_PLAYER_ID and SOFTMAX_PLAYER_CREDENTIAL are not set and the softmax client"
+            " is not importable here; run through `uv run` from the repository root"
+        ) from error
+    server = (os.environ.get("COGAMES_API_URL") or DEFAULT_SERVER).rstrip("/")
+    player_id = player or credentials.get_active_player_id(server=server)
+    if not player_id:
+        raise StackError(
+            f"no active Player in the local softmax login for {server}; run"
+            " `softmax player use <id>` (see `softmax player list`) or set SOFTMAX_PLAYER_ID"
+            " and SOFTMAX_PLAYER_CREDENTIAL"
+        )
+    session = credentials.get_cached_player_session(server=server, player_id=player_id)
+    if session is None:
+        raise StackError(
+            f"the local softmax login has no session for Player {player_id} on {server};"
+            f" run `softmax player use {player_id}` and `up` again"
+        )
+    expires = getattr(session, "expires_at", None)
+    if expires is not None and _expired(expires):
+        raise StackError(
+            f"the local player session for {player_id} expired at {expires}; run"
+            f" `softmax player use {player_id}` to mint a new one, then `up` again"
+        )
+    credential = {"token": session.token}
+    if expires is not None:
+        credential["expires_at"] = str(expires)
+    os.environ["SOFTMAX_PLAYER_ID"] = player_id
+    os.environ["SOFTMAX_PLAYER_CREDENTIAL"] = json.dumps(credential)
+    os.environ.setdefault("COGAMES_API_URL", server)
+    print(f"Player from the local softmax login: {player_id} on {server} (session until {expires})")
+
+
+def _expired(expires_at: object) -> bool:
+    from datetime import UTC, datetime
+
+    if isinstance(expires_at, datetime):
+        value = expires_at
+    else:
+        text = str(expires_at).replace("Z", "+00:00")
+        try:
+            value = datetime.fromisoformat(text)
+        except ValueError:
+            return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value <= datetime.now(UTC)
 
 
 def bootstrap_values(settings: Settings) -> dict[str, str]:
@@ -252,7 +315,7 @@ def bootstrap_values(settings: Settings) -> dict[str, str]:
         "SEAM_PORT": str(settings.seam_port),
         "PLATFORM": "real",
         "PLAYER_ID": env.get("SOFTMAX_PLAYER_ID", ""),
-        "COGAMES_API_URL": env.get("COGAMES_API_URL", ""),
+        "COGAMES_API_URL": env.get("COGAMES_API_URL") or DEFAULT_SERVER,
         "DEFAULT_COWORLD": env.get("IDE_DEFAULT_COWORLD", ""),
     }
 
@@ -443,14 +506,14 @@ def cmd_up(args: argparse.Namespace) -> int:
     state = container_state(name)
     if state is None:
         settings = Settings(name, volume, args.seam_port, args.gateway_port, args.platform)
-        check_secrets(settings.platform, fresh)
+        check_secrets(settings.platform, fresh, args.player)
         if fresh:
             docker("volume", "create", volume)
         print(f"creating container {name} from {IMAGE} (volume {volume})")
         create_container(settings)
     else:
         settings = Settings.from_container(name)
-        check_secrets(settings.platform, fresh)
+        check_secrets(settings.platform, fresh, args.player)
         requested = (args.seam_port, args.gateway_port, args.platform)
         if requested != (settings.seam_port, settings.gateway_port, settings.platform):
             print(
@@ -464,9 +527,12 @@ def cmd_up(args: argparse.Namespace) -> int:
     run_bootstrap(settings)
     print(f"bootstrap took {round(time.monotonic() - started)} s")
     print_summary(settings)
-    if fresh and not args.no_scenario:
+    if fresh and not args.no_scenario and settings.platform == "fake":
         print("\nfresh workspace: running the acceptance scenario (skip with --no-scenario)")
         return run_scenario(settings, args.timeout)
+    if fresh and settings.platform == "real":
+        print("\nreal platform: the submission scenario is never run on its own; talk to the")
+        print("Orchestrator through the seam, or run `scenario --really` knowingly")
     return 0
 
 
@@ -514,6 +580,11 @@ def cmd_scenario(args: argparse.Namespace) -> int:
     settings = Settings.from_container(args.name)
     if container_state(args.name) != "running":
         raise StackError(f"container {args.name} is not running; run `up` first")
+    if settings.platform == "real" and not args.really:
+        raise StackError(
+            "this stack is on the real platform: the scenario would upload and submit the"
+            " starter policy to a real league as your Player; pass --really to do that"
+        )
     return run_scenario(settings, args.timeout)
 
 
@@ -553,7 +624,17 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     up = commands.add_parser("up", help="Create or reuse the container and start the services")
-    up.add_argument("--platform", choices=("fake", "real"), default="fake")
+    up.add_argument(
+        "--platform",
+        choices=("fake", "real"),
+        default="real",
+        help="real (the default: softmax.com as your Player) or fake (no credentials, no network)",
+    )
+    up.add_argument(
+        "--player",
+        default=None,
+        help="A Player id from `softmax player list` (default: the local login's active one)",
+    )
     up.add_argument("--seam-port", type=int, default=8650, help="research serve (default 8650)")
     up.add_argument("--gateway-port", type=int, default=8642, help="Hermes API (default 8642)")
     up.add_argument("--no-scenario", action="store_true", help="Leave a fresh workspace empty")
@@ -574,6 +655,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     scenario = commands.add_parser("scenario", help=f"Send {REQUEST!r} and wait for a submission")
     scenario.add_argument("--timeout", type=int, default=600, help="Seconds (default 600)")
+    scenario.add_argument(
+        "--really", action="store_true", help="On the real platform: yes, submit for real"
+    )
     scenario.set_defaults(run=cmd_scenario)
 
     down = commands.add_parser("down", help="Stop the container; --reset removes it and the volume")
