@@ -6,7 +6,54 @@ on:
   pull_request:
 
 jobs:
+  # Decides which distributions a pull request can affect. Each filter starts from every file
+  # and excludes what cannot change that distribution's result, so a new top-level folder runs
+  # the tests by default. The test job below always runs, because main requires its three checks;
+  # an unaffected distribution skips its steps and passes in about a minute.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      researcher: ${{ steps.filter.outputs.researcher }}
+      orchestrator: ${{ steps.filter.outputs.orchestrator }}
+      play: ${{ steps.filter.outputs.play }}
+    steps:
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          predicate-quantifier: some-with-excludes
+          # researcher also checks every generated copy (tools/sync_shared.py writes shared/
+          # into all three distributions, and researcher games and doctrine into orchestrator),
+          # so only documentation and the image-release workflows skip it.
+          filters: |
+            researcher:
+              - '**'
+              - '!docs/**'
+              - '!README.md'
+              - '!.github/workflows/release-*.yml'
+            orchestrator:
+              - '**'
+              - '!docs/**'
+              - '!README.md'
+              - '!.github/workflows/release-*.yml'
+              - '!play/**'
+            play:
+              - '**'
+              - '!docs/**'
+              - '!README.md'
+              - '!.github/workflows/release-*.yml'
+              - '!researcher/**'
+              - '!orchestrator/**'
+              - '!ontology/**'
+
   test:
+    needs: changes
+    # Always run, even when changes is skipped (pushes) or fails: a skipped required check counts
+    # as passing, so a failed filter must lead to testing everything, never to skipping the job.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     container:
       # Match the supported Hermes runtime used by the hosted worker image.
@@ -18,6 +65,8 @@ jobs:
       GIT_COMMITTER_NAME: IDE CI
       GIT_COMMITTER_EMAIL: ide-ci@example.invalid
       HERMES_PYTHON: /opt/hermes/.venv/bin/python
+      # Pushes to main, and pull requests whose filter did not succeed, test everything.
+      RUN_TESTS: ${{ github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs[matrix.distribution] == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,14 +75,21 @@ jobs:
       run:
         working-directory: ${{ matrix.distribution }}
     steps:
+      - name: Skip a distribution this change cannot affect
+        if: env.RUN_TESTS != 'true'
+        working-directory: /
+        run: echo "No change in this pull request affects ${{ matrix.distribution }}; skipping its tests."
       - uses: actions/checkout@v4
+        if: env.RUN_TESTS == 'true'
       - uses: astral-sh/setup-uv@v6
+        if: env.RUN_TESTS == 'true'
         with:
           python-version: "3.12"
       - name: Expose the installed Hermes runtime
+        if: env.RUN_TESTS == 'true'
         run: echo /opt/hermes/.venv/bin >> "$GITHUB_PATH"
       - name: Install the supported native toolchain
-        if: matrix.distribution == 'researcher'
+        if: env.RUN_TESTS == 'true' && matrix.distribution == 'researcher'
         run: |
           apt-get update
           apt-get install -y --no-install-recommends gcc g++ make xz-utils curl ca-certificates
@@ -43,28 +99,31 @@ jobs:
           tar -xJf /tmp/nim.tar.xz -C /opt/nim-2.2.10 --strip-components=1
           echo /opt/nim-2.2.10/bin >> "$GITHUB_PATH"
       - name: Verify generated distribution payloads
-        if: matrix.distribution == 'researcher'
+        if: env.RUN_TESTS == 'true' && matrix.distribution == 'researcher'
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python ../tools/sync_shared.py
           git -C "$GITHUB_WORKSPACE" diff --exit-code
       - run: uv sync --frozen
+        if: env.RUN_TESTS == 'true'
       - name: Lint
+        if: env.RUN_TESTS == 'true'
         run: uv run ruff check .
       - run: uv run pytest -q
+        if: env.RUN_TESTS == 'true'
       - name: Validate Pudge tools from a read-only installation
-        if: matrix.distribution == 'researcher'
+        if: env.RUN_TESTS == 'true' && matrix.distribution == 'researcher'
         run: PUDGE_NATIVE_TESTS=1 uv run pytest -q tests/system/test_pudge_readonly_tools.py
       - name: Validate real Hermes task admission and profile installation
-        if: matrix.distribution == 'orchestrator'
+        if: env.RUN_TESTS == 'true' && matrix.distribution == 'orchestrator'
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           uv run pytest -q -m hermes tests/test_hermes.py
       - name: Validate real Hermes plugin registration
-        if: matrix.distribution == 'play'
+        if: env.RUN_TESTS == 'true' && matrix.distribution == 'play'
         run: uv run pytest -q -m hermes tests/test_hermes.py
       - name: Validate retained researcher completion schema
-        if: matrix.distribution == 'researcher'
+        if: env.RUN_TESTS == 'true' && matrix.distribution == 'researcher'
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           uv run pytest -q -m hermes tests/integration/test_install.py::test_guard_preserves_native_completion_after_retained_update tests/system/test_prepare_system.py
