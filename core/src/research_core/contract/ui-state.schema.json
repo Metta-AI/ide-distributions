@@ -41,6 +41,19 @@
           "at": {"type": "string"}
         }
       }
+    },
+    "reactions": {
+      "type": "object",
+      "description": "The user's reactions to agent messages, keyed by the client's message id (design A.5). Written by the bridge through /ui-action; the agent sees new ones at its next turn.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["value"],
+        "properties": {
+          "value": {"type": "string"},
+          "by": {"type": "string"},
+          "at": {"type": "string"}
+        }
+      }
     }
   }
 }

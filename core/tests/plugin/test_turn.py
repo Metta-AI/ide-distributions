@@ -99,3 +99,34 @@ def test_session_context_section(tmp_path):
     none = session_context.render(ctx, "unknown")
     assert "No session context" in none and "No client capabilities" in none
     assert session_context.make_section("researcher")({"session_id": "chat1"}) == ""
+
+
+def test_reactions_reach_the_agent_at_its_next_turn(tmp_path):
+    from research_core.store import ui_state
+
+    ctx = make_ctx(tmp_path)
+    turn.render_turn(ctx, "chat1", is_first_turn=True, now=NOW)
+    user = Actor.user("u1")
+    ui_state.patch(
+        ctx.wstore,
+        user,
+        "chat1",
+        [
+            {"op": "add", "path": "/reactions", "value": {}},
+            {"op": "add", "path": "/reactions/m-7", "value": {"value": "👍", "by": "user:u1"}},
+        ],
+    )
+    ui_state.patch(
+        ctx.wstore,
+        user,
+        "other-chat",
+        [
+            {"op": "add", "path": "/reactions", "value": {}},
+            {"op": "add", "path": "/reactions/m-9", "value": {"value": "👎", "by": "user:u1"}},
+        ],
+    )
+    text = turn.render_turn(ctx, "chat1", is_first_turn=False, now=NOW)
+    assert "[reactions since your last turn]\n- message m-7: 👍" in text
+    assert "m-9" not in text  # another conversation's reaction
+    assert "ui.patch" not in text  # not counted as a changed-since kind
+    assert "[reactions" not in turn.render_turn(ctx, "chat1", is_first_turn=False, now=NOW)

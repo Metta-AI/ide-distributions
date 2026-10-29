@@ -132,14 +132,14 @@ def _fail(error: str, problems: Sequence[str] = ()) -> int:
 def run_apply(args: argparse.Namespace) -> int:
     op = args.op
     try:
-        actor = _parse_actor(args.actor)
+        actor = parse_actor(args.actor)
         if op not in ALLOWED:
             raise Refusal(
                 f"{op!r} is not an op store apply runs; allowed: {', '.join(sorted(ALLOWED))}"
             )
-        op_args = _parse_op_args(args.args)
+        op_args = parse_op_args(args.args)
         with Stores.open() as stores:
-            kind = args.store or _store_kind_for(op, op_args, stores)
+            kind = args.store or store_kind_for(op, op_args, stores)
             record = _call(op, kind, stores, actor, op_args)
             seq = stores.by_kind(kind).last_seq()
     except Refusal as error:
@@ -153,7 +153,7 @@ def run_apply(args: argparse.Namespace) -> int:
     return 0
 
 
-def _parse_actor(text: str) -> Actor:
+def parse_actor(text: str) -> Actor:
     try:
         actor = Actor.parse(text)
     except ValueError as error:
@@ -163,7 +163,7 @@ def _parse_actor(text: str) -> Actor:
     return actor
 
 
-def _parse_op_args(text: str) -> dict[str, Any]:
+def parse_op_args(text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except ValueError as error:
@@ -191,7 +191,7 @@ def _record_number(value: str, name: str, kind: str, problems: list[str]) -> Any
     return number
 
 
-def _store_kind_for(op: str, op_args: dict[str, Any], stores: Stores) -> str:
+def store_kind_for(op: str, op_args: dict[str, Any], stores: Stores) -> str:
     """Which store the op writes: settings by the key's scope, directives by their scope or
     home, Goals and Tasks in the active Coworld, the ``workspace.*`` ops in the workspace."""
     module = op.split(".", 1)[0]

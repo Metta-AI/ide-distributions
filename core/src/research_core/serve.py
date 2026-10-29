@@ -108,7 +108,7 @@ def _object(body: dict, key: str, default: dict | None = None) -> dict:
 def _actor(text: str | None) -> Actor:
     """``user:<id>`` or ``harness`` (``user:local`` when absent); a session actor is refused."""
     try:
-        return store_cli._parse_actor(text or DEFAULT_ACTOR)
+        return store_cli.parse_actor(text or DEFAULT_ACTOR)
     except store_cli.Refusal as error:
         raise Refused(HTTPStatus.BAD_REQUEST, error.error, problems=error.problems) from None
 
@@ -257,9 +257,9 @@ class SeamServer:
             if op not in store_cli.ALLOWED:
                 allowed = ", ".join(sorted(store_cli.ALLOWED))
                 raise store_cli.Refusal(f"{op!r} is not an op store apply runs; allowed: {allowed}")
-            op_args = store_cli._parse_op_args(json.dumps(args))
+            op_args = store_cli.parse_op_args(json.dumps(args))
             with self.stores() as stores:
-                kind = body.get("store") or store_cli._store_kind_for(op, op_args, stores)
+                kind = body.get("store") or store_cli.store_kind_for(op, op_args, stores)
                 if kind not in store_cli.STORE_KINDS:
                     raise store_cli.Refusal(
                         f"store must be one of {', '.join(store_cli.STORE_KINDS)}"

@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "core" / "src"))
 
 from research_core.prompts import build  # noqa: E402
-from research_core.store import events  # noqa: E402
+from research_core.store import events, settings  # noqa: E402
 from research_core.tools import catalog  # noqa: E402
 
 SKILLS = REPO / "core" / "src" / "research_core" / "skills"
@@ -93,7 +93,7 @@ def structural(role: str) -> list[str]:
         # a SOUL, a role skill or a wake prompt names only what its role has.
         allowed_roles = list(catalog.ROLES) if "/common/" in where else [role]
         for ref in set(TOOL_REF.findall(text)):
-            if ref in events.KINDS:  # an event kind such as `task.asked`, not a tool call
+            if ref in events.KINDS or ref in settings.SETTINGS:  # an event kind or a setting
                 continue
             if not any(build.tool_available(r, ref) for r in allowed_roles):
                 problems.append(f"{where}: names `{ref}`, which the {role} does not have")

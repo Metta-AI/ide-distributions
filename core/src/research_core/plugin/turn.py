@@ -106,6 +106,23 @@ def render_context_block(user_message: str) -> str | None:
     return "[client context] " + ("\n".join(lines) if lines else "empty")
 
 
+def _reaction_lines(event: Any, session_id: str) -> list[str]:
+    """The reactions a ``ui.patch`` event adds to this conversation (design A.5): the bridge
+    writes them under ``/reactions/<message id>``, and the agent sees them at its next turn."""
+    if event.payload.get("conversation") != session_id:
+        return []
+    lines = []
+    for op in event.payload.get("ops") or []:
+        path = str(op.get("path", ""))
+        if op.get("op") not in ("add", "replace") or not path.startswith("/reactions/"):
+            continue
+        message_id = path[len("/reactions/") :].replace("~1", "/").replace("~0", "~")
+        value = op.get("value")
+        shown = value.get("value") if isinstance(value, dict) else value
+        lines.append(f"- message {message_id}: {shown}")
+    return lines
+
+
 def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime) -> str:
     """Notices, the changed-since note, the active Coworld and the away summary, as text."""
     from research_core.store import coworlds, notices
@@ -146,16 +163,22 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
         notices.mark_read(wstore, ctx.actor, ids, by=f"session:{session_id}")
 
     changed: Counter[str] = Counter()
+    reactions: list[str] = []
     for store, since in ((wstore, since_w), (coworld_store, since_c)):
         if store is None:
             continue
         for event in store.events_after(since, limit=500):
-            if event.kind in ("turn.rendered", "watcher.heartbeat", "notice", "ui.patch"):
+            if event.kind == "ui.patch":
+                reactions.extend(_reaction_lines(event, session_id))
+                continue
+            if event.kind in ("turn.rendered", "watcher.heartbeat", "notice"):
                 continue
             changed[event.kind] += 1
     if last is not None and changed:
         top = ", ".join(f"{kind} ×{n}" for kind, n in changed.most_common(MAX_CHANGED_KINDS))
         parts.append(f"[changed since your last turn] {top}")
+    if reactions:
+        parts.append("[reactions since your last turn]\n" + "\n".join(reactions[-MAX_NOTICES:]))
 
     away_from = _parse_time(last_any["at"]) if last_any else None
     if is_first_turn and last is None and away_from is not None and now - away_from >= AWAY_AFTER:

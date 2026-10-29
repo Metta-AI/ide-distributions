@@ -481,11 +481,14 @@ def _evaluate_py() -> str:
 
         Usage: evaluate.py <results.json or folder>... — prints one JSON line per
         (episode, seat): {"episode", "seat", "seed", "status", "metrics": {"score", "errors"}}.
+        Without arguments it reads the folder named by XP_RESULTS, as the xp tool and the
+        watcher's checks run it.
         A folder is searched for results.json files. A results file is the fake platform's
         {"request_id"?, "seed"?, "episodes": [{"episode", "seat", "seed"?, "score", "errors"}]}.
         """
 
         import json
+        import os
         import sys
         from pathlib import Path
 
@@ -522,11 +525,12 @@ def _evaluate_py() -> str:
 
 
         def main() -> int:
-            if len(sys.argv) < 2:
+            arguments = sys.argv[1:] or [p for p in [os.environ.get("XP_RESULTS")] if p]
+            if not arguments:
                 print("usage: evaluate.py <results.json or folder>...", file=sys.stderr)
                 return 2
             try:
-                for path in results_files(sys.argv[1:]):
+                for path in results_files(arguments):
                     for row in rows(path):
                         print(json.dumps(row, sort_keys=True))
             except (OSError, ValueError) as error:

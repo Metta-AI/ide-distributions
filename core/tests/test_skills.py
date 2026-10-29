@@ -30,12 +30,10 @@ BODY_WORD_LIMIT = 700
 TASK_TYPE_WORD_LIMIT = 300
 FORBIDDEN = (".state", "store.db", "promotion", "kanban", "coordinator")
 TOOL_REFERENCE = re.compile(
-    r"\b(goal|task|claim|experiment|version|directive|settings|ui|workspace|upload|submit|xp"
-    r"|platform|forum_post|wiki_edit|softmax_api|github|attachment_download)\.([a-z_]+)\b"
+    r"(?<![/.\w])(goal|task|claim|experiment|version|directive|settings|ui|workspace|upload"
+    r"|submit|xp|platform|forum_post|wiki_edit|softmax_api|github|attachment_download)"
+    r"\.([a-z_]+)\b"
 )
-# Actions the plan defines (A3.6) that another entry adds; a skill may name them before they
-# land. Remove an entry once the action is in the catalog.
-PENDING_ACTIONS = {("workspace", "change_complete")}
 EXPECTED_SKILLS = {
     "orchestrator": {
         "review",
@@ -138,9 +136,7 @@ def test_every_tool_action_exists_for_the_skill_role(path):
         {
             f"{tool}.{action}"
             for tool, action in TOOL_REFERENCE.findall(body)
-            if f"{tool}.{action}" not in setting_keys
-            and (tool, action) not in allowed
-            and (tool, action) not in PENDING_ACTIONS
+            if f"{tool}.{action}" not in setting_keys and (tool, action) not in allowed
         }
     )
     assert not missing, f"{skill_id(path)} ({'/'.join(roles)}): unknown tool actions {missing}"

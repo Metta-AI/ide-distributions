@@ -354,7 +354,7 @@ CODE_FORMAT = "<path>:<a>-<b>@<sha>"
 DOC_FORMAT = "<repo-or-url>#<section> or <url> (retrieved <date>): <quote>"
 TRANSCRIPT_FORMAT = "session:<id>/<message id>#<sha256 of the quote>"
 MEASUREMENT_FORMAT = "<command> @<sha> -> <stored output path or pin id>"
-REPLAY_FORMAT = "episode:<id>[/seat <n>][/phase <p>] xp:<request id>"
+REPLAY_FORMAT = "episode:<id>[/seat <n>][/phase <p>] xp:<request id, or none outside an XP request>"
 ANNOTATION_FORMAT = "annotation:<id>"
 
 EVIDENCE_TYPES: dict[str, EvidenceType] = {
