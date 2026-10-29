@@ -146,3 +146,35 @@ def test_exec_without_a_player_credential_is_refused(env, workspace_venv, monkey
 def test_softmax_without_a_subcommand_prints_usage(env, capsys):
     assert cli.main(["softmax"]) == 2
     assert "usage" in capsys.readouterr().err
+
+
+def test_platform_check_calls_every_read_route_on_the_fake(tmp_path, monkeypatch, capsys):
+    from research_core import cli
+    from research_core.platform.cli import READ_ROUTES, check_read_routes
+    from research_core.platform.fake import FakePlatform
+
+    env = {"IDE_WORKSPACE": str(tmp_path), "IDE_PLATFORM": "fake", "SOFTMAX_PLAYER_ID": "ply_t"}
+    platform = FakePlatform(tmp_path / ".state" / "fake_platform.json", env)
+    results = check_read_routes(platform, coworld_id="cow_fake")
+    assert all(r["ok"] for r in results), results
+    assert {r["name"] for r in results} >= {"whoami", "credits", "leagues", "memberships"}
+    assert len(READ_ROUTES) >= len(results)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert cli.main(["platform", "check", "--read-only", "--coworld", "cow_fake"]) == 0
+    assert '"ok": true' in capsys.readouterr().out
+
+
+def test_platform_check_reports_a_failing_route(tmp_path, monkeypatch):
+    from research_core.platform.cli import check_read_routes
+    from research_core.platform.fake import FakePlatform
+
+    env = {
+        "IDE_WORKSPACE": str(tmp_path),
+        "IDE_PLATFORM": "fake",
+        "IDE_FAKE_FAULTS": "platform=down",
+    }
+    platform = FakePlatform(tmp_path / ".state" / "fake_platform.json", env)
+    results = check_read_routes(platform)
+    assert results and not any(r["ok"] for r in results)
+    assert results[0]["detail"]["status"] == 503

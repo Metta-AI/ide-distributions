@@ -1,0 +1,44 @@
+# The nightly read-only platform check (design C.4): every read route the tools use, called once
+# on a test Player against the real platform. A failure blocks the next release (the release
+# workflow checks this workflow's last conclusion) and opens or updates an issue for metta.
+name: Nightly platform check
+
+on:
+  schedule:
+    - cron: "30 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - name: Call every read route on the test Player
+        id: check
+        if: ${{ secrets.IDE_TEST_PLAYER_CREDENTIAL != '' }}
+        env:
+          IDE_WORKSPACE: ${{ runner.temp }}/workspace
+          SOFTMAX_PLAYER_ID: ${{ secrets.IDE_TEST_PLAYER_ID }}
+          SOFTMAX_PLAYER_CREDENTIAL: ${{ secrets.IDE_TEST_PLAYER_CREDENTIAL }}
+          COGAMES_API_URL: ${{ vars.COGAMES_API_URL || 'https://softmax.com/api' }}
+        run: uv run research platform check --read-only | tee platform-check.json
+      - name: Skip without a test Player credential
+        if: ${{ secrets.IDE_TEST_PLAYER_CREDENTIAL == '' }}
+        run: echo "IDE_TEST_PLAYER_CREDENTIAL is not set; the nightly platform check did not run."
+      - name: Open or update the failure issue
+        if: ${{ failure() && steps.check.conclusion == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Nightly platform check failed"
+          body="$(printf 'The read-only platform check failed on %s.\n\n```json\n%s\n```\n\nRun: %s' "$(date -u +%Y-%m-%dT%H:%MZ)" "$(cat platform-check.json | head -c 6000)" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          number=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then gh issue comment "$number" --body "$body"; else gh issue create --title "$title" --body "$body" --label platform; fi

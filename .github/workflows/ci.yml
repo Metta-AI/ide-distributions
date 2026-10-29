@@ -68,6 +68,14 @@ jobs:
       - name: Lint
         if: env.RUN_TESTS == 'true'
         run: uv run ruff check .
+      - name: Generated prompts and manifests are current
+        if: env.RUN_TESTS == 'true'
+        run: uv run python tools/build_prompts.py --check
+      - name: Prompt checks (the model check runs when OPENROUTER_API_KEY is set)
+        if: env.RUN_TESTS == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: uv run python tools/check_prompts.py --model
       - name: Unit and scenario tests
         if: env.RUN_TESTS == 'true'
         run: uv run pytest -q
