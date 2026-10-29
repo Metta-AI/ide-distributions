@@ -15,7 +15,7 @@ coach's IDE Controls ask before it. Like the server, the same act names the same
 (state ``asks``: ref -> key); the coach's answers are state ``answers`` (key -> ``yes`` or
 ``no``; tests set them): a yes grants the act once (then ``used``), and after a no or a used
 yes the act gets a new ask (``-<n+1>``, reason "the coach said no; a new ask waits" or "the
-last yes was used; ..."). ``permit_answer`` reads them (``asks_read=fail``: None).
+last yes was used; ..."). The platform still enforces these refusals; profiles do not poll their cogent records.
 ``over_cap=1`` makes a spend refusal the over-today's-cap one. ``league=none`` refuses both
 acts with ``LeagueNotChosen`` (no league chosen), ``league=<id>`` likewise (the coach chose that
 one). A request whose state
@@ -70,7 +70,6 @@ from ide_research_core.softmax_tool.identity import (
 from ide_research_core.softmax_tool.protocol import (
     ANSWER_NO,
     ANSWER_USED,
-    ANSWER_WAITING,
     ANSWER_YES,
     PERMIT_DECLINED,
     PERMIT_OVER_CAP,
@@ -303,17 +302,6 @@ class FakeSoftmax:
             why, status = "40 credits is more than the 10 left today", PERMIT_OVER_CAP
         return PermitRequired(f"{action} on {ref}: {why} (ask asks/{ask})", ask, status)
 
-    def permit_answer(self, ask: str) -> str | None:
-        if self._faults.get("asks_read") == "fail":
-            return None
-
-        def action(state: dict) -> str | None:
-            known = {*(state.get("asks") or {}).values(), *(state.get("answers") or {})}
-            if ask not in known:
-                return None  # no such ask (the server answers 404)
-            return (state.get("answers") or {}).get(ask, ANSWER_WAITING)
-
-        return self._operate("permit_answer", action, persist=False)
 
     def episode_cost(self) -> float | None:
         return 1.0  # the fake deducts one credit per (one-episode) request

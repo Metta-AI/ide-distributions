@@ -74,52 +74,29 @@ def test_a_wrong_identity_is_refused(board):
 
 def test_one_submission_at_a_time(board):
     experiment, _ = board.reviewed_experiment()
-    sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
-    with pytest.raises(Refused):
-        champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
+    champion_submission.submit(board.canonical, board.sm, experiment, LEAGUE, PLAYER)
     second, _ = board.reviewed_experiment()
     with pytest.raises(Refused) as refused:
         champion_submission.submit(board.canonical, board.sm, second, LEAGUE, PLAYER)
     assert refused.value.reason == "submission_in_flight"
 
 
-def test_a_permit_ask_waits_at_intent_and_status_sends_after_the_yes(board):
+def test_permit_refusal_is_recorded_without_polling_or_automatic_retry(board):
     experiment, _ = board.reviewed_experiment()
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
     with pytest.raises(Refused) as refused:
         champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
     assert refused.value.reason == "permit_required"
-    waiting = champion_submission.in_flight(board.canonical)
-    assert waiting.stage == "intent" and waiting.waiting["ask"]
-
-    champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)  # no answer yet: nothing is sent
-    assert champion_submission.in_flight(board.canonical).stage == "intent"
-
+    record = champion_submission.load_all(board.canonical)[-1]
+    assert record.stage == "aborted" and record.waiting is None
+    assert refused.value.details["ask"] in record.history[-1]["detail"]
     state = fake_state(board)
-    state["answers"] = {waiting.waiting["ask"]: "yes"}
+    state["answers"] = {refused.value.details["ask"]: "yes"}
     write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
-    report = champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)  # one step: sent
-    assert report["in_flight"]["stage"] == "submitted"
-    report = champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)  # admitted: published
-    assert report["in_flight"] is None
-    assert report["champion"]["platform_policy_version_id"] == PV_A
-
-
-def test_a_declined_permit_aborts_the_submission(board):
-    experiment, _ = board.reviewed_experiment()
-    sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
-    with pytest.raises(Refused):
-        champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
-    ask = champion_submission.in_flight(board.canonical).waiting["ask"]
-    state = fake_state(board)
-    state["answers"] = {ask: "no"}
-    write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
-
-    champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)
-
-    assert champion_submission.in_flight(board.canonical) is None
-    [record] = [p for p in champion_submission.load_all(board.canonical) if p.kind == "experiment"]
-    assert record.stage == "aborted"
+    assert champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)["in_flight"] is None
+    assert not any(row["policy_version_id"] == PV_A for row in sm.submissions(PLAYER))
+    result = champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
+    assert result["stage"] == "submitted"
 
 
 def interrupted_intent(board, platform_id: str) -> champion_submission.ChampionSubmission:
@@ -214,10 +191,10 @@ def test_a_send_that_dies_after_an_approved_permit_is_recovered_not_asked_again(
     ``submitted``: the next status finds the submission instead of asking again (R12 #4)."""
     experiment, _ = board.reviewed_experiment()
     sm = FakeSoftmax(board.canonical, {FAULTS_ENV: "permit=submit"})
-    with pytest.raises(Refused):
+    with pytest.raises(Refused) as refused:
         champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
     state = fake_state(board)
-    state["answers"] = {champion_submission.in_flight(board.canonical).waiting["ask"]: "yes"}
+    state["answers"] = {refused.value.details["ask"]: "yes"}
     write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
     real_submit = sm.submit
 
@@ -227,7 +204,7 @@ def test_a_send_that_dies_after_an_approved_permit_is_recovered_not_asked_again(
 
     sm.submit = accepted_then_died
     with pytest.raises(RuntimeError):
-        champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)
+        champion_submission.submit(board.canonical, sm, experiment, LEAGUE, PLAYER)
     sm.submit = real_submit
 
     report = champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)
@@ -323,11 +300,13 @@ def test_requested_version_submission_needs_no_experiment_and_preserves_strategy
                 "Build and submit this policy to my league", LEAGUE, PLAYER,
             )
         assert refused.value.reason == "permit_required"
-        waiting = champion_submission.in_flight(board.canonical)
         state = fake_state(board)
-        state["answers"] = {waiting.waiting["ask"]: "yes"}
+        state["answers"] = {refused.value.details["ask"]: "yes"}
         write_json(board.canonical / ".supervisor/runtime/fake_softmax.json", state)
-        result = champion_submission.status(board.canonical, sm, LEAGUE, PLAYER)["in_flight"]
+        result = champion_submission.submit_requested(
+            board.canonical, sm, version, source_path,
+            "Build and submit this policy to my league", LEAGUE, PLAYER,
+        )
     else:
         result = champion_submission.submit_requested(
             board.canonical, sm, version, source_path,

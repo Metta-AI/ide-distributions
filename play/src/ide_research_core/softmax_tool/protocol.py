@@ -40,7 +40,7 @@ class CreditDenied:
 # outgrown or used yes, when the server files a new ask), the coach said no, or the act is more
 # than the credits left today, which no yes covers until the UTC day turns.
 PERMIT_WAITING, PERMIT_DECLINED, PERMIT_OVER_CAP = "waiting", "declined", "over_cap"
-# ``Softmax.permit_answer``: the coach's answer to one ask.
+# Simulated platform permit decisions (used by the fake service).
 ANSWER_YES, ANSWER_NO, ANSWER_USED, ANSWER_WAITING = "yes", "no", "used", "waiting"
 # The retry timing shared by XP relaunches (credit denials, the coach's refusals) and champion
 # submits the coach refused (A10): ``BACKOFF_BASE`` first (XP: or the worker's configured base),
@@ -169,11 +169,6 @@ class Softmax(Protocol):
         known: list[XpHandle] | None = None,
     ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen: ...
     def xp_status(self, handle: XpHandle) -> XpStatus: ...
-    def permit_answer(self, ask: str) -> str | None:
-        """The coach's answer to our permit ask ``ask`` (a key of our cogent's ``asks``):
-        ``ANSWER_YES`` (not used yet), ``ANSWER_USED`` (a yes an act consumed), ``ANSWER_NO``,
-        or ``ANSWER_WAITING``; None when it cannot be read (callers fall back to a backoff)."""
-        ...
 
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...
     def xp_recover(self, experiment: str) -> list[XpHandle]: ...

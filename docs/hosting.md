@@ -51,8 +51,7 @@ Game selection comes from the conversation and task; never supply a default `RES
 ## Platform capabilities
 
 Providers own operation schemas, input semantics, limits, effects, status and recovery instructions.
-The distribution uses its existing `capabilities` index, native deferred-tool discovery, and
-`ide_workspace_schema`/`ide_workspace` client. Do not copy provider protocols into profile prompts
+The distribution uses its existing `capabilities` index and native deferred-tool discovery. Do not copy provider protocols into profile prompts
 or add a second discovery catalog. Local executable absence does not establish hosted availability.
 
 The runtime may install provider plugins through supported Hermes APIs. Generic discovery,
@@ -82,3 +81,21 @@ skill; the advisory service owns available models, costs, limits and execution a
 Deploy the platform skill publisher before adopting distributions that refer to it. Qualify fresh
 and retained coordinator/researcher skill discovery, preserved configuration and policy repository
 flows. This does not require changing credentials or reconnecting the user's repositories.
+
+## Intermediate profile without IDE callbacks
+
+The research profiles no longer expose `ide_workspace`, `ide_workspace_schema`, `ide_say`,
+`ide_task_update`, or `attachment_download`. They do not poll cogent permit records.
+The workspace relay must deliver native session IDs and user context without requiring IDE rows.
+Do not configure an IDE MCP endpoint to restore these operations. Browser presentation and
+source operations remain served by the existing workspace CLI; this removal does not delete them.
+
+The current supervisor and native inbox own task follow-up. Native goal records are retained,
+but no profile replacement for the IDE goal runner is introduced. Synchronous build/upload
+completion uses native run/task results; asynchronous publication waits require the future
+workspace-local publication contract, not the former platform build tables.
+
+Release verification must exercise chat, delegation, XP/credit waits and submission completion
+without an IDE database or cogent callback. Validate native inbox recovery separately from the
+transport fake used by the profile tests. Platform authentication, inference, evaluation jobs,
+policy uploads and submissions remain external services; their refusals are still enforced.

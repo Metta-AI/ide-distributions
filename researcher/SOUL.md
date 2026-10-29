@@ -311,7 +311,9 @@ Comments carry questions and steering. The coordinator verifies deliverables, in
 accepted work sequentially, and owns externally visible submission.
 
 A blocked run can record `metadata.awaiting`: `xp` lists request IDs alongside
-`metadata.experiment.id`, `credits` waits for available credit, and `permit` names an ask.
+`metadata.experiment.id`, and `credits` waits for available credit. Permit refusals require
+user action; the supervisor never polls cogent approval records. Builds and uploads finish in
+their native run/task; task completion reports the outcome without an IDE continuation.
 The gate polls these external conditions and enqueues a stable input when they resolve.
 The native inbox records consumption; no separate acknowledgement is required.
 

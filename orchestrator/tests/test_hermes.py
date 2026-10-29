@@ -227,7 +227,7 @@ assert not plugin['error'], plugin
 expected = json.loads(sys.argv[2])
 assert plugin['enabled'] and plugin['tools'] == len(expected), plugin
 assert set(registry.get_tool_names_for_toolset('orchestrator')) == set(expected)
-assert registry.get_schema('ide_workspace')['parameters']['required'] == ['request_id', 'operation']
+assert not {'ide_workspace', 'ide_workspace_schema', 'ide_task_update', 'ide_say', 'attachment_download'} & set(expected)
 schema = registry.get_schema('submit_requested_version')
 assert set(schema['parameters']['required']) == {'id', 'run_id', 'version', 'strategy', 'request', 'league_id'}, schema
 assert any(toolset[0] == 'orchestrator' for toolset in get_plugin_toolsets())

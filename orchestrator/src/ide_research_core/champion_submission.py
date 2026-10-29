@@ -20,8 +20,9 @@ write-ahead order so an interrupted submit is never sent twice blindly:
 ``status`` advances the one submission in flight by at most one platform read and returns
 where things stand, including a champion conflict: the league shows a policy for us that the
 loop did not record as its champion (someone submitted by hand, or the league dropped ours).
-A coach refusal (a permit ask, no league chosen) leaves the submission at ``intent`` with
-``waiting`` set; ``status`` sends again only after the coach answers. ``accept`` records the
+A permit refusal aborts this attempt and remains visible in its record; status never polls
+cogent asks or retries a refused submission. A later explicit submission is a new attempt.
+A missing league leaves the submission at ``intent`` with ``waiting`` set. ``accept`` records the
 league's current champion as the loop's when a human says so.
 """
 
@@ -43,9 +44,6 @@ from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
 from ide_research_core.softmax_tool.identity import IdentityError
 from ide_research_core.softmax_tool.protocol import (
-    ANSWER_NO,
-    ANSWER_USED,
-    ANSWER_WAITING,
     LeagueNotChosen,
     PermitRequired,
     Refused,
@@ -80,7 +78,7 @@ class ChampionSubmission:
     stage: str
     experiment: str | None = None
     submission_id: str | None = None
-    waiting: dict | None = None  # the coach's refusal while at intent
+    waiting: dict | None = None  # league-selection refusal while at intent
     # The player submitted for: the workspace's own player, or an owned player the conversation
     # selected (the IDE workspace credential may publish for it). None only in records written
     # before submissions named their player; those were all for the workspace's own player.
@@ -405,10 +403,14 @@ def _send(clone: Path, sm: Softmax, submission: ChampionSubmission) -> dict:
     """The single platform submit of an ``intent`` submission."""
     result = sm.submit(submission.platform_policy_version_id, submission.league_id, submission.player_id)
     if isinstance(result, PermitRequired):
-        submission.waiting = {"reason": "permit_required", "ask": result.ask, "detail": result.reason}
-        _move(clone, submission, "intent", "waiting for the coach's permit")
+        submission.waiting = None
+        _move(
+            clone, submission, "aborted",
+            f"platform refused submission (ask {result.ask}): {result.reason}",
+        )
         raise Refused(
-            "permit_required", f"the coach must approve the submission: {result.reason}",
+            "permit_required", f"this attempt ended: {result.reason}; after the user answers "
+            "the ask, an explicit submit is a new attempt",
             {"submission": submission.id, "ask": result.ask},
         )
     if isinstance(result, LeagueNotChosen):
@@ -456,19 +458,10 @@ def _accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
 
 def _advance_intent(clone: Path, sm: Softmax, submission: ChampionSubmission) -> None:
     waiting = submission.waiting or {}
-    answer = None
-    if waiting.get("reason") == "permit_required" and waiting.get("ask"):
-        answer = sm.permit_answer(waiting["ask"])
-        if answer in (None, ANSWER_WAITING):
-            return
-        if answer == ANSWER_NO:
-            _move(clone, submission, "aborted", "the coach declined the submission")
-            return
-    # Clear the wait on main before sending again, so a send that dies after the platform
-    # accepted it is recovered by the submissions lookup below, not asked for again. A yes
-    # already used means such a send happened: look it up now.
+    # Permit refusals already ended in _send. Remaining league-selection waits use
+    # the normal submit route; interrupted sends are reconciled by platform identity.
     submission.waiting = None
-    if waiting and answer != ANSWER_USED:
+    if waiting:
         _move(clone, submission, "intent", "sending again")
         try:
             _send(clone, sm, submission)
