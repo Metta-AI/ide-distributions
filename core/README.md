@@ -56,7 +56,9 @@ an OpenRouter key. Hermes v0.21.6 needs Python 3.14 for its own dependencies, so
 (`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev --extra messaging`, then
 `<somewhere>/bin/hermes`); the `messaging` extra brings `aiohttp`, without which the gateway
 starts but its API server does not, and the gateway enables that server from the home's
-`.env`, not from the process environment.
+`.env`, not from the process environment. `docs/local-end-to-end.md` turns the real acceptance
+run into a local end-to-end setup: the one-command run, an interactive session that stays up
+(`IDE_E2E_KEEP=1`, optionally on the real platform), and the same inside the hosted image.
 
 ## Add a tool, a record or a skill
 

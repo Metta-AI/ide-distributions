@@ -62,6 +62,9 @@ HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes   # agai
 CI runs the same inside the hosted Hermes image, and `play/` separately. A daily workflow
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
+To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
+interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).
+
 ## Hosting
 
 Softmax hosting runs these distributions in its sandboxes. [`docs/hosting.md`](docs/hosting.md)

@@ -85,6 +85,9 @@ class Host:
     log: Path
     process: subprocess.Popen | None = None
     timings: dict[str, float] = field(default_factory=dict)
+    # Written after the defaults into the host's and every profile's ``.env``: the acceptance
+    # harness puts the platform choice, the Player and the Researcher profiles here.
+    dotenv_extra: dict[str, str] = field(default_factory=dict)
 
     def profile(self, role: str) -> Path:
         return self.home / "profiles" / role
@@ -118,6 +121,7 @@ class Host:
             "GATEWAY_MULTIPLEX_PROFILES": "true",
             "IDE_WORKSPACE": str(self.workspace),
             "IDE_PLATFORM": "fake",
+            **self.dotenv_extra,
         }
         (self.home / ".env").write_text("\n".join(f"{k}={v}" for k, v in lines.items()) + "\n")
 
@@ -131,6 +135,7 @@ class Host:
             "OPENROUTER_API_KEY": self.openrouter_key,
             "IDE_WORKSPACE": str(self.workspace),
             "IDE_PLATFORM": "fake",
+            **self.dotenv_extra,
         }
         path = self.profile(role) / ".env"
         existing = path.read_text() if path.exists() else ""
