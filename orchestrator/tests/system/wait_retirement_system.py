@@ -109,20 +109,18 @@ class Platform(BaseHTTPRequestHandler):
                 }
                 HANDOFF.set()
         elif not terminal and "background-proof-start" in json.dumps(body["messages"]):
-            if "kanban_create" not in called:
-                tool = "kanban_create"
+            if "card_create" not in called:
+                tool = "card_create"
                 arguments = {
                     "title": "Wait for credits",
                     "assignee": "researcher-1",
-                    "board": "autoresearch",
-                    "workspace_kind": "dir",
-                    "workspace_path": "/opt/data/profiles/researcher-1/workspace",
+                    "command_id": "wait-retirement-proof:credits",
                     "body": "Read credits with the installed research CLI. Complete this launch-only "
                     "assignment with awaiting.credits metadata while credits are unavailable.",
                 }
             else:
                 result = next(item for item in reversed(body["messages"]) if item["role"] == "tool")
-                CARD = json.loads(result["content"])["task_id"]
+                CARD = json.loads(result["content"])["data"]["card"]["id"]
         calls = []
         if tool is not None:
             assert any(item["function"]["name"] == tool for item in body["tools"]), tool
@@ -198,6 +196,8 @@ def main():
                 "sha256:" + "a" * 64,
                 "--model",
                 "fixture",
+                "--researchers",
+                "1",
             ]
         )
     ).model_copy(update={"relay": True})
