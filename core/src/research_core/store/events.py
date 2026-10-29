@@ -51,6 +51,7 @@ KINDS: frozenset[str] = frozenset(
         "claim.updated",
         "claim.retired",
         "experiment.created",
+        "experiment.updated",
         "experiment.started",
         "experiment.run",
         "experiment.closed",
