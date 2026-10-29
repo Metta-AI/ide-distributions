@@ -24,9 +24,20 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "core" / "src"))
 
 from research_core.prompts import build  # noqa: E402
+from research_core.store import events  # noqa: E402
 from research_core.tools import catalog  # noqa: E402
 
 SKILLS = REPO / "core" / "src" / "research_core" / "skills"
+WAKES = REPO / "core" / "src" / "research_core" / "watcher" / "wakes"
+# The role whose Session each wake prompt starts.
+WAKE_ROLES = {
+    "setup": "orchestrator",
+    "management": "orchestrator",
+    "review": "orchestrator",
+    "anti_stall": "orchestrator",
+    "task_start": "researcher",
+    "task_resume": "researcher",
+}
 FORBIDDEN = (
     (re.compile(r"\bpromot(e|ion|ed|ing)\b", re.IGNORECASE), "says 'promotion'; say submission"),
     (re.compile(r"\.state/|store\.db"), "names a store path"),
@@ -67,6 +78,9 @@ def structural(role: str) -> list[str]:
     texts = {f"{role}/SOUL.md": build.render(role)}
     for path in skill_files(role):
         texts[_label(path)] = path.read_text()
+    for wake, wake_role in WAKE_ROLES.items():
+        if wake_role == role and (WAKES / f"{wake}.md").exists():
+            texts[_label(WAKES / f"{wake}.md")] = (WAKES / f"{wake}.md").read_text()
     names = skill_names()
     # Until the skills ship, a SOUL may name skills that do not exist yet; the check is for
     # a shipped tree, so skill existence is enforced only once some skill exists.
@@ -75,8 +89,13 @@ def structural(role: str) -> list[str]:
         for pattern, message in FORBIDDEN:
             if pattern.search(text):
                 problems.append(f"{where}: {message}")
+        # A common skill is read by both roles and may name the other role's step in a handoff;
+        # a SOUL, a role skill or a wake prompt names only what its role has.
+        allowed_roles = list(catalog.ROLES) if "/common/" in where else [role]
         for ref in set(TOOL_REF.findall(text)):
-            if not build.tool_available(role, ref):
+            if ref in events.KINDS:  # an event kind such as `task.asked`, not a tool call
+                continue
+            if not any(build.tool_available(r, ref) for r in allowed_roles):
                 problems.append(f"{where}: names `{ref}`, which the {role} does not have")
         for name in set(SKILL_REF.findall(text)) if check_skill_names else ():
             if name not in names and name != "hermes-agent":

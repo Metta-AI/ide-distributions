@@ -1,5 +1,11 @@
 # Coordinator simplification: acceptance evidence
 
+> **Retired.** This is the acceptance evidence of the previous profiles (the serial
+> coordinator inbox), which were removed on October 28, 2026 and rebuilt from
+> `docs/designs/ide-profile-refactor-2026-10-28-final.html`. The current profiles have no
+> coordinator; their acceptance scenario is the `research serve` end-to-end test described in
+> `docs/hosting.md`. This file and `coordinated-research-proof.json` are kept for history.
+
 Updated October 22, 2026. This is local acceptance proof, not a production rollout.
 Runtime distribution: `90899586f50513eac2b996e03e9a8df6e6320b30`.
 Host runtime source: `1c2e8ade32`; retained-input test correction: `ac3f9ab4b5`.
