@@ -5,7 +5,7 @@ from pathlib import Path
 from .board import Board
 from .gate import transitions
 from .research import Research
-from .storage import snapshot
+from .storage import snapshot, wait_deliveries
 
 # Every researcher distribution ships this plugin; the coordinator does not.
 RESEARCHER_MARKER = Path("plugins") / "researcher_guard"
@@ -97,7 +97,7 @@ class Service:
             "researchers": researchers(self.context, cards),
             "tooling": tooling(self.context),
             "game": research.context.env.get("RESEARCH_GAME"),
-            "pending": transitions(snapshot(self.context), self.research),
+            "pending": transitions(snapshot(self.context), self.research, wait_deliveries(self.context)),
             "research": research.call("records", "summary"),
             "champion_submission": submission,
             "control": research.control_read(),

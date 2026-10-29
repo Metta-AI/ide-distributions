@@ -1,5 +1,6 @@
 """Coordinator conversation binding and read-only native task queries."""
 
+import json
 import sqlite3
 from contextlib import closing
 
@@ -32,6 +33,15 @@ def snapshot(context):
                 "AND r.ended_at IS NOT NULL AND r.metadata IS NOT NULL"
             )
         ]
+    handled = handled_waits(context)
+    for run in runs:
+        metadata = json.loads(run["metadata"])
+        awaiting = metadata.get("awaiting") or {}
+        for wait, kind in WAIT_KINDS.items():
+            if f"task_runs:{run['id']}:{kind}" in handled:
+                awaiting.pop(wait, None)
+        metadata["awaiting"] = awaiting
+        run["metadata"] = json.dumps(metadata)
     return {"awaiting": runs}
 
 
@@ -83,3 +93,44 @@ def _keys(context, prefix):
         return conn.execute(
             "SELECT key, value FROM coordinator WHERE substr(key, 1, ?) = ?", (len(prefix), prefix)
         ).fetchall()
+
+
+# A wait keeps its native run metadata. This relation names the native input handling it;
+# only that input's successful completion retires the wait from the read projection.
+WAIT_DELIVERY = "wait_delivery:"
+WAIT_KINDS = {"xp": "xp_terminal", "credits": "credits_available", "permit": "bad_handoff"}
+
+
+def remember_wait_delivery(context, events, identity):
+    waits = [
+        (WAIT_DELIVERY + event["source_event"], identity)
+        for event in events
+        if event.get("table") == "task_runs" and event["kind"] in WAIT_KINDS.values()
+    ]
+    with closing(open_storage(context.storage_path)) as conn, conn:
+        conn.executemany("INSERT OR IGNORE INTO coordinator(key,value) VALUES (?, ?)", waits)
+
+
+def wait_deliveries(context):
+    return {
+        key.removeprefix(WAIT_DELIVERY): identity for key, identity in _keys(context, WAIT_DELIVERY)
+    }
+
+
+def handled_waits(context):
+    deliveries = wait_deliveries(context)
+    if not deliveries:
+        return set()
+    # Same read-only native-state boundary as the Kanban snapshot above. Do not infer
+    # completion from an absent pending response: fresh, running and failed inputs differ.
+    database = context.home / "state.db"
+    with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as conn:
+        return {
+            source_event
+            for source_event, identity in deliveries.items()
+            if conn.execute(
+                "SELECT 1 FROM coordinator_inbox WHERE identity = ? "
+                "AND json_extract(result, '$.completed') = 1",
+                (identity,),
+            ).fetchone()
+        }
