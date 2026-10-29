@@ -5,8 +5,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
+from uuid import UUID
+
+from pydantic import BaseModel
 
 ArtifactType = Literal["file", "oci-image"]
+
+
+class PublishedPolicy(BaseModel):
+    id: UUID
+    name: str
+    version: int
 
 
 @dataclass(frozen=True)
@@ -173,10 +182,21 @@ class Softmax(Protocol):
     def xp_artifacts(self, handle: XpHandle, dest: Path) -> list[Path]: ...
     def xp_recover(self, experiment: str) -> list[XpHandle]: ...
     def upload(
-        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+        self,
+        artifact: Path,
+        name: str,
+        *,
+        player_id: str,
+        artifact_type: ArtifactType = "file",
     ) -> str:
         """Upload as the workspace credential's player; ``player_id`` must match it."""
         ...
+
+    def upload_inputs(
+        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType
+    ) -> dict: ...
+
+    def publication_status(self, inputs: dict) -> PublishedPolicy | None: ...
 
     def submit(
         self, policy_version_id: str, league_id: str, player_id: str

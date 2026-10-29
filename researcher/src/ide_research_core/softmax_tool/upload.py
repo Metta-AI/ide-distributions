@@ -36,6 +36,7 @@ import json
 import re
 from pathlib import Path
 
+from ide_research_core import publication, workspace
 from ide_research_core.io import gitops
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
@@ -181,16 +182,34 @@ def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
 
 
 def _upload_once(
-    store: RecordStore, sm: Softmax, version_id: str, artifact: Path, artifact_type: ArtifactType
+    ctx: RunContext,
+    store: RecordStore,
+    sm: Softmax,
+    version_id: str,
+    artifact: Path,
+    artifact_type: ArtifactType,
 ) -> str:
     """The platform id of ``version_id``: its ``uploaded`` event, or a new upload (C6 is
     checked by the client) recorded as that event."""
     platform_id = _uploaded_policy(store, version_id)
     if platform_id is None:
         version = store.load(version_id)[0]
-        platform_id = sm.upload(
-            artifact, version["policy_name"], player_id=version["player_id"], artifact_type=artifact_type
+        operation_id, receipt = publication.publish(
+            workspace.canonical_of(ctx.canonical).resolve().parent / "policy-publications",
+            artifact,
+            version["policy_name"],
+            version["player_id"],
+            artifact_type,
+            sm,
         )
+        if receipt.policy is None:
+            raise Refused(
+                "publication_pending",
+                "Publication is unresolved; recover the original operation without uploading again",
+                {"operation_id": str(operation_id)},
+            )
+        # Research/league records use the CLI label; the local intent retains the UUID.
+        platform_id = f"{receipt.policy.name}:v{receipt.policy.version}"
         store.add_event(version_id, "uploaded", {"policy_version_id": platform_id})
     return platform_id
 
@@ -233,7 +252,9 @@ def upload(
     if version_id is None:
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": experiment})
-    platform_id = _upload_once(store, sm, version_id, artifact, build.get("artifact_type", "file"))
+    platform_id = _upload_once(
+        ctx, store, sm, version_id, artifact, build.get("artifact_type", "file")
+    )
     patch = {
         "candidate_binding": {"version_id": version_id, "platform_policy_version_id": platform_id}
     }
@@ -263,5 +284,5 @@ def upload_build(
         version_meta = _version_meta(ctx, build, artifact_hash, name, player_id)
         version_id = store.create("version", {**version_meta, "experiment": None})
     return version_id, _upload_once(
-        store, sm, version_id, artifact, build.get("artifact_type", "file")
+        ctx, store, sm, version_id, artifact, build.get("artifact_type", "file")
     )

@@ -69,6 +69,7 @@ from ide_research_core.softmax_tool.protocol import (
     Identity,
     LeagueNotChosen,
     PermitRequired,
+    PublishedPolicy,
     SubmissionState,
     XpHandle,
     XpStatus,
@@ -126,7 +127,6 @@ class SoftmaxClient:
             return float(payload["status"]["balance_credits"])
         except (KeyError, TypeError, ValueError):
             raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
-
 
     def episode_cost(self) -> float | None:
         """Mean credits per episode over the account's recent XP requests (the same route's
@@ -211,7 +211,12 @@ class SoftmaxClient:
     # --- policies -------------------------------------------------------
 
     def upload(
-        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+        self,
+        artifact: Path,
+        name: str,
+        *,
+        player_id: str,
+        artifact_type: ArtifactType = "file",
     ) -> str:
         """Upload a game-hosted file or OCI image archive for ``player_id``; return its
         ``<name>:v<N>`` label."""
@@ -225,6 +230,29 @@ class SoftmaxClient:
         if label is None:
             raise SoftmaxCliError(f"upload-policy printed no 'Upload complete:' line for {name}")
         return label
+
+    def upload_inputs(
+        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType
+    ) -> dict:
+        from coworld.upload import policy_upload_inputs
+
+        return policy_upload_inputs(
+            artifact=artifact,
+            name=name,
+            player_id=player_id,
+            image_archive=artifact_type == "oci-image",
+        )
+
+    def publication_status(self, inputs: dict) -> PublishedPolicy | None:
+        self.require_player()
+        response = json.loads(
+            self._cli.run("coworld", ["policy-lookup", "-"], input=json.dumps(inputs)).stdout
+        )
+        if response["kind"] == "not_found":
+            return None
+        if response["kind"] != "ok":
+            raise SoftmaxCliError(f"Unexpected policy lookup result: {response['kind']}")
+        return PublishedPolicy.model_validate(response["policy"])
 
     def submit(
         self, policy_version_id: str, league_id: str, player_id: str
