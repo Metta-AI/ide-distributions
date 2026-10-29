@@ -268,9 +268,12 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
         env=root_env,
         check=True,
     )
-    assignee = subprocess.check_output(
-        [hermes, "config", "get", "kanban.default_assignee"], env=root_env, text=True
-    )
+    assignee = _run_hermes(
+        [hermes, "config", "get", "kanban.default_assignee"],
+        env=root_env,
+        capture_output=True,
+        text=True,
+    ).stdout
     if assignee.strip():
         _run_hermes(
             [hermes, "config", "unset", "kanban.default_assignee"],
