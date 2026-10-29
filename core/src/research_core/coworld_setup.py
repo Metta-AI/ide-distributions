@@ -656,10 +656,14 @@ def apply_profile_config(
     profile_home = Path(env["HERMES_HOME"])
     upstream = getattr(prepare, "apply_skill_dirs", None)
     if upstream is not None:
-        applied = upstream(
-            profile_home, hermes, mixin_skills_dir=mixin_skills_dir, code_dir=code_dir, env=env
+        return upstream(
+            profile_home,
+            hermes,
+            mixin_skills_dir=mixin_skills_dir,
+            code_dir=code_dir,
+            env=env,
+            run=run,
         )
-        return {"applied": list(applied or []), "problems": []}
     core_src = _core_src(env)
     applied: list[str] = []
     problems: list[str] = []

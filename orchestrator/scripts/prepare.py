@@ -19,10 +19,16 @@ parser.add_argument("--hermes", required=True, help="The Hermes executable")
 parser.add_argument(
     "--activate-supervisor", action="store_true", help="Enable the watcher job on first preparation"
 )
+parser.add_argument("--check", action="store_true", help="Report what would change; write nothing")
 args = parser.parse_args()
 
 source = args.source.resolve()
 sys.path.insert(0, str(source.parent / "core" / "src"))
 from research_core.prepare import prepare  # noqa: E402
 
-prepare(source=source, hermes=args.hermes, activate_watcher=args.activate_supervisor)
+prepare(
+    source=source,
+    hermes=args.hermes,
+    activate_watcher=args.activate_supervisor,
+    check=args.check,
+)

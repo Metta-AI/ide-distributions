@@ -48,6 +48,8 @@ class FakeHermes:
         self.calls.append((argv, kwargs))
         if argv[0] == "uv":
             return self.uv_result
+        if "research_core.cli" in argv:  # the default-Coworld switch in the workspace env
+            return CompletedProcess(argv, 0, '{"ok": true}', "")
         exe, *rest = argv
         assert exe == "hermes", argv
         if rest[:2] == ["config", "get"]:
@@ -466,3 +468,98 @@ def test_prepare_passes_the_release_checkout_to_uv(homes):
     assert uv_call[-1] == str(REPO)
     venv = Path(env["IDE_WORKSPACE"]) / "tools" / "venv"
     assert (venv / ".lock-sha").read_text().strip() == sha(REPO / "uv.lock")
+
+
+# --- the final preparation rules (plan task 7.8, amendments A5.9, A6.4, A7.4) ---------------
+
+
+def _prepared(homes, fake, role="orchestrator", **extra_env):
+    profile, env = homes
+    env = {**env, **extra_env}
+    (REPO / role / "cron").exists()
+    prepare.prepare(REPO / role, "hermes", False, env=env, run=fake.run)
+    return profile, env
+
+
+def test_prepare_points_every_profile_at_the_active_coworld(homes):
+    from research_core.store import coworlds
+    from research_core.store.actors import Actor
+    from research_core.store.db import Store
+
+    profile, env = homes
+    ws = layout.from_env(env)
+    ws.ensure_dirs()
+    store = Store.open(ws.store_path, kind="workspace")
+    harness = Actor.parse("harness")
+    coworlds.register(store, harness, "cow_fake", folder="cow_fake")
+    coworlds.activate(store, harness, "cow_fake")
+    store.close()
+    fake = FakeHermes()
+    prepare.prepare(REPO / "orchestrator", "hermes", False, env=env, run=fake.run)
+    code = str(ws.coworld("cow_fake").code)
+    assert fake.config["skills.external_dirs"][-1] == str(ws.coworld("cow_fake").mixin / "skills")
+    assert fake.config["skills.trusted_project_dirs"] == [code]
+    assert fake.config["terminal.cwd"] == code
+    assert ws.coworld("cow_fake").store_path.exists()  # ensure_stores migrated it
+
+
+def test_prepare_applies_shipped_values_only_over_earlier_defaults(homes):
+    fake = FakeHermes({"terminal.timeout": 180, "model.default": "owner/choice"})
+    _prepared(homes, fake)
+    assert fake.config["terminal.timeout"] == 1800  # an earlier default is replaced
+    assert fake.config["model.default"] == "owner/choice"  # an owner's choice survives
+    assert fake.config["fallback_providers"] == prepare.FALLBACK_PROVIDERS
+    assert "IDE_RESEARCHER_PROFILES" in fake.config["terminal.env_passthrough"]
+
+
+def test_prepare_keeps_the_owners_passthrough_entries(homes):
+    fake = FakeHermes({"terminal.env_passthrough": ["MY_VAR"]})
+    _prepared(homes, fake)
+    passthrough = fake.config["terminal.env_passthrough"]
+    assert passthrough[0] == "MY_VAR" and "IDE_WORKSPACE" in passthrough
+
+
+def test_prepare_bootstraps_the_default_coworld_through_the_workspace_env(homes):
+    fake = FakeHermes()
+    profile, env = _prepared(homes, fake, IDE_DEFAULT_COWORLD="cow_first")
+    switches = [argv for argv, _ in fake.calls if "switch" in argv]
+    assert switches and switches[0][-4:] == [
+        "switch",
+        "cow_first",
+        "--cites",
+        "IDE_DEFAULT_COWORLD",
+    ]
+    assert switches[0][0] == str(layout.from_env(env).venv_python)
+
+
+def test_prepare_check_mode_plans_without_writing(homes, capsys):
+    profile, env = homes
+    fake = FakeHermes()
+    summary = prepare.prepare(
+        REPO / "orchestrator", "hermes", True, env=env, run=fake.run, check=True
+    )
+    assert summary["check"] is True
+    assert any(a.startswith("config: set approvals.mode") for a in summary["planned"])
+    assert "cron: resume watcher" in summary["planned"]
+    assert fake.sets() == {} and fake.resumed == []
+    assert not (profile / prepare.PREPARED_MARKER).exists()
+    assert not (profile / prepare.CORE_PATH_FILE).exists()
+
+
+def test_apply_skill_dirs_reports_missing_profiles(tmp_path):
+    profiles = tmp_path / "profiles"
+    (profiles / "orchestrator").mkdir(parents=True)
+    (profiles / "researcher").mkdir()
+    fake = FakeHermes()
+    env = {"IDE_RESEARCHER_PROFILES": "researcher,missing", "IDE_CORE_SRC": str(CORE_SRC)}
+    result = prepare.apply_skill_dirs(
+        profiles / "orchestrator",
+        "hermes",
+        mixin_skills_dir=tmp_path / "mixin" / "skills",
+        code_dir=tmp_path / "code",
+        env=env,
+        run=fake.run,
+    )
+    assert result["problems"] == [f"profile missing: no profile home at {profiles / 'missing'}"]
+    assert {a.split(":")[0] for a in result["applied"]} == {"orchestrator", "researcher"}
+    assert fake.config["terminal.cwd"] == str(tmp_path / "code")

@@ -76,6 +76,40 @@ RETIRED_KEYS: tuple[str, ...] = (
     "skills.external_dirs[../../games]",
 )
 
+# Shipped values that are not protected: a retained value is replaced only when it is unset or
+# equals a known earlier default, so a shipped change reaches updated profiles while a value the
+# owner chose survives (amendment A7.4).
+SHIPPED_VALUES: dict[str, Any] = {
+    "model.default": "moonshotai/kimi-k3",
+    "model.provider": "openrouter",
+    "terminal.timeout": 1800,
+    "updates.check": False,
+    "curator.prune_builtins": False,
+}
+EARLIER_DEFAULTS: dict[str, set[Any]] = {
+    "terminal.timeout": {180},
+    "model.default": {"anthropic/claude-sonnet-4", "openai/gpt-4o"},
+}
+FALLBACK_PROVIDERS: list[dict[str, str]] = [{"provider": "openrouter", "model": "z-ai/glm-5.3"}]
+# Lists the shipped config contributes to: the union of the shipped and retained entries is kept.
+ENV_PASSTHROUGH: dict[str, list[str]] = {
+    "common": [
+        "SSL_CERT_FILE",
+        "SOFTMAX_PLAYER_ID",
+        "SOFTMAX_PLAYER_CREDENTIAL",
+        "COGAMES_API_URL",
+        "SOFTMAX_CONFIG_DIR",
+        "IDE_WORKSPACE",
+        "IDE_WORKSPACE_ENV",
+        "IDE_PLATFORM",
+        "IDE_FAKE_FAULTS",
+        "OPENROUTER_MODEL",
+        "TMPDIR",
+    ],
+    "orchestrator": ["IDE_RESEARCHER_PROFILES"],
+    "researcher": [],
+}
+
 # The authored fields of the watcher job that the shipped definition owns. Everything else in
 # the live record (pause state, run history, next_run_at, ...) belongs to the store and is kept.
 WATCHER_JOB_FIELDS: tuple[str, ...] = (
@@ -160,7 +194,11 @@ class HermesCli:
     "Config key not set" when the user's file has no such key.
     """
 
+    dry_run = False
+    planned: list[str]
+
     def __init__(self, hermes: str, profile: Path, env: Mapping[str, str], run: Runner) -> None:
+        self.planned = []
         self.hermes = hermes
         self.env = {**env, "HERMES_HOME": str(profile)}
         self.run = run
@@ -182,12 +220,18 @@ class HermesCli:
         return json.loads(result.stdout)
 
     def config_set(self, key: str, value: Any) -> None:
+        if self.dry_run:
+            self.planned.append(f"config: set {key}")
+            return
         text = value if isinstance(value, str) else json.dumps(value)
         result = self._call("config", "set", key, text)
         if result.returncode != 0:
             raise _failed(result)
 
     def config_unset(self, key: str) -> bool:
+        if self.dry_run:
+            self.planned.append(f"config: unset {key}")
+            return True
         """Remove ``key`` from the user's config; False when it was not set."""
         result = self._call("config", "unset", key)
         if result.returncode == 0:
@@ -197,13 +241,104 @@ class HermesCli:
         raise _failed(result)
 
     def cron_resume(self, job_id: str) -> None:
+        if self.dry_run:
+            self.planned.append(f"cron: resume {job_id}")
+            return
         result = self._call("cron", "resume", job_id)
         if result.returncode != 0:
             raise _failed(result)
 
 
-def apply_config(hermes: HermesCli, role: str, core_src: Path) -> list[str]:
-    """Remove the retired keys, then set every protected key whose value differs."""
+def desired_profile_config(core_src: Path, role: str, active: layout.Coworld | None) -> dict:
+    """The skill directories and working directory a profile needs for the active Coworld.
+
+    Every profile of the sandbox gets the same answer (amendment A5.9): the core skills, the
+    active Coworld's mixin skills, its code repository as the trusted project (for skill
+    overrides under ``.agents/skills``) and as the terminal working directory.
+    """
+    desired: dict[str, Any] = {"skills.external_dirs": skill_dirs_for(core_src, role)}
+    if active is not None:
+        desired["skills.external_dirs"].append(str(active.mixin / "skills"))
+        desired["skills.trusted_project_dirs"] = [str(active.code)]
+        desired["terminal.cwd"] = str(active.code)
+    return desired
+
+
+def apply_skill_dirs(
+    profile_home: Path,
+    hermes: str,
+    *,
+    mixin_skills_dir: Path | None,
+    code_dir: Path | None,
+    env: Mapping[str, str],
+    run: Runner = subprocess.run,
+) -> dict[str, list[str]]:
+    """Point this profile and every Researcher profile at the active Coworld (A5.9).
+
+    Returns ``{"applied": [...], "problems": [...]}``: what was set, and the profiles that
+    could not be configured (a missing home, a failing ``hermes`` call).
+    """
+    core_src = Path(env["IDE_CORE_SRC"]) if env.get("IDE_CORE_SRC") else _core_src_of(profile_home)
+    actions: list[str] = []
+    problems: list[str] = []
+    for profile, role in profile_targets(profile_home, env):
+        if not profile.is_dir():
+            problems.append(f"profile {profile.name}: no profile home at {profile}")
+            continue
+        desired: dict[str, Any] = {"skills.external_dirs": skill_dirs_for(core_src, role)}
+        if mixin_skills_dir is not None:
+            desired["skills.external_dirs"].append(str(mixin_skills_dir))
+        if code_dir is not None:
+            desired["skills.trusted_project_dirs"] = [str(code_dir)]
+            desired["terminal.cwd"] = str(code_dir)
+        cli = HermesCli(hermes, profile, env, run)
+        try:
+            for key, value in desired.items():
+                if cli.config_get(key) != value:
+                    cli.config_set(key, value)
+                    actions.append(f"{profile.name}: set {key}")
+        except PrepareError as error:
+            problems.append(f"profile {profile.name}: {error}")
+    return {"applied": actions, "problems": problems}
+
+
+def profile_targets(profile_home: Path, env: Mapping[str, str]) -> list[tuple[Path, str]]:
+    """This profile and the Researcher profiles beside it, with their roles."""
+    role = "researcher" if profile_home.name.startswith("researcher") else "orchestrator"
+    names = [n.strip() for n in (env.get("IDE_RESEARCHER_PROFILES") or "researcher").split(",")]
+    targets = [(profile_home, role)]
+    for name in names:
+        sibling = profile_home.parent / name
+        if name and sibling.resolve() != profile_home.resolve():
+            targets.append((sibling, "researcher"))
+    return targets
+
+
+def _core_src_of(profile_home: Path) -> Path:
+    marker = profile_home / CORE_PATH_FILE
+    return Path(marker.read_text().strip()) if marker.exists() else Path("core/src").resolve()
+
+
+def active_coworld(ws: layout.Workspace) -> layout.Coworld | None:
+    """The active Coworld from the workspace store, if the store exists and one is active."""
+    if not ws.store_path.exists():
+        return None
+    from research_core.store import coworlds
+    from research_core.store.db import Store
+
+    store = Store.open(ws.store_path, kind="workspace")
+    try:
+        row = coworlds.active(store)
+    finally:
+        store.close()
+    return ws.coworld(row["coworld_id"]) if row else None
+
+
+def apply_config(
+    hermes: HermesCli, role: str, core_src: Path, active: layout.Coworld | None = None
+) -> list[str]:
+    """Remove the retired keys, set every protected key whose value differs, point the profile
+    at the active Coworld, and apply the shipped values the owner has not changed."""
     actions: list[str] = []
     for key in RETIRED_KEYS:
         name, element = _split_retired(key)
@@ -216,11 +351,25 @@ def apply_config(hermes: HermesCli, role: str, core_src: Path) -> list[str]:
             hermes.config_set(name, [item for item in current if item != element])
             actions.append(f"config: dropped {element!r} from {name}")
     desired = protected_keys_for(role)
-    desired["skills.external_dirs"] = skill_dirs_for(core_src, role)
+    desired.update(desired_profile_config(core_src, role, active))
     for key, value in desired.items():
         if hermes.config_get(key) != value:
             hermes.config_set(key, value)
             actions.append(f"config: set {key}")
+    for key, shipped in SHIPPED_VALUES.items():
+        current = hermes.config_get(key)
+        if current != shipped and (current is None or current in EARLIER_DEFAULTS.get(key, set())):
+            hermes.config_set(key, shipped)
+            actions.append(f"config: set {key} (shipped value)")
+    if hermes.config_get("fallback_providers") in (None, []):
+        hermes.config_set("fallback_providers", FALLBACK_PROVIDERS)
+        actions.append("config: set fallback_providers")
+    shipped_env = ENV_PASSTHROUGH["common"] + ENV_PASSTHROUGH.get(role, [])
+    current_env = hermes.config_get("terminal.env_passthrough") or []
+    merged = list(dict.fromkeys([*current_env, *shipped_env]))
+    if merged != current_env:
+        hermes.config_set("terminal.env_passthrough", merged)
+        actions.append("config: set terminal.env_passthrough (union)")
     return actions
 
 
@@ -356,7 +505,9 @@ def prepare(
     activate_watcher: bool,
     env: Mapping[str, str] = os.environ,
     run: Runner = subprocess.run,
-) -> None:
+    *,
+    check: bool = False,
+) -> dict[str, Any]:
     """Prepare the profile at ``$HERMES_HOME`` from the distribution folder ``source``.
 
     ``source`` is ``<checkout>/orchestrator`` or ``<checkout>/researcher``; its name is the
@@ -375,27 +526,90 @@ def prepare(
     actions: list[str] = []
 
     core_path = profile / CORE_PATH_FILE
-    core_path.parent.mkdir(parents=True, exist_ok=True)
-    core_path.write_text(str(core_src) + "\n")
+    if not check:
+        core_path.parent.mkdir(parents=True, exist_ok=True)
+        core_path.write_text(str(core_src) + "\n")
     actions.append(f"wrote {CORE_PATH_FILE}")
 
+    ws = layout.from_env(env)
+    if not check:
+        ws.ensure_dirs()
+        actions.extend(ensure_stores(ws))
+    active = active_coworld(ws)
+
     cli = HermesCli(hermes, profile, env, run)
-    actions.extend(apply_config(cli, role, core_src))
+    cli.dry_run = check
+    actions.extend(apply_config(cli, role, core_src, active))
 
     marker = profile / PREPARED_MARKER
     if role == "orchestrator":
-        actions.append(reconcile_watcher_job(profile, source))
+        if not check:
+            actions.append(reconcile_watcher_job(profile, source))
         if activate_watcher and not marker.exists():
             cli.cron_resume(WATCHER_JOB_ID)
             actions.append("cron: resumed the watcher job")
 
-    ws = layout.from_env(env)
-    ws.ensure_dirs()
+    if check:
+        actions.extend(cli.planned)
+        summary = {"role": role, "workspace": str(ws.root), "check": True, "planned": actions}
+        print(json.dumps(summary), flush=True)
+        return summary
+
     if ensure_workspace_env(checkout, ws, run=run, env=env):
         actions.append("workspace environment synced")
     else:
         actions.append("workspace environment up to date")
 
+    if role == "orchestrator" and active is None and env.get("IDE_DEFAULT_COWORLD"):
+        actions.append(bootstrap_default_coworld(ws, env, run))
+
     marker.touch()
     summary = {"role": role, "workspace": str(ws.root), "venv": str(ws.venv), "actions": actions}
     print(json.dumps(summary), flush=True)
+    return summary
+
+
+def ensure_stores(ws: layout.Workspace) -> list[str]:
+    """Create or migrate the workspace store and every registered Coworld's store."""
+    from research_core.store import coworlds
+    from research_core.store.db import Store
+
+    actions = []
+    store = Store.open(ws.store_path, kind="workspace")
+    try:
+        actions.append("workspace store ready")
+        for row in coworlds.list(store):
+            coworld = ws.coworld(row["coworld_id"])
+            coworld.ensure_dirs()
+            Store.open(coworld.store_path, kind="coworld").close()
+            actions.append(f"store ready: {row['coworld_id']}")
+    finally:
+        store.close()
+    return actions
+
+
+def bootstrap_default_coworld(ws: layout.Workspace, env: Mapping[str, str], run: Runner) -> str:
+    """Register and activate ``IDE_DEFAULT_COWORLD`` on a fresh workspace (amendment A6.4).
+
+    The switch needs the platform client, so it runs in the workspace environment; a failure
+    is reported, never fatal: the first user request selects the Coworld instead.
+    """
+    coworld_id = env["IDE_DEFAULT_COWORLD"]
+    command = [
+        str(ws.venv_python),
+        "-m",
+        "research_core.cli",
+        "coworld",
+        "switch",
+        coworld_id,
+        "--cites",
+        "IDE_DEFAULT_COWORLD",
+    ]
+    try:
+        result = run(command, env=dict(env), capture_output=True, text=True, check=False)
+    except OSError as error:
+        return f"default Coworld {coworld_id}: switch not run ({error})"
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout or "")[-500:]
+        return f"default Coworld {coworld_id}: switch failed ({tail.strip()})"
+    return f"default Coworld {coworld_id}: registered and set up started"
