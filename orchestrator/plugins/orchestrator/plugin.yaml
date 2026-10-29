@@ -5,7 +5,23 @@ author: ide-distributions
 kind: standalone
 requires_hermes: ">=0.21.6"
 # Kept in sync with the tool catalog by `python tools/build_prompts.py --manifests`.
-provides_tools: []
+provides_tools:
+  - attachment_download
+  - claim
+  - directive
+  - experiment
+  - github
+  - goal
+  - platform
+  - settings
+  - softmax_api
+  - submit
+  - task
+  - ui
+  - upload
+  - version
+  - workspace
+  - xp
 provides_hooks:
   - transform_tool_result
   - post_tool_call
