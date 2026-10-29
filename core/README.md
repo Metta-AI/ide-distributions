@@ -24,7 +24,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 |---|---|
 | `layout.py` | The workspace on disk: `tools/`, `.state/store.db`, one folder per Coworld (`code/`, `source/`, `worktrees/`, `documents/`, `.state/`). |
 | `refs.py` | The one reference parser: `G-3`, `T-42#failure`, platform ids, policy labels, URLs. |
-| `store/` | The record store: SQLite per Coworld plus a workspace store; numbered migrations; token-marked transactions with an append-only `events` table and `change_log` detection; schema check and rebuild. One module per record kind (`goals`, `tasks`, `claims`, `experiments`, `versions`, `champion`, `directives`, `settings`, `capabilities`, `intents`, `sessions`, `ui_state`, `notices`, `pins`, `coworlds`), the field `registry`, `events.KINDS`, and `cli.py` (`research store apply|export|snapshot|events`). |
+| `store/` | The record store: SQLite per Coworld plus a workspace store; numbered migrations; token-marked transactions with an append-only `events` table and `change_log` detection; schema check and rebuild. One module per record kind (`goals`, `tasks`, `claims`, `experiments`, `versions`, `champion`, `directives`, `settings`, `capabilities`, `intents`, `sessions`, `ui_state`, `notices`, `pins`, `coworlds`), the field `registry`, `events.KINDS`, and `cli.py` (`research store apply|export|snapshot|events|backup|restore-check`). |
 | `tools/` | The profile tools. `base.py` defines `ToolSpec`/`ActionSpec`/`ToolContext` and `run_tool` (validates every problem at once, never raises, scrubs store paths); `catalog.py` lists the modules and the role sets; one module per tool. |
 | `plugin/` | The Hermes plugin: `register.py` (tools, hooks, prompt sections per role), `executor.py` (in-process or workspace subprocess), `briefing.py` and `session_context.py` (prompt sections), `turn.py` (the Orchestrator's chat-turn hook: context block, notices, changed-since, away summary), `advisory.py` + `rules.py` (the never-blocking advisory hook and the last-error hook). |
 | `platform/` | The Softmax platform behind one `Platform` protocol: `real.py` on the official clients, `fake.py` (a persistent test double with fault injection), `identity.py`, `errors.py`, `wait.py` (retries, then a Task wait), `submission.py` (status ladder and the autonomous quality bar), `xp.py`, `credits.py`, `cli.py` (`research softmax`, `research platform check`). |
@@ -61,6 +61,22 @@ starts but its API server does not, and the gateway enables that server from the
 `.env`, not from the process environment. `docs/local-end-to-end.md` turns the real acceptance
 run into a local end-to-end setup: the one-command run, an interactive session that stays up
 (`IDE_E2E_KEEP=1`, optionally on the real platform), and the same inside the hosted image.
+
+## Upload recovery
+
+`tools/upload.py` sends a Version's bytes once per call and never retries the write (a retry
+could send twice when the error came after the request reached the platform). Before the first
+send it saves the exact upload inputs coworld deduplicates on (`policy_upload_inputs`: name,
+player, file hash, file size, attributes) on the `upload` intent (`intents.begin(request=...)`,
+kept under `result["request"]`). An existing intent is never sent again blindly: the tool reads
+`POST /stats/policies/lookup` (`Platform.lookup_policy_upload`) with the saved inputs, as the
+Player, which works after the local artifact is gone. A match is adopted; the platform's definite
+"no such version" (`200 null`) allows one automatic send per intent (`intents.reopen` records
+`{"lookup": "not_found"}` on the earlier attempt); a second absence, a `done` intent the platform
+no longer shows, or a lookup that errors or is refused leaves the upload unresolved: `ok: false`
+naming the intent and the inputs, a high-urgency notice, nothing sent. `user_requested: true`
+always sends again. The listing's `player_file_content_hash` is served to team callers only, so
+it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`.
 
 ## Add a tool, a record or a skill
 

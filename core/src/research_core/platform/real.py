@@ -18,6 +18,11 @@ protocol's dataclasses or plain dicts (``model_dump(mode="json")``), never pydan
 
 Routes the installed clients do not have: a policy-file download (``policy_file`` raises
 ``NotAvailable``) and the champion route (``set_champion`` posts through ``request``).
+
+Upload recovery (B.13) reads ``POST /stats/policies/lookup`` through the upload client
+(``lookup_policy_upload``) with the exact inputs ``upload_inputs`` computed before the upload
+(coworld's ``policy_upload_inputs``). The listing's hash column (``player_file_content_hash``)
+is only served to team callers, so it is not a way for a Player to find its own upload.
 """
 
 from __future__ import annotations
@@ -39,7 +44,8 @@ from coworld import api_client as coworld_api
 from coworld.api_client import CoworldApiClient
 from coworld.config import NEXT_CURSOR_HEADER
 from coworld.episode_downloads import DownloadResult, download_episodes
-from coworld.upload import CoworldUploadClient
+from coworld.player_files import InvalidPlayerFile
+from coworld.upload import CoworldUploadClient, policy_upload_inputs
 from softmax_client.auth import fetch_cogames_whoami
 from softmax_client.forum_wiki import ForumWikiClient, WikiEditConflictResponse
 from softmax_client.http import observatory_client
@@ -242,6 +248,47 @@ class RealPlatform:
             player_id=identities.player_id(self._env),
         )
 
+    def upload_inputs(self, *, name: str, artifact: Path) -> dict[str, Any]:
+        """coworld's own description of a file upload: what the platform deduplicates on.
+
+        The Player id comes from ``SOFTMAX_PLAYER_ID``, else from one ``whoami`` read: the
+        lookup route requires it, while the upload route defaults it from the token.
+        """
+        player_id = identities.player_id(self._env) or self.whoami().subject_id
+        if not player_id:
+            raise PlatformError(
+                "the Player id is unknown (SOFTMAX_PLAYER_ID is unset and whoami named none);"
+                " the upload lookup needs it",
+                retryable=False,
+            )
+        try:
+            return policy_upload_inputs(
+                artifact=artifact, name=name, player_id=player_id, image_archive=False
+            )
+        except InvalidPlayerFile as error:
+            raise PlatformError(str(error), retryable=False) from error
+
+    def lookup_policy_upload(self, inputs: dict[str, Any]) -> PolicyVersion | None:
+        """``POST /stats/policies/lookup``: the version these exact inputs made, or None.
+
+        None is an HTTP 200 with a null body: the platform's definite answer that no committed
+        version matches. A 403 (not this Player's upload), a 404 (unknown player), a 422 (bad
+        inputs) or an outage raises instead.
+        """
+        client = self._upload()
+        found = self._call(
+            "POST /stats/policies/lookup", lambda: client.lookup_policy_upload(inputs)
+        )
+        if found is None:
+            return None
+        return PolicyVersion(
+            id=found.id,
+            name=found.name,
+            version=found.version,
+            content_hash=inputs.get("file_hash"),
+            player_id=inputs.get("player_id"),
+        )
+
     def policy_versions(
         self,
         *,
@@ -253,7 +300,9 @@ class RealPlatform:
         """``GET /stats/policy-versions`` with ``name_exact`` when a name is given.
 
         coworld's ``lookup_policy_version`` sends the same query but keeps only the first row;
-        callers here need every version of a name (upload reconciliation by content hash).
+        callers here need every version of a name. The rows' ``player_file_content_hash`` is
+        served to team callers only: a Player sees ``content_hash`` None (upload recovery goes
+        through :meth:`lookup_policy_upload` instead).
         """
         http = self._http(identity)
         params: dict[str, str | int] = {"mine": str(mine).lower(), "limit": PAGE_SIZE}
@@ -726,7 +775,7 @@ def _policy_version_row(row: coworld_api.PolicyVersionRow) -> PolicyVersion:
         id=str(row.id),
         name=row.name,
         version=row.version,
-        content_hash=extra.get("content_hash"),
+        content_hash=extra.get("player_file_content_hash"),
         player_id=extra.get("player_id"),
         created_at=extra.get("created_at"),
     )

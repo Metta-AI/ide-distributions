@@ -33,6 +33,9 @@ Faults come from ``IDE_FAKE_FAULTS`` (semicolon-separated ``name=value``):
 - ``fail_after=<op>``: ``RuntimeError`` after that operation persisted its change.
 - ``xp_limit=N``: a new XP request raises a retryable 429 once ``N`` exist.
 - ``upload=503:N``: the first ``N`` uploads raise a retryable 503 (``upload=503`` means one).
+- ``lookup=503``: ``lookup_policy_upload`` raises a retryable 503; ``lookup=403``: it is
+  refused; ``lookup=unavailable``: it raises ``NotAvailable`` (a client without the route);
+  ``lookup=not_found``: it answers no match whatever the platform holds.
 - ``submit=409``: ``submit`` raises a 409.
 - ``champion=<policy version id>``: on the next ``memberships`` read the champion flips to
   that policy version, as if the user changed it on the website.
@@ -56,7 +59,12 @@ from pathlib import Path
 from typing import Any
 
 from research_core.locks import file_lock
-from research_core.platform.errors import CreditsRefused, IdentityUnavailable, PlatformError
+from research_core.platform.errors import (
+    CreditsRefused,
+    IdentityUnavailable,
+    NotAvailable,
+    PlatformError,
+)
 from research_core.platform.protocol import (
     AutoChampion,
     Credits,
@@ -389,6 +397,44 @@ class FakePlatform:
 
         if self._operate("upload_fault", action):
             raise PlatformError("upload failed (fake fault)", route=route, status=503)
+
+    def upload_inputs(self, *, name: str, artifact: Path) -> dict[str, Any]:
+        """The shape coworld 0.1.67's ``policy_upload_inputs`` gives a single file."""
+        content = Path(artifact).read_bytes()
+        return {
+            "name": name,
+            "player_id": self.player_id,
+            "file_hash": hashlib.sha256(content).hexdigest(),
+            "file_size": len(content),
+            "attributes": {},
+        }
+
+    def lookup_policy_upload(self, inputs: dict[str, Any]) -> PolicyVersion | None:
+        """The stored version with these exact inputs (name, player, hash, size), or None."""
+        route = "POST /stats/policies/lookup"
+        fault = self._faults.get("lookup")
+        if fault == "503":
+            raise PlatformError("lookup failed (fake fault)", route=route, status=503)
+        if fault == "403":
+            raise PlatformError("not this Player's upload (fake fault)", route=route, status=403)
+        if fault == "unavailable":
+            raise NotAvailable("the client has no lookup route (fake fault)", route=route)
+
+        def action(state: dict) -> PolicyVersion | None:
+            if fault == "not_found":
+                return None
+            for row in state["policies"].values():
+                size = len(base64.b64decode(row["content_b64"]))
+                if (
+                    row["name"] == inputs.get("name")
+                    and row["player_id"] == inputs.get("player_id")
+                    and row["content_hash"] == inputs.get("file_hash")
+                    and size == inputs.get("file_size")
+                ):
+                    return self._policy_version(row)
+            return None
+
+        return self._operate("lookup_policy_upload", action, persist=False)
 
     def policy_versions(
         self,

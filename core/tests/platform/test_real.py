@@ -22,6 +22,7 @@ from research_core.platform.errors import (
     NotAvailable,
     PlatformError,
 )
+from research_core.platform.fake import FakePlatform
 from research_core.platform.protocol import with_retries
 from research_core.platform.real import RealPlatform
 
@@ -641,8 +642,76 @@ def test_submissions(platform, server):
     assert params["league_id"] == "league_1" and params["mine"] == "true"
 
 
+def test_lookup_policy_upload_answers(platform, server):
+    inputs = {
+        "name": "best",
+        "player_id": "ply_me",
+        "file_hash": "a" * 64,
+        "file_size": 3,
+        "attributes": {},
+    }
+    server.on(
+        "POST",
+        "/observatory/stats/policies/lookup",
+        reply(content=b"null"),  # the platform's definite "no committed version matches"
+        reply(json={"id": "pv_1", "name": "best", "version": 2}),
+        reply(403, json={"detail": "not this player's upload"}),
+    )
+    assert platform.lookup_policy_upload(inputs) is None
+    found = platform.lookup_policy_upload(inputs)
+    assert found.id == "pv_1" and found.label == "best:v2"
+    assert found.content_hash == "a" * 64 and found.player_id == "ply_me"
+    with pytest.raises(PlatformError) as info:
+        platform.lookup_policy_upload(inputs)
+    assert info.value.status == 403 and not info.value.retryable
+    assert "not this player's upload" in info.value.detail
+    assert server.body(0) == inputs
+    assert server.calls[0].headers["authorization"] == "Bearer cga_player"
+
+
+def test_upload_inputs_are_coworlds_and_the_fake_matches(platform, server, tmp_path):
+    content = b'{"patience": 3}'
+    artifact = tmp_path / "policy.json"
+    artifact.write_bytes(content)
+    inputs = platform.upload_inputs(name="best", artifact=artifact)
+    assert inputs == {
+        "name": "best",
+        "player_id": "ply_me",
+        "file_hash": hashlib.sha256(content).hexdigest(),
+        "file_size": len(content),
+        "attributes": {},
+    }
+    fake = FakePlatform(tmp_path / "fake.json", {"SOFTMAX_PLAYER_ID": "ply_me"})
+    assert fake.upload_inputs(name="best", artifact=artifact) == inputs
+    assert server.calls == []
+
+
+def test_upload_inputs_read_the_player_id_when_the_env_has_none(server, env, tmp_path):
+    artifact = tmp_path / "policy.json"
+    artifact.write_bytes(b"x")
+    me = {
+        "user_email": "me@example.test",
+        "subject_type": "player",
+        "subject_id": "ply_from_token",
+        "owner_user_id": "user_1",
+    }
+    server.on("GET", "/observatory/whoami", reply(json=me))
+    without_id = {k: v for k, v in env.items() if k != "SOFTMAX_PLAYER_ID"}
+    with RealPlatform(without_id) as platform:
+        inputs = platform.upload_inputs(name="best", artifact=artifact)
+    assert inputs["player_id"] == "ply_from_token" and inputs["file_size"] == 1
+    assert server.paths() == ["GET /observatory/whoami"]
+
+
 def test_policy_versions_by_name_paginate(platform, server):
-    row1 = {"id": PV_ID, "name": "best", "version": 3, "content_hash": "abc", "player_id": "ply_me"}
+    # The listing's hash column is ``player_file_content_hash`` (team callers only).
+    row1 = {
+        "id": PV_ID,
+        "name": "best",
+        "version": 3,
+        "player_file_content_hash": "abc",
+        "player_id": "ply_me",
+    }
     row2 = {"id": PV2_ID, "name": "best", "version": 2}
     server.on(
         "GET",

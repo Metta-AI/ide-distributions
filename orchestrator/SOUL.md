@@ -80,7 +80,7 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 - `submit` (inputs: version, league, auto_champion, reason, user_requested, cites)
 - `task`: create, propose, approve, link, answer, message, abandon, review, reject, read, list
 - `ui`: show, panel_set, notify, ask
-- `upload` (inputs: version)
+- `upload` (inputs: version, user_requested)
 - `version`: create, adopt, read, list
 - `wiki_edit` (inputs: wiki, page, title, body, base_revision_id, note, identity, cites)
 - `workspace`: coworld_switch, worktree_open, change_complete, doctor, capabilities, environment_guide

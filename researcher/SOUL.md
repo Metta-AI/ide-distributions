@@ -74,7 +74,7 @@ Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables
 - `settings`: read
 - `softmax_api` (inputs: method, path, params, json, identity)
 - `task`: propose, claim, wait, ask, complete, release, propose_submission, read, list
-- `upload` (inputs: version)
+- `upload` (inputs: version, user_requested)
 - `version`: create, adopt, read, list
 - `wiki_edit` (inputs: wiki, page, title, body, base_revision_id, note, identity, cites)
 - `workspace`: doctor, capabilities, environment_guide

@@ -9,7 +9,12 @@ import yaml
 
 from research_core import platform as platform_pkg
 from research_core.platform import fake
-from research_core.platform.errors import CreditsRefused, IdentityUnavailable, PlatformError
+from research_core.platform.errors import (
+    CreditsRefused,
+    IdentityUnavailable,
+    NotAvailable,
+    PlatformError,
+)
 from research_core.platform.fake import FakePlatform
 from research_core.platform.protocol import with_retries
 from tests.fixtures.fakegame_repo import SKILL_NAMES, STARTER_POLICY, make_fakegame_repo
@@ -116,6 +121,36 @@ def test_upload_returns_the_sha256_and_stores_the_bytes(tmp_path):
     with pytest.raises(PlatformError) as info:
         platform.policy_file("pv_missing")
     assert info.value.status == 404 and not info.value.retryable
+
+
+def test_lookup_policy_upload_matches_the_saved_inputs(tmp_path):
+    platform = make(tmp_path)
+    content = policy_bytes(3, 5)
+    artifact = tmp_path / "policy.json"
+    artifact.write_bytes(content)
+    inputs = platform.upload_inputs(name="starter", artifact=artifact)
+    assert inputs == {
+        "name": "starter",
+        "player_id": fake.DEFAULT_PLAYER_ID,
+        "file_hash": hashlib.sha256(content).hexdigest(),
+        "file_size": len(content),
+        "attributes": {},
+    }
+    assert platform.lookup_policy_upload(inputs) is None
+    uploaded = platform.upload_file_policy(name="starter", content=content)
+    assert platform.lookup_policy_upload(inputs) == uploaded
+    assert platform.lookup_policy_upload({**inputs, "name": "other"}) is None
+    assert platform.lookup_policy_upload({**inputs, "file_size": 1}) is None
+    assert platform.lookup_policy_upload({**inputs, "player_id": "ply_other"}) is None
+    # Faults: no match while the version exists, errors and a client without the route.
+    assert make(tmp_path, "lookup=not_found").lookup_policy_upload(inputs) is None
+    for fault, status in (("lookup=503", 503), ("lookup=403", 403), ("platform=down", 503)):
+        with pytest.raises(PlatformError) as info:
+            make(tmp_path, fault).lookup_policy_upload(inputs)
+        assert info.value.status == status
+    with pytest.raises(NotAvailable):
+        make(tmp_path, "lookup=unavailable").lookup_policy_upload(inputs)
+    assert platform.snapshot()["counts"]["upload"] == 1
 
 
 # --- submissions, memberships, champion -----------------------------------------------------------

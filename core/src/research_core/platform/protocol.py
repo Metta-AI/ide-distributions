@@ -121,6 +121,22 @@ class Platform(Protocol):
         identity: Identity = "player",
     ) -> list[PolicyVersion]: ...
 
+    def upload_inputs(self, *, name: str, artifact: Path) -> dict[str, Any]:
+        """The exact inputs a file upload of ``artifact`` under ``name`` is deduplicated on.
+
+        For a file: ``{name, player_id, file_hash, file_size, attributes}``, the dict
+        :meth:`lookup_policy_upload` takes. Computed locally (the Player id may need one read).
+        """
+        ...
+
+    def lookup_policy_upload(self, inputs: dict[str, Any]) -> PolicyVersion | None:
+        """The published policy version these exact upload inputs produced, read-only.
+
+        ``None`` is the platform's definite answer that no committed version matches. A refusal
+        or an outage raises ``PlatformError`` instead: not knowing is not the same as ``None``.
+        """
+        ...
+
     def policy_file(self, policy_version_id: str, identity: Identity = "player") -> bytes: ...
 
     def leagues(self, *, game_id: str | None = None) -> list[League]: ...
