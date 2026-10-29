@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import research_core.tools.workspace  # noqa: F401  (registers the tool)
 from research_core import environment_guide, gitops
@@ -180,3 +181,35 @@ def test_coworld_switch_through_the_tool(call, ctx_factory, tmp_path):
         "workspace", {"action": "coworld_switch", "coworld": "cow_fake"}, role="researcher"
     )
     assert researcher["ok"] is False and "not available to the researcher" in researcher["error"]
+
+
+def test_change_complete_makes_a_reviewed_maintenance_task(call, ctx_factory):
+    from research_core import gitops
+    from research_core.store import tasks
+
+    ctx = ctx_factory("orchestrator", session_id="chat1")
+    code = ctx.coworld().code
+    if not (code / ".git").exists():
+        gitops.init_repo(code)
+    opened = call("workspace", {"action": "worktree_open"})
+    assert opened["ok"] is True, opened
+    worktree = Path(opened["worktree"] if "worktree" in opened else opened["path"])
+    (worktree / "note.md").write_text("a change\n")
+    sha = gitops.commit_all(worktree, "Add a note")
+    done = call(
+        "workspace",
+        {"action": "change_complete", "worktree": worktree.name, "summary": "Add a note to main"},
+    )
+    assert done["ok"] is True, done
+    record = done["record"]
+    assert record["type"] == "maintenance" and record["status"] == "complete"
+    assert record["completed_commit"] == sha and record["goal_id"] is None
+    task_id = int(record["id"].split("-")[-1])
+    assert tasks.read(ctx.store, task_id)["merge"] in ("pending", None)
+    kinds = [row["kind"] for row in ctx.store.q("SELECT kind FROM events ORDER BY seq")]
+    assert "task.completed" in kinds
+    refused = call(
+        "workspace",
+        {"action": "change_complete", "worktree": "/elsewhere", "summary": "x"},
+    )
+    assert refused["ok"] is False

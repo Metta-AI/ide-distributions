@@ -46,6 +46,10 @@ def handle(call: ToolCall) -> dict:
         )
     if call.action == "worktree_open":
         return open_worktree(ctx, call.get("name"))
+    if call.action == "change_complete":
+        return complete_change(
+            ctx, call.get("worktree"), call.get("commit"), call.get("summary") or ""
+        )
     if call.action == "doctor":
         return doctor(ctx)
     if call.action == "capabilities":
@@ -53,6 +57,86 @@ def handle(call: ToolCall) -> dict:
     if call.action == "environment_guide":
         return {"guide": environment_guide.render(ctx)}
     raise AssertionError(call.action)
+
+
+# --- change_complete --------------------------------------------------------------------------
+
+
+def complete_change(ctx: ToolContext, worktree: Any, commit: Any, summary: str) -> dict[str, Any]:
+    """Send an Orchestrator worktree change through review and merge (design B.12, A3.6).
+
+    The change becomes a goal-less ``maintenance`` Task held by this Session, completed at the
+    given commit with a merge request, so the review wake and the mechanical merge reuse the
+    Task path unchanged.
+    """
+    from research_core import gitops
+    from research_core.store import sessions, tasks
+
+    coworld = ctx.coworld()
+    if not ctx.hermes_session_id():
+        raise ToolError("change_complete needs a Session (IDE_SESSION_ID is not set)")
+    if not summary.strip():
+        raise ToolError("summary is required: what the change does and why")
+    path = Path(str(worktree or "")).expanduser()
+    if not path.is_absolute():
+        path = coworld.worktrees / path
+    if coworld.worktrees not in path.resolve().parents or not (path / ".git").exists():
+        raise ToolError(
+            f"worktree must be one of this Coworld's worktrees (under {coworld.worktrees}); "
+            "open one with workspace.worktree_open"
+        )
+    branch = gitops.current_branch(path)
+    sha = str(commit or "").strip() or gitops.rev_parse(path, "HEAD")
+    if not branch or not gitops.commit_on_branch(coworld.code, sha, branch):
+        raise ToolError(f"commit {sha[:12]} is not on the worktree's branch {branch!r}")
+    if gitops.dirty_files(path):
+        raise ToolError(
+            "the worktree has uncommitted changes; commit them first",
+            dirty=gitops.dirty_files(path)[:20],
+        )
+    actor = ctx.actor
+    session = sessions.read(ctx.wstore, ctx.hermes_session_id())
+    if session is None:
+        sessions.register(
+            ctx.wstore,
+            actor,
+            session_id=ctx.hermes_session_id(),
+            profile=str(ctx.env.get("HERMES_PROFILE_NAME") or ctx.role),
+            kind="chat",
+            coworld_id=coworld.coworld_id,
+        )
+    task = tasks.create(
+        ctx.store,
+        actor,
+        type="maintenance",
+        title=f"Orchestrator change: {summary.strip().splitlines()[0][:80]}",
+        description=summary,
+        goal_id=None,
+        for_human=summary.strip().splitlines()[0][:200],
+    )
+    task_id = int(str(task["id"]).split("-")[-1])
+    tasks.claim(
+        ctx.store,
+        actor,
+        task_id,
+        run_id=(session or {}).get("run_id"),
+        worktree=str(path),
+        branch=branch,
+        kind="change",
+    )
+    record = tasks.complete(
+        ctx.store,
+        actor,
+        task_id,
+        checklist={"commit": sha, "summary": summary},
+        commit=sha,
+        merge_request="yes",
+        result=summary,
+    )
+    return {
+        "record": record,
+        "next": "the review wake judges the change and the watcher merges it into main",
+    }
 
 
 # --- worktree_open ----------------------------------------------------------------------------
@@ -289,6 +373,17 @@ SPEC = tool(
                 "Open worktrees/orch-<n> on branch orch/<n> from main for a change of your own.",
                 {"name": a.string("An existing change worktree to reopen, such as orch-2.")},
                 (),
+                ORCHESTRATOR,
+            ),
+            ActionSpec(
+                "change_complete",
+                "Send a change made in your own worktree through review and merge.",
+                {
+                    "worktree": a.string("The worktree path or name, such as orch-1."),
+                    "commit": a.string("The commit to merge; defaults to the worktree's HEAD."),
+                    "summary": a.string("What the change does and why."),
+                },
+                ("worktree", "summary"),
                 ORCHESTRATOR,
             ),
             ActionSpec("doctor", "Health facts and problems: commits, watcher, stores, CLIs."),
