@@ -111,3 +111,17 @@ There is no polling process, platform receipt table, or source-retention depende
 
 Requires the released Coworld `policy-lookup` command and its platform lookup endpoint.
 Deploy that endpoint, release Coworld, then update the profile locks before shipping this runtime.
+
+### Background activity and autosleep
+
+Hosts may run `scripts/activity.py` in the installed orchestrator profile with its normal
+profile environment. It prints `{"waiting_on": ["reason", ...]}` without polling external
+research services or changing local records. Nonempty results prevent automatic sleep;
+empty results permit it. Command failure or invalid output must prevent automatic sleep.
+Explicit user stops may suspend durable waits.
+
+The current supervisor requires an awake workspace while ended cards await external work,
+champion submission publication remains pending, a champion awaits its first league result,
+or the native coordinator inbox contains recoverable input. Pausing the supervisor explicitly
+permits sleeping through those waits. This read-only contract does not replace the supervisor
+or introduce platform-owned operational state.

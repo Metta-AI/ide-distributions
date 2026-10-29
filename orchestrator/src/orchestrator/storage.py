@@ -77,7 +77,9 @@ def mark_league_result_seen(context, submission_id):
 
 
 def _keys(context, prefix):
-    with closing(open_storage(context.storage_path)) as conn:
+    if not context.storage_path.exists():
+        return []
+    with closing(sqlite3.connect(f"{context.storage_path.as_uri()}?mode=ro", uri=True)) as conn:
         return conn.execute(
             "SELECT key, value FROM coordinator WHERE substr(key, 1, ?) = ?", (len(prefix), prefix)
         ).fetchall()
