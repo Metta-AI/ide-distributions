@@ -33,7 +33,9 @@ def error_result(message: str, **context: Any) -> str:
     return json.dumps({"ok": False, "error": message, "problems": [message], "context": context})
 
 
-def run_in_workspace(name: str, args: dict, env: dict[str, str]) -> str:
+def run_in_workspace(
+    name: str, args: dict, env: dict[str, str], timeout_s: int | None = None
+) -> str:
     ws = layout.from_env(env)
     python = ws.venv_python
     if not python.exists():
@@ -42,12 +44,13 @@ def run_in_workspace(name: str, args: dict, env: dict[str, str]) -> str:
             expected=str(python),
         )
     command = [str(python), "-m", "research_core.cli", "tool", name, "--args", json.dumps(args)]
+    timeout = timeout_s or TOOL_TIMEOUT_S
     try:
         completed = subprocess.run(
-            command, env=env, capture_output=True, text=True, timeout=TOOL_TIMEOUT_S, check=False
+            command, env=env, capture_output=True, text=True, timeout=timeout, check=False
         )
     except subprocess.TimeoutExpired:
-        return error_result(f"tool {name} timed out after {TOOL_TIMEOUT_S} s", command=command)
+        return error_result(f"tool {name} timed out after {timeout} s", command=command)
     stdout = completed.stdout.strip()
     if completed.returncode != 0 or not stdout:
         return error_result(
@@ -69,7 +72,7 @@ def make_handler(spec: Any, role: Role) -> Callable[..., str]:
                 from research_core.tools.base import ToolContext, run_tool
 
                 return run_tool(spec.name, args, ToolContext.from_env(role, env))
-            return run_in_workspace(spec.name, args, env)
+            return run_in_workspace(spec.name, args, env, spec.timeout_s)
         except Exception as error:  # never raise into Hermes
             return error_result(f"{type(error).__name__}: {error}", tool=spec.name)
 
