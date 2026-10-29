@@ -1,0 +1,44 @@
+# Refresh the platform client pins daily (design H "CLI freshness"): nothing else refreshes
+# uv.lock, so the profiles would otherwise run an ageing coworld and softmax-cli. The pull
+# request merges on green CI, which releases the hosted image.
+name: Refresh the platform CLI lock
+
+on:
+  schedule:
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Upgrade coworld and softmax-cli within their ranges
+        run: uv lock --upgrade-package coworld --upgrade-package softmax-cli
+      - name: Open a pull request when the lock changed
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bot/lock-refresh
+          title: Refresh the coworld and softmax-cli lock
+          commit-message: |
+            Refresh the coworld and softmax-cli lock
+
+            Daily lock refresh within the declared version ranges.
+          body: |
+            Daily refresh of `uv.lock` for `coworld` and `softmax-cli` within the ranges in
+            `core/pyproject.toml`. Merges automatically when CI is green.
+          labels: dependencies
+          delete-branch: true
+      - name: Enable auto-merge
+        if: steps.pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr merge --auto --squash "${{ steps.pr.outputs.pull-request-number }}"

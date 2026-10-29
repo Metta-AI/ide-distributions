@@ -1,3 +1,10 @@
+> **Being rewritten.** The research distributions are being rebuilt per
+> [the IDE profile refactor design](designs/ide-profile-refactor-2026-10-28-final.html); the
+> implementation plan is in [`plans/ide-profile-refactor/`](plans/ide-profile-refactor/00-overview.md),
+> whose overview lists what the new layout needs from hosting (a shared `IDE_WORKSPACE`, the
+> `core/` package and root lock in the release archive, the `prepare.py` contract). The text
+> below describes the retired profiles and is replaced in the last entry of that plan.
+
 # Hosting research distributions
 
 Metta hosts these distributions. The distribution owns research roles, tools, skills, acceptance,

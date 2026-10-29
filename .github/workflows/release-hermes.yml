@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
     paths:
+      - "core/**"
       - "orchestrator/**"
       - "researcher/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/release-hermes.yml"
   workflow_dispatch:
 
