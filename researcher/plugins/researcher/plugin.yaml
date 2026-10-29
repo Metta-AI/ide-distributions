@@ -9,6 +9,7 @@ provides_tools:
   - claim
   - directive
   - experiment
+  - forum_post
   - goal
   - platform
   - settings
@@ -16,6 +17,7 @@ provides_tools:
   - task
   - upload
   - version
+  - wiki_edit
   - workspace
   - xp
 provides_hooks:

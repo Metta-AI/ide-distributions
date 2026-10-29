@@ -71,6 +71,7 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 - `claim`: search, read, write, add_evidence, retire, inspect_evidence
 - `directive`: add, update, retire, list
 - `experiment`: create, read, search, update, start, add_run, update_run, close, abandon
+- `forum_post`: post, comment
 - `github`: repositories, clone
 - `goal`: create, update, set_status, read, list
 - `platform`: leagues, league, divisions, standings, active_policies, policy_versions, policy_file, results, episodes, episode, replay, credits, champion, forum_list, forum_read, forum_search, wiki_read, wiki_search, wiki_history, coworld
@@ -81,6 +82,7 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 - `ui`: show, panel_set, notify, ask
 - `upload` (inputs: version)
 - `version`: create, adopt, read, list
+- `wiki_edit` (inputs: wiki, page, title, body, base_revision_id, note, identity, cites)
 - `workspace`: coworld_switch, worktree_open, doctor, capabilities, environment_guide
 - `xp`: request, status
 
@@ -102,7 +104,7 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 
 **Capability** (one per capability). One checked capability: a mixin command, a platform login, GitHub access or a build route. Statuses: unknown, ok, broken. Written by `workspace.capabilities` and the watcher's checks.
 
-**Intent** (I-n). One external action, recorded before the platform call and reconciled before any retry. States: pending, done, failed. Written by `upload`, `submit` and `xp`.
+**Intent** (I-n). One external action, recorded before the platform call and reconciled before any retry. States: pending, done, failed. Written by `upload`, `submit`, `xp`, `forum_post` and `wiki_edit`.
 
 **Notice** (N-n). A message to the user through ui.notify; it informs and never asks. Written by `ui.notify` and the watcher.
 

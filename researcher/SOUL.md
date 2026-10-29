@@ -68,6 +68,7 @@ Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables
 - `claim`: search, read, write, add_evidence, retire, inspect_evidence
 - `directive`: list
 - `experiment`: create, read, search, update, start, add_run, update_run, close, abandon
+- `forum_post`: post, comment
 - `goal`: read, list
 - `platform`: leagues, league, divisions, standings, active_policies, policy_versions, policy_file, results, episodes, episode, replay, credits, champion, forum_list, forum_read, forum_search, wiki_read, wiki_search, wiki_history, coworld
 - `settings`: read
@@ -75,6 +76,7 @@ Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables
 - `task`: propose, claim, wait, ask, complete, release, propose_submission, read, list
 - `upload` (inputs: version)
 - `version`: create, adopt, read, list
+- `wiki_edit` (inputs: wiki, page, title, body, base_revision_id, note, identity, cites)
 - `workspace`: doctor, capabilities, environment_guide
 - `xp`: request, status
 
@@ -96,7 +98,7 @@ Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables
 
 **Capability** (one per capability). One checked capability: a mixin command, a platform login, GitHub access or a build route. Statuses: unknown, ok, broken. Written by `workspace.capabilities` and the watcher's checks.
 
-**Intent** (I-n). One external action, recorded before the platform call and reconciled before any retry. States: pending, done, failed. Written by `upload` and `xp`.
+**Intent** (I-n). One external action, recorded before the platform call and reconciled before any retry. States: pending, done, failed. Written by `upload`, `xp`, `forum_post` and `wiki_edit`.
 
 **Notice** (N-n). A message to the user through ui.notify; it informs and never asks. Written by the Orchestrator and the watcher.
 
