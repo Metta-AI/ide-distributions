@@ -95,6 +95,9 @@ HANDLERS: dict[str, Handler] = {
         _wake("task.proposed", "management"),
         _wake("task.proposed_submission", "management"),
         _wake("merge.failed", "management"),
+        # A merged Version the Researcher marked as a submission candidate: the Orchestrator
+        # decides under the submissions settings and the quality bar (now met on the merge).
+        _wake("submission.candidate", "management"),
         _function("task.wait_resolved", "research_core.watcher.resume:handle_wait_resolved"),
         _function("capability.failed", "research_core.watcher.checks:handle_capability_failed"),
         # After the second failed repair the user hears about it through a notice.

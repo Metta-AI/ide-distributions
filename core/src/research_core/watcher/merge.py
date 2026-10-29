@@ -96,6 +96,20 @@ def integrate(ctx: TickContext, task: dict[str, Any]) -> dict[str, Any]:
         reason = failure.pop("reason")
         return _fail(ctx, task, reason, **failure)
     tasks.set_merge(ctx.store, ctx.actor, task["id"], f"merged {new_tip}")
+    if _submission_candidate(task):
+        emit_event(
+            ctx.store,
+            ctx.actor,
+            "submission.candidate",
+            task["id"],
+            {
+                "task": task["id"],
+                "commit": commit,
+                "merge_commit": new_tip,
+                "versions": list((task.get("checklist") or {}).get("versions") or []),
+                "reason": task.get("submission_reason") or "",
+            },
+        )
     return {
         "outcome": "merged",
         "task": task["id"],
@@ -160,6 +174,16 @@ def temporary_worktree(repo: Path, path: Path, commit: str) -> Iterator[Path]:
 
 
 # --- helpers ---------------------------------------------------------------------------------
+
+
+def _submission_candidate(task: dict[str, Any]) -> bool:
+    """Whether the Researcher answered ``submission_candidate: yes`` for this Task. The quality
+    bar for a submission on the Orchestrator's own initiative needs the Version merged into
+    ``main``, so the decision can only be taken once the merge landed (design B.6)."""
+    checklist = task.get("checklist") or {}
+    return (
+        checklist.get("submission_candidate") == "yes" or task.get("submission_candidate") == "yes"
+    )
 
 
 def _fail(ctx: TickContext, task: dict[str, Any], reason: str, **extra: Any) -> dict[str, Any]:

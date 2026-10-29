@@ -5,9 +5,20 @@ from __future__ import annotations
 
 from research_core import gitops
 from research_core.store import tasks
+from research_core.store.actors import Actor
 from research_core.watcher import merge
-from tests.watcher._support import events_of, make_ctx, make_task, set_setting, task_number
+from tests.watcher._support import (
+    HARNESS,
+    claim,
+    events_of,
+    make_ctx,
+    make_task,
+    register_session,
+    set_setting,
+    task_number,
+)
 from tests.watcher._support_w3 import (
+    SESSION,
     branch_commit,
     policy_text,
     reviewed_task,
@@ -148,3 +159,41 @@ def make_task_on_branch(ctx, *, aggression, patience) -> dict:
     task = make_task(ctx, type="maintenance", title="Tune the starter")
     sha = branch_commit(ctx, task_number(task), aggression, patience)
     return reviewed_task(ctx, commit=sha, task=task)
+
+
+def test_merging_a_submission_candidate_wakes_the_orchestrator(tmp_path):
+    """A merged Version the Researcher marked as a candidate emits ``submission.candidate``:
+    the quality bar needs the merge, so the decision is only possible now."""
+    ctx = make_ctx(tmp_path)
+    setup_code_repo(ctx)
+    task = make_task(ctx, type="maintenance", title="Raise aggression")
+    n = task_number(task)
+    sha = branch_commit(ctx, n, 5, 5)
+    register_session(ctx, SESSION, task)
+    claim(ctx, SESSION, task)
+    tasks.complete(
+        ctx.store,
+        Actor.session(SESSION),
+        n,
+        checklist={"commit": sha, "summary": "raised aggression", "submission_candidate": "yes"},
+        commit=sha,
+        merge_request="yes",
+        submission_candidate="yes",
+        result="the tuned policy beats the champion",
+    )
+    tasks.review(ctx.store, HARNESS, n, accept=True, merge="yes", reason="confirmed")
+
+    report = merge.run(ctx)
+
+    assert [entry["task"] for entry in report["merged"]] == [task["id"]]
+    candidates = events_of(ctx.store, "submission.candidate")
+    assert [e["payload"]["task"] for e in candidates] == [task["id"]]
+    assert candidates[0]["payload"]["merge_commit"] == gitops.rev_parse(ctx.coworld.code, "main")
+    assert events_of(ctx.store, "task.merged")  # the plain merge event is still there
+    # A merge without the candidate answer emits nothing extra.
+    other = make_task_on_branch(ctx, aggression=6, patience=6)
+    merge.run(ctx)
+    assert [e["payload"]["task"] for e in events_of(ctx.store, "submission.candidate")] == [
+        task["id"]
+    ]
+    assert other["id"] in [e["subject"] for e in events_of(ctx.store, "task.merged")]

@@ -61,9 +61,9 @@ now rather than leaving it to the next wake.
 3. Mode `autonomous` and the Version already merged: `submit {version, league, reason}`, then
    `ui.notify` the result.
 4. Mode `autonomous` but the merge you just approved has not landed: you cannot submit in this
-   wake. Say in `reason` and in a `ui.notify` that V-n is a candidate pending merge; the next
-   Orchestrator Session that sees it merged (the briefing lists recent Versions with their
-   status) submits it under the same rule.
+   wake. Say in `reason` that V-n is a candidate pending merge. The watcher merges it within
+   minutes and wakes a management Session (event `submission.candidate`), which submits it
+   under the same rule.
 5. Mode `ask`: `ui.ask {question, options, refs: ["V-n", "X-n"]}` with what the Experiment
    showed; the answer arrives as a UI action in a later Session.
 6. Mode `never`, or the bar fails: `ui.notify` why, with the ids, so the user can ask for it in

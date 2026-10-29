@@ -19,6 +19,10 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
 - `task.proposed_submission`: apply the `submissions.*` settings and the quality bar; `submit`
   when they allow it, `ui.ask` when the mode is `ask`, otherwise tell the Researcher why not
   with `task.message`.
+- `submission.candidate`: the watcher merged a Version the Researcher marked as a submission
+  candidate, so the quality bar can now be met. `version.read` it, then `submit` it when the
+  `submissions.*` settings allow it (the tool applies the bar and names each shortfall),
+  `ui.ask` when the mode is `ask`, otherwise `ui.notify` why it stays unsubmitted.
 - `merge.failed`: resolve the conflict in your own worktree and finish it with
   `workspace.change_complete`, or open a maintenance Task with `task.create`, or explain the
   problem to the user with `ui.notify`.

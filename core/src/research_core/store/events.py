@@ -46,6 +46,7 @@ KINDS: frozenset[str] = frozenset(
         "task.reviewed",
         "task.abandoned",
         "task.merged",
+        "submission.candidate",
         "task.proposed_submission",
         "task.stuck",
         "claim.created",
