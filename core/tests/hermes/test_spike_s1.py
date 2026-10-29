@@ -106,6 +106,21 @@ class Host:
     def profile_env(self, role: str) -> dict[str, str]:
         return {**self.base_env(), "HERMES_HOME": str(self.profile(role))}
 
+    def write_host_dotenv(self) -> None:
+        """The host home's ``.env``: the gateway enables its API server from the default home's
+        ``.env``, not from the process environment, and multiplexes the profiles from there."""
+        lines = {
+            "API_SERVER_ENABLED": "true",
+            "API_SERVER_HOST": "127.0.0.1",
+            "API_SERVER_PORT": str(self.port),
+            "API_SERVER_KEY": self.key,
+            "OPENROUTER_API_KEY": self.openrouter_key,
+            "GATEWAY_MULTIPLEX_PROFILES": "true",
+            "IDE_WORKSPACE": str(self.workspace),
+            "IDE_PLATFORM": "fake",
+        }
+        (self.home / ".env").write_text("\n".join(f"{k}={v}" for k, v in lines.items()) + "\n")
+
     def write_dotenv(self, role: str) -> None:
         """The same API key into every profile's ``.env`` (A5.8), plus the model key."""
         lines = {
@@ -189,6 +204,7 @@ def host(tmp_path_factory, hermes_bin, openrouter_key) -> Host:
         log=root / "gateway.log",
     )
     host.home.mkdir()
+    host.write_host_dotenv()
     install_env = {**os.environ, "HERMES_HOME": str(host.home)}
     started = time.monotonic()
     for role in ("orchestrator", "researcher"):

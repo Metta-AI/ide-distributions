@@ -53,7 +53,10 @@ The fake platform (`IDE_PLATFORM=fake`) needs no network; the `hermes`-marked te
 profiles into a temporary Hermes home; the dispatch spike and the real acceptance run also need
 an OpenRouter key. Hermes v0.21.6 needs Python 3.14 for its own dependencies, so a local
 `HERMES_BIN` is easiest to get from an isolated environment of the Hermes checkout
-(`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev`, then `<somewhere>/bin/hermes`).
+(`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev --extra messaging`, then
+`<somewhere>/bin/hermes`); the `messaging` extra brings `aiohttp`, without which the gateway
+starts but its API server does not, and the gateway enables that server from the home's
+`.env`, not from the process environment.
 
 ## Add a tool, a record or a skill
 

@@ -60,6 +60,7 @@ def host(tmp_path_factory, hermes_bin, openrouter_key) -> Host:
         log=root / "gateway.log",
     )
     host.home.mkdir()
+    host.write_host_dotenv()
     install_env = {**os.environ, "HERMES_HOME": str(host.home)}
     for role in ("orchestrator", "researcher"):
         argv = [hermes_bin, "profile", "install", REPO / role, "--name", role, "--yes"]
