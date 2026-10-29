@@ -40,7 +40,7 @@ Every stack entry of the plan is implemented and committed:
 | Check | Result |
 |---|---|
 | `uv run ruff check .` and `ruff format --check .` | clean |
-| `uv run pytest -q` | 1,446 passed, 2 skipped (model-gated), 4 deselected (hermes) |
+| `uv run pytest -q` | 1,447 passed, 2 skipped (model-gated), 6 deselected (hermes) |
 | `python tools/build_prompts.py --check`, `python tools/check_prompts.py` | pass |
 | `cd play && uv run pytest -q` | 81 passed |
 | `HERMES_BIN=… uv run pytest -m hermes core/tests/hermes` (real Hermes v0.21.6) | 3 passed (install and prepare), S1 skipped without a key |
@@ -65,5 +65,8 @@ workspace paths of the acceptance run.
   skips them, and it releases Tasks as the old holder's Session actor.
 - The seam's full contract layer (`session-open` capabilities, panels, the agent-context panel
   as a client surface) ships in its own stack, as the design says.
+- The plan's `tools/e2e.py` demo (a runnable `research serve` with the scripted agent that
+  prints the event stream) was not built; the scenario tests under `core/tests/scenarios/`
+  cover the same path.
 - Hosting changes listed in `docs/hosting.md` (per-Session turn serialisation,
   `sleep_through_jobs`, the read-only core checkout, one API key across profiles) are for metta.

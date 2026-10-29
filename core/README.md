@@ -51,7 +51,9 @@ uv run python tools/build_prompts.py --check && uv run python tools/check_prompt
 
 The fake platform (`IDE_PLATFORM=fake`) needs no network; the `hermes`-marked tests install the
 profiles into a temporary Hermes home; the dispatch spike and the real acceptance run also need
-an OpenRouter key.
+an OpenRouter key. Hermes v0.21.6 needs Python 3.14 for its own dependencies, so a local
+`HERMES_BIN` is easiest to get from an isolated environment of the Hermes checkout
+(`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev`, then `<somewhere>/bin/hermes`).
 
 ## Add a tool, a record or a skill
 
