@@ -29,6 +29,16 @@ from .worker_capabilities import WorkerCapabilities, WorkerRead
 from .workspace import Workspace, WorkspaceError
 
 S = {"type": "string"}
+# The player a publication is for: the conversation's selected player (its context's player_id).
+PLAYER = {
+    "type": "string",
+    "description": (
+        "Player to publish for: the selected player_id from the conversation context. Omit only "
+        "when no player is selected (then the workspace credential's own player is used). The "
+        "workspace credential is a transport identity; Softmax lets it publish for any enabled "
+        "player the same user owns."
+    ),
+}
 I = {"type": "integer"}
 O = {"type": "object"}
 STRINGS = {"type": "array", "items": S}
@@ -300,13 +310,13 @@ TOOLS = {
     "upload_build": (
         Board,
         "Upload the verified build of a card's latest ended run: a completed card, or a blocked card whose worker staged the build before blocking (e.g. waiting on XP results). Never from a running card; uploads only the staged branch. build_dir is a committed task-relative directory containing the policy artifact named in version.json, version.json and gate evidence. Return upload receipts and the new staged commit for integration. Reuse name on retry. Optional experiment binds a research candidate.",
-        {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S},
+        {"id": S, "run_id": I, "build_dir": S, "name": S, "experiment": S, "player_id": PLAYER},
         ["id", "run_id", "build_dir", "name"],
     ),
     "champion_submit": (
         Board,
         ("Submit an experiment's reviewed `submit` decision as our champion through the shared write-ahead champion-submission workflow."),
-        {"id": S, "run_id": I, "experiment": S, "league_id": S},
+        {"id": S, "run_id": I, "experiment": S, "league_id": S, "player_id": PLAYER},
         ["id", "run_id", "experiment", "league_id"],
     ),
     "submit_requested_version": (
@@ -318,19 +328,27 @@ TOOLS = {
             "source on canonical main: its STRATEGY.md, or for a prebuilt artifact (e.g. a .bas) the "
             "artifact or its committed input. Only a STRATEGY.md replaces strategy/STRATEGY.md."
         ),
-        {"id": S, "run_id": I, "version": S, "strategy": S, "request": S, "league_id": S},
+        {
+            "id": S,
+            "run_id": I,
+            "version": S,
+            "strategy": S,
+            "request": S,
+            "league_id": S,
+            "player_id": PLAYER,
+        },
         ["id", "run_id", "version", "strategy", "request", "league_id"],
     ),
     "bootstrap_champion": (
         Board,
         "Submit an integrated starter-policy version (V-...) only when no champion exists.",
-        {"id": S, "run_id": I, "version": S, "league_id": S},
+        {"id": S, "run_id": I, "version": S, "league_id": S, "player_id": PLAYER},
         ["id", "run_id", "version", "league_id"],
     ),
     "accept_champion": (
         Research,
         "Record the league's current champion as the loop's, resolving a champion conflict (for example a version the user submitted outside research).",
-        {"league_id": S, "game": GAME},
+        {"league_id": S, "game": GAME, "player_id": PLAYER},
         ["league_id"],
     ),
     "workspace_integrate": (

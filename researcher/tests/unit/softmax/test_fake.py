@@ -19,8 +19,8 @@ def make(tmp_path, **env):
 def test_state_persists_across_processes(tmp_path):
     code = (
         "import sys; from pathlib import Path; from ide_research_core.softmax_tool.fake import FakeSoftmax;"
-        "sm = FakeSoftmax(Path(sys.argv[1]), {}); pv = sm.upload(Path('a.bin'), 'a');"
-        "sm.submit(pv, 'lg_1'); print(pv)"
+        "sm = FakeSoftmax(Path(sys.argv[1]), {}); pv = sm.upload(Path('a.bin'), 'a', player_id='ply_fake');"
+        "sm.submit(pv, 'lg_1', 'ply_fake'); print(pv)"
     )
     out = subprocess.run(
         [sys.executable, "-c", code, str(tmp_path)], capture_output=True, text=True, check=True
@@ -46,7 +46,7 @@ def test_whoami_answers_for_the_credential_not_the_expected_player(tmp_path):
     sm = make(tmp_path, RESEARCH_PLAYER_ID="ply_wrong", SOFTMAX_PLAYER_CREDENTIAL=credential)
     assert sm.whoami().player_id == "ply_a"
     with pytest.raises(IdentityError, match="ply_wrong"):
-        sm.submit("pv_1", "lg_1")
+        sm.submit("pv_1", "lg_1", "ply_wrong")
     plain = make(tmp_path / "b", RESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="fake")
     assert plain.whoami().player_id == "ply_x"  # no player in the credential: the expected one
 
@@ -54,7 +54,7 @@ def test_whoami_answers_for_the_credential_not_the_expected_player(tmp_path):
 def test_agent_token_credential_has_no_expiry(tmp_path):
     sm = make(tmp_path, RESEARCH_PLAYER_ID="ply_x", SOFTMAX_PLAYER_CREDENTIAL="cga_abc")
     assert sm.whoami().expires_at is None
-    sm.submit("pv_1", "lg_1")  # the C6 check passes: a non-expiring Player
+    sm.submit("pv_1", "lg_1", "ply_x")  # the C6 check passes: a non-expiring Player
 
 
 def test_identity_faults(tmp_path):
@@ -125,7 +125,7 @@ def test_seeded_results_follow_the_uploaded_parameters(tmp_path):
     def uploaded(name, **parameters):
         artifact = tmp_path / f"{name}.json"
         artifact.write_text(json.dumps({"policy": name, "parameters": parameters}))
-        return sm.upload(artifact, name)
+        return sm.upload(artifact, name, player_id="ply_fake")
 
     base = uploaded("base", aggression=3, patience=5)
     calm = uploaded("calm", aggression=3, patience=8)
@@ -145,18 +145,19 @@ def test_seeded_results_follow_the_uploaded_parameters(tmp_path):
 
 def test_fail_after_persists_then_raises(tmp_path):
     sm = make(tmp_path, RESEARCH_FAKE_FAULTS="fail_after=submit")
-    pv = sm.upload(tmp_path / "a", "a")
+    pv = sm.upload(tmp_path / "a", "a", player_id="ply_fake")
     with pytest.raises(RuntimeError, match="injected fault after submit"):
-        sm.submit(pv, "lg_1")
+        sm.submit(pv, "lg_1", "ply_fake")
     assert len(make(tmp_path).submissions("ply_fake")) == 1
 
 
 def test_champion_is_latest_and_none_when_empty(tmp_path):
     sm = make(tmp_path)
     assert sm.leaderboard_champion("ply_fake", "lg_1") is None
-    first, second = sm.upload(tmp_path / "a", "a"), sm.upload(tmp_path / "b", "b")
-    sm.submit(first, "lg_1")
-    sm.submit(second, "lg_1")
+    first = sm.upload(tmp_path / "a", "a", player_id="ply_fake")
+    second = sm.upload(tmp_path / "b", "b", player_id="ply_fake")
+    sm.submit(first, "lg_1", "ply_fake")
+    sm.submit(second, "lg_1", "ply_fake")
     assert sm.leaderboard_champion("ply_fake", "lg_1") == second
     assert sm.leaderboard_champion("ply_fake", "lg_2") is None
 

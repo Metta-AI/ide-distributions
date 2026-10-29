@@ -52,7 +52,7 @@ def ws(tmp_path, monkeypatch):
     root.mkdir()
     gitops.git(root, "init", "-q", "-b", "main")
     gitops.git(root, "remote", "add", "origin", str(bare))
-    FakeSoftmax(root, {}).submit(CHAMPION, "fake-league")
+    FakeSoftmax(root, {}).submit(CHAMPION, "fake-league", "ply_fake")
     # The loop's record of that champion, as ``champion accept`` or a published champion submission
     # leaves it; without it the league and the loop would disagree (a champion conflict).
     write_json(

@@ -649,7 +649,7 @@ def test_xp_create_refuses_a_baseline_that_is_no_longer_the_champion(board, laun
     """Another policy became champion after the design froze: the experiment can never
     be submitted, so nothing is launched (no credits spent on it)."""
     worker, experiment = launch
-    board.sm.submit(PV_A, LEAGUE)  # a champion submission made PV_A the champion
+    board.sm.submit(PV_A, LEAGUE, PLAYER)  # a champion submission made PV_A the champion
     board._accepted(PV_A)
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
@@ -664,7 +664,7 @@ def test_xp_create_refuses_a_baseline_that_is_no_longer_the_champion(board, laun
 def test_xp_create_refuses_while_the_league_disagrees_with_the_loop(board, launch):
     """Someone submitted by hand: the league shows a policy the loop never recorded."""
     worker, experiment = launch
-    board.sm.submit(PV_A, LEAGUE)
+    board.sm.submit(PV_A, LEAGUE, PLAYER)
     code, data = softmax(
         base_env(board, worker), "xp", "create", experiment, "--batch", "1", "--attempt", "1"
     )

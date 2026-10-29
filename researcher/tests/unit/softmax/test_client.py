@@ -22,6 +22,8 @@ from .conftest import (
 )
 
 LABEL = "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA:v1"
+# A player the conversation selected: publication names it; the credential stays the workspace's.
+SELECTED = "ply_00000000-0000-4000-8000-0000000000a1"
 SPEC = {"league_id": LEAGUE_ID, "num_episodes": 4, "roster": [{"player": {"random": True}}] * 10}
 MUTATING = (
     ("coworld", "upload-policy"),
@@ -72,8 +74,8 @@ def test_from_env_selects_fake_or_real(env, tmp_path):
 @pytest.mark.parametrize(
     "action",
     [
-        lambda sm, tmp: sm.upload(tmp / "policy.bas", "ar-E-x"),
-        lambda sm, tmp: sm.submit(LABEL, LEAGUE_ID),
+        lambda sm, tmp: sm.upload(tmp / "policy.bas", "ar-E-x", player_id=SELECTED),
+        lambda sm, tmp: sm.submit(LABEL, LEAGUE_ID, SELECTED),
         lambda sm, tmp: sm.xp_create("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", 1, 1, SPEC),
     ],
     ids=["upload", "submit", "xp_create"],
@@ -95,7 +97,9 @@ def test_upload_checks_identity_immediately_before_and_returns_label(env, runner
     with_mutations(runner)
     artifact = tmp_path / "policy.bas"
     artifact.write_text("10 PRINT 1\n")
-    label = make(env, runner, tmp_path).upload(artifact, "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA", artifact_type=artifact_type)
+    label = make(env, runner, tmp_path).upload(
+        artifact, "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA", player_id=SELECTED, artifact_type=artifact_type
+    )
     assert label == LABEL
     assert runner.argvs() == [
         ["softmax", "status"],
@@ -106,6 +110,8 @@ def test_upload_checks_identity_immediately_before_and_returns_label(env, runner
             str(artifact.resolve()),
             "--name",
             "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA",
+            "--player",
+            SELECTED,
         ],
     ]
     _, kwargs = runner.calls[1]
@@ -115,12 +121,12 @@ def test_upload_checks_identity_immediately_before_and_returns_label(env, runner
 def test_upload_without_completion_line_fails(env, runner, tmp_path):
     runner.on("coworld", "upload-policy", response=completed("Policy name: x\n"))
     with pytest.raises(RuntimeError, match="Upload complete"):
-        make(env, runner, tmp_path).upload(tmp_path / "p.bas", "x")
+        make(env, runner, tmp_path).upload(tmp_path / "p.bas", "x", player_id=PLAYER_ID)
 
 
-def test_submit_names_the_player_and_returns_submission_id(env, runner, tmp_path):
+def test_submit_names_the_selected_player_and_returns_submission_id(env, runner, tmp_path):
     with_mutations(runner)
-    submission_id = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    submission_id = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID, SELECTED)
     assert submission_id == "sub_00000000-0000-4000-8000-000000000051"
     assert runner.argvs() == [
         ["softmax", "status"],
@@ -131,7 +137,7 @@ def test_submit_names_the_player_and_returns_submission_id(env, runner, tmp_path
             "--league",
             LEAGUE_ID,
             "--player",
-            PLAYER_ID,
+            SELECTED,
             "--no-open-browser",
         ],
     ]
@@ -146,7 +152,7 @@ def _submit_fails_with(runner, fixture: str):
 def test_submit_permit_refusal_returns_permit_required(env, runner, tmp_path):
     """The coach's IDE Controls ask before league submissions (403 permit_required)."""
     _submit_fails_with(runner, "submit_403_permit.stderr")
-    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID, PLAYER_ID)
     assert isinstance(result, PermitRequired)
     assert result.ask == "permit-submit-dc43b411e9401d8b-1"
     assert result.reason.startswith(f"submit on league:{LEAGUE_ID}:")
@@ -154,7 +160,7 @@ def test_submit_permit_refusal_returns_permit_required(env, runner, tmp_path):
 
 def test_submit_league_choice_refusal_returns_league_not_chosen(env, runner, tmp_path):
     _submit_fails_with(runner, "submit_403_league_elsewhere.stderr")
-    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+    result = make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID, PLAYER_ID)
     assert isinstance(result, LeagueNotChosen)
     assert result.reason.startswith("This cogent plays league_0b1c2d3e")
     assert result.reason.endswith(f"a submission to {LEAGUE_ID} is refused.")
@@ -163,14 +169,14 @@ def test_submit_league_choice_refusal_returns_league_not_chosen(env, runner, tmp
 def test_submit_other_403_still_raises(env, runner, tmp_path):
     _submit_fails_with(runner, "submit_403_other.stderr")
     with pytest.raises(SoftmaxCliError, match="does not belong to you"):
-        make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID)
+        make(env, runner, tmp_path).submit(LABEL, LEAGUE_ID, PLAYER_ID)
 
 
 def test_every_mutation_rechecks_identity(env, runner, tmp_path):
     with_mutations(runner)
     sm = make(env, runner, tmp_path)
-    sm.submit(LABEL, LEAGUE_ID)
-    sm.submit(LABEL, LEAGUE_ID)
+    sm.submit(LABEL, LEAGUE_ID, PLAYER_ID)
+    sm.submit(LABEL, LEAGUE_ID, PLAYER_ID)
     assert [argv[0:2] for argv in runner.argvs()] == [
         ["softmax", "status"],
         ["coworld", "submit"],
@@ -315,8 +321,8 @@ def test_bad_credential_is_identity_error_before_any_mutating_call(
     env["SOFTMAX_PLAYER_CREDENTIAL"] = credential
     sm = make(env, runner, tmp_path)
     for action in (
-        lambda: sm.upload(tmp_path / "policy.bas", "ar-E-x"),
-        lambda: sm.submit(LABEL, LEAGUE_ID),
+        lambda: sm.upload(tmp_path / "policy.bas", "ar-E-x", player_id=PLAYER_ID),
+        lambda: sm.submit(LABEL, LEAGUE_ID, PLAYER_ID),
         lambda: sm.xp_create("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", 1, 1, SPEC),
     ):
         with pytest.raises(IdentityError):
@@ -359,8 +365,8 @@ def test_agent_token_on_a_local_server_runs_the_whole_cycle(env, tmp_path):
     )
     sm = make(env, runner, tmp_path)
     assert sm.whoami().expires_at is None
-    sm.upload(tmp_path / "policy.bas", "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA")
-    sm.submit(LABEL, LEAGUE_ID)
+    sm.upload(tmp_path / "policy.bas", "ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA", player_id=PLAYER_ID)
+    sm.submit(LABEL, LEAGUE_ID, PLAYER_ID)
     sm.xp_create("E-01K6Z3V8QXAAAAAAAAAAAAAAAA", 9, 1, SPEC)
     sm.submissions(PLAYER_ID)
     tools = [argv[:2] for argv in runner.argvs()]

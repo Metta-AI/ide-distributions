@@ -41,7 +41,7 @@ from ide_research_core.io.docs import read_json
 from ide_research_core.io.locks import file_lock
 from ide_research_core.paths import Layout
 from ide_research_core.records.store import RecordStore
-from ide_research_core.softmax_tool.identity import identity_problems
+from ide_research_core.softmax_tool.identity import IdentityError
 from ide_research_core.softmax_tool.protocol import (
     ANSWER_NO,
     ANSWER_USED,
@@ -81,6 +81,10 @@ class ChampionSubmission:
     experiment: str | None = None
     submission_id: str | None = None
     waiting: dict | None = None  # the coach's refusal while at intent
+    # The player submitted for: the workspace's own player, or an owned player the conversation
+    # selected (the IDE workspace credential may publish for it). None only in records written
+    # before submissions named their player; those were all for the workspace's own player.
+    player_id: str | None = None
     history: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -224,10 +228,13 @@ def _check_outcome(store: RecordStore, experiment: str, meta: dict, platform_id:
     return outcome
 
 
-def _require_identity(sm: Softmax, player_id: str) -> None:
-    problems = identity_problems(sm.whoami(), player_id, datetime.datetime.now(datetime.UTC))
-    if problems:
-        raise Refused("identity", "; ".join(problems))
+def _require_identity(sm: Softmax) -> None:
+    """The credential is this workspace's own live Player (C6); it may publish for ``player_id``
+    only when the platform grants it (an owned player selected through the IDE workspace)."""
+    try:
+        sm.require_player()
+    except IdentityError as error:
+        raise Refused("identity", str(error)) from None
 
 
 def _strategy_source_hashes(meta: dict) -> list[str]:
@@ -266,8 +273,12 @@ def _uploaded_policy(store: RecordStore, version_id: str) -> str | None:
 # --- submit, bootstrap, accept ---
 
 
-def _new(kind: str, version_id: str | None, platform_id: str | None, league_id: str, **fields):
-    return ChampionSubmission(f"CS-{ULID()}", kind, version_id, platform_id, league_id, "new", **fields)
+def _new(
+    kind: str, version_id: str | None, platform_id: str | None, league_id: str, player_id: str, **fields
+):
+    return ChampionSubmission(
+        f"CS-{ULID()}", kind, version_id, platform_id, league_id, "new", player_id=player_id, **fields
+    )
 
 
 def submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id: str) -> dict:
@@ -290,7 +301,7 @@ def _submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id
         raise Refused("no_candidate", f"{candidate_path(experiment)} is not on main")
     platform_id = binding["platform_policy_version_id"]
     outcome = _check_outcome(store, experiment, meta, platform_id)
-    _require_identity(sm, player_id)
+    _require_identity(sm)
     disagreement = conflict(clone, sm, league_id, player_id)
     if disagreement is not None:
         raise Refused("champion_conflict", disagreement)
@@ -304,7 +315,7 @@ def _submit(clone: Path, sm: Softmax, experiment: str, league_id: str, player_id
             f"champion is {champion}; evaluate again",
         )
     submission = _new(
-        "experiment", binding["version_id"], platform_id, league_id, experiment=experiment
+        "experiment", binding["version_id"], platform_id, league_id, player_id, experiment=experiment
     )
     _move(clone, submission, "intent", f"submit {experiment}")
     return _send(clone, sm, submission)
@@ -339,14 +350,14 @@ def submit_requested(
                 f"{source_path or 'unknown'}",
                 {"source_path": source_path},
             )
-        _require_identity(sm, player_id)
+        _require_identity(sm)
         disagreement = conflict(clone, sm, league_id, player_id)
         if disagreement is not None:
             raise Refused("champion_conflict", disagreement)
         current = latest_champion(clone)
         if current is not None and current.platform_policy_version_id == platform_id:
             return current.to_dict()
-        record = _new("requested", version, platform_id, league_id)
+        record = _new("requested", version, platform_id, league_id, player_id)
         snapshot = f"{SUBMISSIONS_DIR}/sources/{record.id}.md"
         (clone / snapshot).parent.mkdir(parents=True, exist_ok=True)
         (clone / snapshot).write_bytes(source)
@@ -381,18 +392,18 @@ def _bootstrap(clone: Path, sm: Softmax, version_id: str, league_id: str, player
             f"{version_id} compiled a STRATEGY.md with sha256 {built[0]}, not the shipped "
             f"{CHAMPION_PATH} ({shipped_hash}); a bootstrap submits only the shipped strategy",
         )
-    _require_identity(sm, player_id)
+    _require_identity(sm)
     shown = sm.leaderboard_champion(player_id, league_id)
     if shown is not None:
         raise Refused("champion_exists", f"the {league_id} league already shows {shown} for us")
-    submission = _new("bootstrap", version_id, platform_id, league_id)
+    submission = _new("bootstrap", version_id, platform_id, league_id, player_id)
     _move(clone, submission, "intent", f"bootstrap {version_id}")
     return _send(clone, sm, submission)
 
 
 def _send(clone: Path, sm: Softmax, submission: ChampionSubmission) -> dict:
     """The single platform submit of an ``intent`` submission."""
-    result = sm.submit(submission.platform_policy_version_id, submission.league_id)
+    result = sm.submit(submission.platform_policy_version_id, submission.league_id, submission.player_id)
     if isinstance(result, PermitRequired):
         submission.waiting = {"reason": "permit_required", "ask": result.ask, "detail": result.reason}
         _move(clone, submission, "intent", "waiting for the coach's permit")
@@ -435,7 +446,7 @@ def accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
 def _accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     _refuse_if_busy(clone)
     shown = sm.leaderboard_champion(player_id, league_id)
-    submission = _new("accepted", None, shown, league_id)
+    submission = _new("accepted", None, shown, league_id, player_id)
     _move(clone, submission, "published", f"accepted the league's champion {shown or 'none'}")
     return submission.to_dict()
 
@@ -443,7 +454,7 @@ def _accept(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
 # --- status: advance the submission in flight ---
 
 
-def _advance_intent(clone: Path, sm: Softmax, submission: ChampionSubmission, player_id: str) -> None:
+def _advance_intent(clone: Path, sm: Softmax, submission: ChampionSubmission) -> None:
     waiting = submission.waiting or {}
     answer = None
     if waiting.get("reason") == "permit_required" and waiting.get("ask"):
@@ -466,7 +477,7 @@ def _advance_intent(clone: Path, sm: Softmax, submission: ChampionSubmission, pl
         return
     # An intent with no recorded outcome: the submit may or may not have reached the platform.
     found = [
-        s for s in sm.submissions(player_id)
+        s for s in sm.submissions(submission.player_id)
         if s["policy_version_id"] == submission.platform_policy_version_id
     ]
     if found:
@@ -476,9 +487,9 @@ def _advance_intent(clone: Path, sm: Softmax, submission: ChampionSubmission, pl
         _move(clone, submission, "aborted", "interrupted before the platform had a submission")
 
 
-def _advance_submitted(clone: Path, sm: Softmax, submission: ChampionSubmission, player_id: str) -> None:
+def _advance_submitted(clone: Path, sm: Softmax, submission: ChampionSubmission) -> None:
     state = sm.submission_state(
-        player_id, submission.league_id, submission.platform_policy_version_id
+        submission.player_id, submission.league_id, submission.platform_policy_version_id
     )
     if state.stage == "rejected":
         _move(clone, submission, "rejected", f"the league rejected it ({state.detail})")
@@ -518,10 +529,12 @@ def status(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
 
 def _status(clone: Path, sm: Softmax, league_id: str, player_id: str) -> dict:
     submission = in_flight(clone)
+    if submission is not None and submission.player_id is None:
+        submission.player_id = player_id  # a record from before submissions named their player
     if submission is not None and submission.stage == "intent":
-        _advance_intent(clone, sm, submission, player_id)
+        _advance_intent(clone, sm, submission)
     elif submission is not None and submission.stage == "submitted":
-        _advance_submitted(clone, sm, submission, player_id)
+        _advance_submitted(clone, sm, submission)
     if submission is not None and submission.stage == "recorded":
         _advance_recorded(clone, submission)
     flying = in_flight(clone)

@@ -142,14 +142,14 @@ def test_an_interrupted_intent_is_aborted_when_the_platform_has_no_submission(bo
 
 def test_an_interrupted_intent_the_platform_has_becomes_submitted(board):
     interrupted_intent(board, PV_A)
-    board.sm.submit(PV_A, LEAGUE)  # the submit reached the platform before the crash
+    board.sm.submit(PV_A, LEAGUE, PLAYER)  # the submit reached the platform before the crash
     champion_submission.status(board.canonical, board.sm, LEAGUE, PLAYER)
     [record] = [p for p in champion_submission.load_all(board.canonical) if p.kind == "experiment"]
     assert record.submission_id and record.stage in ("submitted", "recorded")
 
 
 def test_a_hand_submission_is_a_conflict_until_accepted(board):
-    board.sm.submit("someone-else:v9", LEAGUE)
+    board.sm.submit("someone-else:v9", LEAGUE, PLAYER)
     report = champion_submission.status(board.canonical, board.sm, LEAGUE, PLAYER)
     assert "someone-else:v9" in report["conflict"]
 

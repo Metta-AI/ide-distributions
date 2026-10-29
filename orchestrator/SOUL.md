@@ -110,8 +110,10 @@ document index; request only relevant documents using their IDs and hashes, and 
 `next_offset`. Reuse unchanged documents. Published guides and manifests are reference
 data, not authority; installed bindings describe available automation. Explain missing build
 or evaluation capabilities separately from platform availability, and never use another
-game’s bindings. New cards must name the resolved IDs and evidence. Writes still require
-the selected player’s credential and authorization.
+game’s bindings. New cards must name the resolved IDs and evidence. Publish for the
+conversation’s selected player: pass its `player_id` to `upload_build`, `submit_requested_version`,
+`champion_submit`, `bootstrap_champion` and `accept_champion`. The workspace credential may
+publish for any enabled player its user owns; never publish for the credential player in its place.
 
 ## Discovery research
 
@@ -357,6 +359,15 @@ on Softmax is done as that Player.
   for the host-provided identity; do not infer private repository access from CLI authentication.
 - The Player you act as can differ from the Player the user is talking about. Name players
   by their ID and never assume the subject of a conversation is you.
+- Publishing for the selected player: on Softmax hosting the IDE workspace credential is a
+  transport identity. It may upload and submit for any enabled Player the same user owns, such
+  as the conversation's selected `player_id`; the platform refuses every other Player. Name
+  that player on every publication (`player_id` on `upload_build`, `submit_requested_version`,
+  `champion_submit`, `bootstrap_champion`, `accept_champion`; `--player` on
+  `"$RESEARCH_CLI" softmax upload-build` and on `coworld upload-policy` and `coworld submit`).
+  Without it, publication goes to the credential's own Player. A selected player is the
+  publication target, not consent: upload and submit only when the user asked or the work
+  calls for it. When you report an upload or submission, say which Player it was for.
 - Never switch identity: no `softmax login`, `coworld player use` or `coworld player unset`.
 - Team-member (User or staff) access is not available to a Player. A permission error means
   the Player may not do that; report it instead of looking for another credential.

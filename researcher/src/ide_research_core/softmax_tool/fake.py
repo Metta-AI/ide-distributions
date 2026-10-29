@@ -259,10 +259,12 @@ class FakeSoftmax:
         )
         return self._operate("whoami", lambda _state: identity, persist=False)
 
-    def _require_player(self) -> None:
-        problems = identity_problems(self.whoami(), self._player_id, self._clock())
+    def require_player(self) -> Identity:
+        identity = self.whoami()
+        problems = identity_problems(identity, self._player_id, self._clock())
         if problems:
             raise IdentityError("; ".join(problems))
+        return identity
 
     def _current_credits(self, state: dict) -> int:
         return int(self._faults["credits"]) if "credits" in self._faults else state["credits"]
@@ -350,7 +352,7 @@ class FakeSoftmax:
         request_id = f"xp_{_short_hash(*key)}"
         exists = self._operate("xp_lookup", lambda state: request_id in state["xp"], persist=False)
         if not exists:  # like the client: an existing request is reused without a new check
-            self._require_player()
+            self.require_player()
 
         def action(state: dict):
             if request_id not in state["xp"]:
@@ -447,13 +449,15 @@ class FakeSoftmax:
 
     # --- policies -------------------------------------------------------
 
-    def upload(self, artifact: Path, name: str, *, artifact_type: ArtifactType = "file") -> str:
-        self._require_player()
+    def upload(
+        self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
+    ) -> str:
+        self.require_player()
         parameters = _artifact_parameters(Path(artifact))
 
         def action(state: dict) -> str:
             policy_version_id = f"pv_{_short_hash(name, len(state['uploads']))}"
-            state["uploads"][policy_version_id] = {"name": name}
+            state["uploads"][policy_version_id] = {"name": name, "player_id": player_id}
             if parameters is not None:
                 state["uploads"][policy_version_id]["parameters"] = parameters
             return policy_version_id
@@ -461,9 +465,9 @@ class FakeSoftmax:
         return self._operate("upload", action)
 
     def submit(
-        self, policy_version_id: str, league_id: str
+        self, policy_version_id: str, league_id: str, player_id: str
     ) -> str | PermitRequired | LeagueNotChosen:
-        self._require_player()
+        self.require_player()
 
         def action(state: dict) -> str | PermitRequired | LeagueNotChosen:
             ref = f"league:{league_id}:{policy_version_id}"
@@ -478,7 +482,7 @@ class FakeSoftmax:
                     "submission_id": submission_id,
                     "policy_version_id": policy_version_id,
                     "league_id": league_id,
-                    "player_id": self._player_id,
+                    "player_id": player_id,
                 }
             )
             return submission_id
