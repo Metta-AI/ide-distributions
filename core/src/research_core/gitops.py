@@ -13,7 +13,7 @@ import re
 import shlex
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 DEFAULT_AUTHOR = "IDE <ide@softmax.invalid>"
@@ -161,6 +161,54 @@ def is_clean(repo: Path) -> bool:
     return not dirty_files(repo)
 
 
+def ignored_files(repo: Path) -> list[str]:
+    """Paths git ignores (a directory when whole), which ``dirty_files`` never reports.
+
+    Repository-relative, as ``git status --ignored`` prints them: a whole ignored directory
+    is one entry with a trailing slash.
+    """
+    out = git(repo, "status", "--ignored", "--porcelain=v1", "-z", "--no-renames").stdout
+    return [entry[3:] for entry in out.split("\0") if entry.startswith("!! ")]
+
+
+def submodule_paths(repo: Path) -> list[str]:
+    """The paths ``.gitmodules`` declares as submodules; empty when there is no such file."""
+    result = git(
+        repo,
+        "config",
+        "--file",
+        ".gitmodules",
+        "--get-regexp",
+        r"^submodule\..*\.path$",
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.partition(" ")[2] for line in result.stdout.splitlines() if " " in line]
+
+
+def nested_repositories(repo: Path, *, skip_names: Collection[str] = ()) -> list[str]:
+    """Directories below the root with their own ``.git`` that are not declared submodules.
+
+    Git keeps at most a commit pointer for such a directory (an embedded repository), never
+    its files, so ``git status`` is clean while a commit of ``repo`` cannot rebuild it. The
+    walk does not enter directories named in ``skip_names`` (caches) nor a nested repository
+    once found, and never follows symlinks. Paths are repository-relative, no trailing slash.
+    """
+    root = Path(repo)
+    submodules = set(submodule_paths(root))
+    found: list[str] = []
+    for current, dirs, files in os.walk(root):
+        relative = Path(current).relative_to(root).as_posix()
+        if relative != "." and (".git" in dirs or ".git" in files):
+            if relative not in submodules:
+                found.append(relative)
+            dirs[:] = []
+            continue
+        dirs[:] = sorted(d for d in dirs if d != ".git" and d not in skip_names)
+    return found
+
+
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     result = git(repo, "merge-base", "--is-ancestor", ancestor, descendant, check=False)
     if result.returncode in (0, 1):
@@ -294,6 +342,11 @@ def merge_no_ff(repo: Path, commit: str, *, message: str, into: str = "main") ->
 
 
 # --- file contents and line ranges ------------------------------------------------------------
+
+
+def show_file(repo: Path, ref: str, path: str) -> str:
+    """The text of ``path`` at ``ref`` (a commit, branch or tag), straight from the repository."""
+    return git(repo, "show", f"{ref}:{path}").stdout
 
 
 def show_lines(repo: Path, path: str, a: int, b: int, sha: str) -> list[str]:

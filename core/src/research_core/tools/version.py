@@ -4,7 +4,9 @@
 worktree of the Task it holds; the Orchestrator: ``worktrees/orch-<n>`` when ``worktree`` is
 given, else ``code/``), hashes the artifact the build produced and records the Version at the
 tree's exact commit, tagged ``v/<n>`` in the code repository. The tree must be clean apart from
-the artifact itself: a Version is a commit, not a working copy. The build runs detached with a
+the artifact itself, and it must hold no build input git does not track (a git-ignored file,
+a nested repository that is not a declared submodule), caches aside: a Version is a commit,
+not a working copy, and its commit must be enough to rebuild it. The build runs detached with a
 budget (A3.2): past it the tool answers ``background`` and the agent either waits for the
 process or calls ``create`` again with ``resume``. A failed build reports the ``build``
 capability (A4.1) and the refusal carries the log path and tail (B.15).
@@ -43,6 +45,20 @@ BOTH = frozenset({"orchestrator", "researcher"})
 BUILD_BUDGET_S = 240
 IMAGE_REFUSAL = "image policies are not supported yet: hosted sandboxes have no Docker"
 RUNTIME_MARKER = ".softmax-runtime.json"
+
+# Git-ignored paths that are caches or OS droppings, never build inputs: a path with one of
+# these as a component does not stop a build, nor is it searched for nested repositories.
+CACHE_NAMES = frozenset(
+    {
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "node_modules",
+        ".DS_Store",
+    }
+)
 
 VERSION = a.string("The Version, such as V-7.")
 
@@ -104,6 +120,9 @@ def handle_create(call: ToolCall) -> dict:
     if loaded.artifact.get("kind") == "image":
         raise ToolError(IMAGE_REFUSAL, artifact=loaded.artifact)
     artifact_path = str(loaded.artifact["path"])
+    untracked = untracked_inputs(tree, artifact_path)
+    if any(untracked.values()):
+        raise untracked_inputs_refusal(coworld, tree, artifact_path, untracked)
     dirty = dirty_files_excluding(tree, artifact_path)
     if dirty:
         raise ToolError(
@@ -215,15 +234,68 @@ def load_mixin(tree: Path, fallback: Path) -> mixin.Mixin:
 
 
 def dirty_files_excluding(tree: Path, artifact_path: str) -> list[str]:
-    """Uncommitted paths, ignoring the artifact the build writes (and its untracked folder)."""
+    """Uncommitted paths, ignoring what the build writes (the artifact and its folder)."""
+    return [e for e in gitops.dirty_files(tree) if not is_build_output(e, artifact_path)]
+
+
+def untracked_inputs(tree: Path, artifact_path: str) -> dict[str, list[str]]:
+    """Inputs a commit cannot rebuild: git-ignored paths and nested repositories.
+
+    Neither shows in ``dirty_files``. Caches (``CACHE_NAMES``), the artifact's folder and
+    submodules declared in ``.gitmodules`` are not inputs. The keys are the refusal's context.
+    """
+
+    def is_input(entry: str) -> bool:
+        return not (is_cache(entry) or is_build_output(entry, artifact_path))
+
+    nested = gitops.nested_repositories(tree, skip_names=CACHE_NAMES)
+    return {
+        "ignored_files": [e for e in gitops.ignored_files(tree) if is_input(e)],
+        "nested_repositories": [e for e in nested if is_input(e)],
+    }
+
+
+def untracked_inputs_refusal(
+    coworld, tree: Path, artifact_path: str, found: dict[str, list[str]]
+) -> ToolError:
+    """The refusal names each input and says what to do about its kind."""
+    listed, how = [], []
+    if found["ignored_files"]:
+        listed.append("git-ignored: " + ", ".join(found["ignored_files"]))
+        how.append("un-ignore them")
+    if found["nested_repositories"]:
+        listed.append("nested repository: " + ", ".join(found["nested_repositories"]))
+        how.append(
+            "for a nested repository, remove its .git and commit its files, or declare it as a"
+            " submodule in .gitmodules"
+        )
+    folder = artifact_path.strip("/").rpartition("/")[0]
+    outputs = f", or write them under {folder}/ if they are build outputs" if folder else ""
+    return ToolError(
+        f"{tree_name(coworld, tree)} has inputs git does not track ({'; '.join(listed)}); a"
+        f" Version is an exact commit, so commit them ({'; '.join(how)}){outputs}",
+        **found,
+    )
+
+
+def is_cache(entry: str) -> bool:
+    """Whether any component of the path is a cache name (``CACHE_NAMES``)."""
+    return any(part in CACHE_NAMES for part in entry.strip("/").split("/"))
+
+
+def is_build_output(entry: str, artifact_path: str) -> bool:
+    """Whether ``entry`` is the artifact, a folder on the way to it, or anything in its folder.
+
+    ``git status`` names a whole untracked or ignored folder as one entry (``build/``), so a
+    folder holding the artifact counts; so does a file beside the artifact, which the build
+    wrote too. An artifact at the repository root has no folder: only the artifact counts.
+    """
     artifact = artifact_path.strip("/")
-    kept: list[str] = []
-    for entry in gitops.dirty_files(tree):
-        clean = entry.rstrip("/")
-        if clean == artifact or artifact.startswith(clean + "/"):
-            continue
-        kept.append(entry)
-    return kept
+    path = entry.rstrip("/")
+    if path == artifact or artifact.startswith(path + "/"):
+        return True
+    folder = artifact.rpartition("/")[0]
+    return bool(folder) and path.startswith(folder + "/")
 
 
 def run_build(

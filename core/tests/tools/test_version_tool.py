@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -51,6 +52,11 @@ def policy_bytes(aggression: int, patience: int) -> bytes:
 def commit_policy(tree: Path, aggression: int, patience: int, message: str = "Tune") -> str:
     (tree / "policy.json").write_bytes(policy_bytes(aggression, patience))
     return gitops.commit_all(tree, message)
+
+
+def write_file(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def set_build_command(code: Path, command: str) -> str:
@@ -219,6 +225,72 @@ def test_version_create_refuses_dirty_tree(lab):
     assert "uncommitted changes" in result["error"]
     assert sorted(result["context"]["dirty_files"]) == ["notes.md", "policy.json"]
     assert lab.store.one("SELECT COUNT(*) FROM versions")[0] == 0
+
+
+def test_version_create_refuses_ignored_inputs(lab):
+    """A git-ignored input is refused by name; ignored caches and the build folder are not."""
+    write_file(lab.code / ".gitignore", "weights/\n*.secret\nbuild/\n.venv/\n__pycache__/\n")
+    gitops.commit_all(lab.code, "Ignore inputs, caches and outputs")
+    write_file(lab.code / "weights" / "w.bin", "weights")
+    write_file(lab.code / "key.secret", "key")
+    write_file(lab.code / ".venv" / "lib" / "site.py", "")
+    write_file(lab.code / "mixin" / "tools" / "__pycache__" / "check.pyc", "")
+    write_file(lab.code / "build" / "policy.json", "a stale build output")
+    assert gitops.dirty_files(lab.code) == []  # ordinary status sees none of it
+
+    result = lab.run("version", {"action": "create", "summary": "Hidden inputs"})
+    assert result["ok"] is False
+    assert "code has inputs git does not track" in result["error"]
+    assert "git-ignored: key.secret, weights/" in result["error"]
+    assert "write them under build/ if they are build outputs" in result["error"]
+    assert result["context"]["ignored_files"] == ["key.secret", "weights/"]
+    assert result["context"]["nested_repositories"] == []
+    assert lab.store.one("SELECT COUNT(*) FROM versions")[0] == 0
+
+    # Without the inputs, the ignored caches and the ignored build folder stop nothing.
+    shutil.rmtree(lab.code / "weights")
+    (lab.code / "key.secret").unlink()
+    assert lab.create("No hidden inputs")["id"] == "V-1"
+
+
+def test_version_create_refuses_nested_repository(lab):
+    """An embedded repository is a commit pointer to git: the status is clean, yet no commit
+    of code/ holds its files."""
+    engine = gitops.init_repo(lab.code / "libs" / "engine", initial_commit=False)
+    write_file(engine / "engine.py", "print('go')\n")
+    gitops.commit_all(engine, "Engine")
+    gitops.commit_all(lab.code, "Add the engine")  # git add -A keeps libs/engine as a pointer
+    assert gitops.dirty_files(lab.code) == []
+    assert gitops.nested_repositories(lab.code) == ["libs/engine"]
+
+    result = lab.run("version", {"action": "create", "summary": "With the engine"})
+    assert result["ok"] is False
+    assert "nested repository: libs/engine" in result["error"]
+    assert "remove its .git and commit its files" in result["error"]
+    assert result["context"]["nested_repositories"] == ["libs/engine"]
+    assert result["context"]["ignored_files"] == []
+    assert lab.store.one("SELECT COUNT(*) FROM versions")[0] == 0
+
+
+def test_version_create_allows_submodule(lab, tmp_path):
+    """A submodule declared in .gitmodules is tracked by its commit pointer: not refused."""
+    upstream = gitops.init_repo(tmp_path / "engine_upstream", initial_commit=False)
+    write_file(upstream / "engine.py", "print('go')\n")
+    gitops.commit_all(upstream, "Engine")
+    gitops.git(
+        lab.code,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--quiet",
+        str(upstream),
+        "libs/engine",
+    )
+    gitops.commit_all(lab.code, "Add the engine as a submodule")
+    assert gitops.submodule_paths(lab.code) == ["libs/engine"]
+    assert gitops.nested_repositories(lab.code) == []
+    assert lab.create("With a submodule")["id"] == "V-1"
 
 
 def test_version_create_refuses_image(lab):
