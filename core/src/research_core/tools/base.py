@@ -217,6 +217,8 @@ def validate_args(
         if schema is None or value is None:
             continue
         expected = JSON_TYPES.get(schema.get("type", ""))
+        if expected is str and isinstance(value, int) and not isinstance(value, bool):
+            continue  # an integer id for a string reference field is coerced by coerce_args
         if expected is not None and not isinstance(value, expected):
             problems.append(f"{name} must be {schema['type']}")
         elif expected is int and isinstance(value, bool):
@@ -224,6 +226,18 @@ def validate_args(
         if "enum" in schema and value not in schema["enum"] and name != "action":
             problems.append(f"{name} must be one of {', '.join(map(str, schema['enum']))}")
     return action_name, problems
+
+
+def coerce_args(spec: ToolSpec, role: Role, args: Mapping[str, Any]) -> dict:
+    """Integers given for string fields (record ids) become strings; everything else is kept."""
+    properties = spec.properties(role)
+    out = dict(args)
+    for name, value in args.items():
+        schema = properties.get(name)
+        if schema and schema.get("type") == "string" and isinstance(value, int):
+            if not isinstance(value, bool):
+                out[name] = str(value)
+    return out
 
 
 def error_payload(problems: list[str], context: dict | None = None) -> dict:
@@ -244,7 +258,8 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
     if problems:
         return json.dumps(error_payload(problems, {"tool": name, "action": action}))
     try:
-        result = spec.handler(ToolCall(spec=spec, args=dict(args), ctx=ctx, action=action))
+        call = ToolCall(spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action)
+        result = spec.handler(call)
         if not isinstance(result, dict):
             result = {"result": result}
         result.setdefault("ok", True)

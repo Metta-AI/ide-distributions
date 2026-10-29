@@ -37,6 +37,8 @@ RECORD_PREFIXES: dict[str, str] = {
     "N": "notice",
 }
 
+RECORD_PREFIXES_BY_KIND: dict[str, str] = {kind: prefix for prefix, kind in RECORD_PREFIXES.items()}
+
 _RECORD = re.compile(
     r"^(?P<prefix>[A-Z])-(?P<number>[1-9][0-9]*)(?:#(?P<fragment>[A-Za-z0-9_.-]+))?$"
 )

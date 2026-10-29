@@ -32,7 +32,10 @@ def tools_for(role: Role) -> list[ToolSpec]:
 
 
 # Tool modules, imported on first use so that importing the catalog stays cheap.
-TOOL_MODULES: tuple[str, ...] = ()
+TOOL_MODULES: tuple[str, ...] = (
+    "research_core.tools.goal",
+    "research_core.tools.directive",
+)
 _loaded = False
 
 
