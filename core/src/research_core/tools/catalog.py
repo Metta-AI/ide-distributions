@@ -54,6 +54,9 @@ TOOL_MODULES: tuple[str, ...] = (
     "research_core.tools.attachment_download",
 )
 _loaded = False
+# Modules that failed to import, by name: a broken tool module costs its own tools, never the
+# others. workspace.doctor and the tool-budget test surface the entries.
+LOAD_ERRORS: dict[str, str] = {}
 
 
 def _load_tool_modules() -> None:
@@ -68,5 +71,7 @@ def _load_tool_modules() -> None:
         except ModuleNotFoundError as error:
             if error.name and error.name.startswith("research_core.tools"):
                 continue  # not built yet
-            raise
+            LOAD_ERRORS[module_name] = f"{type(error).__name__}: {error}"
+        except Exception as error:  # a syntax error or a failing import
+            LOAD_ERRORS[module_name] = f"{type(error).__name__}: {error}"
     _loaded = True
