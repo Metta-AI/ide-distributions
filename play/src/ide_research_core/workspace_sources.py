@@ -39,6 +39,12 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
                 "forbidden", "Game workspace has another canonical repository"
             )
         roots.append(clone)
+    from ide_research_core import source_snapshots
+
+    storage = canonical.parent / "policy-sources"
+    retained = source_snapshots.publications(storage, command)
+    if command.action != "sources" and retained:
+        return source_snapshots.execute_files(storage, command, request_id).model_dump(mode="json")
     matches: list[tuple[Path, policy_files.PolicySource]] = []
     discovery = command.model_copy(update={"action": "sources", "path": "", "offset": 0})
     for clone in roots:
@@ -62,7 +68,14 @@ def execute_policy(root: Path, command: HermesPolicyFiles, request_id: str) -> d
         ).model_dump(mode="json")
     if command.action == "sources":
         return policy_files.source_page(
-            [source for _, source in matches], command.offset
+            [
+                source
+                for _, source in matches
+                if not set(source.version_ids)
+                & {version for item in retained for version in item.version_ids}
+            ]
+            + retained,
+            command.offset,
         ).model_dump(mode="json")
     if len(matches) != 1:
         return policy_files.FileResult(

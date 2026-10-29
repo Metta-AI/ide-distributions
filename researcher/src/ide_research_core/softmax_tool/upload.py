@@ -33,7 +33,9 @@ The artifact hash is the sha256 of the file, or for a directory the sha256 of th
 
 import hashlib
 import json
+import os
 import re
+import sys
 from pathlib import Path
 
 from ide_research_core import build_sources
@@ -193,6 +195,20 @@ def register_sources(
     if store.find("version_event", version=version_id, kind="sources_registered"):
         return
     handoff = build_dir / "retained-sources.json"
+    # Released receipts did not identify external source roots. Preserve their upload
+    # contract; absent evidence must not be replaced with a guessed checkout path.
+    if "source_root" not in build and not handoff.exists():
+        inputs = [
+            Path(name) if Path(name).is_absolute() else ctx.worker / name
+            for name in build["source_hashes"]
+        ]
+        if any(not path.is_file() for path in inputs):
+            print(
+                "Source unavailable: this older build receipt does not retain its inputs; "
+                "publication can proceed, but source recovery requires rebuilding.",
+                file=sys.stderr,
+            )
+            return
     if handoff.exists():
         retained = build_sources.StagedSources.model_validate_json(handoff.read_bytes())
         retained.verify(
@@ -202,11 +218,14 @@ def register_sources(
         )
         source_path, source_hashes = retained.source_path, retained.source_hashes
     else:
+        input_root = build_dir / build["source_root"] if "source_root" in build else ctx.worker
+        if "source_root" not in build and all(Path(name).is_absolute() for name in build["source_hashes"]):
+            input_root = Path(os.path.commonpath([str(Path(name).parent) for name in build["source_hashes"]]))
         source_path, source_hashes = build_sources.retain(
             ctx.worker,
             build["source_path"],
             build["source_hashes"],
-            source_root=build_dir / build["source_root"] if "source_root" in build else ctx.worker,
+            source_root=input_root,
         )
     gitops.git(ctx.worker, "--literal-pathspecs", "add", "-f", "--", *source_hashes)
     store.add_event(

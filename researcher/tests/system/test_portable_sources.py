@@ -222,3 +222,150 @@ def test_completed_build_can_move_before_staging(tmp_path):
         subprocess.check_output(["git", "-C", str(clone), "show", "HEAD:" + receipt["source_path"]])
         == b"- aggression: 3\n"
     )
+
+
+def test_immutable_publication_survives_repository_removal_and_volume_relocation(tmp_path):
+    """Published source and edit retries survive losing the build checkout and process."""
+    distribution = Path(__file__).resolve().parents[2]
+    volume = tmp_path.resolve() / "volume"
+    volume.mkdir()
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("RESEARCH_", "HERMES_"))
+    } | {
+        "HERMES_HOME": str(volume / "profile"),
+        "RESEARCH_CANONICAL": str(volume / "canonical.git"),
+        "RESEARCH_WORKSPACE": str(volume / "workspace"),
+        "PYTHONPATH": str(distribution / "src"),
+    }
+
+    def cli(operation, payload=None):
+        result = subprocess.run(
+            [sys.executable, "-m", "ide_research_core", "workspace", operation],
+            input=json.dumps(payload) if payload is not None else None,
+            text=True,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        envelope = json.loads(result.stdout)
+        assert envelope["ok"], envelope
+        return envelope["data"]
+
+    cli("bootstrap")
+    repository = tmp_path / "nested/repository"
+    repository.mkdir(parents=True)
+
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(repository), *args]).decode().strip()
+
+    git("init", "-q")
+    git("config", "user.name", "Source proof")
+    git("config", "user.email", "source@example.com")
+    (repository / ".gitignore").write_text("input.bin\n")
+    (repository / "player.py").write_text("original\n")
+    git("add", ".")
+    git("commit", "-qm", "source")
+    (repository / "player.py").write_text("built dirty input\n")
+    (repository / "input.bin").write_bytes(b"\xff\x00ignored")
+    hashes = {
+        name: hashlib.sha256((repository / name).read_bytes()).hexdigest()
+        for name in ("player.py", "input.bin")
+    }
+    request = {
+        "action": "stage",
+        "repository": str(repository),
+        "commit": git("rev-parse", "HEAD"),
+        "source_path": "player.py",
+        "source_hashes": hashes,
+    }
+    worker_guard = Path(env["HERMES_HOME"]) / "plugins/researcher_guard"
+    worker_guard.mkdir(parents=True)
+    staged = cli("source-snapshot", request)
+    worker_guard.rmdir()
+    assert cli("source-snapshot", request) == staged
+    assert staged["ignored"] == ["input.bin"]
+    assert not (
+        volume / "policy-sources/staged" / staged["snapshot"] / "ignored/player.py"
+    ).exists()
+    version = str(uuid4())
+    promotion = {
+        "action": "promote",
+        "snapshot": staged["snapshot"],
+        "version_id": version,
+        "policy_name": "retained",
+        "artifact_sha256": "a" * 64,
+    }
+    promoted = cli("source-snapshot", promotion)
+    import shutil
+
+    shutil.rmtree(repository)
+    relocated = tmp_path.resolve() / "replacement-volume-mount"
+    volume.rename(relocated)
+    env.update(
+        HERMES_HOME=str(relocated / "profile"),
+        RESEARCH_CANONICAL=str(relocated / "canonical.git"),
+        RESEARCH_WORKSPACE=str(relocated / "workspace"),
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(relocated / "workspace"),
+            "remote",
+            "set-url",
+            "origin",
+            str(relocated / "canonical.git"),
+        ],
+        check=True,
+    )
+    assert cli("source-snapshot", promotion) == promoted
+    found = cli(
+        "policy-files", {"action": "sources", "policy_name": "retained", "version_id": version}
+    )
+    assert found["sources"][0]["record_id"] == version
+    read = {
+        "action": "read",
+        "policy_name": "retained",
+        "version_id": version,
+        "record_id": version,
+        "path": "player.py",
+    }
+    original = cli("policy-files", read)
+    assert original["content"] == "built dirty input\n"
+    assert cli("policy-files", {**read, "path": "input.bin"})["kind"] == "not_text"
+    write = {
+        **read,
+        "action": "write",
+        "content": "user edit\n",
+        "base_sha256": original["sha256"],
+        "request_id": "edit",
+    }
+    saved = cli("policy-files", write)
+    assert saved["kind"] == "ok"
+    assert cli("policy-files", write) == saved
+    assert cli("policy-files", {**write, "request_id": "stale"})["kind"] == "conflict"
+    assert cli("policy-files", read)["content"] == "user edit\n"
+    immutable = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(relocated / "policy-sources/objects.git"),
+            "show",
+            staged["commit"] + ":player.py",
+        ]
+    )
+    assert immutable == b"built dirty input\n"
+    rebuild = cli("source-snapshot", {"action": "stage_publication", "version_id": version})
+    edited_input = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(relocated / "policy-sources/objects.git"),
+            "show",
+            rebuild["commit"] + ":player.py",
+        ]
+    )
+    assert edited_input == b"user edit\n"
+    assert rebuild["snapshot"] != staged["snapshot"]

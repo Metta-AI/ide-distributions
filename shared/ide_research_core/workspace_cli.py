@@ -19,11 +19,10 @@ from ide_research_core.games.loader import GameError
 from ide_research_core.io import gitops
 from ide_research_core.io.dotenv import set_env_lines
 from ide_research_core.records.store import RecordProblems
+from ide_research_core.source_io import SourceError
 
 EXIT_OK, EXIT_FAILED, EXIT_BAD_ARGS = 0, 1, 2
-WORKTREE_ENV = (
-    "HERMES_KANBAN_WORKSPACE"  # survives into a Kanban worker's terminal commands
-)
+WORKTREE_ENV = "HERMES_KANBAN_WORKSPACE"  # survives into a Kanban worker's terminal commands
 
 
 def _emit(payload: dict) -> None:
@@ -58,7 +57,7 @@ def _run(handler):
         except gitops.GitError as error:
             _emit({"ok": False, "error": {"reason": "git", "message": str(error)}})
             return EXIT_FAILED
-        except (ValidationError, RecordProblems) as error:
+        except (ValidationError, RecordProblems, SourceError) as error:
             _emit(
                 {
                     "ok": False,
@@ -68,9 +67,7 @@ def _run(handler):
             return EXIT_FAILED
         except KeyError as error:
             message = f"{error.args[0]} is not set"
-            _emit(
-                {"ok": False, "error": {"reason": "bad_arguments", "message": message}}
-            )
+            _emit({"ok": False, "error": {"reason": "bad_arguments", "message": message}})
             return EXIT_BAD_ARGS
         _emit({"ok": True, "data": data})
         return EXIT_OK
@@ -83,9 +80,7 @@ def _clone(args) -> Path:
 
 
 def _integrate(args) -> dict:
-    return workspace.integrate(
-        _clone(args), branch=args.branch, commit=args.commit
-    ).to_dict()
+    return workspace.integrate(_clone(args), branch=args.branch, commit=args.commit).to_dict()
 
 
 def _stage(args) -> dict:
@@ -119,17 +114,13 @@ def _presentation(args) -> dict:
 def _records(args) -> dict:
     from ide_research_core.workspace_records import RecordsRequest, execute
 
-    return execute(
-        _clone(args), RecordsRequest.model_validate_json(sys.stdin.buffer.read(150001))
-    )
+    return execute(_clone(args), RecordsRequest.model_validate_json(sys.stdin.buffer.read(150001)))
 
 
 def _goals(args) -> dict:
     from ide_research_core.workspace_goals import GoalsRequest, execute
 
-    return execute(
-        _clone(args), GoalsRequest.model_validate_json(sys.stdin.buffer.read(150001))
-    )
+    return execute(_clone(args), GoalsRequest.model_validate_json(sys.stdin.buffer.read(150001)))
 
 
 def _project_source(args) -> dict:
@@ -138,9 +129,7 @@ def _project_source(args) -> dict:
 
     payload = json.loads(sys.stdin.buffer.read(750001))
     request_id = payload.pop("request_id", "")
-    return execute(
-        _clone(args), HermesProjectSource.model_validate(payload), request_id
-    )
+    return execute(_clone(args), HermesProjectSource.model_validate(payload), request_id)
 
 
 def _policy_files(args) -> dict:
@@ -150,6 +139,29 @@ def _policy_files(args) -> dict:
     payload = json.loads(sys.stdin.buffer.read(100001))
     request_id = payload.pop("request_id", "")
     return execute_policy(_clone(args), HermesPolicyFiles.model_validate(payload), request_id)
+
+
+def _source_snapshot(args) -> dict:
+    from ide_research_core.source_snapshots import (
+        StagePublicationRequest,
+        StageRequest,
+        promote_sources,
+        snapshot_request,
+        stage_publication,
+        stage_sources,
+    )
+
+    request = snapshot_request.validate_json(sys.stdin.buffer.read(1000001))
+    storage = workspace.canonical_of(_clone(args)).resolve().parent / "policy-sources"
+    if isinstance(request, StagePublicationRequest):
+        value = stage_publication(storage, request.version_id)
+        return {"snapshot": value.digest, **value.model_dump(mode="json")}
+    if isinstance(request, StageRequest):
+        value = stage_sources(storage, **request.model_dump(exclude={"action"}))
+        return {"snapshot": value.digest, **value.model_dump(mode="json")}
+    return promote_sources(storage, **request.model_dump(exclude={"action"})).model_dump(
+        mode="json"
+    )
 
 
 def _bootstrap(args) -> dict:
@@ -181,9 +193,7 @@ def _bootstrap(args) -> dict:
 
 def setup(parser: argparse.ArgumentParser) -> None:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--root", help="this profile's clone (default: $RESEARCH_WORKSPACE)"
-    )
+    common.add_argument("--root", help="this profile's clone (default: $RESEARCH_WORKSPACE)")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
     def command(name: str, handler, help_text: str) -> argparse.ArgumentParser:
@@ -202,9 +212,7 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--commit", required=True, help="exact reviewed commit")
     sub = command("merged", _merged, "is a card branch's commit in canonical main")
     sub.add_argument("--branch", required=True)
-    sub = command(
-        "publish", _publish, "commit the given paths and push main (orchestrator)"
-    )
+    sub = command("publish", _publish, "commit the given paths and push main (orchestrator)")
     sub.add_argument("--message", required=True)
     sub.add_argument("--path", action="append", required=True)
     sub.add_argument(
@@ -221,15 +229,16 @@ def setup(parser: argparse.ArgumentParser) -> None:
         _goals,
         "read or evaluate native research goal context from JSON on stdin",
     )
+    command(
+        "source-snapshot", _source_snapshot, "stage immutable inputs or promote a platform version"
+    )
     command("project-source", _project_source, "read or edit unpublished project files")
     command(
         "policy-files",
         _policy_files,
         "read or edit source bound to native version provenance",
     )
-    command(
-        "records", _records, "read or update native research records from JSON on stdin"
-    )
+    command("records", _records, "read or update native research records from JSON on stdin")
     sub = command(
         "bootstrap",
         _bootstrap,

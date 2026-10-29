@@ -82,3 +82,38 @@ skill; the advisory service owns available models, costs, limits and execution a
 Deploy the platform skill publisher before adopting distributions that refer to it. Qualify fresh
 and retained coordinator/researcher skill discovery, preserved configuration and policy repository
 flows. This does not require changing credentials or reconnecting the user's repositories.
+
+## Retained policy source
+
+The shared `ide_research_core.source_snapshots` module owns immutable source retention.
+Use `storage = canonical_repository.parent / "policy-sources"` on the workspace volume
+(`/opt/data` in hosted Kubernetes). Neither pointers nor input manifests contain checkout paths.
+
+Publication callers use these operations:
+
+1. Before building, call `stage_sources(storage, repository, commit=..., source_path=...,
+   source_hashes=...)`. Paths are repository-relative and hashes describe exact input bytes.
+   It returns `SourceSnapshot`; persist its `digest` in the workspace operation receipt.
+   Tracked/new/dirty inputs become a retained Git commit. Only ignored inputs are copied separately.
+2. Build inside `with build_context(storage, snapshot) as root:`. This disposable tree contains
+   the captured inputs, including modes and link metadata. Do not build from the mutable checkout.
+3. Persist the artifact digest and original upload operation UUID before contacting the platform.
+   Upload/restart reconciliation belongs to the publication runtime, not this source module.
+4. After normal upload or read-only operation-key recovery returns the platform UUID, call
+   `promote_sources(storage, snapshot=snapshot.digest, version_id=UUID(...), policy_name=...,
+   artifact_sha256=...)`. Identical promotion is safe to repeat; a conflicting binding is rejected.
+
+`research workspace source-snapshot` exposes JSON `stage`, `stage_publication`, and `promote`
+operations. Researchers may stage inputs; only the coordinator may promote a publication.
+`policy-files` discovers, reads and edits by the same platform version UUID without a chat lookup.
+Edits and operation replay receipts are saved atomically as a sparse overlay. Published input bytes
+never change. For a rebuild from Code edits, call `stage_publication(storage, version_id)` and build
+its returned snapshot with `build_context`; using the original snapshot intentionally rebuilds the
+original publication, not its edits.
+
+Older completed builds can still upload when their receipts cannot locate source inputs. They emit
+an explicit unavailable-source diagnostic instead of guessing an external checkout or registering
+false source evidence. Such artifacts need rebuilding to acquire complete retained source.
+
+The source CLI relocation test is local persistence evidence. Image packaging, publication recovery,
+and a real Kubernetes pod replacement followed by public-route editing require combined verification.
