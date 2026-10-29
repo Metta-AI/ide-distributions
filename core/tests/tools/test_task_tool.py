@@ -422,7 +422,7 @@ def test_results_never_show_the_store(call, ctx_factory, goal, code_repo):
     call("task", task_args())
     for result in (claim(call), call("task", {"action": "read", "task": "T-1"})):
         text = json.dumps(result)
-        assert ".state/" not in text and str(ctx_factory().workspace.root) not in text
+        assert ".state" not in text  # the worktree path is wanted; the store path never
 
 
 def test_missing_task_is_a_clean_refusal(call, goal):
