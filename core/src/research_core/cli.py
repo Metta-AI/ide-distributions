@@ -16,7 +16,7 @@ from research_core import __version__
 
 # Module paths that register subcommands, loaded lazily so that one broken module does not
 # take the whole CLI down and so that `research --version` stays instant.
-COMMAND_MODULES: tuple[str, ...] = ()
+COMMAND_MODULES: tuple[str, ...] = ("research_core.contract.cli",)
 
 
 def build_parser() -> argparse.ArgumentParser:

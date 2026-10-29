@@ -77,3 +77,14 @@ def test_find_block():
 def test_schema_files_are_json_with_version():
     assert contract.schema("context")["contract_version"] == contract.CONTRACT_VERSION
     json.dumps(contract.schema("context"))
+
+
+def test_context_schema_command(capsys):
+    from research_core import cli
+
+    assert cli.main(["context-schema"]) == 0
+    assert json.loads(capsys.readouterr().out)["title"] == "Turn context"
+    assert cli.main(["context-schema", "--name", "events"]) == 0
+    assert json.loads(capsys.readouterr().out)["title"] == "Event"
+    for name in ("context", "events", "ui-state"):
+        assert contract.schema(name)["contract_version"] == 1
