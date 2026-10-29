@@ -333,7 +333,7 @@ TOOLS = {
     ),
     "league_players": (
         Research,
-        "Find ranked players in an explicit league by name or ID. Compare against the user's owned-player context; rank never establishes ownership. An absent row does not establish absence of policies or activity.",
+        "Find ranked players in an explicit league by name or ID. Each row has rank, score (the board's headline, e.g. MMR = mu - 3 sigma), sigma (OpenSkill uncertainty; null on other ladders), policy_label (the rated version; it can trail a just-promoted champion), version_rounds_played and settling. Compare against the user's owned-player context; rank never establishes ownership. An absent row does not establish absence of policies or activity.",
         {
             "league_id": S,
             "query": S,

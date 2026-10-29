@@ -16,7 +16,18 @@ seat group, plus per-episode end_tick, kill_goal_rate and draw_rate (--metric li
 Statistics come from ab_stats.py (copied unchanged from GotA): independent samples, Welch
 tests for means, Fisher for rates, Benjamini-Yekutieli correction, at least 30
 observations per side before any verdict. It is a diagnostic: the decision belongs to the
-shared paired statistics (`stats evaluate`).
+shared paired statistics (`stats evaluate`) and, in the end, to league episodes.
+
+Noise floor (--replicate DIR, repeatable): each DIR is a replicate baseline arm, a
+behavior-neutral variant of the baseline (one threshold moved by its smallest step) run on
+the same line-ups and seeds as BASE_DIR. Any change to a policy's actions changes what every
+seat observes, so the match diverges from the baseline's despite the same seed, and replicate
+arms differ from BASE_DIR by the arm-level noise of that line-up set. Each delta then carries `difference` (candidate minus baseline, in the metric's
+units), `replicate_differences` (each replicate minus baseline) and `noise_floor` (the largest
+of their magnitudes), and `difference_vs_replicate_mean` (candidate minus the mean of the
+baseline and its replicates, the better estimate of the incumbent). A candidate difference
+no larger than the floor gets verdict `within_noise_floor`, whatever its p-value. Fewer than
+3 replicates give a floor that is likely too low; the JSON says so.
 """
 from __future__ import annotations
 
@@ -139,7 +150,8 @@ def main(argv=None) -> int:
     parser = cli_contract.ArgumentParser(
         __doc__, prog='compare.py',
         examples=['python3 games/pudge-wars-basic/tools/compare.py BASE_DIR CAND_DIR --seats 0,1,2 --json',
-                  'python3 games/pudge-wars-basic/tools/compare.py BASE_DIR CAND_DIR --group seat --metric deaths --json'])
+                  'python3 games/pudge-wars-basic/tools/compare.py BASE_DIR CAND_DIR --group seat --metric deaths --json',
+                  'python3 games/pudge-wars-basic/tools/compare.py BASE_DIR CAND_DIR --seats 0 --group all --replicate NF1 --replicate NF2 --replicate NF3 --json'])
     parser.add_argument('baseline_dir', type=Path)
     parser.add_argument('candidate_dir', type=Path)
     parser.add_argument('--group', choices=['team', 'seat', 'all'], default='team')
@@ -148,6 +160,8 @@ def main(argv=None) -> int:
     parser.add_argument('--target', help='lead metric shown first in the Markdown (default: win)')
     parser.add_argument('--baseline-label', help='name for the baseline arm (default: its directory name)')
     parser.add_argument('--candidate-label', help='name for the candidate arm (default: its directory name)')
+    parser.add_argument('--replicate', type=Path, action='append', default=[],
+                        help='a behavior-neutral baseline replicate arm on the same line-ups and seeds (repeatable)')
 
     def body(args):
         selected = [name.strip() for value in args.metric or [] for name in value.split(',') if name.strip()]
@@ -164,10 +178,44 @@ def main(argv=None) -> int:
         cand_label = args.candidate_label or args.candidate_dir.name
         target = args.target or ('win' if not selected else selected[0])
         report = ab_stats.emit_json(base_label, cand_label, target, deltas)
+        replicate_differences: dict[tuple[str, str], list[float]] = {}
+        for root in args.replicate:
+            replicate, _ = load_arm(root, seats, args.group)
+            for delta in ab_stats.build_deltas(base, replicate, metrics, metric_value, value_fn, names):
+                if delta.base is not None and delta.cand is not None:
+                    replicate_differences.setdefault((delta.metric, delta.group), []).append(delta.cand - delta.base)
+        if args.replicate:
+            for delta in report['deltas']:
+                differences = replicate_differences.get((delta['metric'], delta['group']), [])
+                delta['replicate_differences'] = differences
+                delta['difference'] = (None if delta['base'] is None or delta['cand'] is None
+                                       else delta['cand'] - delta['base'])
+                delta['noise_floor'] = max((abs(value) for value in differences), default=None)
+                # Against the mean of the baseline and its replicates, not the one baseline draw.
+                delta['difference_vs_replicate_mean'] = (
+                    None if delta['difference'] is None
+                    else delta['difference'] - sum(differences) / (len(differences) + 1))
+                if (delta['noise_floor'] is not None and delta['difference'] is not None
+                        and abs(delta['difference']) <= delta['noise_floor']):
+                    delta['verdict'] = 'within_noise_floor'
+            report['noise_floor'] = {
+                'replicates': [str(root) for root in args.replicate],
+                'warning': None if len(args.replicate) >= 3 else
+                'fewer than 3 replicate arms: the floor is likely too low',
+            }
         report.update(unit=f'episode per {args.group} group (subject seats averaged within an episode)',
                       seats=seats, episodes={'baseline': len(base['episodes']), 'candidate': len(cand['episodes'])},
                       excluded_baseline=excluded_base, excluded_candidate=excluded_cand,
                       markdown=ab_stats.render_markdown(base_label, cand_label, base, cand, deltas, target, names, metrics))
+        if args.replicate:
+            lines = ['', '', f'## Noise floor ({len(args.replicate)} replicate baseline arms)', '',
+                     '| metric | group | candidate − baseline | vs replicate mean | noise floor | verdict |', '|---|---|---|---|---|---|']
+            lines += [f"| {d['metric']} | {d['group']} | {d['difference']:+.3f} | {d['difference_vs_replicate_mean']:+.3f} "
+                      f"| {d['noise_floor']:.3f} | {d['verdict']} |"
+                      for d in report['deltas'] if d['difference'] is not None and d['noise_floor'] is not None]
+            if report['noise_floor']['warning']:
+                lines += ['', report['noise_floor']['warning']]
+            report['markdown'] += '\n'.join(lines) + '\n'
         return report
 
     return cli_contract.run(parser, body, argv)

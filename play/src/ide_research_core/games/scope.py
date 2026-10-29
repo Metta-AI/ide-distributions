@@ -105,6 +105,23 @@ def list_games(env: Mapping[str, str] = os.environ) -> list[dict]:
     return list(found.values())
 
 
+def game_for_league(league_id: str, env: Mapping[str, str] = os.environ) -> Game:
+    """The one shipped or installed game whose ``GAME.md`` declares ``league_id``: how a
+    command given an explicit league finds its bindings without ``RESEARCH_GAME``."""
+    games = [
+        game
+        for entry in list_games(env)
+        if (game := load_game(Path(entry["root"]), entry["name"])).league_id == league_id
+    ]
+    if len(games) != 1:
+        found = ", ".join(game.name for game in games) or "none"
+        raise GameError(
+            f"league {league_id!r} needs exactly one game folder declaring it (found: {found}); "
+            "`research softmax league-results` reads any league without a game binding"
+        )
+    return games[0]
+
+
 def canonical_for(env: Mapping[str, str], game: str) -> Path:
     canonical = Path(env[CANONICAL_ENV])
     if game == env.get(GAME_ENV):

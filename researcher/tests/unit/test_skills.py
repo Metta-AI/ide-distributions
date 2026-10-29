@@ -123,7 +123,7 @@ COMMAND_FLAGS = {
     "game check": "--name --root",
     "source fetch": "--repo --ref",
     "softmax game-support": "--league",
-    "softmax league-results": "--league --limit --dest",
+    "softmax league-results": "--league --limit --dest --replays",
     "softmax exec": "",
     "softmax whoami": "",
     "softmax credits": "",

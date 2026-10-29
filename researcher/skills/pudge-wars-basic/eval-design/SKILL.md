@@ -79,6 +79,12 @@ deaths 3.4, landed/thrown 9.1 points, win 0.48, team margin 12.3.
 | Verdict on deaths ±1.0 or accuracy ±3 points | ~150–180 pairs | same |
 | Verdict on win ±10 points | ~390 pairs | rarely affordable; prefer per-seat metrics |
 
+Budget the noise floor as well: the two arms of a pair play different matches once our
+policy acts differently, so plan at least three neutral replicates of the champion on the
+design's seeds and line-ups (`design.lineups`), created with `softmax exec -- coworld
+xp-request create` (GAME.md **What predicts league rating**). They cost three more
+baseline arms; without them a verdict has no measured floor.
+
 The calibrated `n_min` from `stats design` (noise record for the current version) wins
 when larger. If no noise record exists, `stats design` refuses; follow
 `calibrate-noise` (league rows come from `softmax league-episodes`). Do not use

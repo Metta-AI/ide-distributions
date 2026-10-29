@@ -97,7 +97,9 @@ the game, for its league, from ``RESEARCH_GAME``):
   episodes (``Softmax.league_episodes``), each mapped through the game's evaluate binding
   into EpisodeRows (``softmax_tool.league``), written as JSONL for
   ``stats ingest --league``. Prints ``{league_id, episodes, rows, out, game_versions}``.
-  ``--league`` defaults to the game's league. Episodes are evaluated as they arrive (the real
+  ``--league`` picks the game folder (shipped or installed) whose ``GAME.md`` declares that
+  league (``scope.game_for_league``), so it needs no ``RESEARCH_GAME``; without it the
+  league is ``RESEARCH_GAME``'s. Episodes are evaluated as they arrive (the real
   client fetches 4 at a time); a progress line goes to stderr every 10 episodes, and ``--out``
   is written once, when the read is complete.
 - ``exec -- <coworld|softmax> <args...>``: run any other command of the real CLIs as the
@@ -109,8 +111,10 @@ the game, for its league, from ``RESEARCH_GAME``):
   and run the checks that a raw CLI command does not.
 - ``league-results --league L --limit N --dest DIR``: up to N completed episodes of any league,
   raw: ``DIR/<episode>/results.json`` and ``DIR/<episode>/episode.json`` (seats, seed, game
-  version). No game binding runs, so it works for a league no game folder covers yet (writing
-  a new game's ``evaluate`` binding). Prints ``{league_id, episodes, dest}``. Read-only.
+  version, ``replay_url``). With ``--replays`` it also downloads each episode's public replay
+  to ``DIR/<episode>/replay.gz`` (no credential is sent), ready for a game's replay tool. No
+  game binding runs, so it works for a league no game folder covers yet (writing a new game's
+  ``evaluate`` binding). Prints ``{league_id, episodes, dest, replays}``. Read-only.
 
 Record writes go to the worker worktree (``HERMES_KANBAN_WORKSPACE``) only.
 
@@ -148,6 +152,7 @@ import os
 import sys
 import tempfile
 import time
+import urllib.request
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
@@ -162,7 +167,7 @@ from ide_research_core import champion_submission, refs, runctx, workspace
 from ide_research_core.cli import register_group
 from ide_research_core.games.bindings import binding_evaluate
 from ide_research_core.games.loader import GameError
-from ide_research_core.games.scope import load_named_game
+from ide_research_core.games.scope import game_for_league, load_named_game
 from ide_research_core.ids import parse_id
 from ide_research_core.io import gitops
 from ide_research_core.io.docs import write_text
@@ -175,6 +180,7 @@ from ide_research_core.softmax_tool.discovery import Discovery
 from ide_research_core.softmax_tool.identity import IdentityError, identity_problems
 from ide_research_core.softmax_tool.league import episode_rows, safe_name
 from ide_research_core.softmax_tool.platform_cli import (
+    USER_AGENT,
     ExecRefused,
     PlatformCli,
     SoftmaxCliError,
@@ -1077,6 +1083,7 @@ def _standings(ctx, sm, args) -> dict:
 
 
 LEAGUE_PROGRESS_EVERY = 10  # episodes between progress lines on stderr
+REPLAY_TIMEOUT_S = 120
 
 
 def _progress(text: str, started: float) -> None:
@@ -1086,8 +1093,8 @@ def _progress(text: str, started: float) -> None:
 def _league_episodes(ctx, sm, args) -> dict:
     if args.limit < 1:
         raise BadArguments("--limit must be positive")
-    game = _game()
-    league_id = args.league or game.league_id
+    game = game_for_league(args.league) if args.league else _game()
+    league_id = game.league_id
     current = str(sm.game_version(league_id)).strip()
     evaluate = binding_evaluate(game)
     rows = []
@@ -1123,8 +1130,13 @@ def _league_results(ctx, sm, args) -> dict:
         write_text(folder / "results.json", json.dumps(episode["results"], indent=2, sort_keys=True))
         detail = {key: value for key, value in episode.items() if key != "results"}
         write_text(folder / "episode.json", json.dumps(detail, indent=2, sort_keys=True))
+        if args.replays:
+            # Public object storage: no credential is sent.
+            request = urllib.request.Request(episode["replay_url"], headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=REPLAY_TIMEOUT_S) as response:
+                (folder / "replay.gz").write_bytes(response.read())
         episodes += 1
-    return {"league_id": args.league, "episodes": episodes, "dest": str(dest)}
+    return {"league_id": args.league, "episodes": episodes, "dest": str(dest), "replays": args.replays}
 
 
 # --- parser ---
@@ -1267,7 +1279,9 @@ def setup(parser: argparse.ArgumentParser) -> None:
         _league_episodes,
         "league episodes as EpisodeRow JSONL for stats ingest --league (read-only)",
     )
-    sub.add_argument("--league", help="league id (default: the game's league)")
+    sub.add_argument(
+        "--league", help="league id; its game folder supplies the binding (default: RESEARCH_GAME's)"
+    )
     sub.add_argument("--limit", type=int, required=True, help="most episodes to read")
     sub.add_argument("--out", required=True, help="EpisodeRow JSONL file to write")
     sub = command(
@@ -1279,6 +1293,9 @@ def setup(parser: argparse.ArgumentParser) -> None:
     sub.add_argument("--league", required=True, help="league id")
     sub.add_argument("--limit", type=int, required=True, help="most episodes to read")
     sub.add_argument("--dest", required=True, help="directory that receives <episode>/ folders")
+    sub.add_argument(
+        "--replays", action="store_true", help="also download each public replay to <episode>/replay.gz"
+    )
 
 
 register_group("softmax", setup)

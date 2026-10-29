@@ -50,6 +50,22 @@ build fetches the source and every `nimby.lock` dependency. After exit, read the
 code, the JSON envelope (`ok`, `error.reason`) and the files the command wrote before
 interpreting anything. Exit 1 is a failed check, 2 a rejected input, 3 a tool fault.
 
+## Evidence that predicts the league
+
+Only mixed-seat evidence predicts the rating: league episodes seat six different players'
+champions. Copies against copies (`match.py --seat cand:3 --seat base:3`, or a whole-team
+XP design) answers coordination questions only; never report it as strength.
+
+Hosted XP episodes repeat exactly for an unchanged roster and seed (A/A matched 54 of 54
+pairs), but any change to our policy's actions changes the whole match, so the baseline arm
+is one draw of that line-up set. Follow `games/pudge-wars-basic/GAME.md` **What predicts
+league rating**: run at least three neutral replicates of the champion on the same pairs,
+compare unpaired with `tools/compare.py ... --replicate` and report
+`difference_vs_replicate_mean` beside `noise_floor`. A difference inside the floor is no
+result. About 150 episodes per arm resolve only differences of 10 points or more in win
+rate. A candidate that clears the floor goes to the league; league episodes and the rating
+decide.
+
 ## Metrics that matter
 
 `evaluate.py` emits one entry per seat with these metrics (GAME.md is authoritative):
@@ -110,9 +126,10 @@ Drop or flag an episode before any mean:
 
 ## Tests and floors
 
-Use the shared paired statistics (`stats evaluate`) for the decision; `compare.py` is a
-diagnostic. Measured per seat-episode SDs on 1,152 league seats (2026-10-26): kills 3.7,
-deaths 3.4, landed/thrown 9.1 points, win 0.48, team signed margin 12.3.
+Use the shared paired statistics (`stats evaluate`) for the research record and
+`compare.py --replicate` for the noise floor; neither replaces league episodes. Measured
+per seat-episode SDs on 1,152 league seats (2026-10-26): kills 3.7, deaths 3.4,
+landed/thrown 9.1 points, win 0.48, team signed margin 12.3.
 
 | Effect | Episodes per arm (two-arm, α 0.05, power 0.8) |
 |---|---|
@@ -124,9 +141,10 @@ deaths 3.4, landed/thrown 9.1 points, win 0.48, team signed margin 12.3.
 | landed/thrown ±3 points | ~145 |
 
 `min_episodes_floor` is 100: below it a result is directional only. Pairing by seed and
-line-up (the frozen design) reduces these numbers; the calibrated `n_min` from
-`stats design` wins when it is larger. Deaths and accuracy carry more signal per episode
-than win; report them beside win. Local `match.py` screens never count (D-04).
+line-up (the frozen design) removes the line-up effect, but the two arms still play
+different matches, so check any verdict against replicate baselines (above); the calibrated
+`n_min` from `stats design` wins when it is larger. Deaths and accuracy carry more signal per
+episode than win; report them beside win. Local `match.py` screens never count (D-04).
 
 ## Procedure and outputs
 
@@ -140,6 +158,7 @@ seeds and line-ups, and failed episode counts before calculating means.
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/evaluate.py" --results <ABS_RESULTS_JSON> --json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/compare.py" <ABS_BASELINE_EPISODES> <ABS_CANDIDATE_EPISODES> --group team --json > .scratch/<E-id>-compare.json
 "$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/compare.py" <ABS_BASELINE_EPISODES> <ABS_CANDIDATE_EPISODES> --group seat --metric deaths --json > .scratch/<E-id>-deaths.json
+"$RESEARCH_PYTHON" "$RESEARCH_HOME/games/pudge-wars-basic/tools/compare.py" <ABS_BASELINE_EPISODES> <ABS_CANDIDATE_EPISODES> --seats <N> --group all --replicate <ABS_REPLICATE_1> --replicate <ABS_REPLICATE_2> --replicate <ABS_REPLICATE_3> --json > .scratch/<E-id>-floor.json
 "$RESEARCH_CLI" stats ingest --experiment <E-id> --rows .scratch/<E-id>-rows.jsonl
 "$RESEARCH_CLI" stats evaluate <E-id>
 ```
