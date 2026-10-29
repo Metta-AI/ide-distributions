@@ -7,7 +7,10 @@ workspace doctrine and the coordinator lifecycle; it never calls a platform serv
 import argparse
 import json
 import os
+import resource
 import subprocess
+import sys
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -82,7 +85,10 @@ def reconcile_workspace(profile: Path, workspace: Path, remote: Path, source: Pa
     if not agents.exists() or agents.read_text() != canonical:
         subprocess.run([*git, "fetch", "origin", "main"], check=True)
         result = subprocess.run(
-            [*git, "merge", "--no-edit", "origin/main"], capture_output=True, text=True, check=False
+            [*git, "merge", "--no-edit", "origin/main"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode:
             merge_head = subprocess.run(
@@ -135,10 +141,50 @@ def _shipped(defaults: dict, key: str):
     return value
 
 
+def _run_hermes(argv, *, env=os.environ, check=True, capture_output=False, text=False):
+    # Record operation names and config keys, never values or credentials.
+    event = {
+        "event": "profile_startup_command",
+        "profile": Path(env["HERMES_HOME"]).name,
+        "command": argv[1:4] if argv[1] == "config" else argv[1:3],
+        "state": "started",
+    }
+    print(json.dumps(event), file=sys.stderr, flush=True)
+    started = time.monotonic()
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    state = "failed"
+    try:
+        result = subprocess.run(
+            argv, env=env, check=check, capture_output=capture_output, text=text
+        )
+        state = "completed" if result.returncode == 0 else "nonzero"
+        return result
+    finally:
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        print(
+            json.dumps(
+                {
+                    **event,
+                    "state": state,
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "cpu_seconds": round(
+                        after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime,
+                        3,
+                    ),
+                }
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def _retained(hermes: str, key: str):
     """The profile's current value, or None when the key is not set."""
-    result = subprocess.run(
-        [hermes, "config", "get", key, "--json"], capture_output=True, text=True, check=False
+    result = _run_hermes(
+        [hermes, "config", "get", key, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else None
 
@@ -154,11 +200,12 @@ def reconcile_settings(defaults: dict, hermes: str) -> None:
             # Hermes stores a string-typed setting's text verbatim (so "off" stays a string);
             # JSON-quoting it would store the quotes.
             value = shipped if isinstance(shipped, str) else json.dumps(shipped)
-            subprocess.run([hermes, "config", "set", key, value], check=True)
+            _run_hermes([hermes, "config", "set", key, value], check=True)
     fallback = defaults.get("fallback_providers")
     if fallback and not _retained(hermes, "fallback_providers"):
-        subprocess.run(
-            [hermes, "config", "set", "fallback_providers", json.dumps(fallback)], check=True
+        _run_hermes(
+            [hermes, "config", "set", "fallback_providers", json.dumps(fallback)],
+            check=True,
         )
 
 
@@ -184,7 +231,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
         current = _retained(hermes, key) or []  # an older profile may not have the key
         desired = list(dict.fromkeys([*current, *required]))
         if desired != current:
-            subprocess.run([hermes, "config", "set", key, json.dumps(desired)], check=True)
+            _run_hermes([hermes, "config", "set", key, json.dumps(desired)], check=True)
     reconcile_settings(defaults, hermes)
     if not coordinator:
         return
@@ -205,7 +252,7 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
     pending = jobs_path.with_suffix(".pending")
     pending.write_text(jobs.model_dump_json(indent=2, exclude_unset=True) + "\n")
     pending.replace(jobs_path)
-    subprocess.run(
+    _run_hermes(
         [
             hermes,
             "config",
@@ -216,28 +263,31 @@ def prepare(source: Path, hermes: str, activate_supervisor: bool) -> None:
         check=True,
     )
     root_env = dict(os.environ, HERMES_HOME=str(home))
-    subprocess.run(
+    _run_hermes(
         [hermes, "config", "set", "kanban.auto_decompose", "false"],
         env=root_env,
         check=True,
     )
-    assignee = subprocess.check_output(
-        [hermes, "config", "get", "kanban.default_assignee"], env=root_env, text=True
-    )
+    assignee = _run_hermes(
+        [hermes, "config", "get", "kanban.default_assignee"],
+        env=root_env,
+        capture_output=True,
+        text=True,
+    ).stdout
     if assignee.strip():
-        subprocess.run(
+        _run_hermes(
             [hermes, "config", "unset", "kanban.default_assignee"],
             env=root_env,
             check=True,
         )
     marker = profile / ".softmax-prepared"
     if activate_supervisor and not marker.exists():
-        subprocess.run(
+        _run_hermes(
             [hermes, "kanban", "boards", "create", "autoresearch"],
             env=root_env,
             check=True,
         )
-        subprocess.run([hermes, "cron", "resume", "supervisor"], check=True)
+        _run_hermes([hermes, "cron", "resume", "supervisor"], check=True)
         marker.touch()
 
 
