@@ -427,7 +427,8 @@ def test_republication_attaches_sources_to_existing_immutable_version(ws, tmp_pa
     starter = tmp_path / "installed/player.bas"
     starter.parent.mkdir()
     starter.write_bytes(b"policy-bytes")
-    ws.write_build(source_path=str(starter), source_hashes={str(starter): hashlib.sha256(starter.read_bytes()).hexdigest()})
+    ws.write_build(source_root=str(starter.parent), source_path=starter.name,
+                   source_hashes={starter.name: hashlib.sha256(starter.read_bytes()).hexdigest()})
     assert ws.run() == version_id
     assert ws.store.path_of(version_id).read_bytes() == original
     assert len(ws.uploads()) == 1

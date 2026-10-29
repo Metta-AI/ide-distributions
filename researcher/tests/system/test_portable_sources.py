@@ -170,6 +170,33 @@ def test_completed_build_can_move_before_staging(tmp_path):
         capture_output=True,
         check=True,
     )
+    built = json.loads((output / "version.json").read_text())
+    assert built["source_path"] == "STRATEGY.md"
+    assert built["source_hashes"] == {
+        "STRATEGY.md": hashlib.sha256(source.read_bytes()).hexdigest()
+    }
+    other = tmp_path / "same-input-in-another-directory"
+    other.mkdir()
+    (other / "STRATEGY.md").write_bytes(source.read_bytes())
+    other_output = other / "build"
+    subprocess.run(
+        [
+            sys.executable,
+            str(distribution / "games/fakegame/tools/fake_build.py"),
+            str(other / "STRATEGY.md"),
+            "--out",
+            str(other_output),
+            "--json",
+        ],
+        env=env,
+        capture_output=True,
+        check=True,
+    )
+    rebuilt = json.loads((other_output / "version.json").read_text())
+    assert rebuilt["source_root"] == built["source_root"], (
+        "Source identity must not contain host paths"
+    )
+    assert rebuilt["source_hashes"] == built["source_hashes"]
     relocated = tmp_path.resolve() / "after"
     profile.rename(relocated)
     clone = relocated / "workspace"

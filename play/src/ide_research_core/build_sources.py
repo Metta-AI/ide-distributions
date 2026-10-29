@@ -23,7 +23,6 @@ def retain(
     hashes: dict[str, str],
     *,
     source_root: Path | None = None,
-    build_identity: str = "",
 ) -> tuple[str, dict[str, str]]:
     """Snapshot build inputs into the canonical workspace, including nested or ignored sources.
 
@@ -37,18 +36,15 @@ def retain(
     originals = {
         name: Path(name) if Path(name).is_absolute() else source_root / name for name in hashes
     }
+    names = {name: path.relative_to(source_root).as_posix() for name, path in originals.items()}
+    normalized = {names[name]: digest for name, digest in hashes.items()}
     modes = {name: path.lstat().st_mode & (0o170000 | 0o777) for name, path in originals.items()}
-    manifest_hash = hashlib.sha256(
-        json.dumps(
-            {"hashes": hashes, "modes": modes, "build": build_identity}, sort_keys=True
-        ).encode()
-    ).hexdigest()
-    common = Path(os.path.commonpath([str(path.parent) for path in originals.values()]))
+    manifest_hash = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
     mapped: dict[str, str] = {}
     result: dict[str, str] = {}
     for name, expected in hashes.items():
         original = originals[name]
-        relative = f"sources/{manifest_hash}/{original.relative_to(common).as_posix()}"
+        relative = f"sources/{manifest_hash}/{names[name]}"
         if not policy_files.source_path(relative) or relative.split("/")[0] == "versions":
             raise SourceError(f"Build source must have a visible workspace-relative path: {name}")
         target = root / relative
@@ -96,10 +92,22 @@ def capture(build_dir: Path, source_root: Path) -> dict:
     """Finish a build with self-contained inputs before its directory can be relocated."""
     receipt = build_dir / "version.json"
     build = json.loads(receipt.read_bytes())
-    primary, hashes = retain(
-        build_dir, build["source_path"], build["source_hashes"], source_root=source_root
-    )
-    build.update(source_root=".", source_path=primary, source_hashes=hashes)
+    source_root = source_root.resolve()
+    primary = Path(build["source_path"])
+    primary = primary.relative_to(source_root) if primary.is_absolute() else primary
+    # Installed compiler inputs are already recorded under compiler provenance. They are
+    # not editable project files and must not contribute host paths to source identity.
+    hashes = {}
+    for name, digest in build["source_hashes"].items():
+        path = Path(name)
+        if path.is_absolute():
+            if not path.is_relative_to(source_root):
+                continue
+            path = path.relative_to(source_root)
+        hashes[path.as_posix()] = digest
+    retained, _ = retain(build_dir, primary.as_posix(), hashes, source_root=source_root)
+    snapshot = "/".join(Path(retained).parts[:2])
+    build.update(source_root=snapshot, source_path=primary.as_posix(), source_hashes=hashes)
     receipt.write_text(json.dumps(build, sort_keys=True, indent=2) + "\n")
     return build
 
@@ -183,7 +191,6 @@ def stage(worktree: Path, base: str) -> list[str]:
                 source_root=receipt.parent / build["source_root"]
                 if "source_root" in build
                 else worktree,
-                build_identity=f"{receipt_hash}:{artifact_hash}",
             )
             retained = StagedSources(
                 receipt_sha256=receipt_hash,
