@@ -6,10 +6,7 @@ index ``one_active`` enforces it and ``activate`` flips it in one transaction. A
 as set up once ``mark_set_up`` recorded passing tool checks (``set_up_at``).
 
 ``pending_request`` (amendments A4.8 and A6.3) is the user's request that setup carries out
-when it finishes, ``{text, cites}``. Migration 0001 gives the row no ``pending_request`` column,
-so until a migration adds one the request is kept in the workspace store's ``meta`` table under
-``pending_request:<coworld_id>`` and merged into every record this module returns; callers see
-one shape either way and nothing else reads that key.
+when it finishes, ``{text, cites}`` (column added by migration 0002).
 """
 
 from __future__ import annotations
@@ -26,8 +23,6 @@ if TYPE_CHECKING:
     from research_core.store.actors import Actor
     from research_core.store.db import Store
 
-PENDING_REQUEST_META_KEY = "pending_request:{coworld_id}"
-
 
 def _is_text(value: object) -> bool:
     return isinstance(value, str) and value.strip() != ""
@@ -43,8 +38,7 @@ def _fetch(wstore: Store, coworld_id: str) -> sqlite3.Row:
 def _record(wstore: Store, row: sqlite3.Row) -> dict[str, Any]:
     record = record_from_row(COWORLD, row)
     record["active"] = bool(record["active"])
-    key = PENDING_REQUEST_META_KEY.format(coworld_id=row["coworld_id"])
-    record["pending_request"] = parse_json(wstore.get_meta(key), default=None)
+    record["pending_request"] = parse_json(row["pending_request"], default=None)
     return record
 
 
@@ -138,13 +132,10 @@ def set_pending_request(
     """
     if request is not None and not isinstance(request, dict):
         raise StoreError(["pending_request must be an object such as {text, cites}, or null"])
-    key = PENDING_REQUEST_META_KEY.format(coworld_id=coworld_id)
     with wstore.tx(actor) as tx:
         _fetch(wstore, coworld_id)
-        if request is None:
-            tx.execute("DELETE FROM meta WHERE key = ?", (key,))
-        else:
-            tx.execute(
-                "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, json_field(request))
-            )
+        tx.execute(
+            "UPDATE coworlds SET pending_request = ? WHERE coworld_id = ?",
+            (None if request is None else json_field(request), coworld_id),
+        )
     return read(wstore, coworld_id)

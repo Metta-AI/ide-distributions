@@ -196,18 +196,16 @@ def test_mark_drained(workspace_store, harness):
     assert sessions.mark_drained(workspace_store, harness, [], True) == []
 
 
-def test_set_stopped_by_is_kept_in_meta_until_the_column_exists(workspace_store, harness):
+def test_set_stopped_by_round_trip(workspace_store, harness):
     sessions.register(workspace_store, harness, session_id=SID, profile="r", kind="task", task_id=1)
     record = sessions.set_stopped_by(workspace_store, harness, SID, "watcher:drain")
     assert record["stopped_by"] == "watcher:drain"
-    assert workspace_store.get_meta(f"stopped_by:{SID}") == "watcher:drain"
     assert sessions.read(workspace_store, SID)["stopped_by"] == "watcher:drain"
     ended = sessions.end(workspace_store, harness, SID)
     assert ended["stopped_by"] == "watcher:drain"
     assert events(workspace_store)[1][2]["stopped_by"] == "watcher:drain"
     cleared = sessions.set_stopped_by(workspace_store, harness, SID, None)
     assert cleared["stopped_by"] is None
-    assert workspace_store.get_meta(f"stopped_by:{SID}") is None
     with pytest.raises(StoreError):
         sessions.set_stopped_by(workspace_store, harness, SID, "")
     with pytest.raises(NotFound):

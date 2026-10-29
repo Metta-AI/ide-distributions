@@ -10,11 +10,8 @@ watcher and never stored. ``set_run`` records the run the watcher started and co
 ``attempts`` unless the caller sets the count.
 
 ``stopped_by`` (A5.6: ``watcher:drain``, ``watcher:replace``, ``watcher:abandon``) marks a
-stop the watcher asked for, so recovery does not treat the run's end as a death. The
-workspace migration has no ``stopped_by`` column yet, so the mark is kept in the store's
-``meta`` table under ``stopped_by:<session id>`` and read back into every record; a later
-migration can move it into the table without changing this module's interface. ``set_run``
-clears it: a new run is live and a later end is a real one.
+stop the watcher asked for, so recovery does not treat the run's end as a death (column added
+by migration 0002). ``set_run`` clears it: a new run is live and a later end is a real one.
 """
 
 from __future__ import annotations
@@ -161,7 +158,7 @@ def set_run(
                 " WHERE id = ?",
                 (run_id, attempts, tx.at, session_id),
             )
-        tx.execute("DELETE FROM meta WHERE key = ?", (_stopped_key(session_id),))
+        tx.execute("UPDATE sessions SET stopped_by = NULL WHERE id = ?", (session_id,))
         return _record(tx, session_id)
 
 
@@ -244,11 +241,7 @@ def set_stopped_by(
         raise StoreError(["reason is a string such as watcher:drain, or None to clear it"])
     with store.tx(actor) as tx:
         _require_session(tx, session_id)
-        key = _stopped_key(session_id)
-        if reason is None:
-            tx.execute("DELETE FROM meta WHERE key = ?", (key,))
-        else:
-            tx.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, reason))
+        tx.execute("UPDATE sessions SET stopped_by = ? WHERE id = ?", (reason, session_id))
         return _record(tx, session_id)
 
 
@@ -267,16 +260,10 @@ def _require_session(tx: Tx, session_id: str) -> Any:
     return row
 
 
-def _stopped_key(session_id: str) -> str:
-    return f"stopped_by:{session_id}"
-
-
 def _record(reader: Store | Tx, session_id: str) -> dict[str, Any]:
     row = reader.one("SELECT * FROM sessions WHERE id = ?", (session_id,))
     record = record_from_row(SPEC, row)
     record["drained"] = bool(record["drained"])
-    stopped = reader.one("SELECT value FROM meta WHERE key = ?", (_stopped_key(session_id),))
-    record["stopped_by"] = None if stopped is None else stopped["value"]
     return record
 
 

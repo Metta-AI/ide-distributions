@@ -294,7 +294,7 @@ def test_schema_status_ok(coworld_store, workspace_store):
         status = store.schema_status()
         assert status.ok
         assert status.diff == []
-        assert status.user_version == status.expected_version == 1
+        assert status.user_version == status.expected_version >= 1
 
 
 def test_schema_mismatch_refused(tmp_path):

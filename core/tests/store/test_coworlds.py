@@ -104,11 +104,8 @@ def test_set_pending_request_round_trip(workspace_store, harness):
     assert coworlds.read(workspace_store, "cow-x")["pending_request"] == request
     assert coworlds.active(workspace_store)["pending_request"] == request
     assert coworlds.list(workspace_store)[0]["pending_request"] == request
-    # Until the registry row has its pending_request column, the request lives in meta.
-    assert workspace_store.get_meta("pending_request:cow-x") is not None
     cleared = coworlds.set_pending_request(workspace_store, harness, "cow-x", None)
     assert cleared["pending_request"] is None
-    assert workspace_store.get_meta("pending_request:cow-x") is None
     assert coworlds.read(workspace_store, "cow-x")["pending_request"] is None
     with pytest.raises(StoreError):
         coworlds.set_pending_request(workspace_store, harness, "cow-x", "submit it")
