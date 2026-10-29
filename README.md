@@ -16,8 +16,9 @@ in a browser). The implementation plan, one file per stack entry, is in
 [`docs/plans/ide-profile-refactor/`](docs/plans/ide-profile-refactor/00-overview.md); the
 overview fixes the architecture decisions the design leaves open.
 
-**Status: being rebuilt.** Entries land in order; until the last one, this README, the profile
-READMEs and `docs/hosting.md` describe the target and say what is not built yet.
+The rebuild landed on October 28, 2026 (Pacific). What hosting needs from these profiles, and
+what they guarantee, is in [`docs/hosting.md`](docs/hosting.md); the retired profiles' notes
+under `docs/` carry a banner saying so.
 
 ## How the pieces fit
 
@@ -63,7 +64,8 @@ refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
 ## Hosting
 
-Softmax hosting runs these distributions in its sandboxes. What the new layout needs from
-hosting is listed in the plan overview and will be the content of [`docs/hosting.md`](docs/hosting.md).
-Changes to `core/`, `orchestrator/`, `researcher/` or the root lock on `main` dispatch Metta's
-image release workflow (`.github/workflows/release-hermes.yml`).
+Softmax hosting runs these distributions in its sandboxes. [`docs/hosting.md`](docs/hosting.md)
+is the handoff: the image, `prepare.py`, the environment variables, the gateway, sleep and
+drain, the bridge's seam, storage and releases. Changes to `core/`, `orchestrator/`,
+`researcher/` or the root lock on `main` dispatch Metta's image release workflow
+(`.github/workflows/release-hermes.yml`); a nightly workflow runs the read-only platform check.
