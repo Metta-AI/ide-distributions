@@ -19,6 +19,7 @@ from research_core import layout
 from research_core.layout import Coworld, Workspace
 from research_core.store.actors import Actor
 from research_core.store.db import Store
+from research_core.store.errors import SchemaNewer
 
 WATCHER_ACTOR = Actor.parse("harness")
 DEFAULT_RESEARCHER_PROFILES = ("researcher",)
@@ -84,7 +85,7 @@ def build(
     wstore = Store.open(ws.store_path, kind="workspace")
     active = coworlds.active(wstore)
     coworld = ws.coworld(active["coworld_id"]) if active else None
-    store = Store.open(coworld.store_path, kind="coworld") if coworld else None
+    store = _open_coworld_store(coworld) if coworld else None
     profile_home = Path(env["HERMES_HOME"]) if env.get("HERMES_HOME") else None
     if hermes is None:
         from research_core.watcher.hermes_api import HermesRuns
@@ -108,3 +109,16 @@ def build(
         coworld=coworld,
         store=store,
     )
+
+
+def _open_coworld_store(coworld: Coworld) -> Store | None:
+    """The active Coworld's store, or ``None`` when a newer release wrote it.
+
+    Such a store is left untouched (design B.10 as amended): the tick runs without it, and the
+    store checks report it and pause the workspace. A mismatched store still raises, so the
+    tick repairs it before building the context.
+    """
+    try:
+        return Store.open(coworld.store_path, kind="coworld")
+    except SchemaNewer:
+        return None

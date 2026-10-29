@@ -114,9 +114,36 @@ capabilities, panels, the agent-context panel) ships later in its own stack.
 ## Storage and backup
 
 The durable state is `$IDE_WORKSPACE` (stores, code repositories, worktrees, documents) and each
-profile's Hermes `state.db`. SQLite runs in WAL mode; the bridge may read the stores with a
-read-only connection (check S3: WAL reads under gVisor from a second process). Daily encrypted
-snapshots of the volume are accepted as the durability bound (design R6).
+profile's Hermes `state.db`. SQLite runs in WAL mode with `synchronous=FULL` on every writable
+connection, so a committed record survives a crash of the process or the machine; the bridge may
+read the stores with a read-only connection (check S3: WAL reads under gVisor from a second
+process). Nothing on the volume survives losing the volume, so backups are part of the contract:
+
+- **Hourly encrypted snapshots of the volume are the required minimum**, keeping the daily
+  history as it is (a longer retention, not a shorter one). This bounds the loss at one hour of
+  records, chat and action receipts. The design's accepted daily bound (R6) is replaced by this.
+- `research store backup <dest-dir>` is a database-aware copy hosting may schedule more often
+  than the snapshots, into separate storage. It copies the workspace store, every registered
+  Coworld store and, with `HERMES_HOME` set, that profile's Hermes `state.db` with SQLite's
+  backup API (never a raw copy of a live database and its WAL) into `<dest-dir>/<timestamp>/`
+  with a `manifest.json` (sources, sizes, sha256, the workspace store's `last_seq`). Run it once
+  per profile whose transcripts should be covered, or copy the other profiles' `state.db` files
+  the same way.
+- `research store restore-check <backup-dir>` is the restore test: it opens every copy
+  read-only, runs `PRAGMA integrity_check`, compares the manifest's checksums and checks each
+  store's schema against the running release, and prints a JSON verdict (exit 1 on any
+  failure). Run it against a stored backup, not the one just written, as part of the hosting
+  checks.
+- A backup must cover the workspace store, every Coworld store, the Hermes transcript databases
+  of every profile, and the volume's repositories, worktrees and documents (the volume snapshot
+  covers the files; the records refer to them by path).
+- Monitor the age of the latest restorable backup (the newest folder whose `restore-check`
+  passed) and alert when it exceeds the loss window.
+
+The watcher's schema repair never replaces the store file: it rewrites the schema inside the
+file in one transaction and first saves a copy next to it (`store.before-repair-<timestamp>.db`),
+named in the notice. A store written by a newer release than the running image is left
+untouched and the workspace is paused until the matching release runs again.
 
 ## Releases
 

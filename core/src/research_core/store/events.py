@@ -83,6 +83,7 @@ KINDS: frozenset[str] = frozenset(
         "coworld.set_up",
         "store.unmarked_write",
         "store.schema_rebuilt",
+        "store.schema_newer",
         "platform.request",
         "platform.forum_post",
         "platform.wiki_edit",

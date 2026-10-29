@@ -20,7 +20,26 @@ class StoreError(Exception):
 
 
 class SchemaMismatch(StoreError):
-    """The store's shape differs from the release's migrations; nothing works through it."""
+    """The store's shape differs from the release's migrations; nothing works through it.
+
+    The watcher repairs this in place, keeping the rows (``migrate.rebuild_keeping_rows``).
+    """
+
+
+class SchemaNewer(StoreError):
+    """A newer release wrote the store: its ``user_version`` is above this release's migrations.
+
+    Never repaired: the newer shape is legitimate and this release cannot know it. The file is
+    left untouched until the matching or a newer runtime opens it.
+    """
+
+    def __init__(self, user_version: int, expected_version: int) -> None:
+        self.user_version = user_version
+        self.expected_version = expected_version
+        super().__init__(
+            f"the store's schema version is {user_version}; this release knows version"
+            f" {expected_version}: a newer release wrote it, so it is left untouched"
+        )
 
 
 class NotFound(StoreError):

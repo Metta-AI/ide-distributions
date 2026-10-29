@@ -7,15 +7,19 @@ will.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 import subprocess
 import sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 from research_core import cli, layout
+from research_core.store import cli as store_cli
 from research_core.store import coworlds, directives, goals, settings, tasks, ui_state
 from research_core.store.actors import Actor
 from research_core.store.db import Store
@@ -386,6 +390,164 @@ def test_export_without_a_coworld_dumps_the_workspace_store(tmp_path, monkeypatc
     assert list(out["stores"]) == ["workspace"]
 
 
+def test_export_tables_and_seq_come_from_one_read_transaction(
+    workspace, capsys, tmp_path, monkeypatch
+):
+    """A writer committing between the events and goals tables moves neither in the export."""
+    make_goal(workspace.store)
+    seq_before = workspace.store.last_seq()
+    real_tables = _copyable_tables
+    written: list[int] = []
+
+    def tables_with_a_writer_after_events(conn, schema):
+        for table in real_tables(conn, schema):
+            yield table
+            if table == "events" and "goals" in real_tables(conn, schema) and not written:
+                # The fixture's connection is a second connection to the Coworld store.
+                written.append(goals.update(workspace.store, HARNESS, 1, title="changed")["id"])
+
+    monkeypatch.setattr(store_cli, "_copyable_tables", tables_with_a_writer_after_events)
+    out_dir = tmp_path / "dump"
+    code, out = run(capsys, "export", "--out", str(out_dir))
+    assert code == 0, out
+    assert written and goals.read(workspace.store, 1)["title"] == "changed"
+    folder = out_dir / COWORLD_ID
+    goal_rows = [json.loads(line) for line in (folder / "goals.jsonl").read_text().splitlines()]
+    event_rows = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
+    assert goal_rows[0]["title"] == "Beat the starter"
+    assert "goal.updated" not in [row["kind"] for row in event_rows]
+    assert out["stores"][COWORLD_ID]["seq"] == seq_before
+    assert workspace.store.last_seq() == seq_before + 1
+
+
+# --- backup and restore-check ---------------------------------------------------------------
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def read_only(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+
+def test_backup_copies_every_database_and_writes_a_manifest(
+    workspace, capsys, tmp_path, monkeypatch
+):
+    make_goal(workspace.store)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    state = sqlite3.connect(profile / "state.db")
+    state.execute("CREATE TABLE sessions (id TEXT)")
+    state.execute("INSERT INTO sessions VALUES ('s1')")
+    state.commit()
+    state.close()
+    monkeypatch.setenv("HERMES_HOME", str(profile))
+
+    code, out = run(capsys, "backup", str(tmp_path / "backups"))
+    assert code == 0, out
+    folder = Path(out["dir"])
+    assert folder.parent == tmp_path / "backups" and folder.name.endswith("Z")
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest == {key: value for key, value in out.items() if key != "ok"}
+    assert manifest["workspace"] == str(workspace.ws.root)
+    assert manifest["last_seq"] == workspace.wstore.last_seq()
+    databases = {entry["name"]: entry for entry in manifest["databases"]}
+    assert list(databases) == ["workspace.db", f"coworld-{COWORLD_ID}.db", "hermes-state.db"]
+    assert databases["workspace.db"]["source"] == str(workspace.ws.store_path)
+    assert databases[f"coworld-{COWORLD_ID}.db"]["last_seq"] == workspace.store.last_seq()
+    assert databases["hermes-state.db"]["source"] == str(profile / "state.db")
+    assert "last_seq" not in databases["hermes-state.db"]
+    for name, entry in databases.items():
+        copy = folder / name
+        assert copy.stat().st_size == entry["bytes"] and sha256_of(copy) == entry["sha256"]
+        assert not copy.with_name(name + "-wal").exists()
+        conn = read_only(copy)
+        try:
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        finally:
+            conn.close()
+    conn = read_only(folder / f"coworld-{COWORLD_ID}.db")
+    try:
+        assert conn.execute("SELECT title FROM goals").fetchone()[0] == "Beat the starter"
+    finally:
+        conn.close()
+    assert sorted(p.name for p in folder.iterdir()) == sorted([*databases, "manifest.json"])
+
+    code, out = run(capsys, "restore-check", str(folder))
+    assert code == 0, out
+    assert out["ok"] is True and out["last_seq"] == manifest["last_seq"]
+    verdicts = {entry["name"]: entry for entry in out["databases"]}
+    assert all(entry["ok"] and entry["integrity"] == "ok" for entry in verdicts.values())
+    assert verdicts["workspace.db"]["schema"] == "current"
+    assert verdicts[f"coworld-{COWORLD_ID}.db"]["schema"] == "current"
+    assert verdicts[f"coworld-{COWORLD_ID}.db"]["sha256_matches"] is True
+    assert "schema" not in verdicts["hermes-state.db"]
+
+
+def test_backup_without_a_store_or_a_coworld_store(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path / "empty"))
+    code, out = run(capsys, "backup", str(tmp_path / "backups"))
+    assert code == 1 and "no store yet" in out["error"]
+    Store.open(layout.from_env().store_path, kind="workspace").close()
+    code, out = run(capsys, "backup", str(tmp_path / "backups"))
+    assert code == 0, out
+    assert [entry["name"] for entry in out["databases"]] == ["workspace.db"]
+
+
+def test_a_backup_taken_while_a_writer_commits_is_one_committed_state(workspace, tmp_path):
+    """The backup API restarts when another connection writes; the copy never mixes states."""
+    make_goal(workspace.store)
+    writes: list[str] = []
+
+    def write_once(status: int, remaining: int, total: int) -> None:
+        if not writes:
+            writes.append(goals.update(workspace.store, HARNESS, 1, title="during copy")["title"])
+
+    entry = store_cli.copy_database(
+        workspace.store.path,
+        tmp_path / "copy.db",
+        name="copy.db",
+        kind="coworld",
+        pages=1,
+        progress=write_once,
+    )
+    assert writes == ["during copy"]
+    conn = read_only(tmp_path / "copy.db")
+    try:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        title = conn.execute("SELECT title FROM goals").fetchone()[0]
+        kinds = [row[0] for row in conn.execute("SELECT kind FROM events ORDER BY seq")]
+        seq = conn.execute("SELECT MAX(seq) FROM events").fetchone()[0]
+    finally:
+        conn.close()
+    # Either the state before the write or the state after it, never a mixture.
+    assert (title == "during copy") == ("goal.updated" in kinds)
+    assert entry["last_seq"] == seq
+
+
+def test_restore_check_fails_on_a_truncated_copy(workspace, capsys, tmp_path):
+    make_goal(workspace.store)
+    manifest = store_cli.backup_workspace(workspace.ws, tmp_path / "backups", {})
+    folder = Path(manifest["dir"])
+    copy = folder / f"coworld-{COWORLD_ID}.db"
+    data = copy.read_bytes()
+    copy.write_bytes(data[: len(data) // 2])
+    code, out = run(capsys, "restore-check", str(folder))
+    assert code == 1
+    assert out["ok"] is False
+    verdicts = {entry["name"]: entry for entry in out["databases"]}
+    assert verdicts["workspace.db"]["ok"] is True
+    bad = verdicts[f"coworld-{COWORLD_ID}.db"]
+    assert bad["ok"] is False and bad["sha256_matches"] is False and bad["integrity"] != "ok"
+    copy.unlink()
+    code, out = run(capsys, "restore-check", str(folder))
+    assert code == 1 and out["databases"][1]["integrity"] == "missing"
+    code, out = run(capsys, "restore-check", str(tmp_path / "nowhere"))
+    assert code == 1 and "restore-check failed" in out["error"]
+
+
 # --- snapshot -------------------------------------------------------------------------------
 
 
@@ -436,6 +598,31 @@ def test_snapshot_has_records_settings_ui_state_and_seq(workspace, capsys):
             "updated": out["ui_state"][0]["updated"],
         }
     ]
+
+
+def test_snapshot_rows_and_seq_come_from_one_read_transaction(workspace, capsys, monkeypatch):
+    """A writer committing after the goals were read moves neither the rows nor the cursor."""
+    make_goal(workspace.store)
+    seq_before = workspace.store.last_seq()
+    real_all = settings.all
+    written: list[str] = []
+
+    def settings_then_a_writer(store_or_pair):
+        result = real_all(store_or_pair)
+        if not written:
+            # The fixture's connection is a second connection to the Coworld store.
+            written.append(goals.update(workspace.store, HARNESS, 1, title="changed")["title"])
+        return result
+
+    monkeypatch.setattr(settings, "all", settings_then_a_writer)
+    code, out = run(capsys, "snapshot")
+    assert code == 0, out
+    assert written == ["changed"]
+    assert out["records"]["goals"][0]["title"] == "Beat the starter"
+    assert out["seq"] == seq_before
+    # The committed change is exactly what the client reads after its cursor.
+    [event] = workspace.store.events_after(out["seq"])
+    assert event.kind == "goal.updated" and event.subject == "G-1"
 
 
 # --- events ---------------------------------------------------------------------------------

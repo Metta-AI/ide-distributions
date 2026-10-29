@@ -4,7 +4,8 @@ Every library write is one ``BEGIN IMMEDIATE`` transaction (``Store.tx``), so co
 serialise. Triggers log each change to ``change_log`` with a NULL token; before commit the
 transaction stamps its own rows with its token, so any NULL token left after a commit is a write
 made outside the library (``unmarked_changes``). ``open`` applies pending migrations and refuses
-a file whose schema differs from the migrations (``SchemaMismatch``).
+a file whose schema differs from the migrations (``SchemaMismatch``) or that a newer release
+wrote (``SchemaNewer``). ``read_tx`` gives several reads one consistent view of the store.
 
 Error messages never name the store path (B.10).
 """
@@ -13,6 +14,8 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -20,7 +23,7 @@ from typing import Any, Literal
 from research_core.store import migrate
 from research_core.store._common import Clock, json_field, now_iso
 from research_core.store.actors import Actor
-from research_core.store.errors import SchemaMismatch
+from research_core.store.errors import SchemaMismatch, SchemaNewer
 from research_core.store.events import Event
 
 STATE_README = """\
@@ -37,6 +40,37 @@ class SchemaStatus:
     diff: list[str]
     user_version: int
     expected_version: int
+    # A newer release of this kind wrote the store: refused, never repaired.
+    newer: bool = False
+
+
+def schema_status(conn: sqlite3.Connection, kind: str) -> SchemaStatus:
+    """Compare a connection's schema with the migrations of ``kind``; every difference listed.
+
+    A version above the release's latest migration marks the status ``newer``, unless the
+    store says it is of another kind: that is a plain mismatch, whatever its version.
+    """
+    expected = migrate.expected_schema(kind)
+    actual = migrate.actual_schema(conn)
+    diff = migrate.schema_diff(expected, actual)
+    user_version = migrate.user_version(conn)
+    expected_version = migrate.latest_version(kind)
+    if user_version != expected_version:
+        diff.append(f"user_version is {user_version}, expected {expected_version}")
+    right_kind = True
+    if "table meta" in actual:
+        row = conn.execute("SELECT value FROM meta WHERE key = 'schema_kind'").fetchone()
+        schema_kind = None if row is None else row[0]
+        right_kind = schema_kind == kind
+        if not right_kind:
+            diff.append(f"meta.schema_kind is {schema_kind!r}, expected {kind!r}")
+    return SchemaStatus(
+        ok=not diff,
+        diff=diff,
+        user_version=user_version,
+        expected_version=expected_version,
+        newer=right_kind and user_version > expected_version,
+    )
 
 
 class Store:
@@ -61,23 +95,24 @@ class Store:
     ) -> Store:
         """Open (creating and migrating if needed), check the schema, write the README.
 
-        WAL journal, foreign keys on, a 5 s busy timeout. Pending migrations are applied; a
+        WAL journal, ``synchronous=FULL``, foreign keys on, a 5 s busy timeout. Pending
+        migrations are applied; a store a newer release wrote raises ``SchemaNewer`` and a
         schema that differs from the migrations raises ``SchemaMismatch`` with every difference.
         """
         if kind not in migrate.KINDS:
             raise ValueError(f"not a store kind: {kind!r}")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path, isolation_level=None)
+        conn = migrate.connect_writable(path)
         conn.row_factory = sqlite3.Row
         try:
-            conn.execute("PRAGMA busy_timeout = 5000")
-            conn.execute("PRAGMA journal_mode = WAL").fetchone()
             conn.execute("PRAGMA foreign_keys = ON")
-            if conn.execute("PRAGMA user_version").fetchone()[0] < migrate.latest_version(kind):
+            if migrate.user_version(conn) < migrate.latest_version(kind):
                 migrate.apply_migrations(conn, kind)
             store = cls(path, kind, conn, clock)
             status = store.schema_status()
+            if status.newer:
+                raise SchemaNewer(status.user_version, status.expected_version)
             if not status.ok:
                 raise SchemaMismatch(status.diff)
         except BaseException:
@@ -115,23 +150,29 @@ class Store:
         """``meta`` is the store's own bookkeeping (heartbeat, has_work); it is not logged."""
         self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, value))
 
+    def delete_meta(self, key: str) -> None:
+        self.conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+
+    @contextmanager
+    def read_tx(self) -> Iterator[Store]:
+        """One consistent view for several reads: ``with store.read_tx(): ...``.
+
+        A deferred ``BEGIN`` fixes the snapshot at the first read, so a writer committing on
+        another connection in the middle cannot make one query newer than the previous one
+        (the rows of a snapshot and its ``seq`` cursor agree). Writers are not blocked.
+        """
+        if self.conn.in_transaction:
+            raise RuntimeError("a transaction is already open on this store")
+        self.conn.execute("BEGIN")
+        try:
+            yield self
+        finally:
+            self.conn.execute("ROLLBACK")
+
     # --- the schema check and detection --------------------------------------------------
 
     def schema_status(self) -> SchemaStatus:
-        expected = migrate.expected_schema(self.kind)
-        actual = migrate.actual_schema(self.conn)
-        diff = migrate.schema_diff(expected, actual)
-        user_version = self.one("PRAGMA user_version")[0]
-        expected_version = migrate.latest_version(self.kind)
-        if user_version != expected_version:
-            diff.append(f"user_version is {user_version}, expected {expected_version}")
-        if "table meta" in actual:
-            schema_kind = self.get_meta("schema_kind")
-            if schema_kind != self.kind:
-                diff.append(f"meta.schema_kind is {schema_kind!r}, expected {self.kind!r}")
-        return SchemaStatus(
-            ok=not diff, diff=diff, user_version=user_version, expected_version=expected_version
-        )
+        return schema_status(self.conn, self.kind)
 
     def unmarked_changes(self) -> list[dict[str, Any]]:
         """``change_log`` rows no library transaction stamped: writes made outside the library."""

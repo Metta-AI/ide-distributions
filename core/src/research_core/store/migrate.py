@@ -1,23 +1,29 @@
-"""Numbered SQL migrations, the expected schema and the rebuild that keeps rows (design B.2, B.10).
+"""Numbered SQL migrations, the expected schema and the in-place repair that keeps rows (B.2, B.10).
 
 Migrations are ``migrations/<kind>/NNNN_name.sql``; ``PRAGMA user_version`` records the last
 one applied. The store's shape is fixed machinery: ``expected_schema`` is what the migrations
 produce on an empty database, ``actual_schema`` is what a file has, and ``Store.open`` refuses
-to work through any difference. ``rebuild_keeping_rows`` is the watcher's repair.
+to work through any difference. ``rebuild_keeping_rows`` is the watcher's repair: one
+transaction inside the same file, after a copy of the original is saved next to it.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
 import sqlite3
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
+from research_core.store.errors import SchemaNewer
+
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 KINDS = ("coworld", "workspace")
+BUSY_TIMEOUT_MS = 5000
+# The repair renames the tables it keeps rows from to this prefix while it copies them.
+OLD_PREFIX = "old_"
 
 _MIGRATION_NAME = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 _SCHEMA_TYPES = ("table", "index", "trigger", "view")
@@ -29,6 +35,20 @@ _TIMESTAMP_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 def _check_kind(kind: str) -> None:
     if kind not in KINDS:
         raise ValueError(f"not a store kind: {kind!r} (one of {', '.join(KINDS)})")
+
+
+def connect_writable(path: Path) -> sqlite3.Connection:
+    """A connection that may write a store: WAL, ``synchronous=FULL`` and a 5 s busy wait.
+
+    ``FULL`` fsyncs the WAL on every commit, so a committed record survives a power loss when
+    the storage honours fsync (``NORMAL`` would only promise consistency, not the last commits).
+    Every writable connection the library opens goes through here.
+    """
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    conn.execute("PRAGMA journal_mode = WAL").fetchone()
+    conn.execute("PRAGMA synchronous = FULL")
+    return conn
 
 
 def migration_files(kind: str) -> list[tuple[int, Path]]:
@@ -79,17 +99,26 @@ def apply_migrations(conn: sqlite3.Connection, kind: str) -> int:
     for number, path in migration_files(kind):
         conn.execute("BEGIN IMMEDIATE")
         try:
-            if conn.execute("PRAGMA user_version").fetchone()[0] >= number:
+            if user_version(conn) >= number:
                 conn.execute("COMMIT")
                 continue
-            for statement in split_statements(path.read_text()):
-                conn.execute(statement)
-            conn.execute(f"PRAGMA user_version = {number}")
+            _run_migration(conn, number, path)
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
+    return user_version(conn)
+
+
+def user_version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _run_migration(conn: sqlite3.Connection, number: int, path: Path) -> None:
+    """The statements of one migration and its version stamp; the caller owns the transaction."""
+    for statement in split_statements(path.read_text()):
+        conn.execute(statement)
+    conn.execute(f"PRAGMA user_version = {number}")
 
 
 def normalise_sql(sql: str) -> str:
@@ -130,6 +159,15 @@ def expected_schema(kind: str) -> dict[str, str]:
         conn.close()
 
 
+def expected_tables(kind: str) -> list[str]:
+    """The ordinary (non-virtual) tables the migrations of ``kind`` create, by name."""
+    return sorted(
+        key.split(" ", 1)[1]
+        for key, sql in expected_schema(kind).items()
+        if key.startswith("table ") and not sql.startswith("create virtual table")
+    )
+
+
 def schema_diff(expected: dict[str, str], actual: dict[str, str]) -> list[str]:
     """One problem per object that is missing, unexpected or defined differently."""
     problems: list[str] = []
@@ -143,6 +181,9 @@ def schema_diff(expected: dict[str, str], actual: dict[str, str]) -> list[str]:
     return problems
 
 
+# --- the repair ------------------------------------------------------------------------------
+
+
 @dataclass
 class RebuildReport:
     tables: dict[str, int]
@@ -150,80 +191,137 @@ class RebuildReport:
     dropped_tables: list[str]
     user_version: int
     foreign_key_violations: int
+    # The copy of the store as it was before the repair, next to the store file.
+    backup: str
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
 def rebuild_keeping_rows(path: Path, kind: str) -> RebuildReport:
-    """Replace the store file with one built from the migrations, keeping every row it can.
+    """Rebuild the store's schema from the migrations inside the same file, keeping its rows.
 
-    Rows are copied table by table over the columns both shapes share (``events`` keeps its
-    ``seq``); columns and tables the migrations do not know are dropped and reported. The copy's
-    own ``change_log`` rows are marked with a ``rebuild:`` token and the old ``change_log`` is
-    appended after them, so earlier unmarked writes stay visible. The new file is fsynced and
-    moved into place atomically. Callers close their ``Store`` first: connections to the old
-    file keep pointing at the replaced inode.
+    One ``BEGIN IMMEDIATE`` transaction holds the write lock for the whole repair: a concurrent
+    writer waits on its busy timeout or gets "database is locked", and readers keep seeing the
+    old shape until the commit, so a committed change can never vanish. Inside it the derived
+    objects (triggers, indexes, views, FTS tables) are dropped, tables the migrations do not
+    know are dropped, every other table is renamed to ``old_<name>``, the migrations create the
+    fresh schema, rows are copied over the columns both shapes share (``events`` keeps its
+    ``seq``) and the ``old_`` tables are dropped. Anything that fails rolls back and leaves the
+    file exactly as it was. The copy's own ``change_log`` rows are marked with a ``rebuild:``
+    token and the old ``change_log`` is appended after them, so earlier unmarked writes stay
+    visible.
+
+    Before anything changes, and while the write lock already excludes other writers, a copy of
+    the original is written next to it (``<stem>.before-repair-<timestamp>.db``) with SQLite's
+    backup API; ``RebuildReport.backup`` names it. A store a newer release wrote is refused
+    (``SchemaNewer``) rather than downgraded. The file keeps its inode, so open connections in
+    other processes stay valid and see the new shape on their next statement.
     """
     _check_kind(kind)
     path = Path(path)
-    tmp = path.with_name(path.name + ".rebuild")
-    for leftover in (tmp, *_sidecars(tmp)):
-        leftover.unlink(missing_ok=True)
-    # Fold the old store's WAL into its file, so the copy below reads everything.
-    old = sqlite3.connect(path, isolation_level=None)
+    conn = connect_writable(path)
     try:
-        old.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    finally:
-        old.close()
-
-    new = sqlite3.connect(tmp, isolation_level=None)
-    try:
-        new.execute("PRAGMA foreign_keys = OFF")
-        user_version = apply_migrations(new, kind)
-        new.execute("ATTACH DATABASE ? AS old", (str(path),))
-        new.execute("BEGIN IMMEDIATE")
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("BEGIN IMMEDIATE")
         try:
-            report = _copy_rows(new)
-            new.execute("COMMIT")
+            version = user_version(conn)
+            if version > latest_version(kind):
+                raise SchemaNewer(version, latest_version(kind))
+            backup = _copy_before_repair(path)
         except BaseException:
-            new.execute("ROLLBACK")
+            conn.execute("ROLLBACK")
             raise
-        violations = len(new.execute("PRAGMA foreign_key_check").fetchall())
-        new.execute("DETACH DATABASE old")
+        try:
+            report = _rebuild_in_place(conn, kind, backup)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            # The original is untouched, so the copy says nothing the file does not.
+            backup.unlink(missing_ok=True)
+            raise
     finally:
-        new.close()
+        conn.close()
+    return report
 
-    _fsync(tmp)
-    os.replace(tmp, path)
-    for sidecar in _sidecars(path):
-        sidecar.unlink(missing_ok=True)
-    _fsync(path.parent)
+
+def _copy_before_repair(path: Path) -> Path:
+    """A consistent copy of the store next to it, made by a second connection.
+
+    The caller holds the write lock, so nothing can commit between this copy and the repair; a
+    second connection is needed because a connection cannot back itself up mid-transaction.
+    """
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+    backup = path.with_name(f"{path.stem}.before-repair-{stamp}{path.suffix}")
+    source = sqlite3.connect(path)
+    dest = sqlite3.connect(backup)
+    try:
+        dest.execute("PRAGMA synchronous = FULL")
+        source.backup(dest)
+        dest.execute("PRAGMA journal_mode = DELETE")  # one self-contained file
+    finally:
+        dest.close()
+        source.close()
+    return backup
+
+
+def _rebuild_in_place(conn: sqlite3.Connection, kind: str, backup: Path) -> RebuildReport:
+    """The repair's statements, inside the caller's transaction."""
+    present = _copyable_tables(conn, "main")
+    wanted = expected_tables(kind)
+    dropped_tables = sorted(set(present) - set(wanted))
+    kept = [name for name in present if name in wanted]
+    _drop_derived_objects(conn)
+    for name in dropped_tables:
+        conn.execute(f'DROP TABLE "{name}"')
+    for name in kept:
+        conn.execute(f'ALTER TABLE "{name}" RENAME TO "{OLD_PREFIX}{name}"')
+    conn.execute("PRAGMA user_version = 0")
+    for number, path in migration_files(kind):
+        _run_migration(conn, number, path)
+    tables, dropped_columns = _copy_rows(conn, wanted, kept)
+    for name in kept:
+        conn.execute(f'DROP TABLE "{OLD_PREFIX}{name}"')
+    violations = len(conn.execute("PRAGMA foreign_key_check").fetchall())
     return RebuildReport(
-        tables=report[0],
-        dropped_columns=report[1],
-        dropped_tables=report[2],
-        user_version=user_version,
+        tables=tables,
+        dropped_columns=dropped_columns,
+        dropped_tables=dropped_tables,
+        user_version=user_version(conn),
         foreign_key_violations=violations,
+        backup=str(backup),
     )
 
 
+def _drop_derived_objects(conn: sqlite3.Connection) -> None:
+    """Drop triggers, views, indexes and FTS tables: the migrations recreate every wanted one."""
+    rows = conn.execute(
+        "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL"
+    ).fetchall()
+    for wanted_type in ("trigger", "view", "index"):
+        for type_, name, _ in rows:
+            if type_ == wanted_type:
+                conn.execute(f'DROP {wanted_type.upper()} "{name}"')
+    for type_, name, sql in rows:
+        if type_ == "table" and normalise_sql(sql).startswith("create virtual table"):
+            conn.execute(f'DROP TABLE "{name}"')
+
+
 def _copy_rows(
-    conn: sqlite3.Connection,
-) -> tuple[dict[str, int], dict[str, list[str]], list[str]]:
-    """Copy ``old.*`` into ``main.*`` (attached databases) over shared columns."""
-    new_tables = _copyable_tables(conn, "main")
-    old_tables = _copyable_tables(conn, "old")
+    conn: sqlite3.Connection, new_tables: list[str], kept: list[str]
+) -> tuple[dict[str, int], dict[str, list[str]]]:
+    """Copy each ``old_<name>`` table into the fresh ``<name>`` over the columns they share."""
     tables: dict[str, int] = {}
     dropped_columns: dict[str, list[str]] = {}
     for name in new_tables:
         if name == "change_log":
             continue
-        if name not in old_tables:
+        if name not in kept:
             tables[name] = 0
             continue
-        old_columns = _columns(conn, "old", name)
-        new_columns = set(_columns(conn, "main", name))
+        old_name = f"{OLD_PREFIX}{name}"
+        old_columns = _columns(conn, old_name)
+        new_columns = set(_columns(conn, name))
         shared = [column for column in old_columns if column in new_columns]
         dropped = [column for column in old_columns if column not in new_columns]
         if dropped:
@@ -232,26 +330,24 @@ def _copy_rows(
             columns = ", ".join(f'"{column}"' for column in shared)
             # OR REPLACE: the migrations' own seed rows (meta) yield to the old store's values.
             conn.execute(
-                f'INSERT OR REPLACE INTO main."{name}" ({columns})'
-                f' SELECT {columns} FROM old."{name}"'
+                f'INSERT OR REPLACE INTO "{name}" ({columns}) SELECT {columns} FROM "{old_name}"'
             )
-        tables[name] = conn.execute(f'SELECT COUNT(*) FROM old."{name}"').fetchone()[0]
+        tables[name] = conn.execute(f'SELECT COUNT(*) FROM "{old_name}"').fetchone()[0]
     # The copy fired the change_log triggers: mark those rows as this rebuild's, then carry the
     # old log over (new ids, same tokens) so unmarked writes from before the rebuild stay visible.
     conn.execute(
         "UPDATE change_log SET token = ? WHERE token IS NULL",
         (f"rebuild:{secrets.token_hex(4)}",),
     )
-    if "change_log" in old_tables:
-        shared = [c for c in _columns(conn, "old", "change_log") if c in _CHANGE_LOG_COPY]
+    if "change_log" in kept:
+        old_log = f"{OLD_PREFIX}change_log"
+        shared = [c for c in _columns(conn, old_log) if c in _CHANGE_LOG_COPY]
         columns = ", ".join(f'"{column}"' for column in shared)
         conn.execute(
-            f"INSERT INTO main.change_log ({columns}) SELECT {columns} FROM old.change_log"
-            " ORDER BY id"
+            f'INSERT INTO change_log ({columns}) SELECT {columns} FROM "{old_log}" ORDER BY id'
         )
-        tables["change_log"] = conn.execute("SELECT COUNT(*) FROM old.change_log").fetchone()[0]
-    dropped_tables = sorted(set(old_tables) - set(new_tables))
-    return tables, dropped_columns, dropped_tables
+        tables["change_log"] = conn.execute(f'SELECT COUNT(*) FROM "{old_log}"').fetchone()[0]
+    return tables, dropped_columns
 
 
 _CHANGE_LOG_COPY = ("at", "tbl", "row_id", "op", "token")
@@ -272,17 +368,5 @@ def _copyable_tables(conn: sqlite3.Connection, schema: str) -> list[str]:
     ]
 
 
-def _columns(conn: sqlite3.Connection, schema: str, table: str) -> list[str]:
-    return [row[1] for row in conn.execute(f'PRAGMA {schema}.table_info("{table}")')]
-
-
-def _sidecars(path: Path) -> tuple[Path, ...]:
-    return tuple(path.with_name(path.name + suffix) for suffix in ("-wal", "-shm", "-journal"))
-
-
-def _fsync(path: Path) -> None:
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    return [row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')]

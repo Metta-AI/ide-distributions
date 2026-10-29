@@ -40,6 +40,7 @@ EXPECTED_WAKES = {
     "champion.changed": "management",
     "store.unmarked_write": "management",
     "store.schema_rebuilt": "management",
+    "store.schema_newer": "management",
     "recovery.failed": "management",
     "wake.failed": "management",
     "anti_stall": "anti_stall",

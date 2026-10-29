@@ -32,7 +32,13 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
   the new champion and tell the user what changed.
 - `store.unmarked_write`, `store.schema_rebuilt`: something wrote to the store outside the
   tools. Read the affected records, repair what is wrong through the tools, and tell the user
-  what happened and which tool to use instead.
+  what happened and which tool to use instead. A rebuild saved a copy of the store as it was;
+  the payload names it.
+- `store.schema_newer`: a newer release of the runtime wrote the store the payload names, so
+  this release cannot use it. The watcher left the store untouched and paused the workspace.
+  Do not write records for that store and do not resume: tell the user the runtime must be
+  updated to the matching or a newer release (or the store restored from a backup), and that
+  they resume afterwards.
 - `recovery.failed`, `wake.failed`: the watcher gave up on a run. Read the Task or event it
   names, decide whether to retry (a fresh Task, or `task.message` to its Session) or close it,
   and tell the user.

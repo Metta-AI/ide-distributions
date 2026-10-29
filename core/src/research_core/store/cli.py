@@ -8,7 +8,9 @@ sessions use the tools. The reply carries the store's ``seq`` after the write, w
 "accepted on commit" means to a client (A.11). ``snapshot`` and ``events`` are the read side of
 the seam: a client loads a snapshot, then streams from its ``seq``; each store has its own
 sequence, so both commands work on one store at a time. ``export`` dumps every table of both
-stores as JSON lines for backups and debugging.
+stores as JSON lines for debugging. ``backup`` copies every database of the workspace with
+SQLite's backup API into a timestamped folder with a manifest, and ``restore-check`` is the
+restore test for such a folder (design R6 as amended by the data-loss review).
 
 Every result is one JSON line on stdout: ``{"ok": true, ...}`` or ``{"ok": false, "error",
 "problems"}`` with exit code 1. The commands never show a traceback.
@@ -17,21 +19,24 @@ Every result is one JSON line on stdout: ``{"ok": true, ...}`` or ``{"ok": false
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from research_core import layout
-from research_core.store import coworlds, directives, goals, settings, tasks, ui_state
+from research_core.store import coworlds, directives, goals, migrate, settings, tasks, ui_state
 from research_core.store._common import parse_display_id, require
 from research_core.store.actors import Actor
-from research_core.store.db import Store
+from research_core.store.db import Store, schema_status
 from research_core.store.errors import StoreError
 from research_core.store.migrate import _copyable_tables
 from research_core.store.registry import RECORDS, RecordSpec, record_from_row
@@ -335,16 +340,207 @@ def run_export(args: argparse.Namespace) -> int:
 
 
 def _export_store(store: Store, folder: Path) -> dict[str, Any]:
-    """One ``<table>.jsonl`` per ordinary table (FTS indexes are derived; they are left out)."""
+    """One ``<table>.jsonl`` per ordinary table (FTS indexes are derived; they are left out).
+
+    Every table and the ``seq`` are read inside one read transaction, so a writer committing
+    meanwhile cannot leave the export with a newer table than its cursor.
+    """
     folder.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
-    for table in _copyable_tables(store.conn, "main"):
-        rows = store.q(f"SELECT * FROM {table} ORDER BY rowid")
-        with (folder / f"{table}.jsonl").open("w", encoding="utf-8") as handle:
-            for row in rows:
-                handle.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
-        counts[table] = len(rows)
-    return {"path": str(folder), "seq": store.last_seq(), "tables": counts}
+    with store.read_tx():
+        for table in _copyable_tables(store.conn, "main"):
+            rows = store.q(f"SELECT * FROM {table} ORDER BY rowid")
+            with (folder / f"{table}.jsonl").open("w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
+            counts[table] = len(rows)
+        seq = store.last_seq()
+    return {"path": str(folder), "seq": seq, "tables": counts}
+
+
+# --- backup and restore-check ---------------------------------------------------------------
+
+MANIFEST_NAME = "manifest.json"
+HERMES_STATE_DB = "state.db"
+# Schema verdicts restore-check gives a copied store; ``current`` and ``older`` restore cleanly
+# (``Store.open`` migrates an older store), the other two would be refused or repaired.
+RESTORABLE_SCHEMAS = ("current", "older")
+
+
+def run_backup(args: argparse.Namespace) -> int:
+    try:
+        manifest = backup_workspace(layout.from_env(), Path(args.dest), os.environ)
+    except (sqlite3.Error, OSError) as error:
+        return _fail(f"backup failed: {error}")
+    print(json.dumps({"ok": True, **manifest}, ensure_ascii=False))
+    return 0
+
+
+def backup_workspace(ws: layout.Workspace, dest_root: Path, env: Mapping[str, str]) -> dict:
+    """Copy every database of the workspace into ``<dest_root>/<timestamp>/`` with a manifest.
+
+    The workspace store, every registered Coworld's store and, when ``HERMES_HOME`` is set,
+    that profile's Hermes ``state.db`` are copied with SQLite's backup API (never a raw file
+    copy of a live database). The stores are read with plain read-only connections, so a
+    store this release refuses to open is still backed up. The manifest records each copy's
+    source, size and sha256, the workspace store's ``last_seq`` as copied, and is what
+    ``restore-check`` verifies.
+    """
+    created = datetime.now(UTC)
+    folder = dest_root / created.strftime("%Y%m%dT%H%M%SZ")
+    folder.mkdir(parents=True, exist_ok=True)
+    databases = [
+        copy_database(source, folder / name, name=name, kind=kind)
+        for name, kind, source in backup_sources(ws, env)
+    ]
+    workspace = next(entry for entry in databases if entry["kind"] == "workspace")
+    manifest = {
+        "created": created.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "workspace": str(ws.root),
+        "dir": str(folder),
+        "last_seq": workspace["last_seq"],
+        "databases": databases,
+    }
+    (folder / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    _fsync(folder / MANIFEST_NAME)
+    _fsync(folder)
+    return manifest
+
+
+def backup_sources(ws: layout.Workspace, env: Mapping[str, str]) -> list[tuple[str, str, Path]]:
+    """``(copy name, kind, source path)`` for every database a backup covers."""
+    if not ws.store_path.exists():
+        raise FileNotFoundError("the workspace has no store yet; nothing to back up")
+    sources = [("workspace.db", "workspace", ws.store_path)]
+    conn = _read_only(ws.store_path)
+    try:
+        ids = [row[0] for row in conn.execute("SELECT coworld_id FROM coworlds ORDER BY created")]
+    finally:
+        conn.close()
+    for coworld_id in ids:
+        store_path = ws.coworld(coworld_id).store_path
+        if store_path.exists():
+            sources.append((f"coworld-{coworld_id}.db", "coworld", store_path))
+    if env.get("HERMES_HOME"):
+        hermes_state = Path(env["HERMES_HOME"]).expanduser() / HERMES_STATE_DB
+        if hermes_state.exists():
+            sources.append(("hermes-state.db", "hermes", hermes_state))
+    return sources
+
+
+def copy_database(
+    source: Path,
+    dest: Path,
+    *,
+    name: str,
+    kind: str,
+    pages: int = -1,
+    progress: Callable[[int, int, int], object] | None = None,
+) -> dict[str, Any]:
+    """One consistent copy of a live SQLite database through the backup API.
+
+    ``pages`` and ``progress`` are the backup API's own (all pages in one step by default); a
+    write by another connection while a stepped copy runs restarts the copy, so the result is
+    always one committed state. The copy is left in rollback-journal mode: one plain file.
+    """
+    src = _read_only(source)
+    dst = sqlite3.connect(dest)
+    try:
+        dst.execute("PRAGMA synchronous = FULL")
+        src.backup(dst, pages=pages, progress=progress)
+        dst.execute("PRAGMA journal_mode = DELETE")
+        entry = {"name": name, "kind": kind, "source": str(source)}
+        if kind in migrate.KINDS:
+            row = dst.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
+            entry["last_seq"] = row[0]
+    finally:
+        dst.close()
+        src.close()
+    entry["bytes"] = dest.stat().st_size
+    entry["sha256"] = _sha256(dest)
+    return entry
+
+
+def run_restore_check(args: argparse.Namespace) -> int:
+    try:
+        verdict = restore_check(Path(args.backup_dir))
+    except (OSError, ValueError, KeyError) as error:
+        return _fail(f"restore-check failed: {type(error).__name__}: {error}")
+    print(json.dumps({"ok": verdict["ok"], **verdict}, ensure_ascii=False))
+    return 0 if verdict["ok"] else 1
+
+
+def restore_check(folder: Path) -> dict[str, Any]:
+    """Open every copy of a backup folder read-only and say whether it would restore.
+
+    Each database must pass ``PRAGMA integrity_check`` and match the manifest's sha256; a store
+    must also have a schema this release restores (current, or older with migrations pending).
+    """
+    manifest = json.loads((folder / MANIFEST_NAME).read_text(encoding="utf-8"))
+    checks = [check_database(folder / entry["name"], entry) for entry in manifest["databases"]]
+    return {
+        "ok": all(check["ok"] for check in checks),
+        "dir": str(folder),
+        "created": manifest["created"],
+        "last_seq": manifest["last_seq"],
+        "databases": checks,
+    }
+
+
+def check_database(path: Path, entry: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {"name": entry["name"], "kind": entry["kind"]}
+    if not path.exists():
+        return {**result, "ok": False, "integrity": "missing"}
+    result["sha256_matches"] = _sha256(path) == entry["sha256"]
+    conn = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    try:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        result["integrity"] = "ok" if rows == [("ok",)] else "; ".join(row[0] for row in rows)
+        if entry["kind"] in migrate.KINDS:
+            status = schema_status(conn, entry["kind"])
+            result["schema"] = _schema_verdict(status)
+            result["user_version"] = status.user_version
+            result["expected_version"] = status.expected_version
+    except sqlite3.DatabaseError as error:
+        result["integrity"] = str(error)
+    finally:
+        conn.close()
+    result["ok"] = (
+        result["integrity"] == "ok"
+        and result["sha256_matches"]
+        and result.get("schema", "current") in RESTORABLE_SCHEMAS
+    )
+    return result
+
+
+def _schema_verdict(status) -> str:
+    if status.ok:
+        return "current"
+    if status.newer:
+        return "newer"
+    if status.user_version < status.expected_version:
+        return "older"
+    return "drift"
+
+
+def _read_only(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fsync(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 # --- snapshot -------------------------------------------------------------------------------
@@ -363,25 +559,27 @@ def run_snapshot(args: argparse.Namespace) -> int:
 def snapshot(store: Store, coworld_id: str | None = None) -> dict[str, Any]:
     """The store's records, effective settings, UI state documents and last ``seq``.
 
-    A client that loads this and then reads ``events --after <seq>`` misses nothing: both read
-    the same store, and ``seq`` is taken from the same connection as the rows.
+    A client that loads this and then reads ``events --after <seq>`` misses nothing: rows,
+    settings, UI state and ``seq`` are read inside one read transaction, so a writer committing
+    meanwhile moves either all of them or none of them.
     """
-    existing = set(_copyable_tables(store.conn, "main"))
-    records: dict[str, Any] = {}
-    for spec in RECORDS.values():
-        if spec.table in existing:
-            rows = store.q(f"SELECT * FROM {spec.table} ORDER BY rowid")
-            records[spec.table] = [_record(spec, row) for row in rows]
-    records["settings"] = settings.all(store)
-    conversations = [
-        row[0] for row in store.q("SELECT conversation FROM ui_state ORDER BY conversation")
-    ]
-    result: dict[str, Any] = {"store": store.kind}
-    if store.kind == "coworld":
-        result["coworld_id"] = coworld_id
-    result["seq"] = store.last_seq()
-    result["records"] = records
-    result["ui_state"] = [ui_state.get(store, conversation) for conversation in conversations]
+    with store.read_tx():
+        existing = set(_copyable_tables(store.conn, "main"))
+        records: dict[str, Any] = {}
+        for spec in RECORDS.values():
+            if spec.table in existing:
+                rows = store.q(f"SELECT * FROM {spec.table} ORDER BY rowid")
+                records[spec.table] = [_record(spec, row) for row in rows]
+        records["settings"] = settings.all(store)
+        conversations = [
+            row[0] for row in store.q("SELECT conversation FROM ui_state ORDER BY conversation")
+        ]
+        result: dict[str, Any] = {"store": store.kind}
+        if store.kind == "coworld":
+            result["coworld_id"] = coworld_id
+        result["seq"] = store.last_seq()
+        result["records"] = records
+        result["ui_state"] = [ui_state.get(store, conversation) for conversation in conversations]
     return result
 
 
@@ -462,6 +660,32 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     export_parser.add_argument("--coworld", default=None, help="A Coworld id; default: the active")
     export_parser.add_argument("--out", required=True, help="The output directory")
     export_parser.set_defaults(run=run_export)
+
+    backup_parser = commands.add_parser(
+        "backup",
+        help="Copy every store and the profile's Hermes state.db into <dest-dir>/<timestamp>/",
+        description=(
+            "A database-aware backup: the workspace store, every registered Coworld's store"
+            " and, with HERMES_HOME set, that profile's Hermes state.db, copied with SQLite's"
+            " backup API, plus manifest.json (sources, sizes, sha256, the workspace store's"
+            " last_seq). Hosting may run it as often as its loss window needs."
+        ),
+    )
+    backup_parser.add_argument("dest", metavar="<dest-dir>", help="Where timestamped folders go")
+    backup_parser.set_defaults(run=run_backup)
+
+    restore_check_parser = commands.add_parser(
+        "restore-check",
+        help="Open every copy of a backup folder read-only and print a JSON verdict",
+        description=(
+            "The restore test: PRAGMA integrity_check, the manifest's sha256 and the schema"
+            " status against this release for every copied database. Exit 1 when any fails."
+        ),
+    )
+    restore_check_parser.add_argument(
+        "backup_dir", metavar="<backup-dir>", help="One <dest-dir>/<timestamp>/ folder"
+    )
+    restore_check_parser.set_defaults(run=run_restore_check)
 
     snapshot_parser = commands.add_parser(
         "snapshot", help="Print one store's records, settings, UI state and last seq as JSON"

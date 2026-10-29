@@ -114,6 +114,8 @@ HANDLERS: dict[str, Handler] = {
         _wake("champion.changed", "management"),
         _wake("store.unmarked_write", "management"),
         _wake("store.schema_rebuilt", "management"),
+        # A store a newer release wrote: the watcher paused the workspace and left it alone.
+        _wake("store.schema_newer", "management"),
         _wake("recovery.failed", "management"),
         _wake("wake.failed", "management"),
         _wake("anti_stall", "anti_stall"),
