@@ -11,7 +11,7 @@ What is checked, each a capability row (``capabilities.mark``):
 
 * ``login:player`` through ``platform.whoami("player")``; ``login:user`` only when
   ``SOFTMAX_USER_CREDENTIAL`` is set (an absent User identity is a fact, not a failure);
-* ``cli:coworld`` and ``cli:softmax``: ``<venv>/bin/<cli> --version`` when the workspace
+* ``cli:coworld`` and ``cli:softmax``: ``<venv>/bin/<cli> --help`` when the workspace
   environment has the binary, else the distribution installed in this interpreter (the watcher
   runs in that environment); the installed versions are compared with ``uv.lock`` of the core
   checkout and stored for the briefing as the workspace store's meta ``cli_versions``
@@ -210,7 +210,7 @@ def cli_checks(ctx: TickContext) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     for name, distribution in environment_guide.CLIS:
         installed = _installed_version(distribution)
         binary = ctx.ws.venv / "bin" / name
-        command = f"{binary} --version"
+        command = f"{binary} --help"
         if binary.exists():
             ok, output = _run_version(binary)
         elif installed is not None:
@@ -567,7 +567,7 @@ def _installed_version(distribution: str) -> str | None:
 def _run_version(binary: Path) -> tuple[bool, str]:
     try:
         completed = subprocess.run(
-            [str(binary), "--version"],
+            [str(binary), "--help"],
             capture_output=True,
             text=True,
             errors="replace",
@@ -575,10 +575,10 @@ def _run_version(binary: Path) -> tuple[bool, str]:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        return False, f"{binary} --version did not run: {error}"
+        return False, f"{binary} --help did not run: {error}"
     output = (completed.stdout + completed.stderr).strip()
     if completed.returncode != 0:
-        return False, f"{binary} --version exited {completed.returncode}: {output}"
+        return False, f"{binary} --help exited {completed.returncode}: {output}"
     return True, output
 
 

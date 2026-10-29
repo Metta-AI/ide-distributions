@@ -95,6 +95,20 @@ class ToolSpec:
                     properties.setdefault(name, schema)
         for name, schema in self.params.items():
             properties.setdefault(name, schema)
+        # A JSON schema can only mark ``action`` as required when the other requirements depend
+        # on the action, and a model tends to send only the fields the schema marks required.
+        # So each field's description says which actions need it.
+        if self.actions is not None:
+            for name, schema in list(properties.items()):
+                needed = [
+                    action.name
+                    for action in self.actions
+                    if role in action.roles and name in action.required
+                ]
+                if needed:
+                    description = str(schema.get("description", "")).rstrip()
+                    suffix = f"Required for {', '.join(needed)}."
+                    properties[name] = {**schema, "description": f"{description} {suffix}".strip()}
         return properties
 
     def schema(self, role: Role) -> dict:

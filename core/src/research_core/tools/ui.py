@@ -174,7 +174,7 @@ SPEC = tool(
                 "notify",
                 "Tell the user something: the notice goes in text; it informs and never asks.",
                 {
-                    "text": a.string("The notice itself, in plain language; notify needs it."),
+                    "text": a.string("The notice itself, in plain language."),
                     "refs": a.strings("Records the notice is about, such as T-3."),
                     "urgency": a.string(
                         "low, normal (default) or high.", enum=list(notices.URGENCIES)
