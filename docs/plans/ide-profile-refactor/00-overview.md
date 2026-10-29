@@ -2,8 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development (or
 > superpowers:executing-plans) to implement this plan task by task. Each stack entry has its own
-> file (`01-…` to `07-…`). Read this overview first, then only the entry you are implementing.
-> Steps use checkbox (`- [ ]`) syntax.
+> file (`01-…` to `07-…`). Read this overview first, then `08-amendments.md` (binding changes from
+> the plan review), then only the entry you are implementing. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Build a fresh pair of Hermes profile distributions, `orchestrator/` and `researcher/`,
 that implement the IDE Profile Refactor design end to end, with one shared Python package, a

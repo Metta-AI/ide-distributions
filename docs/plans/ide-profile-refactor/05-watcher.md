@@ -48,9 +48,9 @@ session_id=<new>, text=<wake prompt>, instructions=<wake instructions>)` and reg
 `sessions.register(kind="wake", event=<kind>, …)`. The wake prompt is rendered from
 `watcher/wakes/<kind>.md` templates (short; they tell the model what happened, what records to
 read, which tools to use, and that it must not write into any user conversation and must use
-`ui.notify` for news). An event is acknowledged (`events` payload `handled_by_run`) only after
-its wake's run ends successfully; dispatch is idempotent on the event seq (idempotency key
-`event:<store>:<seq>`).
+`ui.notify` for news). An event is acknowledged in `handled_events` (A2.1) only after its wake's run ends
+successfully; dispatch is idempotent on the event seq and attempt (idempotency key
+`event:<store>:<seq>:<attempt>`, A5.1).
 
 ---
 

@@ -41,13 +41,14 @@ tools:
 # is a full pass (design H "Sleep and drain").
 cron:
   catch_up_missed: true
+# The User identity token is deliberately NOT passed to terminal commands: User-identity actions
+# go through the tools, which record an events row and a notice for each write (design B.16).
 terminal:
   timeout: 1800
   env_passthrough:
     - SSL_CERT_FILE
     - SOFTMAX_PLAYER_ID
     - SOFTMAX_PLAYER_CREDENTIAL
-    - SOFTMAX_USER_CREDENTIAL
     - COGAMES_API_URL
     - SOFTMAX_CONFIG_DIR
     - IDE_WORKSPACE
