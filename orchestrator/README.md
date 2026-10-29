@@ -77,10 +77,7 @@ published by the bridge, and so is a background wake's final reply (there is no 
 
 | Tools | Behavior |
 |---|---|
-| `attachment_download(sha256)` | Save an attachment from the current workspace to a private local cache, verifying its size and SHA-256 (maximum 25 MiB). Use the hash in conversation context, then read the returned path. The tool resolves the signed URL internally; never transcribe it into a command. It uses the current Player credential and cannot read another workspace's attachments. |
 | `capabilities(query?, kind?)` | Profile-configured tools and skills, filtered by keyword; session additions and job overrides may be absent. |
-| `ide_workspace_schema`, `ide_workspace` | Read the deployed workspace contract, then use only supported operations and scope. Nested protocol errors and MCP refusals return `ok: false`. |
-| `ide_task_update(task_id, patch)` | PATCH an IDE task with `set`, observed `base_rev`, and stable `idempotency_key`. |
 | `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
 | `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
 | `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. A body citing a record id (`E-`, `H-`, `V-`, `CS-`, ...) or `ar://file/` path that is not on that game's canonical `main` is refused with `unknown_records` listing them (content-search and game reference types are not checked). |
@@ -151,7 +148,8 @@ same row recoverable. Completing the turn acknowledges it automatically. There i
 separate wake receipt, command ledger, event acknowledgement, or replacement-task graph.
 
 Native notifications alone deliver task events. Cron polls external XP, credit and
-permit waits, and periodically requests champion-submission review through the same inbox.
+waits, and periodically requests champion-submission review through the same inbox. Permit refusals
+require user action; no cogent approval records are polled.
 Every 10 minutes it also checks whether our newest accepted champion submission has played
 its first league match (`latest_league_result` shows its policy version). If so, it wakes the
 coordinator once with a `league_result` item, which goes to the session that made the
@@ -265,18 +263,23 @@ write authority (all four required to pass). Report completed cases, errors and 
 separately. The deterministic platform test verifies tool behavior; it does not measure model
 selection or instruction-following quality. These conversation evaluations remain a rollout gate.
 
-## Shared IDE components and draft notes
+## Workspace-owned operation boundary
 
-The `ide_workspace` tool calls the hosted IDE's MCP server, authenticating directly with the existing scoped player credential.
-The endpoint is `/ide/mcp` on the existing `COGAMES_API_URL` origin (normally `https://softmax.com`).
-No new profile environment setting or retained-workspace configuration migration is needed.
-Deploy and qualify the Metta workspace SDK, migration and public route before merging this distribution change:
-Metta's `preserve` release workflow polls this repository's main branch, so merging can trigger an image release.
-Running hosts adopt that image through the existing explicit Pause/Resume path, preserving their storage.
+The profile does not call the web IDE MCP server or cogent chat, task, permit or attachment
+endpoints. The bridge sends native session identity, league selection and client data as
+context hints. These do not require a matching IDE conversation row. Tools operate on native
+research records, tasks and workspace files; the browser reaches those through the workspace relay.
+Questions and updates use native conversations. Attachment contents must be supplied by the
+runtime; the removed attachment tool is not replaced by a private download endpoint.
 
-The tool is loaded with the orchestrator toolset. Read `ide_workspace_schema` for the deployed component, layout, revision and draft-note contracts. No legacy chat record or token exchange is required. Retain `request_id` on retries.
-The server derives the owner from the validated player credential and validates the explicitly selected league scope. Inspect structured MCP results rather than treating
-an HTTP response as success. Draft notes do not edit, build, upload, or release policy source.
+The supervisor owns XP and credit waits and accepted-submission follow-up. It records completion
+inputs in the native coordinator inbox, whose replay/recovery contract is independent of the IDE.
+Build and upload commands currently execute synchronously inside native runs/tasks. Their normal
+return or native task-completion notification is the completion surface, including failures.
+The profile does not poll IDE build/upload tables. A future asynchronous publication command must
+supply a workspace-local status contract before its wait can be added here; no such command is
+assumed by this release. Goal records remain unchanged. There is no replacement for the IDE's
+measured-goal scheduler until the profile refactor supplies its Tasks and watcher.
 
 ### Permission and source discovery
 

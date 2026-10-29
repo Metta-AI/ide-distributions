@@ -8,7 +8,6 @@ from ide_research_core import host_capabilities, session_catalog
 from ide_research_core.softmax_tool.discovery_schema import StarterRead, SupportRead
 
 from .artifacts import ArtifactError, ArtifactRead, CardFiles, ReportRead, Reports
-from .attachments import AttachmentDownload, Attachments
 from .board import Board, CardFilters
 from .context import profile_context
 from .evidence import (
@@ -21,12 +20,10 @@ from .evidence import (
     PolicyList,
     PolicyRead,
 )
-from .ide import IDE
 from .research import Research, ResearchError
 from .service import Service
 from .storage import open_storage, remember_submission_session
 from .worker_capabilities import WorkerCapabilities, WorkerRead
-from .workspace import Workspace, WorkspaceError
 
 S = {"type": "string"}
 # The player a publication is for: the conversation's selected player (its context's player_id).
@@ -103,12 +100,6 @@ TOOLS = {
         EpisodeRead.model_json_schema()["properties"],
         ["episode_id"],
     ),
-    "attachment_download": (
-        Attachments,
-        "Download a conversation attachment by its SHA-256 from the current workspace. Returns a local path after verifying its size and hash (maximum 25 MiB). Use the hash from attachment context; no URL, credential, or destination argument is needed. Read the returned file with native file or terminal tools. Never executes its contents.",
-        AttachmentDownload.model_json_schema()["properties"],
-        ["sha256"],
-    ),
     "card_report": (
         Reports,
         "Read a bounded page of a committed worker report from a card's recorded workspace. Use task/run identities from card_show and the reported full commit and relative path. Latest ended run only: a completed card, or a blocked card (then only commits staged on origin); never a running card. Validates commit membership in the card branch. Restores a cleaned-up completed worktree through Hermes when needed. Never integrates or executes report content.",
@@ -138,45 +129,6 @@ TOOLS = {
         "Read a bounded text page of a published starter from game_support, verifying its SHA-256. Does not require GitHub. This is not the player's submitted source and never uploads or executes code.",
         StarterRead.model_json_schema()["properties"],
         ["league_id", "starter_id", "expected_sha256"],
-    ),
-    "ide_workspace_schema": (
-        Workspace,
-        (
-            "Read the authenticated IDE MCP tools/list contract. Use the returned ide_workspace inputSchema "
-            "to discover layout, draft, documents and discovery operations before calling ide_workspace. "
-            "This reads schemas only and does not modify the workspace."
-        ),
-        {},
-        [],
-    ),
-    "ide_workspace": (
-        Workspace,
-        (
-            "Edit the same saved workspace as the human in /ide-final, through its MCP server. "
-            "Use a stable request_id; identity comes from your scoped player credential. "
-            "Call ide_workspace_schema first for the deployed operation names, parameters and schemas. "
-            "Use the provider's current scope, formats, conflict and retry rules. "
-            "Read before editing, preserve human content and honor the user's authorization. "
-            "Read the MCP result's isError and structured status; transport success is not effect success."
-        ),
-        {"request_id": S, "operation": O},
-        ["request_id", "operation"],
-    ),
-    "ide_task_update": (
-        IDE,
-        (
-            "Update an IDE task. patch is the bridge shape: set (changed body "
-            "fields), base_rev (observed revision), idempotency_key (stable for this patch)."
-        ),
-        {
-            "task_id": S,
-            "patch": {
-                "type": "object",
-                "properties": {"set": O, "base_rev": I, "idempotency_key": S},
-                "required": ["set", "base_rev", "idempotency_key"],
-            },
-        },
-        ["task_id", "patch"],
     ),
     "worker_skills": (
         Board,
@@ -460,7 +412,7 @@ def handler(name):
             if name in SUBMISSION_TOOLS and origin:
                 remember_submission_session(context, data["id"], origin)
             return json.dumps({"ok": True, "data": data})
-        except (ArtifactError, ResearchError, WorkspaceError) as error:
+        except (ArtifactError, ResearchError) as error:
             # A submission waiting for the coach's permit is still this session's submission.
             submission = (error.envelope["error"].get("details") or {}).get("submission")
             if name in SUBMISSION_TOOLS and origin and submission:

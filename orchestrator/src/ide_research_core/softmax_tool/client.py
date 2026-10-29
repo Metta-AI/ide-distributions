@@ -61,10 +61,6 @@ from ide_research_core.softmax_tool.platform_cli import (
     describe_failure,
 )
 from ide_research_core.softmax_tool.protocol import (
-    ANSWER_NO,
-    ANSWER_USED,
-    ANSWER_WAITING,
-    ANSWER_YES,
     ArtifactType,
     CreditDenied,
     Identity,
@@ -83,11 +79,6 @@ LEAGUE_FETCH_WORKERS = 4  # concurrent episode fetches (each one runs two coworl
 
 
 CREDITS_PATH = "/observatory/usage/me/credits"
-# Our cogent's record ``asks/<key>`` (metta observatory-api routes/app/v2/cogents/records,
-# ``cogent_get``): a player credential reads its own cogent (``cogents/queries._owned``). The
-# body is a ``PermitAsk``: ``{kind, action, ref, why, at, amount?, answer?: {yes, at},
-# used?: {at}}``.
-ASK_PATH = "/observatory/v2/cogents/{player}/c/asks/{key}"
 
 
 def _line_value(text: str, prefix: str) -> str | None:
@@ -133,28 +124,6 @@ class SoftmaxClient:
         except (KeyError, TypeError, ValueError):
             raise SoftmaxCliError(f"{CREDITS_PATH} has no status.balance_credits") from None
 
-    def permit_answer(self, ask: str) -> str | None:
-        """The coach's answer to permit ask ``ask`` (``Softmax.permit_answer``), read as the
-        Player over HTTP (``ASK_PATH``); None when the read fails or the body is not an ask."""
-        path = ASK_PATH.format(
-            player=urllib.parse.quote(self._expected_player, safe=""),
-            key=urllib.parse.quote(ask, safe=""),
-        )
-        try:
-            record = self._cli.api_get_json(path)
-        except SoftmaxCliError:
-            return None
-        body = record.get("body") if isinstance(record, dict) else None
-        if not isinstance(body, dict) or body.get("kind") != "permit":
-            return None
-        answer = body.get("answer")
-        if answer is None:
-            return ANSWER_WAITING
-        if not isinstance(answer, dict) or not isinstance(answer.get("yes"), bool):
-            return None
-        if not answer["yes"]:
-            return ANSWER_NO
-        return ANSWER_USED if body.get("used") else ANSWER_YES
 
     def episode_cost(self) -> float | None:
         """Mean credits per episode over the account's recent XP requests (the same route's

@@ -8,7 +8,6 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from .context import subprocess_context
-from .ide import IDE
 from .research import Research
 from .storage import (
     card_sessions,
@@ -26,7 +25,7 @@ LEAGUE_RESULT_NEXT = (
 )
 
 
-def transitions(state, research, ide):
+def transitions(state, research):
     pending = []
     default = research
     for run in state["awaiting"]:
@@ -61,18 +60,6 @@ def transitions(state, research, ide):
             credits = research.credits()
             if credits.get("available") and credits["credits"] > 0:
                 pending.append({**event, "kind": "credits_available", "credits": credits})
-        if awaiting.get("permit"):
-            ask = ide.permit(awaiting["permit"])
-            body = ask.get("body") or {}
-            if body.get("kind") == "permit" and body.get("answer") is not None:
-                pending.append(
-                    {
-                        **event,
-                        "kind": "permit_answered",
-                        "ask": awaiting["permit"],
-                        "answer": body["answer"],
-                    }
-                )
     # The same key in every status read and wake, so card_create(source_event=...) from a chat
     # turn and from a background wake resolve to one card.
     return [
@@ -126,17 +113,12 @@ def first_league_result(context, research, game=None):
     return {**event, "game": game} if game else event
 
 
-def evaluate(context, research=None, ide=None, now=None):
+def evaluate(context, research=None, now=None):
     state = snapshot(context)
     now = now or datetime.now(UTC)
     research = research or Research(context)
 
-    # Credentials are only needed when there is a permit to read.
-    class PermitReader:
-        def permit(self, ask):
-            return IDE(context).permit(ask)
-
-    pending = transitions(state, research, ide or PermitReader())
+    pending = transitions(state, research)
     if now.minute % 10 == 0:
         tick = now.replace(second=0, microsecond=0).isoformat()
         # Old "promotion" records are rewritten on the first poll after an upgrade; the
