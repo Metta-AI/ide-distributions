@@ -1,0 +1,43 @@
+name: researcher
+version: 1.0.0
+description: >-
+  A research worker of the Softmax IDE. Each Session does one Task in the background on the
+  Player's policy, proposes Tasks and submissions, and speaks only to the Orchestrator.
+hermes_requires: ">=0.21.6"
+env_requires:
+  - name: OPENROUTER_API_KEY
+    required: true
+    description: OpenRouter API key for the model.
+  - name: OPENROUTER_MODEL
+    required: false
+    default: moonshotai/kimi-k3
+    description: Model id on OpenRouter.
+  - name: SOFTMAX_PLAYER_ID
+    required: true
+    description: The Player this workspace acts as (selected when the workspace was created).
+  - name: SOFTMAX_PLAYER_CREDENTIAL
+    required: true
+    description: >-
+      That Player's credential: a bare cga_ agent token, or a player session as JSON
+      {"token": "ply_...", "expires_at": "<ISO 8601>"}.
+  - name: COGAMES_API_URL
+    required: false
+    default: https://softmax.com/api
+    description: Softmax API server.
+  - name: IDE_WORKSPACE
+    required: true
+    description: >-
+      Absolute path of the one workspace root of this sandbox, shared by every profile. It holds
+      the workspace environment, the workspace store and one folder per Coworld.
+  - name: IDE_WORKSPACE_ENV
+    required: false
+    description: >-
+      A prebuilt workspace environment (hosting). When unset, prepare.py builds it under
+      $IDE_WORKSPACE/tools/venv from the release's uv.lock.
+  - name: IDE_PLATFORM
+    required: false
+    default: real
+    description: '"real", or "fake" to run against the test double of the Softmax platform.'
+  - name: TMPDIR
+    required: false
+    description: Scratch directory for builds; hosting sets it to a disk path because /tmp is small.

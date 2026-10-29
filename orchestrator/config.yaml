@@ -1,0 +1,68 @@
+# Shipped defaults. prepare.py re-applies the keys the profile machinery relies on at every
+# start (research_core/prepare.py PROTECTED_KEYS) and removes retired keys; every other value
+# the owner changes is kept across `hermes profile update`.
+model:
+  default: moonshotai/kimi-k3
+  provider: openrouter
+fallback_providers:
+  - provider: openrouter
+    model: z-ai/glm-5.3
+# Hermes memory is off: standing instructions are directive records shown in the briefing, so
+# compaction cannot lose them (design §9).
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+# Approvals are off and there is no deny list (design C.4). The per-context modes are backstops
+# so an unattended run approves rather than blocks if the mode is ever reset.
+approvals:
+  mode: "off"
+  cron_mode: approve
+  single_query_mode: approve
+  unattended_mode: approve
+# Orchestrator chats are long: protect more of the head and tail and compact less aggressively,
+# so the user's instructions stay word for word (design F.5).
+compression:
+  protect_first_n: 6
+  protect_last_n: 30
+  threshold: 0.6
+  target_ratio: 0.3
+platform_toolsets:
+  api_server: [hermes-api-server, ide-orchestrator]
+  cron: []
+known_plugin_toolsets:
+  cron: [ide-orchestrator]
+plugins:
+  enabled: [orchestrator]
+# Keep every profile tool loaded instead of deferred behind tool_search (design §4).
+tools:
+  tool_search:
+    enabled: "off"
+# A missed watcher tick fires once when the gateway comes back, so the first tick after a wake
+# is a full pass (design H "Sleep and drain").
+cron:
+  catch_up_missed: true
+terminal:
+  timeout: 1800
+  env_passthrough:
+    - SSL_CERT_FILE
+    - SOFTMAX_PLAYER_ID
+    - SOFTMAX_PLAYER_CREDENTIAL
+    - SOFTMAX_USER_CREDENTIAL
+    - COGAMES_API_URL
+    - SOFTMAX_CONFIG_DIR
+    - IDE_WORKSPACE
+    - IDE_WORKSPACE_ENV
+    - IDE_PLATFORM
+    - IDE_FAKE_FAULTS
+    - IDE_RESEARCHER_PROFILES
+    - OPENROUTER_MODEL
+    - TMPDIR
+# prepare.py fills these: the core skills (common and this role), and the active Coworld's
+# mixin skills; the active Coworld's code repository is trusted for skill overrides.
+skills:
+  external_dirs: []
+  trusted_project_dirs: []
+updates:
+  check: false
+curator:
+  prune_builtins: false

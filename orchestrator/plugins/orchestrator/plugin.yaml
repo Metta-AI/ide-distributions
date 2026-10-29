@@ -1,0 +1,12 @@
+name: orchestrator
+version: 1.0.0
+description: Record, platform and ui tools of the IDE Orchestrator, its briefing and advisory hook.
+author: ide-distributions
+kind: standalone
+requires_hermes: ">=0.21.6"
+# Kept in sync with the tool catalog by `python tools/build_prompts.py --manifests`.
+provides_tools: []
+provides_hooks:
+  - transform_tool_result
+  - post_tool_call
+  - pre_llm_call
