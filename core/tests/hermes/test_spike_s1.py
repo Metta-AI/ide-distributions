@@ -290,7 +290,13 @@ def _spike(host: Host, outcome: dict) -> None:
     steps.append(f"run 1 ended {first_final.status}")
     assert first_final.status == "completed", first_final
     if steered:
-        assert "STEERED" in (first_final.output or "").upper(), first_final.output
+        # A steer accepted while the model is already writing its one-step reply is kept as
+        # ``pending_steer`` on the run instead of being applied; either is the gateway honouring
+        # the steer (the watcher steers Sessions mid-task, where the next step picks it up).
+        applied = "STEERED" in (first_final.output or "").upper()
+        pending = first_final.raw.get("pending_steer")
+        steps.append(f"steer of run 1 was {'applied' if applied else 'left pending'}")
+        assert applied or pending == STEER, first_final
 
     # Kill the gateway while the third runs, restart, read the status back, resume the session.
     third = wait_running(runs, run_ids[2])

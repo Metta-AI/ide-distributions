@@ -172,9 +172,9 @@ SPEC = tool(
             ),
             ActionSpec(
                 "notify",
-                "Tell the user something in plain language; it informs and never asks.",
+                "Tell the user something: the notice goes in text; it informs and never asks.",
                 {
-                    "text": a.string("The notice."),
+                    "text": a.string("The notice itself, in plain language; notify needs it."),
                     "refs": a.strings("Records the notice is about, such as T-3."),
                     "urgency": a.string(
                         "low, normal (default) or high.", enum=list(notices.URGENCIES)
