@@ -175,9 +175,7 @@ class Softmax(Protocol):
     def upload(
         self, artifact: Path, name: str, *, player_id: str, artifact_type: ArtifactType = "file"
     ) -> str:
-        """Upload as a version of ``player_id``: this workspace's own player, or on Softmax
-        hosting another enabled player of the same owner (the IDE workspace bridge may select
-        one; the platform refuses every other player)."""
+        """Upload as the workspace credential's player; ``player_id`` must match it."""
         ...
 
     def submit(
