@@ -231,7 +231,9 @@ def check_secrets(platform: str, fresh: bool, player: str | None = None) -> None
     missing = []
     if fresh and not os.environ.get("OPENROUTER_API_KEY"):
         missing.append("OPENROUTER_API_KEY")
-    if platform == "real":
+    if platform == "real" and (fresh or player):
+        # A later `up` keeps the Player already in the volume's .env files unless the caller
+        # names one; a fresh volume needs one from the environment or the local login.
         if not all(os.environ.get(name) for name in REAL_REQUIRED):
             player_from_local_login(player)
         missing.extend(name for name in REAL_REQUIRED if not os.environ.get(name))
@@ -523,6 +525,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         if state != "running":
             print(f"starting container {name} (was {state})")
             docker("start", name)
+            wait_until_running(name)
     started = time.monotonic()
     run_bootstrap(settings)
     print(f"bootstrap took {round(time.monotonic() - started)} s")
@@ -534,6 +537,16 @@ def cmd_up(args: argparse.Namespace) -> int:
         print("\nreal platform: the submission scenario is never run on its own; talk to the")
         print("Orchestrator through the seam, or run `scenario --really` knowingly")
     return 0
+
+
+def wait_until_running(name: str, timeout_s: float = 30.0) -> None:
+    """``docker start`` can return before ``docker exec`` is accepted; wait for the state."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if container_state(name) == "running":
+            return
+        time.sleep(0.5)
+    raise StackError(f"container {name} did not reach the running state within {timeout_s} s")
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -905,6 +918,11 @@ up() {{
     if [ "$PLATFORM" = real ]; then
         PLAYER_CREDENTIAL=$(player_credential)
         if [ -z "$PLAYER_CREDENTIAL" ]; then fail "SOFTMAX_PLAYER_CREDENTIAL is not set"; fi
+        # The caller's Player id wins; without one, the id of an earlier `up` is kept.
+        if [ -z "$PLAYER_ID" ]; then
+            PLAYER_ID=$(dotenv_value "$ORCHESTRATOR/.env" SOFTMAX_PLAYER_ID)
+        fi
+        if [ -z "$PLAYER_ID" ]; then fail "SOFTMAX_PLAYER_ID is not set"; fi
     fi
     install_profile orchestrator
     install_profile researcher
