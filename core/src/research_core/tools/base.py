@@ -166,8 +166,18 @@ class ToolContext:
         return from_env(self.env, self.workspace)
 
     def scrub(self, text: str) -> str:
-        """Keep store and workspace paths out of what the agent sees (design B.10)."""
-        return text.replace(str(self.workspace.root), "<workspace>")
+        """Keep store paths out of what the agent sees (design B.10).
+
+        Only the ``.state`` folders are hidden: agents need the real paths of their worktrees
+        and documents.
+        """
+        hidden = [str(self.workspace.state)]
+        active = self.coworld_or_none()
+        if active is not None:
+            hidden.append(str(active.state))
+        for path in sorted(hidden, key=len, reverse=True):
+            text = text.replace(path, "<state>")
+        return text
 
 
 @dataclass

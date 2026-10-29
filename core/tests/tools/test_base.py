@@ -123,7 +123,7 @@ def test_run_tool_scrubs_workspace_paths(demo_tool, tmp_path):
         text = base.run_tool("leaky", {}, ctx)
     finally:
         catalog.TOOLS.pop("leaky")
-    assert str(tmp_path) not in text and "<workspace>" in text
+    assert str(tmp_path / ".state") not in text and "<state>" in text
 
 
 def test_context_from_env(tmp_path):
