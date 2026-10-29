@@ -6,13 +6,23 @@ profile config is read and written through ``hermes config get|set|unset`` and t
 is edited as JSON. In order, ``prepare``:
 
 1. records the core source path in ``<profile>/local/core-path.txt`` for the plugin shim;
-2. re-applies the protected config keys, removes the retired ones and points
-   ``skills.external_dirs`` at the core skills (the active Coworld's mixin skills and
-   ``skills.trusted_project_dirs`` follow once the Coworld registry exists);
-3. (Orchestrator) reconciles the watcher cron job with the shipped definition and, on the first
+2. creates the workspace directories and creates or migrates the workspace store and every
+   registered Coworld's store (``ensure_stores``);
+3. re-applies the protected config keys, removes the retired ones, points the profile at the
+   active Coworld (``skills.external_dirs`` with the core skills and the mixin skills,
+   ``skills.trusted_project_dirs`` and ``terminal.cwd`` at its code repository), applies the
+   shipped values over earlier defaults only (``SHIPPED_VALUES``, ``EARLIER_DEFAULTS``) and
+   unions the shipped ``terminal.env_passthrough`` entries with the owner's;
+4. (Orchestrator) reconciles the watcher cron job with the shipped definition and, on the first
    preparation with ``activate_watcher``, resumes it;
-4. builds or checks the workspace environment under a file lock;
-5. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
+5. builds or checks the workspace environment under a file lock;
+6. (Orchestrator, fresh workspace, ``IDE_DEFAULT_COWORLD`` set) registers and activates the
+   default Coworld through the workspace environment;
+7. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
+
+``check=True`` (the script's ``--check``) plans steps 3 and 4 against the live config and
+writes nothing. ``apply_skill_dirs`` is the same profile-pointing step for every profile of
+the sandbox, which a Coworld switch calls after preparation.
 
 Config comes before the (slow, network-bound) environment build so that a failed or timed-out
 ``uv sync`` still leaves the profile's gates in their protected state.

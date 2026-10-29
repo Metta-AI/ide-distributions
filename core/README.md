@@ -46,7 +46,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 uv sync                        # from the repository root (Python 3.12)
 uv run ruff check . && uv run pytest -q
 HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes
-python tools/build_prompts.py --check && python tools/check_prompts.py
+uv run python tools/build_prompts.py --check && uv run python tools/check_prompts.py
 ```
 
 The fake platform (`IDE_PLATFORM=fake`) needs no network; the `hermes`-marked tests install the
@@ -58,7 +58,7 @@ an OpenRouter key.
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
   `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
   pins the role sets (18 Orchestrator, 14 Researcher) and the executor table; run
-  `python tools/build_prompts.py --write --manifests`.
+  `uv run python tools/build_prompts.py --write --manifests`.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a

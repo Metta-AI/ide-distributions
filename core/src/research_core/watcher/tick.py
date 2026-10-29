@@ -1,9 +1,10 @@
 """One watcher tick: the design's twelve steps in order (Appendix H "Watcher tick order").
 
 Each step is a module ``research_core.watcher.<name>`` exposing ``run(ctx: TickContext) ->
-dict`` (a small report). The tick imports a step lazily by name; a step that is not built yet
-reports ``{"skipped": "not built"}`` and a step that raises reports ``{"error": "<Type>:
-<message>"}``, and in both cases the tick continues: one failing step never stops the others.
+dict`` (a small report). The tick imports a step lazily by name; a step whose module cannot be
+imported reports ``{"skipped": "not built"}`` and a step that raises reports ``{"error":
+"<Type>: <message>"}``, and in both cases the tick continues: one failing step never stops the
+others.
 
 Pause (step 1): while the workspace ``paused`` setting is true only the store checks (step 2)
 and the heartbeat and panel (step 12) run, plus ``drain`` once per pause (``meta

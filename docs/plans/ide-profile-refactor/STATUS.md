@@ -27,7 +27,7 @@ Every stack entry of the plan is implemented and committed:
 6. **Seam**: contract files and validator, `research serve`, the scripted client, the
    acceptance scenario on the fake platform (`core/tests/scenarios/test_seam_end_to_end.py`).
 7. **Skills, SOULs, task types, preparation**: 18 common, 8 Orchestrator and 2 Researcher
-   skills; generated SOULs (2,461 / 1,927 words) and manifests; the four task types;
+   skills; generated SOULs (2,462 / 1,927 words) and manifests; the four task types;
    `prepare.py` with protected and retired keys, the active Coworld's directories for every
    profile, shipped values over earlier defaults, stores, the watcher job, the workspace
    environment, `IDE_DEFAULT_COWORLD` and `--check`.

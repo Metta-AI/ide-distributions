@@ -30,7 +30,9 @@ hermes profile install <checkout>/researcher --name researcher --yes     # one o
 ```
 
 Run `prepare.py` after every install and every `hermes profile update`, with
-`HERMES_HOME=<profile home>` and `HERMES_REAL_HOME=<host home>`. It:
+`HERMES_HOME=<profile home>` (Hermes sets it for anything it runs for a profile; set it yourself
+when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
+`$HERMES_REAL_HOME/workspace`, so set `IDE_WORKSPACE` explicitly. It:
 
 1. writes `<profile>/local/core-path.txt` (where the plugin finds `research_core`);
 2. creates or migrates the workspace store and every registered Coworld store;
