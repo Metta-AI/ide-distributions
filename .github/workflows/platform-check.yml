@@ -21,18 +21,22 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --frozen
+      # The secrets context is not allowed in a step's `if`, so the step decides in the shell.
       - name: Call every read route on the test Player
         id: check
-        if: ${{ secrets.IDE_TEST_PLAYER_CREDENTIAL != '' }}
         env:
           IDE_WORKSPACE: ${{ runner.temp }}/workspace
           SOFTMAX_PLAYER_ID: ${{ secrets.IDE_TEST_PLAYER_ID }}
           SOFTMAX_PLAYER_CREDENTIAL: ${{ secrets.IDE_TEST_PLAYER_CREDENTIAL }}
           COGAMES_API_URL: ${{ vars.COGAMES_API_URL || 'https://softmax.com/api' }}
-        run: uv run research platform check --read-only | tee platform-check.json
-      - name: Skip without a test Player credential
-        if: ${{ secrets.IDE_TEST_PLAYER_CREDENTIAL == '' }}
-        run: echo "IDE_TEST_PLAYER_CREDENTIAL is not set; the nightly platform check did not run."
+        run: |
+          if [ -z "$SOFTMAX_PLAYER_CREDENTIAL" ]; then
+            echo "IDE_TEST_PLAYER_CREDENTIAL is not set; the nightly platform check did not run."
+            echo "ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ran=true" >> "$GITHUB_OUTPUT"
+          uv run research platform check --read-only | tee platform-check.json
       - name: Open or update the failure issue
         if: ${{ failure() && steps.check.conclusion == 'failure' }}
         env:
