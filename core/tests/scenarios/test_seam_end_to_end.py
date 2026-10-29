@@ -52,6 +52,9 @@ class ScriptedAgent:
         self.tool_results: list[dict] = []
         self.seen_sessions: set[str] = set()
         self.other_wakes: list[str] = []  # the first line of every other wake the watcher started
+        self.hold_chat_runs = (
+            False  # leave the chat run live (a long model turn) instead of ending it
+        )
 
     def __call__(self, run: FakeRun) -> None:
         ctx = ToolContext.from_env(
@@ -96,6 +99,8 @@ class ScriptedAgent:
                 "pending_request": {"text": REQUEST, "cites": CITES},
             },
         )
+        if self.hold_chat_runs:
+            return  # the run stays ``running`` until the test completes it
         self.hermes.complete(
             run.run_id, "Switching to fakegame; I will submit the starter as soon as it is set up."
         )
@@ -250,3 +255,31 @@ def test_reaction_never_starts_run(scenario):
         "[reactions since your last turn]\n- message m-1: 👍"
         in scenario.agent.rendered[reply["run_id"]]
     )
+
+
+def test_concurrent_chat_and_wakes_never_touch_the_chat_session(scenario):
+    """A6.1 and B.13: while the chat run is live, the watcher's wakes run in their own
+    Sessions, and a second user message steers the live run instead of starting another."""
+    scenario.agent.hold_chat_runs = True
+    first = scenario.client.say(REQUEST, {"contract_version": 1, "on_screen": []})
+    assert first["delivered"] == "start"
+    assert scenario.hermes.runs[first["run_id"]].status == "running"
+
+    for _ in range(3):
+        scenario.tick()
+    wake_runs = [r for r in scenario.hermes.runs.values() if r.session_id != scenario.session_id]
+    assert any("# Setup wake" in r.input for r in wake_runs), [r.input[:40] for r in wake_runs]
+    assert all(r.status == "completed" for r in wake_runs)
+    assert len(scenario.platform().submissions(mine=True)) == 1  # the pending request ran
+
+    second = scenario.client.say("Also: who is the champion right now?")
+    assert second["delivered"] == "steer" and second["run_id"] == first["run_id"]
+    chat_runs = [r for r in scenario.hermes.runs.values() if r.session_id == scenario.session_id]
+    assert len(chat_runs) == 1
+    assert any("champion" in text for text in scenario.hermes.steered[first["run_id"]])
+
+    scenario.hermes.complete(first["run_id"], "Done.")
+    scenario.agent.hold_chat_runs = False
+    third = scenario.client.say("thanks")
+    assert third["delivered"] == "start" and third["run_id"] != first["run_id"]
+    assert "Submitted V-1" in scenario.agent.rendered[third["run_id"]]
