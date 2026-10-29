@@ -61,6 +61,31 @@ def error_result(message: str, **context: Any) -> str:
     return json.dumps({"ok": False, "error": message, "problems": [message], "context": context})
 
 
+# Variables that bind a process to one interpreter. Hermes sets them for its own venv; the
+# workspace interpreter would otherwise import Hermes's compiled packages (pydantic_core built
+# for another Python) and fail with "No module named pydantic_core._pydantic_core".
+INTERPRETER_VARS = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSAFEPATH",
+    "PYTHONSTARTUP",
+    "PYTHONEXECUTABLE",
+    "PYTHONNOUSERSITE",
+    "VIRTUAL_ENV",
+    "__PYVENV_LAUNCHER__",
+)
+
+
+def workspace_process_env(env: dict[str, str], ws: layout.Workspace) -> dict[str, str]:
+    """``env`` for a process of the workspace environment: Hermes's interpreter variables
+    dropped and the workspace's ``bin`` first on ``PATH``."""
+    clean = {key: value for key, value in env.items() if key not in INTERPRETER_VARS}
+    bin_dir = str(ws.venv / "bin")
+    rest = [part for part in clean.get("PATH", "").split(os.pathsep) if part and part != bin_dir]
+    clean["PATH"] = os.pathsep.join([bin_dir, *rest])
+    return clean
+
+
 def run_in_workspace(
     name: str, args: dict, env: dict[str, str], timeout_s: int | None = None
 ) -> str:
@@ -75,7 +100,12 @@ def run_in_workspace(
     timeout = timeout_s or TOOL_TIMEOUT_S
     try:
         completed = subprocess.run(
-            command, env=env, capture_output=True, text=True, timeout=timeout, check=False
+            command,
+            env=workspace_process_env(env, ws),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return error_result(f"tool {name} timed out after {timeout} s", command=command)

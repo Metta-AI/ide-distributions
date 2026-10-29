@@ -31,3 +31,21 @@ def test_profile_env_without_hermes_or_without_a_scope(monkeypatch):
     monkeypatch.setitem(sys.modules, "agent", types.ModuleType("agent"))
     monkeypatch.setitem(sys.modules, "agent.secret_scope", fake)
     assert executor.profile_env()["SOFTMAX_PLAYER_ID"] == "ply_host"
+
+
+def test_workspace_process_env_drops_hermes_interpreter_variables(tmp_path):
+    from research_core import layout
+
+    ws = layout.from_env({"IDE_WORKSPACE": str(tmp_path / "ws")})
+    env = {
+        "PYTHONPATH": "/opt/hermes/.venv/lib/python3.14/site-packages",
+        "VIRTUAL_ENV": "/opt/hermes/.venv",
+        "PATH": "/opt/hermes/.venv/bin:/usr/bin",
+        "IDE_WORKSPACE": str(tmp_path / "ws"),
+        "OPENROUTER_API_KEY": "k",
+    }
+    clean = executor.workspace_process_env(env, ws)
+    assert "PYTHONPATH" not in clean and "VIRTUAL_ENV" not in clean
+    assert clean["PATH"].split(":")[0] == str(ws.venv / "bin")
+    assert clean["PATH"].endswith("/opt/hermes/.venv/bin:/usr/bin")
+    assert clean["OPENROUTER_API_KEY"] == "k" and clean["IDE_WORKSPACE"] == env["IDE_WORKSPACE"]

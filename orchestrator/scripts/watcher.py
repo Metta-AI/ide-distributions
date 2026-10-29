@@ -26,6 +26,19 @@ def workspace_python() -> Path:
     return root / "tools" / "venv" / "bin" / "python"
 
 
+def workspace_env() -> dict:
+    """Hermes's interpreter variables dropped, so the workspace's Python imports its own
+    packages (not Hermes's pydantic_core, built for another interpreter)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("__PYVENV_LAUNCHER__", None)
+    bin_dir = str(workspace_python().parent)
+    env["PATH"] = os.pathsep.join(
+        [bin_dir, *[p for p in env.get("PATH", "").split(os.pathsep) if p]]
+    )
+    return env
+
+
 def main() -> int:
     python = workspace_python()
     if not python.exists():
@@ -34,6 +47,7 @@ def main() -> int:
         return 1
     completed = subprocess.run(
         [str(python), "-m", "research_core.cli", "watcher", "tick"],
+        env=workspace_env(),
         capture_output=True,
         text=True,
         check=False,
