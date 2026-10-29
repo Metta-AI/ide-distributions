@@ -7,7 +7,7 @@ dependencies = [
     "pydantic>=2",
     "python-frontmatter",
     "PyYAML",
-    "coworld>=0.1.64,<0.2",
+    "coworld>=0.1.67,<0.2",
     "softmax-cli>=0.26.40,<0.27",
 ]
 
