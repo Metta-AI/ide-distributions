@@ -22,6 +22,78 @@ if TYPE_CHECKING:
     from research_core.store.db import Store, Tx
 
 
+# Every event kind any store function or the watcher emits (amendment A2.9). A test asserts
+# the kinds the modules emit are listed here, and the watcher's ownership map covers them.
+KINDS: frozenset[str] = frozenset(
+    {
+        "goal.created",
+        "goal.updated",
+        "goal.status",
+        "task.created",
+        "task.proposed",
+        "task.approved",
+        "task.claimed",
+        "task.released",
+        "task.waiting",
+        "task.wait_resolved",
+        "task.asked",
+        "task.answered",
+        "task.message",
+        "task.completed",
+        "task.failed",
+        "task.reopened",
+        "task.reviewed",
+        "task.abandoned",
+        "task.merged",
+        "task.proposed_submission",
+        "task.stuck",
+        "claim.created",
+        "claim.updated",
+        "claim.retired",
+        "experiment.created",
+        "experiment.started",
+        "experiment.run",
+        "experiment.closed",
+        "experiment.abandoned",
+        "version.created",
+        "version.uploaded",
+        "version.submitted",
+        "champion.changed",
+        "directive.added",
+        "directive.updated",
+        "directive.retired",
+        "settings.updated",
+        "capability.failed",
+        "capability.repaired",
+        "repair.failed_twice",
+        "intent.pending",
+        "intent.done",
+        "intent.failed",
+        "session.started",
+        "session.ended",
+        "session.dead",
+        "notice",
+        "ui.patch",
+        "coworld.registered",
+        "coworld.switched",
+        "coworld.setup_needed",
+        "coworld.set_up",
+        "store.unmarked_write",
+        "store.schema_rebuilt",
+        "platform.request",
+        "platform.forum_post",
+        "platform.wiki_edit",
+        "turn.rendered",
+        "watcher.heartbeat",
+        "merge.failed",
+        "goal.needs_ideation",
+        "goal.park",
+        "workspace.resumed",
+        "anti_stall",
+    }
+)
+
+
 @dataclass(frozen=True)
 class Event:
     seq: int
