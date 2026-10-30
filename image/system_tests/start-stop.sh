@@ -18,6 +18,7 @@ chmod 644 "$scratch/bootstrap.json"
 docker volume create "$volume" >/dev/null
 # Kubernetes supplies this volume group ownership through fsGroup.
 docker run --rm --user 0 --entrypoint /bin/sh -v "$volume:/workspace" "$image" -c 'chown 10000:10000 /workspace'
+sentinel="retained-$name"
 for cycle in 1 2; do
   docker run -d --name "$name" --read-only --cap-drop ALL --security-opt no-new-privileges \
     --tmpfs /tmp:rw,size=1g --mount "type=volume,src=$volume,dst=/workspace" \
@@ -33,6 +34,11 @@ for cycle in 1 2; do
     sleep 2
   done
   test "$ready" = true
+  if [[ "$cycle" == 1 ]]; then
+    docker exec "$name" sh -c 'printf %s "$1" > /workspace/.state-proof' sh "$sentinel"
+  else
+    test "$(docker exec "$name" cat /workspace/.state-proof)" = "$sentinel"
+  fi
   docker exec "$name" /opt/hermes/.venv/bin/python -c \
     'import json, urllib.request; s=json.load(urllib.request.urlopen("http://127.0.0.1:8650/status")); assert not s["sleep_started"] and not s["paused"], s'
   docker exec -e HERMES_HOME=/workspace/host/profiles/orchestrator "$name" \
