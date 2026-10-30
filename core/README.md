@@ -88,3 +88,8 @@ it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
   one-sentence `description` of at most 60 characters; `tools/check_prompts.py` checks it.
+
+`research publish` snapshots selected player files into the private GitHub workspace repository.
+The Orchestrator's five-minute `publication` cron runs it without a model. See
+[hosting](../docs/hosting.md#private-workspace-git-publication) for the broker dependency,
+publication scope, excluded data and rollout checks. This does not export a frontend schema.

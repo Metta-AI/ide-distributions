@@ -299,12 +299,12 @@ def test_prepare_reconciles_watcher_job_keeps_pause_state(homes):
     run_prepare(FakeHermes(), env, activate=False)
 
     payload = read_jobs(profile)
-    assert [job["id"] for job in payload["jobs"]] == ["nightly", "watcher"]
+    assert [job["id"] for job in payload["jobs"]] == ["nightly", "watcher", "publication"]
     assert payload["jobs"][0] == foreign
     assert payload["updated_at"] == "2026-10-20T10:00:00-07:00"
     watcher = payload["jobs"][1]
     shipped = shipped_watcher()
-    for field in prepare.WATCHER_JOB_FIELDS:
+    for field in prepare.CRON_JOB_FIELDS:
         assert watcher[field] == shipped[field], field
     assert watcher["enabled"] is False and watcher["state"] == "paused"
     assert watcher["paused_at"] == "2026-10-20T10:00:00-07:00"
@@ -323,7 +323,7 @@ def test_prepare_adds_a_missing_watcher_job_paused(homes):
     run_prepare(FakeHermes(), env)
 
     jobs = read_jobs(profile)["jobs"]
-    assert [job["id"] for job in jobs] == ["nightly", "watcher"]
+    assert [job["id"] for job in jobs] == ["nightly", "watcher", "publication"]
     assert jobs[1] == shipped_watcher()
     assert jobs[1]["enabled"] is False and jobs[1]["state"] == "paused"
 
@@ -331,7 +331,10 @@ def test_prepare_adds_a_missing_watcher_job_paused(homes):
 def test_prepare_creates_the_cron_store_when_missing(homes):
     profile, env = homes
     run_prepare(FakeHermes(), env)
-    assert read_jobs(profile)["jobs"] == [shipped_watcher()]
+    assert (
+        read_jobs(profile)["jobs"]
+        == json.loads((REPO / "orchestrator/cron/jobs.json").read_text())["jobs"]
+    )
 
 
 def test_prepare_accepts_a_bare_job_list(homes):
@@ -339,23 +342,26 @@ def test_prepare_accepts_a_bare_job_list(homes):
     (profile / "cron").mkdir()
     (profile / "cron" / "jobs.json").write_text(json.dumps([shipped_watcher()]))
     run_prepare(FakeHermes(), env)
-    assert read_jobs(profile)["jobs"] == [shipped_watcher()]
+    assert (
+        read_jobs(profile)["jobs"]
+        == json.loads((REPO / "orchestrator/cron/jobs.json").read_text())["jobs"]
+    )
 
 
 def test_prepare_activates_watcher_once(homes):
     profile, env = homes
     fake = FakeHermes()
     run_prepare(fake, env, activate=False)
-    assert fake.resumed == [], "no activation without the flag"
+    assert fake.resumed == ["publication"], "watcher activation requires the flag"
     assert (profile / ".softmax-prepared").exists()
 
     (profile / ".softmax-prepared").unlink()
     run_prepare(fake, env, activate=True)
-    assert fake.resumed == ["watcher"]
+    assert fake.resumed == ["publication", "watcher"]
     assert (profile / ".softmax-prepared").exists()
 
     run_prepare(fake, env, activate=True)
-    assert fake.resumed == ["watcher"], "the marker stops a second activation"
+    assert fake.resumed == ["publication", "watcher"], "the marker stops a second activation"
 
 
 def test_prepare_resumes_after_the_job_exists(homes):

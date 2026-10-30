@@ -125,7 +125,7 @@ ENV_PASSTHROUGH: dict[str, list[str]] = {
 
 # The authored fields of the watcher job that the shipped definition owns. Everything else in
 # the live record (pause state, run history, next_run_at, ...) belongs to the store and is kept.
-WATCHER_JOB_FIELDS: tuple[str, ...] = (
+CRON_JOB_FIELDS: tuple[str, ...] = (
     "name",
     "prompt",
     "script",
@@ -418,15 +418,15 @@ def _write_json_atomic(path: Path, payload: Any) -> None:
     os.replace(pending, path)
 
 
-def reconcile_watcher_job(profile: Path, source: Path) -> str:
-    """Make the live watcher job match the shipped authored fields; add it paused if missing.
+def reconcile_cron_job(profile: Path, source: Path, job_id: str) -> str:
+    """Make a live cron job match the shipped authored fields; add it paused if missing.
 
-    The live store's other jobs, the watcher's pause state and its run history are kept. The
+    The live store's other jobs, this job's pause state and its run history are kept. The
     store is rewritten atomically (``jobs.json.pending`` then ``os.replace``).
     """
-    shipped_job = _find_job(_job_list(_load_json(source / "cron" / "jobs.json")), WATCHER_JOB_ID)
+    shipped_job = _find_job(_job_list(_load_json(source / "cron" / "jobs.json")), job_id)
     if shipped_job is None:
-        raise PrepareError(f"{source} ships no '{WATCHER_JOB_ID}' cron job")
+        raise PrepareError(f"{source} ships no '{job_id}' cron job")
     jobs_path = profile / "cron" / "jobs.json"
     payload = _load_json(jobs_path) if jobs_path.exists() else {"jobs": []}
     if isinstance(payload, list):
@@ -434,18 +434,18 @@ def reconcile_watcher_job(profile: Path, source: Path) -> str:
     if not isinstance(payload, dict):
         raise PrepareError(f"{jobs_path} is not a cron store")
     jobs = _job_list(payload)
-    live = _find_job(jobs, WATCHER_JOB_ID)
+    live = _find_job(jobs, job_id)
     if live is None:
         jobs.append(copy.deepcopy(shipped_job))
-        action = "cron: added the watcher job (paused)"
+        action = f"cron: added {job_id} job (paused)"
     else:
-        changed = sorted(f for f in WATCHER_JOB_FIELDS if live.get(f) != shipped_job.get(f))
+        changed = sorted(f for f in CRON_JOB_FIELDS if live.get(f) != shipped_job.get(f))
         for field in changed:
             live[field] = copy.deepcopy(shipped_job[field])
         action = (
-            f"cron: watcher job updated ({', '.join(changed)})"
+            f"cron: {job_id} job updated ({', '.join(changed)})"
             if changed
-            else "cron: watcher job unchanged"
+            else f"cron: {job_id} job unchanged"
         )
     payload["jobs"] = jobs
     _write_json_atomic(jobs_path, payload)
@@ -557,7 +557,13 @@ def prepare(
     marker = profile / PREPARED_MARKER
     if role == "orchestrator":
         if not check:
-            actions.append(reconcile_watcher_job(profile, source))
+            actions.append(reconcile_cron_job(profile, source, WATCHER_JOB_ID))
+            actions.append(reconcile_cron_job(profile, source, "publication"))
+            publication_marker = profile / "local" / ".publication-prepared"
+            if not publication_marker.exists():
+                cli.cron_resume("publication")
+                publication_marker.touch()
+                actions.append("cron: resumed publication")
         if activate_watcher and not marker.exists():
             cli.cron_resume(WATCHER_JOB_ID)
             actions.append("cron: resumed the watcher job")

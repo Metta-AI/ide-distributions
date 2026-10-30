@@ -86,7 +86,7 @@ def test_prepare_script_is_stdlib_only_and_takes_the_hosting_flags(role):
 
 def test_watcher_cron_job_shape():
     jobs = json.loads((PROFILES["orchestrator"] / "cron" / "jobs.json").read_text())["jobs"]
-    (job,) = jobs
+    job = next(job for job in jobs if job["id"] == "watcher")
     assert job["id"] == "watcher" and job["no_agent"] is True and job["script"] == "watcher.py"
     assert job["schedule"] == {"kind": "interval", "minutes": 1, "display": "every 1m"}
     assert job["enabled"] is False and job["state"] == "paused"

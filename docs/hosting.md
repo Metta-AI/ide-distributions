@@ -177,3 +177,51 @@ daily lock refresh keeps `coworld` and `softmax-cli` current.
 - S3: the bridge reads a store with WAL under gVisor.
 - S4: whether the profile venv is writable (not needed any more: the workspace environment is
   the one `prepare.py` manages).
+
+## Private workspace Git publication
+
+`research publish` publishes a separate private snapshot repository through Softmax's existing
+GitHub broker. The workspace keeps its existing game repositories and worktrees. GitHub holds
+readable snapshots while the workspace sleeps; volume snapshots remain the recovery mechanism.
+There is no frontend schema, exporter, or promise that these paths are a frontend API.
+
+The Orchestrator installs a model-free `publication` cron job every five minutes. Preparation
+enables it once and preserves a subsequent manual pause. The job calls the installed workspace
+CLI. Configure `sleep_through_jobs` to include both `watcher` and `publication`; publication
+must not keep an idle workspace awake. There is no final sleep hook: the last successful push
+can lag the workspace's final writes. A failed run stays visible in Hermes's cron history, and
+later ticks retry. Missing/revoked GitHub access preserves all local files and published state.
+
+Hosting must first deploy Metta's `POST /api/github/workspace-repository` and restricted Git
+receive-pack proxy. The bound workspace's existing Player credential authorizes those routes;
+the GitHub OAuth token stays on the server. `COGAMES_API_URL` must name the website's `/api`
+base, as for the existing GitHub clone tool. `IDE_GITHUB_BROKER_URL` overrides it for local
+proofs. Ordinary GitHub login is insufficient; the owner must connect repository access to this
+workspace. No new token, external storage service, or database migration is required.
+
+The broker creates `softmax-workspace-<player-id>` in the connected user's GitHub account,
+private and initially empty. It rejects a public repository, a different owner or a namesake
+without the expected Softmax description. Keep that description intact. Snapshots use the
+`workspace` branch. An external edit is replaced by the workspace's next tree, with the external
+commit retained as a parent; ask the agent to import any edits you want to keep. A concurrent
+remote push rejects publication and is reconciled on the next tick. No force push is needed.
+
+Publication includes registered game `code/`, `worktrees/` and `documents/` directories,
+workspace `documents/`, `memory/`, `skills/` and `SOUL.md`, and each configured profile's
+`memory/`, `skills/` and `SOUL.md`. Nested working copies are flattened, including uncommitted
+files, and honor Git ignores. Runtime configuration, credentials, SQLite files and sidecars,
+source caches, toolchains, generated caches, symlinks and archives are excluded. Keep secrets
+out of player-authored content; filename exclusions cannot recognize a secret embedded in code
+or prose. Files above 10 MiB or snapshots above 48 MiB fail visibly, retaining the previous
+published commit. This is intentionally a small-file read surface, not an artifact store.
+
+The durable `.state/publication/repository.git` contains Git objects and a pending local branch.
+The publisher serializes itself with a file lock and builds a fresh index for every run. Only a
+complete tree becomes a commit. A failed push keeps that commit for retry; no change creates no
+new commit. Files are not an application-wide transactional snapshot while writers are active.
+No SQLite data, schema or frontend JSON is exported. EBS recovery covers the complete state.
+
+Verification: `uv run pytest -q core/tests/system/test_publication.py` runs the native cron
+launcher, installed CLI and real smart HTTP Git against a local broker stand-in. It checks
+publication, retries, remote edit handling, deletion, authentication failure and excluded files.
+Qualify actual GitHub consent and publication with the #106-compatible hosted image before rollout.
