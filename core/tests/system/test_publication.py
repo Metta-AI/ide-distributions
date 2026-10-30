@@ -189,3 +189,27 @@ def test_workspace_tree_wins_without_discarding_remote_history(publication, tmp_
             "git", "--git-dir", str(remote), "ls-tree", "-r", "--name-only", "workspace"
         ).stdout
     )
+
+
+def test_snapshot_includes_uncommitted_task_worktrees_without_git_metadata(publication):
+    _, code, remote, _, env = publication
+    command("git", "add", "policy.py", cwd=code)
+    command("git", "commit", "-m", "Policy base", cwd=code, env=env)
+    task = code.parent / "worktrees" / "task-1"
+    command("git", "worktree", "add", "-b", "task-1", str(task), cwd=code)
+    (task / "policy.py").write_text("task in progress\n")
+    tick(env)
+    assert (
+        command(
+            "git",
+            "--git-dir",
+            str(remote),
+            "show",
+            "workspace:workspace/game/worktrees/task-1/policy.py",
+        ).stdout
+        == "task in progress\n"
+    )
+    tree = command(
+        "git", "--git-dir", str(remote), "ls-tree", "-r", "--name-only", "workspace"
+    ).stdout.splitlines()
+    assert not any(Path(path).name == ".git" for path in tree)

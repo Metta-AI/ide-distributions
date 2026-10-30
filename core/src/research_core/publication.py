@@ -114,7 +114,13 @@ def files(root: Path):
                 for part in relative.parts
             ):
                 continue
-            if path.is_symlink() or not path.is_file():
+            if (
+                path.is_symlink()
+                or any(
+                    parent.is_symlink() for parent in path.parents if parent.is_relative_to(root)
+                )
+                or not path.is_file()
+            ):
                 continue
             with open(
                 path, "rb", opener=lambda p, flags: os.open(p, flags | os.O_NOFOLLOW)
