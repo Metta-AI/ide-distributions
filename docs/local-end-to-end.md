@@ -520,7 +520,8 @@ Coworld on the fresh workspace before the first chat.
   reading a WAL store under gVisor) is not exercised.
 - **Sleep and drain.** Nothing puts the container to sleep: `sleep_through_jobs`,
   `lifecycle.activity`, the cron catch-up after a wake and the first tick's resume of drained
-  Sessions do not run. From `shell`, `research workspace drain` drains by hand, and the host's
+  Sessions do not run. From `shell`, `research workspace sleep` and `research workspace wake`
+  run the host's sleep cycle by hand (the container keeps running), and the host's
   autosleep probe can be tried as hosting would run it, with the image's Python in the
   Orchestrator profile: `/opt/hermes/.venv/bin/python $HERMES_HOME/scripts/activity.py` prints
   `{"waiting_on": [...]}` from the watcher's last tick (an empty list permits sleep;
@@ -554,13 +555,15 @@ your shell), from the workspace environment:
 
 ```bash
 RESEARCH=$IDE_WORKSPACE/tools/venv/bin/research
-$RESEARCH watcher status                                # {"heartbeat", "heartbeat_age_s", "has_work", "paused", "paused_drained"}
+$RESEARCH watcher status                                # {"heartbeat", "heartbeat_age_s", "has_work", "waiting_on", "paused", "paused_drained", "sleep_started"}
 $RESEARCH tool workspace --args '{"action": "doctor"}'  # commits, watcher heartbeat, both stores' schema, capabilities, CLIs, core_path.writable, api_keys, problems
 $RESEARCH store snapshot --store workspace              # coworlds, sessions, notices, directives, settings, ui_state, and seq
 $RESEARCH store snapshot                                # the active Coworld's store: goals, tasks, claims, versions, champion, ...
 $RESEARCH store events --after 0 --store workspace      # the workspace store's events as JSON lines; --follow tails
 $RESEARCH store events --after 0                        # the active Coworld's events
-$RESEARCH workspace drain                               # stop Researcher runs and mark their Sessions to resume
+$RESEARCH workspace sleep --wait 30                     # pause, stop every run, flush every database and the volume; exit 0 = safe to stop
+$RESEARCH workspace wake                                # clear sleep's pause; the next tick resumes the drained Sessions
+$RESEARCH workspace drain                               # the raw drain step alone: stop Researcher runs, mark their Sessions to resume
 ```
 
 `research store snapshot` without `--store` refuses until a Coworld is active ("no active

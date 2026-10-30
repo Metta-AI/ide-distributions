@@ -689,6 +689,27 @@ def flush_to_disk(databases: list[Path]) -> None:
     subprocess.run([sys.executable, "-c", FSYNC_SCRIPT, *unique], check=True)
 
 
+def flush_databases(databases: list[Path]) -> dict[str, dict[str, Any]]:
+    """Checkpoint every database into its main file, fsync it, then release: ``quiesce`` without
+    the hold. ``research workspace sleep`` runs it last, when nothing writes any more.
+
+    Per database: ``busy`` (a reader kept the checkpoint from finishing) and ``wal_bytes`` (the
+    WAL left after it). ``busy`` false with ``wal_bytes`` 0 means the main file alone holds
+    every committed write, and the fsync put it on disk.
+    """
+    locks: list[sqlite3.Connection] = []
+    reports: dict[str, dict[str, Any]] = {}
+    try:
+        for path in databases:
+            conn, report = checkpoint_and_lock(path)
+            locks.append(conn)
+            reports[str(path)] = {"busy": report["busy"], "wal_bytes": report["wal_bytes"]}
+        flush_to_disk(databases)
+    finally:
+        release_locks(locks)
+    return reports
+
+
 def run_then(command: list[str], deadline: float) -> dict[str, Any]:
     """Run the snapshot command with the inherited environment; kill it at the deadline."""
     child = subprocess.Popen(command)

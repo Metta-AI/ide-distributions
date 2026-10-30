@@ -97,6 +97,7 @@ KINDS: frozenset[str] = frozenset(
         "drain.done",
         "goal.park",
         "workspace.resumed",
+        "workspace.sleep",
         "anti_stall",
     }
 )

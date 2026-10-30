@@ -14,7 +14,10 @@ active Coworld's store:
   that ends any other way leaves the event unhandled with the error, and the next tick tries
   again with a new Session id and the next attempt number, up to ``recovery.max_attempts``
   tries. After that the watcher gives up on the event: ``wake.failed`` (itself a management
-  wake) and a notice, once.
+  wake) and a notice, once. A run ``research workspace sleep`` stopped (``stopped_by`` is
+  ``workspace:sleep``) is retried after the wake like any other, but it is not a failure: it
+  does not count toward that limit (``meta.wake_planned_stops:<store>:<seq>`` counts such
+  stops; the attempt number itself keeps rising, so every start keeps its own idempotency key).
 
 Repeat suppression: an event whose ``(kind, subject)`` already has a live wake Session started
 within :data:`REPEAT_WINDOW` joins that Session instead of starting another, and the Session's
@@ -43,6 +46,7 @@ from research_core.watcher.store_checks import labelled_stores
 
 TEMPLATES_DIR = Path(__file__).parent / "wakes"
 REPEAT_WINDOW = timedelta(hours=6)
+PLANNED_STOPS_PREFIX = "wake_planned_stops:"
 PAYLOAD_CHARS = 4000
 ERROR_CHARS = 2000
 
@@ -61,6 +65,7 @@ def run(ctx: TickContext) -> dict[str, Any]:
     report: dict[str, Any] = {
         "acknowledged": acknowledged["handled"],
         "run_failed": acknowledged["failed"],
+        "stopped_for_sleep": acknowledged["stopped_for_sleep"],
         "handled": [],
         "not_built": [],
         "started": [],
@@ -93,7 +98,7 @@ def acknowledge_finished_wakes(ctx: TickContext) -> dict[str, list[str]]:
     in both stores, and asks the gateway once per run. A run the gateway no longer knows
     (``unknown``) counts as failed, so the event is retried.
     """
-    report: dict[str, list[str]] = {"handled": [], "failed": []}
+    report: dict[str, list[str]] = {"handled": [], "failed": [], "stopped_for_sleep": []}
     statuses: dict[str, hermes_api.RunStatus] = {}
     for label, store in labelled_stores(ctx):
         rows = store.q(
@@ -113,6 +118,11 @@ def acknowledge_finished_wakes(ctx: TickContext) -> dict[str, list[str]]:
                 events.mark_handled(store, ctx.actor, row["seq"], run_id)
                 sessions.end(ctx.wstore, ctx.actor, session["id"])
                 report["handled"].append(ref)
+            elif status.terminal and session["stopped_by"] == sessions.SLEEP_STOP:
+                events.mark_failed(store, ctx.actor, row["seq"], f"run {run_id} stopped for sleep")
+                _count_planned_stop(ctx, label, row["seq"])
+                sessions.end(ctx.wstore, ctx.actor, session["id"])
+                report["stopped_for_sleep"].append(ref)
             elif status.terminal:
                 detail = status.error or "no detail"
                 events.mark_failed(
@@ -126,12 +136,25 @@ def acknowledge_finished_wakes(ctx: TickContext) -> dict[str, list[str]]:
 def has_queued_wakes(ctx: TickContext) -> bool:
     """Whether any model-wake event is still unacknowledged and not given up on."""
     max_attempts = int(settings.get(ctx.wstore, "recovery.max_attempts"))
-    for _label, store in labelled_stores(ctx):
+    for label, store in labelled_stores(ctx):
         for event in events.unhandled(store, MODEL_KINDS):
             row = _handled_row(store, event.seq)
-            if row is None or row["attempts"] <= max_attempts:
+            if (
+                row is None
+                or counted_attempts(ctx, label, event.seq, row["attempts"]) <= max_attempts
+            ):
                 return True
     return False
+
+
+def counted_attempts(ctx: TickContext, label: str, seq: int, attempts: int) -> int:
+    """The attempts that count toward ``recovery.max_attempts``: stops for sleep do not."""
+    return attempts - int(ctx.meta(f"{PLANNED_STOPS_PREFIX}{label}:{seq}") or 0)
+
+
+def _count_planned_stop(ctx: TickContext, label: str, seq: int) -> None:
+    key = f"{PLANNED_STOPS_PREFIX}{label}:{seq}"
+    ctx.set_meta(key, str(int(ctx.meta(key) or 0) + 1))
 
 
 def render_wake(kind: str, event: Event, ctx: TickContext) -> str:
@@ -198,7 +221,7 @@ def _dispatch_wake(
 ) -> None:
     ref = f"{label}:{event.seq}"
     row = _handled_row(store, event.seq)
-    if row is not None and row["attempts"] > max_attempts:
+    if row is not None and counted_attempts(ctx, label, event.seq, row["attempts"]) > max_attempts:
         report["gave_up"].append(ref)  # reported when it happened; nothing more to do
         return
     if row is not None and row["session_id"]:
@@ -216,7 +239,7 @@ def _dispatch_wake(
         return
     session_id = hermes_api.mint_session_id()
     attempts = events.claim_handling(store, ctx.actor, event.seq, event.kind, session_id)
-    if attempts > max_attempts:
+    if counted_attempts(ctx, label, event.seq, attempts) > max_attempts:
         _give_up(ctx, label, store, event, handler, row, max_attempts)
         report["gave_up"].append(ref)
         return

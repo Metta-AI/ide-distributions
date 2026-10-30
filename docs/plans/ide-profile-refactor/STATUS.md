@@ -34,7 +34,13 @@ Every stack entry of the plan is implemented and committed:
 8. **Host autosleep probe**: `orchestrator/scripts/activity.py` prints `{"waiting_on": [...]}`
    from the watcher's recorded reasons, the contract main's #105 introduced for the old
    profiles, so metta's autosleep integration keeps working with the new distribution.
-9. **Checks and docs**: `tools/check_prompts.py` (structural, plus a model check with a key),
+9. **The host's sleep cycle** (October 30, 2026): `research workspace sleep` pauses, drains,
+   lets the Orchestrator's runs finish (stopping them after `--wait`), then checkpoints and
+   fsyncs every database and syncs the volume, exiting 0 only when nothing runs and nothing is
+   volatile; `research workspace wake` clears sleep's own pause so the next tick resumes the
+   drained Sessions. A wake run stopped for sleep retries without using an attempt. Only running
+   work keeps the workspace awake now: a Task waiting on the platform no longer does.
+10. **Checks and docs**: `tools/check_prompts.py` (structural, plus a model check with a key),
    `tools/build_prompts.py --check`, the nightly platform-check workflow, `docs/hosting.md`,
    `core/README.md`, the profile READMEs, banners on the retired docs.
 

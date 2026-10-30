@@ -2,9 +2,11 @@
 
 The host runs this file in the installed Orchestrator profile with the profile's environment
 and reads one JSON line: ``{"waiting_on": [reason, ...]}``. A non-empty list means the
-workspace has background work and must stay awake: a live Researcher run, a Task waiting on
-XP, credits, a submission or a process, an autonomous-submission candidate, or a queued wake.
-An empty list permits sleep, and so does an explicitly paused workspace. The reasons are the
+workspace has running work and must stay awake: a live Researcher run, a background process a
+Task waits on, an autonomous-submission candidate, or a queued wake. A Task waiting on the
+platform (XP, credits, a submission) does not keep it awake. An empty list permits sleep, and
+so does an explicitly paused workspace; the host then starts the sleep with ``research
+workspace sleep`` (``docs/hosting.md``, "The sleep cycle"). The reasons are the
 ones the watcher recorded at its last tick (``research watcher status``); nothing here polls
 the platform or writes a record. A workspace without a store yet is empty.
 

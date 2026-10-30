@@ -173,6 +173,7 @@ UNWATCHED_KINDS: frozenset[str] = frozenset(
         "watcher.heartbeat",
         "checks.ran",
         "drain.done",
+        "workspace.sleep",
     }
 )
 

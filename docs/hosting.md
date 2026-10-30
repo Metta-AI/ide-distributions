@@ -75,26 +75,59 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 - Turns must be serialised per Session, not per profile (Appendix G). The watcher never starts a
   second run on a Session that is live: it steers instead.
 - `sleep_through_jobs` must list `{"orchestrator": ["watcher"]}` so the one-minute tick never
-  blocks automatic sleep by itself. The tick writes `has_work` into the workspace store's `meta`
-  table (`research watcher status` prints it): a live Researcher run, a Task waiting on XP,
-  credits, a submission or a process, an autonomous-submission candidate, or a queued wake.
-  `lifecycle.activity` should read it as a reason that counts for automatic sleep only.
-- A planned pause runs `research workspace drain` first (from the workspace environment with the
-  Orchestrator's `.env`): it stops Researcher runs, marks their Sessions to resume, and returns
-  when quiet. After a wake, Hermes's cron catch-up fires the watcher at once and its first tick
-  resumes the drained Sessions before starting new work.
+  blocks automatic sleep by itself. Whether the workspace *wants* to stay awake is the activity
+  probe below; *how* it goes to sleep and wakes is the cycle that follows.
 - Container health stays as it is: the watcher reports through its heartbeat and
   `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop.
+
+### The sleep cycle
+
+Every stop of a running container (automatic sleep, a planned pause, an image update, a move to
+another node) goes through these steps. Run both commands from the workspace environment with
+the Orchestrator profile's environment (`HERMES_HOME` set; the same way the cron job runs the
+watcher), while the gateway is still up.
+
+1. **`research workspace sleep [--wait 120]`**, and wait for it to exit. It pauses the workspace
+   (no tick starts new work), stops the Researcher runs and marks their Sessions to resume,
+   sends SIGTERM to background processes Tasks wait on and waits for them to exit, gives the
+   Orchestrator's chat and wake runs `--wait` seconds to finish and then stops them, and then
+   flushes: every database (the workspace store, every Coworld store, the Hermes `state.db` of
+   the Orchestrator and of each Researcher profile) is checkpointed into its main file and
+   fsynced, and `sync` flushes every other file on the volume (documents, git objects, logs).
+   It prints one JSON line (`paused`, `drained`, `orchestrator_runs`, `flushed`, `volatile`).
+   - **Exit 0** guarantees that nothing runs and that every record and every file the profiles
+     wrote is on disk; nothing is held in memory. The host may now stop the container or
+     snapshot the volume without `research store quiesce`.
+   - **Exit 1** lists in `volatile` what is still running or not flushed (a run the gateway
+     refused to stop, a process that ignored SIGTERM, a database a reader kept busy). Run the
+     command again, or stop anyway: the work listed is recovered after the wake as after a crash.
+2. Stop the container or snapshot the volume.
+3. **After the container is back** and the gateway is up, run **`research workspace wake`**. It
+   clears the pause that `sleep` set (a pause the user set stays), and the next tick resumes the
+   drained Researcher Sessions with their own session ids before starting new work; it starts
+   no run itself. Hermes's cron catch-up fires that tick at once.
+
+A wake run stopped by `sleep` is retried after the wake and does not count as a failed attempt.
+Hermes cannot list runs, so `sleep` stops only the runs the stores know: Researcher and wake
+runs, and chat runs started through the seam (`research serve` records them). A bridge that
+starts chat runs itself must finish or stop them before calling `sleep`. While paused the
+watcher still ticks (store checks, heartbeat, panel); each of its writes is committed with
+`synchronous=FULL`, so it never leaves anything volatile. `research workspace drain` is the
+raw drain step on its own and is no longer part of the cycle.
 
 ### Background activity and autosleep
 
 The host may run `scripts/activity.py` in the installed Orchestrator profile with the
 profile's environment and Hermes's Python. It prints one JSON line, `{"waiting_on": [reason,
-...]}`, from the watcher's last tick without polling the platform or writing a record: a live
-Researcher run (`session:<id>:running`), a Task waiting on XP, credits, a submission or a
-process (`task:T-n:waiting:<kind>`), an autonomous-submission candidate
-(`submission:candidate`) or a queued wake (`wake:queued`). A non-empty list prevents automatic
-sleep; an empty list permits it, and so does an explicitly paused workspace. A workspace that
+...]}`, from the watcher's last tick without polling the platform or writing a record. Only
+work that is running or ready to run keeps the workspace awake: a live Researcher run
+(`session:<id>:running`), a background process a Task waits on (`task:T-n:waiting:process`;
+it runs on this machine, so sleep would kill it), an autonomous-submission candidate
+(`submission:candidate`) or a queued wake (`wake:queued`). A Task waiting on the platform (XP,
+credits, a submission) does not: the platform works on while the workspace sleeps, and the
+first tick after the next wake reads the result. A non-empty list prevents automatic sleep; an
+empty list permits it, and so does an explicitly paused workspace. When the probe permits sleep,
+the host still starts it with `research workspace sleep`. A workspace that
 was never prepared or has no store yet is empty. A non-zero exit or unreadable output must
 prevent automatic sleep. The same list is `waiting_on` in `research watcher status`.
 
@@ -140,7 +173,8 @@ process). Nothing on the volume survives losing the volume, so backups are part 
 - Monitor the age of the latest restorable backup (the newest folder whose `restore-check`
   passed) and alert when it exceeds the loss window.
 
-Before initiating a volume snapshot, run `research store quiesce --then <snapshot command>`, or
+A snapshot taken after `research workspace sleep` exited 0 needs nothing more. For a snapshot
+of a workspace that stays awake, run `research store quiesce --then <snapshot command>`, or
 run `research store quiesce` in the background and initiate the snapshot when its first JSON
 line appears. It checkpoints each database's WAL into its file, takes and holds the write lock
 on the workspace store, every Coworld store and (with `HERMES_HOME` set) that profile's Hermes
