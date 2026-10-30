@@ -1,0 +1,16 @@
+name: Workspace image smoke
+on:
+  pull_request:
+    paths: ['image/**', 'core/**', 'orchestrator/**', 'researcher/**', 'pyproject.toml', 'uv.lock', '.github/workflows/workspace-image.yml']
+permissions:
+  contents: read
+jobs:
+  startup-sleep-restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the self-contained image
+        run: docker build --platform linux/amd64 -f image/Dockerfile -t distribution-smoke .
+      - name: Start, sleep, and restart with retained state
+        run: bash image/system_tests/start-stop.sh distribution-smoke
