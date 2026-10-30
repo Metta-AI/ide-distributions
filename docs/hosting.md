@@ -65,7 +65,8 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
 | `COGAMES_API_URL` | hosting | Softmax API server. |
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env` (Hermes strips the key from cron environments). **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | hosting | The model. |
+| `OPENROUTER_API_KEY` | hosting | The OpenRouter key both profiles use. |
+| `OPENROUTER_MODEL` | hosting (optional) | The chat model for this profile, such as `moonshotai/kimi-k3`; `prepare.py` writes it to Hermes's `model.default` on every run, so each profile's `.env` can name a different model. Unset, the shipped default applies (and a model set by hand with `hermes config` survives updates). The fallback model and Hermes's auxiliary models stay as `config.yaml` ships them. |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain

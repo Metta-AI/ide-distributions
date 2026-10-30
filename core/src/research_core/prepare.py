@@ -348,10 +348,17 @@ def active_coworld(ws: layout.Workspace) -> layout.Coworld | None:
 
 
 def apply_config(
-    hermes: HermesCli, role: str, core_src: Path, active: layout.Coworld | None = None
+    hermes: HermesCli,
+    role: str,
+    core_src: Path,
+    active: layout.Coworld | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Remove the retired keys, set every protected key whose value differs, point the profile
-    at the active Coworld, and apply the shipped values the owner has not changed."""
+    at the active Coworld, apply the shipped values the owner has not changed, and let the
+    profile's environment choose the chat model (``OPENROUTER_MODEL`` becomes ``model.default``,
+    so hosting picks a model per profile through its ``.env`` without ``hermes config``)."""
+    env = os.environ if env is None else env
     actions: list[str] = []
     for key in RETIRED_KEYS:
         name, element = _split_retired(key)
@@ -374,6 +381,10 @@ def apply_config(
         if current != shipped and (current is None or current in EARLIER_DEFAULTS.get(key, set())):
             hermes.config_set(key, shipped)
             actions.append(f"config: set {key} (shipped value)")
+    chosen_model = (env.get("OPENROUTER_MODEL") or "").strip()
+    if chosen_model and hermes.config_get("model.default") != chosen_model:
+        hermes.config_set("model.default", chosen_model)
+        actions.append("config: set model.default (from OPENROUTER_MODEL)")
     if hermes.config_get("fallback_providers") in (None, []):
         hermes.config_set("fallback_providers", FALLBACK_PROVIDERS)
         actions.append("config: set fallback_providers")
@@ -552,7 +563,7 @@ def prepare(
 
     cli = HermesCli(hermes, profile, env, run)
     cli.dry_run = check
-    actions.extend(apply_config(cli, role, core_src, active))
+    actions.extend(apply_config(cli, role, core_src, active, env))
 
     marker = profile / PREPARED_MARKER
     if role == "orchestrator":

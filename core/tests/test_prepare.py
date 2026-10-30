@@ -563,3 +563,12 @@ def test_apply_skill_dirs_reports_missing_profiles(tmp_path):
     assert result["problems"] == [f"profile missing: no profile home at {profiles / 'missing'}"]
     assert {a.split(":")[0] for a in result["applied"]} == {"orchestrator", "researcher"}
     assert fake.config["terminal.cwd"] == str(tmp_path / "code")
+
+
+def test_openrouter_model_in_the_environment_sets_the_chat_model(homes):
+    fake = FakeHermes({"model.default": "owner/choice"})
+    _prepared(homes, fake, OPENROUTER_MODEL="anthropic/claude-sonnet-4.5")
+    assert fake.config["model.default"] == "anthropic/claude-sonnet-4.5"
+    fake2 = FakeHermes({"model.default": "owner/choice"})
+    _prepared(homes, fake2)  # without the variable the owner's value stays
+    assert fake2.config["model.default"] == "owner/choice"
