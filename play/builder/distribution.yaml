@@ -6,10 +6,6 @@ env_requires:
   - name: OPENROUTER_API_KEY
     required: true
     description: OpenRouter API key for the builder model.
-  - name: OPENROUTER_MODEL
-    required: false
-    default: moonshotai/kimi-k3
-    description: Model ID on OpenRouter.
   - name: PLAY_WORKSPACE
     required: true
     description: Absolute path of the program workspace, the same directory the play profile uses.

@@ -1,12 +1,6 @@
 # Shipped defaults. prepare.py re-applies the keys the profile machinery relies on at every
 # start (research_core/prepare.py PROTECTED_KEYS) and removes retired keys; every other value
 # the owner changes is kept across `hermes profile update`.
-model:
-  default: moonshotai/kimi-k3
-  provider: openrouter
-fallback_providers:
-  - provider: openrouter
-    model: z-ai/glm-5.3
 # Hermes memory is off: standing instructions are directive records shown in the briefing, so
 # compaction cannot lose them (design §9).
 memory:
@@ -56,7 +50,6 @@ terminal:
     - IDE_PLATFORM
     - IDE_FAKE_FAULTS
     - IDE_RESEARCHER_PROFILES
-    - OPENROUTER_MODEL
     - TMPDIR
 # prepare.py fills these: the core skills (common and this role), and the active Coworld's
 # mixin skills; the active Coworld's code repository is trusted for skill overrides.
@@ -72,3 +65,12 @@ curator:
 auxiliary:
   background_review:
     enabled: false
+# The model is the profile's own setting: a new install starts here, prepare.py never changes it,
+# and the bridge's /models route changes it on the user's request (contract/CONTRACT.md). It
+# stays last: Hermes's writer moves a comment that follows a list into the list.
+model:
+  default: moonshotai/kimi-k3
+  provider: openrouter
+fallback_providers:
+  - provider: openrouter
+    model: z-ai/glm-5.3

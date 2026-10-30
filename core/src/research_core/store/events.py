@@ -66,6 +66,7 @@ KINDS: frozenset[str] = frozenset(
         "directive.updated",
         "directive.retired",
         "settings.updated",
+        "profile.model_updated",
         "capability.failed",
         "capability.repaired",
         "repair.failed_twice",

@@ -36,7 +36,8 @@ profiles inside the hosted image through `tools/local_stack.py`; it passed on Oc
   with the `python` next to `HERMES_BIN`, which is Hermes's own interpreter, as hosting does.
   The tests skip when `HERMES_BIN` is unset or does not name a file.
 - An OpenRouter key in `OPENROUTER_API_KEY`. Every turn calls the model (the default is
-  `moonshotai/kimi-k3`, from `orchestrator/distribution.yaml`). The metta token broker vends
+  `moonshotai/kimi-k3` for the Orchestrator and `recursive/flint-v1.0:free` for a Researcher,
+  from each profile's `config.yaml`; `GET /models` on `research serve` shows and changes them). The metta token broker vends
   one under the scope `openrouter.inference`; the shape, from `docs/spikes/s1-dispatch.md`, is
 
   ```bash
