@@ -54,6 +54,21 @@ async def main() -> None:
         "SOFTMAX_PLAYER_CREDENTIAL": bootstrap.credential.get_secret_value(),
         "COGAMES_API_URL": bootstrap.platform_url.removesuffix("/observatory"),
     }
+    # Multiplexed gateway startup reads the host profile's dotenv after scoping its environment.
+    host_dotenv = HOME / ".env"
+    host_dotenv.write_text(
+        "".join(
+            f"{name}={json.dumps(common[name])}\n"
+            for name in (
+                "API_SERVER_ENABLED",
+                "API_SERVER_HOST",
+                "API_SERVER_PORT",
+                "API_SERVER_KEY",
+                "GATEWAY_MULTIPLEX_PROFILES",
+            )
+        )
+    )
+    host_dotenv.chmod(0o600)
     for role in PROFILES:
         home = HOME / "profiles" / role
         if home.exists():
