@@ -28,6 +28,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -52,6 +53,9 @@ from .limits import (
     MAX_EPISODES,
     MAX_WAIT_SECONDS,
     NAME_MAX,
+    PAGE_KINDS,
+    PAGE_NOTE_MAX,
+    PAGE_REF,
     STEP_STATUS,
     STEPS,
     SUFFIX_LENGTH,
@@ -1026,3 +1030,21 @@ class Program:
         live = self.records.get("tasks", key)
         rev = live["rev"] if live else None
         self.records.put("tasks", key, body, rev, f"play:{key}:{rev or 0}")
+
+    # --- the page -------------------------------------------------------
+
+    def page_act(self, kind: str, ref: str, note: str) -> dict:
+        """Write the cogent's page action: the /play page runs it once (its ``id`` is fresh) on the
+        element whose ref matches in a fresh outline, and shows ``note`` in the chat."""
+        if kind not in PAGE_KINDS:
+            raise PlayError("bad_arguments", f"kind must be one of {', '.join(PAGE_KINDS)}")
+        if not isinstance(ref, str) or not re.fullmatch(PAGE_REF, ref):
+            raise PlayError(
+                "bad_arguments", 'ref must be one the page outline gave, like "@x" or "e14"'
+            )
+        note = note.strip() if isinstance(note, str) else ""
+        if not note or len(note) > PAGE_NOTE_MAX:
+            raise PlayError("bad_arguments", f"note must be 1-{PAGE_NOTE_MAX} characters")
+        action = {"id": str(uuid.uuid4()), "kind": kind, "ref": ref, "note": note}
+        self.records.page(action)
+        return {"written": True, **action}

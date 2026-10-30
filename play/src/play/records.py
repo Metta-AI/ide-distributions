@@ -4,6 +4,9 @@
 credential as a Bearer token: the same calls the hosted bridge makes for ``c/native_research``
 and ``c/state/league``. A player credential writes as the cogent. Play reads ``state/league``
 (the league the coach chose) and writes ``tasks`` (the task cards the Mind on /play shows).
+
+``POST {server}/observatory/v2/cogents/<player>/page`` writes the cogent's one page action (point,
+open, press or go on a ref of the page outline), which the /play page runs once per ``id``.
 """
 
 import json
@@ -34,7 +37,8 @@ def urllib_request(
 
 class CogentRecords:
     def __init__(self, server: str, player: str, token: str, request: Request = urllib_request):
-        self._root = f"{server}/observatory/v2/cogents/{urllib.parse.quote(player, safe='')}/c"
+        self._cogent = f"{server}/observatory/v2/cogents/{urllib.parse.quote(player, safe='')}"
+        self._root = f"{self._cogent}/c"
         self._token = token
         self._request = request
 
@@ -42,6 +46,9 @@ class CogentRecords:
         self, method: str, collection: str, key: str, payload: dict | None = None
     ) -> tuple[int, bytes]:
         url = f"{self._root}/{collection}/{urllib.parse.quote(key, safe='')}"
+        return self._send(method, url, payload)
+
+    def _send(self, method: str, url: str, payload: dict | None = None) -> tuple[int, bytes]:
         headers = {
             "Authorization": f"Bearer {self._token}",
             "User-Agent": USER_AGENT,
@@ -73,3 +80,9 @@ class CogentRecords:
             raise SoftmaxCliError(
                 f"PUT c/{collection}/{key} answered HTTP {status}: {response[:500]!r}"
             )
+
+    def page(self, action: dict) -> None:
+        """Write the cogent's page action (``{id, kind, ref, note?}``)."""
+        status, response = self._send("POST", f"{self._cogent}/page", action)
+        if status not in (200, 201, 202, 204):
+            raise SoftmaxCliError(f"POST page answered HTTP {status}: {response[:500]!r}")
