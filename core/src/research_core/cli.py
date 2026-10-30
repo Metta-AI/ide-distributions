@@ -26,6 +26,7 @@ COMMAND_MODULES: tuple[str, ...] = (
     "research_core.watcher.cli",
     "research_core.serve",
     "research_core.prepare_cli",
+    "research_core.publication",
 )
 
 
