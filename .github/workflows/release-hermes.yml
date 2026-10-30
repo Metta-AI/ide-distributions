@@ -25,8 +25,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Only nightly runs on main count: a run on a branch (for example a rejected
+          # workflow file on a pull request) must not block a release.
           conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow platform-check.yml \
-            --status completed --limit 1 --json conclusion --jq '.[0].conclusion // "none"')
+            --branch main --event schedule --status completed --limit 1 \
+            --json conclusion --jq '.[0].conclusion // "none"')
           echo "last nightly platform check: $conclusion"
           if [ "$conclusion" = "failure" ]; then
             echo "::error::the last nightly platform check failed; fix the route the tools use (or rerun the check) before releasing"
