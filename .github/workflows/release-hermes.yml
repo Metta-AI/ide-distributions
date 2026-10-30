@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - "image/**"
+      - ".dockerignore"
       - "core/**"
       - "orchestrator/**"
       - "researcher/**"
@@ -38,4 +40,5 @@ jobs:
       - name: Trigger the independent image release
         env:
           GH_TOKEN: ${{ secrets.METTA_RELEASE_DISPATCH_TOKEN }}
-        run: gh workflow run deploy-hermes-agent.yml --repo Metta-AI/metta --ref main
+          SOURCE_REVISION: ${{ github.sha }}
+        run: gh workflow run deploy-hermes-agent.yml --repo Metta-AI/metta --ref main -f "source_revision=$SOURCE_REVISION"
