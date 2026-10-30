@@ -4,7 +4,8 @@
 (`ide-profile-refactor-2026-10-28-final.html`), which deferred image policies: "`version.create`
 refuses image policies with a clear message until image-policy Versions are designed". James
 decided on October 29 that image support lands in the PR after #106 and that metta's pin to
-the new profiles waits for it, so no platform-hosted Coworld regresses in production.
+the new profiles waits for it, so no platform-hosted Coworld regresses in production. Rohit
+agreed on the PR on the same condition.
 
 ## Problem
 
@@ -69,11 +70,12 @@ so the scenario tests cover both kinds without a network.
 
 ## Builder
 
-The sandbox has no Docker daemon. The old profiles ran the mixin's own build command, which in
-the hosted image used a daemonless builder; the exact tool must be confirmed with Rohit before
-the PR (metta's `prove_build_storage.py` is the image test the release runs). Options, in
-order of preference: whatever the hosted image already ships; `buildah` in rootless mode;
-`umoci`. The profiles stay indifferent: they need only the archive the command leaves behind.
+Settled with Rohit on the PR (October 29): reuse the hosted BuildKit path. The sandbox has no
+Docker daemon; a private per-workspace BuildKit sidecar does the build, `buildctl` talks to it
+and writes an OCI archive, which is the artifact the mixin's `build` command leaves behind. No
+builder change is needed in #106. The profiles stay indifferent to the builder: they need only
+the archive. The follow-up verifies build, upload and lost-response recovery together against
+that hosted builder.
 
 ## Affected files
 
@@ -99,8 +101,7 @@ PR and the contract-layer follow-up (source editing) are in.
 
 ## Open questions
 
-1. The builder the hosted image ships (above).
-2. Whether `platform-hosted` Coworlds need extra manifest fields (`CoworldRunnableResources`,
+1. Whether `platform-hosted` Coworlds need extra manifest fields (`CoworldRunnableResources`,
    `CoworldPlayerStartup`, `secret_env` in `upload_policy_cmd`) at upload time, and where a
    mixin declares them.
-3. The retention setting's default.
+2. The retention setting's default.
