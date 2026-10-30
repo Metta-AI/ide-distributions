@@ -181,7 +181,7 @@ class Settings:
 
 def create_container(settings: Settings) -> None:
     """One container from the image: the checkout read-only at /src, the volume at /opt/data,
-    both ports published on this machine's loopback only, root as CI runs it, and ``sleep`` as
+    both ports published on this machine's loopback only, the image's Hermes user, and ``sleep`` as
     the main process so the services can be started and restarted with ``docker exec``
     (``--init`` puts a reaper in front of it, so an exited service does not linger as a zombie
     that ``kill -0`` still finds)."""
@@ -195,7 +195,7 @@ def create_container(settings: Settings) -> None:
         "--name",
         settings.name,
         "--user",
-        "0",
+        "10000:10000",
         "--entrypoint",
         "sleep",
         *settings.labels(),
@@ -515,6 +515,12 @@ def cmd_up(args: argparse.Namespace) -> int:
         create_container(settings)
     else:
         settings = Settings.from_container(name)
+        user = docker("inspect", "--format", "{{.Config.User}}", name).strip()
+        if user != "10000:10000":
+            raise StackError(
+                f"container {name} uses user {user!r}; start a fresh stack with a new --name"
+                " so setup and runtime both use Hermes UID 10000"
+            )
         check_secrets(settings.platform, fresh, args.player)
         requested = (args.seam_port, args.gateway_port, args.platform)
         if requested != (settings.seam_port, settings.gateway_port, settings.platform):
@@ -714,7 +720,7 @@ exec "$@"
 # The in-container setup. @@MARKERS@@ are substituted by ``render``; the secrets come from the
 # environment ``docker exec -e`` passes, never from this file.
 BOOTSTRAP_SCRIPT = f"""#!/bin/bash
-# Written by tools/local_stack.py; runs inside the Hermes image as root.
+# Written by tools/local_stack.py; runs inside the Hermes image as its Hermes user.
 #   bootstrap.sh up    install what is missing, rewrite the .env files, (re)start the services
 #   bootstrap.sh stop  stop the seam server and the gateway
 set -euo pipefail
@@ -753,9 +759,6 @@ install_uv() {{
         curl -LsSf https://astral.sh/uv/install.sh \\
             | env UV_INSTALL_DIR=$DATA/.local/bin UV_NO_MODIFY_PATH=1 sh
     fi
-    # The agents' terminal is a login shell whose PATH has no $DATA/.local/bin; hosting's image
-    # has uv on PATH, so put it where every shell finds it (the container layer, redone per up).
-    ln -sf "$DATA/.local/bin/uv" /usr/local/bin/uv
 }}
 
 mark_checkout_safe() {{
@@ -884,9 +887,6 @@ start_gateway() {{
         . "$HOST_HOME/.env"
         set +a
         export HERMES_HOME=$HOST_HOME HERMES_REAL_HOME=$HOST_HOME
-        # The image's own entrypoint drops to the `hermes` user; as root (CI's --user 0) the
-        # gateway refuses to start without this. Everything on this volume is root's anyway.
-        export HERMES_ALLOW_ROOT_GATEWAY=1
         setsid nohup "$HERMES" gateway run >> "$GATEWAY_LOG" 2>&1 < /dev/null &
         echo $! > "$STACK_DIR/gateway.pid"
     )

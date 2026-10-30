@@ -336,15 +336,15 @@ new workspace: run it once per volume, or `up --reset` first.
 
 ### What `up` sets up
 
-One container from the image digest, as a GitHub Actions job container runs it (`--user 0`,
-the entrypoint replaced, here by `sleep` under `--init`), with `~/coding/ide-distributions` at
+One container from the image digest as its Hermes user (`--user 10000:10000`,
+the entrypoint replaced by `sleep` under `--init`), with `~/coding/ide-distributions` at
 `/src` read-only, the volume at `/opt/data`, both ports published on `127.0.0.1` only and the
 `GIT_*` identity CI sets. It writes two scripts into the volume and runs the first with `docker
 exec`:
 
 | Step inside the container (`/opt/data/local_stack/bootstrap.sh up`) | In hosting |
 |---|---|
-| Install `uv` into `/opt/data/.local/bin` (the image ships none, CI uses `astral-sh/setup-uv`) with a link from `/usr/local/bin/uv`, because the agents' terminal is a login shell whose `PATH` lacks the volume's directory; mark `/src` safe for git (it belongs to your Mac user) | The image has `uv` |
+| Install `uv` into `/opt/data/.local/bin` (the image ships none, CI uses `astral-sh/setup-uv`), which is on the Hermes user's login-shell `PATH`; mark `/src` safe for git (it belongs to your Mac user) | The image has `uv` |
 | `hermes profile install /src/<role> --name <role> --yes` into `HERMES_HOME=/opt/data/host` for both roles; skipped when the profile exists | The same, from the release checkout |
 | Write `/opt/data/host/.env` and both profiles' `.env`: one random `API_SERVER_KEY` per volume (kept in `/opt/data/local_stack/api_key`), `API_SERVER_HOST=0.0.0.0` in the host home (the gateway binds from there, so the published port reaches it) and `127.0.0.1` in the profiles (where the watcher and the seam read the gateway's address), `GATEWAY_MULTIPLEX_PROFILES=true`, `IDE_WORKSPACE=/opt/data/workspace`, `IDE_PLATFORM`, `IDE_RESEARCHER_PROFILES=researcher`, `SOFTMAX_PLAYER_ID` (`ply_canary` for the fake), `OPENROUTER_API_KEY`, and for the real platform the Player credential, `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD` | The per-profile `.env` hosting writes |
 | `prepare.py --source /src/<role> --hermes /opt/hermes/.venv/bin/hermes` with the image's Python, `--activate-supervisor` for the Orchestrator, each with `HERMES_HOME=<profile home>` and that profile's `.env` exported (`as-profile.sh`); the first run builds the workspace environment with `uv sync` into `/opt/data/workspace/tools/venv` (uv's cache and the CPython 3.12 it fetches stay on the volume) | The same script; the environment is prebuilt at image build |
@@ -531,11 +531,11 @@ Coworld on the fresh workspace before the first chat.
   refreshes `SOFTMAX_PLAYER_CREDENTIAL` (a player session lasts 24 hours); here you paste a test
   Player's credential and nothing refreshes it. `SOFTMAX_USER_CREDENTIAL` is absent, so
   User-identity reads report themselves unavailable.
-- **Root.** Production runs the image's s6 init, which drops to the unprivileged `hermes` user
-  before the gateway; this runs everything as root, as CI's job container does (`--user 0`), and
-  the gateway starts as root only with `HERMES_ALLOW_ROOT_GATEWAY=1`, which the bootstrap sets
-  (without it the gateway prints "Refusing to run the Hermes gateway as root inside the official
-  Docker image" and exits). Every file on the volume is root's.
+- **Entrypoint.** Production runs the image's s6 init, which drops to the unprivileged `hermes`
+  user before the gateway. The launcher replaces init with `sleep` and starts services itself,
+  but installation, preparation, the gateway and tools all run as that same user (UID 10000).
+  Use a fresh named stack for this version; it does not change ownership on older root-owned
+  volumes.
 - **The workspace environment** is built by `prepare.py` on the first `up`, not prebuilt at image
   build (`IDE_WORKSPACE_ENV`).
 - **Hermes's warnings.** The gateway logs that its API server is network-accessible with the

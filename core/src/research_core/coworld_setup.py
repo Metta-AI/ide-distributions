@@ -25,6 +25,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import research_core
 from research_core import environment_guide, gitops, layout, mixin, prepare
@@ -284,6 +285,17 @@ def _runnable(manifest: dict[str, Any] | None) -> dict[str, Any]:
 def _ensure_source(url: str, dest: Path, sha: str | None) -> str:
     """The clone at ``dest`` detached at ``sha`` (or the default branch tip when no commit is
     pinned); an existing clone already at that commit is left alone."""
+    # Coworld source_url is provenance: GitHub tree/blob URLs name a repository revision,
+    # not a clone endpoint. Keep the revision when converting it to a Git repository URL.
+    parsed = urlsplit(url)
+    parts = parsed.path.strip("/").split("/")
+    if (
+        parsed.hostname in {"github.com", "www.github.com"}
+        and len(parts) >= 4
+        and parts[2] in {"tree", "blob", "commit"}
+    ):
+        url = f"https://github.com/{parts[0]}/{parts[1].removesuffix('.git')}.git"
+        sha = sha or parts[3]
     head = _head(dest)
     if head is not None and sha and head.startswith(sha):
         return head
