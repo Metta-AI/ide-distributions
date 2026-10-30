@@ -14,6 +14,10 @@ each request its own thread, and each request opens its own store connections (S
 connections are per thread). Steer-or-start runs under one lock so two messages to one Session
 never start two runs.
 
+The model routes (``GET /models``, ``GET /models/catalog``, ``POST /models``) show each
+profile's model and change it on the user's request (``profile_models.py``); a change is a
+``profile.model_updated`` event in the workspace store, so every attached client sees it.
+
 Two conveniences sit beside the contract's routes: ``GET /`` (and ``/ui``) serves the client
 page ``ui/index.html``, a self-contained page that exercises every route from a browser, and
 ``GET /status`` answers what ``research watcher status`` prints, read from the workspace store,
@@ -27,6 +31,8 @@ import dataclasses
 import json
 import logging
 import os
+import shutil
+import subprocess
 import threading
 import time
 import traceback
@@ -40,7 +46,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from research_core import contract, layout
+from research_core import contract, layout, profile_models
+from research_core.prepare import Runner
+from research_core.profile_models import Catalog, ModelError, Profile
 from research_core.store import cli as store_cli
 from research_core.store import coworlds, sessions, settings, ui_state
 from research_core.store._common import parse_iso
@@ -125,6 +133,11 @@ def _actor(text: str | None) -> Actor:
         raise Refused(HTTPStatus.BAD_REQUEST, error.error, problems=error.problems) from None
 
 
+def _model_refusal(error: ModelError) -> Refused:
+    status = HTTPStatus.NOT_FOUND if error.not_found else HTTPStatus.BAD_REQUEST
+    return Refused(status, error.error, problems=error.problems)
+
+
 class SeamServer:
     """The seam over one workspace and one Hermes gateway. See the module docstring."""
 
@@ -136,10 +149,22 @@ class SeamServer:
         profile: str = "orchestrator",
         host: str = "127.0.0.1",
         port: int = 0,
+        profiles: list[Profile] | None = None,
+        hermes_bin: str = "hermes",
+        env: dict[str, str] | None = None,
+        config_runner: Runner = subprocess.run,
+        catalog: Catalog | None = None,
     ) -> None:
         self.ws = ws
         self.hermes = hermes
         self.profile = profile
+        # The profiles whose model the bridge shows and changes, and how it changes them.
+        self.profiles = profiles or []
+        self.hermes_bin = hermes_bin
+        self.env = dict(os.environ if env is None else env)
+        self.config_runner = config_runner
+        self.catalog = catalog or Catalog()
+        self._model_lock = threading.Lock()
         # The client that opened each Session, for the stamp (A.4). A Session this instance
         # did not open is stamped with the client the context block names, if any.
         self._clients: dict[str, dict[str, Any]] = {}
@@ -318,6 +343,71 @@ class SeamServer:
     def run_status(self, run_id: str) -> dict:
         return dataclasses.asdict(self.hermes.status(run_id, profile=self.profile))
 
+    # --- models ---------------------------------------------------------------------------
+
+    def models(self) -> dict:
+        """Each profile's model, provider and fallbacks, read from its ``config.yaml``."""
+        try:
+            return {"ok": True, "profiles": [profile_models.read(p) for p in self.profiles]}
+        except ModelError as error:
+            raise _model_refusal(error) from None
+
+    def models_catalog(self) -> dict:
+        """OpenRouter's models that take tool calls, for a client's model picker."""
+        models = self.catalog.models()
+        if models is None:
+            raise Refused(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "the OpenRouter model list cannot be read now",
+                headers={"Retry-After": "30"},
+            )
+        return {"ok": True, "source": profile_models.CATALOG_URL, "models": models}
+
+    def set_model(self, body: dict) -> dict:
+        """Change one profile's model (and optionally its fallbacks) as the user asked; record
+        it as a ``profile.model_updated`` event. One change at a time."""
+        actor = _actor(body.get("actor"))
+        if not str(actor).startswith("user:"):
+            raise Refused(HTTPStatus.BAD_REQUEST, "only a user changes a profile's model")
+        try:
+            profile = profile_models.find(self.profiles, _text(body, "profile"))
+            with self._model_lock:
+                previous = profile_models.read(profile)
+                change = profile_models.parse_change(body, previous)
+                verified = profile_models.check_against_catalog(change, self.catalog)
+                written = profile_models.write(
+                    profile,
+                    change,
+                    previous,
+                    hermes=self.hermes_bin,
+                    env=self.env,
+                    run=self.config_runner,
+                )
+                current = profile_models.read(profile)
+                seq = self._record_model_change(actor, current, previous, written)
+        except ModelError as error:
+            raise _model_refusal(error) from None
+        return {
+            "ok": True,
+            "profile": current,
+            "previous": previous,
+            "changed": written,
+            "verified": verified,
+            "seq": seq,
+        }
+
+    def _record_model_change(
+        self, actor: Actor, current: dict, previous: dict, written: list[str]
+    ) -> int | None:
+        if not written:
+            return None  # nothing differed: no event
+        with self.stores() as stores, stores.wstore.tx(actor) as tx:
+            return tx.event(
+                "profile.model_updated",
+                current["profile"],
+                {**current, "previous": previous, "changed": written},
+            )
+
     # --- the pieces -----------------------------------------------------------------------
 
     def _require_session(self, stores: store_cli.Stores, session_id: str) -> dict:
@@ -487,6 +577,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, seam.snapshot(query.get("store", "workspace")))
             elif url.path == "/stream":
                 self._stream(query)
+            elif url.path == "/models":
+                self._json(HTTPStatus.OK, seam.models())
+            elif url.path == "/models/catalog":
+                self._json(HTTPStatus.OK, seam.models_catalog())
             elif url.path.startswith("/runs/") and len(url.path) > len("/runs/"):
                 self._json(HTTPStatus.OK, seam.run_status(url.path[len("/runs/") :]))
             else:
@@ -502,6 +596,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/message": seam.message,
             "/ui-action": seam.ui_action,
             "/store/apply": seam.store_apply,
+            "/models": seam.set_model,
         }
         try:
             handler = routes.get(path)
@@ -622,6 +717,11 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--profile", default="orchestrator", help="The Hermes profile that runs the chat Sessions"
     )
+    parser.add_argument(
+        "--hermes",
+        default=shutil.which("hermes") or "hermes",
+        help="The hermes executable that writes a profile's model (default: hermes on PATH)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -635,7 +735,16 @@ def run(args: argparse.Namespace) -> int:
         profile_home, researcher_profiles=[name for name in researcher_profiles if name]
     )
     server = SeamServer(
-        ws=layout.from_env(env), hermes=hermes, profile=args.profile, host=args.host, port=args.port
+        ws=layout.from_env(env),
+        hermes=hermes,
+        profile=args.profile,
+        host=args.host,
+        port=args.port,
+        profiles=profile_models.sandbox_profiles(
+            profile_home.parent, args.profile, researcher_profiles
+        ),
+        hermes_bin=args.hermes,
+        env=dict(env),
     )
     print(f"research serve: {server.url} (profile {args.profile}, Hermes {hermes.base_url})")
     try:

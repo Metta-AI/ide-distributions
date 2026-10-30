@@ -37,6 +37,9 @@ hosted bridge:
 | `GET /snapshot?store=workspace\|coworld` | 2 | The store's records, settings, UI state documents and `seq`. |
 | `GET /stream?store=…&after=<seq>` | 2 | SSE of the store's events after `seq`. |
 | `GET /runs/<run_id>` | 1 | The run's status from the Hermes runs API. |
+| `GET /models` | 2 | Each profile's model: `{profiles: [{profile, role, model, provider, fallbacks}]}`. See "Profile models". |
+| `GET /models/catalog` | 2 | The models a client may offer: `{source, models: [{id, name, context_length, usd_per_million_input, usd_per_million_output, free}]}`. |
+| `POST /models` `{profile, model, provider?, fallbacks?, actor?}` | 3 | Changes one profile's model as the user asked; returns `{profile, previous, changed, verified, seq}`. |
 | `GET /health` | — | `{ok, profile, coworld, contract_version}`. |
 | `GET /` and `GET /ui` | — | A convenience of `research serve`, not a contract channel: the client page (`research_core/ui/index.html`), which exercises every channel above. |
 | `GET /status` | — | A convenience of `research serve`: what `research watcher status` prints (`heartbeat`, `has_work`, `waiting_on`, `paused`). |
@@ -102,6 +105,36 @@ history. `delivered` in the reply says which happened. A queued run cannot take 
 the bridge answers 503 with `Retry-After: 1` and the client retries. A reaction never starts a
 run: it is a UI state change under `/reactions/<message id>` of the conversation, which the
 agent sees at its next turn.
+
+## Profile models
+
+Each profile's model belongs to the profile, not to the host: a new install starts with what the
+profile's shipped `config.yaml` names (the Orchestrator: `moonshotai/kimi-k3`, falling back to
+`z-ai/glm-5.3`; a Researcher: `recursive/flint-v1.0:free`, falling back to
+`moonshotai/kimi-k3`, all through OpenRouter), `prepare.py` never changes it, and only the user
+changes it, through the bridge.
+
+- `GET /models` lists every profile of the sandbox (the Orchestrator, then each Researcher
+  profile) with its `role` (`orchestrator` or `researcher`), `model`, `provider` and
+  `fallbacks` (`[{provider, model}]`, tried in order when the primary fails).
+- `GET /models/catalog` is the list a model picker offers: OpenRouter's models that take tool
+  calls (the profiles need them), with context length and prices in US dollars per million
+  tokens. It is cached for ten minutes; 503 with `Retry-After: 30` when it cannot be read.
+- `POST /models` `{profile, model, provider?, fallbacks?, actor?}` changes one profile.
+  `model` is an id such as `moonshotai/kimi-k3`; `provider` defaults to the profile's current
+  one; `fallbacks`, when present, replaces the list (each entry a model id or `{model,
+  provider?}`, at most four; an absent `fallbacks` keeps the list). Only a `user:<id>` actor
+  may change a model. An OpenRouter model not on the catalog is refused (400, named in
+  `problems`); when the catalog cannot be read the change is made and `verified` is false.
+  `changed` lists the config keys written (empty, and no event, when nothing differed); an
+  unknown profile is 404.
+- A change is a `profile.model_updated` event in the workspace store (subject: the profile;
+  payload: the new `{profile, role, model, provider, fallbacks}` with `previous` and
+  `changed`), so every attached client sees it on its stream.
+- A change applies to the next run of every conversation of that profile: Hermes reads the
+  profile's config when a run starts. A run already going finishes on the model it started
+  with. The bridge must not name a `model` in its run requests, or the request would override
+  the profile's choice.
 
 ## Versioning
 

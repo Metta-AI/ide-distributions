@@ -34,12 +34,13 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `watcher/` | The model-free cron job: `context.py`, `tick.py` (the twelve steps), `handlers.py` (the event-ownership map), `wakes.py`, `dispatch.py`, `recovery.py`, `waits.py`, `messages.py`, `resume.py`, `merge.py`, `goals.py`, `champion_sync.py`, `checks.py`, `context_panel.py`, `drain.py`, `heartbeat.py`, `store_checks.py`, `hermes_api.py` (the runs API client and its fake), `cli.py` (`research watcher tick|status`, `research workspace drain`), `wakes/*.md` (wake prompts). |
 | `contract/` | The client contract files (`context`, `events`, `ui-state` schemas, `CONTRACT.md`), the stdlib validator and `research context-schema`. |
 | `serve.py`, `client.py` | `research serve`, the local seam server that plays the bridge (plus `GET /` for the client page and `GET /status` for the watcher's status), and the scripted client used by the end-to-end tests. |
+| `profile_models.py` | Each profile's model for the bridge's `/models` routes: read from the profile's `config.yaml`, checked against OpenRouter's tool-capable models, written with `hermes config set`. |
 | `ui/` | `index.html`, the self-contained client page `research serve` serves at `/`: chat with context, the event streams, UI state (show, panels, asks), notices, the records, user edits and a raw request form, in the Ink & Print house style. `docs/local-end-to-end.md` ("A client page") says how to open it. |
 | `scripted_agent.py` | `ScriptedAgent`, the model-free Orchestrator that plays the runs of `FakeHermesRuns` with real tool calls: the acceptance scenario and `tools/ui_dev.py` (the page's development stack) share it. |
 | `prompts/` | The SOUL parts per role, `vocabulary.md` (from metta) and `build.py`; `tools/build_prompts.py` renders `orchestrator/SOUL.md` and `researcher/SOUL.md` and syncs the plugin manifests. |
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
-| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults, stores, the watcher job, the workspace environment, the default Coworld. |
+| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (never the model settings), stores, the watcher job, the workspace environment, the default Coworld. |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
 ## Run the tests

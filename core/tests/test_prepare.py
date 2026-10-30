@@ -504,12 +504,24 @@ def test_prepare_points_every_profile_at_the_active_coworld(homes):
 
 
 def test_prepare_applies_shipped_values_only_over_earlier_defaults(homes):
-    fake = FakeHermes({"terminal.timeout": 180, "model.default": "owner/choice"})
+    fake = FakeHermes({"terminal.timeout": 180})
     _prepared(homes, fake)
     assert fake.config["terminal.timeout"] == 1800  # an earlier default is replaced
-    assert fake.config["model.default"] == "owner/choice"  # an owner's choice survives
-    assert fake.config["fallback_providers"] == prepare.FALLBACK_PROVIDERS
     assert "IDE_RESEARCHER_PROFILES" in fake.config["terminal.env_passthrough"]
+
+
+def test_prepare_never_touches_the_model_settings(homes):
+    fake = FakeHermes(
+        {"model.default": "owner/choice", "terminal.env_passthrough": ["OPENROUTER_MODEL"]}
+    )
+    _prepared(homes, fake, OPENROUTER_MODEL="ignored/model")
+    assert fake.config["model.default"] == "owner/choice"
+    assert "fallback_providers" not in fake.config and "model.provider" not in fake.config
+    touched = [
+        argv for argv, _ in fake.calls if "config" in argv and ("set" in argv or "unset" in argv)
+    ]
+    assert not [argv for argv in touched if any(a.startswith(("model", "fallback")) for a in argv)]
+    assert "OPENROUTER_MODEL" not in fake.config["terminal.env_passthrough"]  # retired
 
 
 def test_prepare_keeps_the_owners_passthrough_entries(homes):

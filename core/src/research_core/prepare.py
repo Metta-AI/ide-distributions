@@ -12,7 +12,9 @@ is edited as JSON. In order, ``prepare``:
    active Coworld (``skills.external_dirs`` with the core skills and the mixin skills,
    ``skills.trusted_project_dirs`` and ``terminal.cwd`` at its code repository), applies the
    shipped values over earlier defaults only (``SHIPPED_VALUES``, ``EARLIER_DEFAULTS``) and
-   unions the shipped ``terminal.env_passthrough`` entries with the owner's;
+   unions the shipped ``terminal.env_passthrough`` entries with the owner's. It never touches
+   the model settings (``model``, ``fallback_providers``): a new install takes them from the
+   shipped ``config.yaml`` and the bridge's ``/models`` route changes them;
 4. (Orchestrator) reconciles the watcher cron job with the shipped definition and, on the first
    preparation with ``activate_watcher``, resumes it;
 5. builds or checks the workspace environment under a file lock;
@@ -87,23 +89,21 @@ RETIRED_KEYS: tuple[str, ...] = (
     "timeouts",
     "kanban",
     "skills.external_dirs[../../games]",
+    # The model is the profile's own setting, never the host's (the bridge changes it).
+    "terminal.env_passthrough[OPENROUTER_MODEL]",
 )
 
 # Shipped values that are not protected: a retained value is replaced only when it is unset or
 # equals a known earlier default, so a shipped change reaches updated profiles while a value the
 # owner chose survives (amendment A7.4).
 SHIPPED_VALUES: dict[str, Any] = {
-    "model.default": "moonshotai/kimi-k3",
-    "model.provider": "openrouter",
     "terminal.timeout": 1800,
     "updates.check": False,
     "curator.prune_builtins": False,
 }
 EARLIER_DEFAULTS: dict[str, set[Any]] = {
     "terminal.timeout": {180},
-    "model.default": {"anthropic/claude-sonnet-4", "openai/gpt-4o"},
 }
-FALLBACK_PROVIDERS: list[dict[str, str]] = [{"provider": "openrouter", "model": "z-ai/glm-5.3"}]
 # Lists the shipped config contributes to: the union of the shipped and retained entries is kept.
 ENV_PASSTHROUGH: dict[str, list[str]] = {
     "common": [
@@ -116,7 +116,6 @@ ENV_PASSTHROUGH: dict[str, list[str]] = {
         "IDE_WORKSPACE_ENV",
         "IDE_PLATFORM",
         "IDE_FAKE_FAULTS",
-        "OPENROUTER_MODEL",
         "TMPDIR",
     ],
     "orchestrator": ["IDE_RESEARCHER_PROFILES"],
@@ -374,9 +373,6 @@ def apply_config(
         if current != shipped and (current is None or current in EARLIER_DEFAULTS.get(key, set())):
             hermes.config_set(key, shipped)
             actions.append(f"config: set {key} (shipped value)")
-    if hermes.config_get("fallback_providers") in (None, []):
-        hermes.config_set("fallback_providers", FALLBACK_PROVIDERS)
-        actions.append("config: set fallback_providers")
     shipped_env = ENV_PASSTHROUGH["common"] + ENV_PASSTHROUGH.get(role, [])
     current_env = hermes.config_get("terminal.env_passthrough") or []
     merged = list(dict.fromkeys([*current_env, *shipped_env]))
