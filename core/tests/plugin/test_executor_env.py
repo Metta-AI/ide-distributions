@@ -7,17 +7,22 @@ from research_core.plugin import executor
 
 
 def test_profile_env_merges_the_secret_scope_over_the_process_env(monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", "/host")
     monkeypatch.setenv("SOFTMAX_PLAYER_ID", "ply_host")
     monkeypatch.setenv("ONLY_IN_PROCESS", "1")
     fake = types.ModuleType("agent.secret_scope")
     fake.current_secret_scope = lambda: {"SOFTMAX_PLAYER_ID": "ply_profile", "FROM_DOTENV": "x"}
     monkeypatch.setitem(sys.modules, "agent", types.ModuleType("agent"))
     monkeypatch.setitem(sys.modules, "agent.secret_scope", fake)
+    constants = types.ModuleType("hermes_constants")
+    constants.get_hermes_home = lambda: "/host/profiles/orchestrator"
+    monkeypatch.setitem(sys.modules, "hermes_constants", constants)
 
     env = executor.profile_env(IDE_SESSION_ID="s1")
     assert env["SOFTMAX_PLAYER_ID"] == "ply_profile"  # the profile's .env wins
     assert env["FROM_DOTENV"] == "x" and env["ONLY_IN_PROCESS"] == "1"
     assert env["IDE_SESSION_ID"] == "s1"
+    assert env["HERMES_HOME"] == "/host/profiles/orchestrator"
     assert executor.tool_env("orchestrator", "s1")["SOFTMAX_PLAYER_ID"] == "ply_profile"
 
 
@@ -28,6 +33,9 @@ def test_profile_env_without_hermes_or_without_a_scope(monkeypatch):
     assert executor.profile_env()["SOFTMAX_PLAYER_ID"] == "ply_host"
     fake = types.ModuleType("agent.secret_scope")
     fake.current_secret_scope = lambda: None
+    constants = types.ModuleType("hermes_constants")
+    constants.get_hermes_home = lambda: "/host/profiles/orchestrator"
+    monkeypatch.setitem(sys.modules, "hermes_constants", constants)
     monkeypatch.setitem(sys.modules, "agent", types.ModuleType("agent"))
     monkeypatch.setitem(sys.modules, "agent.secret_scope", fake)
     assert executor.profile_env()["SOFTMAX_PLAYER_ID"] == "ply_host"

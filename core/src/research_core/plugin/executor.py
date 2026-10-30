@@ -29,24 +29,29 @@ def profile_env(**overrides: str) -> dict[str, str]:
     one profile's keys never leak into another's turns) and exposes the routed profile's values
     per task through ``agent.secret_scope``. Everything the plugin reads from the environment,
     in process or for a workspace subprocess, goes through here so a profile's ``.env`` reaches
-    the tools the way the design assumes.
+    the tools the way the design assumes. The routed home comes from Hermes's context-local
+    accessor; it is not the gateway's process-wide ``HERMES_HOME``.
     """
     merged = dict(os.environ)
-    merged.update(_secret_scope())
+    merged.update(_profile_scope())
     merged.update(overrides)
     return merged
 
 
-def _secret_scope() -> dict[str, str]:
+def _profile_scope() -> dict[str, str]:
     try:
         from agent.secret_scope import current_secret_scope
+        from hermes_constants import get_hermes_home
     except ImportError:  # outside Hermes: tests and the CLI
         return {}
     try:
         scope = current_secret_scope()
     except Exception:  # a scope API change must never take the tools down
         return {}
-    return {str(k): str(v) for k, v in (scope or {}).items() if v is not None}
+    return {
+        **{str(k): str(v) for k, v in (scope or {}).items() if v is not None},
+        "HERMES_HOME": str(get_hermes_home()),
+    }
 
 
 def tool_env(role: Role, session_id: str, env: dict[str, str] | None = None) -> dict[str, str]:
