@@ -1,4 +1,4 @@
-# Self-contained workspace image (integration draft)
+# Self-contained workspace image
 
 This image builds on distribution PR #116's `research workspace sleep` and
 `research workspace wake`. It includes PR #117's source-acquisition and routed-profile fixes.
@@ -22,8 +22,11 @@ connection. Explicit sleep starts the distribution command asynchronously; statu
 ready for sleep only after its successful exit. The image also initiates sleep after fifteen
 minutes without work. Restart calls wake with the retained filesystem.
 
-This is not a deployable application release yet. Application relay operations return 501;
-the `/ide-final` adapter and platform-issued model credential acquisition remain unfinished.
-Do not publish this image as the default workspace or interpret lifecycle proof as chat proof.
-The local proof uses real Kubernetes storage and relay transport, but fixture authentication;
-it does not establish production authentication, gVisor or EBS behavior.
+The release dispatcher passes the distribution commit to Metta's generic build workflow.
+That workflow builds `image/Dockerfile`, runs `image/system_tests/start-stop.sh`, and publishes
+an immutable image digest. Hosting consumes that digest without inspecting profile internals.
+Deploy Metta #30090's format readers and release workflow before dispatching this release.
+
+This image provides the build, hosting and lifecycle foundation for ide-next. Application
+relay operations return 501 until the ide-next application adapter is connected; lifecycle
+acceptance does not establish chat or model-service behavior.
