@@ -464,6 +464,7 @@ def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkey
         "waiting_on": [],
         "paused": False,
         "paused_drained": False,
+        "sleep_started": None,
     }
     seam.wstore.set_meta("heartbeat", now_iso())
     seam.wstore.set_meta("has_work", "1")

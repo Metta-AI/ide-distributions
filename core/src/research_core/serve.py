@@ -211,6 +211,7 @@ class SeamServer:
                 "waiting_on": json.loads(wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"),
                 "paused": bool(settings.get(wstore, "paused")),
                 "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
+                "sleep_started": wstore.get_meta("sleep_started"),
             }
 
     @staticmethod

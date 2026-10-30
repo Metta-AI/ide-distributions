@@ -92,7 +92,10 @@ def test_has_work_cases(tmp_path):
     tasks.wait(ctx.store, holder, task_number(task), kind="question", detail="which seed?")
     assert drain.has_work(ctx) is False  # a question waits on the Orchestrator, not the platform
     tasks.wait(ctx.store, holder, task_number(task), kind="xp", detail="10 episodes", ref=["xp1"])
-    assert drain.has_work(ctx) is True
+    assert drain.has_work(ctx) is False  # the platform works on while the workspace sleeps
+    tasks.resolve_wait(ctx.store, ctx.actor, task_number(task), note="done")
+    tasks.wait(ctx.store, holder, task_number(task), kind="process", detail="eval", ref=4242)
+    assert drain.work_reasons(ctx) == [f"task:{task['id']}:waiting:process"]  # runs on this box
     tasks.resolve_wait(ctx.store, ctx.actor, task_number(task), note="done")
     assert drain.has_work(ctx) is False
 
@@ -145,7 +148,7 @@ def test_work_reasons_name_each_cause(tmp_path):
 
     ctx.hermes.complete(run_id)
     holder = Actor.session(session["id"])
-    tasks.wait(ctx.store, holder, task_number(task), kind="credits", detail="402", ref=[])
+    tasks.wait(ctx.store, holder, task_number(task), kind="process", detail="eval", ref=4242)
     with ctx.store.tx(ctx.actor) as tx:
         tx.event("task.asked", task["id"], {"question": "which seed?"})
-    assert drain.work_reasons(ctx) == [f"task:{task['id']}:waiting:credits", "wake:queued"]
+    assert drain.work_reasons(ctx) == [f"task:{task['id']}:waiting:process", "wake:queued"]

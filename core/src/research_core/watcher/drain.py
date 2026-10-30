@@ -8,9 +8,12 @@ processes a Researcher waits on (``waiting_on.kind == process``) get SIGTERM; th
 waits up to a minute for the stopped runs to end and emits ``drain.done``. After the wake the
 dispatch step resumes drained Sessions first, with their own session ids.
 
-``has_work`` is the signal hosting reads to keep the workspace awake. It is true for a live
-Researcher run, a Task waiting on XP, credits, a submission or a background process, an open
-autonomous-submission window **with a candidate**, or a queued wake. The window alone is not
+``has_work`` is the signal hosting reads to keep the workspace awake. It is true only for work
+that is running or ready to run: a live Researcher run, a background process a Task waits on (it
+runs on this machine, so a sleep would kill it), an open autonomous-submission window **with a
+candidate**, or a queued wake. A Task waiting on the platform (XP, credits, a submission) does
+not keep the workspace awake: the platform keeps working while it sleeps, and the first tick
+after the wake reads the result. The window alone is not
 work (A5.11): ``submissions.until`` is null by default, so an "open window" would hold every
 workspace awake forever; a candidate is a succeeded Task that answered ``submission_candidate:
 yes`` with a tested Version no ``version.submitted`` event names yet.
@@ -37,7 +40,9 @@ if TYPE_CHECKING:  # pragma: no cover
 STOP_REASON = "watcher:drain"
 WAIT_S = 60.0
 POLL_S = 1.0
-BUSY_WAIT_KINDS = frozenset({"xp", "credits", "submission", "process"})
+# Waits whose work runs on this machine; waits on the platform (xp, credits, submission) do not
+# keep the workspace awake.
+RUNNING_WAIT_KINDS = frozenset({"process"})
 
 
 def run(
@@ -99,7 +104,7 @@ def wait_quiet(
         live = [
             session_id
             for session_id in session_ids
-            if _still_running(ctx, sessions.read(ctx.wstore, session_id))
+            if still_running(ctx, sessions.read(ctx.wstore, session_id))
         ]
         if not live:
             return True
@@ -118,15 +123,15 @@ def has_work(ctx: TickContext) -> bool:
 
 def work_reasons(ctx: TickContext) -> list[str]:
     """Why the workspace must stay awake, one short reason per cause, in a fixed order: live
-    Researcher runs (``session:<id>:running``), Tasks waiting on the platform or a process
-    (``task:T-n:waiting:<kind>``), an autonomous-submission candidate
+    Researcher runs (``session:<id>:running``), Tasks waiting on a background process
+    (``task:T-n:waiting:process``), an autonomous-submission candidate
     (``submission:candidate``) and queued wakes (``wake:queued``). Empty means sleep is fine.
     The heartbeat records the list; ``scripts/activity.py`` hands it to the host."""
     reasons = [f"session:{sid}:running" for sid in dispatch.live_task_sessions(ctx)]
     if ctx.store is not None:
         for task in tasks.list(ctx.store, status="in-progress"):
             kind = (task["waiting_on"] or {}).get("kind")
-            if kind in BUSY_WAIT_KINDS:
+            if kind in RUNNING_WAIT_KINDS:
                 reasons.append(f"task:{task['id']}:waiting:{kind}")
         if autonomous_candidate(ctx):
             reasons.append("submission:candidate")
@@ -157,7 +162,8 @@ def autonomous_candidate(ctx: TickContext) -> bool:
 # --- helpers ----------------------------------------------------------------------------------
 
 
-def _still_running(ctx: TickContext, session: dict[str, Any] | None) -> bool:
+def still_running(ctx: TickContext, session: dict[str, Any] | None) -> bool:
+    """Whether the gateway still reports the Session's run live (unreachable counts as no)."""
     if session is None or not session.get("run_id"):
         return False
     try:

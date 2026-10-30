@@ -39,7 +39,7 @@ hosted bridge:
 | `GET /runs/<run_id>` | 1 | The run's status from the Hermes runs API. |
 | `GET /health` | — | `{ok, profile, coworld, contract_version}`. |
 | `GET /` and `GET /ui` | — | A convenience of `research serve`, not a contract channel: the client page (`research_core/ui/index.html`), which exercises every channel above. |
-| `GET /status` | — | A convenience of `research serve`: what `research watcher status` prints (`heartbeat`, `has_work`, `waiting_on`, `paused`). |
+| `GET /status` | — | A convenience of `research serve`: what `research watcher status` prints (`heartbeat`, `has_work`, `waiting_on`, `paused`, `sleep_started`). |
 
 Errors are JSON `{ok: false, error, problems}` with an HTTP status: 400 for a malformed or
 refused request, 404 for an unknown session, ask or store, 409 for an ask already answered,

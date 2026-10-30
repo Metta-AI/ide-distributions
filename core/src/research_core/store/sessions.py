@@ -9,8 +9,9 @@ Session's status (running, waiting, stopped) is computed from the Hermes runs AP
 watcher and never stored. ``set_run`` records the run the watcher started and counts it in
 ``attempts`` unless the caller sets the count.
 
-``stopped_by`` (A5.6: ``watcher:drain``, ``watcher:replace``, ``watcher:abandon``) marks a
-stop the watcher asked for, so recovery does not treat the run's end as a death (column added
+``stopped_by`` (A5.6: ``watcher:drain``, ``watcher:replace``, ``watcher:abandon``, and
+``workspace:sleep`` for an Orchestrator run ``research workspace sleep`` stopped) marks a stop
+the watcher asked for, so recovery does not treat the run's end as a death (column added
 by migration 0002). ``set_run`` clears it: a new run is live and a later end is a real one.
 """
 
@@ -27,6 +28,8 @@ from research_core.store.registry import RECORDS, record_from_row
 
 SPEC = RECORDS["session"]
 KINDS = ("chat", "task", "wake")
+# The stop reason of a chat or wake run that ``research workspace sleep`` stopped.
+SLEEP_STOP = "workspace:sleep"
 
 
 def register(
