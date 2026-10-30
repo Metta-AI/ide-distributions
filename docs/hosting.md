@@ -65,7 +65,7 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
 | `COGAMES_API_URL` | hosting | Softmax API server. |
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env` (Hermes strips the key from cron environments). **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | hosting | The model. |
+| `OPENROUTER_API_KEY` | hosting | The OpenRouter key both profiles use. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through the bridge (`contract/CONTRACT.md`, "Profile models"). |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain
@@ -110,6 +110,12 @@ applies user edits through `research store apply --actor user:<id> <op> <json>`.
 (`events` rows of kind `notice`) must reach every client. `research serve` is the reference
 implementation of all of this against a local Hermes. The full contract layer (`session-open`,
 capabilities, panels, the agent-context panel) ships later in its own stack.
+
+One thing beyond transport: the bridge implements the model routes of
+`contract/CONTRACT.md` ("Profile models"). It reads each profile's `config.yaml` (`model`,
+`fallback_providers`) and changes them with `hermes config set` as the profile's user, under
+each profile's home. It never puts a `model` in a run request. `research serve` is the
+reference.
 
 ## Storage and backup
 

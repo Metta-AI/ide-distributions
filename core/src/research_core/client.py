@@ -170,6 +170,30 @@ class ScriptedClient:
     def health(self) -> dict:
         return self._get("/health")
 
+    def models(self) -> dict:
+        """Each profile's model, provider and fallbacks (``GET /models``)."""
+        return self._get("/models")
+
+    def model_catalog(self) -> dict:
+        """The models a picker may offer (``GET /models/catalog``)."""
+        return self._get("/models/catalog")
+
+    def set_model(
+        self,
+        profile: str,
+        model: str,
+        *,
+        provider: str | None = None,
+        fallbacks: list[dict | str] | None = None,
+    ) -> dict:
+        """Change one profile's model as this client's user (``POST /models``)."""
+        body: dict = {"profile": profile, "model": model, "actor": self.actor}
+        if provider is not None:
+            body["provider"] = provider
+        if fallbacks is not None:
+            body["fallbacks"] = fallbacks
+        return self._post("/models", body)
+
     # --- transport -----------------------------------------------------------------------
 
     def _ui_action(self, action: str, payload: dict, session_id: str | None) -> dict:

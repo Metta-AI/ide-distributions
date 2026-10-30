@@ -34,7 +34,13 @@ Every stack entry of the plan is implemented and committed:
 8. **Host autosleep probe**: `orchestrator/scripts/activity.py` prints `{"waiting_on": [...]}`
    from the watcher's recorded reasons, the contract main's #105 introduced for the old
    profiles, so metta's autosleep integration keeps working with the new distribution.
-9. **Checks and docs**: `tools/check_prompts.py` (structural, plus a model check with a key),
+9. **Profile models** (October 30, 2026): the model is the profile's own setting. The host
+   no longer passes `OPENROUTER_MODEL` (it was never read) and `prepare.py` never touches
+   `model` or `fallback_providers`. The Orchestrator ships with `moonshotai/kimi-k3` (fallback
+   `z-ai/glm-5.3`), a Researcher with `recursive/flint-v1.0:free` (fallback
+   `moonshotai/kimi-k3`). The bridge's `/models` routes (contract "Profile models") show and
+   change each profile's model; `research serve` implements them.
+10. **Checks and docs**: `tools/check_prompts.py` (structural, plus a model check with a key),
    `tools/build_prompts.py --check`, the nightly platform-check workflow, `docs/hosting.md`,
    `core/README.md`, the profile READMEs, banners on the retired docs.
 

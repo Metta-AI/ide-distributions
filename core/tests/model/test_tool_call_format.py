@@ -13,7 +13,9 @@ import pytest
 from research_core.tools import catalog
 from research_core.tools.base import validate_args
 
-MODELS = os.environ.get("IDE_TOOL_CALL_MODELS", "moonshotai/kimi-k3,z-ai/glm-5.3").split(",")
+MODELS = os.environ.get(
+    "IDE_TOOL_CALL_MODELS", "moonshotai/kimi-k3,z-ai/glm-5.3,recursive/flint-v1.0:free"
+).split(",")
 KEY = os.environ.get("OPENROUTER_API_KEY")
 INSTRUCTIONS = {
     "goal": "Create a Goal titled 'Beat the house' with end state 'rank first' because I asked.",
