@@ -63,6 +63,19 @@ Research owns canonical policy repositories, task worktrees, records and publica
 Keep using those supported workflows. Platform credentials do not replace the research
 wrapper's receipts, budgets, identity isolation or acceptance checks.
 
+## Your tooling
+
+Your profile's code, game folders, skills, scripts, doctrine and SOUL (`$HERMES_HOME`) are a Git
+working tree you own on hosted workspaces. Read, fix, extend and build them. Commit each change with
+a message that says why. Each new Softmax release merges into your commits; if it cannot,
+`status.tooling` (and `local/tooling-update.json`) says so: run `git -C "$HERMES_HOME" merge
+origin/release`, resolve the conflicts and commit. If your edits break your plugin's code, the
+image copy loads instead and `status.tooling` shows the error; fix it and restart. Changes to
+your own tool code take effect on the next tool call for the research CLI and after a restart for
+plugins. Researchers share fixes by pulling from each other's profile
+(`git pull <other profile> main`). Clone other repositories with `git clone` into any writable
+folder.
+
 ## The CLIs and the API
 
 - **`coworld`**: Coworlds, leagues and divisions, policy uploads, Experience Requests,

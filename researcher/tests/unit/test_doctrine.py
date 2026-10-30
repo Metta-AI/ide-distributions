@@ -42,7 +42,7 @@ def test_tool_fault_rule_keeps_going_and_reports():
     rule = text[text.index("\nD-26.") : text.index("\nD-27.")]
     for required in (
         "Keep going when a tool fails",
-        "Never edit the installed",  # work around a broken tool with a copy, never patch it
+        "fix the tool there and commit",  # agents own their tooling: fix it in place
         "preserve failed reports",
         "Report what failed",
         "help_request:",

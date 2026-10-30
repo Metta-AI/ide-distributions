@@ -97,7 +97,7 @@ API (league → `game.canonical_coworld_id` → the Coworld's version, manifest 
 and starter files), re-checked at least hourly, and builds binaries for that commit on first use.
 Engine records, source checkouts, dependencies and binaries live under
 `$HERMES_HOME/cache/pudge-wars-basic/` (`~/.hermes/cache/pudge-wars-basic/` outside a profile).
-This writable profile cache survives task cleanup and leaves the installed game folder read-only.
+This profile cache survives task cleanup and stays out of the game folder's tracked files.
 `tools/engine.env` is only a last-known fallback when the API cannot be reached; every envelope
 then says `engine.live: false`, `stale_risk: true` and warns. `COGAMES_API_URL` selects the API
 server; `PUDGE_LIVE_ENGINE` overrides the live lookup (tests and offline hosts).

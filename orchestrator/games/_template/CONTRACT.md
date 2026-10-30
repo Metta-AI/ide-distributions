@@ -80,12 +80,11 @@ source:
 
 ## Where tools may write
 
-A shipped game folder is installed read-only on Softmax hosting (an installed one is not, so
-a tool that writes beside itself passes `game check` and breaks only once shipped). Tools
-write only to an output or work directory they are given (`--out`, `--work-dir`), to
-`$TMPDIR`, or to a documented writable build root on the workspace disk for downloads,
-caches and binaries. Never write under `games/<game>/`, and never
-under `/tmp`, which on hosting is small memory that restarts empty. Run Python helpers with
+A game folder is part of the agent's tooling, a Git working tree the agent edits and commits.
+So tools keep generated files out of tracked paths: write to an output or work directory
+they are given (`--out`, `--work-dir`), to `$TMPDIR`, to `tools/.cache/` or `tools/bin/`
+(never tracked), or to a documented build root on the workspace disk. Never write under
+`/tmp`, which on hosting is small memory that restarts empty. Run Python helpers with
 the profile's `python3` (or `sys.executable`), not `uv run --project`, which makes a new
 environment inside the installed profile.
 
