@@ -1,7 +1,0 @@
-Authenticated
-user_email: owner@example.com
-subject_type: player
-subject_id: ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1
-owner_user_id: xhkpr7aw1f0gwjvc2yl0c5sa
-is_softmax_team_member: False
-is_softmax_admin: False

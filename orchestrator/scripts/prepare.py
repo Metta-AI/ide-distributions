@@ -1,16 +1,34 @@
-"""Run distribution preparation in the profile's locked environment.
+"""Prepare this profile after an install or an update (run by the host with Hermes's Python).
 
-Hosting runs the image's copy of this script; it loads the launcher from beside itself, so an
-agent's edits to the profile's own ``src`` cannot stop preparation."""
+Usage: prepare.py --source <distribution folder> --hermes <hermes exe> [--activate-supervisor]
 
-import os
+It loads research_core from <source>/../core/src, the release checkout, so an agent's edits can
+never stop preparation. ``--activate-supervisor`` is the host's name for "enable the watcher job
+once" and is kept for compatibility with the hosting contract.
+"""
+
+import argparse
 import sys
 from pathlib import Path
 
-home = Path(os.environ["HERMES_HOME"])
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from ide_research_core.launch import ensure_venv
+parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+parser.add_argument(
+    "--source", required=True, type=Path, help="This distribution's folder in the release checkout"
+)
+parser.add_argument("--hermes", required=True, help="The Hermes executable")
+parser.add_argument(
+    "--activate-supervisor", action="store_true", help="Enable the watcher job on first preparation"
+)
+parser.add_argument("--check", action="store_true", help="Report what would change; write nothing")
+args = parser.parse_args()
 
-ensure_venv(home)
-python = str(home / "local/venv/bin/python")
-os.execv(python, [python, "-I", "-m", "ide_research_core.prepare", *sys.argv[1:]])
+source = args.source.resolve()
+sys.path.insert(0, str(source.parent / "core" / "src"))
+from research_core.prepare import prepare  # noqa: E402
+
+prepare(
+    source=source,
+    hermes=args.hermes,
+    activate_watcher=args.activate_supervisor,
+    check=args.check,
+)

@@ -16,8 +16,8 @@ so it never runs. Removing it needs that metta change.
 ## Tools
 
 The `play` plugin (`plugins/play`, code in `src/play`) registers these tools with JSON schemas.
-Each one runs `python -m play <tool>` in the profile venv on the shared `softmax_tool` client
-(copied into `src/ide_research_core` by `tools/sync_shared.py`): the credential is installed in
+Each one runs `python -m play <tool>` in the profile venv on the `softmax_tool` client in
+`src/ide_research_core` (play's own vendored copy of the former shared package): the credential is installed in
 the profile-local Softmax home before each CLI call, and every mutating call checks with
 `whoami` that the credential is the Player `RESEARCH_PLAYER_ID`.
 
@@ -70,10 +70,9 @@ arrived. Step names are the records schema's fixed rungs (`reflect`, `implement`
 A coach refusal (403 `permit_required`, 402 `credit_denied`, `league_not_chosen`) is returned as
 data, `{"outcome": "refused", "refusal": ..., "reason", "state"?, "ask"?}`, and is never retried.
 
-`src/play/program.py` uses private members of the shared `SoftmaxClient` (`_league_coworld`,
-`_cli`, `_require_player`, `_line_value`) instead of adding public ones to `shared/`, which would
-change the IDE profiles' copies; `tests/test_program.py` runs every one of those paths through
-the real client with a fake CLI, so a rename in `shared/` fails `test (play)`.
+`src/play/program.py` uses private members of the vendored `SoftmaxClient` (`_league_coworld`,
+`_cli`, `_require_player`, `_line_value`); `tests/test_program.py` runs every one of those paths
+through the real client with a fake CLI, so a rename in `src/ide_research_core` fails `test (play)`.
 
 ## Install
 

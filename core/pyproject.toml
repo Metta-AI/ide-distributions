@@ -1,0 +1,27 @@
+[project]
+name = "research-core"
+version = "0.1.0"
+description = "Shared code of the Softmax IDE research profiles: store, tools, plugin, watcher, CLI"
+requires-python = ">=3.12"
+# The base package is stdlib only: the Hermes plugin imports it inside Hermes's own interpreter.
+dependencies = []
+
+[project.optional-dependencies]
+# Everything that talks to the Softmax platform or computes statistics runs in the workspace
+# environment (the repository root project), never inside Hermes.
+platform = [
+    "coworld>=0.1.66,<0.2",
+    "softmax-cli>=0.26.40,<0.27",
+    "PyYAML>=6",
+    "numpy>=1.26",
+]
+
+[project.scripts]
+research = "research_core.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/research_core"]

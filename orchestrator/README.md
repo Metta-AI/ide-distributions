@@ -1,347 +1,54 @@
-# Orchestrator
+# orchestrator
 
-A Hermes profile that leads research for one player, on any game the host can research, and
-delegates implementation to native Kanban researchers on the explicitly named
-`autoresearch` board. Each card names its game. It has everything a researcher has except the
-researcher's restrictions: the same skills, game folders and template, doctrine, Hermes
-toolsets, timeouts and general terminal environment (`config.yaml`). API chat turns expose the
-`orchestrator` toolset plus Hermes's `terminal`, `file`, `code_execution`, `skills`, `web`,
-`browser`, `vision`, `todo`, `session_search`, `delegation` and `memory` toolsets: full shell,
-file and Python access on the profile host. Approvals are off (`approvals.mode: "off"`), as
-for researchers, so commands run unattended; an `approvals.deny` list blocks identity changes,
-raw `coworld submit`, credential reads and force pushes. The deny list catches habits and
-mistakes, not a determined script. The supervisor is an agent cron job
-(`cron/jobs.json`) that runs every minute; its gate script, `scripts/supervisor_gate.py`,
-skips the model when nothing needs attention.
+The research lead of the Softmax IDE: the profile the user talks to. It turns the user's
+requests into Goals and Tasks, answers the Researchers' questions, reviews their work, makes and
+submits policy Versions, and hosts the watcher, a model-free cron job that keeps the background
+work moving. Its principles are the design's: the user's explicit request comes first and is
+never refused, agents repair what breaks and keep going, and the few gates that exist bound only
+the agents' own initiative.
 
-## GitHub repositories
+Everything it does lives in the shared package [`core/`](../core/README.md). This folder is the
+Hermes distribution shell:
 
-For agent-driven game discovery and release-pinned public repository reads, follow
-[Coworld repository context](../docs/coworld-context.md). Both profiles use the shared
-`coworld-context` skill and existing CLI; the IDE supplies conversation context only.
-
-Clone public repositories with `git clone` into any writable folder. The profile has no
-GitHub tools and does not use a GitHub connection, so private repositories are not available.
-
-## Install and configure
-
-Requires Hermes v0.21.6, Python 3.12 for this distribution, uv and Git.
-The pinned Hermes runtime itself uses Python 3.14; use its provisioned interpreter for
-the `hermes` tests, independently of this profile's Python 3.12 venv. Hosting prepares the bare canonical
-repository, this profile's main clone, researcher profiles/clones, the board and native
-dispatcher ([docs/hosting.md](../docs/hosting.md) lists the metta changes). Clone origins must
-point to that local bare repository. Use a clean export,
-not a checkout containing `.venv`, when installing:
-
-```sh
-git archive HEAD orchestrator | tar -x -C /path/to/empty-export
-hermes profile install /path/to/empty-export/orchestrator --name orchestrator --yes
-```
-
-Set the installed profile's `.env` with `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`,
-`SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL`, `RESEARCH_PLAYER_ID`,
-`RESEARCH_WORKSPACE` (this profile's clone) and `RESEARCH_CANONICAL` (the bare repo).
-The manifest documents defaults. The credential accepts a bare token or player-session
-JSON. Hermes's routed profile secret scope supplies HTTP/CLI credentials; a different
-profile's ambient credential is not used. Gate subprocesses get the configured passthrough.
-
-Then prepare the profile once. Whichever profile bootstraps first creates the bare canonical
-repository; this profile ships every shipped game's folder, seed included, so it can be first:
-
-```sh
-HERMES_HOME=<profile> python3 <profile>/scripts/bootstrap.py
-```
-
-It syncs `$HERMES_HOME/local/venv` from `uv.lock`, clones the canonical repository into
-`RESEARCH_WORKSPACE`, writes the `research` CLI shim to `$HERMES_HOME/bin/research` and adds
-`RESEARCH_CLI` to `.env`. The board is created once per host with
-`hermes kanban boards create autoresearch`.
-
-`src/ide_research_core/`, the ontology at the end of `SOUL.md`, the game folders under
-`games/` and the game skills under `skills/<game>/` are copies made by `python3 tools/sync_shared.py` at the repository root. Edit the sources
-(`shared/`, `ontology/`, `researcher/games/`) and rerun the script; do not edit the copies.
-
-The installed supervisor starts paused. Hosting should resume it once after preparation,
-preserving later deliberate pauses. With the host root selected:
-
-```sh
-hermes -p orchestrator cron resume supervisor
-```
-
-Configure the host dispatcher with `dispatch_profiles: [researcher-1, ...]`,
-`max_in_progress` equal to researcher count, and `max_in_progress_per_profile: 1`.
-Connect the IDE bridge to the orchestrator profile's API session. A coach chat reply is
-published by the bridge, and so is a background wake's final reply (there is no separate news tool).
+| File | What it is |
+|---|---|
+| `distribution.yaml` | The manifest: the variables `.env` must define (`env_requires`) and what the profile is. |
+| `config.yaml` | The shipped Hermes config: approvals off, no deny list, memory off, the `orchestrator` plugin and the `ide-orchestrator` toolset, the compaction settings that keep the user's instructions word for word, the terminal environment passthrough (without `SOFTMAX_USER_CREDENTIAL`). |
+| `SOUL.md` | The system prompt, generated by `uv run python tools/build_prompts.py --write` from `core/src/research_core/prompts/`; do not edit by hand. |
+| `plugins/orchestrator/` | The plugin entry (`plugin.yaml` lists the tools; `__init__.py` imports `research_core` from the path in `local/core-path.txt`). |
+| `scripts/prepare.py` | Preparation after install or update; see below. |
+| `scripts/watcher.py` | The cron job's script: runs one watcher tick in the workspace environment. |
+| `scripts/activity.py` | The host's autosleep probe: prints `{"waiting_on": [...]}` from the watcher's last tick (empty permits sleep). |
+| `cron/jobs.json` | The `watcher` job, every minute, installed paused. |
+| `.no-bundled-skills` | Hermes's bundled skills are not installed; the profile's skills come from `core/src/research_core/skills/` through `skills.external_dirs`. |
+| `local/` | Written at preparation (`core-path.txt`, the prepared marker); not shipped. |
 
 ## Tools
 
-| Tools | Behavior |
-|---|---|
-| `capabilities(query?, kind?)` | Profile-configured tools and skills, filtered by keyword; session additions and job overrides may be absent. |
-| `worker_skills` | Read the assigned worker’s installed skill names and descriptions. |
-| `worker_capabilities(assignee, game?, query?)` | Inspect the worker's actual tool and skill catalog, plus optional game bindings and static readiness for build, checks, upload, evaluation and replay inspection. Reports missing requirements together before assigning work. Does not execute bindings or grant publication permission. |
-| `card_create(..., game?)` | Prepare the assignee's clone of the card's game (`research workspace bootstrap --game` when the clone is missing; prepare refreshes doctrine in existing game repositories) and branch, and create native worktree work; return actual subscription status. The game is recorded in the creation command. A body citing a record id (`E-`, `H-`, `V-`, `CS-`, ...) or `ar://file/` path that is not on that game's canonical `main` is refused with `unknown_records` listing them (content-search and game reference types are not checked). |
-| `card_show`, `card_list` | Read native cards, runs and comments. `card_list` takes its filters as top-level parameters (`status`, `assignee`, `limit`, `order_by`, ...) with typed sort values (`updated`, not `updated_at`); the default limit is 20, maximum 200. |
-| `card_files`, `card_report`, `card_artifacts` | Discover committed files of a card's latest ended run (completed, or blocked: staged commits only), read report pages, and inspect or export evidence into this coordinator's private cache. Accepts source, large logs, results and binary replays without integrating the worker branch. |
-| `card_comment`, `card_answer` | Durable comment; answer additionally unblocks. |
-| `card_close` | Native done with nonempty summary/metadata, or archive; never forces completion of a live claim. |
-| `status(game?)` | Cards by state, pending waits and the host-wide budget, plus one game's canonical record summary, pause, plan and champion-submission state, and the researchers cards can be assigned to (each with its running and queued cards). `tooling` lists writable-tooling problems on every profile: a release that could not merge into a profile's edits (`update`) or a profile `src` that failed to import, so its plugin loaded the image copy (`fallback`). |
-| `records_find`, `records_show` (`game?`) | Shared canonical record reads. `records_show` also takes an `ar://` reference and a champion submission by `CS-`, legacy `P-` or platform `sub_` id. |
-| `plan_write`, `control_write` (`game?`) | Publish plan.md or pause/resume through shared workspace publish. |
-| `upload_build(id, run_id, build_dir, name, experiment?)` | Upload the staged, committed build of a card's latest ended run (completed, or blocked mid-experiment) in the card's game. Never from a running card. |
-| `champion_submit(experiment)`, `bootstrap_champion(version)` | Shared champion-submission workflow in the card's game; bootstrap requires the integrated starter version record (`V-...`). |
-| `accept_champion(game?)` | Record the league's current champion as the loop's; resolves a champion conflict without asking the user. |
-| `workspace_integrate(id, run_id, commit)` | Integrate a completed run's staged commit into the card's game. |
-| `game_list` | Shipped and installed games with each one's `league_id`, whether each has a research workspace yet, and how an installed one was installed. |
-| `game_prepare(game)` | Create a game's research workspace (canonical repository seeded from the game folder, plus this profile's clone), or refresh it. Idempotent; no card or researcher needed. |
-| `game_install(id, run_id, name, replace?)` | Install the `games/<name>/` folder a completed card committed, host-wide; returns its check report (problems refuse, gaps to report). |
-| `discover_leagues(query?, offset?, limit?)` | Search live leagues and games by name or ID; returns Coworld IDs and documentation links. |
-| `league_players(league_id, query?, offset?, limit?)` | Search ranked players in an explicit league. Owned-player context establishes ownership, not rank. |
-| `game_support(league_id, document?, offset?, limit?, expected_sha256?)` | Return compact game identity, `policy_artifact` (`file` for a game-hosted Coworld, `container` for platform-hosted, from the manifest's `game.player_runtime`), installed bindings and document IDs/hashes by default. Select a document for at most 6,000 Unicode characters (default 4,000); continue with `next_offset` and the original hash. A changed document fails rather than mixing releases. |
-| `player_champion(league_id, player_id)` | Read the selected player's current champion (one entry, not standings; `league_players` lists the ranked players); never defaults to the workspace carrier. |
-| `xp_status(experiment, game?)`, `credits` | Shared research platform reads. |
-| `latest_league_result(league_id, player_id)` | Latest recorded match for the selected player and league, including round/episode IDs, policy versions, status, scores, and replay. Returns `available: false` before a replay exists. Read-only; verify the returned policy version before attributing a result to a new upload. |
+Eighteen tools, each with actions: `goal`, `task`, `directive`, `claim`, `experiment`,
+`version`, `upload`, `submit`, `settings`, `ui`, `workspace`, `xp`, `platform`, `forum_post`,
+`wiki_edit`, `softmax_api`, `github`, `attachment_download`. `SOUL.md` lists their actions; the
+`briefing` prompt section shows the state of the active Coworld at the start of every turn.
 
-Describe the objective, inputs, constraints and completion criteria in the card body.
-Use `worker_capabilities` to investigate an execution blocker in the assigned profile.
-Retained coordinator and researcher installations may differ; the coordinator's
-`game_support` readiness cannot establish a worker's readiness. Discovery checks the
-worker's CLI configuration and research interpreter without creating cards, installing tools,
-or consuming evaluation budget. Configured bindings still need a real build and evaluation.
-Omit `skills` by default: the researcher discovers and loads its own procedures, or reports
-why it cannot complete the task. Task skills are optional preloads, not capability grants.
-When a task requires a specific procedure, call `worker_skills` before requesting that
-preload. Unknown selections return `invalid_worker_skills` with the available catalog
-before creating a branch or task. Cards without preloads do not query the worker catalog.
+## Install
 
-`card_create` requires `command_id`, `assignee`, `title`, and `body`. Replaying a
-command returns the same native task, including after archive. Reusing its ID with
-different arguments fails. Creation and its immutable arguments commit in one native
-transaction. Serial reconciliation does not serialize the workers themselves.
-Work caused by a pending event passes the event's `source_event` (shown on each
-`status.pending` and wake item, `task_runs:<run>:<kind>`). It then identifies the card
-instead of `command_id`: a chat turn and a background wake acting on the same event get
-one card, and the later call returns the first card's recorded command whatever arguments
-it passed.
-
-New task branches start at fetched canonical `origin/main`. A retained worker clone can
-have local commits, staged changes, modified doctrine/plan files, or untracked notes;
-creation preserves its checkout and index. Only missing game clones are bootstrapped.
-Profile preparation owns doctrine and stored-record migrations, independently of task admission.
-Completed task artifacts remain available through `card_files` and `card_artifacts` after
-native worktree cleanup.
-
-`host_capabilities` returns `runtime.executables` and `runtime.locations` with exact paths,
-plus each game's binding `commands` (`argv` and `cwd`). Use the profile interpreter with
-the returned game directory; the installed game root need not contain a virtualenv.
-Append operation arguments or `--help` to the returned argv. Presence/readiness is not an
-execution result. `execution` reports this session's approval mode and active unattended
-contexts; local `execute_code` uses whole-script approval while terminal commands retain
-their native command gates. Discovery never approves an operation or bypasses a refusal.
-`worker_capabilities.host` reports the same information from the assigned worker's CLI
-context; a dispatched task's session settings can differ.
-
-
-All coordinator inputs enter one durable inbox. Its identity deduplicates delivery;
-its oldest unfinished row owns execution. A failed turn or dead process leaves that
-same row recoverable. Completing the turn acknowledges it automatically. There is no
-separate wake receipt, command ledger, event acknowledgement, or replacement-task graph.
-
-Native notifications alone deliver task events. Cron polls external XP, credit and
-waits, and periodically requests champion-submission review through the same inbox. Permit refusals
-require user action; no cogent approval records are polled.
-Every 10 minutes it also checks whether our newest accepted champion submission has played
-its first league match (`latest_league_result` shows its policy version). If so, it wakes the
-coordinator once with a `league_result` item, which goes to the session that made the
-submission, and records that submission as followed up in coordinator storage. It makes
-this platform read only while a submission still waits for its first match.
-A card's wait events resume the session that created the card (native `session_id`),
-as native notifications do; events with no card, or a card without an origin session,
-resume the session that most recently called an orchestrator tool.
-`status` reads native tasks and current external waits. Resume blocked or triaged tasks
-with `card_answer`; task completion never depends on Git ancestry.
-
-Researchers build, smoke-test, and commit the complete artifact. The coordinator calls
-`upload_build` on the latest ended native run (completed, or blocked after staging a verified
-build; never a running one). Once the card completes it integrates the receipt commit, and
-uses `submit_requested_version` for a direct submission (the user asked, or the coordinator
-chose to compete a verified version; `request` records why). Cancellation revokes
-publication before stopping the native worker. A direct submission claims no statistical
-improvement; `champion_submit` submits a reviewed improvement. The coordinator does all of
-this without asking the user for approval (SOUL "Act without asking").
-
-## Development and verification
-
-```sh
-cd orchestrator
-uv run pytest -q
-HERMES_PYTHON=<hermes>/bin/python PATH=<hermes>/bin:$PATH uv run pytest -q -m hermes
-uv run ruff check .
+```bash
+hermes profile install ~/ide-distributions/orchestrator --name orchestrator --yes
+# write ~/.hermes/profiles/orchestrator/.env (see distribution.yaml env_requires)
+<hermes python> ~/.hermes/profiles/orchestrator/scripts/prepare.py \
+  --source ~/ide-distributions/orchestrator --hermes $(command -v hermes) --activate-supervisor
 ```
 
-Default tests use local Git repositories, a local HTTP server and a subprocess CLI fixture;
-no model or platform credentials are required. Hermes tests use its installed interpreter,
-a temporary host root and real native board APIs. Put the Hermes install's own `bin`
-directory first on `PATH`: a `hermes` launcher that resolves `python3` through `PATH` would
-otherwise run in this project's venv, which lacks Hermes's dependencies. The clean-install test exports committed HEAD, so commit
-before running those tests. `tests/test_end_to_end.py` installs a researcher and this profile
-on one host and plays one card from `card_create` through a scripted worker to `status`, with no model and the fake platform. Hosted bridge delivery is
-a separate integration check that these tests do not establish.
+`prepare.py` records where the shared code lives, creates the stores, re-applies the config
+keys the machinery relies on, points every profile at the active Coworld's skills and code,
+builds the workspace environment under `$IDE_WORKSPACE/tools/venv`, and enables the `watcher`
+job once (`--activate-supervisor`). Run it again after every `hermes profile update`;
+`--check` shows what it would change. `docs/hosting.md` has the full contract.
 
-For an explicit coach build/upload-only request, assign the researcher the `candidate` skill's
-"Explicit build/upload-only request" procedure. `softmax upload-build` uploads a checked build
-without an experiment, evaluation or league submission. Require the intended source change in
-the generated artifact and both returned version IDs; champion submission is a separate step, which the coordinator takes on its own judgment.
+## The watcher
 
-## Conversation context and game support
-
-Conversation intent takes precedence over current UI and workspace hints. Clients should
-supply owned-player IDs/names and current selections near the start of each turn. They are
-context, not a fixed binding or credential grant. Discovery and match reads take explicit
-IDs and never write profile environment, canonical records or running cards.
-
-Ordinary greetings, navigation and goal setup do not initialize the research board. Notebook
-work starts from supplied evidence; research state is refreshed for task changes and supervision.
-
-`game_support` returns an index first. Pass a document ID and its `sha256` as
-`expected_sha256` to read the participation guide, manifest or installed research guide.
-Offsets count Unicode characters, not bytes. Continuing beyond offset zero requires the hash;
-`document_changed` means reload the index. The Coworld is read by its exact API ID, avoiding
-the CLI's catalog-wide summaries lookup. This response replaces the former inline manifest
-and participation text; update the plugin, shared CLI and SOUL together.
-
-Production release follows `ide-distributions/main` through Metta’s
-[Deploy Hermes agent workflow](https://github.com/Metta-AI/metta/blob/main/.github/workflows/deploy-hermes-agent.yml).
-With `HERMES_WORKSPACE_UPDATE_POLICY=preserve`, it polls the source every five minutes
-and qualifies the image before release. No separate Metta source-lock bump is needed
-for this path. Existing workspaces keep their selected image until the owner pauses
-and resumes them; the update preserves their workspace and identity. A merged source
-PR is not proof that image qualification or rollout has completed.
-
-A shipped or installed contract is matched by
-its exact declared league ID, not by guessed directory paths. Missing bindings are reported separately
-from platform availability. This permits research and match analysis for games without a
-local build/evaluation adapter. The existing automated champion-submission loop still uses its installed
-game contract and scoped credential; using a different player for writes requires the proper
-credential and authorization, not a prompt override.
-
-### Several games, and making support for a new one
-
-A host researches any shipped or installed game, each in its own canonical repository
-(`canonical-<game>.git` beside `RESEARCH_CANONICAL`) with a clone per profile
-(`workspace-<game>`). Cards and tools without a game use the neutral workspace; `RESEARCH_GAME` scopes selected tasks only.
-The minute supervisor reads each waiting run's game from its card and polls champion submissions in
-every game that has a workspace. The design is
-[docs/designs/multi-game-research.md](../docs/designs/multi-game-research.md).
-
-When the user asks for research on a game with no research support, the orchestrator creates
-a researcher card (in any existing game) that preloads `game-create`. The researcher fetches
-the game's source from GitHub, scaffolds `games/<game>/` from the researcher's template
-(installing a public optimizer-seed mixin when one exists), fills it and runs `game check`.
-The orchestrator then calls `game_install` on that card's completed run, never integrates
-its branch, tells the user the remaining gaps, and creates the game's cards with `game`.
-
-Run `tests/test_platform_discovery.py` against a real local Observatory fixture using
-`COGAMES_API_URL` (the frontend proxy), `SOFTMAX_PLAYER_CREDENTIAL`,
-`RESEARCH_TEST_PLAYER`, and two comma-separated `RESEARCH_TEST_LEAGUES`. Use a credential
-player different from the research player. This system test loads both games and switches
-back without an installed default game, creating a workspace, or changing profile settings.
-It is skipped without an explicit fixture and refuses non-loopback servers.
-
-Before rollout, evaluate complete conversations for these cases:
-
-- Empty desktop projects and board, existing hosted policy/matches: discover and cite activity.
-- UI hints name one game; the user asks about another: use the requested game's support.
-- User switches games and then returns: explicit tool targets follow each request.
-- Workspace credential and owned default player differ: resolve the intended player from context.
-- Multiple plausible owned players: ask one focused question after discovery.
-- Published game has no installed research adapter: read its guide and identify the missing operation.
-- Platform read fails: report an unavailable read, never infer no activity or require a new recording.
-
-Score each conversation by correct target, cited live evidence, relevant support, and preserved
-write authority (all four required to pass). Report completed cases, errors and timeouts
-separately. The deterministic platform test verifies tool behavior; it does not measure model
-selection or instruction-following quality. These conversation evaluations remain a rollout gate.
-
-## Workspace-owned operation boundary
-
-The profile does not call the web IDE MCP server or cogent chat, task, permit or attachment
-endpoints. The bridge sends native session identity, league selection and client data as
-context hints. These do not require a matching IDE conversation row. Tools operate on native
-research records, tasks and workspace files; the browser reaches those through the workspace relay.
-Questions and updates use native conversations. Attachment contents must be supplied by the
-runtime; the removed attachment tool is not replaced by a private download endpoint.
-
-The supervisor owns XP and credit waits and accepted-submission follow-up. It records completion
-inputs in the native coordinator inbox, whose replay/recovery contract is independent of the IDE.
-Build and upload commands currently execute synchronously inside native runs/tasks. Their normal
-return or native task-completion notification is the completion surface, including failures.
-The profile does not poll IDE build/upload tables. A future asynchronous publication command must
-supply a workspace-local status contract before its wait can be added here; no such command is
-assumed by this release. Goal records remain unchanged. There is no replacement for the IDE's
-measured-goal scheduler until the profile refactor supplies its Tasks and watcher.
-
-### Permission and source discovery
-
-`host_capabilities` (shared with the researchers, `ide_research_core.host_capabilities`) reports, without running
-anything or exposing environment values: installed executables (git, uv, gcc, nim, docker, ...), whether Docker has a
-daemon, which places are writable (profile, workspace, `TMPDIR`, `/tmp`, the installed games and venv, the profile
-cache), whether `/tmp` can run programs, whether this is a hosted workspace, and each game's missing host requirements.
-`game_support` reports static readiness per operation, including installed-template markers and missing host requirements.
-Configured bindings are not execution-verified. `game_starter` reads bounded UTF-8 pages of a published starter,
-verifies its manifest SHA-256 and distinguishes it from the selected player's submitted version.
-`card_report` reads a committed report from the recorded workspace of the card's latest ended run,
-checks commit membership in that card branch, and never integrates or executes the report. A completed
-card reads its card branch; a blocked card (its run ended, e.g. waiting on XP results) reads only commits
-staged on origin. A running card is never read.
-If native completion cleaned up the worktree, the reader restores it through Hermes from the retained card branch.
-
-Review a completed experiment through these tools:
-
-1. Get its latest ended run (completed, or blocked) and full commit from `card_show`.
-2. Call `card_files(task_id, run_id, commit)` to discover the tree recursively. `directory`
-   restricts the subtree; `recursive=false` lists one level. Follow `next_offset` for bounded
-   pages, rather than guessing report paths or making a separate call for every match folder.
-3. Use `card_report` for bounded text pages. Use `card_artifacts(task_id, run_id, commit, paths)`
-   for SHA-256 hashes, byte sizes and Git blob IDs. Optional `expected_sha256` maps paths to
-   hashes from the report or index; each file reports whether its expected hash matched.
-4. Set `export=true` on `card_artifacts` to copy source, logs, JSON/CSV results and binary replays
-   into a fresh private snapshot under this profile's `cache/card-artifacts/`. The returned
-   `directory` preserves relative paths; `manifest` records the task, run, commit and file hashes.
-   Native file and terminal tools can then analyze this coordinator-owned copy.
-
-Each batch accepts at most 64 regular files totaling 256 MiB. `status=mismatch` exports nothing;
-otherwise status is `inspected` or `exported`. Exports contain committed bytes even when a worker
-worktree has uncommitted changes. Symlinks, submodules and unsafe paths cannot be exported.
-Each export creates a separate snapshot, so a retry never overwrites an earlier analysis.
-These tools share completed-run and branch checks, recover cleaned worktrees through Hermes,
-never integrate a branch, and never execute copied files. Hash agreement establishes byte identity;
-review result rows and evaluation evidence separately. Active worker files remain unavailable.
-Failures carry stable reasons: `card_not_completed`, `workspace_unavailable`, `artifact_unavailable`,
-`invalid_artifact_path`, `invalid_artifact_selection`, `artifact_limit`, or `invalid_export_cache`.
-Refresh native task state, correct the selection, or reduce the batch according to that reason;
-these conditions do not imply missing account credentials.
-
-
-### On-demand policy evidence
-
-The coordinator can discover coaching sessions, their existing analyses and recordings, uploaded policy versions,
-and a policy's episodes. It can read arbitrary episode metadata and download replay/results bundles. These tools
-use the current workspace credential. The API verifies the workspace's owner grant; no user token is copied into
-Hermes. The backend evidence-read authorization must be deployed before coaching and owner-wide policy reads work.
-
-JSON responses are saved as private, hashed files. Read them with native file tools and follow the returned cursor
-for the next page. Recording and policy downloads verify the API's size and SHA-256; their signed URLs never receive
-the workspace bearer token. Binary downloads stop at 256 MiB. A bundle's manifest identifies which evidence was
-actually delivered; recorded episodes can contain a replay reference instead of replay bytes.
-
-Access does not require inspection. Hermes chooses whether a recording, replay, metadata, or source read helps the
-current task. These tools perform no analysis, code execution, upload, submission, or paid evaluation.
-
-The native system workflow uses a real local frontend proxy, API, PostgreSQL and object store. Prepare the private
-fixture described in `tests/test_evidence_system.py`, then run:
-
-```sh
-HERMES_PYTHON=/path/to/hermes/python SOFTMAX_EVIDENCE_SYSTEM_FIXTURE=/path/to/private-fixture.json \
-  uv run pytest -m hermes tests/test_evidence_system.py
-```
+Every minute Hermes runs `scripts/watcher.py` without a model. One tick: store checks, champion
+sync, resolved waits, run recovery, Researcher messages, merges of accepted work, Goal
+bookkeeping, capability checks, Task dispatch, wakes (setup, review, management, anti-stall
+Sessions of this profile), the heartbeat and the agent-context panel. `research watcher status`
+prints the last tick; `workspace.doctor` reports it to the agent.

@@ -1,62 +1,43 @@
 name: researcher
-version: 0.2.0
-description: Research worker for the Softmax IDE. Works Kanban cards from the orchestrator, each on one game, in its own clone of that game's shared canonical workspace.
+version: 1.0.0
+description: >-
+  A research worker of the Softmax IDE. Each Session does one Task in the background on the
+  Player's policy, proposes Tasks and submissions, and speaks only to the Orchestrator.
 hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
     required: true
-    description: OpenRouter API key for the research model.
-  - name: SOFTMAX_PLAYER_CREDENTIAL
-    required: true
-    description: >-
-      Credential of the Softmax player account the agent acts as: a bare cga_ agent
-      token (what Softmax hosting provisions; it does not expire), or a Player session
-      as JSON {"token": "ply_...", "expires_at": "<ISO 8601>"} (one entry of
-      player_sessions.<server>.cache written by `coworld player use <ply_id>`).
-  - name: RESEARCH_PLAYER_ID
-    required: true
-    description: Id of that Softmax player.
-  - name: RESEARCH_CANONICAL
-    required: true
-    description: >-
-      Path of the neutral bare canonical repository, shared by every profile on the host
-      (for example <hermes root>/canonical.git). Bootstrap creates it without game records. Each
-      game's repository sits beside it, as canonical-<game>.git.
-  - name: RESEARCH_WORKSPACE
-    required: false
-    description: >-
-      This profile's neutral workspace. Default is $HERMES_HOME/workspace;
-      explicitly selected games use $HERMES_HOME/workspace-<game>.
-  - name: COGAMES_API_URL
-    required: false
-    default: https://softmax.com/api
-    description: >-
-      Softmax API server. Every softmax/coworld call passes it as --server. Softmax
-      hosting writes it to the profile .env.
+    description: OpenRouter API key for the model.
   - name: OPENROUTER_MODEL
     required: false
     default: moonshotai/kimi-k3
-    description: Model id on OpenRouter. Overrides the model in config.yaml.
+    description: Model id on OpenRouter.
+  - name: SOFTMAX_PLAYER_ID
+    required: true
+    description: The Player this workspace acts as (selected when the workspace was created).
+  - name: SOFTMAX_PLAYER_CREDENTIAL
+    required: true
+    description: >-
+      That Player's credential: a bare cga_ agent token, or a player session as JSON
+      {"token": "ply_...", "expires_at": "<ISO 8601>"}.
+  - name: COGAMES_API_URL
+    required: false
+    default: https://softmax.com/api
+    description: Softmax API server.
+  - name: IDE_WORKSPACE
+    required: true
+    description: >-
+      Absolute path of the one workspace root of this sandbox, shared by every profile. It holds
+      the workspace environment, the workspace store and one folder per Coworld.
+  - name: IDE_WORKSPACE_ENV
+    required: false
+    description: >-
+      A prebuilt workspace environment (hosting). When unset, prepare.py builds it under
+      $IDE_WORKSPACE/tools/venv from the release's uv.lock.
+  - name: IDE_PLATFORM
+    required: false
+    default: real
+    description: '"real", or "fake" to run against the test double of the Softmax platform.'
   - name: TMPDIR
     required: false
-    description: >-
-      Scratch directory for builds and episodes. Set by Softmax hosting (/opt/data/tmp, because
-      the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS.
-  - name: GOTA_HERMES_PYTHON
-    required: false
-    description: >-
-      Python of the Hermes install, for GotA builds (games/gota/GAME.md host_requirements).
-      Softmax hosting sets /opt/hermes/.venv/bin/python.
-  - name: GOTA_G2_RUNNER
-    required: false
-    default: native
-    description: >-
-      GotA G2 episode runner. "native" runs the pinned native match binary and needs no
-      Docker; "docker" runs pinned coworld run-episode (needs Docker).
-  - name: RESEARCH_CREDIT_BACKOFF_MINUTES
-    required: false
-    default: "30"
-    description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
-  - name: RESEARCH_SOFTMAX
-    required: false
-    description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.
+    description: Scratch directory for builds; hosting sets it to a disk path because /tmp is small.

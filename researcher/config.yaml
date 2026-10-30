@@ -1,121 +1,60 @@
-# Shipped defaults. Hermes keeps this file on `hermes profile update` (--force-config resets it).
-# A researcher is a Kanban worker profile: the orchestrator assigns it cards on the
-# `autoresearch` board and the gateway's dispatcher runs them (design: ide-distributions
-# docs/designs/orchestrator-design-2026-10-15.html).
+# Shipped defaults. prepare.py re-applies the keys the profile machinery relies on at every
+# start (research_core/prepare.py PROTECTED_KEYS) and removes retired keys; every other value
+# the owner changes is kept across `hermes profile update`.
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
 fallback_providers:
   - provider: openrouter
     model: z-ai/glm-5.3
-
-# Knowledge lives in the canonical workspace, not in profile memory: researchers share durable records, and and unprovenanced memory would diverge between them.
+# Hermes memory is off: standing instructions are directive records shown in the briefing, so
+# compaction cannot lose them (design §9).
 memory:
   memory_enabled: false
   user_profile_enabled: false
-
-auxiliary:
-  background_review:
-    enabled: false
-
-tool_loop_guardrails:
-  hard_stop_enabled: true
-
-agent:
-  max_turns: 150
-  # Below card_create's default max_runtime_seconds (14,400), so a run ends before its card is
-  # killed; long enough for a hosted GotA native build (6,600-8,400 s).
-  run_budget_seconds: 12600
-
+# Approvals are off and there is no deny list (design C.4). The per-context modes are backstops
+# so an unattended run approves rather than blocks if the mode is ever reset.
 approvals:
   mode: "off"
-  # Never prompt: "off" is Hermes's yolo mode. The per-context modes are backstops so an
-  # unattended run approves rather than blocks if the mode is ever reset.
   cron_mode: approve
   single_query_mode: approve
   unattended_mode: approve
-  # Hermes matches these over the whole command and over each command word's tail
-  # (tools/approval_detection.py _deny_command_variants), before mode and not overridable.
-  # Champion submission and other league submission belong to the orchestrator.
-  deny:
-    - "*workspace integrate*"
-    - "*workspace publish*"
-    - "*game install*"
-    - "coworld player use*"
-    - "coworld submit*"
-    - "coworld upload-policy*"
-    - "*softmax upload*"
-    - "coworld xp-request create*"
-    # `research softmax exec -- coworld ...` puts the research CLI in the executable position,
-    # so the coworld rules above never match it; these cover the same commands through exec.
-    - "*softmax exec*coworld submit*"
-    - "*softmax exec*coworld upload-policy*"
-    - "*softmax exec*coworld xp-request create*"
-    - "softmax login*"
-    - "softmax logout*"
-    - "softmax set-token*"
-    - "softmax get-token*"
-    - "*SOFTMAX_PLAYER_CREDENTIAL*"
-    - "git push -f*"
-    - "git push*--force*"
-    - "git push* -f*"
-    - "git *push*--force*"
-    - "git push* +*"
-    - "hermes kanban create*"
-    - "hermes kanban link*"
-    - "hermes kanban --board * create*"
-    - "hermes kanban --board * link*"
-    - "*champion submit-requested"
-    - "*champion submit-requested *"
-    - "*champion submit"
-    - "*champion submit *"
-    - "*champion bootstrap"
-    - "*champion bootstrap *"
-    - "*champion accept"
-    - "*champion accept *"
-
+platform_toolsets:
+  api_server: [hermes-api-server, ide-researcher]
+  cron: []
+known_plugin_toolsets:
+  cron: [ide-researcher]
+plugins:
+  enabled: [researcher]
+# Keep every profile tool loaded instead of deferred behind tool_search (design §4).
+tools:
+  tool_search:
+    enabled: "off"
 terminal:
-  # Longest process_manage wait (Hermes clamps a wait to it) and the default foreground timeout.
   timeout: 1800
   env_passthrough:
     - SSL_CERT_FILE
+    - SOFTMAX_PLAYER_ID
     - SOFTMAX_PLAYER_CREDENTIAL
     - COGAMES_API_URL
-    - RESEARCH_PLAYER_ID
-    - RESEARCH_GAME
-    - RESEARCH_WORKSPACE
-    - RESEARCH_CANONICAL
-    - RESEARCH_EPISODE_LIMIT
-    - RESEARCH_CLI
-    - RESEARCH_SOFTMAX
+    - SOFTMAX_CONFIG_DIR
+    - IDE_WORKSPACE
+    - IDE_WORKSPACE_ENV
+    - IDE_PLATFORM
+    - IDE_FAKE_FAULTS
     - OPENROUTER_MODEL
     - TMPDIR
-    - GOTA_G2_RUNNER
-
-# Hermes cuts any single tool call after 420 s (agent/tool_executor.py), which would end a
-# process_manage wait of up to terminal.timeout (1800) early. 1900 = that wait plus margin.
-timeouts:
-  tools:
-    sequential_call: 1900
-    concurrent_batch: 1900
-
-plugins:
-  enabled:
-    - researcher_guard
-    - researcher_tools
-
-# Installed games (`research game install`, run by the orchestrator) live in the host's
-# `<hermes root>/games/`, two levels above this profile; Hermes loads their binding skills
-# (`games/<game>/skills/<binding>/SKILL.md`, named `<game>-<binding>`) from there. The
-# directory must exist when Hermes starts; `scripts/bootstrap.py` creates it.
+# prepare.py fills these: the core skills (common and this role), and the active Coworld's
+# mixin skills; the active Coworld's code repository is trusted for skill overrides.
 skills:
-  external_dirs:
-    - ../../games
-
-# Hermes has no auto-update; this turns off its passive update check.
+  external_dirs: []
+  trusted_project_dirs: []
 updates:
   check: false
-
-# Shipped skills are never curator-managed; this pins built-in pruning off.
 curator:
   prune_builtins: false
+# Hermes's post-turn self-improvement review would patch the shipped skills (release content
+# under skills.external_dirs); prepare.py keeps it off.
+auxiliary:
+  background_review:
+    enabled: false

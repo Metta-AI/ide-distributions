@@ -1,112 +1,74 @@
 # ide-distributions
 
-Hermes Agent profile distributions for the Softmax IDE. Each top-level folder that holds a
-`distribution.yaml` is one distribution, and it installs and tests on its own.
+Hermes Agent profile distributions for the Softmax IDE. Two research profiles share one package;
+a third, `play/`, stands alone.
 
 | Folder | What it is |
 |---|---|
-| [`orchestrator/`](orchestrator/README.md) | The research lead: the IDE chat's agent. Plans research, assigns Kanban cards to researchers, answers them, submits champions and tells the user what happened. |
-| [`researcher/`](researcher/README.md) | A research worker (formerly `autoresearch`, moved here from `Metta-AI/ide-mvp` with its full history). Install it once per researcher (`researcher-1`, `researcher-2`, ...). Each card is on one game: a shipped one (`games/`), or one a card made and the orchestrator installed on the host. |
-| [`play/`](play/README.md) | Play: the user's own program on an explicitly selected coworld (bundled GotA build support). The `play` profile takes the user's request, has the `builder` profile ([`play/builder/`](play/builder)) change the program through native Kanban, uploads it, practices it and releases it when the user says so. No research machinery. |
+| [`core/`](core/) | `research-core`, the shared package: the record store, the record and platform tools, the Hermes plugin wiring, the watcher, the platform client (real and fake), the `research` CLI, the prompt parts and the skills. |
+| [`orchestrator/`](orchestrator/README.md) | The research lead: the profile the user talks to. Plans Goals and Tasks, answers the Researchers, makes and submits policy Versions, runs the watcher. |
+| [`researcher/`](researcher/README.md) | A research worker. Each Session does one Task in the background and speaks only to the Orchestrator. |
+| [`play/`](play/README.md) | Play: the user's own program on one coworld. Independent of the research profiles; it keeps its own vendored copy of the former shared code. |
 
-Shared code lives once in [`shared/ide_research_core/`](shared/ide_research_core) and is copied
-into each distribution's `src/` by [`tools/sync_shared.py`](tools/sync_shared.py); the research-method
-skills in [`shared/skills/autoresearch/`](shared/skills/autoresearch) are copied into both research profiles' `skills/`, because
-Hermes installs a distribution by copying its one folder. The built-in knowledge
-([`ontology/KNOWLEDGE.md`](ontology/KNOWLEDGE.md)), the Softmax vocabulary
-([`ontology/VOCABULARY.md`](ontology/VOCABULARY.md), refreshed from metta by `tools/refresh_vocabulary.py`) and the
-research ontology ([`ontology/ONTOLOGY.md`](ontology/ONTOLOGY.md)) are embedded by the same script at the end of
-each research distribution's `SOUL.md`, so every session of every research profile has it. The copies are
-generated: edit `shared/` or `ontology/`, run `python3 tools/sync_shared.py`, and commit the
-source and the copies together.
+The research profiles follow the
+[IDE profile refactor design](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it
+in a browser). The implementation plan, one file per stack entry, is in
+[`docs/plans/ide-profile-refactor/`](docs/plans/ide-profile-refactor/00-overview.md); the
+overview fixes the architecture decisions the design leaves open.
 
-The [orchestrator design](docs/designs/orchestrator-design-2026-10-15.html) (open it in a
-browser) describes how they work together on one host: one Kanban board, one bare canonical
-git repository per game, the orchestrator between the IDE chat and the researchers.
-[Multi-game research](docs/designs/multi-game-research.md) describes how one host works on
-several games and how a new game's folder is made (from its GitHub source, adapting
-optimizer-seed's mixin method) and installed.
-[Implementation notes](docs/designs/orchestrator-implementation-notes.md) record where the
-code differs from it.
+The rebuild landed on October 28, 2026 (Pacific). What hosting needs from these profiles, and
+what they guarantee, is in [`docs/hosting.md`](docs/hosting.md); the retired profiles' notes
+under `docs/` carry a banner saying so.
 
-The [IDE profile refactor](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it in a
-browser) is the final design for the next iteration of the Orchestrator and Researcher profiles.
-It is not implemented yet. Where it conflicts with the two designs above, it supersedes them.
+## How the pieces fit
 
-Softmax hosting runs these distributions in its sandboxes. The metta changes it needs are in
-the [hosting handoff](docs/hosting.md).
+- Each profile folder is a thin Hermes distribution: a manifest, a config, a generated `SOUL.md`,
+  a plugin shim, scripts and (Orchestrator) the `watcher` cron job. Hermes copies the folder on
+  install; the shim imports `research_core` from the release checkout, whose path `prepare.py`
+  records.
+- Two Python environments exist: Hermes's own interpreter runs the plugin (the stdlib-only base
+  of `research_core`), and one *workspace environment* under `$IDE_WORKSPACE/tools/venv` runs
+  the `research` CLI, the watcher and every tool that needs the Softmax client. The repository
+  root `pyproject.toml` and `uv.lock` define that environment; `prepare.py` builds it.
+- Every profile of one sandbox shares one workspace (`IDE_WORKSPACE`): a workspace store, and one
+  folder per Coworld with the policy repository, worktrees, documents and the Coworld's store.
 
 ## Install
 
-Profiles have no default game or league. The frontend supplies current selections as context;
-the user can change the subject in conversation. Bootstrap creates neutral records; explicitly
-select game support with `research workspace bootstrap --game <name>`. Keep `RESEARCH_GAME`
-out of profile `.env` files. Retained research remains history, not a default assignment.
-
-Hermes installs a distribution only from a whole local folder: a git URL must hold
-`distribution.yaml` at its root, and there is no syntax for a subfolder or a ref. So clone
-this repository and install each folder by path.
-
-Install from a clean checkout in which nothing has run `uv sync` or tests. The installer
-copies the folder whole and rejects symlinks, so a `.venv` or `__pycache__` in the source
-either fails the install or ships with it. Keep a separate clone for development.
-
 ```bash
 git clone https://github.com/Metta-AI/ide-distributions.git ~/ide-distributions
-hermes profile install ~/ide-distributions/researcher --name researcher-1 --yes
 hermes profile install ~/ide-distributions/orchestrator --name orchestrator --yes
+hermes profile install ~/ide-distributions/researcher --name researcher --yes
+# write each profile's .env (distribution.yaml lists the variables; IDE_WORKSPACE must be the
+# same path for both), then prepare each profile with Hermes's Python:
+<hermes python> ~/.hermes/profiles/orchestrator/scripts/prepare.py \
+  --source ~/ide-distributions/orchestrator --hermes $(command -v hermes) --activate-supervisor
+<hermes python> ~/.hermes/profiles/researcher/scripts/prepare.py \
+  --source ~/ide-distributions/researcher --hermes $(command -v hermes)
 ```
 
-Each distribution's README covers what follows the install: the profile `.env`, the one-time
-bootstrap (`scripts/bootstrap.py`, which syncs the profile venv and creates or clones the
-shared canonical workspace) and the host's Kanban dispatcher settings.
-
-## Update
-
-Changes to `orchestrator/` or `researcher/` on `main` immediately dispatch Metta's
-[`Deploy Hermes agent`](https://github.com/Metta-AI/metta/actions/workflows/deploy-hermes-agent.yml)
-workflow. Metta builds the latest profile trees, qualifies the candidate, and promotes it independently
-of backend deployments. Running workspaces keep their current image. Concurrent pushes coalesce in
-Metta's existing release queue; the trigger does not pin an older source revision.
-
-The `Release hosted Hermes image` workflow uses the `METTA_RELEASE_DISPATCH_TOKEN` Actions
-repository secret: a temporary fine-grained personal token owned by Rohit, restricted to
-`Metta-AI/metta` with **Actions: read/write** and required **Metadata: read**.
-It expires November 23, 2026; Rohit must rotate or replace it before then. There is no automatic
-rotation. Prefer a managed GitHub App or broker-mediated dispatch for long-term operation.
-Actions access covers all workflows and artifacts in Metta, not only this release workflow.
-Repository secrets can be used by other eligible workflows in this repository; the main-branch
-condition on this job does not constrain the credential itself.
-The repository's normal `GITHUB_TOKEN` cannot dispatch across repositories.
-The dispatch job confirms acceptance; follow the linked Metta workflow for build and qualification results.
-Keep Metta's polling fallback until a main-branch push has successfully triggered a release.
-
-`hermes profile update` re-reads the recorded source path, so pull the clone first. The
-update keeps the installed `config.yaml`; `--force-config` resets it.
-
-```bash
-git -C ~/ide-distributions pull --ff-only
-hermes profile update researcher-1
-```
+Run `prepare.py` again after every `hermes profile update` (which keeps `config.yaml`; prepare
+re-applies the keys the machinery relies on and removes retired ones).
 
 ## Develop and test
 
-Each distribution has its own `pyproject.toml` and `uv.lock`. CI runs one job per
-distribution folder. The tests of the shared package run in `researcher/`, against its copy,
-so run the sync script before testing a change under `shared/`.
-
-On a pull request, CI skips the tests of a distribution that the change cannot affect: a change
-only to `docs/`, `README.md` or the image-release workflows skips all three, and `play` skips
-changes to `researcher/`, `orchestrator/` and `ontology/`. The three checks still report, so the
-required checks on `main` pass. Pushes to `main` always test everything. The filters are in
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
 ```bash
-cd researcher
-uv sync --frozen
-uv run pytest -q
+uv sync                 # the workspace environment plus pytest and ruff (Python 3.12)
+uv run ruff check .
+uv run pytest -q        # unit and scenario tests; the fake platform needs no network
+HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes   # against a real Hermes
 ```
 
-Profile policy and retained doctrine updates are owned by `scripts/prepare.py`, generated from
-`shared/scripts/prepare.py` and backed by `shared/ide_research_core/prepare.py`. Hosts invoke this
-operation after installation and updates; see [hosting](docs/hosting.md).
+CI runs the same inside the hosted Hermes image, and `play/` separately. A daily workflow
+refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
+
+To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
+interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).
+
+## Hosting
+
+Softmax hosting runs these distributions in its sandboxes. [`docs/hosting.md`](docs/hosting.md)
+is the handoff: the image, `prepare.py`, the environment variables, the gateway, sleep and
+drain, the bridge's seam, storage and releases. Changes to `core/`, `orchestrator/`,
+`researcher/` or the root lock on `main` dispatch Metta's image release workflow
+(`.github/workflows/release-hermes.yml`); a nightly workflow runs the read-only platform check.

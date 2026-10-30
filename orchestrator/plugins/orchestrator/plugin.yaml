@@ -1,50 +1,30 @@
 name: orchestrator
-version: 0.2.0
-description: Research lead tools for the native autoresearch board and shared research CLI.
+version: 1.0.0
+description: Record, platform and ui tools of the IDE Orchestrator, its briefing and advisory hook.
 author: ide-distributions
+kind: standalone
+requires_hermes: ">=0.21.6"
+# Kept in sync with the tool catalog by `python tools/build_prompts.py --manifests`.
 provides_tools:
-  - coaching_sessions
-  - coaching_session
-  - coaching_analysis
-  - coaching_recording
-  - policy_versions
-  - policy_file
-  - policy_episodes
-  - episode
-  - episode_replay
-  - capabilities
-  - host_capabilities
-  - worker_capabilities
-  - game_starter
-  - card_report
-  - card_files
-  - card_artifacts
-  - worker_skills
-  - card_create
-  - card_show
-  - card_list
-  - card_comment
-  - card_answer
-  - card_close
-  - status
-  - records_find
-  - records_show
-  - plan_write
-  - control_write
-  - upload_build
-  - submit_requested_version
-  - champion_submit
-  - bootstrap_champion
-  - accept_champion
-  - workspace_integrate
-  - xp_status
-  - budget_limit
-  - credits
-  - discover_leagues
-  - league_players
-  - game_support
-  - player_champion
-  - latest_league_result
-  - game_list
-  - game_prepare
-  - game_install
+  - attachment_download
+  - claim
+  - directive
+  - experiment
+  - forum_post
+  - github
+  - goal
+  - platform
+  - settings
+  - softmax_api
+  - submit
+  - task
+  - ui
+  - upload
+  - version
+  - wiki_edit
+  - workspace
+  - xp
+provides_hooks:
+  - transform_tool_result
+  - post_tool_call
+  - pre_llm_call

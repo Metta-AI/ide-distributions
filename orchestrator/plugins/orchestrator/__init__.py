@@ -1,78 +1,40 @@
-"""Hermes plugin entry. STDLIB ONLY: this runs inside the Hermes process.
+"""Hermes plugin entry of the Orchestrator profile. Runs inside the Hermes process: stdlib only.
 
-It puts `<distribution root>/src` on sys.path and delegates to
-`orchestrator.plugin`. On a hosted workspace that `src` is the agent's writable copy; if it
-fails to import, the image copy is loaded instead (`_import_with_fallback`).
+prepare.py records the release's core source path in ``local/core-path.txt``; this shim puts it
+on ``sys.path`` and delegates to ``research_core``. If ``research_core`` is already importable
+(installed into Hermes's interpreter), that copy is used instead.
 """
 
 import os
 import sys
 from pathlib import Path
 
+ROLE = "orchestrator"
 
-def _distribution_root() -> Path:
-    # Inside the gateway, os.environ["HERMES_HOME"] is the host root, not this
-    # profile, so prefer Hermes' own resolver (amendment A7).
+
+def _home() -> Path:
     try:
         from hermes_constants import get_hermes_home
 
         return Path(get_hermes_home())
     except ImportError:
-        pass
-    env_home = os.environ.get("HERMES_HOME")
-    if env_home:
-        return Path(env_home)
-    return Path(__file__).resolve().parents[2]
+        env_home = os.environ.get("HERMES_HOME")
+        return Path(env_home) if env_home else Path(__file__).resolve().parents[2]
 
 
-def _image_src(root: Path):
-    """The read-only image copy of this distribution's ``src``, recorded by Softmax hosting."""
+def _add_core_path(home: Path) -> None:
+    marker = home / "local" / "core-path.txt"
     try:
-        source = Path((root / "local/tooling-source.txt").read_text().strip()) / "src"
+        path = marker.read_text().strip()
     except OSError:
-        return None
-    return source if source.is_dir() and source.resolve() != (root / "src").resolve() else None
+        return
+    if path and path not in sys.path:
+        sys.path.insert(0, path)
 
 
-def _import_with_fallback(root: Path, *modules: str):
-    """Import from the profile's writable ``src``; if the agent's edits break it, load the image
-    copy and record why, so the agent keeps its tools and ``status`` shows the error."""
-    import importlib
-    import json
-    import traceback
+_add_core_path(_home())
+from research_core.plugin.register import make_register  # noqa: E402
 
-    record = root / "local/tooling-fallback.json"
-    try:
-        loaded = [importlib.import_module(module) for module in modules]
-        record.unlink(missing_ok=True)
-        return loaded
-    except Exception as error:
-        image = _image_src(root)
-        if image is None:
-            raise
-        packages = {module.split(".")[0] for module in modules} | {"ide_research_core"}
-        for name in [name for name in sys.modules if name.split(".")[0] in packages]:
-            del sys.modules[name]
-        if str(root / "src") in sys.path:
-            sys.path.remove(str(root / "src"))
-        sys.path.insert(0, str(image))
-        record.parent.mkdir(parents=True, exist_ok=True)
-        record.write_text(json.dumps({
-            "error": f"{type(error).__name__}: {error}",
-            "traceback": traceback.format_exc()[-4000:],
-            "using": str(image),
-            "message": "Your tooling in src failed to import, so the image copy is loaded. "
-            "Fix the error in your profile's src, commit, and restart.",
-        }, indent=2) + "\n")
-        return [importlib.import_module(module) for module in modules]
-
-
-_root = _distribution_root()
-_src = str(_root / "src")
-if _src not in sys.path:
-    sys.path.insert(0, _src)
-
-(_plugin,) = _import_with_fallback(_root, "orchestrator.plugin")
-register = _plugin.register
+register = make_register(ROLE)
 
 __all__ = ["register"]

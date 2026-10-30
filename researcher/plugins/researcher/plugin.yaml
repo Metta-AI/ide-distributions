@@ -1,0 +1,25 @@
+name: researcher
+version: 1.0.0
+description: Record and platform tools of an IDE Researcher, its briefing and advisory hook.
+author: ide-distributions
+kind: standalone
+requires_hermes: ">=0.21.6"
+# Kept in sync with the tool catalog by `python tools/build_prompts.py --manifests`.
+provides_tools:
+  - claim
+  - directive
+  - experiment
+  - forum_post
+  - goal
+  - platform
+  - settings
+  - softmax_api
+  - task
+  - upload
+  - version
+  - wiki_edit
+  - workspace
+  - xp
+provides_hooks:
+  - transform_tool_result
+  - post_tool_call

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Metta-AI/ide-distributions/contract/context.schema.json",
+  "title": "Turn context",
+  "description": "The typed context block a client sends with each message (design A.3, A.4). Every field but contract_version is optional. The bridge stamps client and coworld. Unknown fields are dropped; oversize values are refused with a clear error, never truncated.",
+  "contract_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version"],
+  "properties": {
+    "contract_version": {"type": "integer", "const": 1},
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "maxLength": 80},
+        "kind": {"type": "string", "maxLength": 40},
+        "guide": {"type": "string", "maxLength": 64, "description": "The client guide skill to load, such as client-coplay."}
+      }
+    },
+    "coworld": {"type": "string", "maxLength": 120, "description": "The Coworld the client shows; stamped by the bridge with the active one."},
+    "mode": {"$ref": "#/$defs/instruction"},
+    "command": {"$ref": "#/$defs/instruction"},
+    "league": {"type": "string", "maxLength": 120},
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "maxLength": 120},
+        "version_id": {"type": "string", "maxLength": 120}
+      }
+    },
+    "opening_goal": {"type": "string", "maxLength": 2000},
+    "parent_session": {"type": "string", "maxLength": 120},
+    "agent_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "maxLength": 80},
+        "focus": {"type": "string", "maxLength": 1000},
+        "preferences": {"type": "object"}
+      }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "maxLength": 120},
+        "label": {"type": "string", "maxLength": 200},
+        "description": {"type": "string", "maxLength": 1000}
+      }
+    },
+    "selection": {"$ref": "#/$defs/reference"},
+    "references": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/reference"}},
+    "on_screen": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 200}},
+    "replay_moment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "episode": {"type": "string", "maxLength": 120},
+        "step": {"type": "integer"},
+        "seat": {"type": "integer"},
+        "note": {"type": "string", "maxLength": 1000}
+      }
+    },
+    "voice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transcript_excerpt": {"type": "string", "maxLength": 4000},
+        "answer_for_speech": {"type": "boolean"}
+      }
+    },
+    "client_data": {"type": "object", "description": "Client-specific data, passed through with a label and never interpreted; at most 8 KB as JSON."}
+  },
+  "$defs": {
+    "instruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "maxLength": 40},
+        "instruction": {"type": "string", "maxLength": 1000}
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "maxLength": 40},
+        "ref": {"type": "string", "maxLength": 500},
+        "title": {"type": "string", "maxLength": 200},
+        "url": {"type": "string", "maxLength": 2000},
+        "excerpt": {"type": "string", "maxLength": 2000}
+      }
+    }
+  },
+  "limits": {
+    "total_bytes": 16384,
+    "client_data_bytes": 8192
+  }
+}

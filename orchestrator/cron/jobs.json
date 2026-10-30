@@ -1,15 +1,15 @@
 {
   "jobs": [
     {
-      "id": "supervisor",
-      "name": "supervisor",
-      "prompt": "Wake the existing workspace coordinator through its native run endpoint.",
+      "id": "watcher",
+      "name": "watcher",
+      "prompt": "",
       "skills": [],
       "skill": null,
       "model": null,
       "provider": null,
       "base_url": null,
-      "script": "supervisor_gate.py",
+      "script": "watcher.py",
       "no_agent": true,
       "monitor_script": null,
       "monitor_url": null,
@@ -28,7 +28,7 @@
       "enabled": false,
       "state": "paused",
       "paused_at": null,
-      "paused_reason": "Installed from a profile distribution; review it, then resume.",
+      "paused_reason": "Installed from a profile distribution; prepare.py enables it.",
       "created_at": null,
       "next_run_at": null,
       "last_run_at": null,
@@ -39,7 +39,7 @@
       "failure_streak": 0,
       "deliver": "local",
       "origin": null,
-      "enabled_toolsets": null,
+      "enabled_toolsets": [],
       "workdir": null
     }
   ]

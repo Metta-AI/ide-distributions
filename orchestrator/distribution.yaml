@@ -1,44 +1,52 @@
 name: orchestrator
-version: 0.1.0
-description: Conversation-led research and platform discovery, coordinating native Hermes Kanban workers.
+version: 1.0.0
+description: >-
+  The research lead of the Softmax IDE. Speaks to the user, manages Goals and Tasks, makes and
+  submits policy Versions, and runs the watcher that keeps the Researchers working.
 hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
     required: true
-    description: OpenRouter API key for the orchestrator model.
+    description: OpenRouter API key for the model.
   - name: OPENROUTER_MODEL
     required: false
     default: moonshotai/kimi-k3
-    description: Model ID on OpenRouter.
+    description: Model id on OpenRouter.
+  - name: SOFTMAX_PLAYER_ID
+    required: true
+    description: The Player this workspace acts as (selected when the workspace was created).
   - name: SOFTMAX_PLAYER_CREDENTIAL
     required: true
-    description: Bare player agent token or player-session JSON containing token and expires_at.
+    description: >-
+      That Player's credential: a bare cga_ agent token, or a player session as JSON
+      {"token": "ply_...", "expires_at": "<ISO 8601>"}.
+  - name: SOFTMAX_USER_CREDENTIAL
+    required: false
+    description: >-
+      The user's User identity token (Orchestrator only). Without it, User-identity reads and
+      writes are unavailable and the briefing says so.
   - name: COGAMES_API_URL
     required: false
     default: https://softmax.com/api
     description: Softmax API server.
-  - name: RESEARCH_PLAYER_ID
-    required: true
-    description: Credential player for authorized research writes; not the conversation subject.
-  - name: RESEARCH_WORKSPACE
+  - name: IDE_WORKSPACE
     required: true
     description: >-
-      Absolute path to this profile's neutral canonical clone
-      (other games: $HERMES_HOME/workspace-<game>).
-  - name: RESEARCH_CANONICAL
-    required: true
+      Absolute path of the one workspace root of this sandbox, shared by every profile. It holds
+      the workspace environment, the workspace store and one folder per Coworld.
+  - name: IDE_WORKSPACE_ENV
+    required: false
     description: >-
-      Absolute path to the neutral shared bare canonical repository; selected games'
-      repositories sit beside it as canonical-<game>.git.
+      A prebuilt workspace environment (hosting). When unset, prepare.py builds it under
+      $IDE_WORKSPACE/tools/venv from the release's uv.lock.
+  - name: IDE_RESEARCHER_PROFILES
+    required: false
+    default: researcher
+    description: Comma-separated Hermes profile names that run Researcher Sessions.
+  - name: IDE_PLATFORM
+    required: false
+    default: real
+    description: '"real", or "fake" to run against the test double of the Softmax platform.'
   - name: TMPDIR
     required: false
-    description: >-
-      Scratch directory for builds and episodes. Set by Softmax hosting (/opt/data/tmp, because
-      the sandbox /tmp is a small tmpfs); a manual install normally leaves it to the OS.
-  - name: RESEARCH_CREDIT_BACKOFF_MINUTES
-    required: false
-    default: "30"
-    description: Minutes before the first relaunch of an experiment refused for credits (doubles per refusal, at most 8 hours).
-  - name: RESEARCH_SOFTMAX
-    required: false
-    description: Set to "fake" in tests to use the fake Softmax tool instead of the real one.
+    description: Scratch directory for builds; hosting sets it to a disk path because /tmp is small.

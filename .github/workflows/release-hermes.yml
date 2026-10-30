@@ -4,12 +4,16 @@ on:
   push:
     branches: [main]
     paths:
+      - "core/**"
       - "orchestrator/**"
       - "researcher/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/release-hermes.yml"
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  actions: read
 
 jobs:
   dispatch:
@@ -17,6 +21,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Refuse to release after a failed nightly platform check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow platform-check.yml \
+            --status completed --limit 1 --json conclusion --jq '.[0].conclusion // "none"')
+          echo "last nightly platform check: $conclusion"
+          if [ "$conclusion" = "failure" ]; then
+            echo "::error::the last nightly platform check failed; fix the route the tools use (or rerun the check) before releasing"
+            exit 1
+          fi
       - name: Trigger the independent image release
         env:
           GH_TOKEN: ${{ secrets.METTA_RELEASE_DISPATCH_TOKEN }}

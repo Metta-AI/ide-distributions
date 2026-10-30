@@ -1,0 +1,22 @@
+# Anti-stall wake
+
+Daily check at the configured hour (event `{event_kind}`, subject `{subject}`, Coworld
+`{coworld_id}`). Nothing is known to be wrong; decide whether anything should be moving and is
+not. This is a background Session: never write into a user conversation; `ui.notify` is the
+only channel to the user.
+
+Payload:
+
+```json
+{payload_json}
+```
+
+1. Read your briefing and `workspace.doctor`: the active Goals and where each stands, open and
+   in-progress Tasks, waits and how long they have lasted, broken capabilities and their
+   maintenance Tasks, the champion and the recent Versions, unanswered `ui.ask` questions.
+2. For a Goal with no open Task and nothing waiting on the user, create or approve a Task with
+   `task.create` or `task.approve`. For a Task waiting longer than its wait should take,
+   `task.read` why and answer it (`task.answer`), message it (`task.message`) or abandon it. For
+   a repair that keeps failing, say so.
+3. If nothing needs to move, end the run without a notice. Otherwise `ui.notify` one short
+   summary of what you started or what needs the user, with record references.

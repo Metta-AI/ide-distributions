@@ -1,0 +1,32 @@
+# The workspace environment: the one Python environment in which the profiles' tools, the
+# `research` CLI and the watcher run (design §B.15). prepare.py builds it from this project
+# and uv.lock with `uv sync --frozen --no-dev --project <checkout>`. Development uses the same
+# environment plus the dev group.
+[project]
+name = "ide-workspace-environment"
+version = "0.1.0"
+description = "The Python environment the IDE profiles' tools, CLI and watcher run in"
+requires-python = ">=3.12,<3.13"
+dependencies = ["research-core[platform]"]
+
+[tool.uv.sources]
+research-core = { path = "core", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["core/tests"]
+markers = ["hermes: needs a real Hermes install (HERMES_BIN); skipped by default"]
+addopts = "-m 'not hermes'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["play"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["research_core"]

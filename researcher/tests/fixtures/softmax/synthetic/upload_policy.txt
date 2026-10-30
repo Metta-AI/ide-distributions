@@ -1,5 +1,0 @@
-Policy name: ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA
-Upload complete: ar-E-01K6Z3V8QXAAAAAAAAAAAAAAAA:v1
-Next: run hosted episodes against live opponents with an Experience Request:
-  uv run coworld xp-request --help
-Docs: https://softmax.com/docs/coworld/build-a-player/upload-and-evaluate

@@ -1,0 +1,542 @@
+"""The ``experiment`` tool (design B.8, C.2): a comparison of Versions that ends in a verdict.
+
+Every action is available to both roles. The store module does the record work (validation,
+the design lock at ``start``, the lease check when the Experiment has a Task); this module maps
+arguments to it and adds the one computation a tool needs numeric libraries for: the computed
+verdict at ``close``. That is why the tool runs in the workspace environment (A3.1) even though
+most of its actions are store-only.
+
+``close`` has two paths:
+
+- **Explicit**: ``verdict`` is given with ``measurements`` and ``interpretation``; the reason
+  codes are ``reason_codes`` or ``["explicit:<reason>"]``. This records a judgement (usually the
+  Orchestrator's) when the decision rule cannot be applied as pre-registered.
+- **Computed** (no ``verdict``): the Experiment's methods become an ``EvaluationDesign``
+  (the candidate is ``methods.candidate`` or, when that stayed empty at start, the one Version
+  built for the Experiment), the rows stored on its runs are paired baseline against candidate
+  by seed, and ``decision_rule.evaluate`` gives the verdict, the reason codes and one
+  measurement per metric. ``interpretation`` is optional here; a one-line summary is generated
+  when it is absent.
+
+**The results-row contract.** A tool that fetches evaluation results (``xp.status``) stores them
+on the run with ``update_run {results: {"rows": [...]}}``. Each row is an object with:
+
+- ``episode_id`` (string, unique within the Experiment),
+- ``game_version`` (string),
+- ``policy_version`` (string): the Version the run played, written as its record id
+  (``methods.baseline`` for a baseline arm, ``methods.candidate`` for a candidate arm, e.g.
+  ``"V-3"``); rows naming any other policy never pair,
+- ``seed`` (integer), ``seats`` (list of integers), ``opponents`` (list of strings),
+- ``metrics`` (object of metric name to number; every metric named in ``methods.metrics``),
+- ``status`` (``"completed"`` by default, or ``"failed"``) and ``reason`` (string, optional).
+
+Rows with ``status: failed``, a repeated ``episode_id``, another game version or a missing
+metric are dropped and counted in the result's ``evaluation.rows.dropped``. Several rows for one
+``(policy_version, game_version, seed, opponents)`` - per-seat rows from a mixin's ``evaluate``
+output, or several episodes on one seed - are averaged into one row whose seats are their
+union, so each seed makes exactly one baseline/candidate pair. The ``evaluation`` design's
+seats, opponents and game version are read from the first row; its seeds are the runs' seeds
+and the rows' seeds together.
+
+numpy is imported only inside the bootstrap that ``evaluate`` calls, so importing this module
+stays light.
+"""
+
+from __future__ import annotations
+
+import statistics
+from collections import Counter
+from typing import Any
+
+from research_core.stats import decision_rule, ingest
+from research_core.stats.design import EvaluationDesign, MetricSpec
+from research_core.stats.ingest import EpisodeRow
+from research_core.store import experiments
+from research_core.tools import _args as a
+from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec, tool
+
+EXPERIMENT = a.string("The Experiment, such as X-5.")
+UPDATABLE = ("summary", "hypothesis", "methods", "tags", "related_claims", "related_experiments")
+NO_ROWS = "no evaluation rows recorded yet; run xp.status first or close with an explicit verdict"
+ROW_LIST_KEYS = ("seats", "opponents")
+
+
+def handle(call: ToolCall) -> dict:
+    store, actor = call.ctx.store, call.ctx.actor
+    if call.action == "create":
+        goal, task = call.get("goal"), call.get("task")
+        record = experiments.create(
+            store,
+            actor,
+            summary=call.get("summary"),
+            goal_id=a.record_number(goal, "goal", "goal") if goal is not None else None,
+            task_id=a.record_number(task, "task", "task") if task is not None else None,
+            tags=call.get("tags") or [],
+            hypothesis=call.get("hypothesis"),
+            methods=call.get("methods"),
+            related_claims=call.get("related_claims") or [],
+            related_experiments=call.get("related_experiments") or [],
+        )
+        return {"record": record}
+    if call.action == "search":
+        limit = call.get("limit")
+        records = experiments.search(store, call.get("query"), limit=limit or 20)
+        return {"records": records}
+    if call.action == "update_run":
+        record = experiments.update_run(
+            store,
+            actor,
+            call.get("run"),
+            state=call.get("state"),
+            episodes_completed=call.get("episodes_completed"),
+            results=call.get("results"),
+            validity=call.get("validity"),
+        )
+        return {"record": record}
+    experiment_id = a.record_number(call.get("experiment"), "experiment", "experiment")
+    if call.action == "read":
+        return {"record": experiments.read(store, experiment_id, section=call.get("section"))}
+    if call.action == "update":
+        fields = {name: call.get(name) for name in UPDATABLE if call.get(name) is not None}
+        return {"record": experiments.update(store, actor, experiment_id, **fields)}
+    if call.action == "start":
+        return {"record": experiments.start(store, actor, experiment_id)}
+    if call.action == "add_run":
+        record = experiments.add_run(
+            store,
+            actor,
+            experiment_id,
+            kind=call.get("kind"),
+            platform_request_id=call.get("platform_request_id"),
+            arm=call.get("arm"),
+            seed=call.get("seed"),
+            episodes_total=call.get("episodes_total"),
+        )
+        return {"record": record}
+    if call.action == "close":
+        if call.get("verdict") is not None:
+            return explicit_close(call, experiment_id)
+        return computed_close(call, experiment_id)
+    if call.action == "abandon":
+        return {
+            "record": experiments.abandon(store, actor, experiment_id, reason=call.get("reason"))
+        }
+    raise AssertionError(call.action)
+
+
+# --- close: the explicit path -----------------------------------------------------------------
+
+
+def explicit_close(call: ToolCall, experiment_id: int) -> dict:
+    problems = []
+    if not call.get("measurements"):
+        problems.append("measurements are required with an explicit verdict")
+    if not call.get("interpretation"):
+        problems.append("interpretation is required with an explicit verdict")
+    reason_codes, reason = call.get("reason_codes"), call.get("reason")
+    if not reason_codes and not reason:
+        problems.append("reason or reason_codes is required with an explicit verdict")
+    if problems:
+        raise ToolError(problems)
+    record = experiments.close(
+        call.ctx.store,
+        call.ctx.actor,
+        experiment_id,
+        verdict=call.get("verdict"),
+        measurements=call.get("measurements"),
+        interpretation=call.get("interpretation"),
+        reason_codes=reason_codes or [f"explicit:{reason}"],
+    )
+    return {"record": record}
+
+
+# --- close: the computed path -----------------------------------------------------------------
+
+
+def computed_close(call: ToolCall, experiment_id: int) -> dict:
+    store, actor = call.ctx.store, call.ctx.actor
+    record = experiments.read(store, experiment_id)
+    if record["status"] != "running":
+        raise ToolError(
+            f"{record['id']} is {record['status']}; an Experiment closes only while it is running"
+        )
+    candidate = candidate_version(record)
+    rows = stored_rows(record["runs"])
+    if not rows:
+        raise ToolError(NO_ROWS)
+    design = design_from(record["methods"], candidate, record["runs"], rows)
+    kept, report = ingest.ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
+    pairs = ingest.pair(one_row_per_seed(kept), design)
+    if not pairs:
+        raise ToolError(
+            f"{record['id']} has {len(kept)} usable rows but no baseline/candidate pair: rows pair"
+            f" when {design.baseline_version} and {design.candidate_version} rows share a seed,"
+            " seats, opponents and game version; close with an explicit verdict if the rows"
+            " cannot be repaired",
+            rows_by_policy=dict(Counter(row.policy_version for row in kept)),
+            dropped=dropped(report),
+        )
+    verdict = decision_rule.evaluate(design, pairs)
+    measurements = measurements_from(design, pairs, verdict)
+    interpretation = call.get("interpretation") or summarise(verdict, measurements, len(pairs))
+    closed = experiments.close(
+        store,
+        actor,
+        experiment_id,
+        verdict=verdict.verdict,
+        measurements=measurements,
+        interpretation=interpretation,
+        reason_codes=verdict.reason_codes,
+    )
+    return {
+        "record": closed,
+        "evaluation": {
+            "pairs": len(pairs),
+            "rows": {"kept": report.kept, "dropped": dropped(report)},
+            "reason_codes": verdict.reason_codes,
+        },
+    }
+
+
+def stored_rows(runs: list[dict]) -> list[EpisodeRow]:
+    """Every row under ``results.rows`` of every run; every malformed row is named at once."""
+    rows: list[EpisodeRow] = []
+    problems: list[str] = []
+    for run in runs:
+        stored = (run.get("results") or {}).get("rows")
+        if stored is None:
+            continue
+        if not isinstance(stored, list):
+            problems.append(f"run {run['id']} results.rows must be a list")
+            continue
+        for index, data in enumerate(stored):
+            try:
+                rows.append(row_from_dict(data))
+            except ValueError as error:
+                problems.append(f"run {run['id']} results.rows[{index}] {error}")
+    if problems:
+        raise ToolError(problems)
+    return rows
+
+
+def row_from_dict(data: Any) -> EpisodeRow:
+    """An ``EpisodeRow`` from a stored row dict (the contract in the module docstring)."""
+    if not isinstance(data, dict):
+        raise ValueError("must be an object")
+    problems = []
+    for key in ("episode_id", "game_version", "policy_version"):
+        if not isinstance(data.get(key), str) or not data.get(key):
+            problems.append(f"{key} must be a non-empty string")
+    if not _is_int(data.get("seed")):
+        problems.append("seed must be an integer")
+    seats = data.get("seats", [])
+    if not isinstance(seats, list) or not all(_is_int(seat) for seat in seats):
+        problems.append("seats must be a list of integers")
+    opponents = data.get("opponents", [])
+    if not isinstance(opponents, list) or not all(isinstance(o, str) for o in opponents):
+        problems.append("opponents must be a list of strings")
+    metrics = data.get("metrics", {})
+    if not isinstance(metrics, dict) or not all(
+        isinstance(name, str) and _is_number(value) for name, value in metrics.items()
+    ):
+        problems.append("metrics must be an object of metric name to number")
+    status = data.get("status", "completed")
+    if status not in ("completed", "failed"):
+        problems.append("status must be completed or failed")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return EpisodeRow(
+        episode_id=data["episode_id"],
+        game_version=data["game_version"],
+        policy_version=data["policy_version"],
+        seed=data["seed"],
+        seats=tuple(seats),
+        opponents=tuple(opponents),
+        metrics={name: float(value) for name, value in metrics.items()},
+        status=status,
+        reason=data.get("reason"),
+    )
+
+
+def candidate_version(record: dict) -> str:
+    """``methods.candidate``, or the one Version built for the Experiment when it is empty.
+
+    The store lets the candidate stay empty at ``start`` (it is built during the Task) and
+    locks the methods from then on, so the Version built for the Experiment
+    (``version.create`` with this ``experiment_id``; ``versions_tested`` role ``built``) is the
+    candidate.
+    """
+    if record["methods"].get("candidate"):
+        return record["methods"]["candidate"]
+    built = [v["id"] for v in record["versions_tested"] if v["role"] == "built"]
+    if len(built) == 1:
+        return built[0]
+    raise ToolError(
+        f"{record['id']} has no candidate: methods.candidate is empty and {len(built)} Versions"
+        f" were built for it ({', '.join(built) or 'none'}); the computed verdict needs one"
+        " candidate, so close with an explicit verdict"
+    )
+
+
+def design_from(
+    methods: dict, candidate: str, runs: list[dict], rows: list[EpisodeRow]
+) -> EvaluationDesign:
+    """The locked methods as an ``EvaluationDesign``.
+
+    Built directly rather than through ``from_dict`` because ``validate`` refuses fewer seeds
+    than ``n_min``, and at close time that case is exactly what the decision rule must report
+    as ``n_short`` rather than refuse. ``k`` is not used by the decision rule (``power`` uses
+    it) and the store leaves it optional, so a placeholder stands in when it is absent.
+    """
+    first = rows[0]
+    seeds = {run["seed"] for run in runs if run.get("seed") is not None}
+    seeds |= {row.seed for row in rows}
+    rule = methods.get("decision_rule") or {}
+    return EvaluationDesign(
+        game_version=methods.get("game_version") or first.game_version,
+        baseline_version=methods["baseline"],
+        candidate_version=candidate,
+        seats=first.seats,
+        opponents=first.opponents,
+        seeds=tuple(sorted(seeds)),
+        metrics=tuple(
+            MetricSpec(
+                name=m["name"],
+                direction=m["direction"],
+                role=m["role"],
+                min_effect=m.get("min_effect"),
+                tolerance=m.get("tolerance"),
+            )
+            for m in methods["metrics"]
+        ),
+        k=rule.get("k") or 1.0,
+        delta={},
+        n_min=rule["n_min"],
+    )
+
+
+def one_row_per_seed(rows: list[EpisodeRow]) -> list[EpisodeRow]:
+    """Average several rows of one policy, game version, seed and opponents into one row.
+
+    Per-seat rows (one per seat our policy sat in) and repeated episodes on one seed would
+    otherwise pair as several pairs for one seed, or not at all when the seats differ.
+    """
+    groups: dict[tuple, list[EpisodeRow]] = {}
+    for row in sorted(rows, key=lambda r: r.episode_id):
+        key = (row.policy_version, row.game_version, row.seed, row.opponents)
+        groups.setdefault(key, []).append(row)
+    merged = []
+    for group in groups.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        first = group[0]
+        names = set(first.metrics)
+        for row in group[1:]:
+            names &= set(row.metrics)
+        merged.append(
+            EpisodeRow(
+                episode_id=first.episode_id,
+                game_version=first.game_version,
+                policy_version=first.policy_version,
+                seed=first.seed,
+                seats=tuple(sorted({seat for row in group for seat in row.seats})),
+                opponents=first.opponents,
+                metrics={
+                    name: statistics.fmean(row.metrics[name] for row in group)
+                    for name in sorted(names)
+                },
+                status="completed",
+            )
+        )
+    return merged
+
+
+def measurements_from(
+    design: EvaluationDesign,
+    pairs: list[tuple[EpisodeRow, EpisodeRow]],
+    verdict: decision_rule.Verdict,
+) -> list[dict]:
+    """One measurement per metric: the store's ``{metric, baseline, candidate, n, effect}`` plus
+    the decision rule's ``mean_signed_diff``, ``ci``, ``threshold`` and ``passed``."""
+    measurements = []
+    for spec in design.metrics:
+        entry = verdict.per_metric[spec.name][spec.role]
+        measurements.append(
+            {
+                "metric": spec.name,
+                "baseline": statistics.fmean(b.metrics[spec.name] for b, _ in pairs),
+                "candidate": statistics.fmean(c.metrics[spec.name] for _, c in pairs),
+                "n": len(pairs),
+                "effect": entry["mean_signed_diff"],
+                **entry,
+            }
+        )
+    return measurements
+
+
+def summarise(verdict: decision_rule.Verdict, measurements: list[dict], pairs: int) -> str:
+    """A one-line interpretation when the caller gives none."""
+    effects = ", ".join(f"{m['metric']} {m['effect']:+.4g}" for m in measurements)
+    line = f"{verdict.verdict} by the decision rule over {pairs} pairs: {effects}"
+    if verdict.reason_codes:
+        line += f" ({', '.join(verdict.reason_codes)})"
+    return line
+
+
+def dropped(report: ingest.IngestReport) -> dict:
+    return {
+        "duplicates": report.duplicates,
+        "failed": report.failed,
+        "wrong_version": report.wrong_version,
+        "missing_metrics": report.missing_metrics,
+    }
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+# --- the spec ---------------------------------------------------------------------------------
+
+SPEC = tool(
+    ToolSpec(
+        name="experiment",
+        description=(
+            "Experiments: a comparison of Versions whose hypothesis and methods lock at start "
+            "and end in a verdict. Runs are recorded as the platform accepts them; close "
+            "applies the pre-registered decision rule to the stored rows, or records an "
+            "explicit verdict with its reason. Returns the updated record."
+        ),
+        handler=handle,
+        executor="workspace",
+        actions=(
+            ActionSpec(
+                "create",
+                "Propose an Experiment; the design may still change until start.",
+                {
+                    "summary": a.string("What is being tested, in at most 40 words."),
+                    "goal": a.string("The Goal it serves, such as G-3."),
+                    "task": a.string("The Task that runs it, such as T-12."),
+                    "tags": a.strings("Keywords from the shared vocabulary; the lever is a tag."),
+                    "hypothesis": a.obj("{statement, if_true, if_false, motivation}."),
+                    "methods": a.obj(
+                        "{baseline, candidate, procedure, metrics, decision_rule}: Versions as "
+                        "V-<n>; metrics [{name, direction up|down, role primary|guardrail|"
+                        "performance, min_effect?, tolerance?}]; decision_rule {text, n_min, k?}."
+                    ),
+                    "related_claims": a.strings("Claims it builds on, such as C-12."),
+                    "related_experiments": a.strings("Experiments it follows, such as X-4."),
+                },
+                ("summary", "hypothesis", "methods"),
+            ),
+            ActionSpec(
+                "read",
+                "Read an Experiment with its runs, or one section of it.",
+                {
+                    "experiment": EXPERIMENT,
+                    "section": a.string(
+                        "hypothesis, methods or results (the results section carries the runs).",
+                        enum=list(experiments.SECTIONS),
+                    ),
+                },
+                ("experiment",),
+            ),
+            ActionSpec(
+                "search",
+                "Full-text search over summaries, designs, results and tags.",
+                {
+                    "query": a.string("Words to look for; all must match."),
+                    "limit": a.integer("At most this many results (default 20)."),
+                },
+                ("query",),
+            ),
+            ActionSpec(
+                "update",
+                "Change a proposed Experiment's design; a section given replaces the stored one.",
+                {
+                    "experiment": EXPERIMENT,
+                    "summary": a.string("New summary."),
+                    "hypothesis": a.obj("New hypothesis (the whole section)."),
+                    "methods": a.obj("New methods (the whole section)."),
+                    "tags": a.strings("New tags (replaces the list)."),
+                    "related_claims": a.strings("New related Claims (replaces the list)."),
+                    "related_experiments": a.strings(
+                        "New related Experiments (replaces the list)."
+                    ),
+                },
+                ("experiment",),
+            ),
+            ActionSpec(
+                "start",
+                "Lock the design and run; refused while any part is missing, naming each.",
+                {"experiment": EXPERIMENT},
+                ("experiment",),
+            ),
+            ActionSpec(
+                "add_run",
+                "Record an evaluation run the moment the platform accepts it.",
+                {
+                    "experiment": EXPERIMENT,
+                    "kind": a.string("The run kind, such as xp."),
+                    "platform_request_id": a.string("The platform's request id."),
+                    "arm": a.string("baseline or candidate."),
+                    "seed": a.integer("The game seed the run plays."),
+                    "episodes_total": a.integer("Episodes the request will play."),
+                },
+                ("experiment", "kind", "platform_request_id", "arm"),
+            ),
+            ActionSpec(
+                "update_run",
+                "Progress on a run: platform state, episodes done, result rows, validity.",
+                {
+                    "run": a.integer("The run id from add_run."),
+                    "state": a.string("The platform's state of the request."),
+                    "episodes_completed": a.integer("Episodes finished so far."),
+                    "results": a.obj(
+                        "The run's results; evaluation rows go under results.rows (xp.status "
+                        "writes them)."
+                    ),
+                    "validity": a.string("valid, or 'invalid: <reason>'."),
+                },
+                ("run",),
+            ),
+            ActionSpec(
+                "close",
+                "Record the verdict: computed from the stored rows by the decision rule, or "
+                "explicit when verdict is given.",
+                {
+                    "experiment": EXPERIMENT,
+                    "verdict": a.string(
+                        "An explicit verdict; omit to apply the decision rule to the rows.",
+                        enum=list(experiments.VERDICTS),
+                    ),
+                    "measurements": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": (
+                            "With an explicit verdict: [{metric, baseline, candidate, n, "
+                            "effect}] for every primary metric."
+                        ),
+                    },
+                    "interpretation": a.string(
+                        "What the result means; required with an explicit verdict."
+                    ),
+                    "reason_codes": a.strings("The decision rule's codes, when known."),
+                    "reason": a.string("Why the verdict is given by hand (explicit path)."),
+                },
+                ("experiment",),
+            ),
+            ActionSpec(
+                "abandon",
+                "Stop before a verdict; the record stays and a replacement can cite it.",
+                {"experiment": EXPERIMENT, "reason": a.string("Why it is abandoned.")},
+                ("experiment", "reason"),
+            ),
+        ),
+    )
+)
