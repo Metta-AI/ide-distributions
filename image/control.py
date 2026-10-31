@@ -15,7 +15,7 @@ from application import response as application_response
 from inference import Availability
 from pydantic import BaseModel, ConfigDict
 from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 log = logging.getLogger(__name__)
 
@@ -172,8 +172,9 @@ async def serve(
 
         while True:
             (result,) = await asyncio.gather(session(), return_exceptions=True)
-            if isinstance(result, BaseException) and not isinstance(
-                result, ConnectionClosed | OSError | httpx.TransportError
-            ):
+            temporary = isinstance(result, ConnectionClosed | OSError | httpx.TransportError) or (
+                isinstance(result, InvalidStatus) and result.response.status_code in {502, 503, 504}
+            )
+            if isinstance(result, BaseException) and not temporary:
                 raise result
             await asyncio.sleep(1)
