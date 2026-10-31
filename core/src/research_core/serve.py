@@ -150,6 +150,8 @@ class SeamServer:
         self._clients: dict[str, dict[str, Any]] = {}
         self._deliver_lock = threading.Lock()
         self.stopping = threading.Event()
+        # Initialize the schema before the dispatcher and HTTP handlers can open it concurrently.
+        Store.open(self.ws.store_path, kind="workspace").close()
         self._http = _HttpServer((host, port), self)
 
     @property

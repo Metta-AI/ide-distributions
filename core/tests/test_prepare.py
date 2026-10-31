@@ -99,7 +99,11 @@ def homes(tmp_path):
 
 def run_prepare(fake, env, role="orchestrator", activate=False):
     prepare.prepare(
-        source=REPO / role, hermes="hermes", activate_watcher=activate, env=env, run=fake.run
+        source=REPO / role,
+        cli=prepare.HermesCli("hermes", Path(env["HERMES_HOME"]), env, fake.run),
+        activate_watcher=activate,
+        env=env,
+        run=fake.run,
     )
 
 
@@ -135,13 +139,21 @@ def test_prepare_rejects_unknown_role(tmp_path, homes):
     source = tmp_path / "checkout" / "supervisor"
     source.mkdir(parents=True)
     with pytest.raises(prepare.PrepareError, match="supervisor"):
-        prepare.prepare(source=source, hermes="hermes", activate_watcher=False, env=env)
+        prepare.prepare(
+            source=source,
+            cli=prepare.HermesCli("hermes", profile, env, FakeHermes().run),
+            activate_watcher=False,
+            env=env,
+        )
 
 
 def test_prepare_requires_hermes_home():
     with pytest.raises(prepare.PrepareError, match="HERMES_HOME"):
         prepare.prepare(
-            source=REPO / "orchestrator", hermes="hermes", activate_watcher=False, env={}
+            source=REPO / "orchestrator",
+            cli=prepare.HermesCli("hermes", Path("/unused"), {}, FakeHermes().run),
+            activate_watcher=False,
+            env={},
         )
 
 
@@ -253,7 +265,7 @@ def test_prepare_reports_a_failed_hermes_command_with_its_output(homes):
     with pytest.raises(prepare.PrepareError) as info:
         prepare.prepare(
             source=REPO / "orchestrator",
-            hermes="hermes",
+            cli=prepare.HermesCli("hermes", profile, env, failing_run),
             activate_watcher=False,
             env=env,
             run=failing_run,
@@ -477,7 +489,13 @@ def _prepared(homes, fake, role="orchestrator", **extra_env):
     profile, env = homes
     env = {**env, **extra_env}
     (REPO / role / "cron").exists()
-    prepare.prepare(REPO / role, "hermes", False, env=env, run=fake.run)
+    prepare.prepare(
+        REPO / role,
+        prepare.HermesCli("hermes", profile, env, fake.run),
+        False,
+        env=env,
+        run=fake.run,
+    )
     return profile, env
 
 
@@ -495,7 +513,13 @@ def test_prepare_points_every_profile_at_the_active_coworld(homes):
     coworlds.activate(store, harness, "cow_fake")
     store.close()
     fake = FakeHermes()
-    prepare.prepare(REPO / "orchestrator", "hermes", False, env=env, run=fake.run)
+    prepare.prepare(
+        REPO / "orchestrator",
+        prepare.HermesCli("hermes", profile, env, fake.run),
+        False,
+        env=env,
+        run=fake.run,
+    )
     code = str(ws.coworld("cow_fake").code)
     assert fake.config["skills.external_dirs"][-1] == str(ws.coworld("cow_fake").mixin / "skills")
     assert fake.config["skills.trusted_project_dirs"] == [code]
@@ -536,7 +560,12 @@ def test_prepare_check_mode_plans_without_writing(homes, capsys):
     profile, env = homes
     fake = FakeHermes()
     summary = prepare.prepare(
-        REPO / "orchestrator", "hermes", True, env=env, run=fake.run, check=True
+        REPO / "orchestrator",
+        prepare.HermesCli("hermes", profile, env, fake.run),
+        True,
+        env=env,
+        run=fake.run,
+        check=True,
     )
     assert summary["check"] is True
     assert any(a.startswith("config: set approvals.mode") for a in summary["planned"])

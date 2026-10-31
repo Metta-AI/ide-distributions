@@ -1,9 +1,9 @@
 """Profile preparation, run by the host after ``hermes profile install`` or ``update``.
 
 ``<profile>/scripts/prepare.py`` loads this module from the release checkout and calls
-``prepare``. It runs under Hermes's own interpreter, so it is stdlib only (no PyYAML): the
-profile config is read and written through ``hermes config get|set|unset`` and the cron store
-is edited as JSON. In order, ``prepare``:
+``prepare``. It runs under Hermes's own interpreter, using its installed configuration API
+without starting a CLI process for each key. The cron store is edited as JSON.
+In order, ``prepare``:
 
 1. records the core source path in ``<profile>/local/core-path.txt`` for the plugin shim;
 2. creates the workspace directories and creates or migrates the workspace store and every
@@ -262,6 +262,47 @@ class HermesCli:
             raise _failed(result)
 
 
+class HermesConfig(HermesCli):
+    """Prepare one profile using the installed Hermes configuration API.
+
+    The preparation script already runs in Hermes's interpreter with HERMES_HOME selected.
+    Keep its validated setters and file-signature cache, without restarting the CLI per key.
+    Coworld switching still uses HermesCli because it runs in the workspace interpreter.
+    """
+
+    def __init__(self, hermes: str) -> None:
+        from hermes_cli import config
+
+        super().__init__(hermes, Path(os.environ["HERMES_HOME"]), os.environ, subprocess.run)
+        self.config = config
+
+    def config_get(self, key: str) -> Any:
+        value = self.config.load_config()
+        for part in key.split("."):
+            if not isinstance(value, dict) or part not in value:
+                return None
+            value = value[part]
+        return value
+
+    def config_set(self, key: str, value: Any) -> None:
+        if self.dry_run:
+            self.planned.append(f"config: set {key}")
+            return
+        self.config.set_config_value(key, value if isinstance(value, str) else json.dumps(value))
+
+    def config_unset(self, key: str) -> bool:
+        if self.dry_run:
+            self.planned.append(f"config: unset {key}")
+            return True
+        value = self.config.require_readable_config_before_write()
+        for part in key.split("."):
+            if not isinstance(value, dict) or part not in value:
+                return False
+            value = value[part]
+        self.config.unset_config_value(key)
+        return True
+
+
 def desired_profile_config(core_src: Path, role: str, active: layout.Coworld | None) -> dict:
     """The skill directories and working directory a profile needs for the active Coworld.
 
@@ -514,7 +555,7 @@ def ensure_workspace_env(
 
 def prepare(
     source: Path,
-    hermes: str,
+    cli: HermesCli,
     activate_watcher: bool,
     env: Mapping[str, str] = os.environ,
     run: Runner = subprocess.run,
@@ -524,8 +565,8 @@ def prepare(
     """Prepare the profile at ``$HERMES_HOME`` from the distribution folder ``source``.
 
     ``source`` is ``<checkout>/orchestrator`` or ``<checkout>/researcher``; its name is the
-    role. ``hermes`` is the Hermes executable. ``activate_watcher`` resumes the watcher job on
-    the first preparation only (the ``.softmax-prepared`` marker records that one happened).
+    role. ``cli`` configures the selected Hermes profile. ``activate_watcher`` resumes the watcher
+    job on the first preparation only (the ``.softmax-prepared`` marker records that one happened).
     """
     source = Path(source)
     role = source.name
@@ -550,7 +591,6 @@ def prepare(
         actions.extend(ensure_stores(ws))
     active = active_coworld(ws)
 
-    cli = HermesCli(hermes, profile, env, run)
     cli.dry_run = check
     actions.extend(apply_config(cli, role, core_src, active))
 
