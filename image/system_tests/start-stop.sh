@@ -34,6 +34,7 @@ for cycle in 1 2; do
     sleep 2
   done
   test "$ready" = true
+  docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-contract.py
   if [[ "$cycle" == 1 ]]; then
     docker exec "$name" sh -c 'printf %s "$1" > /workspace/.state-proof' sh "$sentinel"
   else
