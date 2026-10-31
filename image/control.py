@@ -7,7 +7,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from application import Operation
@@ -89,7 +89,7 @@ async def reply(
         ) as socket,
     ):
         frame = {
-            "connection_id": request_id,
+            "connection_id": str(uuid4()),
             "seq": 0,
             "status": result.status_code,
             "content_type": result.headers.get("content-type", "application/json").split(";", 1)[0],
@@ -135,23 +135,31 @@ async def serve(
         ) as gateway,
         asyncio.TaskGroup() as replies,
     ):
+        pending: set[UUID] = set()
 
-        async def answer(envelope: dict) -> None:
-            (result,) = await asyncio.gather(
-                reply(player, root, envelope, lifecycle, seam, gateway, inference),
-                return_exceptions=True,
-            )
-            if isinstance(result, ConnectionClosed | httpx.TransportError):
-                log.info("Reply transport unavailable: %s", type(result).__name__)
-            elif isinstance(result, BaseException):
-                raise result
+        async def answer(request_id: UUID, envelope: dict) -> None:
+            try:
+                (result,) = await asyncio.gather(
+                    reply(player, root, envelope, lifecycle, seam, gateway, inference),
+                    return_exceptions=True,
+                )
+                if isinstance(result, ConnectionClosed | httpx.TransportError):
+                    log.info("Reply transport unavailable: %s", type(result).__name__)
+                elif isinstance(result, BaseException):
+                    raise result
+            finally:
+                pending.remove(request_id)
 
         async def receive() -> None:
             async with player.stream("GET", root + "/connection", timeout=45) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if line:
-                        replies.create_task(answer(json.loads(line)))
+                        envelope = json.loads(line)
+                        request_id = UUID(envelope["id"])
+                        if request_id not in pending:
+                            pending.add(request_id)
+                            replies.create_task(answer(request_id, envelope))
 
         while True:
             result = (await asyncio.gather(receive(), return_exceptions=True))[0]
