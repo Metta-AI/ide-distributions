@@ -24,11 +24,11 @@ args = parser.parse_args()
 
 source = args.source.resolve()
 sys.path.insert(0, str(source.parent / "core" / "src"))
-from research_core.prepare import prepare  # noqa: E402
+from research_core.prepare import HermesConfig, prepare  # noqa: E402
 
 prepare(
     source=source,
-    hermes=args.hermes,
+    cli=HermesConfig(args.hermes),
     activate_watcher=args.activate_supervisor,
     check=args.check,
 )
