@@ -23,10 +23,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Refuse to release after a failed nightly platform check
+      - id: origin
+        name: Refuse to release after a failed nightly platform check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          echo "started_at=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)" >> "$GITHUB_OUTPUT"
           # Only nightly runs on main count: a run on a branch (for example a rejected
           # workflow file on a pull request) must not block a release.
           conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow platform-check.yml \
@@ -41,4 +43,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.METTA_RELEASE_DISPATCH_TOKEN }}
           SOURCE_REVISION: ${{ github.sha }}
-        run: gh workflow run deploy-hermes-agent.yml --repo Metta-AI/metta --ref main -f "source_revision=$SOURCE_REVISION"
+          RELEASE_STARTED_AT: ${{ steps.origin.outputs.started_at }}
+        run: >-
+          gh workflow run deploy-hermes-agent.yml --repo Metta-AI/metta --ref main
+          -f "source_revision=$SOURCE_REVISION" -f "release_started_at=$RELEASE_STARTED_AT"

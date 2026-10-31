@@ -4,7 +4,11 @@ import asyncio
 import json
 import os
 import secrets
+import time
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
+from uuid import uuid4
 
 import httpx
 from control import serve
@@ -36,9 +40,43 @@ async def command(*args: str, env: dict[str, str]) -> None:
         raise RuntimeError(f"{args[0]} exited {code}")
 
 
+class StartupTiming(BaseModel):
+    event: Literal["workspace_startup"] = "workspace_startup"
+    outcome: Literal["started", "passed"]
+    workspace_id: str
+    boot_id: str
+    phase: str
+    elapsed_seconds: float
+    timestamp: datetime
+    role: str | None = None
+
+
 async def main() -> None:
+    started = time.monotonic()
+    boot_id = uuid4().hex
     inference = Availability()
     bootstrap = Bootstrap.model_validate_json(Path("/run/workspace/bootstrap.json").read_text())
+
+    def report(
+        phase: str,
+        since: float,
+        *,
+        role: str | None = None,
+        outcome: Literal["started", "passed"] = "passed",
+    ) -> None:
+        print(
+            StartupTiming(
+                workspace_id=bootstrap.workspace_id,
+                boot_id=boot_id,
+                phase=phase,
+                outcome=outcome,
+                elapsed_seconds=round(time.monotonic() - since, 3),
+                timestamp=datetime.now(UTC),
+                role=role,
+            ).model_dump_json(exclude_none=True),
+            flush=True,
+        )
+
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     lease_file = HOME / ".inference-lease"
     lease_file.unlink(missing_ok=True)
@@ -76,6 +114,8 @@ async def main() -> None:
     )
     host_dotenv.chmod(0o600)
     for role in PROFILES:
+        phase_started = time.monotonic()
+        report("profile_install", phase_started, role=role, outcome="started")
         home = HOME / "profiles" / role
         if home.exists():
             await command(HERMES, "profile", "update", role, "--yes", env=common)
@@ -90,6 +130,7 @@ async def main() -> None:
                 "--yes",
                 env=common,
             )
+        report("profile_install", phase_started, role=role)
         profile_env = {**common, "HERMES_HOME": str(home)}
         # The watcher reads the gateway key from its profile dotenv, not its cron environment.
         dotenv = home / ".env"
@@ -113,6 +154,8 @@ async def main() -> None:
             )
         )
         dotenv.chmod(0o600)
+        phase_started = time.monotonic()
+        report("profile_prepare", phase_started, role=role, outcome="started")
         await command(
             PYTHON,
             str(home / "scripts/prepare.py"),
@@ -123,7 +166,10 @@ async def main() -> None:
             "--activate-supervisor",
             env=profile_env,
         )
+        report("profile_prepare", phase_started, role=role)
     profile_env = {**common, "HERMES_HOME": str(HOME / "profiles/orchestrator")}
+    phase_started = time.monotonic()
+    report("gateway_ready", phase_started, outcome="started")
     gateway = await asyncio.create_subprocess_exec(HERMES, "gateway", "run", env=common)
     async with httpx.AsyncClient(
         base_url="http://127.0.0.1:8642", headers={"Authorization": f"Bearer {key}"}
@@ -138,7 +184,13 @@ async def main() -> None:
                 if isinstance(result, httpx.Response) and result.is_success:
                     break
                 await asyncio.sleep(1)
+        report("gateway_ready", phase_started)
+        phase_started = time.monotonic()
+        report("application_wake", phase_started, outcome="started")
         await command(RESEARCH, "workspace", "wake", env=profile_env)
+        report("application_wake", phase_started)
+        phase_started = time.monotonic()
+        report("application_ready", phase_started, outcome="started")
         seam = await asyncio.create_subprocess_exec(
             RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env
         )
@@ -151,7 +203,8 @@ async def main() -> None:
                     if isinstance(result, httpx.Response) and result.is_success:
                         break
                     await asyncio.sleep(1)
-        print("Distribution gateway and seam started", flush=True)
+        report("application_ready", phase_started)
+        report("startup_total", started)
         async with asyncio.TaskGroup() as group:
             group.create_task(
                 maintain_inference(
