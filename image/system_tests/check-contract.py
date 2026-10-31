@@ -9,9 +9,9 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from application import Operation, response  # noqa: E402
+from inference import Availability  # noqa: E402
 
 from contract import Request  # noqa: E402
-from inference import Availability  # noqa: E402
 
 
 async def main():
@@ -30,7 +30,7 @@ async def main():
         async with response(operation, seam, gateway, inference) as result:
             assert result.status_code == 200, await result.aread()
             session = result.json()["session_id"]
-        # The same input must recover its native receipt, including the second retained-volume cycle.
+        # Recover the native receipt, including the second retained-volume cycle.
         async with response(operation, seam, gateway, inference) as result:
             assert result.status_code == 200 and result.json()["session_id"] == session
         saved = Path("/workspace/.contract-session")
