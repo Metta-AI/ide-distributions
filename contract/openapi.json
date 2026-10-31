@@ -1,0 +1,771 @@
+{
+  "components": {
+    "schemas": {
+      "Approval": {
+        "additionalProperties": false,
+        "properties": {
+          "choice": {
+            "enum": [
+              "once",
+              "deny"
+            ],
+            "title": "Choice",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "request_id",
+          "choice"
+        ],
+        "title": "Approval",
+        "type": "object"
+      },
+      "ApproveCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Approval"
+          },
+          "name": {
+            "const": "run.approve",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "ApproveCommand",
+        "type": "object"
+      },
+      "Cancel": {
+        "additionalProperties": false,
+        "properties": {
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id"
+        ],
+        "title": "Cancel",
+        "type": "object"
+      },
+      "CancelCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Cancel"
+          },
+          "name": {
+            "const": "session.cancel",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "CancelCommand",
+        "type": "object"
+      },
+      "CancelReply": {
+        "additionalProperties": true,
+        "properties": {
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          },
+          "stop_requested": {
+            "title": "Stop Requested",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "op_id",
+          "stop_requested"
+        ],
+        "title": "CancelReply",
+        "type": "object"
+      },
+      "Client": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "title": "Client",
+        "type": "object"
+      },
+      "Events": {
+        "additionalProperties": false,
+        "properties": {
+          "last_seq": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Last Seq",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "Events",
+        "type": "object"
+      },
+      "EventsCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Events"
+          },
+          "name": {
+            "const": "run.events",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "EventsCommand",
+        "type": "object"
+      },
+      "Failure": {
+        "additionalProperties": true,
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "Failure",
+        "type": "object"
+      },
+      "GetCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "name": {
+            "const": "run.get",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "GetCommand",
+        "type": "object"
+      },
+      "JsonValue": {},
+      "Message": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Context",
+            "type": "object"
+          },
+          "message": {
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "message",
+          "context"
+        ],
+        "title": "Message",
+        "type": "object"
+      },
+      "MessageCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Message"
+          },
+          "name": {
+            "const": "session.message",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "MessageCommand",
+        "type": "object"
+      },
+      "MessageReply": {
+        "additionalProperties": true,
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "run_id"
+        ],
+        "title": "MessageReply",
+        "type": "object"
+      },
+      "Messages": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "Messages",
+        "type": "object"
+      },
+      "MessagesCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Messages"
+          },
+          "name": {
+            "const": "session.messages",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "MessagesCommand",
+        "type": "object"
+      },
+      "MessagesReply": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/NativeMessage"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "MessagesReply",
+        "type": "object"
+      },
+      "NativeMessage": {
+        "additionalProperties": true,
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Id"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content"
+        ],
+        "title": "NativeMessage",
+        "type": "object"
+      },
+      "OpenCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/OpenSession"
+          },
+          "name": {
+            "const": "session.open",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "OpenCommand",
+        "type": "object"
+      },
+      "OpenReply": {
+        "additionalProperties": true,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "OpenReply",
+        "type": "object"
+      },
+      "OpenSession": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Capabilities"
+          },
+          "client": {
+            "$ref": "#/components/schemas/Client"
+          },
+          "session_context": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Session Context"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "title": "OpenSession",
+        "type": "object"
+      },
+      "Reply": {
+        "additionalProperties": true,
+        "description": "Native replies may expose additional runtime fields; these are the guaranteed fields.",
+        "properties": {},
+        "title": "Reply",
+        "type": "object"
+      },
+      "Request": {
+        "discriminator": {
+          "mapping": {
+            "run.approve": "#/components/schemas/ApproveCommand",
+            "run.events": "#/components/schemas/EventsCommand",
+            "run.get": "#/components/schemas/GetCommand",
+            "run.stop": "#/components/schemas/StopCommand",
+            "session.cancel": "#/components/schemas/CancelCommand",
+            "session.message": "#/components/schemas/MessageCommand",
+            "session.messages": "#/components/schemas/MessagesCommand",
+            "session.open": "#/components/schemas/OpenCommand",
+            "workspace.snapshot": "#/components/schemas/SnapshotCommand"
+          },
+          "propertyName": "name"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SnapshotCommand"
+          },
+          {
+            "$ref": "#/components/schemas/OpenCommand"
+          },
+          {
+            "$ref": "#/components/schemas/MessageCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CancelCommand"
+          },
+          {
+            "$ref": "#/components/schemas/MessagesCommand"
+          },
+          {
+            "$ref": "#/components/schemas/GetCommand"
+          },
+          {
+            "$ref": "#/components/schemas/EventsCommand"
+          },
+          {
+            "$ref": "#/components/schemas/StopCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ApproveCommand"
+          }
+        ],
+        "title": "Request"
+      },
+      "Responses": {
+        "properties": {
+          "run.approve": {
+            "$ref": "#/components/schemas/Reply"
+          },
+          "run.get": {
+            "$ref": "#/components/schemas/RunReply"
+          },
+          "run.stop": {
+            "$ref": "#/components/schemas/Reply"
+          },
+          "session.cancel": {
+            "$ref": "#/components/schemas/CancelReply"
+          },
+          "session.message": {
+            "$ref": "#/components/schemas/MessageReply"
+          },
+          "session.messages": {
+            "$ref": "#/components/schemas/MessagesReply"
+          },
+          "session.open": {
+            "$ref": "#/components/schemas/OpenReply"
+          },
+          "workspace.snapshot": {
+            "$ref": "#/components/schemas/SnapshotReply"
+          }
+        },
+        "required": [
+          "workspace.snapshot",
+          "session.open",
+          "session.message",
+          "session.cancel",
+          "session.messages",
+          "run.get",
+          "run.stop",
+          "run.approve"
+        ],
+        "title": "Responses",
+        "type": "object"
+      },
+      "Run": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "Run",
+        "type": "object"
+      },
+      "RunEvent": {
+        "additionalProperties": true,
+        "properties": {
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Seq"
+          }
+        },
+        "required": [
+          "event",
+          "run_id"
+        ],
+        "title": "RunEvent",
+        "type": "object"
+      },
+      "RunReply": {
+        "additionalProperties": true,
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunReply",
+        "type": "object"
+      },
+      "Snapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "store": {
+            "enum": [
+              "workspace",
+              "coworld"
+            ],
+            "title": "Store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store"
+        ],
+        "title": "Snapshot",
+        "type": "object"
+      },
+      "SnapshotCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Snapshot"
+          },
+          "name": {
+            "const": "workspace.snapshot",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "SnapshotCommand",
+        "type": "object"
+      },
+      "SnapshotReply": {
+        "additionalProperties": true,
+        "properties": {
+          "records": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Records",
+            "type": "object"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "store": {
+            "enum": [
+              "workspace",
+              "coworld"
+            ],
+            "title": "Store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store",
+          "seq",
+          "records"
+        ],
+        "title": "SnapshotReply",
+        "type": "object"
+      },
+      "StopCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "name": {
+            "const": "run.stop",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "StopCommand",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "IDE agent application contract",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {}
+}

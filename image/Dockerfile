@@ -17,6 +17,7 @@ RUN uv sync --frozen --no-dev --project /opt/distribution \
 COPY orchestrator /opt/distribution/orchestrator
 COPY researcher /opt/distribution/researcher
 COPY image /opt/distribution/image
+COPY contract /opt/distribution/contract
 ENV HOME=/workspace/host \
     HERMES_HOME=/workspace/host \
     HERMES_REAL_HOME=/workspace/host \
