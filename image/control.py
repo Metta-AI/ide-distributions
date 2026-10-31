@@ -7,15 +7,15 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx
 from application import Operation
 from application import response as application_response
 from inference import Availability
 from pydantic import BaseModel, ConfigDict
-from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed
+from websockets.asyncio.client import ClientConnection, connect
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 log = logging.getLogger(__name__)
 
@@ -59,15 +59,15 @@ class Lifecycle:
 
 
 async def reply(
-    player: httpx.AsyncClient,
-    root: str,
+    socket: ClientConnection,
+    stream_id: str,
     envelope: dict,
     lifecycle: Lifecycle,
     seam: httpx.AsyncClient,
     gateway: httpx.AsyncClient,
     inference: Availability,
 ) -> None:
-    request_id = str(UUID(envelope["id"]))
+    """Send one request's frames on the shared reply websocket (Metta spec 0150)."""
 
     @asynccontextmanager
     async def response():
@@ -80,25 +80,18 @@ async def reply(
             ) as result:
                 yield result
 
-    url = player.build_request("GET", root + f"/replies/{request_id}").url
-    url = url.copy_with(scheme="wss" if url.scheme == "https" else "ws")
-    async with (
-        response() as result,
-        connect(
-            str(url), additional_headers={"Authorization": player.headers["Authorization"]}
-        ) as socket,
-    ):
+    async with response() as result:
         frame = {
-            "connection_id": str(uuid4()),
+            "request_id": str(UUID(envelope["id"])),
             "seq": 0,
+            "stream_id": stream_id,
             "status": result.status_code,
             "content_type": result.headers.get("content-type", "application/json").split(";", 1)[0],
             "data": "",
             "end": False,
         }
         await socket.send(json.dumps(frame))
-        if await socket.recv() != "accepted":
-            return
+        frame["stream_id"] = ""
         async for chunk in result.aiter_bytes():
             for offset in range(0, len(chunk), 65536):
                 frame.update(
@@ -106,11 +99,8 @@ async def reply(
                     data=base64.b64encode(chunk[offset : offset + 65536]).decode(),
                 )
                 await socket.send(json.dumps(frame))
-                if await socket.recv() != "accepted":
-                    return
         frame.update(seq=frame["seq"] + 1, data="", end=True)
         await socket.send(json.dumps(frame))
-        await socket.recv()
 
 
 async def serve(
@@ -121,6 +111,7 @@ async def serve(
     env: dict[str, str],
     inference: Availability,
 ) -> None:
+    """One bidirectional transport; durable admission and operation idempotency belong to AIDE."""
     lifecycle = Lifecycle(env)
     root = f"v2/workspaces/{workspace_id}"
     async with (
@@ -133,36 +124,70 @@ async def serve(
             base_url="http://127.0.0.1:8642/p/orchestrator/",
             headers={"Authorization": f"Bearer {env['API_SERVER_KEY']}"},
         ) as gateway,
-        asyncio.TaskGroup() as replies,
     ):
-        pending: set[UUID] = set()
+        url = player.build_request("GET", root + "/connection").url
+        url = url.copy_with(scheme="wss" if url.scheme == "https" else "ws")
 
-        async def answer(request_id: UUID, envelope: dict) -> None:
-            try:
+        async def answer(socket: ClientConnection, stream_id: str, envelope: dict) -> None:
+            (result,) = await asyncio.gather(
+                reply(socket, stream_id, envelope, lifecycle, seam, gateway, inference),
+                return_exceptions=True,
+            )
+            if isinstance(result, httpx.TransportError):
                 (result,) = await asyncio.gather(
-                    reply(player, root, envelope, lifecycle, seam, gateway, inference),
+                    socket.send(
+                        json.dumps(
+                            {
+                                "request_id": str(envelope["id"]),
+                                "stream_id": stream_id,
+                                "aborted": True,
+                            }
+                        )
+                    ),
                     return_exceptions=True,
                 )
-                if isinstance(result, ConnectionClosed | httpx.TransportError):
-                    log.info("Reply transport unavailable: %s", type(result).__name__)
-                elif isinstance(result, BaseException):
-                    raise result
-            finally:
-                pending.remove(request_id)
+            if isinstance(result, ConnectionClosed):
+                log.info("Reply transport unavailable: %s", type(result).__name__)
+            elif isinstance(result, BaseException):
+                raise result
 
-        async def receive() -> None:
-            async with player.stream("GET", root + "/connection", timeout=45) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line:
-                        envelope = json.loads(line)
-                        request_id = UUID(envelope["id"])
-                        if request_id not in pending:
-                            pending.add(request_id)
-                            replies.create_task(answer(request_id, envelope))
+        async def session() -> None:
+            async with connect(
+                str(url), additional_headers={"Authorization": player.headers["Authorization"]}
+            ) as socket:
+                running: dict[UUID, asyncio.Task[None]] = {}
+                async with asyncio.TaskGroup() as replies:
+
+                    async def receive() -> None:
+                        async for message in socket:
+                            incoming = json.loads(message)
+                            if "envelope" not in incoming:
+                                request_id = UUID(incoming["request_id"])
+                                if request_id in running:
+                                    running[request_id].cancel()
+                                continue
+                            request_id = UUID(incoming["envelope"]["id"])
+                            if len(running) >= 32:
+                                await socket.close(code=1013, reason="Too many in-flight requests")
+                                return
+                            task = replies.create_task(
+                                answer(socket, incoming["stream_id"], incoming["envelope"])
+                            )
+                            running[request_id] = task
+                            task.add_done_callback(lambda _, key=request_id: running.pop(key))
+
+                    (closed,) = await asyncio.gather(receive(), return_exceptions=True)
+                    # Disconnect stops observation, not work already durably admitted by AIDE.
+                    for task in running.values():
+                        task.cancel()
+            if isinstance(closed, BaseException):
+                raise closed
 
         while True:
-            result = (await asyncio.gather(receive(), return_exceptions=True))[0]
-            if isinstance(result, BaseException) and not isinstance(result, httpx.TransportError):
+            (result,) = await asyncio.gather(session(), return_exceptions=True)
+            temporary = isinstance(result, ConnectionClosed | OSError | httpx.TransportError) or (
+                isinstance(result, InvalidStatus) and result.response.status_code in {502, 503, 504}
+            )
+            if isinstance(result, BaseException) and not temporary:
                 raise result
             await asyncio.sleep(1)

@@ -50,3 +50,7 @@ for cycle in 1 2; do
   docker logs "$name"
   docker rm "$name" >/dev/null
 done
+
+# Fault-path component proof uses the packaged bridge and real HTTP/websocket peers in its own container.
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
+  --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-transport.py
