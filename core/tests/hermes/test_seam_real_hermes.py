@@ -225,7 +225,7 @@ def run_scenario(
     """The acceptance scenario: one request, watcher ticks until a submission exists."""
     player_id = env["SOFTMAX_PLAYER_ID"]
     client.open("canary", "web-ide")
-    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []})
+    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     print(f"chat run {reply['run_id']} ({reply['delivered']})")
 
     watch = Submissions(ws, env)

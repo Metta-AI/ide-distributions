@@ -784,7 +784,14 @@ def test_snapshot_has_records_settings_ui_state_and_seq(workspace, capsys):
     code, out = run(capsys, "snapshot", "--store", "workspace")
     assert code == 0, out
     assert out["store"] == "workspace" and out["seq"] == workspace.wstore.last_seq()
-    assert list(out["records"]) == ["directives", "notices", "sessions", "coworlds", "settings"]
+    assert list(out["records"]) == [
+        "directives",
+        "notices",
+        "sessions",
+        "coworlds",
+        "settings",
+        "admissions",
+    ]
     assert out["records"]["coworlds"][0]["coworld_id"] == COWORLD_ID
     assert out["records"]["settings"]["paused"] is False
     assert out["ui_state"] == [

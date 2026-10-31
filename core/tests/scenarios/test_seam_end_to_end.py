@@ -82,7 +82,7 @@ def scenario(tmp_path):
 def submit_the_starter(scenario: Scenario) -> str:
     """The user asks on a new workspace; the chat run switches, the ticks run setup; returns
     the run id of the user's message."""
-    reply = scenario.client.say(REQUEST, {"contract_version": 1, "on_screen": []})
+    reply = scenario.client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     run_id = reply["run_id"]
     assert scenario.hermes.runs[run_id].status == "completed"
     for _ in range(3):  # the setup wake starts on the first tick; later ticks settle it
@@ -127,13 +127,13 @@ def test_acceptance_submit_starter(scenario):
 
 def test_notice_opens_next_turn(scenario):
     submit_the_starter(scenario)
-    reply = scenario.client.say("thanks")
+    reply = scenario.client.say("thanks", wait=True)
     rendered = scenario.agent.rendered[reply["run_id"]]
     assert "[notices since your last turn]" in rendered
     assert "Submitted V-1" in rendered
     assert "[active Coworld] cow_fake" in rendered
     # Read once: the next turn does not repeat it.
-    again = scenario.client.say("anything else?")
+    again = scenario.client.say("anything else?", wait=True)
     assert "Submitted V-1" not in scenario.agent.rendered[again["run_id"]]
 
 
@@ -144,7 +144,7 @@ def test_reaction_never_starts_run(scenario):
     assert result["accepted"] is True and result["delivered"] == "none"
     assert scenario.starts() == before
     # ...but the agent sees it at its next turn.
-    reply = scenario.client.say("ok")
+    reply = scenario.client.say("ok", wait=True)
     assert (
         "[reactions since your last turn]\n- message m-1: 👍"
         in scenario.agent.rendered[reply["run_id"]]
@@ -155,8 +155,8 @@ def test_concurrent_chat_and_wakes_never_touch_the_chat_session(scenario):
     """A6.1 and B.13: while the chat run is live, the watcher's wakes run in their own
     Sessions, and a second user message steers the live run instead of starting another."""
     scenario.agent.hold_chat_runs = True
-    first = scenario.client.say(REQUEST, {"contract_version": 1, "on_screen": []})
-    assert first["delivered"] == "start"
+    first = scenario.client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
+    assert first["delivered"] == "queued"
     assert scenario.hermes.runs[first["run_id"]].status == "running"
 
     for _ in range(3):
@@ -167,13 +167,13 @@ def test_concurrent_chat_and_wakes_never_touch_the_chat_session(scenario):
     assert len(scenario.platform().submissions(mine=True)) == 1  # the pending request ran
 
     second = scenario.client.say("Also: who is the champion right now?")
-    assert second["delivered"] == "steer" and second["run_id"] == first["run_id"]
+    assert second["delivered"] == "queued" and second["run_id"] is None
     chat_runs = [r for r in scenario.hermes.runs.values() if r.session_id == scenario.session_id]
     assert len(chat_runs) == 1
-    assert any("champion" in text for text in scenario.hermes.steered[first["run_id"]])
 
     scenario.hermes.complete(first["run_id"], "Done.")
     scenario.agent.hold_chat_runs = False
-    third = scenario.client.say("thanks")
-    assert third["delivered"] == "start" and third["run_id"] != first["run_id"]
-    assert "Submitted V-1" in scenario.agent.rendered[third["run_id"]]
+    third = scenario.client.say("thanks", wait=True)
+    assert third["delivered"] == "queued" and third["run_id"] != first["run_id"]
+    dispatched_second = scenario.client.wait_admission(second["op_id"])
+    assert "Submitted V-1" in scenario.agent.rendered[dispatched_second["run_id"]]

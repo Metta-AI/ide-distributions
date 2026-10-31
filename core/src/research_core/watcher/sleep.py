@@ -38,8 +38,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from research_core import layout
+from research_core.store import admissions, sessions, settings
 from research_core.store import cli as store_cli
-from research_core.store import sessions, settings
 from research_core.store._common import now_iso
 from research_core.store.db import Store
 from research_core.watcher import dispatch, drain
@@ -76,7 +76,15 @@ def go_to_sleep(
         ctx.set_meta(PAUSED_DRAINED_KEY, "1")  # the paused tick need not drain again
     orchestrator = settle_orchestrator_runs(ctx, wait_s=wait_s, sleep=sleep, clock=clock)
     processes = wait_for_processes(drained["processes"], sleep=sleep, clock=clock)
-    running = still_running(ctx) + [f"process:{pid}:running" for pid in processes]
+    with admissions.dispatch_lock(ctx.wstore):
+        running = still_running(ctx) + [f"process:{pid}:running" for pid in processes]
+        running.extend(
+            f"admission:{row['op_id']}:reconciling"
+            for row in ctx.wstore.q(
+                "SELECT op_id FROM client_admissions"
+                " WHERE dispatch_started=1 AND run_id IS NULL AND status='queued'"
+            )
+        )
     started = now_iso()
     ctx.set_meta(SLEEP_STARTED_KEY, started)
     emit_event(
@@ -103,10 +111,11 @@ def go_to_sleep(
 
 def pause(ctx: TickContext) -> bool:
     """Pause the workspace unless it is paused already; whether the pause is sleep's own."""
-    if settings.get(ctx.wstore, "paused"):
-        return paused_by_sleep(ctx.wstore)
-    settings.update(ctx.wstore, ctx.actor, "paused", True, cites=SLEEP_CITES)
-    return True
+    with admissions.dispatch_lock(ctx.wstore):
+        if settings.get(ctx.wstore, "paused"):
+            return paused_by_sleep(ctx.wstore)
+        settings.update(ctx.wstore, ctx.actor, "paused", True, cites=SLEEP_CITES)
+        return True
 
 
 def paused_by_sleep(wstore: Store) -> bool:

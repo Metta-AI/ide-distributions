@@ -451,7 +451,7 @@ def run_scenario(settings: Settings, timeout_s: int) -> int:
     after = before["seq"] if before else 0
     print(f"scenario on {settings.seam_url} (platform {settings.platform}): {REQUEST!r}")
     session_id = client.open("local-stack", "web-ide")
-    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []})
+    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     print(f"session {session_id}; chat run {reply['run_id']} ({reply['delivered']})", flush=True)
 
     started = time.monotonic()
