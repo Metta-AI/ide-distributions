@@ -501,6 +501,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   const showError = (message) => { const el = $("page-error"); el.textContent = message; el.hidden = false; };
 
   async function api(method, path, body) {
+    if (["/session-open", "/message"].includes(path)) body = {op_id: crypto.randomUUID(), ...body};
     const init = {method, headers: {Accept: "application/json"}};
     if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
     const response = await fetch(path, init);
@@ -594,7 +595,16 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       addMessage({role: "user", text, run_id: reply.run_id, delivered: reply.delivered, context});
       const problems = (reply.problems || []).length ? ` Problems: ${reply.problems.join("; ")}.` : "";
       setText("composer-status", `Delivered as <strong>${esc(reply.delivered)}</strong> to <span class="mono">${esc(reply.run_id)}</span> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
-      trackRun(reply.run_id);
+      for (;;) {
+        const snapshot = await api("GET", "/snapshot?store=workspace");
+        const admission = snapshot.records.admissions.find(item => item.op_id === reply.op_id);
+        if (admission.run_id) { trackRun(admission.run_id); break; }
+        if (TERMINAL.has(admission.status)) {
+          setText("composer-status", esc(admission.error || admission.status));
+          break;
+        }
+        await sleep(RUN_POLL_MS);
+      }
     } catch (error) {
       setText("composer-status", `<span class="err-text">Not sent: ${esc(error.message)}</span>`);
     } finally {

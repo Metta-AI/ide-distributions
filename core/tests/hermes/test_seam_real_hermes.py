@@ -39,6 +39,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -225,7 +226,7 @@ def run_scenario(
     """The acceptance scenario: one request, watcher ticks until a submission exists."""
     player_id = env["SOFTMAX_PLAYER_ID"]
     client.open("canary", "web-ide")
-    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []})
+    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     print(f"chat run {reply['run_id']} ({reply['delivered']})")
 
     watch = Submissions(ws, env)
@@ -320,6 +321,7 @@ def banner(
     message = json.dumps(
         {
             "session_id": sid,
+            "op_id": str(uuid4()),
             "message": "What is the state of the workspace?",
             "actor": "user:local",
             "context": {"contract_version": 1, "on_screen": []},
@@ -348,7 +350,13 @@ def banner(
         "",
         "curl against the seam:",
         f"  curl -s -X POST {seam}/session-open {json_header} -d '"
-        + json.dumps({"client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"})
+        + json.dumps(
+            {
+                "op_id": str(uuid4()),
+                "client": {"id": "curl", "kind": "web-ide"},
+                "actor": "user:local",
+            }
+        )
         + "'",
         f"  curl -s -X POST {seam}/message {json_header} -d '{message}'",
         f"  curl -s {seam}/runs/<run_id>",

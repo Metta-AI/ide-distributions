@@ -38,7 +38,16 @@ from pathlib import Path
 from typing import Any
 
 from research_core import layout
-from research_core.store import coworlds, directives, goals, migrate, settings, tasks, ui_state
+from research_core.store import (
+    admissions,
+    coworlds,
+    directives,
+    goals,
+    migrate,
+    settings,
+    tasks,
+    ui_state,
+)
 from research_core.store._common import now_iso, parse_display_id, require
 from research_core.store.actors import Actor
 from research_core.store.db import QUIESCE_MARKER, Store, schema_status
@@ -783,6 +792,8 @@ def snapshot(store: Store, coworld_id: str | None = None) -> dict[str, Any]:
                 rows = store.q(f"SELECT * FROM {spec.table} ORDER BY rowid")
                 records[spec.table] = [_record(spec, row) for row in rows]
         records["settings"] = settings.all(store)
+        if store.kind == "workspace":
+            records["admissions"] = admissions.snapshot(store)
         conversations = [
             row[0] for row in store.q("SELECT conversation FROM ui_state ORDER BY conversation")
         ]

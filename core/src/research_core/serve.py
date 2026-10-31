@@ -1,18 +1,18 @@
 """``research serve``: the local seam server (design §10, A.4, A.11; plan entry 6; A6.1).
 
 Locally this is the bridge: a small stdlib HTTP server that gives a client the seam without
-metta. It opens chat Sessions, turns each message into a Hermes run (or steers the live one),
+metta. It opens chat Sessions and durably queues each message for a Hermes run,
 stamps the client and the active Coworld into the context block, streams each store's
 ``events`` rows as Server-Sent Events, serves snapshots, passes UI actions into the Session and
 runs the user-edit allow-list. It is the reference for the bridge's per-session rule (A6.1):
-one live run per Session, and a message that arrives while a run is live steers it.
+one live run per Session; messages arriving during a run wait in the workspace inbox.
 
 What the server stamps into a turn is only ``client``, ``coworld`` and ``contract_version``:
 the profile's own turn hook (``plugin/turn.py``) adds the unread notices and the changed-since
-note, so the server never duplicates them. Threads, not async: ``ThreadingHTTPServer`` gives
+note, so the server never duplicates them. ``ThreadingHTTPServer`` gives
 each request its own thread, and each request opens its own store connections (SQLite
-connections are per thread). Steer-or-start runs under one lock so two messages to one Session
-never start two runs.
+connections are per thread). A background dispatcher reconciles each persisted input using
+Hermes's durable idempotency key. Its filesystem lock also fences the separate sleep command.
 
 Two conveniences sit beside the contract's routes: ``GET /`` (and ``/ui``) serves the client
 page ``ui/index.html``, a self-contained page that exercises every route from a browser, and
@@ -23,6 +23,7 @@ so the page can show the watcher's liveness without a shell.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import dataclasses
 import json
 import logging
@@ -31,6 +32,7 @@ import threading
 import time
 import traceback
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
@@ -39,10 +41,11 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
-from research_core import contract, layout
+from research_core import contract, inference, layout
+from research_core.store import admissions, coworlds, sessions, settings, ui_state
 from research_core.store import cli as store_cli
-from research_core.store import coworlds, sessions, settings, ui_state
 from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store
@@ -136,10 +139,12 @@ class SeamServer:
         profile: str = "orchestrator",
         host: str = "127.0.0.1",
         port: int = 0,
+        inference_lease_file: Path | None = None,
     ) -> None:
         self.ws = ws
         self.hermes = hermes
         self.profile = profile
+        self.inference_lease_file = inference_lease_file
         # The client that opened each Session, for the stamp (A.4). A Session this instance
         # did not open is stamped with the client the context block names, if any.
         self._clients: dict[str, dict[str, Any]] = {}
@@ -153,7 +158,23 @@ class SeamServer:
         return f"http://{host}:{port}"
 
     def serve_forever(self) -> None:
-        self._http.serve_forever(poll_interval=0.2)
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            dispatch = worker.submit(asyncio.run, self.dispatch_forever())
+            dispatch.add_done_callback(lambda _: self._http.shutdown())
+            try:
+                self._http.serve_forever(poll_interval=0.2)
+            finally:
+                self.stopping.set()
+            dispatch.result()
+
+    async def dispatch_forever(self) -> None:
+        while not self.stopping.is_set():
+            (result,) = await asyncio.gather(self.dispatch_messages(), return_exceptions=True)
+            if isinstance(result, RunsError):
+                log.warning("Chat dispatch unavailable: %s", result)
+            elif isinstance(result, BaseException):
+                raise result
+            await asyncio.sleep(0.5)
 
     def shutdown(self) -> None:
         """Stop accepting requests and end every open stream; safe to call more than once."""
@@ -207,7 +228,13 @@ class SeamServer:
                 "ok": True,
                 "heartbeat": heartbeat,
                 "heartbeat_age_s": age_s,
-                "has_work": wstore.get_meta(HAS_WORK_KEY) == "1",
+                "has_work": wstore.get_meta(HAS_WORK_KEY) == "1"
+                or bool(
+                    wstore.one(
+                        "SELECT 1 FROM client_admissions"
+                        " WHERE status IN ('queued','running') LIMIT 1"
+                    )
+                ),
                 "waiting_on": json.loads(wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"),
                 "paused": bool(settings.get(wstore, "paused")),
                 "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
@@ -231,8 +258,21 @@ class SeamServer:
                 HTTPStatus.BAD_REQUEST, "client is required: {id, kind, guide?}", problems=problems
             )
         actor = _actor(body.get("actor"))
-        with self.stores() as stores:
-            session_id = hermes_api.mint_session_id()
+        op_id = str(UUID(_text(body, "op_id")))
+        with self._deliver_lock, self.stores() as stores:
+            receipt = admissions.read(stores.wstore, op_id, "open", body)
+            session_id = receipt["session_id"] if receipt else hermes_api.mint_session_id()
+            if receipt is None:
+                admissions.accept(
+                    stores.wstore,
+                    actor,
+                    op_id=op_id,
+                    kind="open",
+                    request=body,
+                    session_id=session_id,
+                    message="",
+                    payload="",
+                )
             try:
                 sessions.register(
                     stores.wstore,
@@ -258,17 +298,169 @@ class SeamServer:
             }
 
     def message(self, body: dict) -> dict:
-        """Validate and stamp the context, then steer the live run or start one (A6.1)."""
+        """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
         session_id = _text(body, "session_id")
         text = _text(body, "message")
         actor = _actor(body.get("actor"))
-        with self.stores() as stores:
+        op_id = str(UUID(_text(body, "op_id")))
+        with self._deliver_lock, self.stores() as stores:
             self._require_session(stores, session_id)
+            receipt = admissions.read(stores.wstore, op_id, "message", body)
+            if receipt is not None:
+                return {
+                    "op_id": op_id,
+                    "session_id": session_id,
+                    "run_id": receipt["run_id"],
+                    "delivered": "queued",
+                    "problems": [],
+                    "seq": stores.wstore.last_seq(),
+                }
             block, problems = self._context_block(stores, session_id, body.get("context"))
+            payload = text
             if block is not None:
-                text = f"{text}\n\n{contract.BLOCK_LABEL}\n{json.dumps(block, sort_keys=True)}"
-            result = self._deliver(stores, actor, session_id, text)
-            return {**result, "problems": problems, "seq": stores.wstore.last_seq()}
+                payload = f"{text}\n\n{contract.BLOCK_LABEL}\n{json.dumps(block, sort_keys=True)}"
+            admissions.accept(
+                stores.wstore,
+                actor,
+                op_id=op_id,
+                kind="message",
+                request=body,
+                session_id=session_id,
+                message=text,
+                payload=payload,
+            )
+            return {
+                "op_id": op_id,
+                "session_id": session_id,
+                "run_id": None,
+                "delivered": "queued",
+                "problems": problems,
+                "seq": stores.wstore.last_seq(),
+            }
+
+    async def dispatch_messages(self) -> None:
+        with self._deliver_lock, self.stores() as stores:
+            actor = Actor.user("client-dispatch")
+            reserved: set[str] = set()
+            for row in stores.wstore.q(
+                "SELECT * FROM client_admissions WHERE kind='message'"
+                " AND status IN ('queued','running') ORDER BY rowid"
+            ):
+                if row["session_id"] in reserved:
+                    continue
+                reserved.add(row["session_id"])
+                with admissions.dispatch_lock(stores.wstore):
+                    if row["run_id"]:
+                        session = self._require_session(stores, row["session_id"])
+                        if session["run_id"] != row["run_id"]:
+                            sessions.set_run(stores.wstore, actor, row["session_id"], row["run_id"])
+                        if row["cancel_requested"]:
+                            self.hermes.stop(row["run_id"], profile=self.profile)
+                        status = self.hermes.status(row["run_id"], profile=self.profile)
+                        if status.terminal:
+                            terminal = (
+                                status.status if status.status != "unknown" else "interrupted"
+                            )
+                            with stores.wstore.tx(actor) as tx:
+                                tx.execute(
+                                    "UPDATE client_admissions SET status=?,error=? WHERE op_id=?",
+                                    (terminal, status.error, row["op_id"]),
+                                )
+                                tx.event("client.finished", row["op_id"], {"status": terminal})
+                        continue
+                    if row["cancel_requested"] and not row["dispatch_started"]:
+                        with stores.wstore.tx(actor) as tx:
+                            tx.execute(
+                                "UPDATE client_admissions SET status='cancelled' WHERE op_id=?",
+                                (row["op_id"],),
+                            )
+                            tx.event("client.cancelled", row["op_id"], {})
+                        continue
+                    if settings.get(stores.wstore, "paused") and not row["dispatch_started"]:
+                        continue
+                    if not inference.available(self.inference_lease_file):
+                        continue
+                    session = self._require_session(stores, row["session_id"])
+                    if (
+                        not row["dispatch_started"]
+                        and session["run_id"]
+                        and not self.hermes.status(session["run_id"], profile=self.profile).terminal
+                    ):
+                        continue
+                    with stores.wstore.tx(actor) as tx:
+                        tx.execute(
+                            "UPDATE client_admissions SET dispatch_started=1 WHERE op_id=?",
+                            (row["op_id"],),
+                        )
+                    (run_id,) = await asyncio.gather(
+                        asyncio.to_thread(
+                            self.hermes.start,
+                            profile=self.profile,
+                            session_id=row["session_id"],
+                            text=row["payload"],
+                            idempotency_key=row["op_id"],
+                        ),
+                        return_exceptions=True,
+                    )
+                    if isinstance(run_id, RunsError):
+                        with stores.wstore.tx(actor) as tx:
+                            if run_id.status == 429 or run_id.code in {
+                                "gateway_draining",
+                                "inference_unavailable",
+                            }:
+                                tx.execute(
+                                    "UPDATE client_admissions SET dispatch_started=0 WHERE op_id=?",
+                                    (row["op_id"],),
+                                )
+                            tx.execute(
+                                "UPDATE client_admissions SET error=?,status=? WHERE op_id=?",
+                                (
+                                    run_id.detail,
+                                    "queued" if run_id.retryable else "failed",
+                                    row["op_id"],
+                                ),
+                            )
+                            tx.event(
+                                "client.delivery_failed",
+                                row["op_id"],
+                                {"retryable": run_id.retryable},
+                            )
+                        continue
+                    if isinstance(run_id, BaseException):
+                        raise run_id
+                    with stores.wstore.tx(actor) as tx:
+                        tx.execute(
+                            "UPDATE client_admissions SET run_id=?,status='running',error=NULL"
+                            " WHERE op_id=?",
+                            (run_id, row["op_id"]),
+                        )
+                        tx.event("client.started", row["op_id"], {"run_id": run_id})
+                    sessions.set_run(stores.wstore, actor, row["session_id"], run_id)
+                    if row["cancel_requested"]:
+                        self.hermes.stop(run_id, profile=self.profile)
+
+    def message_cancel(self, body: dict) -> dict:
+        op_id = str(UUID(_text(body, "op_id")))
+        with self._deliver_lock, self.stores() as stores:
+            row = stores.wstore.one(
+                "SELECT * FROM client_admissions WHERE op_id=? AND kind='message'", (op_id,)
+            )
+            if row is None:
+                raise Refused(HTTPStatus.NOT_FOUND, "Unknown message admission")
+            if row["status"] in {"queued", "running"}:
+                with stores.wstore.tx(_actor(body.get("actor"))) as tx:
+                    tx.execute(
+                        "UPDATE client_admissions SET cancel_requested=1 WHERE op_id=?", (op_id,)
+                    )
+                    if not row["dispatch_started"]:
+                        tx.execute(
+                            "UPDATE client_admissions SET status='cancelled' WHERE op_id=?",
+                            (op_id,),
+                        )
+                    tx.event("client.cancel_requested", op_id, {})
+            if row["run_id"]:
+                self.hermes.stop(row["run_id"], profile=self.profile)
+            return {"op_id": op_id, "stop_requested": True}
 
     def ui_action(self, body: dict) -> dict:
         """An answer goes into the Session at once; a reaction is feedback and starts no run."""
@@ -335,6 +527,13 @@ class SeamServer:
         """The validated block with the server's stamps, or ``None`` when there is nothing to
         send: no context and no client known for the Session."""
         client = self._clients.get(session_id)
+        if client is None:
+            opened = stores.wstore.one(
+                "SELECT request FROM client_admissions WHERE session_id=? AND kind='open'",
+                (session_id,),
+            )
+            if opened is not None:
+                client = json.loads(opened["request"])["client"]
         if context is None and client is None:
             return None, []
         kept, problems = ({}, []) if context is None else contract.validate_context(context)
@@ -501,6 +700,7 @@ class _Handler(BaseHTTPRequestHandler):
         routes = {
             "/session-open": seam.session_open,
             "/message": seam.message,
+            "/message-cancel": seam.message_cancel,
             "/ui-action": seam.ui_action,
             "/store/apply": seam.store_apply,
         }
@@ -636,7 +836,14 @@ def run(args: argparse.Namespace) -> int:
         profile_home, researcher_profiles=[name for name in researcher_profiles if name]
     )
     server = SeamServer(
-        ws=layout.from_env(env), hermes=hermes, profile=args.profile, host=args.host, port=args.port
+        ws=layout.from_env(env),
+        hermes=hermes,
+        profile=args.profile,
+        host=args.host,
+        port=args.port,
+        inference_lease_file=Path(env["IDE_INFERENCE_LEASE_FILE"])
+        if "IDE_INFERENCE_LEASE_FILE" in env
+        else None,
     )
     print(f"research serve: {server.url} (profile {args.profile}, Hermes {hermes.base_url})")
     try:

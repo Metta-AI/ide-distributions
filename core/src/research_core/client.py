@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
 from research_core.watcher.hermes_api import TERMINAL
 
@@ -71,8 +72,8 @@ class ScriptedClient:
         self.session_id = self._post("/session-open", body)["session_id"]
         return self.session_id
 
-    def say(self, text: str, context: dict | None = None) -> dict:
-        """``POST /message``: ``{session_id, run_id, delivered, problems, seq}``."""
+    def say(self, text: str, context: dict | None = None, *, wait: bool = False) -> dict:
+        """Confirm a queued message; optionally wait until its run is assigned."""
         body: dict[str, Any] = {
             "session_id": self._session(),
             "message": text,
@@ -80,11 +81,24 @@ class ScriptedClient:
         }
         if context is not None:
             body["context"] = context
-        return self._post("/message", body)
+        receipt = self._post("/message", body)
+        return receipt | self.wait_admission(receipt["op_id"]) if wait else receipt
 
     def run(self, run_id: str) -> dict:
         """``GET /runs/<id>``: the run's status as the gateway reports it."""
         return self._get(f"/runs/{urllib.parse.quote(run_id, safe='')}")
+
+    def wait_admission(self, op_id: str, timeout: float = 30) -> dict:
+        """Wait for a durable message to start, fail or be cancelled; timeout does not cancel it."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for admission in self.snapshot("workspace")["records"]["admissions"]:
+                if admission["op_id"] == op_id and (
+                    admission["run_id"] or admission["status"] in TERMINAL
+                ):
+                    return admission
+            time.sleep(0.1)
+        raise TimeoutError(f"Message {op_id} is still queued")
 
     def wait_run(self, run_id: str, timeout: float = 120, poll: float = 0.2) -> dict:
         """Poll ``/runs/<id>`` until the run is terminal; ``TimeoutError`` after ``timeout`` s."""
@@ -187,6 +201,8 @@ class ScriptedClient:
         return self.session_id
 
     def _post(self, path: str, body: dict) -> dict:
+        if path in {"/session-open", "/message"}:
+            body = {"op_id": str(uuid4()), **body}
         data = json.dumps(body).encode("utf-8")
         request = urllib.request.Request(
             self.base_url + path,

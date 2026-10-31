@@ -27,6 +27,15 @@ That workflow builds `image/Dockerfile`, runs `image/system_tests/start-stop.sh`
 an immutable image digest. Hosting consumes that digest without inspecting profile internals.
 Deploy Metta #30090's format readers and release workflow before dispatching this release.
 
-This image provides the build, hosting and lifecycle foundation for ide-next. Application
-relay operations return 501 until the ide-next application adapter is connected; lifecycle
-acceptance does not establish chat or model-service behavior.
+The image also owns the ide-next application adapter. It exposes native session opening,
+durable message admission and cancellation, workspace snapshots, transcripts and run controls.
+Chat messages are confirmed only after the workspace commits them. Each operation ID names
+one input; reconnecting with that ID cannot create a second run. Messages wait behind the
+previous run in their session, and queued messages survive sleep and restart.
+
+The image obtains its spend-capped model credential from
+`PUT /v2/workspaces/{workspace_id}/inference`, using the bootstrap credential. It installs
+and renews the key internally; hosting never supplies profile paths or model environment
+variables. Deploy that platform endpoint before this image. Queued chat dispatch waits for
+a valid inference lease, including after restart. Lifecycle readiness remains independent
+of the optional model service, so an unavailable budget does not prevent stopping a workspace.

@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from research_core import inference
 from research_core.platform.errors import PlatformError
 
 DEFAULT_HOST = "127.0.0.1"
@@ -206,12 +207,14 @@ class HermesRuns:
         default_profile: str = "orchestrator",
         timeout_s: float = 30,
         opener: Callable[..., Any] = urllib.request.urlopen,
+        inference_lease_file: Path | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.keys = dict(keys)
         self.default_profile = default_profile
         self.timeout_s = timeout_s
         self._opener = opener
+        self.inference_lease_file = inference_lease_file
 
     @classmethod
     def from_profile(
@@ -234,6 +237,9 @@ class HermesRuns:
             base_url=f"http://{host}:{port}",
             keys={name: key for name, key in keys.items() if key},
             default_profile=profile_home.name,
+            inference_lease_file=Path(env["IDE_INFERENCE_LEASE_FILE"])
+            if "IDE_INFERENCE_LEASE_FILE" in env
+            else None,
         )
 
     def key_for(self, profile: str) -> str:
@@ -256,6 +262,8 @@ class HermesRuns:
         Raises :class:`RunsBusy` (429), :class:`RunsUnavailable` (503 or no gateway),
         :class:`RunsAuthError` (401/403) and :class:`RunsConflict` (409).
         """
+        if not inference.available(self.inference_lease_file):
+            raise RunsUnavailable("Inference lease unavailable", code="inference_unavailable")
         body: dict[str, Any] = {"input": text, "session_id": session_id}
         if instructions is not None:
             body["instructions"] = instructions
