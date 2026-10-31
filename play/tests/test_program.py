@@ -1,4 +1,5 @@
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,7 @@ from conftest import CREDIT_STDERR, LEAGUE_STDERR, PERMIT_STDERR, PLAYER, STARTE
 from play.__main__ import run
 from play.games import GOTA
 from play.journal import Journal
-from play.limits import NAME_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
+from play.limits import NAME_MAX, PAGE_NOTE_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
 from play.program import PlayError
 
 CHOSEN = "league_00000000-0000-0000-0000-000000000001"
@@ -594,3 +595,47 @@ def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
     assert data["state"] not in ("completed", "failed", "cancelled")
     assert "summary" not in data
     assert "games finished so far" in data["plain"]
+
+
+def test_page_act_writes_the_contract_record_with_a_fresh_id(program, records):
+    data = program.page_act("point", "@setup-action", "This is the button that starts it.")
+    program.page_act("press", "e14", "Opening the leaderboard")
+    first, second = records.pages
+    # The screen-context contract (v1): {id: uuid, kind, ref, note?: <= 200}.
+    assert set(first) == {"id", "kind", "ref", "note"}
+    assert first == {
+        "id": first["id"],
+        "kind": "point",
+        "ref": "@setup-action",
+        "note": "This is the button that starts it.",
+    }
+    assert str(uuid.UUID(first["id"])) == first["id"] and first["id"] != second["id"]
+    assert data == {"written": True, **first}
+    assert records.puts == []  # a page action is not a record write
+
+
+@pytest.mark.parametrize(
+    ("kind", "ref", "note"),
+    [
+        ("click", "e1", "x"),
+        ("POINT", "e1", "x"),
+        ("point", "button", "x"),
+        ("point", "@", "x"),
+        ("point", "e1", ""),
+        ("point", "e1", "x" * (PAGE_NOTE_MAX + 1)),
+    ],
+)
+def test_page_act_refuses_bad_kinds_refs_and_notes_and_writes_nothing(
+    program, records, kind, ref, note
+):
+    envelope = run("page_act", {"kind": kind, "ref": ref, "note": note}, program)
+    assert envelope["ok"] is False and envelope["error"]["reason"] == "bad_arguments"
+    assert records.pages == []
+
+
+def test_page_act_reports_a_refused_write_as_a_failure(program, records):
+    records.page_status = 403
+    arguments = {"kind": "go", "ref": "@nav-leaderboard", "note": "Going there"}
+    envelope = run("page_act", arguments, program)
+    assert envelope["ok"] is False and envelope["error"]["reason"] == "softmax"
+    assert "POST page answered HTTP 403" in envelope["error"]["message"]
