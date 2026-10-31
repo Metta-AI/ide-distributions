@@ -72,7 +72,7 @@ async def main():
             assert result.status_code == 200, await result.aread()
             assert isinstance(result.json()["records"]["sessions"], list)
     print(
-        "PASS packaged adapter: native open/snapshot; invalid actor refused; inference gate explicit"
+        "PASS adapter: native open/snapshot; invalid actor refused; inference gate explicit"
     )
 
 
