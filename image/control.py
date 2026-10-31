@@ -111,11 +111,7 @@ async def serve(
     env: dict[str, str],
     inference: Availability,
 ) -> None:
-    """Hold one reply websocket and the operation connection it answers.
-
-    The platform answers each request once: it refuses a second header with a `duplicate`
-    notice and a request whose caller left with `disconnected`. Either cancels that request.
-    """
+    """One bidirectional transport; durable admission and operation idempotency belong to AIDE."""
     lifecycle = Lifecycle(env)
     root = f"v2/workspaces/{workspace_id}"
     async with (
@@ -129,7 +125,7 @@ async def serve(
             headers={"Authorization": f"Bearer {env['API_SERVER_KEY']}"},
         ) as gateway,
     ):
-        url = player.build_request("GET", root + "/replies").url
+        url = player.build_request("GET", root + "/connection").url
         url = url.copy_with(scheme="wss" if url.scheme == "https" else "ws")
 
         async def answer(socket: ClientConnection, stream_id: str, envelope: dict) -> None:
@@ -142,52 +138,33 @@ async def serve(
             elif isinstance(result, BaseException):
                 raise result
 
-        async def receive(
-            socket: ClientConnection, running: dict, replies: asyncio.TaskGroup
-        ) -> None:
-            async with player.stream("GET", root + "/connection", timeout=45) as response:
-                response.raise_for_status()
-                async for text in response.aiter_lines():
-                    if not text:
-                        continue
-                    line = json.loads(text)
-                    request_id = UUID(line["envelope"]["id"])
-                    # A redelivery after this connection reconnected; the running task answers it.
-                    if request_id not in running:
-                        task = replies.create_task(
-                            answer(socket, line["stream_id"], line["envelope"])
-                        )
-                        running[request_id] = task
-                        task.add_done_callback(lambda _, key=request_id: running.pop(key))
-
-        async def poll(socket: ClientConnection, running: dict, replies: asyncio.TaskGroup) -> None:
-            while True:
-                (result,) = await asyncio.gather(
-                    receive(socket, running, replies), return_exceptions=True
-                )
-                if isinstance(result, BaseException) and not isinstance(
-                    result, httpx.TransportError
-                ):
-                    raise result
-                await asyncio.sleep(1)
-
         async def session() -> None:
             async with connect(
                 str(url), additional_headers={"Authorization": player.headers["Authorization"]}
             ) as socket:
                 running: dict[UUID, asyncio.Task[None]] = {}
                 async with asyncio.TaskGroup() as replies:
-                    polling = replies.create_task(poll(socket, running, replies))
 
-                    async def notices() -> None:
+                    async def receive() -> None:
                         async for message in socket:
-                            request_id = UUID(json.loads(message)["request_id"])
-                            if request_id in running:
-                                running[request_id].cancel()
+                            incoming = json.loads(message)
+                            if "envelope" not in incoming:
+                                request_id = UUID(incoming["request_id"])
+                                if request_id in running:
+                                    running[request_id].cancel()
+                                continue
+                            request_id = UUID(incoming["envelope"]["id"])
+                            if len(running) >= 32:
+                                await socket.close(code=1013, reason="Too many in-flight requests")
+                                return
+                            task = replies.create_task(
+                                answer(socket, incoming["stream_id"], incoming["envelope"])
+                            )
+                            running[request_id] = task
+                            task.add_done_callback(lambda _, key=request_id: running.pop(key))
 
-                    (closed,) = await asyncio.gather(notices(), return_exceptions=True)
-                    # Requests answered on a closed websocket cannot finish on another.
-                    polling.cancel()
+                    (closed,) = await asyncio.gather(receive(), return_exceptions=True)
+                    # Disconnect stops observation, not work already durably admitted by AIDE.
                     for task in running.values():
                         task.cancel()
             if isinstance(closed, BaseException):
