@@ -133,7 +133,20 @@ async def serve(
                 reply(socket, stream_id, envelope, lifecycle, seam, gateway, inference),
                 return_exceptions=True,
             )
-            if isinstance(result, ConnectionClosed | httpx.TransportError):
+            if isinstance(result, httpx.TransportError):
+                (result,) = await asyncio.gather(
+                    socket.send(
+                        json.dumps(
+                            {
+                                "request_id": str(envelope["id"]),
+                                "stream_id": stream_id,
+                                "aborted": True,
+                            }
+                        )
+                    ),
+                    return_exceptions=True,
+                )
+            if isinstance(result, ConnectionClosed):
                 log.info("Reply transport unavailable: %s", type(result).__name__)
             elif isinstance(result, BaseException):
                 raise result
