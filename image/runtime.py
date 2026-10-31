@@ -8,6 +8,8 @@ from pathlib import Path
 
 import httpx
 from control import serve
+from inference import Availability
+from inference import maintain as maintain_inference
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 
@@ -35,8 +37,11 @@ async def command(*args: str, env: dict[str, str]) -> None:
 
 
 async def main() -> None:
+    inference = Availability()
     bootstrap = Bootstrap.model_validate_json(Path("/run/workspace/bootstrap.json").read_text())
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lease_file = HOME / ".inference-lease"
+    lease_file.unlink(missing_ok=True)
     Path("/tmp/hermes-runtime").mkdir(exist_ok=True, mode=0o700)
     key_file = HOME / ".gateway-key"
     if not key_file.exists():
@@ -51,6 +56,7 @@ async def main() -> None:
         "API_SERVER_KEY": key,
         "GATEWAY_MULTIPLEX_PROFILES": "true",
         "IDE_RESEARCHER_PROFILES": "researcher",
+        "IDE_INFERENCE_LEASE_FILE": str(lease_file),
         "SOFTMAX_PLAYER_CREDENTIAL": bootstrap.credential.get_secret_value(),
         "COGAMES_API_URL": bootstrap.platform_url.removesuffix("/observatory"),
     }
@@ -99,6 +105,7 @@ async def main() -> None:
                     "IDE_WORKSPACE",
                     "IDE_WORKSPACE_ENV",
                     "IDE_RESEARCHER_PROFILES",
+                    "IDE_INFERENCE_LEASE_FILE",
                     "SOFTMAX_PLAYER_CREDENTIAL",
                     "COGAMES_API_URL",
                     "OPENROUTER_API_KEY",
@@ -146,12 +153,23 @@ async def main() -> None:
                     await asyncio.sleep(1)
         print("Distribution gateway and seam started", flush=True)
         async with asyncio.TaskGroup() as group:
+            group.create_task(
+                maintain_inference(
+                    platform_url=bootstrap.platform_url,
+                    workspace_id=bootstrap.workspace_id,
+                    credential=bootstrap.credential.get_secret_value(),
+                    homes=(HOME, *(HOME / "profiles" / role for role in PROFILES)),
+                    availability=inference,
+                    lease_file=lease_file,
+                )
+            )
             control = group.create_task(
                 serve(
                     platform_url=bootstrap.platform_url,
                     workspace_id=bootstrap.workspace_id,
                     credential=bootstrap.credential.get_secret_value(),
                     env=profile_env,
+                    inference=inference,
                 )
             )
             await asyncio.wait(

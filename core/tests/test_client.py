@@ -42,12 +42,12 @@ def test_say_before_open_is_a_runtime_error(seam):
     with pytest.raises(RuntimeError, match="open"):
         seam.client.say("hi")
     seam.client.open()
-    assert seam.client.say("hi")["delivered"] == "start"
+    assert seam.client.say("hi")["delivered"] == "queued"
 
 
 def test_wait_run_polls_until_terminal_and_times_out(seam):
     seam.client.open()
-    run = seam.client.say("work")
+    run = seam.say("work")
     with pytest.raises(TimeoutError):
         seam.client.wait_run(run["run_id"], timeout=0.3, poll=0.05)
     threading.Timer(0.3, seam.hermes.complete, args=(run["run_id"], "finished")).start()

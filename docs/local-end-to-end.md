@@ -178,8 +178,8 @@ research CLI from the workspace environment ...:
   ...
 
 curl against the seam:
-  curl -s -X POST http://127.0.0.1:<seam>/session-open -H 'Content-Type: application/json' -d '{"client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}'
-  curl -s -X POST http://127.0.0.1:<seam>/message -H 'Content-Type: application/json' -d '{"session_id": "api_...", "message": "What is the state of the workspace?", "actor": "user:local", "context": {"contract_version": 1, "on_screen": []}}'
+  curl -s -X POST http://127.0.0.1:<seam>/session-open -H 'Content-Type: application/json' -d '{"op_id": "<new UUID>", "client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}'
+  curl -s -X POST http://127.0.0.1:<seam>/message -H 'Content-Type: application/json' -d '{"op_id": "<new UUID>", "session_id": "api_...", "message": "What is the state of the workspace?", "actor": "user:local", "context": {"contract_version": 1, "on_screen": []}}'
   curl -s http://127.0.0.1:<seam>/runs/<run_id>
   curl -s 'http://127.0.0.1:<seam>/snapshot?store=workspace'
   curl -sN 'http://127.0.0.1:<seam>/stream?store=workspace&after=0'
@@ -195,9 +195,11 @@ The watcher ticks every 60 s below, as the cron job would.
 
 The seam's routes are those of `research serve` (`core/src/research_core/serve.py`): `POST
 /session-open`, `/message`, `/ui-action`, `/store/apply`; `GET /snapshot`, `/stream`,
-`/runs/<id>`, `/health`. `/message` answers `{session_id, run_id, delivered, problems, seq}`;
-`delivered` is `start` for a new run and `steer` when the Session already had a live one (the
-bridge's per-Session rule). `/stream` is Server-Sent Events with `id: <seq>` and the event JSON
+`/runs/<id>`, `/health`. `/session-open` and `/message` require a caller-generated UUID `op_id`; preserve it when retrying
+the same input. `/message` confirms a durable receipt with
+`{op_id, session_id, run_id, delivered, problems, seq}` and `delivered: queued`.
+Read `records.admissions` in the workspace snapshot for the assigned run and its status.
+Messages wait behind an existing run in the same session. `/stream` is Server-Sent Events with `id: <seq>` and the event JSON
 in `data:`; `?store=coworld` streams the active Coworld's store. `core/src/research_core/client.py`
 (`ScriptedClient`) is the same conversation in Python.
 
@@ -413,8 +415,8 @@ workspace (IDE_WORKSPACE):     /opt/data/workspace
 checkout (read-only):          /src
 
 talk to it:
-  curl -s -X POST http://127.0.0.1:8650/session-open -H 'Content-Type: application/json' -d '{"client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}'
-  curl -s -X POST http://127.0.0.1:8650/message -H 'Content-Type: application/json' -d '{"session_id": "<session_id>", "message": "What is the state of the workspace?", "actor": "user:local", "context": {"contract_version": 1, "on_screen": []}}'
+  curl -s -X POST http://127.0.0.1:8650/session-open -H 'Content-Type: application/json' -d '{"op_id": "<new UUID>", "client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}'
+  curl -s -X POST http://127.0.0.1:8650/message -H 'Content-Type: application/json' -d '{"op_id": "<new UUID>", "session_id": "<session_id>", "message": "What is the state of the workspace?", "actor": "user:local", "context": {"contract_version": 1, "on_screen": []}}'
   curl -s 'http://127.0.0.1:8650/snapshot?store=workspace'
   curl -sN 'http://127.0.0.1:8650/stream?store=workspace&after=0'
   uv run python tools/local_stack.py scenario | status | logs | shell | down

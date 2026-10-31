@@ -49,6 +49,10 @@ class Seam:
     def starts(self) -> int:
         return sum(1 for method, _ in self.hermes.calls if method == "start")
 
+    def say(self, text, context=None):
+        receipt = self.client.say(text, context)
+        return receipt | self.client.wait_admission(receipt["op_id"])
+
 
 def make_ctx(tmp_path, coworld: bool = True) -> ToolContext:
     ctx = ToolContext.from_env(
@@ -112,11 +116,11 @@ def test_session_open_refuses_a_missing_client(seam):
 
 def test_message_stamps_client_coworld_and_version_into_the_block(seam):
     seam.client.open(client_id="coplay-7", kind="desktop", guide="client-coplay")
-    result = seam.client.say(
+    result = seam.say(
         "what is the champion?",
         context={"contract_version": 1, "mode": {"name": "coach", "instruction": "brief"}},
     )
-    assert result["delivered"] == "start" and result["problems"] == []
+    assert result["delivered"] == "queued" and result["problems"] == []
     text = seam.run_input(result["run_id"])
     assert text.startswith("what is the champion?\n\nContext v1:\n")
     block = context_block(text)
@@ -133,7 +137,7 @@ def test_message_stamps_client_coworld_and_version_into_the_block(seam):
 
 def test_message_without_a_context_still_carries_the_stamps(seam):
     seam.client.open()
-    result = seam.client.say("hello")
+    result = seam.say("hello")
     block = context_block(seam.run_input(result["run_id"]))
     assert block == {
         "client": {"id": "scripted", "kind": "test"},
@@ -144,7 +148,7 @@ def test_message_without_a_context_still_carries_the_stamps(seam):
 
 def test_malformed_context_yields_200_with_problems_and_the_run_still_starts(seam):
     seam.client.open()
-    result = seam.client.say(
+    result = seam.say(
         "go",
         context={
             "contract_version": 1,
@@ -154,26 +158,26 @@ def test_malformed_context_yields_200_with_problems_and_the_run_still_starts(sea
             "client": {"id": "spoofed", "kind": "other"},
         },
     )
-    assert result["delivered"] == "start"
+    assert result["delivered"] == "queued"
     assert any("bogus" in p for p in result["problems"])
     assert any("at most 40 characters" in p for p in result["problems"])
     block = context_block(seam.run_input(result["run_id"]))
     assert "mode" not in block and block["on_screen"] == ["G-1"]
     assert block["client"] == {"id": "scripted", "kind": "test"}  # the server's stamp wins
     # A context that is not even an object: the stamps alone make the block.
-    result = seam.client.say("again")
     seam.hermes.complete(result["run_id"])
     result = seam.client._post(
         "/message", {"session_id": seam.client.session_id, "message": "x", "context": "junk"}
     )
-    assert result["delivered"] == "start"
+    assert result["delivered"] == "queued"
     assert result["problems"] == ["context: must be a JSON object"]
+    result |= seam.client.wait_admission(result["op_id"])
     assert context_block(seam.run_input(result["run_id"]))["coworld"] == COWORLD_ID
 
 
 def test_client_showing_another_coworld_is_told_so(seam):
     seam.client.open()
-    result = seam.client.say("hi", context={"contract_version": 1, "coworld": "cow_other"})
+    result = seam.say("hi", context={"contract_version": 1, "coworld": "cow_other"})
     assert context_block(seam.run_input(result["run_id"]))["coworld"] == COWORLD_ID
     assert any("cow_other" in p and COWORLD_ID in p for p in result["problems"])
 
@@ -183,24 +187,22 @@ def test_no_active_coworld_leaves_the_client_coworld_in_place(tmp_path):
     try:
         seam.client.open()
         context = {"contract_version": 1, "coworld": "cow_p"}
-        result = seam.client.say("set up pudge", context=context)
+        result = seam.say("set up pudge", context=context)
         assert context_block(seam.run_input(result["run_id"]))["coworld"] == "cow_p"
         assert seam.client.health()["coworld"] is None
     finally:
         seam.server.shutdown()
 
 
-def test_second_message_while_the_run_is_live_steers_it(seam):
+def test_second_message_waits_until_the_previous_run_finishes(seam):
     seam.client.open()
-    first = seam.client.say("start the work")
+    first = seam.say("start the work")
     second = seam.client.say("and also check the forum")
-    assert second["delivered"] == "steer" and second["run_id"] == first["run_id"]
+    assert second["delivered"] == "queued" and second["run_id"] is None
     assert seam.starts() == 1
-    steered = seam.hermes.steered[first["run_id"]]
-    assert len(steered) == 1 and steered[0].startswith("and also check the forum\n\nContext v1:\n")
     seam.hermes.complete(first["run_id"], "done")
-    third = seam.client.say("thanks")
-    assert third["delivered"] == "start" and third["run_id"] != first["run_id"]
+    dispatched = seam.client.wait_admission(second["op_id"])
+    assert dispatched["run_id"] != first["run_id"]
     assert seam.starts() == 2
 
 
@@ -210,16 +212,15 @@ def test_message_to_an_unknown_session_is_404(seam):
     assert info.value.status == 404
 
 
-def test_busy_gateway_is_503_with_retry_after(seam):
+def test_busy_gateway_preserves_confirmed_message_until_available(seam):
     seam.client.open()
     seam.hermes.set_busy(True)
-    with pytest.raises(SeamError) as info:
-        seam.client.say("hello")
-    assert info.value.status == 503
-    assert info.value.headers.get("Retry-After") == "1"
-    assert info.value.body["retryable"] is True and "429" in info.value.body["error"]
+    receipt = seam.client.say("hello")
+    assert receipt["delivered"] == "queued"
+    with pytest.raises(TimeoutError):
+        seam.client.wait_admission(receipt["op_id"], timeout=0.7)
     seam.hermes.set_busy(False)
-    assert seam.client.say("hello")["delivered"] == "start"
+    assert seam.client.wait_admission(receipt["op_id"])["status"] == "running"
 
 
 # --- stream and snapshot --------------------------------------------------------------------
@@ -311,7 +312,7 @@ def open_ask(seam, conversation: str, ask_id: str = "ask_1") -> None:
 
 def test_ui_action_answer_patches_the_ask_and_steers_the_live_run(seam):
     session_id = seam.client.open()
-    run = seam.client.say("propose a submission")
+    run = seam.say("propose a submission")
     open_ask(seam, session_id)
     result = seam.client.answer("ask_1", "yes")
     assert result["accepted"] is True and result["delivered"] == "steer"
@@ -431,7 +432,7 @@ def test_health_and_run_status(seam):
         "contract_version": 1,
     }
     seam.client.open()
-    run = seam.client.say("hi")
+    run = seam.say("hi")
     status = seam.client.run(run["run_id"])
     assert status["status"] == "running" and status["terminal"] is False
     seam.hermes.complete(run["run_id"], "all done")

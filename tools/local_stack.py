@@ -38,6 +38,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 REPO = Path(__file__).resolve().parents[1]
 try:
@@ -343,10 +344,13 @@ def in_profile(settings: Settings, *command: str, check: bool = True) -> str:
 def print_summary(settings: Settings) -> None:
     seam, name = settings.seam_url, settings.name
     header = "-H 'Content-Type: application/json'"
-    open_body = json.dumps({"client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"})
+    open_body = json.dumps(
+        {"op_id": str(uuid4()), "client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}
+    )
     message = json.dumps(
         {
             "session_id": "<session_id>",
+            "op_id": str(uuid4()),
             "message": "What is the state of the workspace?",
             "actor": "user:local",
             "context": {"contract_version": 1, "on_screen": []},
@@ -451,7 +455,7 @@ def run_scenario(settings: Settings, timeout_s: int) -> int:
     after = before["seq"] if before else 0
     print(f"scenario on {settings.seam_url} (platform {settings.platform}): {REQUEST!r}")
     session_id = client.open("local-stack", "web-ide")
-    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []})
+    reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     print(f"session {session_id}; chat run {reply['run_id']} ({reply['delivered']})", flush=True)
 
     started = time.monotonic()
