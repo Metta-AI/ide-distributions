@@ -39,3 +39,26 @@ and renews the key internally; hosting never supplies profile paths or model env
 variables. Deploy that platform endpoint before this image. Queued chat dispatch waits for
 a valid inference lease, including after restart. Lifecycle readiness remains independent
 of the optional model service, so an unavailable budget does not prevent stopping a workspace.
+
+## Application contract
+
+`image/contract.py` owns the existing application's request, reply and run-event schemas.
+`contract/openapi.json` is generated from those exact Pydantic models; the adapter imports them.
+This is a schemas-only OpenAPI 3.1 artifact, not an additional HTTP API. The platform
+continues to own authentication, lifecycle and the opaque relay envelope.
+
+Generate with `python tools/export_contract.py`; CI runs it with `--check`. Operation
+requests are a closed union discriminated by `name`, with `op_id` and operation-specific
+`args`. Extra request fields are rejected. `actor` is supplied by the image, never a client.
+Context remains JSON. Native reply extensions are allowed; opaque snapshot records and
+run-control replies make no stronger guarantees than their declared schema.
+
+Metta vendors the artifact from an immutable agent commit and records its SHA-256. Its
+frontend types, runtime request validator and browser fixture consume that artifact.
+Changing a public shape requires regenerating the artifact and checking both consumers
+before release. Existing operation names and wire bodies remain unchanged.
+The separate AIDE v1 proposal owns the future bidirectional protocol.
+
+The normal image smoke checks execute the real packaged adapter against its running
+seam, including the previously accepted-by-the-stub invalid actor field. Real model
+chat remains a target-environment acceptance check with an authorized inference lease.
