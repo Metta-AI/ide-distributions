@@ -15,6 +15,7 @@ from control import serve
 from inference import Availability
 from inference import maintain as maintain_inference
 from pydantic import BaseModel, ConfigDict, SecretStr
+from timing import StartupTiming
 
 
 class Bootstrap(BaseModel):
@@ -38,17 +39,6 @@ async def command(*args: str, env: dict[str, str]) -> None:
     code = await process.wait()
     if code:
         raise RuntimeError(f"{args[0]} exited {code}")
-
-
-class StartupTiming(BaseModel):
-    event: Literal["workspace_startup"] = "workspace_startup"
-    outcome: Literal["started", "passed"]
-    workspace_id: str
-    boot_id: str
-    phase: str
-    elapsed_seconds: float
-    timestamp: datetime
-    role: str | None = None
 
 
 async def main() -> None:
@@ -77,6 +67,7 @@ async def main() -> None:
             flush=True,
         )
 
+    report("startup_total", started, outcome="started")
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     lease_file = HOME / ".inference-lease"
     lease_file.unlink(missing_ok=True)
