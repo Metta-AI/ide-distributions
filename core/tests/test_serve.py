@@ -493,6 +493,23 @@ def test_unknown_get_paths_still_404_beside_the_page(seam):
         assert info.value.status == 404, path
 
 
+def test_fresh_workspace_storage_is_ready_before_concurrent_workers_start(tmp_path):
+    ctx = make_ctx(tmp_path, coworld=False)
+    assert not ctx.workspace.store_path.exists()
+    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns())
+    # Existing fixtures register a Coworld first, hiding first-open SQLite journal/schema races.
+    assert ctx.workspace.store_path.exists()
+    with server.stores() as stores:
+        assert stores.wstore.schema_status().ok
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(SeamError) as info:
+            ScriptedClient(server.url)._get("/nowhere")
+        assert info.value.status == 404
+    finally:
+        server.shutdown()
+
+
 def test_unknown_routes_and_bad_json_are_json_errors(seam):
     with pytest.raises(SeamError) as info:
         seam.client._get("/nowhere")

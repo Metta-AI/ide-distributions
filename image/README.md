@@ -62,3 +62,11 @@ The separate AIDE v1 proposal owns the future bidirectional protocol.
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
 chat remains a target-environment acceptance check with an authorized inference lease.
+
+Run `bash image/system_tests/start-stop.sh ide-distribution:local` after building. The smoke
+uses a fresh volume, then restarts with the same volume under the hosting filesystem
+restrictions. It checks adapter operations, sleep, retained sessions and transport failures.
+It also validates all sixteen startup timing events on each boot: profile install/update,
+preparation, gateway readiness, application wake/readiness and total startup. Missing phases,
+reused boot IDs, malformed events and extra telemetry fields fail the check.
+Timing events run only during startup; no timing work is added to chat or relay traffic.

@@ -2,7 +2,7 @@
 # Protect startup and retained-volume recovery under the hosting filesystem restrictions.
 set -euo pipefail
 image=${1:?immutable or locally built image reference required}
-name="distribution-smoke-${GITHUB_RUN_ID:-local}"
+name="distribution-smoke-${GITHUB_RUN_ID:-local}-$$"
 volume="$name"
 scratch=$(mktemp -d)
 cleanup() {
@@ -47,9 +47,14 @@ for cycle in 1 2; do
   docker exec "$name" /opt/hermes/.venv/bin/python -c \
     'import json, urllib.request; s=json.load(urllib.request.urlopen("http://127.0.0.1:8650/status")); assert s["sleep_started"] and s["paused"], s'
   docker stop --time 30 "$name" >/dev/null
-  docker logs "$name"
+  docker logs "$name" > "$scratch/boot-$cycle.log" 2>&1
+  cat "$scratch/boot-$cycle.log"
   docker rm "$name" >/dev/null
 done
+
+cat "$scratch/boot-1.log" "$scratch/boot-2.log" | docker run --rm -i --read-only \
+  --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
+  --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-startup.py
 
 # Fault-path component proof uses the packaged bridge and real HTTP/websocket peers in its own container.
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
