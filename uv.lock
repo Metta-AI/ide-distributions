@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.12.*"
 
 [[package]]
@@ -183,7 +183,7 @@ wheels = [
 
 [[package]]
 name = "coworld"
-version = "0.1.67"
+version = "0.1.68"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -202,9 +202,9 @@ dependencies = [
     { name = "typer" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/9a/cce8eee053334e6a0b0fce431a6ce6041557932cb70a7bd2b3ba8c0e96b5/coworld-0.1.67.tar.gz", hash = "sha256:a55cf68eaf89566b0b6e871baff2dced2b18b5ea806db12aea8d995d6cdb616b", size = 2198895, upload-time = "2026-10-29T19:39:06.916Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/f1/31175eb93e2ef5ade57106606416ae47381a41fccdc0bdb2467fc5d18596/coworld-0.1.68.tar.gz", hash = "sha256:49a06a9c0c5a3ba94e88607714fbfe3c906d7700b1ef88281892f9dd7255aaff", size = 2204693, upload-time = "2026-10-31T17:10:19.425Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/64/9b6e05ead56b770af2fc84d9cfd9ac2a8c9e1e54db29b2b1c933d53fd14f/coworld-0.1.67-py3-none-any.whl", hash = "sha256:f75066d082df5e563c48c54dfdf69d3b8e131434e0e86dcd1f1190a6a0acdac7", size = 632724, upload-time = "2026-10-29T19:39:04.868Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/b9/5c3be0e11e8510dfccf231715e9e47a6dfc66f06aab221650e52f66ebe44/coworld-0.1.68-py3-none-any.whl", hash = "sha256:6598e4b3558f5e9339dd842132ef3483813434ea6bc54ee57bda3dcb5f759f8e", size = 637207, upload-time = "2026-10-31T17:10:17.332Z" },
 ]
 
 [[package]]
