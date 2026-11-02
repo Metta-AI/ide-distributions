@@ -380,6 +380,36 @@ class FakePlatform:
 
         return self._operate("upload", action)
 
+    def upload_image_policy(
+        self, *, name: str, archive_path: Path, tags: dict[str, str] | None = None
+    ) -> PolicyVersion:
+        self._require_identity("player", "container image upload")
+        self._upload_fault("container image upload")
+        inputs = self.upload_inputs(name=name, artifact=archive_path, image_archive=True)
+
+        def action(state: dict) -> PolicyVersion:
+            for row in state["policies"].values():
+                if row.get("image_inputs") == inputs:
+                    return self._policy_version(row)
+            version = 1 + sum(row["name"] == name for row in state["policies"].values())
+            row = {
+                "id": f"pv_{_short_hash(name, version)}",
+                "name": name,
+                "version": version,
+                "content_hash": None,
+                "player_id": self.player_id,
+                "created_at": self._iso(),
+                "tags": dict(tags or {}),
+                "parameters": None,
+                "content_b64": base64.b64encode(archive_path.read_bytes()).decode("ascii"),
+                "image_inputs": inputs,
+            }
+            state["policies"][row["id"]] = row
+            state["counts"]["upload"] += 1
+            return self._policy_version(row)
+
+        return self._operate("upload", action)
+
     def _upload_fault(self, route: str) -> None:
         """``upload=503:N``: the first N uploads fail with a retryable 503 (counted in state)."""
         fault = self._faults.get("upload")
@@ -398,8 +428,16 @@ class FakePlatform:
         if self._operate("upload_fault", action):
             raise PlatformError("upload failed (fake fault)", route=route, status=503)
 
-    def upload_inputs(self, *, name: str, artifact: Path) -> dict[str, Any]:
+    def upload_inputs(
+        self, *, name: str, artifact: Path, image_archive: bool = False
+    ) -> dict[str, Any]:
         """The shape coworld 0.1.67's ``policy_upload_inputs`` gives a single file."""
+        if image_archive:
+            from coworld.upload import policy_upload_inputs
+
+            return policy_upload_inputs(
+                artifact=artifact, name=name, player_id=self.player_id, image_archive=True
+            )
         content = Path(artifact).read_bytes()
         return {
             "name": name,
@@ -424,6 +462,10 @@ class FakePlatform:
             if fault == "not_found":
                 return None
             for row in state["policies"].values():
+                if inputs["attributes"] == {"kind": "docker-img"}:
+                    if row.get("image_inputs") == inputs:
+                        return self._policy_version(row)
+                    continue
                 size = len(base64.b64decode(row["content_b64"]))
                 if (
                     row["name"] == inputs.get("name")

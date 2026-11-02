@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
+import tarfile
 import time
 from pathlib import Path
 
@@ -293,14 +295,64 @@ def test_version_create_allows_submodule(lab, tmp_path):
     assert lab.create("With a submodule")["id"] == "V-1"
 
 
-def test_version_create_refuses_image(lab):
+def image_policy(lab):
+    """An OCI archive made by the committed build command, with a distinct config identity."""
+    config = json.dumps(
+        {"architecture": "amd64", "os": "linux", "rootfs": {"type": "layers", "diff_ids": []}}
+    ).encode()
+    config_digest = hashlib.sha256(config).hexdigest()
+    manifest = json.dumps(
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": "sha256:" + config_digest,
+                "size": len(config),
+            },
+            "layers": [],
+        }
+    ).encode()
+    manifest_digest = hashlib.sha256(manifest).hexdigest()
+    index = json.dumps(
+        {
+            "schemaVersion": 2,
+            "manifests": [
+                {
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": "sha256:" + manifest_digest,
+                    "size": len(manifest),
+                    "platform": {"architecture": "amd64", "os": "linux"},
+                }
+            ],
+        }
+    ).encode()
+    with tarfile.open(lab.code / "policy.tar", "w") as archive:
+        for name, data in {
+            "index.json": index,
+            "oci-layout": b'{"imageLayoutVersion":"1.0.0"}',
+            "blobs/sha256/" + config_digest: config,
+            "blobs/sha256/" + manifest_digest: manifest,
+        }.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
     path = lab.code / "mixin" / "MIXIN.md"
-    path.write_text(path.read_text().replace("  kind: file\n", "  kind: image\n"))
-    gitops.commit_all(lab.code, "Switch to an image policy")
-    result = lab.run("version", {"action": "create", "summary": "Image"})
-    assert result["ok"] is False
-    assert result["error"] == version_tool.IMAGE_REFUSAL
-    assert lab.store.one("SELECT COUNT(*) FROM versions")[0] == 0
+    path.write_text(
+        path.read_text()
+        .replace("  kind: file\n", "  kind: image\n")
+        .replace("build/policy.json", "build/policy.tar")
+    )
+    set_build_command(lab.code, "mkdir -p build && cp policy.tar build/policy.tar")
+    return "sha256:" + config_digest
+
+
+def test_version_create_records_image_archive_kind(lab):
+    image_policy(lab)
+    record = lab.create("Image")
+    assert record["artifact"]["kind"] == "image"
+    kept = lab.coworld.documents / "artifacts" / record["artifact"]["digest"]
+    assert kept.read_bytes() == (lab.code / "policy.tar").read_bytes()
 
 
 def test_version_create_build_failure_reports_capability(lab):

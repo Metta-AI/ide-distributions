@@ -14,7 +14,7 @@ from research_core.platform.fake import FakePlatform
 from research_core.platform.protocol import PolicyVersion
 from research_core.store import intents, notices, sessions
 from research_core.tools import version as version_tool
-from tests.tools.test_version_tool import HARNESS, Lab, commit_policy, policy_bytes
+from tests.tools.test_version_tool import HARNESS, Lab, commit_policy, image_policy, policy_bytes
 
 LOST = "fail_after=upload"  # the platform stored the bytes; the answer never arrived
 
@@ -294,3 +294,25 @@ def test_upload_refusal_carries_the_route(lab, monkeypatch):
     result = lab.run("upload", {"version": "V-1"})
     assert result["ok"] is False
     assert result["context"]["route"] == "POST /x" and result["context"]["request_id"] == "req-1"
+
+
+def test_image_upload_recovers_config_identity_without_archive(lab):
+    config_digest = image_policy(lab)
+    version = lab.create("Image")
+    archive_digest = version["artifact"]["digest"]
+    crashed = lab.run("upload", {"version": "V-1"}, faults=LOST)
+    assert crashed["ok"] is False
+    assert lab.platform().snapshot()["counts"]["upload"] == 1
+    (pending,) = intents.pending(lab.store, "upload")
+    assert pending["request"] == {
+        "name": "cow_fake-main",
+        "player_id": "ply_fake",
+        "image_client_hash": config_digest,
+        "attributes": {"kind": "docker-img"},
+    }
+    (lab.coworld.documents / "artifacts" / archive_digest).unlink()
+    recovered = lab.upload("V-1")
+    assert recovered["reconciled"] is True
+    assert recovered["record"]["uploaded"]["digest_checked"] is False
+    assert lab.platform().snapshot()["counts"]["upload"] == 1
+    assert lab.upload("V-1")["already_uploaded"] is True

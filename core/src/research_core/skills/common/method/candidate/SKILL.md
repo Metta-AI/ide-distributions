@@ -33,6 +33,6 @@ A Version is a policy candidate built on purpose: a commit in the code repositor
 ## Failure handling
 
 - A failed build: the refusal carries the log path and its tail, and the `build` capability is reported broken with a repair Task. Read the whole log, fix the environment or the command (`repair`), rebuild.
-- Image policies: `version.create` refuses them with a clear message until image Versions are designed; say so in the Task's result.
+- Image policies use `artifact.kind: image` and an OCI archive at `artifact.path`. Use `coworld build-policy` with the configured BuildKit endpoint, then `version.create` and `upload`. Keep the archive outside the Docker build context.
 - The baseline changed (a new champion) while you built: the Version is still valid; the Experiment's baseline is locked, so note it and let the review decide whether a new Experiment is needed.
 - The same commit builds to a different artifact digest: the build is not reproducible, a maintenance finding to record.

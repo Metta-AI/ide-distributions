@@ -45,7 +45,7 @@ from coworld.api_client import CoworldApiClient
 from coworld.config import NEXT_CURSOR_HEADER
 from coworld.episode_downloads import DownloadResult, download_episodes
 from coworld.player_files import InvalidPlayerFile
-from coworld.upload import CoworldUploadClient, policy_upload_inputs
+from coworld.upload import CoworldUploadClient, _upload_container_image, policy_upload_inputs
 from softmax_client.auth import fetch_cogames_whoami
 from softmax_client.forum_wiki import ForumWikiClient, WikiEditConflictResponse
 from softmax_client.http import observatory_client
@@ -248,8 +248,31 @@ class RealPlatform:
             player_id=identities.player_id(self._env),
         )
 
-    def upload_inputs(self, *, name: str, artifact: Path) -> dict[str, Any]:
-        """coworld's own description of a file upload: what the platform deduplicates on.
+    def upload_image_policy(
+        self, *, name: str, archive_path: Path, tags: dict[str, str] | None = None
+    ) -> PolicyVersion:
+        """Use the same archive upload and completion path as coworld upload-policy."""
+        client = self._upload()
+        uploaded = self._call(
+            "container image upload", lambda: _upload_container_image(client, archive_path)
+        )
+        version = self._call(
+            "POST /stats/policies/docker/complete",
+            lambda: client.complete_docker_image_policy(
+                name=name, container_image_id=uploaded.id, run=None, secret_env=None, tags=tags
+            ),
+        )
+        return PolicyVersion(
+            id=version.id,
+            name=version.name,
+            version=version.version,
+            player_id=identities.player_id(self._env),
+        )
+
+    def upload_inputs(
+        self, *, name: str, artifact: Path, image_archive: bool = False
+    ) -> dict[str, Any]:
+        """coworld's exact deduplication inputs for a file or image archive upload.
 
         The Player id comes from ``SOFTMAX_PLAYER_ID``, else from one ``whoami`` read: the
         lookup route requires it, while the upload route defaults it from the token.
@@ -263,7 +286,7 @@ class RealPlatform:
             )
         try:
             return policy_upload_inputs(
-                artifact=artifact, name=name, player_id=player_id, image_archive=False
+                artifact=artifact, name=name, player_id=player_id, image_archive=image_archive
             )
         except InvalidPlayerFile as error:
             raise PlatformError(str(error), retryable=False) from error

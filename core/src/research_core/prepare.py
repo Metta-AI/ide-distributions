@@ -34,6 +34,7 @@ import copy
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -107,6 +108,7 @@ FALLBACK_PROVIDERS: list[dict[str, str]] = [{"provider": "openrouter", "model": 
 # Lists the shipped config contributes to: the union of the shipped and retained entries is kept.
 ENV_PASSTHROUGH: dict[str, list[str]] = {
     "common": [
+        "BUILDKIT_HOST",
         "SSL_CERT_FILE",
         "SOFTMAX_PLAYER_ID",
         "SOFTMAX_PLAYER_CREDENTIAL",
@@ -593,6 +595,18 @@ def prepare(
 
     cli.dry_run = check
     actions.extend(apply_config(cli, role, core_src, active))
+
+    # Hermes captures a login-shell environment before running terminal commands. Restore the
+    # workspace CLI directory through its supported shell initialization hook after that login.
+    shell_init = profile / "local" / "workspace-shell.sh"
+    if not check:
+        shell_init.write_text(f"export PATH={shlex.quote(str(ws.venv / 'bin'))}:$PATH\n")
+    shell_files = cli.config_get("terminal.shell_init_files") or []
+    if not shell_files and cli.config_get("terminal.auto_source_bashrc") is not False:
+        shell_files = ["~/.profile", "~/.bash_profile", "~/.bashrc"]
+    if str(shell_init) not in shell_files:
+        cli.config_set("terminal.shell_init_files", [*shell_files, str(shell_init)])
+        actions.append("config: add workspace terminal shell initialization")
 
     marker = profile / PREPARED_MARKER
     if role == "orchestrator":

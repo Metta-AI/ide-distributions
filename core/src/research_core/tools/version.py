@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import asdict
@@ -43,7 +44,6 @@ ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
 
 BUILD_BUDGET_S = 240
-IMAGE_REFUSAL = "image policies are not supported yet: hosted sandboxes have no Docker"
 RUNTIME_MARKER = ".softmax-runtime.json"
 
 # Git-ignored paths that are caches or OS droppings, never build inputs: a path with one of
@@ -117,8 +117,6 @@ def handle_create(call: ToolCall) -> dict:
     coworld = ctx.coworld()
     tree, task_id = working_tree(ctx, call)
     loaded = load_mixin(tree, coworld.mixin)
-    if loaded.artifact.get("kind") == "image":
-        raise ToolError(IMAGE_REFUSAL, artifact=loaded.artifact)
     artifact_path = str(loaded.artifact["path"])
     untracked = untracked_inputs(tree, artifact_path)
     if any(untracked.values()):
@@ -142,16 +140,21 @@ def handle_create(call: ToolCall) -> dict:
     artifact_file = tree / artifact_path
     if not artifact_file.is_file():
         raise build_failure(ctx, result, f"no artifact at {artifact_path} after it")
-    content = artifact_file.read_bytes()
-    digest = hashlib.sha256(content).hexdigest()
-    keep_artifact_copy(ctx, digest, content)
+    with artifact_file.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    keep_artifact_copy(ctx, digest, artifact_file)
     record = versions.create(
         ctx.store,
         ctx.actor,
         summary=call.get("summary"),
         commit_sha=commit,
         branch=branch,
-        artifact={"kind": "file", "path": artifact_path, "digest": digest, "size": len(content)},
+        artifact={
+            "kind": loaded.artifact["kind"],
+            "path": artifact_path,
+            "digest": digest,
+            "size": artifact_file.stat().st_size,
+        },
         based_on=[f"V-{n}" for n in a.record_numbers(call.get("based_on"), "version", "based_on")],
         task_id=task_id,
         experiment_id=(
@@ -355,11 +358,11 @@ def log_text(path: Path) -> str:
         return ""
 
 
-def keep_artifact_copy(ctx: ToolContext, digest: str, content: bytes) -> Path:
+def keep_artifact_copy(ctx: ToolContext, digest: str, source: Path) -> Path:
     path = artifact_copy_path(ctx, digest)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        path.write_bytes(content)
+        shutil.copyfile(source, path)
     return path
 
 
