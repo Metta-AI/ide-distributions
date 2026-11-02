@@ -813,6 +813,11 @@ class FakePlatform:
         title = body.get("title")
 
         def action(state: dict) -> XpRequest:
+            idempotency_key = body.get("idempotency_key")
+            if idempotency_key is not None:
+                for existing in state["xp"].values():
+                    if existing["body"].get("idempotency_key") == idempotency_key:
+                        return self._xp(state, existing)
             balance = self._balance(state)
             if self._faults.get("credits_refuse") == "1" or balance <= 0:
                 raise CreditsRefused(

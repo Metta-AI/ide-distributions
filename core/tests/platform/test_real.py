@@ -339,7 +339,12 @@ def test_xp_create_and_get(platform, server):
     done = {**XP, "status": "completed", "completed_count": 3, "failed_count": 1, "error": "e"}
     server.on("GET", "/observatory/v2/experience-requests/xreq_1", reply(json=done))
 
-    body = {"coworld_id": "cow_1", "num_episodes": 4, "title": "ide:X-1:7:pair"}
+    body = {
+        "coworld_id": "cow_1",
+        "num_episodes": 4,
+        "title": "ide:X-1:7:pair",
+        "idempotency_key": "request-operation-1",
+    }
     created = platform.xp_create(body)
     assert server.body(0) == body
     assert created.id == "xreq_1" and created.status == "pending" and not created.terminal

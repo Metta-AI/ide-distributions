@@ -1,23 +1,11 @@
-"""Experience (XP) requests: the create body, the title that identifies one, and the lookup.
+"""Experience request bodies and display titles.
 
-One XP request plays one Version for a number of episodes on one seed; an Experiment's
-evaluation is a set of them, one per (seed, arm). The title ``ide:X-<n>:<seed>:<arm>`` names
-the Experiment, the seed and the arm, so a request the platform accepted but this side never
-recorded (a crash between the create and the store write, B.13) is found again by listing the
-Player's requests: :func:`find_by_title` is the reconciliation the ``xp`` tool runs before any
-retry. Stdlib only.
+Recovery uses the idempotency key saved with the body in the local intent, never the title.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:  # pragma: no cover
-    from research_core.platform.protocol import Platform, XpRequest
-
 TITLE_PREFIX = "ide:"
-# How many of the Player's newest requests a reconciliation looks through.
-RECONCILE_LIMIT = 200
 
 
 def title_for(experiment_n: int, seed: int, arm: str) -> str:
@@ -55,11 +43,3 @@ def request_body(
     if seed is not None:
         body["game_config_overrides"] = {"seed": seed}
     return body
-
-
-def find_by_title(platform: Platform, title: str) -> XpRequest | None:
-    """The Player's newest request carrying ``title``, or ``None``."""
-    for request in platform.xp_list(mine=True, limit=RECONCILE_LIMIT):
-        if request.title == title:
-            return request
-    return None

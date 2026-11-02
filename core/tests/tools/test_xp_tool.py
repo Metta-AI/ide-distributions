@@ -204,6 +204,7 @@ def test_request_body_and_options(run, ctx, running):
     assert result["ok"] is True, result
     (row,) = ctx.platform().snapshot()["xp"].values()
     assert row["body"] == {
+        "idempotency_key": intents.read(ctx.store, 1)["request"]["idempotency_key"],
         "coworld_id": fake.COWORLD_ID,
         "roster": [
             {"player": {"policy_ref": row["policy"]}, "slot": 0},
@@ -445,3 +446,77 @@ def test_status_on_a_closed_experiment_reports_without_touching_runs(run, ctx, r
     result = run("xp", {"action": "status", "experiment": "X-1"})
     assert result["ok"] is True and result["note"] == "X-1 is abandoned; its runs are final"
     assert result["runs"][0]["state"] == "pending"
+
+
+def test_recovery_ignores_other_requests_with_same_title(run, ctx, running):
+    args = {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    assert run("xp", args, faults="fail_after=xp_create")["ok"] is False
+    platform = ctx.platform()
+    (original,) = platform.snapshot()["xp"].values()
+    foreign = platform.xp_create(
+        {**original["body"], "coworld_id": "cow_other", "idempotency_key": "foreign"}
+    )
+    result = run("xp", args)
+    assert result["ok"] is True, result
+    assert result["requests"] == [original["id"]]
+    assert result["requests"] != [foreign.id]
+    assert platform.snapshot()["counts"]["xp_create"] == 2
+
+
+def test_recovery_replays_saved_body_without_listing(run, ctx, running, monkeypatch):
+    args = {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    assert run("xp", args, faults="fail_after=xp_create")["ok"] is False
+    (pending,) = intents.pending(ctx.store, "xp")
+    saved = pending["request"]
+    assert saved["idempotency_key"]
+
+    def no_listing(*args, **kwargs):
+        pytest.fail("Recovery must not search platform request listings")
+
+    monkeypatch.setattr(fake.FakePlatform, "xp_list", no_listing)
+    result = run("xp", {**args, "episodes": 9})
+    assert result["ok"] is True, result
+    (row,) = ctx.platform().snapshot()["xp"].values()
+    assert row["body"] == saved
+    assert result["runs"][0]["episodes_total"] == 1
+    assert ctx.platform().snapshot()["counts"]["xp_create"] == 1
+
+
+def test_old_pending_request_is_not_resubmitted(run, ctx, running):
+    intents.begin(ctx.store, ctx.actor, kind="xp", key="X-1:1:candidate", subject="X-1")
+    result = run("xp", {"action": "request", "experiment": "X-1"})
+    assert result["ok"] is False
+    assert "predates idempotent XP requests" in result["error"]
+    assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
+
+
+def test_distinct_experiments_get_distinct_request_keys(run, ctx, running):
+    first = run("xp", {"action": "request", "experiment": "X-1"})
+    second_experiment = make_experiment(ctx)
+    second = run("xp", {"action": "request", "experiment": second_experiment["id"]})
+    assert first["ok"] and second["ok"]
+    keys = [row["body"]["idempotency_key"] for row in ctx.platform().snapshot()["xp"].values()]
+    assert len(set(keys)) == 8
+
+
+def test_retry_after_lost_response_creates_one_request(run, ctx, running, monkeypatch):
+    from research_core.platform.errors import PlatformError
+
+    create = fake.FakePlatform.xp_create
+    calls = []
+
+    def lose_first_response(self, body):
+        result = create(self, body)
+        calls.append(dict(body))
+        if len(calls) == 1:
+            raise PlatformError("lost response", retryable=True)
+        return result
+
+    monkeypatch.setattr(fake.FakePlatform, "xp_create", lose_first_response)
+    monkeypatch.setattr(xp_tool.wait, "sleep", lambda _: None)
+    result = run(
+        "xp", {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    )
+    assert result["ok"] is True, result
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert ctx.platform().snapshot()["counts"]["xp_create"] == 1
