@@ -96,3 +96,9 @@ Linux runner: once with the base revision's Dockerfile and once with the propose
 Each image runs one fresh boot and five retained boots with the same smoke command. This
 isolates packaging changes; it does not compare different application revisions. Both build
 identities, the baseline Dockerfile, and all per-boot timing reports are retained as artifacts.
+
+On container stop, the supervisor cancels ongoing startup/control work, terminates its owned
+application and gateway processes, and waits for them to exit. A child that ignores termination
+is killed after ten seconds. The smoke requires a zero container exit code and retains gateway
+file logs alongside startup events when STARTUP_ARTIFACTS is set. These fixture logs contain no
+real model credentials or user conversations.
