@@ -330,13 +330,12 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
     optional = [name for name in schemas if name not in required]
     example: dict[str, Any] = {"action": action} if action else {}
     example.update({name: _placeholder(schemas[name]) for name in required})
-    out: dict[str, Any] = {}
-    if selected is not None:
-        out["does"] = selected.description
-    out["required"] = _fields(schemas, required)
-    out["optional"] = _fields(schemas, optional)
-    out["example"] = example
-    return out
+    return {
+        **({"does": selected.description} if selected else {}),
+        "required": _fields(schemas, required),
+        "optional": _fields(schemas, optional),
+        "example": example,
+    }
 
 
 def argument_error(
