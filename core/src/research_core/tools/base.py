@@ -304,9 +304,12 @@ def _placeholder(schema: dict) -> Any:
         return schema["enum"][0]
     if schema.get("type") == "array":
         return [_placeholder(schema.get("items") or {"type": "string"})]
-    if schema.get("type") == "object":
-        return {}
     return PLACEHOLDERS.get(schema.get("type", ""), "<value>")
+
+
+def _is_structured(schema: dict) -> bool:
+    """An object, or a list of objects: its shape lives in prose, so no placeholder fits it."""
+    return "object" in (schema.get("type"), (schema.get("items") or {}).get("type"))
 
 
 def _fields(schemas: Mapping[str, dict], names: list[str]) -> dict[str, str]:
@@ -332,15 +335,18 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
     schemas = spec.accepted(selected)
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
-    example: dict[str, Any] = {"action": action} if action else {}
-    extra = selected.example_fields if selected else ()
-    example.update({name: _placeholder(schemas[name]) for name in [*required, *extra]})
-    return {
+    names = [*required, *(selected.example_fields if selected else ())]
+    out = {
         **({"does": selected.description} if selected else {}),
         "required": _fields(schemas, required),
         "optional": _fields(schemas, optional),
-        "example": example,
     }
+    # A guessed object would be refused again, so an action that needs one gets no example:
+    # its required fields' descriptions spell out each shape.
+    if not any(_is_structured(schemas[name]) for name in names):
+        example = {"action": action} if action else {}
+        out["example"] = {**example, **{name: _placeholder(schemas[name]) for name in names}}
+    return out
 
 
 def argument_error(
@@ -354,11 +360,12 @@ def argument_error(
     received = sorted(k for k in args if k != "action")
     label = f"{spec.name} {action}" if action else spec.name
     how_to = usage(spec, role, action)
-    fix = (
-        "Call again with every required field in one call; see usage.example."
-        if "example" in how_to
-        else "Call again with one of the actions in usage.actions and the fields it requires."
-    )
+    if "example" in how_to:
+        fix = "Call again with every required field in one call; see usage.example."
+    elif "actions" in how_to:
+        fix = "Call again with one of the actions in usage.actions and the fields it requires."
+    else:
+        fix = "Call again with every required field in one call; usage.required describes each."
     summary = (
         f"{label} was not run, nothing changed: {'; '.join(problems)}. "
         f"This call sent: {', '.join(received) or 'no fields besides action'}. {fix}"

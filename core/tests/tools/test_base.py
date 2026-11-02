@@ -193,7 +193,23 @@ def test_every_actions_example_call_passes_validation():
         for spec in catalog.tools_for(role):
             for action in spec.actions_for(role) if spec.actions else [None]:
                 name = action.name if action else None
-                example = base.usage(spec, role, name)["example"]
+                how_to = base.usage(spec, role, name)
+                if "example" not in how_to:  # it needs an object; the descriptions give the shape
+                    assert any(
+                        base._is_structured(spec.accepted(action)[f]) for f in how_to["required"]
+                    )
+                    continue
+                example = how_to["example"]
                 assert set(action.example_fields if action else ()) <= set(example)
                 _, problems = base.validate_args(spec, role, example)
                 assert problems == [], (spec.name, name, problems)
+
+
+def test_an_action_that_needs_an_object_gets_no_guessed_example(tmp_path):
+    catalog._load_tool_modules()
+    refused = json.loads(
+        base.run_tool("claim", {"action": "write"}, make_ctx(tmp_path, "researcher"))
+    )
+    assert "example" not in refused["usage"]
+    assert "evidence" in refused["usage"]["required"]
+    assert refused["error"].endswith("usage.required describes each.")

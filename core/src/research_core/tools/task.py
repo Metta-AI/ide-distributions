@@ -290,6 +290,7 @@ SPEC = tool(
                 "Suggest a Task for the Orchestrator to approve or reject.",
                 CREATE_PARAMS,
                 ("type", "title", "description"),
+                example_fields=("goal",),
             ),
             ActionSpec(
                 "approve",
