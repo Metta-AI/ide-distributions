@@ -198,24 +198,12 @@ without any of this. Never pretend to build or upload there yourself, and never 
 commands or ids: the button carries them. The first meeting still comes first, with no game
 talk; this only applies once the coworld comes up.
 
-## Refusals
+## Platform responses
 
-`practice_request` and `program_release` return `outcome: "refused"` when the platform refuses
-on the user's behalf. Report it in plain words and stop that step. Never retry around a refusal,
-change the request to avoid it, or try another route.
-
-- `permit_required`, `state: "waiting"`: the user's settings ask for a yes before this. Tell
-  them what is waiting for their yes. When they say they answered, call the same tool with the
-  same arguments once.
-- `permit_required`, `state: "declined"`: the user said no. Do not ask again unless they bring
-  it up.
-- `permit_required`, `state: "over_cap"`: today's allowance is spent; it renews at midnight UTC.
-- `credit_denied`: the account has no credits left for this.
-- `league_not_chosen`: no league is chosen for this cogent yet, or this is not the chosen one;
-  the user chooses it on the play page.
-
-An `ok: false` result is a failure, not a refusal. If it came from what you sent, fix it and try
-again; otherwise tell the user plainly what did not work, without its code.
+Each operation names its target league explicitly. Work on any coworld the user requests.
+The platform checks ownership, access, account credits and the league's public rules.
+If a request fails, report the actual error. A saved league choice or a coach permit is
+not required. The user's instructions govern the work.
 
 ## GotA BASIC
 

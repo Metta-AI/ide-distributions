@@ -64,8 +64,8 @@ for source editing; it never supplies a default league for practice or release.
 
 `task_update` updates the existing current card in `journal.json` without publishing it to the platform.
 
-A coach refusal (403 `permit_required`, 402 `credit_denied`, `league_not_chosen`) is returned as
-data, `{"outcome": "refused", "refusal": ..., "reason", "state"?, "ask"?}`, and is never retried.
+An exhausted account-credit balance is returned as a `credit_denied` refusal.
+Practice and release each use the league explicitly supplied for that operation.
 
 `src/play/program.py` uses private members of the vendored `SoftmaxClient` (`_league_coworld`,
 `_cli`, `_require_player`, `_line_value`); `tests/test_program.py` runs every one of those paths

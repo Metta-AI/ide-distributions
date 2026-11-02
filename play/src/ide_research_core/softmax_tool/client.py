@@ -60,15 +60,12 @@ from ide_research_core.softmax_tool.platform_cli import (
     PlatformCli,
     Runner,
     SoftmaxCliError,
-    coach_refusal,
     describe_failure,
 )
 from ide_research_core.softmax_tool.protocol import (
     ArtifactType,
     CreditDenied,
     Identity,
-    LeagueNotChosen,
-    PermitRequired,
     PublishedPolicy,
     SubmissionState,
     XpHandle,
@@ -168,7 +165,7 @@ class SoftmaxClient:
         seed: int | None = None,
         arm: str | None = None,
         known: list[XpHandle] | None = None,
-    ) -> XpHandle | CreditDenied | PermitRequired | LeagueNotChosen:
+    ) -> XpHandle | CreditDenied:
         """Reuse an existing request for (experiment, batch, attempt, seed, arm); else check
         identity, create.
 
@@ -193,9 +190,7 @@ class SoftmaxClient:
         if self._budget is not None:
             self._budget.reserve(key, spec)
         result = xp.create(self._cli, experiment, batch, attempt, spec, seed, arm)
-        if self._budget is not None and isinstance(
-            result, (CreditDenied, PermitRequired, LeagueNotChosen)
-        ):
+        if self._budget is not None and isinstance(result, CreditDenied):
             self._budget.release_refused(key)
         return result
 
@@ -254,19 +249,13 @@ class SoftmaxClient:
             raise SoftmaxCliError(f"Unexpected policy lookup result: {response['kind']}")
         return PublishedPolicy.model_validate(response["policy"])
 
-    def submit(
-        self, policy_version_id: str, league_id: str, player_id: str
-    ) -> str | PermitRequired | LeagueNotChosen:
-        """Submit ``<name>:v<N>`` for ``player_id``; return the submission id, or the
-        coach's refusal (``platform_cli.coach_refusal``: nothing was submitted)."""
+    def submit(self, policy_version_id: str, league_id: str, player_id: str) -> str:
+        """Submit ``<name>:v<N>`` for ``player_id``; return the submission id."""
         self.require_player()
         args = ["submit", policy_version_id, "--league", league_id]
         args += ["--player", player_id, "--no-open-browser"]
         result = self._cli.run("coworld", args, ok_codes=(0, 1))
         if result.returncode != 0:
-            refusal = coach_refusal(result.stderr or "")
-            if refusal is not None:
-                return refusal
             raise SoftmaxCliError(describe_failure("coworld", args, result))
         submission_id = _line_value(result.stdout, "Submission:")
         if submission_id is None:
