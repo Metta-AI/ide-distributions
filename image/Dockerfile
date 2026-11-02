@@ -20,7 +20,16 @@ COPY orchestrator /opt/distribution/orchestrator
 COPY researcher /opt/distribution/researcher
 COPY image /opt/distribution/image
 COPY contract /opt/distribution/contract
+# Hosted workspaces use the built-in API transport. Keep other bundled plugins,
+# without discovering messaging adapters in the host or either profile.
+RUN mkdir /opt/workspace-plugins \
+    && for plugin in /opt/hermes/plugins/*; do \
+         if [ "$(basename "$plugin")" != platforms ]; then \
+           ln -s "$plugin" /opt/workspace-plugins/; \
+         fi; \
+       done
 ENV HOME=/workspace/host \
+    HERMES_BUNDLED_PLUGINS=/opt/workspace-plugins \
     HERMES_HOME=/workspace/host \
     HERMES_REAL_HOME=/workspace/host \
     HERMES_WRITE_SAFE_ROOT=/workspace \
