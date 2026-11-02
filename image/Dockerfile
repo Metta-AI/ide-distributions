@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --compile-bytecode --project /opt/distribution \
 COPY orchestrator /opt/distribution/orchestrator
 COPY researcher /opt/distribution/researcher
 COPY image /opt/distribution/image
+COPY image/workspace-path.sh /etc/profile.d/workspace-path.sh
 COPY contract /opt/distribution/contract
 # Hosted workspaces use the built-in API transport. Keep other bundled plugins,
 # without discovering messaging adapters in the host or either profile.
