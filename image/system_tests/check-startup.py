@@ -37,10 +37,17 @@ for boot_id, events in boots.items():
     state = events[0].workspace_state
     states.append(state)
     assert all(e.workspace_state == state for e in events), events
-    assert [(e.phase, e.role, e.outcome) for e in events] == phases, events
+    startup = [e for e in events if e.phase not in {"inference_ready", "relay_connected"}]
+    assert [(e.phase, e.role, e.outcome) for e in startup] == phases, events
+    for phase in ("inference_ready", "relay_connected"):
+        readiness = [e for e in events if e.phase == phase]
+        assert [e.outcome for e in readiness] in (["started"], ["started", "passed"]), events
+        assert all(e.role is None and e.timestamp >= startup[-1].timestamp for e in readiness), (
+            events
+        )
     assert [e.timestamp for e in events] == sorted(e.timestamp for e in events), events
-    total = events[-1].elapsed_seconds
-    assert total >= sum(e.elapsed_seconds for e in events[1:-1]), events
+    total = startup[-1].elapsed_seconds
+    assert total >= sum(e.elapsed_seconds for e in startup[1:-1]), events
     print(f"PASS startup telemetry: boot={boot_id} events={len(events)} total={total}s")
 
     for event in events:

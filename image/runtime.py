@@ -207,7 +207,18 @@ async def run(stack: AsyncExitStack) -> None:
                     await asyncio.sleep(1)
         report("application_ready", phase_started)
         report("startup_total", started)
+
+        async def observe_ready(phase: str, ready: asyncio.Event) -> None:
+            since = time.monotonic()
+            report(phase, since, outcome="started")
+            await ready.wait()
+            report(phase, since)
+
+        inference_ready = asyncio.Event()
+        relay_connected = asyncio.Event()
         async with asyncio.TaskGroup() as group:
+            group.create_task(observe_ready("inference_ready", inference_ready))
+            group.create_task(observe_ready("relay_connected", relay_connected))
             group.create_task(
                 maintain_inference(
                     platform_url=bootstrap.platform_url,
@@ -216,6 +227,7 @@ async def run(stack: AsyncExitStack) -> None:
                     homes=(HOME, *(HOME / "profiles" / role for role in PROFILES)),
                     availability=inference,
                     lease_file=lease_file,
+                    ready=inference_ready,
                 )
             )
             control = group.create_task(
@@ -225,6 +237,7 @@ async def run(stack: AsyncExitStack) -> None:
                     credential=bootstrap.credential.get_secret_value(),
                     env=profile_env,
                     inference=inference,
+                    connected=relay_connected,
                 )
             )
             await asyncio.wait(

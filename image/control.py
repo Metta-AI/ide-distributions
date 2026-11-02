@@ -110,6 +110,7 @@ async def serve(
     credential: str,
     env: dict[str, str],
     inference: Availability,
+    connected: asyncio.Event,
 ) -> None:
     """One bidirectional transport; durable admission and operation idempotency belong to AIDE."""
     lifecycle = Lifecycle(env)
@@ -155,6 +156,7 @@ async def serve(
             async with connect(
                 str(url), additional_headers={"Authorization": player.headers["Authorization"]}
             ) as socket:
+                connected.set()
                 running: dict[UUID, asyncio.Task[None]] = {}
                 async with asyncio.TaskGroup() as replies:
 

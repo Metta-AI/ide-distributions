@@ -102,3 +102,16 @@ application and gateway processes, and waits for them to exit. A child that igno
 is killed after ten seconds. The smoke requires a zero container exit code and retains gateway
 file logs alongside startup events when STARTUP_ARTIFACTS is set. These fixture logs contain no
 real model credentials or user conversations.
+
+## Startup timing
+
+`workspace_startup` JSON lines join on `workspace_id` and `boot_id`, with `workspace_state`
+set to `fresh` or `retained`. `startup_total` ends at application health. Two concurrent
+phases follow: `relay_connected` ends after the authenticated websocket handshake, and
+`inference_ready` ends only after the first lease is installed in every profile and its
+expiry marker is persisted. Each reports started/passed and elapsed seconds. Missing
+passed events indicate incomplete readiness, not zero latency. Renewal and reconnection
+do not duplicate these first-readiness events.
+
+These milestones do not claim a completed model turn. Use Metta's packaged chat harness
+for container-to-completed-chat measurements and retained-session verification.
