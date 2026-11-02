@@ -166,71 +166,74 @@ async def run(stack: AsyncExitStack) -> None:
             env=profile_env,
         )
         report("profile_prepare", phase_started, role=role)
-    profile_env = {**common, "HERMES_HOME": str(HOME / "profiles/orchestrator")}
-    phase_started = time.monotonic()
-    report("gateway_ready", phase_started, outcome="started")
-    gateway = await stack.enter_async_context(managed_process(HERMES, "gateway", "run", env=common))
-    async with httpx.AsyncClient(
-        base_url="http://127.0.0.1:8642", headers={"Authorization": f"Bearer {key}"}
-    ) as client:
-        async with asyncio.timeout(180):
-            while True:
-                if gateway.returncode is not None:
-                    raise RuntimeError(f"Gateway exited {gateway.returncode}")
-                result = (
-                    await asyncio.gather(client.get("/v1/capabilities"), return_exceptions=True)
-                )[0]
-                if isinstance(result, httpx.Response) and result.is_success:
-                    break
-                await asyncio.sleep(1)
-        report("gateway_ready", phase_started)
-        phase_started = time.monotonic()
-        report("application_wake", phase_started, outcome="started")
-        await command(RESEARCH, "workspace", "wake", env=profile_env)
-        report("application_wake", phase_started)
-        phase_started = time.monotonic()
-        report("application_ready", phase_started, outcome="started")
-        seam = await stack.enter_async_context(
-            managed_process(RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env)
+
+    async def observe_ready(phase: str, ready: asyncio.Event) -> None:
+        since = time.monotonic()
+        report(phase, since, outcome="started")
+        await ready.wait()
+        report(phase, since)
+
+    inference_ready = asyncio.Event()
+    relay_connected = asyncio.Event()
+    async with asyncio.TaskGroup() as group:
+        group.create_task(observe_ready("inference_ready", inference_ready))
+        group.create_task(
+            maintain_inference(
+                platform_url=bootstrap.platform_url,
+                workspace_id=bootstrap.workspace_id,
+                credential=bootstrap.credential.get_secret_value(),
+                homes=(HOME, *(HOME / "profiles" / role for role in PROFILES)),
+                availability=inference,
+                lease_file=lease_file,
+                ready=inference_ready,
+            )
         )
-        async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam_client:
-            async with asyncio.timeout(30):
+        profile_env = {**common, "HERMES_HOME": str(HOME / "profiles/orchestrator")}
+        phase_started = time.monotonic()
+        report("gateway_ready", phase_started, outcome="started")
+        gateway = await stack.enter_async_context(
+            managed_process(HERMES, "gateway", "run", env=common)
+        )
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:8642", headers={"Authorization": f"Bearer {key}"}
+        ) as client:
+            async with asyncio.timeout(180):
                 while True:
-                    if seam.returncode is not None:
-                        raise RuntimeError(f"Application exited {seam.returncode}")
                     if gateway.returncode is not None:
                         raise RuntimeError(f"Gateway exited {gateway.returncode}")
                     result = (
-                        await asyncio.gather(seam_client.get("/health"), return_exceptions=True)
+                        await asyncio.gather(client.get("/v1/capabilities"), return_exceptions=True)
                     )[0]
                     if isinstance(result, httpx.Response) and result.is_success:
                         break
                     await asyncio.sleep(1)
-        report("application_ready", phase_started)
-        report("startup_total", started)
-
-        async def observe_ready(phase: str, ready: asyncio.Event) -> None:
-            since = time.monotonic()
-            report(phase, since, outcome="started")
-            await ready.wait()
-            report(phase, since)
-
-        inference_ready = asyncio.Event()
-        relay_connected = asyncio.Event()
-        async with asyncio.TaskGroup() as group:
-            group.create_task(observe_ready("inference_ready", inference_ready))
-            group.create_task(observe_ready("relay_connected", relay_connected))
-            group.create_task(
-                maintain_inference(
-                    platform_url=bootstrap.platform_url,
-                    workspace_id=bootstrap.workspace_id,
-                    credential=bootstrap.credential.get_secret_value(),
-                    homes=(HOME, *(HOME / "profiles" / role for role in PROFILES)),
-                    availability=inference,
-                    lease_file=lease_file,
-                    ready=inference_ready,
-                )
+            report("gateway_ready", phase_started)
+            phase_started = time.monotonic()
+            report("application_wake", phase_started, outcome="started")
+            await command(RESEARCH, "workspace", "wake", env=profile_env)
+            report("application_wake", phase_started)
+            phase_started = time.monotonic()
+            report("application_ready", phase_started, outcome="started")
+            seam = await stack.enter_async_context(
+                managed_process(RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env)
             )
+            async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam_client:
+                async with asyncio.timeout(30):
+                    while True:
+                        if seam.returncode is not None:
+                            raise RuntimeError(f"Application exited {seam.returncode}")
+                        if gateway.returncode is not None:
+                            raise RuntimeError(f"Gateway exited {gateway.returncode}")
+                        result = (
+                            await asyncio.gather(seam_client.get("/health"), return_exceptions=True)
+                        )[0]
+                        if isinstance(result, httpx.Response) and result.is_success:
+                            break
+                        await asyncio.sleep(1)
+            report("application_ready", phase_started)
+            report("startup_total", started)
+
+            group.create_task(observe_ready("relay_connected", relay_connected))
             control = group.create_task(
                 serve(
                     platform_url=bootstrap.platform_url,
