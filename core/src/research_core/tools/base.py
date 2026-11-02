@@ -6,6 +6,12 @@ flat parameter set or a list of actions with flat optional inputs, and a handler
 against the role's view of the tool, reports every problem at once, runs the handler and
 renders the result as JSON text. It never raises: Hermes gets a string in every case.
 
+A call is checked against its selected action: a missing required field, a field of another
+action given a value, an unknown field or a wrong type refuses the call before anything runs.
+That refusal says what the call sent and carries ``usage`` (the action's required and optional
+fields and an example call), so a model can fix the call in one try instead of repeating it.
+Empty placeholders for fields the action does not take are dropped, not refused.
+
 Stdlib only: store-only tools run inside Hermes.
 """
 
@@ -55,6 +61,9 @@ class ActionSpec:
     params: dict[str, dict] = field(default_factory=dict)
     required: tuple[str, ...] = ()
     roles: frozenset[Role] = frozenset({"orchestrator", "researcher"})
+    # Fields the handler needs in some form beyond ``required`` ("ref or view", "goal unless
+    # type is maintenance"): a refusal's example call includes them so copying it can succeed.
+    example_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,10 @@ class ToolSpec:
                     suffix = f"Required for {', '.join(needed)}."
                     properties[name] = {**schema, "description": f"{description} {suffix}".strip()}
         return properties
+
+    def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
+        """The fields one call may carry: the action's own inputs plus the tool's common ones."""
+        return {**(action.params if action else {}), **self.params}
 
     def schema(self, role: Role) -> dict:
         """The OpenAI function body Hermes registers: name, description, parameters."""
@@ -230,16 +243,23 @@ def validate_args(
             action_name = str(raw)
             required.extend(spec.action(action_name).required)  # type: ignore[union-attr]
     known = set(properties) | {name for action in spec.actions or () for name in action.params}
-    for name in args:
+    accepted = spec.accepted(spec.action(action_name)) if action_name else None
+    for name, value in args.items():
         if name not in known:
             problems.append(f"unknown field {name!r}")
+        elif accepted is not None and name not in accepted and name != "action":
+            # A value the action would silently ignore is a mistake the model must see; an empty
+            # placeholder is padding and is dropped instead (see drop_unused_empty).
+            if value not in (None, ""):
+                problems.append(f"{name} is not a field of {action_name}")
     for name in required:
         if args.get(name) in (None, ""):
             problems.append(f"{name} is required" + (f" for {action_name}" if action_name else ""))
     for name, value in args.items():
         schema = properties.get(name)
-        if schema is None or value is None:
-            continue
+        unused = accepted is not None and name not in accepted
+        if schema is None or value is None or (unused and value == ""):
+            continue  # an empty placeholder for another action's field is dropped, not checked
         expected = JSON_TYPES.get(schema.get("type", ""))
         if expected is str and isinstance(value, int) and not isinstance(value, bool):
             continue  # an integer id for a string reference field is coerced by coerce_args
@@ -264,6 +284,98 @@ def coerce_args(spec: ToolSpec, role: Role, args: Mapping[str, Any]) -> dict:
     return out
 
 
+def drop_unused_empty(spec: ToolSpec, action: str | None, args: Mapping[str, Any]) -> dict:
+    """``args`` without empty placeholders for fields the selected action does not take."""
+    if action is None:
+        return dict(args)
+    accepted = spec.accepted(spec.action(action))
+    return {
+        name: value
+        for name, value in args.items()
+        if name == "action" or name in accepted or value not in (None, "")
+    }
+
+
+PLACEHOLDERS = {"string": "<text>", "integer": 1, "number": 1.0, "boolean": True}
+
+
+def _placeholder(schema: dict) -> Any:
+    if "enum" in schema:
+        return schema["enum"][0]
+    if schema.get("type") == "array":
+        return [_placeholder(schema.get("items") or {"type": "string"})]
+    return PLACEHOLDERS.get(schema.get("type", ""), "<value>")
+
+
+def _is_structured(schema: dict) -> bool:
+    """An object, or a list of objects: its shape lives in prose, so no placeholder fits it."""
+    return "object" in (schema.get("type"), (schema.get("items") or {}).get("type"))
+
+
+def _fields(schemas: Mapping[str, dict], names: list[str]) -> dict[str, str]:
+    return {
+        name: str(schemas[name].get("description", schemas[name].get("type", ""))) for name in names
+    }
+
+
+def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
+    """How to call the tool correctly: what a model needs to fix a refused call in one try.
+
+    With a known action: its required and optional fields with their descriptions and an example
+    call to copy. Without one: every action the role may use, with the fields each requires.
+    """
+    if spec.actions is not None and action is None:
+        return {
+            "actions": {
+                a.name: {"does": a.description, "requires": list(a.required)}
+                for a in spec.actions_for(role)
+            }
+        }
+    selected = spec.action(action) if action else None
+    schemas = spec.accepted(selected)
+    required = [*(selected.required if selected else ()), *spec.required]
+    optional = [name for name in schemas if name not in required]
+    names = [*required, *(selected.example_fields if selected else ())]
+    out = {
+        **({"does": selected.description} if selected else {}),
+        "required": _fields(schemas, required),
+        "optional": _fields(schemas, optional),
+    }
+    # A guessed object would be refused again, so an action that needs one gets no example:
+    # its required fields' descriptions spell out each shape.
+    if not any(_is_structured(schemas[name]) for name in names):
+        example = {"action": action} if action else {}
+        out["example"] = {**example, **{name: _placeholder(schemas[name]) for name in names}}
+    return out
+
+
+def argument_error(
+    spec: ToolSpec, role: Role, action: str | None, args: Mapping[str, Any], problems: list[str]
+) -> dict:
+    """The refusal for a call whose arguments are wrong: what arrived, what is wrong, how to fix it.
+
+    Models that keep repeating a broken call (seen with Kimi K3 on some OpenRouter hosts) need the
+    fix spelled out, so the summary names what this call sent and the payload carries the usage.
+    """
+    received = sorted(k for k in args if k != "action")
+    label = f"{spec.name} {action}" if action else spec.name
+    how_to = usage(spec, role, action)
+    if "example" in how_to:
+        fix = "Call again with every required field in one call; see usage.example."
+    elif "actions" in how_to:
+        fix = "Call again with one of the actions in usage.actions and the fields it requires."
+    else:
+        fix = "Call again with every required field in one call; usage.required describes each."
+    summary = (
+        f"{label} was not run, nothing changed: {'; '.join(problems)}. "
+        f"This call sent: {', '.join(received) or 'no fields besides action'}. {fix}"
+    )
+    payload = error_payload(problems, {"tool": spec.name, "action": action, "received": received})
+    payload["error"] = summary
+    payload["usage"] = how_to
+    return payload
+
+
 def error_payload(problems: list[str], context: dict | None = None) -> dict:
     return {
         "ok": False,
@@ -283,11 +395,9 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
         return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
     action, problems = validate_args(spec, ctx.role, args)
     if problems:
-        # The fields that did arrive, so a model that keeps omitting one sees its own call.
-        received = sorted(k for k in args if k != "action")
-        context = {"tool": name, "action": action, "received": received}
-        return json.dumps(error_payload(problems, context))
+        return json.dumps(argument_error(spec, ctx.role, action, args, problems))
     try:
+        args = drop_unused_empty(spec, action, args)
         call = ToolCall(spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action)
         result = spec.handler(call)
         if not isinstance(result, dict):

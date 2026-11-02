@@ -229,6 +229,7 @@ SPEC = tool(
                     "type": EVIDENCE_TYPE,
                     "ref": EVIDENCE_REF,
                 },
+                example_fields=("claim",),
             ),
         ),
     )

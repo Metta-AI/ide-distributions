@@ -677,6 +677,7 @@ SPEC = tool(
                     "request": a.string("One platform request id instead of the Experiment."),
                     "resume": a.string("The token of a backgrounded evaluate, to finish it."),
                 },
+                example_fields=("experiment",),
             ),
         ),
     )

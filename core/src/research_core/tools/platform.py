@@ -524,6 +524,7 @@ SPEC = tool(
                 "standings",
                 "The leaderboard of a division, or of every division of a league.",
                 {"division": a.string("The Division id (div_...)."), "league": LEAGUE},
+                example_fields=("league",),
             ),
             ActionSpec(
                 "active_policies",
@@ -560,6 +561,7 @@ SPEC = tool(
                 "episodes",
                 "Episodes of a policy version, or of a league's active policies.",
                 {"policy_version": a.string("A policy version id."), "league": LEAGUE},
+                example_fields=("league",),
             ),
             ActionSpec(
                 "episode",

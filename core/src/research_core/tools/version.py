@@ -501,6 +501,7 @@ SPEC = tool(
                     "summary": a.string("What this policy is, in one sentence."),
                 },
                 ("summary",),
+                example_fields=("label",),
             ),
             ActionSpec(
                 "read",

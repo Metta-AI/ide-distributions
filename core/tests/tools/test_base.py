@@ -35,7 +35,12 @@ def demo_tool():
                 ("title",),
                 frozenset({"orchestrator"}),
             ),
-            ActionSpec("read", "Read one.", {"goal": {"type": "string"}}, ("goal",)),
+            ActionSpec(
+                "read",
+                "Read one.",
+                {"goal": {"type": "string"}, "limit": {"type": "integer"}},
+                ("goal",),
+            ),
             ActionSpec("boom", "Fail loudly."),
             ActionSpec("store", "Fail in the store."),
             ActionSpec("crash", "Crash."),
@@ -111,6 +116,52 @@ def test_run_tool_success_and_errors(demo_tool, tmp_path):
     assert unknown["ok"] is False
 
 
+def test_a_field_the_action_does_not_take_is_refused(demo_tool):
+    _, problems = base.validate_args(
+        demo_tool, "orchestrator", {"action": "read", "goal": "G-1", "title": "x", "count": 2}
+    )
+    assert problems == ["title is not a field of read"]
+
+
+def test_empty_placeholders_for_other_actions_fields_are_dropped(demo_tool, tmp_path):
+    ok = json.loads(
+        base.run_tool("demo", {"action": "read", "goal": "G-1", "title": ""}, make_ctx(tmp_path))
+    )
+    assert ok["ok"] is True
+    assert ok["record"]["args"] == {"action": "read", "goal": "G-1"}
+
+
+def test_an_empty_placeholder_skips_type_and_enum_checks(demo_tool):
+    # "limit" is an integer field of read; an empty one on create is padding, not a type error.
+    _, problems = base.validate_args(
+        demo_tool, "orchestrator", {"action": "create", "title": "x", "limit": ""}
+    )
+    assert problems == []
+
+
+def test_argument_error_says_what_arrived_and_how_to_fix_it(demo_tool, tmp_path):
+    refused = json.loads(
+        base.run_tool("demo", {"action": "create", "count": 3}, make_ctx(tmp_path))
+    )
+    assert refused["ok"] is False
+    assert refused["problems"] == ["title is required for create"]
+    assert refused["error"].startswith("demo create was not run, nothing changed")
+    assert "This call sent: count." in refused["error"]
+    assert refused["context"] == {"tool": "demo", "action": "create", "received": ["count"]}
+    assert refused["usage"]["does"] == "Make one."
+    assert list(refused["usage"]["required"]) == ["title"]
+    assert set(refused["usage"]["optional"]) == {"count", "mode"}
+    assert refused["usage"]["example"] == {"action": "create", "title": "<text>"}
+
+
+def test_argument_error_without_an_action_lists_the_actions(demo_tool, tmp_path):
+    refused = json.loads(base.run_tool("demo", {"goal": "G-1"}, make_ctx(tmp_path, "researcher")))
+    actions = refused["usage"]["actions"]
+    assert "create" not in actions
+    assert actions["read"] == {"does": "Read one.", "requires": ["goal"]}
+    assert "usage.actions" in refused["error"] and "usage.example" not in refused["error"]
+
+
 def test_run_tool_scrubs_workspace_paths(demo_tool, tmp_path):
     ctx = make_ctx(tmp_path)
 
@@ -134,3 +185,31 @@ def test_context_from_env(tmp_path):
     with pytest.raises(ToolError):
         ctx.coworld()
     assert ctx.coworld_or_none() is None
+
+
+def test_every_actions_example_call_passes_validation():
+    catalog._load_tool_modules()
+    for role in ("orchestrator", "researcher"):
+        for spec in catalog.tools_for(role):
+            for action in spec.actions_for(role) if spec.actions else [None]:
+                name = action.name if action else None
+                how_to = base.usage(spec, role, name)
+                if "example" not in how_to:  # it needs an object; the descriptions give the shape
+                    assert any(
+                        base._is_structured(spec.accepted(action)[f]) for f in how_to["required"]
+                    )
+                    continue
+                example = how_to["example"]
+                assert set(action.example_fields if action else ()) <= set(example)
+                _, problems = base.validate_args(spec, role, example)
+                assert problems == [], (spec.name, name, problems)
+
+
+def test_an_action_that_needs_an_object_gets_no_guessed_example(tmp_path):
+    catalog._load_tool_modules()
+    refused = json.loads(
+        base.run_tool("claim", {"action": "write"}, make_ctx(tmp_path, "researcher"))
+    )
+    assert "example" not in refused["usage"]
+    assert "evidence" in refused["usage"]["required"]
+    assert refused["error"].endswith("usage.required describes each.")

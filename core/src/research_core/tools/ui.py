@@ -156,6 +156,7 @@ SPEC = tool(
                     "ref": a.string("A record such as T-3, a platform id or a platform URL."),
                     "view": a.string("A client view id, such as leaderboard."),
                 },
+                example_fields=("ref",),
             ),
             ActionSpec(
                 "panel_set",
