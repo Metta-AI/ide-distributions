@@ -11,7 +11,7 @@ sys.path.insert(0, "/opt/hermes")
 from hermes_constants import reset_hermes_home_override, set_hermes_home_override  # noqa: E402
 from tools.environments.local import LocalEnvironment  # noqa: E402
 from tools.process_registry import process_registry  # noqa: E402
-from tools.terminal_tool import terminal_tool  # noqa: E402
+from tools.terminal_tool import FOREGROUND_MAX_TIMEOUT, terminal_tool  # noqa: E402
 
 for role in ("orchestrator", "researcher"):
     home = Path("/workspace/host/profiles") / role
@@ -29,7 +29,7 @@ for role in ("orchestrator", "researcher"):
         assert result["returncode"] == 0, (role, result)
         assert "/opt/workspace-env/bin/research" in result["output"], result
         assert "/opt/workspace-env/bin/coworld" in result["output"], result
-        for options in ({"background": True}, {"timeout": 600}):
+        for options in ({"background": True}, {"timeout": FOREGROUND_MAX_TIMEOUT + 1}):
             started = json.loads(
                 terminal_tool(
                     command=command,
@@ -39,6 +39,7 @@ for role in ("orchestrator", "researcher"):
                 )
             )
             assert started["error"] is None, (role, options, started)
+            assert "session_id" in started, (role, options, started)
             finished = process_registry.wait(started["session_id"], timeout=60)
             assert finished["exit_code"] == 0, (role, options, finished)
             assert "/opt/workspace-env/bin/coworld" in finished["output"], finished
