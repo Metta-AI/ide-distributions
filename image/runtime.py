@@ -44,6 +44,9 @@ async def command(*args: str, env: dict[str, str]) -> None:
 async def main() -> None:
     started = time.monotonic()
     boot_id = uuid4().hex
+    workspace_state = (
+        "retained" if (HOME / "profiles/orchestrator/.softmax-prepared").exists() else "fresh"
+    )
     inference = Availability()
     bootstrap = Bootstrap.model_validate_json(Path("/run/workspace/bootstrap.json").read_text())
 
@@ -58,6 +61,7 @@ async def main() -> None:
             StartupTiming(
                 workspace_id=bootstrap.workspace_id,
                 boot_id=boot_id,
+                workspace_state=workspace_state,
                 phase=phase,
                 outcome=outcome,
                 elapsed_seconds=round(time.monotonic() - since, 3),
@@ -188,6 +192,10 @@ async def main() -> None:
         async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam_client:
             async with asyncio.timeout(30):
                 while True:
+                    if seam.returncode is not None:
+                        raise RuntimeError(f"Application exited {seam.returncode}")
+                    if gateway.returncode is not None:
+                        raise RuntimeError(f"Gateway exited {gateway.returncode}")
                     result = (
                         await asyncio.gather(seam_client.get("/health"), return_exceptions=True)
                     )[0]

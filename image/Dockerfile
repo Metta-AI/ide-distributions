@@ -10,7 +10,9 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_CACHE_DIR=/tmp/uv-cache \
     UV_PYTHON=3.12 \
     IDE_WORKSPACE_ENV=/opt/workspace-env
-RUN uv sync --frozen --no-dev --project /opt/distribution \
+# Runtime files are read-only; compile dependencies and editable source at build time.
+RUN uv sync --frozen --no-dev --compile-bytecode --project /opt/distribution \
+    && /opt/workspace-env/bin/python -m compileall -q /opt/distribution/core \
     && sha256sum /opt/distribution/uv.lock | cut -d ' ' -f1 > /opt/workspace-env/.lock-sha \
     && chmod -R a+rX /opt/python /opt/workspace-env /opt/distribution \
     && rm -rf /tmp/uv-cache

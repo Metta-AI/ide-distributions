@@ -13,6 +13,7 @@ class StartupTiming(BaseModel):
     outcome: Literal["started", "passed"]
     workspace_id: str
     boot_id: str
+    workspace_state: Literal["fresh", "retained"]
     phase: str
     elapsed_seconds: float
     timestamp: datetime
