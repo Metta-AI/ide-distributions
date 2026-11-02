@@ -254,8 +254,9 @@ def validate_args(
             problems.append(f"{name} is required" + (f" for {action_name}" if action_name else ""))
     for name, value in args.items():
         schema = properties.get(name)
-        if schema is None or value is None:
-            continue
+        unused = accepted is not None and name not in accepted
+        if schema is None or value is None or (unused and value == ""):
+            continue  # an empty placeholder for another action's field is dropped, not checked
         expected = JSON_TYPES.get(schema.get("type", ""))
         if expected is str and isinstance(value, int) and not isinstance(value, bool):
             continue  # an integer id for a string reference field is coerced by coerce_args
@@ -348,14 +349,19 @@ def argument_error(
     """
     received = sorted(k for k in args if k != "action")
     label = f"{spec.name} {action}" if action else spec.name
+    how_to = usage(spec, role, action)
+    fix = (
+        "Call again with every required field in one call; see usage.example."
+        if "example" in how_to
+        else "Call again with one of the actions in usage.actions and the fields it requires."
+    )
     summary = (
         f"{label} was not run, nothing changed: {'; '.join(problems)}. "
-        f"This call sent: {', '.join(received) or 'no fields besides action'}. "
-        "Call again with every required field in one call; see usage.example."
+        f"This call sent: {', '.join(received) or 'no fields besides action'}. {fix}"
     )
     payload = error_payload(problems, {"tool": spec.name, "action": action, "received": received})
     payload["error"] = summary
-    payload["usage"] = usage(spec, role, action)
+    payload["usage"] = how_to
     return payload
 
 

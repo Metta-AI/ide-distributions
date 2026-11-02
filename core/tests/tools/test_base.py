@@ -35,7 +35,12 @@ def demo_tool():
                 ("title",),
                 frozenset({"orchestrator"}),
             ),
-            ActionSpec("read", "Read one.", {"goal": {"type": "string"}}, ("goal",)),
+            ActionSpec(
+                "read",
+                "Read one.",
+                {"goal": {"type": "string"}, "limit": {"type": "integer"}},
+                ("goal",),
+            ),
             ActionSpec("boom", "Fail loudly."),
             ActionSpec("store", "Fail in the store."),
             ActionSpec("crash", "Crash."),
@@ -126,6 +131,14 @@ def test_empty_placeholders_for_other_actions_fields_are_dropped(demo_tool, tmp_
     assert ok["record"]["args"] == {"action": "read", "goal": "G-1"}
 
 
+def test_an_empty_placeholder_skips_type_and_enum_checks(demo_tool):
+    # "limit" is an integer field of read; an empty one on create is padding, not a type error.
+    _, problems = base.validate_args(
+        demo_tool, "orchestrator", {"action": "create", "title": "x", "limit": ""}
+    )
+    assert problems == []
+
+
 def test_argument_error_says_what_arrived_and_how_to_fix_it(demo_tool, tmp_path):
     refused = json.loads(
         base.run_tool("demo", {"action": "create", "count": 3}, make_ctx(tmp_path))
@@ -146,6 +159,7 @@ def test_argument_error_without_an_action_lists_the_actions(demo_tool, tmp_path)
     actions = refused["usage"]["actions"]
     assert "create" not in actions
     assert actions["read"] == {"does": "Read one.", "requires": ["goal"]}
+    assert "usage.actions" in refused["error"] and "usage.example" not in refused["error"]
 
 
 def test_run_tool_scrubs_workspace_paths(demo_tool, tmp_path):
