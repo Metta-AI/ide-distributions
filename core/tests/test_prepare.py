@@ -567,6 +567,8 @@ def test_prepare_adds_the_kimi_host_pins_beside_the_owners_models(homes):
         {"only": ["deepinfra"]},  # the owner's rule for every model
         {"order": ["deepinfra"]},
         {"ignore": ["deepinfra"]},
+        {"sort": "latency"},
+        {"models": {m: {} for m in prepare.PROVIDER_ROUTING_MODELS}},  # an owner's "no pin"
     ],
 )
 def test_the_owners_routing_wins_over_the_shipped_pins(homes, routing):

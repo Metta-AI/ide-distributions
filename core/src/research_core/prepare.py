@@ -16,7 +16,7 @@ In order, ``prepare``:
    the model settings (``model``, ``fallback_providers``): a new install takes them from the
    shipped ``config.yaml`` and the bridge's ``/models`` route changes them. It adds the
    shipped OpenRouter host pins (``PROVIDER_ROUTING_MODELS``) the owner's routing does not
-   already decide, so whichever Kimi model a profile runs goes to Moonshot's own endpoint;
+   already decide, so the two shipped Kimi models go only to Moonshot's own endpoint;
 4. (Orchestrator) reconciles the watcher cron job with the shipped definition and, on the first
    preparation with ``activate_watcher``, resumes it;
 5. builds or checks the workspace environment under a file lock;
@@ -410,16 +410,21 @@ def _has_model_entry(model: str, models: Mapping[str, Any]) -> bool:
         from hermes_constants import resolve_per_model_provider_routing
     except ImportError:
         return model in models
-    return bool(resolve_per_model_provider_routing(model, dict(models)))
+    # The resolver answers {} both for no entry and for an empty one (an owner's "no pin"), so
+    # each entry is marked to tell them apart.
+    marked = {
+        name: {**entry, "_entry": True} for name, entry in models.items() if isinstance(entry, dict)
+    }
+    return bool(resolve_per_model_provider_routing(model, marked))
 
 
 def unpinned_routing(routing: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     """The shipped host pins the owner's ``provider_routing`` does not already decide.
 
-    Owner-set host rules for every model (``only``, ``ignore``, ``order``) win over a shipped
-    pin, as does an owner entry Hermes would apply to the same model.
+    Owner-set routing for every model (``only``, ``ignore``, ``order``, ``sort``) wins over a
+    shipped pin, as does an owner entry Hermes would apply to the same model, even an empty one.
     """
-    if any(routing.get(rule) for rule in ("only", "ignore", "order")):
+    if any(routing.get(rule) for rule in ("only", "ignore", "order", "sort")):
         return {}
     models = routing.get("models") or {}
     return {m: r for m, r in PROVIDER_ROUTING_MODELS.items() if not _has_model_entry(m, models)}

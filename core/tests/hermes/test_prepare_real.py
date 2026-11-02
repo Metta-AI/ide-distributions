@@ -147,14 +147,16 @@ def test_the_kimi_pin_yields_exactly_where_hermes_applies_an_owner_entry(hermes_
         "import json, sys; sys.path.insert(0, sys.argv[1]);"
         "from research_core.prepare import unpinned_routing;"
         "keys = json.loads(sys.argv[2]);"
-        "print(json.dumps({k: sorted(unpinned_routing({'models': {k: {'only': ['x']}}})) "
-        "for k in keys}))"
+        "print(json.dumps({k: sorted(unpinned_routing({'models': {k: e}})) "
+        "for k in keys for e in [{} if k.endswith(' (empty)') else {'only': ['x']}] "
+        "for k in [k.removesuffix(' (empty)')]}))"
     )
     keys = [
         "kimi-k3.1-pro",
         "moonshotai/kimi-k3-1-pro",
         "custom/kimi-k3.1-pro",
         "MOONSHOTAI/KIMI-K3.1-PRO",
+        "kimi-k3 (empty)",  # an empty entry is still the owner's: no pin for kimi-k3
     ]
     result = run([hermes_python(hermes_bin), "-c", code, CORE_SRC, json.dumps(keys)], os.environ)
     assert result.returncode == 0, result.stderr
@@ -165,4 +167,5 @@ def test_the_kimi_pin_yields_exactly_where_hermes_applies_an_owner_entry(hermes_
         "moonshotai/kimi-k3-1-pro": [k3],
         "custom/kimi-k3.1-pro": [k3, k31],
         "MOONSHOTAI/KIMI-K3.1-PRO": [k3, k31],
+        "kimi-k3": [k31],
     }

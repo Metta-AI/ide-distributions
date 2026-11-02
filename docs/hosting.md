@@ -42,7 +42,7 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
    applies shipped values only where the owner kept an earlier default; it never changes the
    model, but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
-   Moonshot only) unless the owner set routing for that model or host rules for every model
+   Moonshot only) unless the owner set routing for that model or for every model
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
 4. reconciles the Orchestrator's `watcher` cron job (kept paused until `--activate-supervisor`

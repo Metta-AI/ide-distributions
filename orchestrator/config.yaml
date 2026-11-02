@@ -65,9 +65,10 @@ curator:
 auxiliary:
   background_review:
     enabled: false
-# Kimi runs only on Moonshot's own OpenRouter endpoint: third-party hosts dropped tool-call
-# arguments in long sessions. This is routing, not the model choice; it applies while the
-# profile runs that model (prepare.py PROVIDER_ROUTING_MODELS adds it to older installs).
+# Kimi K3.1 Pro and K3 run only on Moonshot's own OpenRouter endpoint: third-party hosts
+# dropped tool-call arguments in long sessions. This is routing, not the model choice; it
+# applies while the profile runs that model (prepare.py PROVIDER_ROUTING_MODELS adds it to
+# older installs).
 provider_routing:
   models:
     moonshotai/kimi-k3.1-pro:
