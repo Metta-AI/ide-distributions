@@ -4,7 +4,9 @@ import asyncio
 import json
 import os
 import secrets
+import signal
 import time
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -14,6 +16,7 @@ import httpx
 from control import serve
 from inference import Availability
 from inference import maintain as maintain_inference
+from processes import managed_process
 from pydantic import BaseModel, ConfigDict, SecretStr
 from timing import StartupTiming
 
@@ -35,13 +38,13 @@ PROFILES = ("orchestrator", "researcher")
 
 
 async def command(*args: str, env: dict[str, str]) -> None:
-    process = await asyncio.create_subprocess_exec(*args, env=env)
-    code = await process.wait()
+    async with managed_process(*args, env=env) as process:
+        code = await process.wait()
     if code:
         raise RuntimeError(f"{args[0]} exited {code}")
 
 
-async def main() -> None:
+async def run(stack: AsyncExitStack) -> None:
     started = time.monotonic()
     boot_id = uuid4().hex
     workspace_state = (
@@ -165,7 +168,7 @@ async def main() -> None:
     profile_env = {**common, "HERMES_HOME": str(HOME / "profiles/orchestrator")}
     phase_started = time.monotonic()
     report("gateway_ready", phase_started, outcome="started")
-    gateway = await asyncio.create_subprocess_exec(HERMES, "gateway", "run", env=common)
+    gateway = await stack.enter_async_context(managed_process(HERMES, "gateway", "run", env=common))
     async with httpx.AsyncClient(
         base_url="http://127.0.0.1:8642", headers={"Authorization": f"Bearer {key}"}
     ) as client:
@@ -186,8 +189,8 @@ async def main() -> None:
         report("application_wake", phase_started)
         phase_started = time.monotonic()
         report("application_ready", phase_started, outcome="started")
-        seam = await asyncio.create_subprocess_exec(
-            RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env
+        seam = await stack.enter_async_context(
+            managed_process(RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env)
         )
         async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam_client:
             async with asyncio.timeout(30):
@@ -229,6 +232,23 @@ async def main() -> None:
                 return_when=asyncio.FIRST_COMPLETED,
             )
             raise RuntimeError("A distribution service exited")
+
+
+async def main() -> None:
+    stopping = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(signum, stopping.set)
+    try:
+        async with AsyncExitStack() as stack, asyncio.TaskGroup() as group:
+            runtime = group.create_task(run(stack))
+            shutdown = group.create_task(stopping.wait())
+            await asyncio.wait([runtime, shutdown], return_when=asyncio.FIRST_COMPLETED)
+            runtime.cancel()
+            shutdown.cancel()
+    finally:
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.remove_signal_handler(signum)
 
 
 if __name__ == "__main__":

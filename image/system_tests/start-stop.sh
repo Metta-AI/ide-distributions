@@ -56,7 +56,13 @@ for cycle in $(seq 1 "$cycles"); do
     /opt/workspace-env/bin/research workspace sleep
   docker exec "$name" /opt/hermes/.venv/bin/python -c \
     'import json, urllib.request; s=json.load(urllib.request.urlopen("http://127.0.0.1:8650/status")); assert s["sleep_started"] and s["paused"], s'
+  if [[ -n "${STARTUP_ARTIFACTS:-}" ]]; then
+    docker exec "$name" /opt/hermes/.venv/bin/python -c \
+      'import json; from pathlib import Path; root=Path("/workspace/host"); print(json.dumps({str(p.relative_to(root)): p.read_text() for p in root.rglob("gateway.log")}))' \
+      > "$scratch/gateway-$cycle.json"
+  fi
   docker stop --time 30 "$name" >/dev/null
+  test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
   docker logs "$name" > "$scratch/boot-$cycle.log" 2>&1
   cat "$scratch/boot-$cycle.log"
   docker rm "$name" >/dev/null
