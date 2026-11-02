@@ -22,3 +22,9 @@ STEPS = {
     "release": ("submit", "Ask before releasing"),
 }
 STEP_STATUS = {"running": "running", "done": "ok", "failed": "failed", "skipped": "skipped"}
+# A page action (the screen-context contract, v1): what it does to the element whose ref the page
+# outline gave, and the note the user sees as a status line in the chat.
+PAGE_KINDS = ("point", "open", "press", "go")
+PAGE_NOTE_MAX = 200
+# "@<data-testid or id>" (stable across turns) or "e<n>" (this outline only).
+PAGE_REF = r"^(@\S+|e[0-9]+)$"

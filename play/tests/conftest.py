@@ -224,9 +224,17 @@ class FakeRecords:
     def __init__(self):
         self.records: dict[tuple[str, str], dict] = {}
         self.puts: list[dict] = []
+        self.pages: list[dict] = []  # POST .../cogents/<player>/page bodies
+        self.page_status = 200
 
     def __call__(self, method, url, headers, body):
         assert headers["Authorization"] == "Bearer cga_fake"
+        if url == f"{SERVER}/observatory/v2/cogents/{PLAYER}/page":
+            assert method == "POST" and headers["Content-Type"] == "application/json"
+            if self.page_status != 200:
+                return self.page_status, b'{"detail": "not allowed"}'
+            self.pages.append(json.loads(body))
+            return 200, b"{}"
         prefix = f"{SERVER}/observatory/v2/cogents/{PLAYER}/c/"
         assert url.startswith(prefix), url
         collection, key = url.removeprefix(prefix).split("/", 1)

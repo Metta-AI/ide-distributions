@@ -13,7 +13,17 @@ from .basic import MAX_SOURCE_BYTES
 from .context import Context, profile_context
 from .fresh import clear_notes
 from .launch import ensure_venv
-from .limits import DEFAULT_EPISODES, MAX_EPISODES, MAX_WAIT_SECONDS, NAME_MAX, STEP_STATUS, STEPS
+from .limits import (
+    DEFAULT_EPISODES,
+    MAX_EPISODES,
+    MAX_WAIT_SECONDS,
+    NAME_MAX,
+    PAGE_KINDS,
+    PAGE_NOTE_MAX,
+    PAGE_REF,
+    STEP_STATUS,
+    STEPS,
+)
 
 PROGRAM = {
     "type": "string",
@@ -284,6 +294,33 @@ TOOLS = {
             },
         },
         ["step", "status", "detail"],
+    ),
+    "page_act": (
+        (
+            "Act on the page the user is looking at, where they see it: point scrolls to and "
+            "highlights the element, open expands a section, press presses a button or link the "
+            "way they would, go follows a link to another page. The ref comes from the page "
+            "outline in the user's current message; note is the line the user sees in the chat. "
+            "Act only when the user asked for it or it shows them what you are talking about, "
+            "and never press anything that releases a program or starts over: ask them instead. "
+            "ok false means nothing happened on the page."
+        ),
+        {
+            "kind": {"enum": list(PAGE_KINDS)},
+            "ref": {
+                "type": "string",
+                "pattern": PAGE_REF,
+                "maxLength": 200,
+                "description": 'A ref from the current page outline, like "@setup-action" or "e14".',
+            },
+            "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": PAGE_NOTE_MAX,
+                "description": "What you are doing, in plain words the user sees.",
+            },
+        },
+        ["kind", "ref", "note"],
     ),
     "fresh_start": (
         (

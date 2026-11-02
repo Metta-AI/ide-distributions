@@ -35,6 +35,7 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 | `practice_status` | The request's progress (optionally waiting up to 60 s); once over, each game's result from its `results.json` in plain words, a summary against the previous version's practice, what the results can and cannot measure, and a watch link per game. |
 | `program_release` | `coworld submit <name>:v<N> --league L --player P` for a version the user names, once, and only with `user_said_yes: true`. |
 | `task_update` | Keeps one task card per user request in the cogent's `tasks` records (shown in the Mind on /play): six steps from understanding the request to the release question, then an outcome. |
+| `page_act` | Acts on the page the user is looking at, by a ref from the page outline their message carries: `point` (scroll to and highlight), `open` (a section), `press` (a button or link) or `go` (an internal link), with a `note` (at most 200 characters) the user sees in the chat. Writes `{id, kind, ref, note}` with a fresh uuid `id` by `POST <server>/observatory/v2/cogents/<player>/page` with the player credential; the page runs each `id` once. A failed write is `ok: false`. |
 | `fresh_start` | Only when the user asks to start over: empties the profile's `memories/MEMORY.md` and `memories/USER.md` so the next conversation is a first meeting. Needs `confirm: true`; touches nothing else. |
 
 Tools name programs as the user does: a name and a version number. The platform's policy name

@@ -8,7 +8,7 @@ import yaml
 from play import fresh, plugin
 from play.context import Context
 from play.launch import lock_sha
-from play.limits import NAME_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
+from play.limits import NAME_MAX, PAGE_NOTE_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
 
 DISTRIBUTION = Path(__file__).resolve().parents[1]
 PLAY_TOOLS = {
@@ -27,6 +27,7 @@ PLAY_TOOLS = {
         ["step", "status", "detail"],
         {"title", "step", "status", "detail", "version", "outcome"},
     ),
+    "page_act": (["kind", "ref", "note"], {"kind", "ref", "note"}),
     "fresh_start": (["confirm"], {"confirm"}),
 }
 
@@ -96,6 +97,14 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
         {"title": "Run under towers less", "step": "understand", "status": "done", "detail": "ok"},
     )
     assert not valid("task_update", {"step": "deploy", "status": "done", "detail": "ok"})
+    for kind in ("point", "open", "press", "go"):
+        assert valid("page_act", {"kind": kind, "ref": "@setup-action", "note": "Here"}), kind
+    assert valid("page_act", {"kind": "point", "ref": "e14", "note": "x" * PAGE_NOTE_MAX})
+    too_long = "x" * (PAGE_NOTE_MAX + 1)
+    assert not valid("page_act", {"kind": "point", "ref": "e14", "note": too_long})
+    assert not valid("page_act", {"kind": "click", "ref": "e14", "note": "Here"})
+    assert not valid("page_act", {"kind": "point", "ref": "the button", "note": "Here"})
+    assert not valid("page_act", {"kind": "point", "ref": "e14"})
 
 
 def test_manifest_advertises_registered_tools():

@@ -24,6 +24,7 @@ OPERATIONS = (
     "practice_status",
     "program_release",
     "task_update",
+    "page_act",
 )
 
 
