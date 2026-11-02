@@ -111,6 +111,43 @@ def test_run_tool_success_and_errors(demo_tool, tmp_path):
     assert unknown["ok"] is False
 
 
+def test_a_field_the_action_does_not_take_is_refused(demo_tool):
+    _, problems = base.validate_args(
+        demo_tool, "orchestrator", {"action": "read", "goal": "G-1", "title": "x", "count": 2}
+    )
+    assert problems == ["title is not a field of read"]
+
+
+def test_empty_placeholders_for_other_actions_fields_are_dropped(demo_tool, tmp_path):
+    ok = json.loads(
+        base.run_tool("demo", {"action": "read", "goal": "G-1", "title": ""}, make_ctx(tmp_path))
+    )
+    assert ok["ok"] is True
+    assert ok["record"]["args"] == {"action": "read", "goal": "G-1"}
+
+
+def test_argument_error_says_what_arrived_and_how_to_fix_it(demo_tool, tmp_path):
+    refused = json.loads(
+        base.run_tool("demo", {"action": "create", "count": 3}, make_ctx(tmp_path))
+    )
+    assert refused["ok"] is False
+    assert refused["problems"] == ["title is required for create"]
+    assert refused["error"].startswith("demo create was not run, nothing changed")
+    assert "This call sent: count." in refused["error"]
+    assert refused["context"] == {"tool": "demo", "action": "create", "received": ["count"]}
+    assert refused["usage"]["does"] == "Make one."
+    assert list(refused["usage"]["required"]) == ["title"]
+    assert set(refused["usage"]["optional"]) == {"count", "mode"}
+    assert refused["usage"]["example"] == {"action": "create", "title": "<text>"}
+
+
+def test_argument_error_without_an_action_lists_the_actions(demo_tool, tmp_path):
+    refused = json.loads(base.run_tool("demo", {"goal": "G-1"}, make_ctx(tmp_path, "researcher")))
+    actions = refused["usage"]["actions"]
+    assert "create" not in actions
+    assert actions["read"] == {"does": "Read one.", "requires": ["goal"]}
+
+
 def test_run_tool_scrubs_workspace_paths(demo_tool, tmp_path):
     ctx = make_ctx(tmp_path)
 
