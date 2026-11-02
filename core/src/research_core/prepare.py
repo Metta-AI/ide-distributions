@@ -424,7 +424,7 @@ def unpinned_routing(routing: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     Owner-set routing for every model (``only``, ``ignore``, ``order``, ``sort``) wins over a
     shipped pin, as does an owner entry Hermes would apply to the same model, even an empty one.
     """
-    if any(routing.get(rule) for rule in ("only", "ignore", "order", "sort")):
+    if any(rule in routing for rule in ("only", "ignore", "order", "sort")):  # even if empty
         return {}
     models = routing.get("models") or {}
     return {m: r for m, r in PROVIDER_ROUTING_MODELS.items() if not _has_model_entry(m, models)}

@@ -568,6 +568,7 @@ def test_prepare_adds_the_kimi_host_pins_beside_the_owners_models(homes):
         {"order": ["deepinfra"]},
         {"ignore": ["deepinfra"]},
         {"sort": "latency"},
+        {"only": []},  # written by the owner, even if it restricts nothing
         {"models": {m: {} for m in prepare.PROVIDER_ROUTING_MODELS}},  # an owner's "no pin"
     ],
 )
