@@ -121,8 +121,14 @@ class Platform(Protocol):
         identity: Identity = "player",
     ) -> list[PolicyVersion]: ...
 
-    def upload_inputs(self, *, name: str, artifact: Path) -> dict[str, Any]:
-        """The exact inputs a file upload of ``artifact`` under ``name`` is deduplicated on.
+    def upload_image_policy(
+        self, *, name: str, archive_path: Path, tags: dict[str, str] | None = None
+    ) -> PolicyVersion: ...
+
+    def upload_inputs(
+        self, *, name: str, artifact: Path, image_archive: bool = False
+    ) -> dict[str, Any]:
+        """The exact inputs an upload of ``artifact`` under ``name`` is deduplicated on.
 
         For a file: ``{name, player_id, file_hash, file_size, attributes}``, the dict
         :meth:`lookup_policy_upload` takes. Computed locally (the Player id may need one read).

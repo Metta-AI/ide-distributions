@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from research_core.platform import submission
@@ -121,7 +122,7 @@ def adopt(
     ctx: ToolContext, record: dict[str, Any], intent: dict[str, Any], found: PolicyVersion
 ) -> dict:
     """The platform has the bytes: record the upload without sending."""
-    updated = mark(ctx, record, found, digest_checked=True)
+    updated = mark(ctx, record, found, digest_checked=record["artifact"]["kind"] == "file")
     if intent["state"] == "failed":
         # The attempt that came back failed reached the platform after all.
         intent = intents.reopen(
@@ -145,16 +146,23 @@ def send_again(
     return send(ctx, record, reopened, content)
 
 
-def send(ctx: ToolContext, record: dict[str, Any], intent: dict[str, Any], content: bytes) -> dict:
+def send(ctx: ToolContext, record: dict[str, Any], intent: dict[str, Any], content: Path) -> dict:
     """One send of the bytes; the write is not retried, the next call asks the platform first."""
     vid = record["id"]
     digest = record["artifact"]["digest"]
     tags = {"version": vid, "commit": record.get("commit_sha") or ""}
     platform = ctx.platform()
     try:
-        uploaded = platform.upload_file_policy(
-            name=record["policy_name"], content=content, tags=tags
-        )
+        if record["artifact"]["kind"] == "image":
+            uploaded = platform.upload_image_policy(
+                name=record["policy_name"],
+                archive_path=content,
+                tags=tags,
+            )
+        else:
+            uploaded = platform.upload_file_policy(
+                name=record["policy_name"], content=content.read_bytes(), tags=tags
+            )
     except PlatformError as error:
         finish(ctx, intent, "failed", error.to_dict())
         raise version_tool.platform_refusal(UPLOAD_ROUTE, error) from error
@@ -205,10 +213,14 @@ def upload_inputs(ctx: ToolContext, record: dict[str, Any]) -> dict[str, Any]:
     digest = record["artifact"]["digest"]
     path = version_tool.artifact_copy_path(ctx, digest)
     try:
-        inputs = ctx.platform().upload_inputs(name=record["policy_name"], artifact=path)
+        inputs = ctx.platform().upload_inputs(
+            name=record["policy_name"],
+            artifact=path,
+            image_archive=record["artifact"]["kind"] == "image",
+        )
     except PlatformError as error:
         raise version_tool.platform_refusal("upload inputs", error) from error
-    if inputs.get("file_hash") != digest:
+    if record["artifact"]["kind"] == "file" and inputs.get("file_hash") != digest:
         # The intent key is the digest; the lookup must ask for the same bytes.
         raise ToolError(
             f"the upload client hashes the artifact of {record['id']} as"
@@ -217,24 +229,24 @@ def upload_inputs(ctx: ToolContext, record: dict[str, Any]) -> dict[str, Any]:
     return inputs
 
 
-def read_artifact(ctx: ToolContext, vid: str, artifact: dict[str, Any]) -> bytes:
+def read_artifact(ctx: ToolContext, vid: str, artifact: dict[str, Any]) -> Path:
     """The exact built bytes, verified against the digest before they leave."""
     digest = artifact["digest"]
     path = version_tool.artifact_copy_path(ctx, digest)
     try:
-        content = path.read_bytes()
+        with path.open("rb") as source:
+            actual = hashlib.file_digest(source, "sha256").hexdigest()
     except OSError:
         raise ToolError(
             f"the built artifact of {vid} is gone ({artifact.get('path')}, sha256 {digest});"
             " build it again with version.create",
         ) from None
-    actual = hashlib.sha256(content).hexdigest()
     if actual != digest:
         raise ToolError(
             f"the kept artifact of {vid} no longer matches its digest (now {actual}, recorded"
             f" {digest}); build it again with version.create"
         )
-    return content
+    return path
 
 
 def mark(

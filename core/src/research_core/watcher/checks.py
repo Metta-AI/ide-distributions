@@ -336,11 +336,16 @@ def _upload_check(
         note = "skipped: real upload not attempted (the route was verified before)"
         return _result("upload", "route", None, note, capability="upload", note=note)
     name = f"{ctx.coworld.coworld_id}-{UPLOAD_NAME_SUFFIX}"
-    content = artifact.read_bytes()
     try:
         version = with_retries(
-            lambda: ctx.platform.upload_file_policy(
-                name=name, content=content, tags={"ide": UPLOAD_NAME_SUFFIX}
+            lambda: (
+                ctx.platform.upload_image_policy(
+                    name=name, archive_path=artifact, tags={"ide": UPLOAD_NAME_SUFFIX}
+                )
+                if loaded.artifact["kind"] == "image"
+                else ctx.platform.upload_file_policy(
+                    name=name, content=artifact.read_bytes(), tags={"ide": UPLOAD_NAME_SUFFIX}
+                )
             ),
             sleep=_sleep,
         )
