@@ -109,10 +109,11 @@ agent sees at its next turn.
 ## Profile models
 
 Each profile's model belongs to the profile, not to the host: a new install starts with what the
-profile's shipped `config.yaml` names (the Orchestrator: `moonshotai/kimi-k3`, falling back to
-`z-ai/glm-5.3`; a Researcher: `recursive/flint-v1.0:free`, falling back to
+profile's shipped `config.yaml` names (the Orchestrator: `moonshotai/kimi-k3.1-pro`, falling
+back to `z-ai/glm-5.3`; a Researcher: `recursive/flint-v1.0:free`, falling back to
 `moonshotai/kimi-k3`, all through OpenRouter), `prepare.py` never changes it, and only the user
-changes it, through the bridge.
+changes it, through the bridge. Whichever Kimi model a profile runs goes only to Moonshot's own
+OpenRouter endpoint: `provider_routing.models` pins it, unless the owner routed that model.
 
 - `GET /models` lists every profile of the sandbox (the Orchestrator, then each Researcher
   profile) with its `role` (`orchestrator` or `researcher`), `model`, `provider` and

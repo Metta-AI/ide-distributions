@@ -55,9 +55,10 @@ class FakeHermes:
         if rest[:2] == ["config", "get"]:
             key = rest[2]
             assert rest[3:] == ["--json"], rest
-            if key not in self.config:
+            value = self._get(key)
+            if value is None:
                 return CompletedProcess(argv, 1, "", f"Config key not set: {key}\n")
-            return CompletedProcess(argv, 0, json.dumps(self.config[key]) + "\n", "")
+            return CompletedProcess(argv, 0, json.dumps(value) + "\n", "")
         if rest[:2] == ["config", "set"]:
             key, value = rest[2], rest[3]
             self.config[key] = _parse_set_value(value)
@@ -72,6 +73,14 @@ class FakeHermes:
             self.resumed.append(rest[2])
             return CompletedProcess(argv, 0, f"Resumed job: {rest[2]}\n", "")
         raise AssertionError(f"unexpected command: {argv}")
+
+    def _get(self, key):
+        """The value at ``key``; a section is assembled from its dotted sub-keys, as Hermes does."""
+        if key in self.config:
+            return self.config[key]
+        prefix = key + "."
+        section = {k[len(prefix) :]: v for k, v in self.config.items() if k.startswith(prefix)}
+        return section or None
 
     def hermes_calls(self):
         return [argv for argv, _ in self.calls if argv[0] == "hermes"]
@@ -532,6 +541,48 @@ def test_prepare_applies_shipped_values_only_over_earlier_defaults(homes):
     _prepared(homes, fake)
     assert fake.config["terminal.timeout"] == 1800  # an earlier default is replaced
     assert "IDE_RESEARCHER_PROFILES" in fake.config["terminal.env_passthrough"]
+
+
+def test_prepare_adds_the_kimi_host_pins_beside_the_owners_models(homes):
+    fresh = FakeHermes()
+    _prepared(homes, fresh)
+    assert fresh.config["provider_routing.models"] == prepare.PROVIDER_ROUTING_MODELS
+
+    empty = FakeHermes({"provider_routing": {"models": None}})  # a bare "models:" in YAML
+    _prepared(homes, empty)
+    assert empty.config["provider_routing.models"] == prepare.PROVIDER_ROUTING_MODELS
+
+    owner = FakeHermes({"provider_routing": {"models": {"some/model": {"order": ["x"]}}}})
+    _prepared(homes, owner)
+    assert owner.config["provider_routing.models"] == {
+        "some/model": {"order": ["x"]},
+        **prepare.PROVIDER_ROUTING_MODELS,
+    }
+
+
+@pytest.mark.parametrize(
+    "routing",
+    [
+        {"models": {m: {"ignore": ["y"]} for m in prepare.PROVIDER_ROUTING_MODELS}},
+        {"only": ["deepinfra"]},  # the owner's rule for every model
+        {"order": ["deepinfra"]},
+        {"ignore": ["deepinfra"]},
+    ],
+)
+def test_the_owners_routing_wins_over_the_shipped_pins(homes, routing):
+    # Spellings Hermes also applies are covered against a real Hermes (test_prepare_real).
+    assert prepare.unpinned_routing(routing) == {}
+    fake = FakeHermes({"provider_routing": routing})
+    _prepared(homes, fake)
+    assert "provider_routing.models" not in fake.config
+
+
+def test_shipped_configs_carry_the_kimi_host_pins():
+    import yaml
+
+    for role in ("orchestrator", "researcher"):
+        shipped = yaml.safe_load((REPO / role / "config.yaml").read_text())
+        assert shipped["provider_routing"]["models"] == prepare.PROVIDER_ROUTING_MODELS
 
 
 def test_prepare_never_touches_the_model_settings(homes):

@@ -14,7 +14,9 @@ In order, ``prepare``:
    shipped values over earlier defaults only (``SHIPPED_VALUES``, ``EARLIER_DEFAULTS``) and
    unions the shipped ``terminal.env_passthrough`` entries with the owner's. It never touches
    the model settings (``model``, ``fallback_providers``): a new install takes them from the
-   shipped ``config.yaml`` and the bridge's ``/models`` route changes them;
+   shipped ``config.yaml`` and the bridge's ``/models`` route changes them. It adds the
+   shipped OpenRouter host pins (``PROVIDER_ROUTING_MODELS``) the owner's routing does not
+   already decide, so whichever Kimi model a profile runs goes to Moonshot's own endpoint;
 4. (Orchestrator) reconciles the watcher cron job with the shipped definition and, on the first
    preparation with ``activate_watcher``, resumes it;
 5. builds or checks the workspace environment under a file lock;
@@ -104,6 +106,14 @@ SHIPPED_VALUES: dict[str, Any] = {
 }
 EARLIER_DEFAULTS: dict[str, set[Any]] = {
     "terminal.timeout": {180},
+}
+# OpenRouter hosts per model id (Hermes's provider_routing.models). Kimi K3 on cheaper
+# third-party hosts dropped required tool-call arguments in long sessions (2026-11-02), while
+# Moonshot's own endpoint did not, so the Kimi models a profile may run are pinned to Moonshot.
+# The pin is routing, not the model choice: it applies only while a profile runs that model.
+PROVIDER_ROUTING_MODELS: dict[str, dict[str, Any]] = {
+    "moonshotai/kimi-k3.1-pro": {"only": ["moonshotai"]},
+    "moonshotai/kimi-k3": {"only": ["moonshotai"]},
 }
 # Lists the shipped config contributes to: the union of the shipped and retained entries is kept.
 ENV_PASSTHROUGH: dict[str, list[str]] = {
@@ -389,6 +399,32 @@ def active_coworld(ws: layout.Workspace) -> layout.Coworld | None:
     return ws.coworld(row["coworld_id"]) if row else None
 
 
+def _has_model_entry(model: str, models: Mapping[str, Any]) -> bool:
+    """Whether Hermes would apply one of ``models`` to ``model``.
+
+    Hermes matches spellings (``kimi-k3.1-pro`` and ``moonshotai/kimi-k3-1-pro`` both apply to
+    ``moonshotai/kimi-k3.1-pro``), so its own resolver decides; prepare runs on Hermes's Python.
+    Without Hermes (unit tests) only the exact id counts.
+    """
+    try:
+        from hermes_constants import resolve_per_model_provider_routing
+    except ImportError:
+        return model in models
+    return bool(resolve_per_model_provider_routing(model, dict(models)))
+
+
+def unpinned_routing(routing: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """The shipped host pins the owner's ``provider_routing`` does not already decide.
+
+    Owner-set host rules for every model (``only``, ``ignore``, ``order``) win over a shipped
+    pin, as does an owner entry Hermes would apply to the same model.
+    """
+    if any(routing.get(rule) for rule in ("only", "ignore", "order")):
+        return {}
+    models = routing.get("models") or {}
+    return {m: r for m, r in PROVIDER_ROUTING_MODELS.items() if not _has_model_entry(m, models)}
+
+
 def apply_config(
     hermes: HermesCli, role: str, core_src: Path, active: layout.Coworld | None = None
 ) -> list[str]:
@@ -416,6 +452,11 @@ def apply_config(
         if current != shipped and (current is None or current in EARLIER_DEFAULTS.get(key, set())):
             hermes.config_set(key, shipped)
             actions.append(f"config: set {key} (shipped value)")
+    routing = hermes.config_get("provider_routing") or {}
+    missing = unpinned_routing(routing)
+    if missing:
+        hermes.config_set("provider_routing.models", {**(routing.get("models") or {}), **missing})
+        actions.append("config: set provider_routing.models")
     shipped_env = ENV_PASSTHROUGH["common"] + ENV_PASSTHROUGH.get(role, [])
     current_env = hermes.config_get("terminal.env_passthrough") or []
     merged = list(dict.fromkeys([*current_env, *shipped_env]))
