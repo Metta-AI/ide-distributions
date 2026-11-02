@@ -437,8 +437,8 @@ class SeamServer:
                             " WHERE op_id=?",
                             (run_id, row["op_id"]),
                         )
+                        sessions.set_run_in_transaction(tx, row["session_id"], run_id)
                         tx.event("client.started", row["op_id"], {"run_id": run_id})
-                    sessions.set_run(stores.wstore, actor, row["session_id"], run_id)
                     if row["cancel_requested"]:
                         self.hermes.stop(run_id, profile=self.profile)
 

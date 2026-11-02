@@ -8,6 +8,7 @@ and a fresh workspace with ``cow_fake`` active, and drives it through the
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
@@ -20,7 +21,7 @@ from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
 from research_core.store import coworlds, goals, notices, tasks, ui_state
 from research_core.store.actors import Actor
-from research_core.store.db import Store
+from research_core.store.db import Store, Tx
 from research_core.tools.base import ToolContext
 from research_core.watcher.hermes_api import FakeHermesRuns
 
@@ -116,7 +117,24 @@ def test_session_open_refuses_a_missing_client(seam):
     assert info.value.status == 400 and "client" in info.value.body["error"]
 
 
-def test_message_stamps_client_coworld_and_version_into_the_block(seam):
+def test_message_stamps_client_coworld_and_version_into_the_block(seam, monkeypatch):
+    # Observe every commit from another connection, including the gap between separate writes.
+    committed_runs = []
+    original_exit = Tx.__exit__
+
+    def observe_commit(tx, *args):
+        result = original_exit(tx, *args)
+        if tx.actor == Actor.user("client-dispatch"):
+            with sqlite3.connect(tx.store.path) as reader:
+                committed_runs.extend(
+                    reader.execute(
+                        "SELECT a.run_id, s.run_id FROM client_admissions a"
+                        " JOIN sessions s ON s.id=a.session_id WHERE a.status='running'"
+                    ).fetchall()
+                )
+        return result
+
+    monkeypatch.setattr(Tx, "__exit__", observe_commit)
     seam.client.open(client_id="coplay-7", kind="desktop", guide="client-coplay")
     result = seam.say(
         "what is the champion?",
@@ -135,6 +153,8 @@ def test_message_stamps_client_coworld_and_version_into_the_block(seam):
     from research_core.store import sessions
 
     assert sessions.read(seam.wstore, result["session_id"])["run_id"] == result["run_id"]
+    assert committed_runs
+    assert all(admission == session for admission, session in committed_runs)
 
 
 def test_message_without_a_context_still_carries_the_stamps(seam):
