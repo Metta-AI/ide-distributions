@@ -109,4 +109,4 @@ def test_play_first_meeting_is_getting_to_know_each_other_not_game_talk():
         assert needle in meeting, needle
     assert "Do not fetch the starter in the first meeting" in meeting
     assert "On your first turn" not in soul and "plainly what you are for here" not in soul
-    assert "tone" in soul and "fresh_start" in soul and "`who_we_are`" in soul
+    assert "tone" in soul and "fresh_start" in soul and "`who_we_are`" not in soul

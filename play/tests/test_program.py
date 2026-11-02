@@ -20,13 +20,13 @@ def workspace(env) -> Path:
 
 
 def first_version(program, name="towerless"):
-    program.starter_fetch()
+    program.starter_fetch(league=GOTA.reference_league_id)
     program.program_change(CHANGED, "retreat earlier when hurt")
     return program.program_upload(name)
 
 
 def test_starter_fetch_checks_the_published_sha256(program, cli, fetched, env):
-    data = program.starter_fetch()
+    data = program.starter_fetch(league=GOTA.reference_league_id)
     assert data == {
         "starter": "Baseline",
         "player": "baseline",
@@ -38,23 +38,23 @@ def test_starter_fetch_checks_the_published_sha256(program, cli, fetched, env):
     assert fetched == [
         f"https://example.invalid/api/observatory/v2/coworlds/cow_gota/player-files/{STARTER_SHA}"
     ]
-    assert program.starter_fetch() == data  # safe to repeat
+    assert program.starter_fetch(league=GOTA.reference_league_id) == data  # safe to repeat
     assert cli.mutations() == []
 
 
 def test_starter_fetch_refuses_bytes_that_do_not_match(program, env):
     with pytest.raises(PlayError) as error:
-        program.starter_fetch("other")
+        program.starter_fetch("other", league=GOTA.reference_league_id)
     assert error.value.reason == "sha256_mismatch"
     assert not (workspace(env) / "starter/other.bas").exists()
     with pytest.raises(PlayError) as error:
-        program.starter_fetch("missing")
+        program.starter_fetch("missing", league=GOTA.reference_league_id)
     assert error.value.reason == "starter_not_found"
     assert error.value.details["available"] == ["baseline", "other"]
 
 
 def test_the_cogent_changes_the_program_itself_through_the_check(program, env):
-    program.starter_fetch()
+    program.starter_fetch(league=GOTA.reference_league_id)
     shown = program.program_show()
     assert shown["source"] == "starter" and shown["text"] == STARTER.decode()
     assert program.program_show("starter")["text"] == STARTER.decode()
@@ -117,7 +117,7 @@ def test_a_taken_name_gets_the_platforms_short_suffix_and_is_never_shown(program
 
 
 def test_upload_refuses_bad_names_and_another_player(program, cli, env):
-    program.starter_fetch()
+    program.starter_fetch(league=GOTA.reference_league_id)
     with pytest.raises(PlayError) as error:
         program.program_upload("towerless")
     assert error.value.reason == "no_program"
@@ -134,7 +134,7 @@ def test_upload_refuses_bad_names_and_another_player(program, cli, env):
 
 def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
     first_version(program)
-    data = program.practice_request()
+    data = program.practice_request(league=GOTA.reference_league_id)
     assert data == {
         "program": "towerless v1",
         "outcome": "requested",
@@ -154,14 +154,17 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         "num_episodes": 5,
         "private": True,
         "title": "Practice: towerless v1",
-        "idempotency_key": "practice:towerless:v1:a1",
+        "idempotency_key": f"practice:{GOTA.reference_league_id}:towerless:v1:a1",
     }
 
 
 @pytest.mark.parametrize("named", ["towerless v1", "towerless:v1", "Towerless V1", "towerless"])
 def test_bare_names_resolve_inside_the_tool(program, cli, named):
     first_version(program)
-    assert program.practice_request(named)["program"] == "towerless v1"
+    assert (
+        program.practice_request(named, league=GOTA.reference_league_id)["program"]
+        == "towerless v1"
+    )
     body = json.loads(cli.inputs[-1])
     assert body["roster"][0]["player"] == {"policy_ref": "towerless:v1"}
 
@@ -173,16 +176,22 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
         {"name": legacy, "version": 1},
         {"name": f"tower-retreat-{SHORT}", "version": 1},
     ]
-    assert program.practice_request("towerless v1")["program"] == "towerless v1"
+    assert (
+        program.practice_request("towerless v1", league=GOTA.reference_league_id)["program"]
+        == "towerless v1"
+    )
     assert json.loads(cli.inputs[-1])["roster"][0]["player"] == {"policy_ref": f"{legacy}:v1"}
-    assert program.practice_request("tower-retreat")["program"] == "tower-retreat v1"
+    assert (
+        program.practice_request("tower-retreat", league=GOTA.reference_league_id)["program"]
+        == "tower-retreat v1"
+    )
     assert json.loads(cli.inputs[-1])["roster"][0]["player"] == {
         "policy_ref": f"tower-retreat-{SHORT}:v1"
     }
     assert program.practice_status()["summary"]["program"] == "tower-retreat v1"
     # The platform's lookup is this player's own versions, by exact name and version.
     assert f"mine=true&limit=200&player_id={PLAYER}&name_exact=towerless&version=1" in cli.api_reads
-    data = program.program_release("towerless v1", True)
+    data = program.program_release("towerless v1", True, league=GOTA.reference_league_id)
     assert data == {"program": "towerless v1", "outcome": "released", "already": False}
     assert [
         "coworld",
@@ -195,7 +204,7 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
         "--no-open-browser",
     ] in cli.calls
     with pytest.raises(PlayError) as error:
-        program.practice_request("towerless v7")
+        program.practice_request("towerless v7", league=GOTA.reference_league_id)
     assert error.value.reason == "unknown_version"
     assert error.value.details["your_programs"] == ["tower-retreat", "towerless"]
     listed = program.program_versions()
@@ -235,18 +244,13 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
 def test_practice_refusals_are_typed_and_never_retried(program, cli, stderr, expected):
     first_version(program)
     cli.create = ("refuse", stderr)
-    data = program.practice_request()
+    data = program.practice_request(league=GOTA.reference_league_id)
     assert data["outcome"] == "refused"
     assert {k: data[k] for k in expected} == expected
     assert len(cli.mutations()) == 2  # the upload and the one refused request
 
 
-def test_practice_uses_the_league_the_coach_chose(program, cli, records):
-    records.records[("state", "league")] = {
-        "key": "league",
-        "rev": 1,
-        "body": {"leagueId": CHOSEN, "at": "x"},
-    }
+def test_practice_uses_the_explicit_league(program, cli):
     game = {"name": "gota", "coworld_id": "cw_gota"}
     games = {GOTA.reference_league_id: game, CHOSEN: game}
     starter = program._fetch
@@ -256,9 +260,9 @@ def test_practice_uses_the_league_the_coach_chose(program, cli, records):
         else starter(url)
     )
     first_version(program)
-    program.practice_request()
+    program.practice_request(league=CHOSEN)
     assert json.loads(cli.inputs[-1])["target"] == {"league_id": CHOSEN}
-    program.program_release("towerless v1", True)
+    program.program_release("towerless v1", True, league=CHOSEN)
     assert [
         "coworld",
         "submit",
@@ -273,7 +277,7 @@ def test_practice_uses_the_league_the_coach_chose(program, cli, records):
 
 def test_practice_status_reports_every_game_in_plain_words(program, cli, env):
     first_version(program)
-    program.practice_request(episodes=3)
+    program.practice_request(episodes=3, league=GOTA.reference_league_id)
     cli.episodes.append(("ereq_3", None, "failed", None, "BASIC compile error on line 4"))
     cli.xp_status = "running"
     running = program.practice_status()
@@ -313,7 +317,7 @@ def test_practice_status_reports_every_game_in_plain_words(program, cli, env):
     program.program_change(CHANGED + "PRINT 1\n", "log once")
     program.program_upload()
     cli.episodes = [("ereq_9", "ep-9", "completed", dict(cli.episodes[0][3]), None)]
-    program.practice_request()
+    program.practice_request(league=GOTA.reference_league_id)
     later = program.practice_status()["summary"]
     assert later["previous"] == {
         "program": "towerless v1",
@@ -329,7 +333,7 @@ def test_practice_status_reports_every_game_in_plain_words(program, cli, env):
 
 def test_practice_status_waits_for_the_games(program, cli):
     first_version(program)
-    program.practice_request()
+    program.practice_request(league=GOTA.reference_league_id)
     states = iter(["running", "running", "completed"])
     waited = []
 
@@ -345,7 +349,7 @@ def test_practice_status_waits_for_the_games(program, cli):
 
 def test_practice_status_treats_not_produced_as_terminal(program, cli):
     first_version(program)
-    program.practice_request()
+    program.practice_request(league=GOTA.reference_league_id)
     cli.replay_state = "not_produced"
     assert "summary" in program.practice_status()
     cli.replay_state = "pending"
@@ -355,8 +359,8 @@ def test_practice_status_treats_not_produced_as_terminal(program, cli):
 def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, cli, env):
     first_version(program)
     for arguments in (
-        {"program": "towerless v1", "user_said_yes": False},
-        {"program": "towerless", "user_said_yes": True},
+        {"program": "towerless v1", "user_said_yes": False, "league": GOTA.reference_league_id},
+        {"program": "towerless", "user_said_yes": True, "league": GOTA.reference_league_id},
     ):
         envelope = run("program_release", arguments, program)
         assert envelope["error"]["reason"] == "bad_arguments"
@@ -379,7 +383,7 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
         membership("m_other", "rival", 1, owner="ply_someone_else"),
         membership("m_new", submitted, 1),
     ]
-    data = program.program_release("towerless v1", True)
+    data = program.program_release("towerless v1", True, league=GOTA.reference_league_id)
     assert data == {
         "program": "towerless v1",
         "outcome": "released",
@@ -397,7 +401,10 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
         }
     ]
     cli.calls.clear()
-    assert program.program_release("towerless v1", True)["already"] is True
+    assert (
+        program.program_release("towerless v1", True, league=GOTA.reference_league_id)["already"]
+        is True
+    )
     assert cli.mutations() == []
     journal = Journal.load(workspace(env))
     assert journal.versions[0].release.submission_id == "sub_1"
@@ -415,14 +422,14 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
 def test_release_refusals_are_typed(program, cli, stderr, refusal):
     first_version(program)
     cli.submit = ("refuse", stderr)
-    data = program.program_release("towerless v1", True)
+    data = program.program_release("towerless v1", True, league=GOTA.reference_league_id)
     assert data["outcome"] == "refused" and data["refusal"] == refusal
     assert len(cli.mutations()) == 2
     if refusal == "credit_denied":
         assert data["reason"] == "no credits left"
 
 
-def test_one_task_card_per_request_in_the_records_the_mind_reads(program, records):
+def test_task_card_stays_in_the_existing_workspace_journal(program):
     with pytest.raises(PlayError) as error:
         program.task_update("change", "running", "Editing")
     assert error.value.reason == "no_card"
@@ -440,9 +447,9 @@ def test_one_task_card_per_request_in_the_records_the_mind_reads(program, record
         "status": "done",
         "finished": False,
     }
-    ((key, card),) = [(k, v) for (c, k), v in records.records.items() if c == "tasks"]
-    assert key.startswith("play-") and card["rev"] == 3
-    body = card["body"]
+    card = Journal.load(program.workspace).card
+    assert card.key.startswith("play-")
+    body = card.body
     assert body["origin"] == "player"  # the bridge forwards only coach tasks
     assert body["state"] == "active" and body["version"] == 2
     assert [s["rung"] for s in body["steps"]] == [
@@ -461,13 +468,11 @@ def test_one_task_card_per_request_in_the_records_the_mind_reads(program, record
         "pending",
         "pending",
     ]
-    assert [p["base_rev"] for p in records.puts] == [None, 1, 2]
-    assert len({p["idempotency_key"] for p in records.puts}) == 3
 
     program.task_update(
         "release", "skipped", "You chose not to release yet", outcome="towerless v2 won 3 of 5"
     )
-    body = records.records[("tasks", key)]["body"]
+    body = Journal.load(program.workspace).card.body
     assert (body["state"], body["status"], body["outcome"]) == (
         "done",
         "kept",
@@ -476,8 +481,7 @@ def test_one_task_card_per_request_in_the_records_the_mind_reads(program, record
 
     program.task_update("understand", "done", "Practice again", title="Practice towerless v2")
     program.task_update("understand", "done", "Something else", title="Release towerless v2")
-    cards = {k: v["body"] for (c, k), v in records.records.items() if c == "tasks"}
-    assert [b["status"] for b in cards.values()] == ["kept", "dropped", "active"]
+    assert Journal.load(program.workspace).card.body["text"] == "Release towerless v2"
 
 
 def test_bad_arguments_never_reach_the_platform(program, cli):
@@ -488,7 +492,7 @@ def test_bad_arguments_never_reach_the_platform(program, cli):
         ("practice_status", {"request_id": "../etc"}),
         ("practice_status", {"wait_seconds": 9999}),
         ("program_release", {"program": "p v1"}),
-        ("program_release", {"program": "p v1", "user_said_yes": True, "league": "other"}),
+        ("program_release", {"program": "p v1", "user_said_yes": True, "league_id": "other"}),
         ("program_change", {"text": "x = 1\n", "change": " "}),
         ("task_update", {"step": "deploy", "status": "done", "detail": "x"}),
         ("champion_submit", {}),
@@ -508,7 +512,7 @@ def test_a_name_another_player_of_the_user_owns_counts_as_taken(program, cli):
 
 
 def test_small_edits_apply_once_and_go_through_the_same_check(program, env):
-    program.starter_fetch()
+    program.starter_fetch(league=GOTA.reference_league_id)
     data = program.program_edit(
         [{"find": "self.abilityPoints = 0 then", "replace": "self.abilityPoints = 1 then"}],
         "spend points sooner",
@@ -531,7 +535,7 @@ def test_small_edits_apply_once_and_go_through_the_same_check(program, env):
     ],
 )
 def test_a_bad_edit_writes_nothing(program, env, edits, reason):
-    program.starter_fetch()
+    program.starter_fetch(league=GOTA.reference_league_id)
     with pytest.raises(PlayError) as error:
         program.program_edit(edits, "bad")
     if reason is not None:
@@ -540,7 +544,7 @@ def test_a_bad_edit_writes_nothing(program, env, edits, reason):
 
 
 def test_an_edit_that_breaks_the_program_is_refused_by_the_check(program, env):
-    program.starter_fetch()
+    program.starter_fetch(league=GOTA.reference_league_id)
     with pytest.raises(PlayError) as error:
         program.program_edit(
             [{"find": "if bestClass >= 0 then", "replace": "if bestClass >= 0"}], "drop an end if"
@@ -549,45 +553,9 @@ def test_an_edit_that_breaks_the_program_is_refused_by_the_check(program, env):
     assert not (workspace(env) / "program.bas").exists()
 
 
-def test_who_we_are_reads_the_public_cogent_profile(program, records):
-    records.records.pop(("state", "league"))
-    urls = []
-
-    def profile(url):
-        urls.append(url)
-        return json.dumps({"name": "scissors", "owner_name": "Emmett S"}).encode()
-
-    program._fetch = profile
-    assert program.who_we_are() == {
-        "named": False,
-        "cogent_name": None,
-        "user_name": "Emmett S",
-        "coworld": None,
-    }
-    assert urls == [f"{program.client._cli.server}/observatory/v2/cogents/{PLAYER}"]
-
-
-def test_who_we_are_has_no_user_name_when_the_platform_has_none(program):
-    program._fetch = lambda url: json.dumps({"name": "scissors", "owner_name": None}).encode()
-    assert run("who_we_are", {}, program) == {
-        "ok": True,
-        "data": {"named": False, "cogent_name": None, "user_name": None, "coworld": None},
-    }
-
-
-def test_who_we_are_reports_an_unreachable_profile(program):
-    import urllib.error
-
-    def refuse(url):
-        raise urllib.error.HTTPError(url, 404, "not found", {}, None)
-
-    program._fetch = refuse
-    assert run("who_we_are", {}, program)["error"]["reason"] == "who_unavailable"
-
-
 def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
     first_version(program)
-    program.practice_request()
+    program.practice_request(league=GOTA.reference_league_id)
     program._sleep = lambda seconds: None
     cli.xp_status = "running"
     data = program.practice_status(wait_seconds=60)

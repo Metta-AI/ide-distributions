@@ -23,8 +23,6 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 
 | Tool | What it does |
 |---|---|
-| `who_we_are` | Whether the cogent has a name (`named`), its name (`cogent_name`, from its soul record; `null` until named), and its user's account name (`user_name`, `null` when none, from the public `GET /v2/cogents/<player>`). `softmax status` and `whoami` print the user's account name, not the cogent's. |
-| `take_name` | Takes the name the user chose: writes it into the cogent's soul record (`c/profile/soul`), keeping the other fields. `who_we_are` then reports `named: true`. |
 | `starter_fetch` | Downloads the coworld's starter player file (manifest `player` entry `baseline`, else the first file entry) to `starter/<id>.bas` and checks its sha256. |
 | `program_show` | The program now (or the starter before the first change), its name, its last version and whether it changed since. |
 | `program_edit` | Applies `{find, replace}` edits (each `find` exactly once; `edit_not_found` / `edit_ambiguous` otherwise) to the program now or the starter, then runs the same check and write as `program_change`. |
@@ -34,7 +32,7 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 | `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". |
 | `practice_status` | The request's progress (optionally waiting up to 60 s); once over, each game's result from its `results.json` in plain words, a summary against the previous version's practice, what the results can and cannot measure, and a watch link per game. |
 | `program_release` | `coworld submit <name>:v<N> --league L --player P` for a version the user names, once, and only with `user_said_yes: true`. |
-| `task_update` | Keeps one task card per user request in the cogent's `tasks` records (shown in the Mind on /play): six steps from understanding the request to the release question, then an outcome. |
+| `task_update` | Keeps one task card per user request in the existing workspace journal: six steps from understanding the request to the release question, then an outcome. |
 | `fresh_start` | Only when the user asks to start over: empties the profile's `memories/MEMORY.md` and `memories/USER.md` so the next conversation is a first meeting. Needs `confirm: true`; touches nothing else. |
 
 Tools name programs as the user does: a name and a version number. The platform's policy name
@@ -52,20 +50,12 @@ task card), `versions/<platform name>/v<N>.bas` (a copy of each uploaded file, f
 
 ### The league
 
-Practice, release and the starter use the league the coach chose for this cogent: the record
-`c/state/league`, read as the Player through the public records API
-(`GET <server>/observatory/v2/cogents/<player>/c/state/league`). With no choice, GotA's default
-league (`games.py`) is used, and the platform answers with its own `league_not_chosen` refusal if
-it requires a choice.
+`starter_fetch`, `practice_request`, and `program_release` require the `league` argument.
+They do not read or store a selected league.
 
 ### Task cards
 
-`task_update` writes `c/tasks/<key>` (`PUT <server>/observatory/v2/cogents/<player>/c/tasks/<key>`,
-`bodies.Task`) with the player credential, which writes as the cogent. Cards have `origin:
-"player"`, so the hosted bridge never forwards them as coach requests. The Mind shows an active
-card as "v2 · step N of 6", a failed step as its snag, and a finished card's outcome under what
-arrived. Step names are the records schema's fixed rungs (`reflect`, `implement`, `compile`,
-`tryout`, `screen`, `submit`); each step's `detail` carries the plain words.
+`task_update` updates the existing current card in `journal.json` without publishing it to the platform.
 
 A coach refusal (403 `permit_required`, 402 `credit_denied`, `league_not_chosen`) is returned as
 data, `{"outcome": "refused", "refusal": ..., "reason", "state"?, "ask"?}`, and is never retried.

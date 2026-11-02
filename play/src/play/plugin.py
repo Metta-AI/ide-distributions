@@ -39,46 +39,20 @@ TIMEOUT_S = 840  # an upload may take 600 s; Hermes allows tool calls up to time
 
 # name: (description, parameters, required)
 TOOLS = {
-    "who_we_are": (
-        (
-            "Whether you have a name yet (named), your name (cogent_name, null until you are "
-            "named) and your user's account name. Call once at the start of each conversation. "
-            "user_name is null when the user has set none. The account name that softmax status "
-            "and whoami print is the user's, not yours. coworld is null until you have been "
-            "brought into one, then {name, builds_here}: builds_here is false for a coworld whose "
-            "programs the user's own coding agent builds, not you."
-        ),
-        {},
-        [],
-    ),
-    "take_name": (
-        (
-            "Take the name your user chose for you, exactly as they said it. Call only when "
-            "the user has told you a name in this conversation; never pick one yourself."
-        ),
-        {
-            "name": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 255,
-                "description": "The exact name the user chose.",
-            }
-        },
-        ["name"],
-    ),
     "starter_fetch": (
         (
             "Download the coworld's starter program into the program workspace and check it "
             "against the published file. Safe to repeat."
         ),
         {
+            "league": {"type": "string", "description": "The league for this operation."},
             "player": {
                 "type": "string",
                 "pattern": r"^[A-Za-z0-9_-]+$",
                 "description": "Manifest player id. Omit for the coworld's starter (baseline).",
-            }
+            },
         },
-        [],
+        ["league"],
     ),
     "program_show": (
         (
@@ -184,6 +158,7 @@ TOOLS = {
             "the same practice again. " + REFUSAL
         ),
         {
+            "league": {"type": "string", "description": "The league for this operation."},
             "program": {
                 **PROGRAM,
                 "description": PROGRAM["description"] + " Omit for the latest version.",
@@ -205,7 +180,7 @@ TOOLS = {
             },
             "attempt": {"type": "integer", "minimum": 1, "default": 1},
         },
-        [],
+        ["league"],
     ),
     "practice_status": (
         (
@@ -237,6 +212,7 @@ TOOLS = {
             "reported as released. " + REFUSAL
         ),
         {
+            "league": {"type": "string", "description": "The league for this operation."},
             "program": {
                 **PROGRAM,
                 "pattern": r"^[A-Za-z0-9][A-Za-z0-9_-]*(:[vV]| [vV]| version )[0-9]+$",
@@ -247,12 +223,12 @@ TOOLS = {
                 "description": "True only because the user said to release this version.",
             },
         },
-        ["program", "user_said_yes"],
+        ["program", "user_said_yes", "league"],
     ),
     "task_update": (
         (
-            "Keep the task card for the user's current request up to date; the user sees it in "
-            "the Mind on the play page. Pass title to start the card for a new request, then "
+            "Keep the existing workspace task card up to date. "
+            "Pass title to start the card for a new request, then "
             "update each step as it runs and ends; pass outcome to finish the card. Write in "
             "plain words."
         ),

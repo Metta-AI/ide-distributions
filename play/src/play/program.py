@@ -9,8 +9,7 @@ cogent names things as the user does ("towerless v2") and never needs a platform
 Every platform call goes through the shared ``softmax_tool`` client: the credential is installed
 into the profile-local Softmax home before each CLI call, and every mutating call (upload,
 practice, release) first runs ``whoami`` and refuses unless the credential is the Player
-``RESEARCH_PLAYER_ID`` (``SoftmaxClient.require_player``). The league is the one the coach chose
-(the cogent's ``state/league`` record); an absent choice never falls back to a game adapter.
+``RESEARCH_PLAYER_ID`` (``SoftmaxClient.require_player``). League-scoped calls receive their league explicitly.
 
 The coach's refusals come back as data, never as an error and never retried:
 ``{"outcome": "refused", "refusal": "permit_required" | "credit_denied" | "league_not_chosen",
@@ -36,11 +35,9 @@ from pathlib import Path
 from ide_research_core.softmax_tool import xp
 from ide_research_core.softmax_tool.client import UPLOAD_TIMEOUT_S, SoftmaxClient, _line_value
 from ide_research_core.softmax_tool.platform_cli import (
-    CREDENTIAL_ENV,
     SoftmaxCliError,
     coach_refusal,
     describe_failure,
-    parse_credential,
 )
 from ide_research_core.softmax_tool.protocol import CreditDenied, LeagueNotChosen, PermitRequired
 
@@ -56,7 +53,6 @@ from .limits import (
     STEPS,
     SUFFIX_LENGTH,
 )
-from .records import CogentRecords
 
 SHA256 = re.compile(r"[0-9a-f]{64}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -147,24 +143,12 @@ def diff(before: str, after: str, before_name: str, after_name: str) -> dict:
     }
 
 
-NAME_LIMIT = 255
-# The soul record the server validates strictly; plain, truthful values for a cogent with none yet.
-NEW_SOUL = {
-    "temperament": "neutral",
-    "voice": "Still finding my voice.",
-    "aboutMistakes": "I say what went wrong and fix it.",
-    "neverSilently": ["submit", "spend"],
-    "body": "New here, getting to know my user.",
-}
-
-
 class Program:
     def __init__(
         self,
         env: Mapping[str, str],
         client: SoftmaxClient | None = None,
         fetch: Fetch = fetch_public,
-        records: CogentRecords | None = None,
     ):
         if not env.get("PLAY_WORKSPACE"):
             raise PlayError("not_configured", "PLAY_WORKSPACE is not set")
@@ -172,65 +156,7 @@ class Program:
         self.player = env.get("RESEARCH_PLAYER_ID", "")
         self.client = client or SoftmaxClient(env)
         self._fetch = fetch
-        self._credential = env.get(CREDENTIAL_ENV)
-        self._records = records
-        self._league: str | None = None
         self._sleep = time.sleep
-
-    @property
-    def records(self) -> CogentRecords:
-        if self._records is None:
-            if not self.player:
-                raise PlayError("not_configured", "RESEARCH_PLAYER_ID is not set")
-            token = parse_credential(self._credential).token
-            self._records = CogentRecords(self.client._cli.server, self.player, token)
-        return self._records
-
-    def league_id(self) -> str:
-        """The explicitly chosen league. Never select a league from an installed adapter."""
-        if self._league is None:
-            choice = self.records.get("state", "league")
-            if not choice:
-                raise PlayError(
-                    "league_not_chosen",
-                    "Choose a league in the frontend before building a program.",
-                )
-            league = choice["body"]["leagueId"]
-            try:
-                here = self._builds_here(league)
-            except (OSError, KeyError, ValueError) as error:  # URLError is an OSError
-                raise PlayError(
-                    "league_unreadable", f"could not read the chosen league {league}: {error}"
-                ) from error
-            if not here:
-                raise PlayError(
-                    "builds_elsewhere",
-                    "this coworld's programs are built on the user's own computer by their "
-                    "coding agent, not here; guide them to its 'Copy prompt for your local agent' button",
-                )
-            self._league = league
-        return self._league
-
-    def _league_game(self, league_id: str) -> dict:
-        """The game block of a league's public read (no credential)."""
-        url = (
-            f"{self.client._cli.server}/observatory/v2/leagues/"
-            f"{urllib.parse.quote(league_id, safe='')}"
-        )
-        return json.loads(self._fetch(url))["game"]
-
-    def _builds_here(self, league_id: str, game: dict | None = None) -> bool:
-        """Whether programs for this league's coworld are built here: it is GotA's coworld, judged
-        by the league's game (so any GotA league counts), not by the league's id. The two games are
-        compared on the first coworld field both carry; with none in common it is not GotA's."""
-        if league_id == GOTA.reference_league_id:
-            return True
-        game = game if game is not None else self._league_game(league_id)
-        home = self._league_game(GOTA.reference_league_id)
-        for field in ("canonical_coworld_id", "coworld_id", "coworld_name"):
-            if game.get(field) and home.get(field):
-                return game[field] == home[field]
-        return False
 
     @property
     def program_file(self) -> Path:
@@ -243,73 +169,11 @@ class Program:
     def _starter_text(self) -> str | None:
         return self.starter_file.read_text() if self.starter_file.is_file() else None
 
-    # --- who we are -----------------------------------------------------
-
-    def who_we_are(self) -> dict:
-        """Whether the cogent has a name yet, its name, and its user's.
-
-        ``named`` is true when the cogent's soul record holds a name; ``cogent_name`` is that name
-        (the page renames the player to match shortly after, so the soul is the truth first), or
-        None when the cogent is not named yet: the player's placeholder name is never its name.
-        ``user_name`` comes from the public cogent profile (no credential) and is the user's
-        account name, which ``softmax status`` and ``whoami`` also print; None when the user set
-        none. ``coworld`` is None until the cogent has been brought into a coworld; then it is
-        ``{"name", "builds_here"}``: the coworld's name and whether programs for it are built here
-        (only GotA's are; any other coworld's are built by the user's own coding agent)."""
-        if not self.player:
-            raise PlayError("not_configured", "RESEARCH_PLAYER_ID is not set")
-        url = f"{self.client._cli.server}/observatory/v2/cogents/{urllib.parse.quote(self.player, safe='')}"
-        try:
-            profile = json.loads(self._fetch(url))
-        except urllib.error.HTTPError as error:
-            raise PlayError(
-                "who_unavailable", f"GET {url} answered HTTP {error.code}", {"status": error.code}
-            ) from error
-        soul = self.records.get("profile", "soul")
-        name = (soul["body"].get("name") or "").strip() if soul else ""
-        choice = self.records.get("state", "league")
-        coworld = None
-        if choice:
-            try:
-                league_id = choice["body"]["leagueId"]
-                game = self._league_game(league_id)
-                coworld = {
-                    "name": game.get("coworld_name") or game["name"],
-                    "builds_here": self._builds_here(league_id, game),
-                }
-            except (OSError, KeyError, TypeError, ValueError):
-                # Optional (any read failure, URLError and timeouts included): never fail the first call.
-                coworld = None
-        return {
-            "named": bool(name),
-            "cogent_name": name or None,
-            "user_name": profile.get("owner_name"),
-            "coworld": coworld,
-        }
-
-    def take_name(self, name: str) -> dict:
-        """Take the name the user chose: write it into the cogent's soul record."""
-        name = name.strip()
-        if not name:
-            raise PlayError("bad_name", "the name is empty")
-        if len(name) > NAME_LIMIT:
-            raise PlayError("bad_name", f"the name is longer than {NAME_LIMIT} characters")
-        live = self.records.get("profile", "soul")
-        rev = live["rev"] if live else None
-        old = live["body"] if live else {}
-        body = {"name": name}
-        for field, default in NEW_SOUL.items():
-            value = old.get(field)
-            body[field] = value if isinstance(value, type(default)) and value else default
-        key = f"play:soul-name:{hashlib.sha256(name.encode()).hexdigest()[:16]}:{rev or 0}"
-        self.records.put("profile", "soul", body, rev, key)
-        return {"name": name}
-
     # --- starter --------------------------------------------------------
 
-    def starter_fetch(self, player: str | None = None) -> dict:
+    def starter_fetch(self, player: str | None = None, *, league: str) -> dict:
         """Download the coworld's starter player file into ``starter/`` and check its sha256."""
-        coworld = self.client._league_coworld(self.league_id())
+        coworld = self.client._league_coworld(league)
         entries = [p for p in (coworld.get("manifest") or {}).get("player") or [] if p.get("file")]
         wanted = player or GOTA.starter_player
         entry = next((p for p in entries if p.get("id") == wanted), None)
@@ -474,7 +338,6 @@ class Program:
             before, before_name = starter or "", "starter"
         if text == before:
             raise PlayError("no_change", "the new text is the same as the program now")
-        self.league_id()
         write_text(self.program_file, text)
         journal = Journal.load(self.workspace)
         journal.change = change
@@ -553,7 +416,6 @@ class Program:
     def program_upload(self, name: str | None = None) -> dict:
         """Upload ``program.bas`` as the next version of the program (``coworld upload-policy``).
         The same file uploaded again is the same version, not a new one."""
-        self.league_id()
         if not self.program_file.is_file():
             raise PlayError("no_program", "there is no changed program to upload yet")
         data = self.program_file.read_bytes()
@@ -730,6 +592,8 @@ class Program:
         episodes: int = DEFAULT_EPISODES,
         seats: list[int] | None = None,
         attempt: int = 1,
+        *,
+        league: str,
     ) -> dict:
         """One private practice request (``POST /v2/experience-requests``) of ``episodes`` games.
         The platform needs the whole roster: the program on ``seats``, and on every other seat a
@@ -746,8 +610,7 @@ class Program:
         journal = Journal.load(self.workspace)
         ref = self._resolve(journal, program)
         display, label, entry = ref.display, ref.label, ref.entry
-        league = self.league_id()
-        key = f"practice:{label}:a{attempt}"
+        key = f"practice:{league}:{label}:a{attempt}"
         title = f"Practice: {display}" + (f" (run {attempt})" if attempt > 1 else "")
 
         def player(seat: int) -> dict:
@@ -894,7 +757,7 @@ class Program:
 
     # --- release --------------------------------------------------------
 
-    def program_release(self, program: str, user_said_yes: bool) -> dict:
+    def program_release(self, program: str, user_said_yes: bool, league: str) -> dict:
         """``coworld submit <name>:v<N> --league L --player P``, once: an existing submission of
         the same version to the league is reported as released. Either way the cogent's other
         programs in that league are retired: one program per league, a release replaces."""
@@ -905,7 +768,6 @@ class Program:
         journal = Journal.load(self.workspace)
         ref = self._resolve(journal, program)
         display, label, entry = ref.display, ref.label, ref.entry
-        league = self.league_id()
         out = {"program": display}
         self.client.require_player()
         found = [
@@ -958,8 +820,7 @@ class Program:
         version: int | None = None,
         outcome: str | None = None,
     ) -> dict:
-        """Keep one task card per user request current in the cogent's ``tasks`` records, which the
-        Mind on /play shows. A ``title`` starts the card for a new request."""
+        """Update the existing workspace task card. A ``title`` starts the card for a new request."""
         if step not in STEPS or status not in STEP_STATUS or not detail.strip():
             raise PlayError(
                 "bad_arguments", f"step must be one of {', '.join(STEPS)}; detail is required"
@@ -968,14 +829,6 @@ class Program:
         stamp = now()
         open_card = journal.card if journal.card and journal.card.body["state"] != "done" else None
         if title is not None:
-            if open_card is not None:
-                previous = {
-                    **open_card.body,
-                    "state": "done",
-                    "status": "dropped",
-                    "outcome": f"Set aside for a new request: {title}",
-                }
-                self._write_card(open_card.key, previous)
             key = "play-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
             body = {
                 "id": key,
@@ -1012,7 +865,6 @@ class Program:
                 status="failed" if status == "failed" else "kept",
                 outcome=outcome.strip(),
             )
-        self._write_card(open_card.key, body)
         journal.card = Card(key=open_card.key, body=body)
         journal.save(self.workspace)
         return {
@@ -1021,8 +873,3 @@ class Program:
             "status": status,
             "finished": body["state"] == "done",
         }
-
-    def _write_card(self, key: str, body: dict) -> None:
-        live = self.records.get("tasks", key)
-        rev = live["rev"] if live else None
-        self.records.put("tasks", key, body, rev, f"play:{key}:{rev or 0}")

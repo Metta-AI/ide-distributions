@@ -3,8 +3,6 @@ version: 0.1.0
 description: The user's own program on one coworld - starter, checked changes, versions, private practice with plain results, release and the task card.
 author: ide-distributions
 provides_tools:
-  - who_we_are
-  - take_name
   - starter_fetch
   - program_show
   - program_change

@@ -10,7 +10,6 @@ import pytest
 from ide_research_core.softmax_tool.client import SoftmaxClient
 from play.games import GOTA
 from play.program import Program
-from play.records import CogentRecords
 
 PLAYER = "ply_281ba4ec-d1a2-4e37-a609-a391d30421d2"  # a real player id's shape: ply_<uuid>
 SERVER = "https://example.invalid/api"
@@ -218,30 +217,6 @@ class FakeCli:
         ]
 
 
-class FakeRecords:
-    """The cogent records API: ``GET``/``PUT .../cogents/<player>/c/<collection>/<key>``."""
-
-    def __init__(self):
-        self.records: dict[tuple[str, str], dict] = {}
-        self.puts: list[dict] = []
-
-    def __call__(self, method, url, headers, body):
-        assert headers["Authorization"] == "Bearer cga_fake"
-        prefix = f"{SERVER}/observatory/v2/cogents/{PLAYER}/c/"
-        assert url.startswith(prefix), url
-        collection, key = url.removeprefix(prefix).split("/", 1)
-        live = self.records.get((collection, key))
-        if method == "GET":
-            return (200, json.dumps(live).encode()) if live else (404, b'{"detail": "not found"}')
-        assert method == "PUT" and collection in ("tasks", "profile")
-        payload = json.loads(body)
-        assert payload["base_rev"] == (live["rev"] if live else None)
-        rev = (live["rev"] if live else 0) + 1
-        self.records[(collection, key)] = {"key": key, "rev": rev, "body": payload["body"]}
-        self.puts.append({"key": key, **payload})
-        return 200, b"{}"
-
-
 @pytest.fixture
 def env(tmp_path):
     home = tmp_path / "host/profiles/play"
@@ -264,30 +239,17 @@ def cli():
 
 
 @pytest.fixture
-def records():
-    return FakeRecords()
-
-
-@pytest.fixture
 def fetched():
     return []
 
 
 @pytest.fixture
-def program(env, cli, records, fetched, tmp_path):
-    records.records[("state", "league")] = {
-        "key": "league",
-        "rev": 1,
-        "body": {"leagueId": GOTA.reference_league_id},
-    }
-
+def program(env, cli, fetched, tmp_path):
     def fetch(url):
         fetched.append(url)
         return STARTER
 
     client = SoftmaxClient(env, run=cli, bin_dir=tmp_path / "bin", http_get=cli.http_get)
-    play = Program(
-        env, client=client, fetch=fetch, records=CogentRecords(SERVER, PLAYER, "cga_fake", records)
-    )
+    play = Program(env, client=client, fetch=fetch)
     play._sleep = lambda seconds: None
     return play
