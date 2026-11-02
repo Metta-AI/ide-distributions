@@ -44,6 +44,7 @@ async def maintain(
     homes: tuple[Path, ...],
     availability: Availability,
     lease_file: Path,
+    ready: asyncio.Event,
 ) -> None:
     async with httpx.AsyncClient(
         base_url=platform_url.rstrip("/") + "/",
@@ -81,4 +82,5 @@ async def maintain(
                 pending = lease_file.with_suffix(".pending")
                 pending.write_text(result.expires_at.isoformat())
                 pending.replace(lease_file)
+                ready.set()
             await asyncio.sleep(max(2, (renew_at - datetime.now(UTC)).total_seconds()))

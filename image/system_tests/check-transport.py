@@ -20,6 +20,7 @@ async def main():
     release_held = asyncio.Event()
     finished = asyncio.Event()
     connections = 0
+    connected = asyncio.Event()
 
     async def gateway(reader, writer):
         headers = await reader.readuntil(b"\r\n\r\n")
@@ -120,11 +121,13 @@ async def main():
                 credential="proof",
                 env={"API_SERVER_KEY": "proof"},
                 inference=Availability(),
+                connected=connected,
             )
         )
         try:
             async with asyncio.timeout(10):
                 await finished.wait()
+            assert connected.is_set()
             assert connections == 1 and not task.done(), (
                 "A failed request restarted the shared connection"
             )

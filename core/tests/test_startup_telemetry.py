@@ -11,10 +11,22 @@ CHECK = Path(__file__).resolve().parents[2] / "image/system_tests/check-startup.
 
 
 @pytest.mark.parametrize(
-    "fault", [None, "missing", "reused_boot", "secret", "negative", "json", "state"]
+    "fault",
+    [
+        None,
+        "missing",
+        "reused_boot",
+        "secret",
+        "negative",
+        "json",
+        "state",
+        "duplicate_ready",
+        "premature_ready",
+    ],
 )
 @pytest.mark.parametrize("cycles", [2, 4])
-def test_packaged_startup_log_validation(fault, cycles):
+@pytest.mark.parametrize("connected", [False, True])
+def test_packaged_startup_log_validation(fault, cycles, connected):
     phases = [("startup_total", None, "started")]
     for role in ("orchestrator", "researcher"):
         for phase in ("profile_install", "profile_prepare"):
@@ -22,6 +34,9 @@ def test_packaged_startup_log_validation(fault, cycles):
     for phase in ("gateway_ready", "application_wake", "application_ready"):
         phases.extend((phase, None, outcome) for outcome in ("started", "passed"))
     phases.append(("startup_total", None, "passed"))
+    phases.extend((phase, None, "started") for phase in ("inference_ready", "relay_connected"))
+    if connected:
+        phases.extend((phase, None, "passed") for phase in ("relay_connected", "inference_ready"))
     events = [
         {
             "event": "workspace_startup",
@@ -31,14 +46,21 @@ def test_packaged_startup_log_validation(fault, cycles):
             "phase": phase,
             "role": role,
             "outcome": outcome,
-            "elapsed_seconds": 20 if index == len(phases) - 1 else int(outcome == "passed"),
+            "elapsed_seconds": 20
+            if phase == "startup_total" and outcome == "passed"
+            else int(outcome == "passed"),
             "timestamp": f"2026-11-01T00:00:{index:02d}Z",
         }
         for boot in range(cycles)
         for index, (phase, role, outcome) in enumerate(phases)
     ]
+    if fault == "duplicate_ready":
+        events.append(events[-1])
+    if fault == "premature_ready":
+        target = next(e for e in events if e["phase"] == "relay_connected")
+        target["outcome"] = "passed"
     if fault == "missing":
-        events.pop()
+        events.pop(1)
     if fault == "reused_boot":
         for event in events:
             event["boot_id"] = "same"
