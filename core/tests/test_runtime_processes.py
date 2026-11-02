@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from image.processes import managed_process
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "image"))
+from processes import managed_process  # noqa: E402
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
