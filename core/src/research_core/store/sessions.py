@@ -138,6 +138,15 @@ def set_run(
 ) -> dict[str, Any]:
     """A run started for the Session: record it, count the attempt, make the Session live."""
     _require_workspace(store)
+    with store.tx(actor) as tx:
+        return set_run_in_transaction(tx, session_id, run_id, attempts)
+
+
+def set_run_in_transaction(
+    tx: Tx, session_id: str, run_id: str, attempts: int | None = None
+) -> dict[str, Any]:
+    """Record a run in the transaction publishing its admission or other owner state."""
+    _require_workspace(tx.store)
     problems: list[str] = []
     require(problems, _is_text(run_id), "run_id is a non-empty string")
     require(
@@ -147,22 +156,21 @@ def set_run(
     )
     if problems:
         raise StoreError(problems)
-    with store.tx(actor) as tx:
-        _require_session(tx, session_id)
-        if attempts is None:
-            tx.execute(
-                "UPDATE sessions SET run_id = ?, attempts = attempts + 1, ended = NULL,"
-                " last_seen = ? WHERE id = ?",
-                (run_id, tx.at, session_id),
-            )
-        else:
-            tx.execute(
-                "UPDATE sessions SET run_id = ?, attempts = ?, ended = NULL, last_seen = ?"
-                " WHERE id = ?",
-                (run_id, attempts, tx.at, session_id),
-            )
-        tx.execute("UPDATE sessions SET stopped_by = NULL WHERE id = ?", (session_id,))
-        return _record(tx, session_id)
+    _require_session(tx, session_id)
+    if attempts is None:
+        tx.execute(
+            "UPDATE sessions SET run_id = ?, attempts = attempts + 1, ended = NULL,"
+            " last_seen = ? WHERE id = ?",
+            (run_id, tx.at, session_id),
+        )
+    else:
+        tx.execute(
+            "UPDATE sessions SET run_id = ?, attempts = ?, ended = NULL, last_seen = ?"
+            " WHERE id = ?",
+            (run_id, attempts, tx.at, session_id),
+        )
+    tx.execute("UPDATE sessions SET stopped_by = NULL WHERE id = ?", (session_id,))
+    return _record(tx, session_id)
 
 
 def end(store: Store, actor: Actor, session_id: str) -> dict[str, Any]:
