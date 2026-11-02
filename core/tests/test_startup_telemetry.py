@@ -31,10 +31,11 @@ def test_packaged_startup_log_validation(fault, cycles, connected):
     for role in ("orchestrator", "researcher"):
         for phase in ("profile_install", "profile_prepare"):
             phases.extend((phase, role, outcome) for outcome in ("started", "passed"))
+    phases.append(("inference_ready", None, "started"))
     for phase in ("gateway_ready", "application_wake", "application_ready"):
         phases.extend((phase, None, outcome) for outcome in ("started", "passed"))
     phases.append(("startup_total", None, "passed"))
-    phases.extend((phase, None, "started") for phase in ("inference_ready", "relay_connected"))
+    phases.append(("relay_connected", None, "started"))
     if connected:
         phases.extend((phase, None, "passed") for phase in ("relay_connected", "inference_ready"))
     events = [

@@ -41,10 +41,22 @@ for boot_id, events in boots.items():
     assert [(e.phase, e.role, e.outcome) for e in startup] == phases, events
     for phase in ("inference_ready", "relay_connected"):
         readiness = [e for e in events if e.phase == phase]
+        if phase == "inference_ready":
+            gateway_ready = next(
+                e for e in startup if e.phase == "gateway_ready" and e.outcome == "passed"
+            )
+            assert readiness[0].timestamp < gateway_ready.timestamp, events
         assert [e.outcome for e in readiness] in (["started"], ["started", "passed"]), events
-        assert all(e.role is None and e.timestamp >= startup[-1].timestamp for e in readiness), (
-            events
+        boundary = (
+            startup[-1]
+            if phase == "relay_connected"
+            else next(
+                e
+                for e in reversed(startup)
+                if e.phase == "profile_prepare" and e.outcome == "passed"
+            )
         )
+        assert all(e.role is None and e.timestamp >= boundary.timestamp for e in readiness), events
     assert [e.timestamp for e in events] == sorted(e.timestamp for e in events), events
     total = startup[-1].elapsed_seconds
     assert total >= sum(e.elapsed_seconds for e in startup[1:-1]), events
