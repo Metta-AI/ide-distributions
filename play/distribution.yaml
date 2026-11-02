@@ -6,10 +6,6 @@ env_requires:
   - name: OPENROUTER_API_KEY
     required: true
     description: OpenRouter API key for the play model.
-  - name: OPENROUTER_MODEL
-    required: false
-    default: moonshotai/kimi-k3
-    description: Model ID on OpenRouter.
   - name: SOFTMAX_PLAYER_CREDENTIAL
     required: true
     description: Bare player agent token or player-session JSON containing token and expires_at.

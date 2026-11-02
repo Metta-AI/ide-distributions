@@ -65,7 +65,7 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
 | `COGAMES_API_URL` | hosting | Softmax API server. |
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env` (Hermes strips the key from cron environments). **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | hosting | The model. |
+| `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`contract/CONTRACT.md`, "Profile models"). |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain
@@ -143,6 +143,13 @@ applies user edits through `research store apply --actor user:<id> <op> <json>`.
 (`events` rows of kind `notice`) must reach every client. `research serve` is the reference
 implementation of all of this against a local Hermes. The full contract layer (`session-open`,
 capabilities, panels, the agent-context panel) ships later in its own stack.
+
+The model routes of `contract/CONTRACT.md` ("Profile models") are served by `research serve`
+itself, which the workspace image runs: it reads each profile's `config.yaml` (`model`,
+`fallback_providers`) and changes them with `hermes config set` under each profile's home. The
+IDE reaches `research serve` only through the operations in `image/contract.py`, and that list
+has no model operations yet, so `/ide-next` cannot show or change a model until they are added.
+Nothing that starts a run may put a `model` in the run request.
 
 ## Storage and backup
 

@@ -174,6 +174,7 @@ UNWATCHED_KINDS: frozenset[str] = frozenset(
         "checks.ran",
         "drain.done",
         "workspace.sleep",
+        "profile.model_updated",
     }
 )
 
