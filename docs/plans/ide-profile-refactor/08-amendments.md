@@ -132,8 +132,9 @@ and task it changes. Implementers read this file with their entry.
   tool then reports balance, held and next refill and, for a Researcher, says to `task.wait
   {kind: credits}`. `xp.ask_above_requests_per_experiment` is a warning for the Orchestrator and a
   `task.ask` suggestion for a Researcher; it never refuses. The create body sets `title =
-  f"ide:X-{n}:{seed}:{arm}"`; `XpRequest` has `title`; reconciliation lists `mine=True` requests by
-  title. `Credits` gains `recent_requests: list[dict]` (what the platform returns) and
+  f"ide:X-{n}:{seed}:{arm}"`; `XpRequest` has `title` for display only. The local intent saves a UUID idempotency key
+  and the exact create body before sending. Recovery replays that body through the platform
+  create endpoint; it never searches request titles. `Credits` gains `recent_requests: list[dict]` (what the platform returns) and
   `credits.estimate` falls back to the mixin front matter `cost_per_episode` when there is no
   history.
 - A4.5 **`submit`**: `cites` is a record, never a gate: a `user_requested` submit without

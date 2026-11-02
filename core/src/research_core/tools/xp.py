@@ -16,10 +16,10 @@ refusal, reported with the balance, the held amount and the next refill. The
 a warning and proceeds, a Researcher gets ``ask_orchestrator`` and a ``task.ask`` suggestion.
 
 Every create is an intent (B.13): ``intents.begin(kind="xp", key="X-<n>:<seed>:<arm>")``
-before the call; a pending intent found on a later call is reconciled by listing the Player's
-requests by title (``platform/xp.py``) before anything is sent again. A platform error that
-outlives the retries becomes a refusal through ``platform/wait.py`` (a task Session is put on
-``waiting_on: platform``, A3.9).
+before the call, saving the exact body and a unique idempotency key locally. Recovery
+replays that body through the platform's idempotent create contract; titles are display only.
+A platform error that outlives the retries becomes a refusal through ``platform/wait.py``
+(a task Session is put on ``waiting_on: platform``, A3.9).
 
 ``evaluate`` runs through ``mixin.run_command`` with the A3.2 budget: a command that outlives
 it keeps running and the result carries ``background.resume``; ``status {resume: <token>}``
@@ -39,6 +39,7 @@ from dataclasses import asdict
 from functools import partial
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from research_core import mixin as mixin_module
 from research_core.platform import credits as credits_module
@@ -105,26 +106,34 @@ def handle_request(call: ToolCall) -> dict:
     reconciled: list[str] = []
     for seed, arm in plan["pairs"]:
         title = xp_module.title_for(n, seed, arm)
+        body = xp_module.request_body(
+            coworld_id=coworld_id,
+            policy_version_id=plan["policy_version_ids"][arm],
+            seed=seed,
+            episodes=plan["episodes"],
+            title=title,
+            league_id=plan["league"],
+            opponents=plan["opponents"],
+        )
+        body["idempotency_key"] = str(uuid4())
         intent = intents.begin(
-            store, actor, kind="xp", key=f"X-{n}:{seed}:{arm}", subject=record["id"]
+            store,
+            actor,
+            kind="xp",
+            key=f"X-{n}:{seed}:{arm}",
+            subject=record["id"],
+            request=body,
         )
         intent_n = parse_display_id(intent["id"])[1]
         run = _run_for(existing_runs, seed, arm)
-        if run is None and intent["existing"] and intent["state"] == "pending":
-            request = _reconcile(ctx, platform, title)
-            if request is not None:
-                run = _record_run(ctx, record, request, seed=seed, arm=arm, plan=plan)
-                reconciled.append(request.id)
         if run is None:
-            body = xp_module.request_body(
-                coworld_id=coworld_id,
-                policy_version_id=plan["policy_version_ids"][arm],
-                seed=seed,
-                episodes=plan["episodes"],
-                title=title,
-                league_id=plan["league"],
-                opponents=plan["opponents"],
-            )
+            if "request" not in intent:
+                raise ToolError(
+                    f"{intent['id']} predates idempotent XP requests; its outcome must be"
+                    " resolved before retrying. No request was sent.",
+                    intent=intent["id"],
+                )
+            body = intent["request"]
             try:
                 request = with_retries(partial(platform.xp_create, body), sleep=wait.sleep)
             except CreditsRefused as error:
@@ -135,7 +144,9 @@ def handle_request(call: ToolCall) -> dict:
                 refusal.context.update(created=created, reconciled=reconciled)
                 raise refusal from error
             run = _record_run(ctx, record, request, seed=seed, arm=arm, plan=plan)
-            created.append(request.id)
+            (reconciled if intent["existing"] and not intent["retried"] else created).append(
+                request.id
+            )
         if intent["state"] == "pending" or not intent["existing"]:
             intents.finish(
                 store,
@@ -287,13 +298,6 @@ def _estimate(ctx: ToolContext, credits: Credits | None, episodes: int) -> dict:
             episodes, credits=credits, cost_per_episode=cost_per_episode
         ),
     }
-
-
-def _reconcile(ctx: ToolContext, platform: Platform, title: str) -> XpRequest | None:
-    """A pending intent: find the request by title before sending anything again (B.13)."""
-    return wait.call_platform(
-        ctx, "GET /v2/experience-requests", lambda: xp_module.find_by_title(platform, title)
-    )
 
 
 def _record_run(
