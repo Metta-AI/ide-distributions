@@ -62,8 +62,11 @@ async def maintain(
             if isinstance(response, BaseException):
                 raise response
             if not response.is_success:
-                log.warning("Inference lease refused: HTTP %s", response.status_code)
-                await asyncio.sleep(30)
+                delay = max(1, int(response.headers.get("Retry-After", "30")))
+                log.warning(
+                    "Inference lease refused: HTTP %s; retry in %ss", response.status_code, delay
+                )
+                await asyncio.sleep(delay)
                 continue
             result = TypeAdapter(Lease | Unavailable).validate_json(response.content)
             if isinstance(result, Unavailable):
