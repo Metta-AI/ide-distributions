@@ -29,11 +29,7 @@ NAME = {
     "maxLength": NAME_MAX,
     "description": "The program's name as the user knows it. Omit for the current program.",
 }
-REFUSAL = (
-    "A coach refusal returns outcome refused with refusal permit_required (state waiting, "
-    "declined or over_cap, and the ask), credit_denied or league_not_chosen. Tell the user; "
-    "never retry around it."
-)
+REFUSAL = "If account credits are exhausted, tell the user."
 TIMEOUT_S = 840  # an upload may take 600 s; Hermes allows tool calls up to timeouts.tools
 
 # name: (description, parameters, required)

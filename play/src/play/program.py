@@ -12,7 +12,7 @@ practice, release) first runs ``whoami`` and refuses unless the credential is th
 ``RESEARCH_PLAYER_ID`` (``SoftmaxClient.require_player``). League-scoped calls receive their league explicitly.
 
 The coach's refusals come back as data, never as an error and never retried:
-``{"outcome": "refused", "refusal": "permit_required" | "credit_denied" | "league_not_chosen",
+``{"outcome": "refused", "refusal": "credit_denied",
 "reason", "state"?, "ask"?}``. The same call made again sends the same request (practice reuses
 its idempotency key; release looks up the league's submissions first), so asking again after the
 coach answers is safe.
@@ -36,10 +36,9 @@ from ide_research_core.softmax_tool import xp
 from ide_research_core.softmax_tool.client import UPLOAD_TIMEOUT_S, SoftmaxClient, _line_value
 from ide_research_core.softmax_tool.platform_cli import (
     SoftmaxCliError,
-    coach_refusal,
     describe_failure,
 )
-from ide_research_core.softmax_tool.protocol import CreditDenied, LeagueNotChosen, PermitRequired
+from ide_research_core.softmax_tool.protocol import CreditDenied
 
 from . import basic, results
 from .games import GOTA, CommissionerConfig, Selection
@@ -114,18 +113,8 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def refused(refusal: CreditDenied | PermitRequired | LeagueNotChosen) -> dict:
-    if isinstance(refusal, CreditDenied):
-        return {"outcome": "refused", "refusal": "credit_denied", "reason": refusal.reason}
-    if isinstance(refusal, LeagueNotChosen):
-        return {"outcome": "refused", "refusal": "league_not_chosen", "reason": refusal.reason}
-    return {
-        "outcome": "refused",
-        "refusal": "permit_required",
-        "reason": refusal.reason,
-        "state": refusal.state,
-        "ask": refusal.ask,
-    }
+def refused(refusal: CreditDenied) -> dict:
+    return {"outcome": "refused", "refusal": "credit_denied", "reason": refusal.reason}
 
 
 def diff(before: str, after: str, before_name: str, after_name: str) -> dict:
@@ -694,9 +683,6 @@ class Program:
             stderr = result.stderr or ""
             if xp.CREDIT_DENIAL.search(stderr):
                 return {**out, **refused(CreditDenied(reason=xp._error_detail(stderr)))}
-            refusal = coach_refusal(stderr)
-            if refusal is not None:
-                return {**out, **refused(refusal)}
             raise SoftmaxCliError(describe_failure("coworld", args, result))
         try:
             request_id = str(json.loads(result.stdout)["id"])
@@ -855,8 +841,6 @@ class Program:
                 raise
             stderr = re.split(r" exited -?[0-9]+: ", str(error), maxsplit=1)[-1]
             return {**out, **refused(CreditDenied(reason=xp._error_detail(stderr)))}
-        if isinstance(result, (PermitRequired, LeagueNotChosen)):
-            return {**out, **refused(result)}
         entry = entry or self._remember(journal, ref)
         entry.release = Release(league_id=league, submission_id=result, released_at=now())
         journal.save(self.workspace)

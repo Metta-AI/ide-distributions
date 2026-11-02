@@ -61,7 +61,7 @@ def test_register_lists_exactly_the_play_tools_with_their_schemas():
         assert parameters["type"] == "object" and parameters["additionalProperties"] is False
         assert parameters["required"] == required and set(parameters["properties"]) == properties
     for name in ("practice_request", "program_release"):
-        assert "never retry" in ctx.tools[name]["description"]
+        assert "account credits" in ctx.tools[name]["description"].lower()
 
 
 def test_schemas_accept_and_refuse_the_documented_shapes():

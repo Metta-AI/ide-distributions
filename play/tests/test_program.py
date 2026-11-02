@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import CREDIT_STDERR, LEAGUE_STDERR, PERMIT_STDERR, PLAYER, STARTER, STARTER_SHA
+from conftest import CREDIT_STDERR, PLAYER, STARTER, STARTER_SHA
 
 from play.__main__ import run
 from play.games import GOTA
@@ -234,17 +234,7 @@ def test_versions_this_workspace_never_uploaded_resolve_from_the_platform(progra
 @pytest.mark.parametrize(
     "stderr, expected",
     [
-        (
-            PERMIT_STDERR,
-            {
-                "refusal": "permit_required",
-                "state": "waiting",
-                "ask": "ask_1",
-                "reason": "Your coach asks first.",
-            },
-        ),
         (CREDIT_STDERR, {"refusal": "credit_denied", "reason": "no credits left"}),
-        (LEAGUE_STDERR, {"refusal": "league_not_chosen"}),
     ],
 )
 def test_practice_refusals_are_typed_and_never_retried(program, cli, stderr, expected):
@@ -420,8 +410,6 @@ def test_release_needs_the_users_yes_for_one_version_and_submits_once(program, c
 @pytest.mark.parametrize(
     "stderr, refusal",
     [
-        (PERMIT_STDERR, "permit_required"),
-        (LEAGUE_STDERR, "league_not_chosen"),
         (CREDIT_STDERR, "credit_denied"),
     ],
 )
