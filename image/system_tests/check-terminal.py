@@ -17,7 +17,7 @@ for role in ("orchestrator", "researcher"):
     terminal = LocalEnvironment(cwd="/workspace", env={**profile_env, "HERMES_HOME": str(home)})
     try:
         result = terminal.execute(
-            "command -v research && command -v coworld && command -v buildctl "
+            "command -v research && command -v coworld "
             "&& research --version && coworld build-policy --help >/dev/null"
         )
         assert result["returncode"] == 0, (role, result)
@@ -27,7 +27,7 @@ for role in ("orchestrator", "researcher"):
             assert profile_env["BUILDKIT_HOST"] == os.environ["BUILDKIT_HOST"]
             result = terminal.execute('test -n "$BUILDKIT_HOST" && buildctl debug workers')
             assert result["returncode"] == 0, (role, result)
-        print(f"PASS {role} terminal: packaged research, coworld and buildctl")
+        print(f"PASS {role} terminal: packaged workspace commands")
     finally:
         terminal.cleanup()
         reset_hermes_home_override(scope)
