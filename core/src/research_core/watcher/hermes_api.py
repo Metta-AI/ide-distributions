@@ -325,8 +325,12 @@ class HermesRuns:
         return []
 
     def create_session(self, session_id: str, *, profile: str) -> None:
-        """``POST /p/<profile>/api/sessions``: create the session row now, before any run."""
-        self._request("POST", profile, "/api/sessions", body={"id": session_id})
+        """Create the native session before any run; replay keeps the existing transcript."""
+        response = self._request(
+            "POST", profile, "/api/sessions", body={"id": session_id}, accept=(409,)
+        )
+        if response.status == 409 and _error_fields(response.payload)[1] != "session_exists":
+            raise self._error_for(f"POST /p/{profile}/api/sessions", response)
 
     # -- transport ----------------------------------------------------------------------------
 
