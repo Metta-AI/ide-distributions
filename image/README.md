@@ -17,6 +17,11 @@ The host supplies a durable `/workspace`, writable `/tmp`, and a read-only
 root filesystem and no Linux capabilities. No source checkout or dependency installation
 is needed outside the image.
 
+The hosted image selects its bundled plugins through Hermes's supported
+`HERMES_BUNDLED_PLUGINS` setting. It preserves the base image's plugins except
+messaging-platform adapters: hosted traffic uses the built-in API transport.
+Standalone orchestrator and researcher installations retain their normal plugin selection.
+
 The lifecycle adapter sends replies over the platform's authenticated outbound workspace
 connection. Explicit sleep starts the distribution command asynchronously; status reports
 ready for sleep only after its successful exit. The image also initiates sleep after fifteen
