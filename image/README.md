@@ -120,3 +120,18 @@ do not duplicate these first-readiness events.
 
 These milestones do not claim a completed model turn. Use Metta's packaged chat harness
 for container-to-completed-chat measurements and retained-session verification.
+
+## Container policy builds
+
+The image packages `buildctl` alongside the locked Coworld CLI. Hosting supplies a private
+BuildKit endpoint in `BUILDKIT_HOST`; profile preparation passes it to terminal commands.
+A mixin builds with `coworld build-policy <context> --output <archive>` and declares
+`artifact.kind: image`. Keep the archive outside the Docker build context. `version.create`
+retains the archive by its byte digest; `upload` saves the image config digest separately
+for the platform's upload lookup. Recovery needs those saved inputs, not the archive.
+
+`image/system_tests/check-build-upload.py` is an opt-in proof inside the built image with a
+real builder and platform Player credential. Pass `SOFTMAX_PLAYER_CREDENTIAL` and
+`SOFTMAX_PLAYER_ID` as JSON on stdin, and provide writable `/workspace` and `BUILDKIT_HOST`.
+It creates one uniquely named policy with two versions, verifies an ordinary upload and
+recovery after a deliberately lost response and deleted archive, and never submits or evaluates.

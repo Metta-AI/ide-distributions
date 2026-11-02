@@ -18,7 +18,13 @@ async def main():
     inference = Availability()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam,
-        httpx.AsyncClient(base_url="http://127.0.0.1:8642") as gateway,
+        httpx.AsyncClient(
+            base_url="http://127.0.0.1:8642/p/orchestrator/",
+            headers={
+                "Authorization": "Bearer "
+                + Path("/workspace/host/.gateway-key").read_text().strip()
+            },
+        ) as gateway,
     ):
         operation = Operation(
             id=uuid4(),
@@ -30,6 +36,16 @@ async def main():
         async with response(operation, seam, gateway, inference) as result:
             assert result.status_code == 200, await result.aread()
             session = result.json()["session_id"]
+        transcript = operation.model_copy(
+            update={
+                "op_id": uuid4(),
+                "name": "session.messages",
+                "args": {"session_id": session, "offset": 0, "limit": 20},
+            }
+        )
+        async with response(transcript, seam, gateway, inference) as result:
+            assert result.status_code == 200, await result.aread()
+            assert result.json()["data"] == []
         # Recover the native receipt, including the second retained-volume cycle.
         async with response(operation, seam, gateway, inference) as result:
             assert result.status_code == 200 and result.json()["session_id"] == session

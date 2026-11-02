@@ -3,6 +3,7 @@ FROM nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163b
 RUN apt-get update && apt-get install -y --no-install-recommends --reinstall tini \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
+COPY --from=moby/buildkit@sha256:0ffa2fcf6b8757c47d569b3ef0f03f9d5eb3b9ff5ce68d858f994f89b749da0c /usr/bin/buildctl /usr/local/bin/buildctl
 COPY pyproject.toml uv.lock /opt/distribution/
 COPY core /opt/distribution/core
 ENV UV_PYTHON_INSTALL_DIR=/opt/python \

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from research_core.store.db import Store
 
 ARTIFACT_KEYS = ("kind", "path", "digest", "size")
-ARTIFACT_KINDS = ("file",)
+ARTIFACT_KINDS = ("file", "image")
 
 _COMMIT_SHA = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
@@ -258,9 +258,7 @@ def _check_artifact(artifact: Any, problems: list[str]) -> dict[str, Any]:
         return {}
     kind = artifact.get("kind")
     if kind not in ARTIFACT_KINDS:
-        problems.append(
-            f"artifact.kind is {kind!r}; only file artifacts are supported (image policies are not)"
-        )
+        problems.append(f"artifact.kind is {kind!r}; expected file or image")
     require(problems, _is_text(artifact.get("path")), "artifact.path is required")
     require(problems, _is_text(artifact.get("digest")), "artifact.digest is required")
     size = artifact.get("size")

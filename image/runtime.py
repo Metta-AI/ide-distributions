@@ -143,6 +143,7 @@ async def run(stack: AsyncExitStack) -> None:
                     "API_SERVER_PORT",
                     "IDE_WORKSPACE",
                     "IDE_WORKSPACE_ENV",
+                    "BUILDKIT_HOST",
                     "IDE_RESEARCHER_PROFILES",
                     "IDE_INFERENCE_LEASE_FILE",
                     "SOFTMAX_PLAYER_CREDENTIAL",

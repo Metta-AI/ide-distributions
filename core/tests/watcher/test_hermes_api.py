@@ -387,6 +387,14 @@ def test_create_session_posts_the_id(gateway, client):
     assert request["body"] == {"id": "api_1_c"}
 
 
+def test_create_session_replay_accepts_only_an_existing_session(gateway, client):
+    gateway.answer(409, {"error": {"code": "session_exists", "message": "Already exists"}})
+    assert client.create_session("api_1_c", profile="orchestrator") is None
+    gateway.answer(409, {"error": {"code": "other_conflict", "message": "Not a replay"}})
+    with pytest.raises(RunsConflict, match="other_conflict"):
+        client.create_session("api_1_c", profile="orchestrator")
+
+
 def test_mint_session_id_has_the_hermes_api_shape():
     assert re.fullmatch(r"api_\d{9,}_[0-9a-f]{8}", mint_session_id())
     assert mint_session_id() != mint_session_id()

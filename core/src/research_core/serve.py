@@ -275,6 +275,7 @@ class SeamServer:
                     message="",
                     payload="",
                 )
+            self.hermes.create_session(session_id, profile=self.profile)
             try:
                 sessions.register(
                     stores.wstore,
