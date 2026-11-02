@@ -1,0 +1,41 @@
+name: Workspace packaging comparison
+on:
+  pull_request:
+    paths: ['image/Dockerfile', '.github/workflows/startup-benchmark.yml']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build both packaging variants from the same source and lockfile
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git show "$BASE_REF:image/Dockerfile" > "$RUNNER_TEMP/baseline.Dockerfile"
+          docker build --platform linux/amd64 -f "$RUNNER_TEMP/baseline.Dockerfile" -t startup-baseline .
+          docker build --platform linux/amd64 -f image/Dockerfile -t startup-candidate .
+          docker image inspect startup-baseline startup-candidate --format '{{.RepoTags}} {{.Id}} {{.Size}}'
+      - name: Measure baseline packaging
+        env:
+          STARTUP_CYCLES: "6"
+          STARTUP_ARTIFACTS: ${{ runner.temp }}/baseline-proof
+        run: bash image/system_tests/start-stop.sh startup-baseline
+      - name: Measure candidate packaging
+        env:
+          STARTUP_CYCLES: "6"
+          STARTUP_ARTIFACTS: ${{ runner.temp }}/candidate-proof
+        run: bash image/system_tests/start-stop.sh startup-candidate
+      - name: Retain comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-packaging-comparison
+          path: |
+            ${{ runner.temp }}/baseline.Dockerfile
+            ${{ runner.temp }}/baseline-proof
+            ${{ runner.temp }}/candidate-proof

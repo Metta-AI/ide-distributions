@@ -90,3 +90,9 @@ The readiness wait has a four-minute wall-clock budget between Docker probes. A 
 request can exceed that budget; Docker must be healthy before interpreting a benchmark.
 Container timing ends at application health. Platform control readiness and browser usability
 remain separate gates; the smoke's deliberately unavailable platform does not prove either.
+
+The packaging comparison workflow builds the pull request's source and lockfile twice on one
+Linux runner: once with the base revision's Dockerfile and once with the proposed Dockerfile.
+Each image runs one fresh boot and five retained boots with the same smoke command. This
+isolates packaging changes; it does not compare different application revisions. Both build
+identities, the baseline Dockerfile, and all per-boot timing reports are retained as artifacts.
