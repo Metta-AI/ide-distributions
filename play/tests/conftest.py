@@ -92,14 +92,44 @@ class FakeCli:
                     GOTA.reference_league_id,
                     "league_00000000-0000-0000-0000-000000000001",
                 )
-                return done(json.dumps({"game": {"coworld_id": "cow_gota"}}))
+                return done(
+                    json.dumps(
+                        {
+                            "game": {"coworld_id": "cow_gota"},
+                            "commissioner_config": {"default_variant_id": "standard"},
+                        }
+                    )
+                )
             case ["coworld", "show", "cow_gota", "--json"]:
                 players = [
                     {"id": "image-player", "image": "ghcr.io/x"},
                     {"id": "baseline", "name": "Baseline", "file": f"sha256:{STARTER_SHA}"},
                     {"id": "other", "file": "sha256:" + "0" * 64},
                 ]
-                return done(json.dumps({"id": "cow_gota", "manifest": {"player": players}}))
+                return done(
+                    json.dumps(
+                        {
+                            "id": "cow_gota",
+                            "manifest": {
+                                "player": players,
+                                "game": {
+                                    "name": "Gods of the Arena",
+                                    "player_runtime": "game-hosted",
+                                    "docs": {"readme": {"type": "text", "value": "GotA rules"}},
+                                    "protocols": {
+                                        "player": {"type": "text", "value": "GotA BASIC"}
+                                    },
+                                },
+                                "variants": [
+                                    {
+                                        "id": "standard",
+                                        "game_config": {"players": [{"name": "Baseline"}] * 10},
+                                    }
+                                ],
+                            },
+                        }
+                    )
+                )
             case ["coworld", "upload-policy", "--file", _, "--name", name, "--title", _]:
                 if name in self.taken:
                     message = f"Policy name '{name}' is already taken by user 'u_x'. Please choose a different name."

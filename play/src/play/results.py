@@ -1,4 +1,4 @@
-"""A practice's games in words a beginner reads: who won, glory, XP, game length, and the change
+"""A practice's games in words a beginner reads: who won, native scores, game length, and the change
 against the previous version's practice.
 
 GotA writes one ``results.json`` per game (polyworld ``examples/gods_of_the_arena``; recorded
@@ -7,9 +7,12 @@ samples in ``researcher/tests/fixtures``): ``scores`` (glory per seat), ``ticks`
 and ``total_xp`` (lifetime XP per seat). Seats 0-4 are Red and 5-9 are Blue. Glory is the winning
 heroes' XP per simulated minute; losers, draws and time-limit games give 0. Nothing else is in the
 file: no kills, deaths, positions or time near towers.
+
+Generals reports winner, scores, engine ticks, final army and land, and timeouts.
+FFA adds placements and captures; two-seat Classic and Build omit those fields.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 TICKS_PER_SECOND = 24
 TEAMS = {"RedTeam": "Red", "BlueTeam": "Blue"}
@@ -131,3 +134,111 @@ def _average(values) -> float | int:
         return 0
     mean = sum(values) / len(values)
     return round(mean) if mean >= 100 else round(mean, 1)
+
+
+class GeneralsResults(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    scores: list[float]
+    winner: int = Field(ge=-1, le=7)
+    reason: str
+    turns: int = Field(ge=0)
+    army: list[int]
+    land: list[int]
+    timeouts: list[int]
+
+    @model_validator(mode="after")
+    def matching_roster(self):
+        count = len(self.scores)
+        if any(len(values) != count for values in (self.army, self.land, self.timeouts)):
+            raise ValueError("result arrays must match the roster")
+        if self.winner >= count:
+            raise ValueError("winner must name a roster seat")
+        return self
+
+
+class GeneralsDuelResults(GeneralsResults):
+    scores: list[float] = Field(min_length=2, max_length=2)
+
+
+class GeneralsFfaResults(GeneralsResults):
+    scores: list[float] = Field(min_length=3, max_length=8)
+    placements: list[int]
+    kills: list[int]
+
+    @model_validator(mode="after")
+    def survival_roster(self):
+        count = len(self.scores)
+        if len(self.kills) != count or sorted(self.placements) != list(range(1, count + 1)):
+            raise ValueError("Survival results must cover every roster seat")
+        return self
+
+
+GENERALS_RESULTS = TypeAdapter(GeneralsDuelResults | GeneralsFfaResults)
+
+
+def generals_game_summary(
+    number: int, seats: list[int], results: GeneralsResults, watch_url: str | None
+) -> dict:
+    if results.winner == -1:
+        result = "draw"
+    else:
+        result = "won" if results.winner in seats else "lost"
+    summary = {
+        "game": number,
+        "mode": "ffa" if isinstance(results, GeneralsFfaResults) else "duel",
+        "result": result,
+        "why": f"{results.reason.replace('_', ' ')} after {results.turns} engine ticks",
+        "ticks": results.turns,
+        "your_score": sum(results.scores[seat] for seat in seats) / len(seats),
+        "your_army": sum(results.army[seat] for seat in seats),
+        "your_land": sum(results.land[seat] for seat in seats),
+        "your_timeouts": sum(results.timeouts[seat] for seat in seats),
+        "watch_url": watch_url,
+    }
+    if isinstance(results, GeneralsFfaResults):
+        summary["your_placements"] = [results.placements[seat] for seat in seats]
+        summary["your_kills"] = sum(results.kills[seat] for seat in seats)
+    return summary
+
+
+def summarize_generals(display: str, games: list[dict], previous: tuple[str, dict] | None) -> dict:
+    played = [g for g in games if g["result"] != "failed"]
+    counts = {
+        key: sum(g["result"] == key for g in games) for key in ("won", "lost", "draw", "failed")
+    }
+    summary = {
+        "program": display,
+        "games": len(games),
+        **counts,
+        "average_score": round(sum(g["your_score"] for g in played) / len(played), 3)
+        if played
+        else 0,
+        "timeouts": sum(g["your_timeouts"] for g in played),
+    }
+    plain = (
+        f"{display} played {len(games)} practice game{'s' if len(games) != 1 else ''}: "
+        f"won {counts['won']}, "
+        f"lost {counts['lost']}, drew {counts['draw']}, failed to run {counts['failed']}."
+    )
+    if played:
+        plain += f" Average native score: {summary['average_score']:g}."
+        if played[0]["mode"] == "ffa":
+            summary["kills"] = sum(g["your_kills"] for g in played)
+            plain += f" Captures: {summary['kills']}."
+    if previous is not None:
+        before, numbers = previous
+        summary["previous"] = {"program": before, **numbers}
+        plain += (
+            f" Last practice of {before}: won {numbers['won']} of {numbers['games']}, "
+            f"average native score {numbers['average_score']:g}."
+        )
+    summary["plain"] = plain
+    summary["measured"] = (
+        "winner, native scores, final armies and land, missed turns, and engine ticks; FFA also records placements and captures"
+    )
+    summary["not_measured"] = (
+        "These results do not explain movement choices or hidden-map knowledge. "
+        "A few practice games do not establish competitive strength; watch the replays."
+    )
+    return summary

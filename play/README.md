@@ -5,8 +5,14 @@ whole loop itself: it changes the user's program, saves each change as a new ver
 it, reports the results in plain words and releases a version only when the user says yes to it.
 It has only its own tools and the `memory` toolset: no raw file, terminal or Kanban tools.
 
-There are no research records, experiments or champions. GotA only: its program is one BASIC
-file (`program.bas`) that the game runs as is. Other coworlds are built by the user's local coding agent, guided by the cogent.
+There are no research records, experiments or champions. GotA and Generals programs are
+BASIC files that their games execute directly.
+The selected league's published manifest supplies the starter, rules, and player protocol.
+Generals uses its own source limits, variant roster, and native score summaries; it needs
+no player container. Unsupported coworlds still use a local coding agent.
+Existing GoTA files stay in the workspace root; Generals files and journals live in
+`generals/`. `game.json` records which supported game the source tools currently edit.
+Fetch the selected league's starter before switching games or requesting practice.
 
 `builder/` is the earlier builder profile. The hosted Play runtime still installs it
 (metta `devops/hermes-fleet/applications/play/runtime_definition.py` lists both profiles, and
@@ -23,10 +29,10 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 
 | Tool | What it does |
 |---|---|
-| `starter_fetch` | Downloads the coworld's starter player file (manifest `player` entry `baseline`, else the first file entry) to `starter/<id>.bas` and checks its sha256. |
+| `starter_fetch` | Selects the game's workspace, downloads `baseline` (GotA) or `basic` (Generals) to `starter/<id>.bas`, checks its sha256, and returns the published rules and protocol. |
 | `program_show` | The program now (or the starter before the first change), its name, its last version and whether it changed since. |
 | `program_edit` | Applies `{find, replace}` edits (each `find` exactly once; `edit_not_found` / `edit_ambiguous` otherwise) to the program now or the starter, then runs the same check and write as `program_change`. |
-| `program_change` | Writes `program.bas` from a full new text after a static check (`src/play/basic.py`: size, closed blocks, the statements of the bassy compiler GotA runs, array/routine/global limits). A problem writes nothing and returns `program_invalid` with each problem by line; names the starter never uses come back as warnings. Returns the diff. |
+| `program_change` | Writes `program.bas` from a full new text after a static check (`src/play/basic.py`: size, closed blocks, bassy statements, and the selected game's countable limits). A problem writes nothing and returns `program_invalid` with each problem by line; names the starter never uses come back as warnings. Returns the diff. |
 | `program_versions` | Every uploaded version (what changed, practice summaries, released or not) and the diff of the program now against the last version or any version. |
 | `program_upload` | `coworld upload-policy --file program.bas --name <name> --title <change>`; returns "towerless v2". An unchanged file returns its existing version. |
 | `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". |
@@ -51,7 +57,8 @@ task card), `versions/<platform name>/v<N>.bas` (a copy of each uploaded file, f
 ### The league
 
 `starter_fetch`, `practice_request`, and `program_release` require the `league` argument.
-They do not read or store a selected league.
+The league is always explicit for platform actions. `game.json` records the fetched contract
+for source editing; it never supplies a default league for practice or release.
 
 ### Task cards
 
@@ -88,3 +95,15 @@ uv sync --frozen
 uv run pytest -q             # model-free: tools, schemas, refusals, sync check
 uv run pytest -q -m hermes   # with a real Hermes install: clean-export install and registration
 ```
+
+The opt-in system check exercises writing, file upload and completed practice against real local
+services. It catches rejected file players, wrong rosters, and results parsed as the wrong game.
+Prepare an isolated local Generals league and test Player as documented in
+`tests/system/test_generals_flow.py`, then run:
+
+```bash
+GENERALS_PLAY_SYSTEM=1 uv run pytest -q tests/system/test_generals_flow.py
+```
+
+The hosted game image requires an AMD64 host with AVX; an ARM Mac's Docker emulator
+cannot run its JAX runtime. A native game episode alone does not validate hosted practice.
