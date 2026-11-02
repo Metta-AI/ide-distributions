@@ -28,6 +28,12 @@ def first_version(program, name="towerless"):
 def test_starter_fetch_checks_the_published_sha256(program, cli, fetched, env):
     data = program.starter_fetch(league=GOTA.reference_league_id)
     assert data == {
+        "game": "gota",
+        "league": GOTA.reference_league_id,
+        "variant": "standard",
+        "seat_count": 10,
+        "readme": {"type": "text", "value": "GotA rules"},
+        "protocol": {"type": "text", "value": "GotA BASIC"},
         "starter": "Baseline",
         "player": "baseline",
         "sha256": STARTER_SHA,
@@ -146,7 +152,7 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         cli.inputs[cli.calls.index(["coworld", "xp-request", "create", "-", "--json"])]
     )
     assert body == {
-        "target": {"league_id": GOTA.reference_league_id},
+        "target": {"league_id": GOTA.reference_league_id, "variant_id": "standard"},
         "roster": [
             {"slot": 0, "player": {"policy_ref": "towerless:v1"}},
             *({"slot": seat, "player": {"random": True}} for seat in range(1, 10)),
@@ -261,7 +267,7 @@ def test_practice_uses_the_explicit_league(program, cli):
     )
     first_version(program)
     program.practice_request(league=CHOSEN)
-    assert json.loads(cli.inputs[-1])["target"] == {"league_id": CHOSEN}
+    assert json.loads(cli.inputs[-1])["target"] == {"league_id": CHOSEN, "variant_id": "standard"}
     program.program_release("towerless v1", True, league=CHOSEN)
     assert [
         "coworld",

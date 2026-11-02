@@ -42,7 +42,7 @@ from ide_research_core.softmax_tool.platform_cli import (
 from ide_research_core.softmax_tool.protocol import CreditDenied, LeagueNotChosen, PermitRequired
 
 from . import basic, results
-from .games import GOTA
+from .games import GOTA, CommissionerConfig, Selection
 from .journal import Card, Journal, Practice, Release, Version, now, write_text
 from .limits import (
     DEFAULT_EPISODES,
@@ -152,11 +152,26 @@ class Program:
     ):
         if not env.get("PLAY_WORKSPACE"):
             raise PlayError("not_configured", "PLAY_WORKSPACE is not set")
-        self.workspace = Path(env["PLAY_WORKSPACE"])
+        self.root = Path(env["PLAY_WORKSPACE"])
         self.player = env.get("RESEARCH_PLAYER_ID", "")
         self.client = client or SoftmaxClient(env)
         self._fetch = fetch
         self._sleep = time.sleep
+
+    @property
+    def selection(self) -> Selection | None:
+        path = self.root / "game.json"
+        return Selection.model_validate_json(path.read_text()) if path.is_file() else None
+
+    @property
+    def game(self) -> str:
+        selection = self.selection
+        # Existing GoTA journals retain their original location and reader.
+        return selection.game if selection else "gota"
+
+    @property
+    def workspace(self) -> Path:
+        return self.root / "generals" if self.game == "generals" else self.root
 
     @property
     def program_file(self) -> Path:
@@ -164,21 +179,57 @@ class Program:
 
     @property
     def starter_file(self) -> Path:
-        return self.workspace / "starter" / f"{GOTA.starter_player}{GOTA.suffix}"
+        selection = self.selection
+        starter = selection.starter if selection else GOTA.starter_player
+        return self.workspace / "starter" / f"{starter}.bas"
 
     def _starter_text(self) -> str | None:
         return self.starter_file.read_text() if self.starter_file.is_file() else None
 
     # --- starter --------------------------------------------------------
 
+    def _published_game(self, league: str) -> tuple[dict, Selection]:
+        coworld = self.client._league_coworld(league)
+        manifest = coworld["manifest"]
+        game = manifest["game"]
+        name = game["name"]
+        if name not in ("generals-competition", "Gods of the Arena"):
+            raise PlayError(
+                "unsupported_game", "This game's BASIC execution contract is not supported here."
+            )
+        runtimes = game["player_runtime"]
+        if "game-hosted" not in ([runtimes] if isinstance(runtimes, str) else runtimes):
+            raise PlayError(
+                "unsupported_runtime", "The published game does not accept file programs."
+            )
+        generals = name == "generals-competition"
+        league_record = self.client._cli.run_json("coworld", ["leagues", league])
+        config = CommissionerConfig.model_validate(league_record["commissioner_config"] or {})
+        # The platform uses manifest order when the league has no explicit default.
+        variant_id = config.default_variant_id or manifest["variants"][0]["id"]
+        variant = next(v for v in manifest["variants"] if v["id"] == variant_id)
+        selection = Selection(
+            game="generals" if generals else "gota",
+            league_id=league,
+            coworld_id=coworld["id"],
+            starter="basic" if generals else "baseline",
+            variant_id=variant_id,
+            seat_count=len(variant["game_config"]["players"]),
+        )
+        return coworld, selection
+
     def starter_fetch(self, player: str | None = None, *, league: str) -> dict:
         """Download the coworld's starter player file into ``starter/`` and check its sha256."""
-        coworld = self.client._league_coworld(league)
-        entries = [p for p in (coworld.get("manifest") or {}).get("player") or [] if p.get("file")]
-        wanted = player or GOTA.starter_player
+        coworld, selection = self._published_game(league)
+        manifest = coworld["manifest"]
+        game = manifest["game"]
+        generals = selection.game == "generals"
+        variant_id = selection.variant_id
+        if player is not None:
+            selection.starter = player
+        entries = [p for p in manifest["player"] if p.get("file")]
+        wanted = selection.starter
         entry = next((p for p in entries if p.get("id") == wanted), None)
-        if entry is None and player is None and entries:
-            entry = entries[0]  # softmax.com's rule: the `baseline` entry, else the first
         if entry is None:
             raise PlayError(
                 "starter_not_found",
@@ -209,10 +260,19 @@ class Program:
                 "the downloaded bytes do not match the published sha256",
                 {"url": url, "expected": digest, "actual": sha256(data)},
             )
-        target = self.workspace / "starter" / f"{entry['id']}{GOTA.suffix}"
+        selection.starter = entry["id"]
+        destination = self.root / "generals" if generals else self.root
+        target = destination / "starter" / f"{entry['id']}.bas"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        write_text(self.root / "game.json", selection.model_dump_json(indent=2))
         return {
+            "game": selection.game,
+            "league": league,
+            "variant": variant_id,
+            "seat_count": selection.seat_count,
+            "readme": game["docs"]["readme"],
+            "protocol": game["protocols"]["player"],
             "starter": entry.get("name") or entry["id"],
             "player": entry["id"],
             "sha256": digest,
@@ -324,7 +384,7 @@ class Program:
 
     def _write_checked(self, text: str, change: str) -> dict:
         starter = self._starter_text()
-        problems, warnings = basic.check(text, starter)
+        problems, warnings = basic.check(text, starter, game=self.game)
         if problems:
             raise PlayError(
                 "program_invalid",
@@ -419,7 +479,7 @@ class Program:
         if not self.program_file.is_file():
             raise PlayError("no_program", "there is no changed program to upload yet")
         data = self.program_file.read_bytes()
-        problems, _ = basic.check(data.decode("utf-8", "replace"))
+        problems, _ = basic.check(data.decode("utf-8", "replace"), game=self.game)
         if problems:
             raise PlayError(
                 "program_invalid",
@@ -598,13 +658,15 @@ class Program:
         """One private practice request (``POST /v2/experience-requests``) of ``episodes`` games.
         The platform needs the whole roster: the program on ``seats``, and on every other seat a
         player the platform draws from the league at random."""
+        _, selection = self._published_game(league)
+        if selection.game != self.game:
+            raise PlayError(
+                "wrong_game", "Fetch the selected game's starter before practising here."
+            )
+        count = selection.seat_count
         seats = [0] if seats is None else seats
-        if (
-            not seats
-            or len(set(seats)) != len(seats)
-            or not set(seats) <= set(range(GOTA.seat_count))
-        ):
-            raise PlayError("bad_arguments", "seats must be distinct GotA seats 0-9")
+        if not seats or len(set(seats)) != len(seats) or not set(seats) <= set(range(count)):
+            raise PlayError("bad_arguments", f"seats must be distinct positions 0-{count - 1}")
         if not 1 <= episodes <= MAX_EPISODES or attempt < 1:
             raise PlayError("bad_arguments", f"episodes must be 1-{MAX_EPISODES}; attempt positive")
         journal = Journal.load(self.workspace)
@@ -617,8 +679,8 @@ class Program:
             return {"policy_ref": label} if seat in seats else {"random": True}
 
         body = {
-            "target": {"league_id": league},
-            "roster": [{"slot": seat, "player": player(seat)} for seat in range(GOTA.seat_count)],
+            "target": {"league_id": league, "variant_id": selection.variant_id},
+            "roster": [{"slot": seat, "player": player(seat)} for seat in range(count)],
             "num_episodes": episodes,
             "private": True,
             "title": title,
@@ -737,8 +799,12 @@ class Program:
             watch = f"{site}/observatory/episodes/{episode_id}" if site and episode_id else None
             path = result_files.get(row["id"])
             if path is not None:
-                parsed = results.GameResults.model_validate_json(path.read_text())
-                games.append(results.game_summary(number, seats, parsed, watch))
+                if self.game == "generals":
+                    parsed = results.GENERALS_RESULTS.validate_json(path.read_text())
+                    games.append(results.generals_game_summary(number, seats, parsed, watch))
+                else:
+                    parsed = results.GameResults.model_validate_json(path.read_text())
+                    games.append(results.game_summary(number, seats, parsed, watch))
             else:
                 why = (
                     f"the game did not finish: {row.get('error') or 'the platform gave no reason'}"
@@ -747,7 +813,8 @@ class Program:
                 )
                 games.append(results.failed_game(number, why, watch))
         previous = journal.previous_result(found[0]) if found else None
-        summary = results.summarize(
+        summarize = results.summarize_generals if self.game == "generals" else results.summarize
+        summary = summarize(
             display, games, (previous[0].display, previous[1]) if previous else None
         )
         if found:
@@ -763,6 +830,9 @@ class Program:
         programs in that league are retired: one program per league, a release replaces."""
         if user_said_yes is not True:
             raise PlayError("bad_arguments", "release only after the user said yes to this version")
+        _, selection = self._published_game(league)
+        if selection.game != self.game:
+            raise PlayError("wrong_game", "This program belongs to another game.")
         if self._split(program)[1] is None:
             raise PlayError("bad_arguments", 'a release names one version, like "towerless v2"')
         journal = Journal.load(self.workspace)

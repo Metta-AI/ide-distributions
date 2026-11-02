@@ -9,7 +9,6 @@ are installed) and returns its envelope: ``{"ok": true, "data": ...}`` or ``{"ok
 import json
 import subprocess
 
-from .basic import MAX_SOURCE_BYTES
 from .context import Context, profile_context
 from .fresh import clear_notes
 from .launch import ensure_venv
@@ -42,7 +41,8 @@ TOOLS = {
     "starter_fetch": (
         (
             "Download the coworld's starter program into the program workspace and check it "
-            "against the published file. Safe to repeat."
+            "against the published file. Selects the game and returns its rules, player protocol, "
+            "variant and seat count. Supports Generals and Gods of the Arena. Safe to repeat."
         ),
         {
             "league": {"type": "string", "description": "The league for this operation."},
@@ -67,15 +67,15 @@ TOOLS = {
     "program_change": (
         (
             "Replace the program with a full new text (use program_edit for a small change). The "
-            "text is checked first (size, closed blocks, only GotA BASIC statements, the compile "
-            "limits it can count); on a problem nothing is written and the error lists each "
+            "text is checked first (the selected game’s size and array limits, closed BASIC blocks, "
+            "and the compile limits it can count); on a problem nothing is written and the error lists each "
             "problem by line. Returns the diff and warnings about names the starter never uses."
         ),
         {
             "text": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": MAX_SOURCE_BYTES,
+                "maxLength": 262144,
                 "description": "The whole new program, not a fragment.",
             },
             "change": {
@@ -176,7 +176,7 @@ TOOLS = {
                 "minItems": 1,
                 "uniqueItems": True,
                 "default": [0],
-                "description": "GotA seats the program plays: 0-4 red, 5-9 blue.",
+                "description": "Zero-based seats within the selected variant. Generals: 2-8 players; GotA: 0-4 red, 5-9 blue.",
             },
             "attempt": {"type": "integer", "minimum": 1, "default": 1},
         },
@@ -185,7 +185,7 @@ TOOLS = {
     "practice_status": (
         (
             "How far a practice is. Once it is over: each game's result in plain words (won, "
-            "lost, ran out of time, failed, and why), the hero's glory and XP, a summary "
+            "lost, ran out of time, failed, and why), the selected game’s native scores, a summary "
             "against the previous version's practice, what the results can and cannot measure, "
             "and a link to watch each game."
         ),

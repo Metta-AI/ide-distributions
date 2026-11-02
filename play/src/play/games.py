@@ -1,10 +1,9 @@
-"""The coworlds Play supports. GotA only: its program is one game-hosted BASIC file.
-
-Other coworlds have container players, which the hosted agent cannot build: the user's local
-coding agent builds them, guided by the cogent.
-"""
+"""Supported BASIC games and the selected program's published execution contract."""
 
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @dataclass(frozen=True)
@@ -23,3 +22,18 @@ GOTA = Game(
     suffix=".bas",
     seat_count=10,  # GotA's ten hero seats, red 0-4 and blue 5-9
 )
+
+
+class CommissionerConfig(BaseModel):
+    default_variant_id: str | None = None
+
+
+class Selection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    game: Literal["gota", "generals"]
+    league_id: str
+    coworld_id: str
+    starter: str
+    variant_id: str
+    seat_count: int = Field(ge=2, le=10)

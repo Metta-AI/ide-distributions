@@ -1,6 +1,6 @@
-"""A cheap static check of a GotA BASIC program, before it is written or uploaded.
+"""A cheap static check of a GotA or Generals BASIC program, before it is written or uploaded.
 
-It follows the lexer and statement grammar of the compiler GotA runs (treeform/bassy
+Both games use bassy. The check follows the lexer and statement grammar GotA runs (treeform/bassy
 ``src/bassy.nim``: ``lex``, ``parseStatement`` and the ``parse*`` procs it calls; polyworld
 requires it): case-insensitive words, ``'`` and ``REM`` comments, ``:`` as a line break, ``_`` line
 continuation, labels and ``GOTO`` / ``GOSUB`` / ``ON``, single-line and block ``IF`` with ``ELSEIF``
@@ -10,7 +10,9 @@ arrays with literal bounds. It also counts what it can cheaply: the 64 routines 
 (only variables assigned to, so a floor, never an overcount). It checks the limits the builder's GotA reference states: 64 KiB of source, 32 arrays and
 4,096 array elements in total. A program that opts into GotA's structures (a ``' @gota-structures``
 comment; researcher/games/gota/gates/limits.py) gets the host's storage, so only its size and
-blocks are checked. ``TYPE`` blocks and ``.`` member access are accepted in both modes.
+blocks are checked. Generals allows 256 KiB of source and 100,000 array elements;
+its compiler owns routine and global storage limits. ``TYPE`` blocks and ``.`` member
+access are accepted in both games.
 
 It flags only what the compiler certainly refuses, and it does not compile: a misspelled host
 call or a budget overrun still shows only in a game, so names the starter never uses come back as
@@ -81,11 +83,11 @@ OPERATORS = {
     "as",
 }
 # Words that cannot start a statement unless they are a variable or a SUB call (``input = 1``).
-NOT_GOTA = {
-    "function": "GotA BASIC has no functions that return a value; use a SUB that sets a global",
-    "const": "GotA BASIC has no CONST; assign a global once",
-    "input": "GotA BASIC has no INPUT or file access",
-    "open": "GotA BASIC has no file access",
+UNSUPPORTED_STATEMENTS = {
+    "function": "BASIC has no functions that return a value; use a SUB that sets a global",
+    "const": "BASIC has no CONST; assign a global once",
+    "input": "BASIC has no INPUT or file access",
+    "open": "BASIC has no file access",
 }
 CLOSERS = {
     "if": "END IF",
@@ -156,12 +158,20 @@ def _structured(text: str) -> bool:
     return re.match(r"'\s*" + re.escape(STRUCTURES), first) is not None
 
 
-def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Problem]]:
+def check(
+    text: str, starter: str | None = None, *, game: str = "gota"
+) -> tuple[list[Problem], list[Problem]]:
     """(problems, warnings). A program with problems would not compile; warnings are names the
     starter never uses (a likely misspelled host call), checked only when a starter is given."""
     problems: list[Problem] = []
-    structured = _structured(text)
-    limit = MAX_STRUCTURED_SOURCE_BYTES if structured else MAX_SOURCE_BYTES
+    structured = game == "gota" and _structured(text)
+    limit = (
+        262144
+        if game == "generals"
+        else MAX_STRUCTURED_SOURCE_BYTES
+        if structured
+        else MAX_SOURCE_BYTES
+    )
     size = len(text.encode("utf-8"))
     if size > limit:
         problems.append(Problem(0, f"the program is {size} bytes; the limit is {limit}"))
@@ -183,7 +193,7 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
             problems.append(
                 Problem(
                     line,
-                    f"'{bad}' is not a character GotA BASIC understands "
+                    f"'{bad}' is not a character BASIC understands "
                     "(or a string is missing its closing quote)",
                 )
             )
@@ -194,8 +204,8 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
             and first not in STATEMENTS | OPERATORS
         ):
             continue  # ``name:`` is a label
-        elif first in NOT_GOTA and second not in (("op", "="), ("op", "(")):
-            problems.append(Problem(line, NOT_GOTA[first]))
+        elif first in UNSUPPORTED_STATEMENTS and second not in (("op", "="), ("op", "(")):
+            problems.append(Problem(line, UNSUPPORTED_STATEMENTS[first]))
         else:
             for position, (kind, value) in enumerate(tokens[:-1]):
                 if kind == "word" and tokens[position + 1] == ("op", "("):
@@ -226,7 +236,7 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
                 block.line, f"this {block.kind.upper()} is never closed with {CLOSERS[block.kind]}"
             )
         )
-    if len(defined) + 1 > MAX_ROUTINES:
+    if game == "gota" and len(defined) + 1 > MAX_ROUTINES:
         problems.append(
             Problem(
                 0,
@@ -237,14 +247,20 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
     scalars = len(assigned - set(arrays) - defined)
     max_globals = MAX_STRUCTURED_GLOBALS if structured else MAX_GLOBALS
     max_arrays = MAX_STRUCTURED_ARRAYS if structured else MAX_ARRAYS
-    max_cells = MAX_STRUCTURED_ARRAY_CELLS if structured else MAX_ARRAY_CELLS
-    if scalars > max_globals:
+    max_cells = (
+        100000
+        if game == "generals"
+        else MAX_STRUCTURED_ARRAY_CELLS
+        if structured
+        else MAX_ARRAY_CELLS
+    )
+    if game == "gota" and scalars > max_globals:
         problems.append(
             Problem(
                 0, f"at least {scalars} global variables are assigned; the limit is {max_globals}"
             )
         )
-    if len(arrays) > max_arrays:
+    if game == "gota" and len(arrays) > max_arrays:
         problems.append(Problem(0, f"{len(arrays)} arrays; the limit is {max_arrays}"))
     cells = sum(arrays.values())
     if cells > max_cells:
@@ -258,6 +274,20 @@ def check(text: str, starter: str | None = None) -> tuple[list[Problem], list[Pr
             if kind == "word"
         }
         known |= defined | set(arrays) | OPERATORS
+        if game == "generals":
+            known |= {
+                "tiletype",
+                "owner",
+                "visibleowner",
+                "army",
+                "buildcost",
+                "playerarmy",
+                "playerland",
+                "playereliminated",
+                "move",
+                "buildcastle",
+                "pass",
+            }
         warnings = [
             Problem(
                 line,
@@ -340,7 +370,7 @@ def _statement(line, tokens, blocks, arrays, defined, inline, colon=False) -> li
             return [Problem(line, "CASE can only be used inside SELECT CASE")]
     elif first == "end" and len(words) > 1:
         if words[1] not in ("if", "sub", "type", "select"):
-            return [Problem(line, f"END {tokens[1][1].upper()} closes nothing GotA BASIC has")]
+            return [Problem(line, f"END {tokens[1][1].upper()} closes nothing BASIC has")]
         return _close(line, words[1], f"END {words[1].upper()}", blocks)
     elif first == "type" and len(tokens) == 2 and words[1] is not None:
         blocks.append(_Block("type", line))
