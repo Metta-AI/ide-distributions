@@ -106,6 +106,8 @@ def test_session_open_registers_a_chat_session_with_its_context(seam):
     assert row["coworld_id"] == COWORLD_ID
     assert row["session_context"] == {"mode": {"name": "research"}}
     assert row["client_capabilities"] == {"views": ["replay"], "panels": ["markdown"]}
+    assert session_id in seam.hermes.sessions
+    assert seam.hermes.session_messages(session_id, profile="orchestrator") == []
 
 
 def test_session_open_refuses_a_missing_client(seam):
