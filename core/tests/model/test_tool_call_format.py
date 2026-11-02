@@ -1,21 +1,36 @@
 """Tool-call format against the models in use (design C.4, amendment A7.2).
 
-Skipped without ``OPENROUTER_API_KEY``. For each tool and each configured model, ask for exactly
-one call from a one-line instruction and check that the returned arguments validate.
+Skipped without ``OPENROUTER_API_KEY``. For each role, each model its shipped ``config.yaml``
+names (the primary and the fallbacks) and each of the role's tools, ask for exactly one call from
+a one-line instruction and check that the returned arguments validate.
 """
 
 import json
 import os
 import urllib.request
+from pathlib import Path
 
 import pytest
+import yaml
 
+from research_core import prepare
 from research_core.tools import catalog
 from research_core.tools.base import validate_args
 
-MODELS = os.environ.get(
-    "IDE_TOOL_CALL_MODELS", "moonshotai/kimi-k3,z-ai/glm-5.3,recursive/flint-v1.0:free"
-).split(",")
+REPO = Path(__file__).resolve().parents[3]
+
+
+def shipped_models(role: str) -> list[str]:
+    config = yaml.safe_load((REPO / role / "config.yaml").read_text())
+    return [config["model"]["default"], *(f["model"] for f in config["fallback_providers"])]
+
+
+# IDE_TOOL_CALL_MODELS (comma-separated) runs the Orchestrator's tools on other models instead.
+CASES = (
+    [("orchestrator", model) for model in os.environ["IDE_TOOL_CALL_MODELS"].split(",")]
+    if os.environ.get("IDE_TOOL_CALL_MODELS")
+    else [(role, m) for role in ("orchestrator", "researcher") for m in shipped_models(role)]
+)
 KEY = os.environ.get("OPENROUTER_API_KEY")
 INSTRUCTIONS = {
     "goal": "Create a Goal titled 'Beat the house' with end state 'rank first' because I asked.",
@@ -37,6 +52,8 @@ INSTRUCTIONS = {
     "github": "List my GitHub repositories.",
     "attachment_download": "Download the attachment with sha256 " + "a" * 64 + ".",
 }
+# A Researcher reads Goals; it cannot create one.
+ROLE_INSTRUCTIONS = {"researcher": {"goal": "Read Goal G-1."}}
 
 pytestmark = pytest.mark.skipif(not KEY, reason="OPENROUTER_API_KEY is not set")
 
@@ -47,8 +64,17 @@ def ask(model: str, schema: dict, instruction: str) -> dict:
             "model": model,
             "messages": [{"role": "user", "content": instruction}],
             "tools": [{"type": "function", "function": schema}],
-            "tool_choice": {"type": "function", "function": {"name": schema["name"]}},
-            "temperature": 0,
+            # One tool per request, so "required" forces it; Kimi K3.1 Pro's endpoint does not
+            # support naming the function.
+            "tool_choice": "required",
+            # Hermes sends no temperature to Kimi (Moonshot accepts only its own); 0 elsewhere.
+            **({} if model.rsplit("/", 1)[-1].startswith("kimi") else {"temperature": 0}),
+            # The OpenRouter hosts the shipped config pins this model to, as production uses.
+            **(
+                {"provider": prepare.PROVIDER_ROUTING_MODELS[model]}
+                if model in prepare.PROVIDER_ROUTING_MODELS
+                else {}
+            ),
         }
     ).encode()
     request = urllib.request.Request(
@@ -63,15 +89,16 @@ def ask(model: str, schema: dict, instruction: str) -> dict:
     return json.loads(calls[0]["function"]["arguments"] or "{}")
 
 
-@pytest.mark.parametrize("model", MODELS)
-def test_models_emit_valid_tool_calls(model):
+@pytest.mark.parametrize(("role", "model"), CASES)
+def test_models_emit_valid_tool_calls(role, model):
+    instructions = {**INSTRUCTIONS, **ROLE_INSTRUCTIONS.get(role, {})}
     passes, failures = 0, []
-    for spec in catalog.tools_for("orchestrator"):
-        args = ask(model, spec.schema("orchestrator"), INSTRUCTIONS[spec.name])
-        _, problems = validate_args(spec, "orchestrator", args)
+    for spec in catalog.tools_for(role):
+        args = ask(model, spec.schema(role), instructions[spec.name])
+        _, problems = validate_args(spec, role, args)
         if problems:
             failures.append((spec.name, args, problems))
         else:
             passes += 1
-    print(f"{model}: {passes} valid, {len(failures)} invalid")
+    print(f"{role} on {model}: {passes} valid, {len(failures)} invalid")
     assert not failures, failures

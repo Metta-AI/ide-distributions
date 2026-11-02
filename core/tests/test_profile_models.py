@@ -36,6 +36,13 @@ CATALOG = [
         "supported_parameters": ["tools"],
     },
     {
+        "id": "moonshotai/kimi-k3.1-pro",
+        "name": "MoonshotAI: Kimi K3.1 Pro",
+        "context_length": 1048576,
+        "pricing": {"prompt": "0.000002", "completion": "0.00001"},
+        "supported_parameters": ["tools"],
+    },
+    {
         "id": "z-ai/glm-5.3",
         "name": "Z.ai: GLM 5.3",
         "context_length": 1048576,
@@ -119,7 +126,7 @@ def test_the_shipped_defaults_per_role(seam):
     assert by_profile["orchestrator"] == {
         "profile": "orchestrator",
         "role": "orchestrator",
-        "model": "moonshotai/kimi-k3",
+        "model": "moonshotai/kimi-k3.1-pro",
         "provider": "openrouter",
         "fallbacks": [{"provider": "openrouter", "model": "z-ai/glm-5.3"}],
     }
@@ -163,11 +170,11 @@ def test_set_model_writes_through_hermes_and_records_an_event(seam):
     assert event["payload"]["model"] == "moonshotai/kimi-k3"
     assert event["payload"]["previous"]["model"] == "recursive/flint-v1.0:free"
     # The orchestrator is untouched.
-    assert seam.client.models()["profiles"][0]["model"] == "moonshotai/kimi-k3"
+    assert seam.client.models()["profiles"][0]["model"] == "moonshotai/kimi-k3.1-pro"
 
 
 def test_setting_the_same_model_writes_nothing_and_records_no_event(seam):
-    reply = seam.client.set_model("orchestrator", "moonshotai/kimi-k3")
+    reply = seam.client.set_model("orchestrator", "moonshotai/kimi-k3.1-pro")
     assert reply["changed"] == [] and reply["seq"] is None
     assert seam.runner.calls == []
 
@@ -235,7 +242,12 @@ def test_a_failed_hermes_write_says_what_was_written(tmp_path):
 def test_catalog_lists_only_models_that_take_tool_calls(seam):
     reply = seam.client.model_catalog()
     ids = [model["id"] for model in reply["models"]]
-    assert ids == ["moonshotai/kimi-k3", "recursive/flint-v1.0:free", "z-ai/glm-5.3"]
+    assert ids == [
+        "moonshotai/kimi-k3",
+        "recursive/flint-v1.0:free",
+        "moonshotai/kimi-k3.1-pro",
+        "z-ai/glm-5.3",
+    ]
     kimi = reply["models"][0]
     assert kimi["usd_per_million_input"] == 0.192 and kimi["usd_per_million_output"] == 15.0
     assert kimi["free"] is False and reply["models"][1]["free"] is True
@@ -252,12 +264,12 @@ def test_catalog_is_cached_and_keeps_the_last_good_list():
         return CATALOG
 
     catalog = Catalog(fetch, ttl_s=600, clock=lambda: now[0])
-    assert len(catalog.models()) == 3
+    assert len(catalog.models()) == 4
     now[0] = 100
     catalog.models()
     assert fetches == [0.0]  # cached
     now[0] = 700
-    assert len(catalog.models()) == 3  # the refetch failed: the last good list stays
+    assert len(catalog.models()) == 4  # the refetch failed: the last good list stays
     assert fetches == [0.0, 700]
 
 

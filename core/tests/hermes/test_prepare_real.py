@@ -139,3 +139,33 @@ def test_prepare_researcher_shares_the_environment(hermes_bin, host):
     assert config_get(hermes_bin, host, "researcher", "compression.protect_first_n") != 6
     assert not (host.profile("researcher") / "cron" / "jobs.json").exists()
     assert (host.profile("researcher") / "local" / "core-path.txt").is_file()
+
+
+def test_the_kimi_pin_yields_exactly_where_hermes_applies_an_owner_entry(hermes_bin):
+    """unpinned_routing defers to Hermes's own per-model matching, run on Hermes's Python."""
+    code = (
+        "import json, sys; sys.path.insert(0, sys.argv[1]);"
+        "from research_core.prepare import unpinned_routing;"
+        "keys = json.loads(sys.argv[2]);"
+        "print(json.dumps({k: sorted(unpinned_routing({'models': {k: e}})) "
+        "for k in keys for e in [{} if k.endswith(' (empty)') else {'only': ['x']}] "
+        "for k in [k.removesuffix(' (empty)')]}))"
+    )
+    keys = [
+        "kimi-k3.1-pro",
+        "moonshotai/kimi-k3-1-pro",
+        "custom/kimi-k3.1-pro",
+        "MOONSHOTAI/KIMI-K3.1-PRO",
+        "kimi-k3 (empty)",  # an empty entry is still the owner's: no pin for kimi-k3
+    ]
+    result = run([hermes_python(hermes_bin), "-c", code, CORE_SRC, json.dumps(keys)], os.environ)
+    assert result.returncode == 0, result.stderr
+    k3, k31 = "moonshotai/kimi-k3", "moonshotai/kimi-k3.1-pro"
+    # The pins still added: an owner entry Hermes would not apply to the model does not count.
+    assert json.loads(result.stdout) == {
+        "kimi-k3.1-pro": [k3],
+        "moonshotai/kimi-k3-1-pro": [k3],
+        "custom/kimi-k3.1-pro": [k3, k31],
+        "MOONSHOTAI/KIMI-K3.1-PRO": [k3, k31],
+        "kimi-k3": [k31],
+    }
