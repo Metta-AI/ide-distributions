@@ -7,22 +7,24 @@ import yaml
 
 from play import fresh, plugin
 from play.context import Context
+from play.games import GOTA
 from play.launch import lock_sha
 from play.limits import NAME_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
 
 DISTRIBUTION = Path(__file__).resolve().parents[1]
 PLAY_TOOLS = {
-    "who_we_are": ([], set()),
-    "take_name": (["name"], {"name"}),
-    "starter_fetch": ([], {"player"}),
+    "starter_fetch": (["league"], {"player", "league"}),
     "program_show": ([], {"program"}),
     "program_change": (["text", "change"], {"text", "change"}),
     "program_edit": (["edits", "change"], {"edits", "change"}),
     "program_versions": ([], {"program"}),
     "program_upload": ([], {"name"}),
-    "practice_request": ([], {"program", "episodes", "seats", "attempt"}),
+    "practice_request": (["league"], {"program", "episodes", "seats", "attempt", "league"}),
     "practice_status": ([], {"request_id", "wait_seconds"}),
-    "program_release": (["program", "user_said_yes"], {"program", "user_said_yes"}),
+    "program_release": (
+        ["program", "user_said_yes", "league"],
+        {"program", "user_said_yes", "league"},
+    ),
     "task_update": (
         ["step", "status", "detail"],
         {"title", "step", "status", "detail", "version", "outcome"},
@@ -67,7 +69,9 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
         validator = jsonschema.Draft202012Validator(plugin.schema(name)["parameters"])
         return validator.is_valid(arguments)
 
-    assert valid("starter_fetch", {}) and valid("starter_fetch", {"player": "baseline"})
+    assert not valid("starter_fetch", {})
+    assert valid("starter_fetch", {"league": GOTA.reference_league_id})
+    assert valid("starter_fetch", {"league": GOTA.reference_league_id, "player": "baseline"})
     assert valid("program_upload", {"name": "my-first"}) and valid("program_upload", {})
     assert not valid("program_upload", {"name": "My First"})
     # The real limit: the name plus the platform's "-<8 characters>" suffix fits 64.
@@ -75,12 +79,27 @@ def test_schemas_accept_and_refuse_the_documented_shapes():
     assert not valid("program_upload", {"name": "a" * (NAME_MAX + 1)})
     assert NAME_MAX + 1 + SUFFIX_LENGTH == POLICY_NAME_MAX
     for named in ("towerless v2", "towerless:v2", "Towerless V2", "towerless"):
-        assert valid("practice_request", {"program": named, "seats": [0, 5]}), named
+        assert valid(
+            "practice_request",
+            {"program": named, "seats": [0, 5], "league": GOTA.reference_league_id},
+        ), named
         assert valid("program_versions", {"program": named}), named
-    assert not valid("practice_request", {"program": "towerless v2", "seats": [0, 0]})
-    assert valid("program_release", {"program": "towerless v2", "user_said_yes": True})
-    assert not valid("program_release", {"program": "towerless", "user_said_yes": True})
-    assert not valid("program_release", {"program": "towerless v2", "user_said_yes": False})
+    assert not valid(
+        "practice_request",
+        {"program": "towerless v2", "seats": [0, 0], "league": GOTA.reference_league_id},
+    )
+    assert valid(
+        "program_release",
+        {"program": "towerless v2", "user_said_yes": True, "league": GOTA.reference_league_id},
+    )
+    assert not valid(
+        "program_release",
+        {"program": "towerless", "user_said_yes": True, "league": GOTA.reference_league_id},
+    )
+    assert not valid(
+        "program_release",
+        {"program": "towerless v2", "user_said_yes": False, "league": GOTA.reference_league_id},
+    )
     assert not valid(
         "program_release", {"program": "towerless v2", "user_said_yes": True, "league_id": "x"}
     )
