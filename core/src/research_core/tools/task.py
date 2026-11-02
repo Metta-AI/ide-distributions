@@ -283,6 +283,7 @@ SPEC = tool(
                 },
                 ("type", "title", "description"),
                 ORCHESTRATOR,
+                example_fields=("goal",),
             ),
             ActionSpec(
                 "propose",

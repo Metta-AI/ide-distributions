@@ -61,6 +61,9 @@ class ActionSpec:
     params: dict[str, dict] = field(default_factory=dict)
     required: tuple[str, ...] = ()
     roles: frozenset[Role] = frozenset({"orchestrator", "researcher"})
+    # Fields the handler needs in some form beyond ``required`` ("ref or view", "goal unless
+    # type is maintenance"): a refusal's example call includes them so copying it can succeed.
+    example_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -330,7 +333,8 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
     example: dict[str, Any] = {"action": action} if action else {}
-    example.update({name: _placeholder(schemas[name]) for name in required})
+    extra = selected.example_fields if selected else ()
+    example.update({name: _placeholder(schemas[name]) for name in [*required, *extra]})
     return {
         **({"does": selected.description} if selected else {}),
         "required": _fields(schemas, required),

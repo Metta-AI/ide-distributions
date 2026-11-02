@@ -185,3 +185,15 @@ def test_context_from_env(tmp_path):
     with pytest.raises(ToolError):
         ctx.coworld()
     assert ctx.coworld_or_none() is None
+
+
+def test_every_actions_example_call_passes_validation():
+    catalog._load_tool_modules()
+    for role in ("orchestrator", "researcher"):
+        for spec in catalog.tools_for(role):
+            for action in spec.actions_for(role) if spec.actions else [None]:
+                name = action.name if action else None
+                example = base.usage(spec, role, name)["example"]
+                assert set(action.example_fields if action else ()) <= set(example)
+                _, problems = base.validate_args(spec, role, example)
+                assert problems == [], (spec.name, name, problems)
