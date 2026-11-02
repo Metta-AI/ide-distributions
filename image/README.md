@@ -70,3 +70,23 @@ It also validates all sixteen startup timing events on each boot: profile instal
 preparation, gateway readiness, application wake/readiness and total startup. Missing phases,
 reused boot IDs, malformed events and extra telemetry fields fail the check.
 Timing events run only during startup; no timing work is added to chat or relay traffic.
+
+## Repeatable startup measurements
+
+Use the same built image, machine and resource limits for before/after comparisons:
+
+```sh
+STARTUP_CYCLES=6 STARTUP_ARTIFACTS=/tmp/ide-startup-baseline \
+  bash image/system_tests/start-stop.sh ide-distribution:local
+```
+
+The artifact directory must not already exist. It retains the image ID/architecture, checkout
+revision, per-boot logs and per-stage median/minimum/maximum durations. The first boot uses an
+empty volume; later boots retain state and run the same adapter, sleep and persistence checks.
+`workspace_state` in each timing event distinguishes fresh from previously prepared workspaces.
+This is workspace state, not whether the Kubernetes host or image cache was cold.
+
+The readiness wait has a four-minute wall-clock budget between Docker probes. A stalled Docker
+request can exceed that budget; Docker must be healthy before interpreting a benchmark.
+Container timing ends at application health. Platform control readiness and browser usability
+remain separate gates; the smoke's deliberately unavailable platform does not prove either.

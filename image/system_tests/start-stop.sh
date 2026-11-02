@@ -4,13 +4,22 @@ set -euo pipefail
 image=${1:?immutable or locally built image reference required}
 name="distribution-smoke-${GITHUB_RUN_ID:-local}-$$"
 volume="$name"
-scratch=$(mktemp -d)
+cycles=${STARTUP_CYCLES:-2}
+[[ "$cycles" =~ ^[0-9]+$ ]] && (( cycles >= 2 ))
+if [[ -n "${STARTUP_ARTIFACTS:-}" ]]; then
+  mkdir "$STARTUP_ARTIFACTS"
+  scratch=$(cd "$STARTUP_ARTIFACTS" && pwd)
+else
+  scratch=$(mktemp -d)
+fi
+docker image inspect "$image" --format '{{.Id}} {{.Os}}/{{.Architecture}}' > "$scratch/image.txt"
+git rev-parse HEAD > "$scratch/source-revision.txt"
 cleanup() {
   docker logs "$name" > "$scratch/container.log" 2>&1 || true
   cat "$scratch/container.log"
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
-  rm -rf "$scratch"
+  if [[ -z "${STARTUP_ARTIFACTS:-}" ]]; then rm -rf "$scratch"; fi
 }
 trap cleanup EXIT
 printf '%s\n' '{"workspace_id":"00000000-0000-4000-8000-000000000149","platform_url":"http://127.0.0.1:1","credential":"fixture-no-platform-access"}' > "$scratch/bootstrap.json"
@@ -19,12 +28,13 @@ docker volume create "$volume" >/dev/null
 # Kubernetes supplies this volume group ownership through fsGroup.
 docker run --rm --user 0 --entrypoint /bin/sh -v "$volume:/workspace" "$image" -c 'chown 10000:10000 /workspace'
 sentinel="retained-$name"
-for cycle in 1 2; do
+for cycle in $(seq 1 "$cycles"); do
   docker run -d --name "$name" --read-only --cap-drop ALL --security-opt no-new-privileges \
     --tmpfs /tmp:rw,size=1g --mount "type=volume,src=$volume,dst=/workspace" \
     --mount "type=bind,src=$scratch/bootstrap.json,dst=/run/workspace/bootstrap.json,readonly" "$image"
   ready=false
-  for attempt in $(seq 1 600); do
+  deadline=$((SECONDS + 240))
+  while (( SECONDS < deadline )); do
     if docker exec "$name" /opt/hermes/.venv/bin/python -c \
       'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8650/health", timeout=2)' >/dev/null 2>&1; then
       ready=true
@@ -52,9 +62,9 @@ for cycle in 1 2; do
   docker rm "$name" >/dev/null
 done
 
-cat "$scratch/boot-1.log" "$scratch/boot-2.log" | docker run --rm -i --read-only \
+for cycle in $(seq 1 "$cycles"); do cat "$scratch/boot-$cycle.log"; done | docker run --rm -i --read-only \
   --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
-  --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-startup.py
+  --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-startup.py "$cycles" | tee "$scratch/timings.txt"
 
 # Fault-path component proof uses the packaged bridge and real HTTP/websocket peers in its own container.
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
