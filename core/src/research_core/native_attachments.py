@@ -7,6 +7,7 @@ PDF rendering and document annotations; the profile supplies no file parser.
 import base64
 import json
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -116,4 +117,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Native RPC notifications and tool progress belong on stderr, not the JSON result pipe.
+    with redirect_stdout(sys.stderr):
+        main()
