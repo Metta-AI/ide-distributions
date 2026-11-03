@@ -4,8 +4,68 @@ This proves staging, native reference expansion and file-tool access. It does no
 claim the hosted runs endpoint accepts OpenAI file parts or proves a model turn.
 """
 
+import base64
+import json
 import os
 import subprocess
+from pathlib import Path
+
+from research_core import layout
+from research_core.attachments import prepare
+from research_core.messages import UserMessage
+
+
+def test_public_message_schema_matches_pinned_hermes(hermes_bin):
+    source = str(Path(__file__).resolve().parents[2] / "src")
+    result = subprocess.run(
+        [
+            str(hermes_bin.parent / "python"),
+            "-c",
+            "import sys,json,importlib.metadata;sys.path.insert(0,sys.argv[1]);"
+            "from research_core.messages import UserMessage;"
+            "print(json.dumps({'sdk':importlib.metadata.version('openai'),'schema':UserMessage.model_json_schema()}))",
+            source,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    native = json.loads(result.stdout)
+    assert native["schema"] == UserMessage.model_json_schema(), native
+
+
+def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path):
+    home = tmp_path / "hermes"
+    home.mkdir()
+    (home / "config.yaml").write_text("attachments:\n  storage: workspace\n")
+    workspace = tmp_path / "workspace"
+    env = {**os.environ, "HERMES_HOME": str(home), "HERMES_REAL_HOME": str(home)}
+    message = UserMessage.model_validate(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Read the attachment"},
+                {
+                    "type": "file",
+                    "file": {
+                        "filename": "notes with spaces.txt",
+                        "file_data": "data:text/plain;base64,"
+                        + base64.b64encode(b"retained-file-marker").decode(),
+                    },
+                },
+            ],
+        }
+    )
+    prepared = prepare(
+        message,
+        ws=layout.Workspace(workspace, tmp_path / "env"),
+        env=env,
+        hermes_bin=str(hermes_bin),
+    )
+    assert prepared.root["content"][0] == {"type": "text", "text": "Read the attachment"}
+    assert "saved at:" in prepared.root["content"][1]["text"]
+    assert next(workspace.rglob("notes with spaces.txt")).read_text() == "retained-file-marker"
+    assert message.root["content"][1]["type"] == "file"
 
 
 def test_pinned_hermes_stages_and_reads_native_attachment(hermes_bin, tmp_path):

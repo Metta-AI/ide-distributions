@@ -58,6 +58,7 @@ LOCK_STAMP = ".lock-sha"
 # Config keys the profile machinery relies on, re-applied at every preparation so that an edit
 # by the owner or an agent never switches a gate back on. ``<role>`` is substituted.
 PROTECTED_KEYS: dict[str, Any] = {
+    "attachments.storage": "workspace",
     "approvals.mode": "off",
     "approvals.cron_mode": "approve",
     "approvals.single_query_mode": "approve",

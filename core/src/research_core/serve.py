@@ -335,7 +335,12 @@ class SeamServer:
         from research_core.messages import UserMessage
 
         message = UserMessage.model_validate(body["message"])
-        text = message.content
+        content = message.root["content"]
+        text = (
+            content
+            if isinstance(content, str)
+            else "\n".join(part["text"] for part in content if part["type"] == "text")
+        )
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
         with self._deliver_lock, self.stores() as stores:
@@ -426,18 +431,57 @@ class SeamServer:
                         and not self.hermes.status(session["run_id"], profile=self.profile).terminal
                     ):
                         continue
+                    payload = json.loads(row["payload"])
+                    if not row["dispatch_started"]:
+                        from httpx import HTTPError
+
+                        from research_core.attachments import AttachmentError, prepare
+                        from research_core.messages import UserMessage
+                        from research_core.platform.errors import PlatformError
+
+                        (prepared,) = await asyncio.gather(
+                            asyncio.to_thread(
+                                prepare,
+                                UserMessage.model_validate(payload["input"][0]),
+                                ws=self.ws,
+                                env=self.env,
+                                hermes_bin=self.hermes_bin,
+                            ),
+                            return_exceptions=True,
+                        )
+                        if isinstance(
+                            prepared,
+                            (AttachmentError, PlatformError, HTTPError, subprocess.TimeoutExpired),
+                        ):
+                            detail = (
+                                str(prepared)
+                                if isinstance(prepared, AttachmentError)
+                                else type(prepared).__name__
+                            )
+                            with stores.wstore.tx(actor) as tx:
+                                tx.execute(
+                                    "UPDATE client_admissions SET status='failed',error=?"
+                                    " WHERE op_id=?",
+                                    (detail, row["op_id"]),
+                                )
+                                tx.event("client.delivery_failed", row["op_id"], {"error": detail})
+                            continue
+                        if isinstance(prepared, BaseException):
+                            raise prepared
+                        payload["input"] = [prepared.model_dump(mode="json")]
                     with stores.wstore.tx(actor) as tx:
                         tx.execute(
-                            "UPDATE client_admissions SET dispatch_started=1 WHERE op_id=?",
-                            (row["op_id"],),
+                            "UPDATE client_admissions SET dispatch_started=1,payload=?"
+                            " WHERE op_id=?",
+                            (json.dumps(payload), row["op_id"]),
                         )
                     (run_id,) = await asyncio.gather(
                         asyncio.to_thread(
                             self.hermes.start,
                             profile=self.profile,
                             session_id=row["session_id"],
-                            text=json.loads(row["payload"])["input"],
-                            instructions=json.loads(row["payload"])["instructions"],
+                            text=payload["input"],
+                            instructions=payload["instructions"],
                             idempotency_key=row["op_id"],
                         ),
                         return_exceptions=True,
@@ -483,17 +527,30 @@ class SeamServer:
         """Join application metadata by native row identity, never by parsing message text."""
         session_id = _text(body, "session_id")
         with self.stores() as stores:
-            contexts = {
-                row["native_message_id"]: json.loads(row["payload"])["context"]
+            admissions_by_message = {
+                row["native_message_id"]: (
+                    json.loads(row["payload"])["context"],
+                    json.loads(row["request"])["message"]["content"],
+                )
                 for row in stores.wstore.q(
-                    "SELECT native_message_id,payload FROM client_admissions"
+                    "SELECT native_message_id,payload,request FROM client_admissions"
                     " WHERE session_id=? AND native_message_id IS NOT NULL",
                     (session_id,),
                 )
             }
             return {
                 "data": [
-                    {**message, "client_context": contexts.get(message["id"])}
+                    {
+                        **message,
+                        **(
+                            {"content": admissions_by_message[message["id"]][1]}
+                            if message["id"] in admissions_by_message
+                            else {}
+                        ),
+                        "client_context": admissions_by_message[message["id"]][0]
+                        if message["id"] in admissions_by_message
+                        else None,
+                    }
                     for message in body["data"]
                 ]
             }

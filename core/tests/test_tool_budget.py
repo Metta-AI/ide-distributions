@@ -26,9 +26,8 @@ ORCHESTRATOR = {
     "wiki_edit",
     "softmax_api",
     "github",
-    "attachment_download",
 }
-RESEARCHER = ORCHESTRATOR - {"ui", "submit", "github", "attachment_download"}
+RESEARCHER = ORCHESTRATOR - {"ui", "submit", "github"}
 INPROC = {"goal", "task", "directive", "claim", "settings", "ui"}
 
 

@@ -1,12 +1,27 @@
-"""The text-only OpenAI user-message shape accepted by this application."""
+"""The OpenAI SDK owns the user-message schema."""
 
-from typing import Literal
+from openai.types.chat import ChatCompletionUserMessageParam
+from pydantic import RootModel, model_serializer, model_validator
 
-from pydantic import BaseModel, ConfigDict, Field
 
+class UserMessage(RootModel[ChatCompletionUserMessageParam]):
+    @model_serializer
+    def serialize(self):
+        return self.root
 
-class UserMessage(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    role: Literal["user"]
-    content: str = Field(min_length=1, max_length=50000)
+    @model_validator(mode="after")
+    def nonempty(self):
+        content = self.root["content"]
+        if not isinstance(content, str):
+            content = list(content)
+            self.root["content"] = content
+            for part in content:
+                if part["type"] == "file" and (
+                    bool(part["file"].get("file_id")) == bool(part["file"].get("file_data"))
+                ):
+                    raise ValueError("A file needs exactly one of file_id or file_data")
+        if not content:
+            raise ValueError("A message must contain text or attachments")
+        if isinstance(content, str) and len(content) > 50000:
+            raise ValueError("Message text exceeds 50000 characters")
+        return self

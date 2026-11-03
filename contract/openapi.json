@@ -131,6 +131,120 @@
         "title": "CancelReply",
         "type": "object"
       },
+      "ChatCompletionContentPartImageParam": {
+        "description": "Learn about [image inputs](https://platform.openai.com/docs/guides/vision).",
+        "properties": {
+          "image_url": {
+            "$ref": "#/components/schemas/ImageURL"
+          },
+          "prompt_cache_breakpoint": {
+            "$ref": "#/components/schemas/PromptCacheBreakpoint"
+          },
+          "type": {
+            "const": "image_url",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_url",
+          "type"
+        ],
+        "title": "ChatCompletionContentPartImageParam",
+        "type": "object"
+      },
+      "ChatCompletionContentPartInputAudioParam": {
+        "description": "Learn about [audio inputs](https://platform.openai.com/docs/guides/audio).",
+        "properties": {
+          "input_audio": {
+            "$ref": "#/components/schemas/InputAudio"
+          },
+          "prompt_cache_breakpoint": {
+            "$ref": "#/components/schemas/PromptCacheBreakpoint"
+          },
+          "type": {
+            "const": "input_audio",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input_audio",
+          "type"
+        ],
+        "title": "ChatCompletionContentPartInputAudioParam",
+        "type": "object"
+      },
+      "ChatCompletionContentPartTextParam": {
+        "description": "Learn about [text inputs](https://platform.openai.com/docs/guides/text-generation).",
+        "properties": {
+          "prompt_cache_breakpoint": {
+            "$ref": "#/components/schemas/PromptCacheBreakpoint"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "type"
+        ],
+        "title": "ChatCompletionContentPartTextParam",
+        "type": "object"
+      },
+      "ChatCompletionUserMessageParam": {
+        "description": "Messages sent by an end user, containing prompts or additional context\ninformation.",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ChatCompletionContentPartTextParam"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatCompletionContentPartImageParam"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatCompletionContentPartInputAudioParam"
+                    },
+                    {
+                      "$ref": "#/components/schemas/File"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Content"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "const": "user",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "role"
+        ],
+        "title": "ChatCompletionUserMessageParam",
+        "type": "object"
+      },
       "Clarification": {
         "additionalProperties": false,
         "properties": {
@@ -305,6 +419,61 @@
         "title": "Failure",
         "type": "object"
       },
+      "File": {
+        "description": "Learn about [file inputs](https://platform.openai.com/docs/guides/text) for text generation.",
+        "properties": {
+          "file": {
+            "$ref": "#/components/schemas/FileFile"
+          },
+          "prompt_cache_breakpoint": {
+            "$ref": "#/components/schemas/FilePromptCacheBreakpoint"
+          },
+          "type": {
+            "const": "file",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "type"
+        ],
+        "title": "File",
+        "type": "object"
+      },
+      "FileFile": {
+        "properties": {
+          "file_data": {
+            "title": "File Data",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "title": "FileFile",
+        "type": "object"
+      },
+      "FilePromptCacheBreakpoint": {
+        "description": "Marks the exact end of a reusable prompt prefix.\n\nThe breakpoint inherits its TTL from the request's `prompt_cache_options.ttl`; the boundary is not rounded to a token block.",
+        "properties": {
+          "mode": {
+            "const": "explicit",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "FilePromptCacheBreakpoint",
+        "type": "object"
+      },
       "GetCommand": {
         "additionalProperties": false,
         "properties": {
@@ -328,6 +497,50 @@
           "args"
         ],
         "title": "GetCommand",
+        "type": "object"
+      },
+      "ImageURL": {
+        "properties": {
+          "detail": {
+            "enum": [
+              "auto",
+              "low",
+              "high"
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "ImageURL",
+        "type": "object"
+      },
+      "InputAudio": {
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "wav",
+              "mp3"
+            ],
+            "title": "Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "format"
+        ],
+        "title": "InputAudio",
         "type": "object"
       },
       "JsonValue": {},
@@ -634,6 +847,21 @@
         "title": "OpenSession",
         "type": "object"
       },
+      "PromptCacheBreakpoint": {
+        "description": "Marks the exact end of a reusable prompt prefix.\n\nThe breakpoint inherits its TTL from the request's `prompt_cache_options.ttl`; the boundary is not rounded to a token block.",
+        "properties": {
+          "mode": {
+            "const": "explicit",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "PromptCacheBreakpoint",
+        "type": "object"
+      },
       "Reply": {
         "additionalProperties": true,
         "description": "Native replies may expose additional runtime fields; these are the guaranteed fields.",
@@ -901,32 +1129,14 @@
         "type": "object"
       },
       "UserMessage": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "maxLength": 50000,
-            "minLength": 1,
-            "title": "Content",
-            "type": "string"
-          },
-          "role": {
-            "const": "user",
-            "title": "Role",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role",
-          "content"
-        ],
-        "title": "UserMessage",
-        "type": "object"
+        "$ref": "#/components/schemas/ChatCompletionUserMessageParam",
+        "title": "UserMessage"
       }
     }
   },
   "info": {
     "title": "IDE agent application contract",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "openapi": "3.1.0",
   "paths": {}
