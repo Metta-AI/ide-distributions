@@ -38,6 +38,20 @@ Chat messages are confirmed only after the workspace commits them. Each operatio
 one input; reconnecting with that ID cannot create a second run. Messages wait behind the
 previous run in their session, and queued messages survive sleep and restart.
 
+Session opening and message intake perform only local validation and durable writes. They
+never acquire the execution lock. One serial dispatcher creates native sessions, prepares
+attachments and starts Hermes runs after intake. A newly accepted session has an empty
+transcript until its native session is ready.
+
+Each successful intake emits one `workspace_intake` JSON event to stderr, correlated by
+`op_id`, `session_id` and operation. Durations in milliseconds distinguish validation,
+store opening, metadata preparation, writer acquisition, writing, commit, session registration
+and total intake time. `writer_wait_ms` includes SQLite transaction setup. Replayed requests
+emit the same measurements with `replayed: true`. Events contain no message or attachment
+contents. Track total intake latency and its stage breakdown independently of attachment
+preparation and Hermes execution; a slow writer wait indicates database contention rather
+than time spent preparing or running a message.
+
 The image obtains its spend-capped model credential from
 `PUT /v2/workspaces/{workspace_id}/inference`, using the bootstrap credential. It installs
 and renews the key internally; hosting never supplies profile paths or model environment
@@ -74,7 +88,7 @@ restrictions. It checks adapter operations, sleep, retained sessions and transpo
 It also validates all sixteen startup timing events on each boot: profile install/update,
 preparation, gateway readiness, application wake/readiness and total startup. Missing phases,
 reused boot IDs, malformed events and extra telemetry fields fail the check.
-Timing events run only during startup; no timing work is added to chat or relay traffic.
+Startup timing events are separate from the per-request intake events described above.
 
 ## Repeatable startup measurements
 

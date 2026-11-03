@@ -275,6 +275,7 @@ class SeamServer:
 
     def session_open(self, body: dict) -> dict:
         """Mint a session id and register a chat Session with the client's context (A.2)."""
+        started = time.monotonic()
         client = _object(body, "client")
         kept, problems = contract.validate_context(
             {"contract_version": contract.CONTRACT_VERSION, "client": client}
@@ -286,25 +287,23 @@ class SeamServer:
             )
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
-        with self._deliver_lock, self.stores() as stores:
-            receipt = admissions.read(stores.wstore, op_id, "open", body)
-            session_id = (
-                receipt["session_id"]
-                if receipt
-                else (body.get("session_id") or hermes_api.mint_session_id())
+        validated = time.monotonic()
+        with self.stores() as stores:
+            opened = time.monotonic()
+            session_id = body.get("session_id") or hermes_api.mint_session_id()
+            metadata = time.monotonic()
+            receipt = admissions.accept(
+                stores.wstore,
+                actor,
+                op_id=op_id,
+                kind="open",
+                request=body,
+                session_id=session_id,
+                message="",
+                payload="",
             )
-            if receipt is None:
-                admissions.accept(
-                    stores.wstore,
-                    actor,
-                    op_id=op_id,
-                    kind="open",
-                    request=body,
-                    session_id=session_id,
-                    message="",
-                    payload="",
-                )
-            self.hermes.create_session(session_id, profile=self.profile)
+            session_id = receipt.session_id
+            registering = time.monotonic()
             try:
                 sessions.register(
                     stores.wstore,
@@ -321,6 +320,17 @@ class SeamServer:
                     HTTPStatus.BAD_REQUEST, "session-open refused", problems=error.problems
                 ) from None
             self._clients[session_id] = client
+            completed = time.monotonic()
+            admissions.IntakeTiming(
+                **receipt.model_dump(),
+                operation="session.open",
+                op_id=op_id,
+                validation_ms=(validated - started) * 1000,
+                store_open_ms=(opened - validated) * 1000,
+                metadata_ms=(metadata - opened) * 1000,
+                registration_ms=(completed - registering) * 1000,
+                total_ms=(completed - started) * 1000,
+            ).emit()
             return {
                 "session_id": session_id,
                 "client": client,
@@ -331,6 +341,7 @@ class SeamServer:
 
     def message(self, body: dict) -> dict:
         """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
+        started = time.monotonic()
         session_id = _text(body, "session_id")
         from research_core.messages import UserMessage
 
@@ -343,25 +354,11 @@ class SeamServer:
         )
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
-        started = time.monotonic()
+        validated = time.monotonic()
         log.info("Message admission started: op_id=%s", op_id)
-        with self._deliver_lock, self.stores() as stores:
-            log.info(
-                "Message admission lock and store ready: op_id=%s seconds=%.3f",
-                op_id,
-                time.monotonic() - started,
-            )
+        with self.stores() as stores:
+            opened = time.monotonic()
             self._require_session(stores, session_id)
-            receipt = admissions.read(stores.wstore, op_id, "message", body)
-            if receipt is not None:
-                return {
-                    "op_id": op_id,
-                    "session_id": session_id,
-                    "run_id": receipt["run_id"],
-                    "delivered": "queued",
-                    "problems": [],
-                    "seq": stores.wstore.last_seq(),
-                }
             block, problems = self._context_block(stores, session_id, body.get("context"))
             payload = json.dumps(
                 {
@@ -370,8 +367,8 @@ class SeamServer:
                     "instructions": body.get("instructions"),
                 }
             )
-            persisting = time.monotonic()
-            admissions.accept(
+            metadata = time.monotonic()
+            receipt = admissions.accept(
                 stores.wstore,
                 actor,
                 op_id=op_id,
@@ -381,28 +378,47 @@ class SeamServer:
                 message=text,
                 payload=payload,
             )
-            log.info(
-                "Message admission persisted: op_id=%s persist_seconds=%.3f total_seconds=%.3f",
-                op_id,
-                time.monotonic() - persisting,
-                time.monotonic() - started,
-            )
+            completed = time.monotonic()
+            admissions.IntakeTiming(
+                **receipt.model_dump(),
+                operation="session.message",
+                op_id=op_id,
+                validation_ms=(validated - started) * 1000,
+                store_open_ms=(opened - validated) * 1000,
+                metadata_ms=(metadata - opened) * 1000,
+                total_ms=(completed - started) * 1000,
+            ).emit()
             return {
                 "op_id": op_id,
                 "session_id": session_id,
-                "run_id": None,
+                "run_id": receipt.run_id,
                 "delivered": "queued",
-                "problems": problems,
+                "problems": [] if receipt.replayed else problems,
                 "seq": stores.wstore.last_seq(),
             }
 
     async def dispatch_messages(self) -> None:
         with self._deliver_lock, self.stores() as stores:
             actor = Actor.user("client-dispatch")
+            for opening in stores.wstore.q(
+                "SELECT op_id,session_id FROM client_admissions"
+                " WHERE kind='open' AND status='queued' ORDER BY rowid"
+            ):
+                await asyncio.to_thread(
+                    self.hermes.create_session, opening["session_id"], profile=self.profile
+                )
+                with stores.wstore.tx(actor) as tx:
+                    tx.execute(
+                        "UPDATE client_admissions SET status='completed' WHERE op_id=?",
+                        (opening["op_id"],),
+                    )
             reserved: set[str] = set()
             for row in stores.wstore.q(
-                "SELECT * FROM client_admissions WHERE kind='message'"
-                " AND status IN ('queued','running') ORDER BY rowid"
+                "SELECT * FROM client_admissions AS message WHERE kind='message'"
+                " AND status IN ('queued','running')"
+                " AND NOT EXISTS(SELECT 1 FROM client_admissions AS opening"
+                " WHERE opening.kind='open' AND opening.status='queued'"
+                " AND opening.session_id=message.session_id) ORDER BY rowid"
             ):
                 if row["session_id"] in reserved:
                     continue
@@ -550,6 +566,19 @@ class SeamServer:
                         tx.event("client.started", row["op_id"], {"run_id": run_id})
                     if row["cancel_requested"]:
                         self.hermes.stop(run_id, profile=self.profile)
+
+    def session_pending(self, session_id: str) -> dict:
+        """A locally accepted chat is empty until its serial native opening completes."""
+        with self.stores() as stores:
+            return {
+                "pending": bool(
+                    stores.wstore.one(
+                        "SELECT EXISTS(SELECT 1 FROM client_admissions"
+                        " WHERE kind='open' AND session_id=? AND status='queued')",
+                        (session_id,),
+                    )[0]
+                )
+            }
 
     def message_context(self, body: dict) -> dict:
         """Join application metadata by native row identity, never by parsing message text."""
@@ -898,6 +927,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, seam.status())
             elif url.path == "/snapshot":
                 self._json(HTTPStatus.OK, seam.snapshot(query.get("store", "workspace")))
+            elif url.path == "/session-pending":
+                self._json(HTTPStatus.OK, seam.session_pending(query["session_id"]))
             elif url.path == "/stream":
                 self._stream(query)
             elif url.path == "/models":
