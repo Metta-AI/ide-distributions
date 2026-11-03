@@ -50,7 +50,6 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from research_core import contract, inference, layout, profile_models
-from research_core.messages import UserMessage
 from research_core.prepare import Runner
 from research_core.profile_models import Catalog, ModelError, Profile
 from research_core.store import admissions, coworlds, sessions, settings, ui_state
@@ -160,6 +159,9 @@ class SeamServer:
         config_runner: Runner = subprocess.run,
         catalog: Catalog | None = None,
     ) -> None:
+        from research_core.messages import UserMessage
+
+        self._message_type = UserMessage
         self.ws = ws
         self.hermes = hermes
         self.profile = profile
@@ -336,7 +338,7 @@ class SeamServer:
         """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
         started = time.monotonic()
         session_id = _text(body, "session_id")
-        message = UserMessage.model_validate(body["message"])
+        message = self._message_type.model_validate(body["message"])
         content = message.root["content"]
         text = (
             content
@@ -500,7 +502,7 @@ class SeamServer:
                         (prepared,) = await asyncio.gather(
                             asyncio.to_thread(
                                 prepare,
-                                UserMessage.model_validate(payload["input"][0]),
+                                self._message_type.model_validate(payload["input"][0]),
                                 ws=self.ws,
                                 env=self.env,
                                 hermes_bin=self.hermes_bin,
