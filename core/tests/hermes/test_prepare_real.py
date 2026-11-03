@@ -209,7 +209,7 @@ print("PASS installed profile middleware: native payload and unchanged history")
 def test_installed_agent_preserves_files_through_a_complete_turn(hermes_bin, host):
     """Exercise native turn construction, provider preparation, middleware and history together."""
     prepare(hermes_bin, host, "orchestrator")
-    script = '''
+    script = """
 import json, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -225,8 +225,14 @@ class Provider(BaseHTTPRequestHandler):
             "model":"proof", "choices":[{"index":0, "finish_reason":"stop",
             "message":{"role":"assistant", "content":"Attachment received"}}],
             "usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}).encode()
+        if captured[-1].get("stream"):
+            chunk = {"id":"proof", "object":"chat.completion.chunk", "created":1,
+                "model":"proof", "choices":[{"index":0, "finish_reason":"stop",
+                "delta":{"role":"assistant", "content":"Attachment received"}}]}
+            body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        mime = "text/event-stream" if captured[-1].get("stream") else "application/json"
+        self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -256,7 +262,7 @@ finally:
     server.shutdown()
     server.server_close()
     db.close()
-'''
+"""
     result = run([hermes_python(hermes_bin), "-c", script], host.env("orchestrator"))
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS complete pinned native turn" in result.stdout

@@ -216,8 +216,15 @@ def _away_summary(wstore: Any, coworld_store: Any, since: datetime, now: datetim
 
 def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
     def pre_llm_call(
-        session_id: str = "", user_message: str = "", is_first_turn: bool = False, **_: Any
+        session_id: str = "",
+        user_message: str = "",
+        is_first_turn: bool = False,
+        turn_id: str = "",
+        **_: Any,
     ) -> dict | None:
+        from research_core.plugin.messages import turn_context
+
+        turn_context.set((session_id, turn_id, ""))
         if role != "orchestrator" or not session_id:
             return None
         try:
@@ -255,7 +262,8 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
             parts.append(
                 render_turn(ctx, session_id, is_first_turn=is_first_turn, now=datetime.now(UTC))
             )
-            return {"context": "\n\n".join(p for p in parts if p)}
+            turn_context.set((session_id, turn_id, "\n\n".join(p for p in parts if p)))
+            return None
         except Exception as error:  # never fail a turn
             log.debug("turn hook failed: %s", error)
             return None

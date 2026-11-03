@@ -3,8 +3,12 @@
 Registration stays stdlib-only. Canonical session history is never rewritten.
 """
 
+from contextvars import ContextVar
 
-def adapt_request(*, request: dict, **_) -> dict | None:
+turn_context = ContextVar("openai_turn_context", default=("", "", ""))
+
+
+def adapt_request(*, request: dict, session_id: str = "", turn_id: str = "", **_) -> dict | None:
     from research_core import layout
     from research_core.messages import UserMessage
     from research_core.plugin.executor import profile_env
@@ -56,11 +60,17 @@ def adapt_request(*, request: dict, **_) -> dict | None:
             else:
                 content.append(part)
         adapted.append({**message, "content": content})
-    return (
-        {"request": {**request, field: adapted}, "source": "research-core.openai-content"}
-        if changed
-        else None
-    )
+    context_session, context_turn, context = turn_context.get()
+    updated = {**request, field: adapted}
+    if context and (context_session, context_turn) == (session_id, turn_id):
+        if field == "messages":
+            adapted.insert(0, {"role": "system", "content": context})
+        else:
+            updated["instructions"] = "\n\n".join(
+                text for text in (request.get("instructions", ""), context) if text
+            )
+        changed = True
+    return {"request": updated, "source": "research-core.openai-content"} if changed else None
 
 
 def record_native_message(*, session_id: str, conversation_history: list, **_) -> None:
@@ -87,8 +97,8 @@ def record_native_message(*, session_id: str, conversation_history: list, **_) -
         with store.tx(Actor.harness()) as tx:
             tx.execute(
                 "UPDATE client_admissions SET native_message_id=? WHERE op_id=?"
-                " AND native_message_id IS NOT ?",
-                (native_id, admission["op_id"], native_id),
+                " AND native_message_id IS NULL",
+                (native_id, admission["op_id"]),
             )
     finally:
         store.close()

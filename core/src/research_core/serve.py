@@ -484,7 +484,6 @@ class SeamServer:
         """Join application metadata by native row identity, never by parsing message text."""
         session_id = _text(body, "session_id")
         with self.stores() as stores:
-            self._require_session(stores, session_id)
             contexts = {
                 row["native_message_id"]: json.loads(row["payload"])["context"]
                 for row in stores.wstore.q(
