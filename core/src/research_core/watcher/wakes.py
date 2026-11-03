@@ -21,10 +21,19 @@ active Coworld's store:
 
 Repeat suppression: an event whose ``(kind, subject)`` already has a live wake Session started
 within :data:`REPEAT_WINDOW` joins that Session instead of starting another, and the Session's
-end acknowledges every event it carries. A gateway that answers busy leaves the claimed
-Session without a run; the next tick retries the start with the same key, which the gateway
-replays if the earlier request did reach it, so a crash between the start and its commit
-never starts a second run (the reconciliation A5.2 asks for).
+end acknowledges every event it carries.
+
+Batching by kind: for a kind whose handler sets ``batch_by_kind`` (``champion.changed``), every
+pending event of that kind in one store starts a single wake Session instead. Its prompt renders
+the template once with every event's subject and payload (:func:`render_batch`), and its end
+acknowledges them all. While that Session is live, newer events of the kind wait for the next
+batch rather than join it, because joining would acknowledge an event the running model never
+saw. The start's idempotency key is the first event's ``event:<store>:<seq>:<attempt>``.
+
+A gateway that answers busy leaves the claimed Session without a run; the next tick retries
+the start with the same key, which the gateway replays if the earlier request did reach it, so
+a crash between the start and its commit never starts a second run (the reconciliation A5.2
+asks for).
 """
 
 from __future__ import annotations
@@ -78,9 +87,13 @@ def run(ctx: TickContext) -> dict[str, Any]:
     }
     max_attempts = int(settings.get(ctx.wstore, "recovery.max_attempts"))
     for label, store in labelled_stores(ctx):
+        batches: dict[str, list[Event]] = {}
         for event in events.unhandled(store, set(HANDLERS)):
             handler = HANDLERS[event.kind]
             ref = f"{label}:{event.seq}"
+            if handler.batch_by_kind:
+                batches.setdefault(event.kind, []).append(event)
+                continue
             try:
                 if handler.model:
                     _dispatch_wake(ctx, label, store, event, handler, max_attempts, report)
@@ -88,6 +101,11 @@ def run(ctx: TickContext) -> dict[str, Any]:
                     _handle_without_model(ctx, store, event, handler, ref, report)
             except Exception as error:  # one bad event never blocks the others
                 report["errors"].append(f"{ref} {event.kind}: {_describe(error)}")
+        for kind, pending in batches.items():
+            try:
+                _dispatch_batch(ctx, label, store, pending, HANDLERS[kind], max_attempts, report)
+            except Exception as error:  # one bad batch never blocks the others
+                report["errors"].append(f"{label} {kind} batch: {_describe(error)}")
     return report
 
 
@@ -159,14 +177,32 @@ def _count_planned_stop(ctx: TickContext, label: str, seq: int) -> None:
 
 def render_wake(kind: str, event: Event, ctx: TickContext) -> str:
     """The wake prompt: ``wakes/<kind>.md`` with the event filled in."""
+    return _fill(kind, event.kind, event.subject, _payload_text(event.payload), ctx)
+
+
+def render_batch(kind: str, batch: list[Event], ctx: TickContext) -> str:
+    """The wake prompt for a batch of events of one kind: the template rendered once, with every
+    subject in ``{subject}`` and a list of ``{"subject", "payload"}`` entries, each cut at
+    :data:`PAYLOAD_CHARS`, in ``{payload_json}``."""
+    subjects = ", ".join(event.subject for event in batch)
+    entries = [_payload_text({"subject": e.subject, "payload": e.payload}) for e in batch]
+    payload = "[\n" + ",\n".join(entries) + "\n]"
+    return _fill(kind, batch[0].kind, subjects, payload, ctx)
+
+
+def _payload_text(payload: Any) -> str:
+    text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
+    if len(text) > PAYLOAD_CHARS:
+        text = text[:PAYLOAD_CHARS] + "\n… (payload cut here; the event has the rest)"
+    return text
+
+
+def _fill(kind: str, event_kind: str, subject: str, payload: str, ctx: TickContext) -> str:
     template = (TEMPLATES_DIR / f"{kind}.md").read_text(encoding="utf-8")
-    payload = json.dumps(event.payload, indent=2, sort_keys=True, ensure_ascii=False)
-    if len(payload) > PAYLOAD_CHARS:
-        payload = payload[:PAYLOAD_CHARS] + "\n… (payload cut here; the event has the rest)"
     coworld_id = ctx.coworld.coworld_id if ctx.coworld is not None else "none active"
     replacements = (
-        ("{event_kind}", event.kind),
-        ("{subject}", event.subject),
+        ("{event_kind}", event_kind),
+        ("{subject}", subject),
         ("{payload_json}", payload),
         ("{coworld_id}", coworld_id),
     )
@@ -230,7 +266,7 @@ def _dispatch_wake(
             if session["run_id"]:
                 report["waiting"].append(ref)  # the run is live; acknowledged when it ends
             else:
-                _start(ctx, label, store, event, handler, session, row["attempts"], report)
+                _start(ctx, label, store, [event], handler, session, row["attempts"], report)
             return
     open_session = _open_wake_session(ctx, store, event)
     if open_session is not None:
@@ -253,45 +289,130 @@ def _dispatch_wake(
         event=event.kind,
         **_subject_ids(event.subject),
     )
-    _start(ctx, label, store, event, handler, session, attempts, report)
+    _start(ctx, label, store, [event], handler, session, attempts, report)
+
+
+def _dispatch_batch(
+    ctx: TickContext,
+    label: str,
+    store: Store,
+    pending: list[Event],
+    handler: Handler,
+    max_attempts: int,
+    report: dict[str, Any],
+) -> None:
+    """One wake Session for every pending event of a ``batch_by_kind`` kind in ``store``.
+
+    Events a live Session already carries wait for it (or retry its start after a busy
+    gateway). While such a Session is live, every other event of the kind waits for the next
+    batch. Otherwise the events not given up on are claimed for one new Session and started
+    together.
+    """
+    fresh: list[Event] = []
+    live: dict[str, tuple[dict[str, Any], list[Event], int]] = {}
+    for event in pending:
+        ref = f"{label}:{event.seq}"
+        row = _handled_row(store, event.seq)
+        if (
+            row is not None
+            and counted_attempts(ctx, label, event.seq, row["attempts"]) > max_attempts
+        ):
+            report["gave_up"].append(ref)  # reported when it happened; nothing more to do
+            continue
+        if row is not None and row["session_id"]:
+            session = sessions.read(ctx.wstore, row["session_id"])
+            if session is not None and session["ended"] is None:
+                _, carried, _ = live.setdefault(session["id"], (session, [], row["attempts"]))
+                carried.append(event)
+                continue
+        fresh.append(event)
+    for session, carried, attempts in live.values():
+        if session["run_id"]:
+            report["waiting"].extend(f"{label}:{event.seq}" for event in carried)
+        else:
+            _start(ctx, label, store, carried, handler, session, attempts, report)
+    if live:
+        report["waiting"].extend(f"{label}:{event.seq}" for event in fresh)
+        return
+    session_id = hermes_api.mint_session_id()
+    batch: list[Event] = []
+    first_attempts = 0
+    for event in fresh:
+        row = _handled_row(store, event.seq)
+        next_attempt = (row["attempts"] if row is not None else 0) + 1
+        if counted_attempts(ctx, label, event.seq, next_attempt) > max_attempts:
+            # Claimed under an id no Session is registered with, so the batch's end never
+            # acknowledges it (the same as a single event given up on).
+            events.claim_handling(
+                store, ctx.actor, event.seq, event.kind, hermes_api.mint_session_id()
+            )
+            _give_up(ctx, label, store, event, handler, row, max_attempts)
+            report["gave_up"].append(f"{label}:{event.seq}")
+            continue
+        attempts = events.claim_handling(store, ctx.actor, event.seq, event.kind, session_id)
+        if not batch:
+            first_attempts = attempts
+        batch.append(event)
+    if not batch:
+        return
+    session = sessions.register(
+        ctx.wstore,
+        ctx.actor,
+        session_id=session_id,
+        profile=ctx.orchestrator_profile,
+        kind="wake",
+        coworld_id=ctx.coworld.coworld_id if ctx.coworld is not None else None,
+        event=handler.kind,
+    )
+    _start(ctx, label, store, batch, handler, session, first_attempts, report)
 
 
 def _start(
     ctx: TickContext,
     label: str,
     store: Store,
-    event: Event,
+    batch: list[Event],
     handler: Handler,
     session: dict[str, Any],
     attempts: int,
     report: dict[str, Any],
 ) -> None:
-    """Record the run intent, start the run, record the run id (B.13 "uncertain outcomes")."""
+    """Record the run intent, start the run, record the run id (B.13 "uncertain outcomes").
+
+    ``batch`` is the one event of an ordinary wake or every event of a batched one; the
+    idempotency key and ``attempts`` are the first event's.
+    """
     session_id = session["id"]
-    ref = f"{label}:{event.seq}"
+    first = batch[0]
+    refs = [f"{label}:{event.seq}" for event in batch]
+    if handler.batch_by_kind:
+        text = render_batch(handler.wake, batch, ctx)
+    else:
+        text = render_wake(handler.wake, first, ctx)
     intent = _begin_run_intent(ctx, session_id, attempts)
     try:
         run_id = ctx.hermes.start(
             profile=ctx.orchestrator_profile,
             session_id=session_id,
-            text=render_wake(handler.wake, event, ctx),
+            text=text,
             instructions=WAKE_INSTRUCTIONS,
-            idempotency_key=f"event:{label}:{event.seq}:{attempts}",
+            idempotency_key=f"event:{label}:{first.seq}:{attempts}",
         )
     except RunsBusy as error:
-        ctx.note(f"wake for {ref} {event.kind} deferred to the next tick: {error}")
-        report["busy"].append(ref)
+        ctx.note(f"wake for {', '.join(refs)} {first.kind} deferred to the next tick: {error}")
+        report["busy"].extend(refs)
         return
     except RunsError as error:  # a conflict, a refused key, another definite answer
         message = _describe(error)
-        events.mark_failed(store, ctx.actor, event.seq, message)
+        for event in batch:
+            events.mark_failed(store, ctx.actor, event.seq, message)
         _finish_run_intent(ctx, intent, "failed", {"error": message})
         sessions.end(ctx.wstore, ctx.actor, session_id)
-        report["failed"].append(ref)
+        report["failed"].extend(refs)
         return
     sessions.set_run(ctx.wstore, ctx.actor, session_id, run_id)
     _finish_run_intent(ctx, intent, "done", {"run_id": run_id})
-    report["started"].append(f"{ref}->{run_id}")
+    report["started"].extend(f"{ref}->{run_id}" for ref in refs)
 
 
 def _give_up(

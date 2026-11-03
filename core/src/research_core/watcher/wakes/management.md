@@ -28,8 +28,9 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
   problem to the user with `ui.notify`.
 - `goal.needs_ideation`: create or approve one ideation Task for the Goal (at most one open).
 - `goal.park`: park the Goal with the `goal` tool and a reason; tell the user.
-- `champion.changed`: read the platform state with the `platform` tool, record a claim about
-  the new champion and tell the user what changed.
+- `champion.changed`: one wake carries every pending change; the payload lists each league.
+  Read the platform state with the `platform` tool, record a claim about each new champion
+  and tell the user what changed.
 - `store.unmarked_write`, `store.schema_rebuilt`: something wrote to the store outside the
   tools. Read the affected records, repair what is wrong through the tools, and tell the user
   what happened and which tool to use instead. A rebuild saved a copy of the store as it was;
