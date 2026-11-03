@@ -66,14 +66,6 @@ def test_bad_types_and_missing_version():
     assert contract.validate_context(None)[1] == ["context: must be a JSON object"]
 
 
-def test_find_block():
-    assert contract.find_block("hello") == (None, None)
-    parsed, error = contract.find_block('do it\n\nContext v1:\n{"contract_version": 1}')
-    assert parsed == {"contract_version": 1} and error is None
-    parsed, error = contract.find_block("x\nContext v1:\nnot json")
-    assert parsed is None and error.startswith("context block is not valid JSON")
-
-
 def test_schema_files_are_json_with_version():
     assert contract.schema("context")["contract_version"] == contract.CONTRACT_VERSION
     json.dumps(contract.schema("context"))

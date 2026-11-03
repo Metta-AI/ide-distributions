@@ -253,7 +253,7 @@ class HermesRuns:
         *,
         profile: str,
         session_id: str,
-        text: str,
+        text: str | list[dict],
         instructions: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
@@ -484,7 +484,7 @@ class FakeHermesRuns(HermesRuns):
         *,
         profile: str,
         session_id: str,
-        text: str,
+        text: str | list[dict],
         instructions: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
@@ -519,7 +519,16 @@ class FakeHermesRuns(HermesRuns):
             run_id=f"run_{secrets.token_hex(16)}",
             profile=profile,
             session_id=session_id,
-            input=text,
+            input=(
+                text
+                if isinstance(text, str)
+                else "\n".join(
+                    part["text"]
+                    for message in text
+                    for part in message["content"]
+                    if part["type"] == "text"
+                )
+            ),
             instructions=instructions,
             idempotency_key=idempotency_key,
         )

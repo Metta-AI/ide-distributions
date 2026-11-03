@@ -13,6 +13,7 @@ from contract import (
     RESPONSES,
     Approval,
     Cancel,
+    Clarification,
     Events,
     Message,
     Messages,
@@ -82,10 +83,12 @@ async def response(
         case Events():
             path = f"v1/runs/{quote(args.run_id, safe='')}/events"
             params = {"last_seq": args.last_seq}
-        case Approval():
-            path = f"v1/runs/{quote(args.run_id, safe='')}/approval"
+        case Approval() | Clarification():
+            path = f"v1/runs/{quote(args.run_id, safe='')}/" + (
+                "approval" if isinstance(args, Approval) else "clarify"
+            )
             method = "POST"
-            body = {"request_id": args.request_id, "choice": args.choice}
+            body = args.model_dump(exclude={"run_id"}, exclude_none=True)
         case Run():
             path = f"v1/runs/{quote(args.run_id, safe='')}"
             if operation.name == "run.stop":
@@ -104,4 +107,14 @@ async def response(
         if 200 <= result.status_code < 300 and not isinstance(args, Events):
             payload = await result.aread()
             RESPONSES[operation.name].model_validate_json(payload)
+            if isinstance(args, Messages):
+                projected = await seam.post(
+                    "/messages/project",
+                    json={
+                        "session_id": args.session_id,
+                        "data": result.json()["data"],
+                    },
+                )
+                yield projected
+                return
         yield result

@@ -687,6 +687,7 @@ source = { editable = "core" }
 platform = [
     { name = "coworld" },
     { name = "numpy" },
+    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "softmax-cli" },
 ]
@@ -695,6 +696,7 @@ platform = [
 requires-dist = [
     { name = "coworld", marker = "extra == 'platform'", specifier = ">=0.1.66,<0.2" },
     { name = "numpy", marker = "extra == 'platform'", specifier = ">=1.26" },
+    { name = "pydantic", marker = "extra == 'platform'", specifier = ">=2,<3" },
     { name = "pyyaml", marker = "extra == 'platform'", specifier = ">=6" },
     { name = "softmax-cli", marker = "extra == 'platform'", specifier = ">=0.26.40,<0.27" },
 ]

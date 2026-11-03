@@ -22,12 +22,15 @@ def make_ctx(tmp_path, session_id="chat1", coworld=True):
 
 
 def test_context_block_bad_input_never_crashes():
-    assert turn.render_context_block("hello") is None
-    assert "not valid JSON" in turn.render_context_block("x\nContext v1:\n{nope")
+    assert turn.render_context_block({}) is None
     text = turn.render_context_block(
-        'go\nContext v1:\n{"contract_version": 1, '
-        '"mode": {"name": "research", "instruction": "brief"}, '
-        '"client_data": {"z": "' + "q" * 9000 + '"}, "bogus": 1, "on_screen": ["G-1"]}'
+        {
+            "contract_version": 1,
+            "mode": {"name": "research", "instruction": "brief"},
+            "client_data": {"z": "q" * 9000},
+            "bogus": 1,
+            "on_screen": ["G-1"],
+        }
     )
     assert "mode: research — brief" in text
     assert "on screen: G-1" in text

@@ -7,10 +7,25 @@
           "choice": {
             "enum": [
               "once",
-              "deny"
+              "deny",
+              "session",
+              "always"
             ],
             "title": "Choice",
             "type": "string"
+          },
+          "execution_generation": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Generation"
           },
           "request_id": {
             "title": "Request Id",
@@ -116,9 +131,88 @@
         "title": "CancelReply",
         "type": "object"
       },
+      "Clarification": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Answer",
+            "type": "string"
+          },
+          "execution_generation": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Generation"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "request_id",
+          "answer"
+        ],
+        "title": "Clarification",
+        "type": "object"
+      },
+      "ClarifyCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/Clarification"
+          },
+          "name": {
+            "const": "run.clarify",
+            "title": "Name",
+            "type": "string"
+          },
+          "op_id": {
+            "format": "uuid",
+            "title": "Op Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "name",
+          "args"
+        ],
+        "title": "ClarifyCommand",
+        "type": "object"
+      },
       "Client": {
         "additionalProperties": false,
         "properties": {
+          "guide": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Guide"
+          },
           "id": {
             "maxLength": 80,
             "minLength": 1,
@@ -236,6 +330,104 @@
         "title": "GetCommand",
         "type": "object"
       },
+      "InputFile": {
+        "additionalProperties": false,
+        "properties": {
+          "file_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Data"
+          },
+          "file_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "type": {
+            "const": "input_file",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "filename"
+        ],
+        "title": "InputFile",
+        "type": "object"
+      },
+      "InputImage": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "low",
+              "high"
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
+          "image_url": {
+            "minLength": 1,
+            "title": "Image Url",
+            "type": "string"
+          },
+          "type": {
+            "const": "input_image",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "image_url"
+        ],
+        "title": "InputImage",
+        "type": "object"
+      },
+      "InputText": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "input_text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "InputText",
+        "type": "object"
+      },
       "JsonValue": {},
       "Message": {
         "additionalProperties": false,
@@ -247,11 +439,21 @@
             "title": "Context",
             "type": "object"
           },
+          "instructions": {
+            "anyOf": [
+              {
+                "maxLength": 16000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instructions"
+          },
           "message": {
-            "maxLength": 16000,
-            "minLength": 1,
-            "title": "Message",
-            "type": "string"
+            "$ref": "#/components/schemas/UserMessage"
           },
           "session_id": {
             "maxLength": 200,
@@ -494,6 +696,19 @@
             ],
             "default": null,
             "title": "Session Context"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_-]{1,200}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Session Id"
           }
         },
         "required": [
@@ -513,6 +728,7 @@
         "discriminator": {
           "mapping": {
             "run.approve": "#/components/schemas/ApproveCommand",
+            "run.clarify": "#/components/schemas/ClarifyCommand",
             "run.events": "#/components/schemas/EventsCommand",
             "run.get": "#/components/schemas/GetCommand",
             "run.stop": "#/components/schemas/StopCommand",
@@ -551,6 +767,9 @@
           },
           {
             "$ref": "#/components/schemas/ApproveCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ClarifyCommand"
           }
         ],
         "title": "Request"
@@ -558,6 +777,9 @@
       "Responses": {
         "properties": {
           "run.approve": {
+            "$ref": "#/components/schemas/Reply"
+          },
+          "run.clarify": {
             "$ref": "#/components/schemas/Reply"
           },
           "run.get": {
@@ -590,7 +812,8 @@
           "session.messages",
           "run.get",
           "run.stop",
-          "run.approve"
+          "run.approve",
+          "run.clarify"
         ],
         "title": "Responses",
         "type": "object"
@@ -759,12 +982,55 @@
         ],
         "title": "StopCommand",
         "type": "object"
+      },
+      "UserMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "input_file": "#/components/schemas/InputFile",
+                  "input_image": "#/components/schemas/InputImage",
+                  "input_text": "#/components/schemas/InputText"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/InputText"
+                },
+                {
+                  "$ref": "#/components/schemas/InputImage"
+                },
+                {
+                  "$ref": "#/components/schemas/InputFile"
+                }
+              ]
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Content",
+            "type": "array"
+          },
+          "role": {
+            "const": "user",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "UserMessage",
+        "type": "object"
       }
     }
   },
   "info": {
     "title": "IDE agent application contract",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "openapi": "3.1.0",
   "paths": {}

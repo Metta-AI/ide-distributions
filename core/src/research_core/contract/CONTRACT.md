@@ -55,8 +55,8 @@ is refused, because Sessions write through the tools.
 Every field of the context block is optional except `contract_version`. The fields and their
 limits are in `context.schema.json`; the ones the seam uses now are `client`, `coworld`,
 `mode`, `command`, `view`, `references`, `on_screen` and `client_data`. The block travels in
-the run input after the label line `Context v1:`; the profile's turn hook finds the last such
-label, validates the block again and renders it for the model.
+the durable admission separately from the user message; the profile's turn hook reads that
+admission, validates the block again and renders it for the model.
 
 The bridge stamps four items into each turn (design A.4). `research serve` stamps the first
 two into the block; the profile's own turn hook (`plugin/turn.py`) adds the last two, so the
