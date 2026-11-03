@@ -558,7 +558,6 @@ def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
     assert "games finished so far" in data["plain"]
 
 
-<<<<<<< HEAD
 def _league(cli):
     cli.rounds = [  # only the newest completed round is asked for (RoundPublic)
         {
@@ -672,7 +671,7 @@ def test_league_status_names_what_the_platform_could_not_answer(program, cli):
     cli.latest_replay = {"round": {}, "episode": {}}
     assert program.league_status(league=CHOSEN)["unavailable"] == ["latest_result"]
     assert run("league_status", {"league": CHOSEN, "top": 3}, program)["ok"] is True
-=======
+
 def test_name_keep_puts_the_name_in_the_cogents_own_play_record(program, monkeypatch):
     sent = []
 
@@ -702,4 +701,3 @@ def test_name_keep_refuses_a_bad_name_without_calling(program, monkeypatch, name
     with pytest.raises(PlayError) as error:
         program.name_keep(name)
     assert error.value.reason == "bad_arguments"
->>>>>>> d5e9db2 (name_keep: silent call, behavior tests for the PUT and validation)
