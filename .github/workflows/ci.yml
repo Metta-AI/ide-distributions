@@ -85,12 +85,12 @@ jobs:
       - name: Agent application contract is current
         if: env.RUN_TESTS == 'true'
         run: /opt/hermes/.venv/bin/python tools/export_contract.py --check
-      - name: Unit and scenario tests
-        if: env.RUN_TESTS == 'true'
-        run: uv run pytest -q
       - name: Tests against the installed Hermes
         if: env.RUN_TESTS == 'true'
         run: uv run pytest -q -m hermes core/tests/hermes
+      - name: Unit and scenario tests
+        if: env.RUN_TESTS == 'true'
+        run: uv run pytest -q
 
   play:
     needs: changes

@@ -115,8 +115,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 from tui_gateway import server
 from agent.context_references import preprocess_context_references
 from tools.file_tools import read_file_tool
