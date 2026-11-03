@@ -324,7 +324,7 @@ def banner(
             "op_id": str(uuid4()),
             "message": {
                 "role": "user",
-                "content": [{"type": "input_text", "text": "What is the state of the workspace?"}],
+                "content": "What is the state of the workspace?",
             },
             "actor": "user:local",
             "context": {"contract_version": 1, "on_screen": []},

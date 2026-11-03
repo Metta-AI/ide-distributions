@@ -171,137 +171,68 @@ def test_the_kimi_pin_yields_exactly_where_hermes_applies_an_owner_entry(hermes_
     }
 
 
-def test_installed_middleware_preserves_canonical_content(hermes_bin, host):
-    prepare(hermes_bin, host, "orchestrator")
-    script = """
-import copy, json
-from pathlib import Path
-from hermes_cli.middleware import apply_llm_request_middleware
-from hermes_cli.plugins import has_middleware
-from gateway.platforms.api_server import _normalize_multimodal_content
-assert has_middleware("llm_request"), "Installed profile did not register content middleware"
-from research_core.messages import UserMessage
-original = {"role": "user", "content": [
-    {"type": "input_text", "text": "Inspect the policy"},
-    {"type": "input_image", "image_url": "https://example.org/frame.png"},
-    {"type": "input_file", "filename": "policy.txt", "file_data": "cG9saWN5"},
-]}
-import os
-UserMessage.model_validate(original).model_input(Path(os.environ["IDE_WORKSPACE"]) / "documents")
-request = {"model": "proof", "messages": [copy.deepcopy(original)]}
-before = copy.deepcopy(request)
-assert has_middleware("llm_request"), "Installed profile did not register content middleware"
-result = apply_llm_request_middleware(request)
-assert result.changed, result
-content = result.payload["messages"][0]["content"]
-assert _normalize_multimodal_content(content) == content
-assert content[0] == {"type":"text", "text":"Inspect the policy"}
-assert Path(json.loads(content[2]["text"])["workspace_file"]).read_bytes() == b"policy"
-assert request == before, "Middleware rewrote canonical content"
-assert result.original_payload == before
-print("PASS installed profile middleware: native payload and unchanged history")
-"""
-    result = run([hermes_python(hermes_bin), "-c", script], host.env("orchestrator"))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "PASS installed profile middleware" in result.stdout
-
-
 @pytest.mark.parametrize("existing_history", [False, True])
-def test_installed_agent_preserves_files_through_a_complete_turn(
-    hermes_bin, host, existing_history
-):
-    """Exercise native turn construction, provider preparation, middleware and history together."""
+def test_installed_agent_text_chat_and_resume(hermes_bin, host, existing_history):
+    """Real pinned agent and persistence, with only the external model replaced by HTTP."""
     prepare(hermes_bin, host, "orchestrator")
     script = """
 import json, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from hermes_cli.plugins import has_middleware
-assert has_middleware("llm_request")
-from run_agent import AIAgent
 from hermes_state_registry import acquire, release
+from run_agent import AIAgent
+assert not has_middleware("llm_request"), "Text chat must not need content middleware"
 captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
-        captured.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-        request = captured[-1]
-        if request["messages"][-1]["role"] == "tool":
-            assert "policy" in str(request["messages"][-1]["content"]), request
-            message = {"role":"assistant", "content":"Attachment received"}
-            finish = "stop"
-            delta = message
-        else:
-            assert any(t["function"]["name"] == "read_file" for t in request["tools"])
-            user = next(m for m in request["messages"]
-                if m["role"] == "user" and isinstance(m["content"], list))
-            path = json.loads(user["content"][1]["text"])["workspace_file"]
-            call = {"id":f"read-{len(captured)}", "type":"function",
-                "function":{"name":"read_file", "arguments":json.dumps({"path":path})}}
-            message = {"role":"assistant", "content":None, "tool_calls":[call]}
-            delta = {"role":"assistant", "tool_calls":[{"index":0, **call}]}
-            finish = "tool_calls"
-        body = json.dumps({"id":"proof", "object":"chat.completion", "created":1,
-            "model":"proof", "choices":[{"index":0, "finish_reason":finish, "message":message}],
-            "usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}).encode()
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        captured.append(request)
+        message = {"role": "assistant", "content": "Chat received"}
+        choice = {"index": 0, "finish_reason": "stop", "message": message}
+        body = json.dumps({"id": "proof", "object": "chat.completion", "created": 1,
+            "model": "proof", "choices": [choice],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}).encode()
         if request.get("stream"):
-            chunk = {"id":"proof", "object":"chat.completion.chunk", "created":1,
-                "model":"proof", "choices":[{"index":0, "finish_reason":finish, "delta":delta}]}
+            chunk = {"id": "proof", "object": "chat.completion.chunk", "created": 1,
+                "model": "proof", "choices": [
+                    {"index": 0, "finish_reason": "stop", "delta": message}]}
             body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
         self.send_response(200)
-        mime = "text/event-stream" if captured[-1].get("stream") else "application/json"
+        mime = "text/event-stream" if request.get("stream") else "application/json"
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
     def log_message(self, *args): pass
 server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
-thread = threading.Thread(target=server.serve_forever, daemon=True)
-thread.start()
-original = [{"type":"input_text","text":"Read the attached policy"},
-    {"type":"input_file","filename":"policy.txt","file_data":"cG9saWN5"}]
+threading.Thread(target=server.serve_forever, daemon=True).start()
 db = acquire()
-sid = "openai-message-proof-" + sys.argv[1]
+sid = "openai-text-proof-" + sys.argv[1]
 prior = []
 if sys.argv[1] == "1":
     db.create_session(sid, "api_server", model="proof")
     db.append_message(sid, "user", "A message from before the protocol upgrade")
     db.append_message(sid, "assistant", "A saved answer from before the upgrade")
     prior = [(m["id"], m["role"], m["content"]) for m in db.get_messages(sid)]
-initial = db.get_messages_as_conversation(sid, include_row_ids=True)
-agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
-    base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
-    enabled_toolsets=["file"], quiet_mode=True, skip_context_files=True,
-    skip_memory=True, skip_background_review=True, session_id=sid,
-    session_db=db, max_iterations=4)
 try:
-    result = agent.run_conversation(original, conversation_history=initial)
-    assert result["final_response"] == "Attachment received", result
-    user = next(m for m in captured[-1]["messages"]
-        if m["role"] == "user" and isinstance(m["content"], list))
-    assert all(p["type"] == "text" for p in user["content"]), user
-    ref = json.loads(user["content"][1]["text"])
-    assert Path(ref["workspace_file"]).read_bytes() == b"policy"
+    for text in ("Hello from the OpenAI message contract", "Continue this same chat"):
+        initial = db.get_messages_as_conversation(sid, include_row_ids=True)
+        agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
+            base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
+            enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
+            skip_memory=True, skip_background_review=True, session_id=sid,
+            session_db=db, max_iterations=2)
+        result = agent.run_conversation(text, conversation_history=initial)
+        assert result["final_response"] == "Chat received", result
+        assert any(m["role"] == "user" and isinstance(m["content"], str)
+            and m["content"].startswith(text) for m in captured[-1]["messages"]), captured[-1]
     saved = db.get_messages(sid)
-    assert saved[len(prior)]["content"] == original, saved
     assert [(m["id"], m["role"], m["content"]) for m in saved[:len(prior)]] == prior
-    resumed = db.get_messages_as_conversation(sid, include_row_ids=True)
-    assert resumed[len(prior)]["content"] == original
-    agent2 = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
-        base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
-        enabled_toolsets=["file"], quiet_mode=True, skip_context_files=True,
-        skip_memory=True, skip_background_review=True, session_id=sid,
-        session_db=db, max_iterations=4)
-    again = agent2.run_conversation(
-        [{"type":"input_text", "text":"Continue from the saved file"}],
-        conversation_history=resumed)
-    assert again["final_response"] == "Attachment received", again
-    assert len(db.get_messages(sid)) == len(prior) + 8
-    assert [(m["id"], m["role"], m["content"])
-        for m in db.get_messages(sid)[:len(prior)]] == prior
-    old = next(m for m in captured[-1]["messages"]
-        if m["role"] == "user" and isinstance(m["content"], list))
-    assert Path(json.loads(old["content"][1]["text"])["workspace_file"]).read_bytes() == b"policy"
-    print("PASS complete pinned native turn and resume: provider input and canonical file history")
+    assert [(m["role"], m["content"]) for m in saved[len(prior):]] == [
+        ("user", "Hello from the OpenAI message contract"), ("assistant", "Chat received"),
+        ("user", "Continue this same chat"), ("assistant", "Chat received"),
+    ], saved
+    print("PASS pinned native text chat and resume without content middleware or history rewrites")
 finally:
     server.shutdown()
     server.server_close()
@@ -312,4 +243,4 @@ finally:
         host.env("orchestrator"),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "PASS complete pinned native turn" in result.stdout
+    assert "PASS pinned native text chat and resume" in result.stdout

@@ -519,16 +519,7 @@ class FakeHermesRuns(HermesRuns):
             run_id=f"run_{secrets.token_hex(16)}",
             profile=profile,
             session_id=session_id,
-            input=(
-                text
-                if isinstance(text, str)
-                else "\n".join(
-                    part["text"]
-                    for message in text
-                    for part in message["content"]
-                    if part["type"] in ("text", "input_text")
-                )
-            ),
+            input=text if isinstance(text, str) else text[-1]["content"],
             instructions=instructions,
             idempotency_key=idempotency_key,
         )

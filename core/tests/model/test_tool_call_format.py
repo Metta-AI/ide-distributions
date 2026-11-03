@@ -50,6 +50,7 @@ INSTRUCTIONS = {
     "wiki_edit": "Edit wiki w page p: title T, body B, base revision r1.",
     "softmax_api": "GET /whoami.",
     "github": "List my GitHub repositories.",
+    "attachment_download": "Download the attachment with sha256 " + "a" * 64 + ".",
 }
 # A Researcher reads Goals; it cannot create one.
 ROLE_INSTRUCTIONS = {"researcher": {"goal": "Read Goal G-1."}}

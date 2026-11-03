@@ -80,11 +80,7 @@ def test_pre_llm_call_only_for_orchestrator_chat_sessions(tmp_path, monkeypatch)
     hook = turn.make_pre_llm_call("orchestrator")
     assert hook(session_id="wake1", user_message="x", is_first_turn=True) is None
     result = hook(session_id="chat9", user_message="hello", is_first_turn=True)
-    from research_core.plugin.messages import adapt_request
-
-    assert result is None
-    adapted = adapt_request(request={"messages": []}, session_id="chat9")
-    assert "[active Coworld] cow_fake" in adapted["request"]["messages"][0]["content"]
+    assert "[active Coworld] cow_fake" in result["context"]
     assert sessions.read(ctx.wstore, "chat9")["kind"] == "chat"
     assert turn.make_pre_llm_call("researcher")(session_id="chat9", user_message="x") is None
 

@@ -67,6 +67,7 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 
 ### Your tools
 
+- `attachment_download` (inputs: sha256)
 - `claim`: search, read, write, add_evidence, retire, inspect_evidence
 - `directive`: add, update, retire, list
 - `experiment`: create, read, search, update, start, add_run, update_run, close, abandon

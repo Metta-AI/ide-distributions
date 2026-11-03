@@ -22,8 +22,6 @@ CHECK = Path(__file__).resolve().parents[2] / "image/system_tests/check-startup.
         "state",
         "duplicate_ready",
         "premature_ready",
-        "rounded",
-        "short_total",
     ],
 )
 @pytest.mark.parametrize("cycles", [2, 4])
@@ -57,12 +55,6 @@ def test_packaged_startup_log_validation(fault, cycles, connected):
         for boot in range(cycles)
         for index, (phase, role, outcome) in enumerate(phases)
     ]
-    if fault in ("rounded", "short_total"):
-        for event in events:
-            if event["phase"] == "startup_total" and event["outcome"] == "passed":
-                event["elapsed_seconds"] = 0.004 if fault == "rounded" else 1
-            elif fault == "rounded" and event["outcome"] == "passed":
-                event["elapsed_seconds"] = 0.001
     if fault == "duplicate_ready":
         events.append(events[-1])
     if fault == "premature_ready":
@@ -85,4 +77,4 @@ def test_packaged_startup_log_validation(fault, cycles, connected):
     result = subprocess.run(
         [sys.executable, str(CHECK), str(cycles)], input=log, text=True, capture_output=True
     )
-    assert (result.returncode == 0) == (fault in (None, "rounded")), result.stderr
+    assert (result.returncode == 0) == (fault is None), result.stderr

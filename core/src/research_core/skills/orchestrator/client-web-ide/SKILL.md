@@ -56,10 +56,9 @@ as a `command`: follow its instruction for that message.
 
 ## Local files and attachments
 
-The IDE runs in the browser; the user's files are not mounted. Attached files use OpenAI
-`input_file` content parts. The workspace prepares each file and supplies its local path;
-read that path with the file tools. Later messages can refer to the same file by `file_id`.
-A pasted path on the user's computer is not an attachment; ask for the file.
+The user's local files are not mounted in the workspace. This chat currently supports text;
+file and image attachment ingestion is deferred. Do not claim to have received or read an
+attachment that is not available through the workspace's tools.
 
 ## Reactions and the agent profile
 

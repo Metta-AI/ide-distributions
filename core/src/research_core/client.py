@@ -76,7 +76,7 @@ class ScriptedClient:
         """Confirm a queued message; optionally wait until its run is assigned."""
         body: dict[str, Any] = {
             "session_id": self._session(),
-            "message": {"role": "user", "content": [{"type": "input_text", "text": text}]},
+            "message": {"role": "user", "content": text},
             "actor": self.actor,
         }
         if context is not None:

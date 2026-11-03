@@ -74,7 +74,7 @@ async def main():
                     "session_id": session,
                     "message": {
                         "role": "user",
-                        "content": [{"type": "input_text", "text": "contract proof"}],
+                        "content": "contract proof",
                     },
                     "context": {},
                 },

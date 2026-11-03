@@ -51,6 +51,7 @@ TOOL_MODULES: tuple[str, ...] = (
     "research_core.tools.wiki_edit",
     "research_core.tools.softmax_api",
     "research_core.tools.github",
+    "research_core.tools.attachment_download",
 )
 _loaded = False
 # Modules that failed to import, by name: a broken tool module costs its own tools, never the

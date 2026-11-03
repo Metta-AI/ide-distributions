@@ -190,7 +190,7 @@ def test_malformed_context_yields_200_with_problems_and_the_run_still_starts(sea
         "/message",
         {
             "session_id": seam.client.session_id,
-            "message": {"role": "user", "content": [{"type": "input_text", "text": "x"}]},
+            "message": {"role": "user", "content": "x"},
             "context": "junk",
         },
     )
@@ -237,7 +237,7 @@ def test_message_to_an_unknown_session_is_404(seam):
             "/message",
             {
                 "session_id": "api_0_nope",
-                "message": {"role": "user", "content": [{"type": "input_text", "text": "x"}]},
+                "message": {"role": "user", "content": "x"},
             },
         )
     assert info.value.status == 404
@@ -560,17 +560,11 @@ def test_serve_command_is_registered():
     assert args.port == 0 and args.profile == "orchestrator" and callable(args.run)
 
 
-def test_file_content_survives_admission_retry_and_native_history(seam):
+def test_text_message_survives_admission_retry_and_native_history(seam):
     from uuid import uuid4
 
     seam.client.open()
-    message = {
-        "role": "user",
-        "content": [
-            {"type": "input_text", "text": "Inspect this policy"},
-            {"type": "input_file", "filename": "policy.bas", "file_data": "UFJJTlQgMQ=="},
-        ],
-    }
+    message = {"role": "user", "content": "Continue this chat without changing its history."}
     body = {
         "op_id": str(uuid4()),
         "session_id": seam.client.session_id,
@@ -582,8 +576,6 @@ def test_file_content_survives_admission_retry_and_native_history(seam):
     assert seam.client._post("/message", body)["run_id"] == admitted["run_id"]
     (start,) = [args for method, args in seam.hermes.calls if method == "start"]
     assert start["text"] == [message]
-    (file,) = (seam.server.ws.root / "documents" / "attachments").glob("file-*")
-    assert file.read_bytes() == b"PRINT 1"
     history = seam.hermes.session_messages(seam.client.session_id, profile="orchestrator")
     assert history[0]["content"] == message["content"]
     assert seam.starts() == 1

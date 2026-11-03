@@ -335,7 +335,7 @@ class SeamServer:
         from research_core.messages import UserMessage
 
         message = UserMessage.model_validate(body["message"])
-        text = message.text()
+        text = message.content
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
         with self._deliver_lock, self.stores() as stores:
@@ -351,7 +351,6 @@ class SeamServer:
                     "seq": stores.wstore.last_seq(),
                 }
             block, problems = self._context_block(stores, session_id, body.get("context"))
-            message.model_input(self.ws.root / "documents")  # Prepare files before admission.
             payload = json.dumps(
                 {
                     "input": [message.model_dump(mode="json", exclude_none=True)],

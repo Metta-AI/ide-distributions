@@ -32,11 +32,9 @@ a notice will follow; do not hold the chat open waiting.
 
 ## Local files are not mounted
 
-coplay runs on the user's Mac; you run in the workspace. Attached files use OpenAI
-`input_file` parts; the workspace saves them privately and supplies local paths for the file
-tools. Later messages can refer to the same file by `file_id`. Voice requests carry the user's
-transcription as text, with speech preferences in the separate turn context. Record evidence
-as claims with `transcript` or `doc` links when relevant.
+The user's local files are not mounted in the workspace. This chat currently supports text;
+file and image attachment ingestion is deferred. Do not claim to have received or read an
+attachment that is not available through the workspace's tools.
 
 ## Library and notebook publishing
 

@@ -31,7 +31,7 @@ TASK_TYPE_WORD_LIMIT = 300
 FORBIDDEN = (".state", "store.db", "promotion", "kanban", "coordinator")
 TOOL_REFERENCE = re.compile(
     r"(?<![/.\w])(goal|task|claim|experiment|version|directive|settings|ui|workspace|upload"
-    r"|submit|xp|platform|forum_post|wiki_edit|softmax_api|github)"
+    r"|submit|xp|platform|forum_post|wiki_edit|softmax_api|github|attachment_download)"
     r"\.([a-z_]+)\b"
 )
 EXPECTED_SKILLS = {

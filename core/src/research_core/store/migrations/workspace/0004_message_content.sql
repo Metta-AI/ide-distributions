@@ -7,9 +7,7 @@ UPDATE client_admissions SET payload = json_object(
 ) WHERE kind = 'message';
 -- Upgrade the admission signature without changing an uncertain native run's frozen input.
 UPDATE client_admissions SET request = json_set(request, '$.message', json_object(
-    'role', 'user', 'content', json_array(json_object(
-        'type', 'input_text', 'text', json_extract(request, '$.message')
-    ))
+    'role', 'user', 'content', json_extract(request, '$.message')
 )) WHERE kind = 'message';
 UPDATE change_log SET token = 'migration:0004_message_content'
 WHERE tbl = 'client_admissions' AND id > (SELECT id FROM message_migration_cursor);
