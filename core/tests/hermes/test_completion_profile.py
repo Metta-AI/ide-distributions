@@ -51,10 +51,53 @@ if __name__ == "__main__":
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             captured.append(request)
-            parent = any(
-                tool["function"]["name"] == "delegate_task" for tool in request.get("tools", [])
-            )
-            if any(message["role"] == "tool" for message in request["messages"]):
+            if self.path.endswith("/responses"):
+                response = {
+                    "id": "proof-auxiliary",
+                    "object": "response",
+                    "status": "completed",
+                    "model": "proof",
+                    "output": [
+                        {
+                            "id": "proof-message",
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "Fixture auxiliary response",
+                                    "annotations": [],
+                                }
+                            ],
+                        }
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                }
+                if request.get("stream"):
+                    event = {"type": "response.completed", "response": response}
+                    body = (
+                        "event: response.completed\ndata: " + json.dumps(event) + "\n\n"
+                    ).encode()
+                else:
+                    body = json.dumps(response).encode()
+                self.write_response(body, request.get("stream"))
+                return
+            names = {tool["function"]["name"] for tool in request.get("tools", [])}
+            parent = "delegate_task" in names
+            if not names:
+                message = {"role": "assistant", "content": "Fixture auxiliary response"}
+                finish = "stop"
+            elif any(message["role"] == "tool" for message in request["messages"]):
+                if not parent:
+                    result = json.loads(
+                        next(
+                            m["content"]
+                            for m in reversed(request["messages"])
+                            if m["role"] == "tool"
+                        )
+                    )
+                    assert result["exit_code"] == 0 and result["output"].strip() == "1591", result
                 message = {
                     "role": "assistant",
                     "content": "DELEGATION_WAITING" if parent else "CHILD_RESULT_1591",
@@ -92,8 +135,11 @@ if __name__ == "__main__":
                 body = ("data: " + json.dumps(response) + "\n\ndata: [DONE]\n\n").encode()
             else:
                 body = json.dumps(response).encode()
+            self.write_response(body, request.get("stream"))
+
+        def write_response(self, body, stream):
             self.send_response(200)
-            mime = "text/event-stream" if request.get("stream") else "application/json"
+            mime = "text/event-stream" if stream else "application/json"
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
