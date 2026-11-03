@@ -48,6 +48,19 @@ class Unavailable(BaseModel):
     retry_at: datetime
 
 
+async def record_state(update, *args, **kwargs) -> None:
+    """Run an inference-state update off the event loop (its lock polls with ``time.sleep``).
+
+    A failed write (``OSError``, which includes the lock's ``LockTimeout``) is logged, never
+    raised: the lease loop runs in the runtime's task group, so raising would stop the
+    workspace. The lease file and keys are installed regardless.
+    """
+    try:
+        await asyncio.to_thread(update, *args, **kwargs)
+    except OSError as error:
+        log.warning("Inference state not recorded: %s: %s", type(error).__name__, error)
+
+
 async def maintain(
     *,
     platform_url: str,
@@ -83,7 +96,8 @@ async def maintain(
             result = TypeAdapter(Lease | Unavailable).validate_json(response.content)
             if isinstance(result, Unavailable):
                 log.warning("Inference unavailable: %s", result.kind)
-                state.lease_refused(
+                await record_state(
+                    state.lease_refused,
                     lease_file,
                     result.next_refill_at,
                     budget_exhausted=result.kind == "budget_exhausted",
@@ -105,6 +119,11 @@ async def maintain(
                 pending = lease_file.with_suffix(".pending")
                 pending.write_text(result.expires_at.isoformat())
                 pending.replace(lease_file)
-                state.lease_installed(lease_file, result.expires_at, result.key.get_secret_value())
+                await record_state(
+                    state.lease_installed,
+                    lease_file,
+                    result.expires_at,
+                    result.key.get_secret_value(),
+                )
                 ready.set()
             await asyncio.sleep(max(2, (renew_at - datetime.now(UTC)).total_seconds()))

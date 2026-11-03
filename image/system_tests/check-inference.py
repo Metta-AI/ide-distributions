@@ -14,7 +14,7 @@ from dotenv import dotenv_values
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from application import Operation, response  # noqa: E402
-from inference import Availability, maintain  # noqa: E402
+from inference import Availability, maintain, record_state  # noqa: E402
 
 from research_core import inference as state  # noqa: E402  (on the path through inference)
 from research_core.plugin.inference_hook import (  # noqa: E402
@@ -162,8 +162,18 @@ async def main(tmp_path: Path):
             await asyncio.gather(task, return_exceptions=True)
 
 
+async def unwritable_state(tmp_path: Path):
+    """A state write that fails is logged, not raised: it must not stop the workspace."""
+    (tmp_path / "a-file").write_text("")
+    lease_file = tmp_path / "a-file" / "lease"
+    await record_state(state.lease_installed, lease_file, datetime.now(UTC), "fixture-key")
+    await record_state(state.lease_refused, lease_file, datetime.now(UTC), budget_exhausted=True)
+
+
 with TemporaryDirectory() as directory:
     asyncio.run(main(Path(directory)))
+with TemporaryDirectory() as directory:
+    asyncio.run(unwritable_state(Path(directory)))
 print(
     "PASS inference retry follows server delay and publishes credentials before readiness;"
     " a spent key blocks until a new key arrives"
