@@ -33,7 +33,6 @@ if __name__ == "__main__":
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     import httpx
-    import yaml
     from gateway.config import GatewayConfig, Platform, PlatformConfig
     from gateway.platforms.api_server import APIServerAdapter
     from gateway.run import GatewayRunner
@@ -117,7 +116,7 @@ if __name__ == "__main__":
     }
     for path in (home, *(home / "profiles" / role for role in ("orchestrator", "researcher"))):
         path.mkdir(parents=True, exist_ok=True)
-        (path / "config.yaml").write_text(yaml.safe_dump(config))
+        (path / "config.yaml").write_text(json.dumps(config))
         (path / ".env").write_text(
             f"OPENAI_API_KEY={key}\nOPENAI_BASE_URL={provider_url}\nAPI_SERVER_KEY={key}\n"
         )
