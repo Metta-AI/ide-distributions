@@ -343,7 +343,14 @@ class SeamServer:
         )
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
+        started = time.monotonic()
+        log.info("Message admission started: op_id=%s", op_id)
         with self._deliver_lock, self.stores() as stores:
+            log.info(
+                "Message admission lock and store ready: op_id=%s seconds=%.3f",
+                op_id,
+                time.monotonic() - started,
+            )
             self._require_session(stores, session_id)
             receipt = admissions.read(stores.wstore, op_id, "message", body)
             if receipt is not None:
@@ -363,6 +370,7 @@ class SeamServer:
                     "instructions": body.get("instructions"),
                 }
             )
+            persisting = time.monotonic()
             admissions.accept(
                 stores.wstore,
                 actor,
@@ -372,6 +380,12 @@ class SeamServer:
                 session_id=session_id,
                 message=text,
                 payload=payload,
+            )
+            log.info(
+                "Message admission persisted: op_id=%s persist_seconds=%.3f total_seconds=%.3f",
+                op_id,
+                time.monotonic() - persisting,
+                time.monotonic() - started,
             )
             return {
                 "op_id": op_id,
@@ -439,6 +453,7 @@ class SeamServer:
                         from research_core.messages import UserMessage
                         from research_core.platform.errors import PlatformError
 
+                        preparing = time.monotonic()
                         (prepared,) = await asyncio.gather(
                             asyncio.to_thread(
                                 prepare,
@@ -448,6 +463,12 @@ class SeamServer:
                                 hermes_bin=self.hermes_bin,
                             ),
                             return_exceptions=True,
+                        )
+                        log.info(
+                            "Message input prepared: op_id=%s seconds=%.3f result=%s",
+                            row["op_id"],
+                            time.monotonic() - preparing,
+                            type(prepared).__name__,
                         )
                         if isinstance(
                             prepared,
@@ -475,6 +496,7 @@ class SeamServer:
                             " WHERE op_id=?",
                             (json.dumps(payload), row["op_id"]),
                         )
+                    starting = time.monotonic()
                     (run_id,) = await asyncio.gather(
                         asyncio.to_thread(
                             self.hermes.start,
@@ -485,6 +507,12 @@ class SeamServer:
                             idempotency_key=row["op_id"],
                         ),
                         return_exceptions=True,
+                    )
+                    log.info(
+                        "Message native start returned: op_id=%s seconds=%.3f result=%s",
+                        row["op_id"],
+                        time.monotonic() - starting,
+                        type(run_id).__name__,
                     )
                     if isinstance(run_id, RunsError):
                         with stores.wstore.tx(actor) as tx:
@@ -621,8 +649,12 @@ class SeamServer:
         return {"ok": True, "op": op, "store": kind, "record": record, "seq": seq}
 
     def snapshot(self, kind: str) -> dict:
+        started = time.monotonic()
+        log.info("Snapshot started: store=%s", kind)
         with self.stores() as stores:
-            return store_cli.snapshot(self.store_for(stores, kind), stores.coworld_id)
+            result = store_cli.snapshot(self.store_for(stores, kind), stores.coworld_id)
+        log.info("Snapshot completed: store=%s seconds=%.3f", kind, time.monotonic() - started)
+        return result
 
     def run_status(self, run_id: str) -> dict:
         return dataclasses.asdict(self.hermes.status(run_id, profile=self.profile))
@@ -1021,6 +1053,8 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> int:
     """Serve the workspace of ``IDE_WORKSPACE`` against the gateway of ``HERMES_HOME/.env``."""
+    logging.basicConfig()
+    log.setLevel(logging.INFO)
     env = os.environ
     profile_home = Path(env.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
     researcher_profiles = [

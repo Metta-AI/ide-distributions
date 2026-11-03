@@ -1,5 +1,7 @@
 """The distribution's application interface; hosting only transports these envelopes."""
 
+import logging
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 from uuid import UUID
@@ -22,6 +24,8 @@ from contract import (
     Run,
     Snapshot,
 )
+
+log = logging.getLogger(__name__)
 
 
 class Operation(BaseModel):
@@ -96,6 +100,14 @@ async def response(
                 method = "POST"
         case _:
             raise AssertionError(type(args))
+    started = time.monotonic()
+    log.info(
+        "Workspace service request started: request_id=%s op_id=%s operation=%s path=%s",
+        operation.id,
+        operation.op_id,
+        operation.name,
+        path,
+    )
     async with client.stream(
         method,
         path,
@@ -104,16 +116,38 @@ async def response(
         headers=headers,
         timeout=httpx.Timeout(30, read=None) if isinstance(args, Events) else 30,
     ) as result:
+        log.info(
+            "Workspace service headers: request_id=%s seconds=%.3f status=%s",
+            operation.id,
+            time.monotonic() - started,
+            result.status_code,
+        )
         if 200 <= result.status_code < 300 and not isinstance(args, Events):
+            reading = time.monotonic()
             payload = await result.aread()
             RESPONSES[operation.name].model_validate_json(payload)
+            log.info(
+                "Workspace service body validated: request_id=%s seconds=%.3f bytes=%s",
+                operation.id,
+                time.monotonic() - reading,
+                len(payload),
+            )
             if isinstance(args, Messages):
+                annotating = time.monotonic()
+                log.info("Workspace history annotation started: request_id=%s", operation.id)
                 annotated = await seam.post(
                     "/messages/context",
                     json={
                         "session_id": args.session_id,
                         "data": result.json()["data"],
                     },
+                    timeout=10,
+                )
+                log.info(
+                    "Workspace history annotated: request_id=%s seconds=%.3f status=%s",
+                    operation.id,
+                    time.monotonic() - annotating,
+                    annotated.status_code,
                 )
                 yield annotated
                 return
