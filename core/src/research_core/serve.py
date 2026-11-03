@@ -426,23 +426,28 @@ class SeamServer:
             for row in stores.wstore.q(
                 "SELECT * FROM client_admissions AS message WHERE kind='message'"
                 " AND status IN ('queued','running')"
-                " AND NOT EXISTS(SELECT 1 FROM client_admissions AS opening"
+                " AND (message.dispatch_started=1 OR NOT EXISTS("
+                " SELECT 1 FROM client_admissions AS opening"
                 " WHERE opening.kind='open' AND opening.status='queued'"
-                " AND opening.session_id=message.session_id) ORDER BY rowid"
+                " AND opening.session_id=message.session_id)) ORDER BY rowid"
             ):
                 if row["session_id"] in reserved:
                     continue
                 reserved.add(row["session_id"])
-                failed_open = stores.wstore.one(
-                    "SELECT error FROM client_admissions WHERE kind='open'"
-                    " AND session_id=? AND status='failed'",
+                opening = stores.wstore.one(
+                    "SELECT status,error FROM client_admissions WHERE kind='open'"
+                    " AND session_id=? ORDER BY rowid DESC LIMIT 1",
                     (row["session_id"],),
                 )
-                if failed_open is not None:
+                if (
+                    opening is not None
+                    and opening["status"] == "failed"
+                    and not row["dispatch_started"]
+                ):
                     with stores.wstore.tx(actor) as tx:
                         tx.execute(
                             "UPDATE client_admissions SET status='failed',error=? WHERE op_id=?",
-                            (failed_open["error"], row["op_id"]),
+                            (opening["error"], row["op_id"]),
                         )
                         tx.event("client.finished", row["op_id"], {"status": "failed"})
                     continue
@@ -596,8 +601,10 @@ class SeamServer:
                 "pending": bool(
                     stores.wstore.one(
                         "SELECT EXISTS(SELECT 1 FROM client_admissions"
-                        " WHERE kind='open' AND session_id=? AND status='queued')",
-                        (session_id,),
+                        " WHERE kind='open' AND session_id=? AND status='queued')"
+                        " AND NOT EXISTS(SELECT 1 FROM client_admissions"
+                        " WHERE kind='open' AND session_id=? AND status='completed')",
+                        (session_id, session_id),
                     )[0]
                 )
             }

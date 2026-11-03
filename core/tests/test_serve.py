@@ -844,6 +844,27 @@ def test_failed_native_open_does_not_block_other_sessions(tmp_path, monkeypatch,
                     "SELECT status FROM client_admissions WHERE session_id='rejected'"
                 )
             )
+            server.session_open(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": "rejected",
+                    "client": {"id": "recovered-proof", "kind": "test"},
+                }
+            )
+            recovered = server.message(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": "rejected",
+                    "message": {"role": "user", "content": "after successful reopening"},
+                }
+            )
+            asyncio.run(server.dispatch_messages())
+            assert (
+                ctx.wstore.one(
+                    "SELECT status FROM client_admissions WHERE op_id=?", (recovered["op_id"],)
+                )[0]
+                == "running"
+            )
     finally:
         server._http.server_close()
 
@@ -886,3 +907,71 @@ def test_open_receipt_and_local_session_roll_back_together(seam, monkeypatch):
     assert info.value.status == 400
     assert seam.wstore.one("SELECT op_id FROM client_admissions WHERE op_id=?", (op_id,)) is None
     assert sessions.read(seam.wstore, "atomic-open") is None
+
+
+@pytest.mark.parametrize("opening_status", ["queued", "failed"])
+@pytest.mark.parametrize("lost_reply", [False, True])
+def test_reopening_preserves_existing_execution_and_history(
+    tmp_path, monkeypatch, opening_status, lost_reply
+):
+    from research_core.store import admissions
+    from research_core.watcher.hermes_api import RunsUnavailable
+
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    server = SeamServer(ws=ctx.workspace, hermes=native)
+    start = native.start
+    lose_reply = lost_reply
+
+    def uncertain_start(*args, **kwargs):
+        nonlocal lose_reply
+        run_id = start(*args, **kwargs)
+        if lose_reply:
+            lose_reply = False
+            raise RunsUnavailable("Lost start response")
+        return run_id
+
+    monkeypatch.setattr(native, "start", uncertain_start)
+    try:
+        session_id = server.session_open(
+            {"op_id": str(uuid4()), "client": {"id": "existing-proof", "kind": "test"}}
+        )["session_id"]
+        receipt = server.message(
+            {
+                "op_id": str(uuid4()),
+                "session_id": session_id,
+                "message": {"role": "user", "content": "existing work"},
+            }
+        )
+        asyncio.run(server.dispatch_messages())
+        admissions.accept(
+            ctx.wstore,
+            HARNESS,
+            op_id="reopening",
+            kind="open",
+            request={},
+            session_id=session_id,
+            message="",
+            payload="",
+        )
+        with ctx.wstore.tx(HARNESS) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET status=?,error='Opening refused'"
+                " WHERE op_id='reopening'",
+                (opening_status,),
+            )
+
+        def unavailable(*args, **kwargs):
+            raise RunsUnavailable("Gateway unavailable")
+
+        monkeypatch.setattr(native, "create_session", unavailable)
+        asyncio.run(server.dispatch_messages())
+        row = ctx.wstore.one(
+            "SELECT status,run_id FROM client_admissions WHERE op_id=?", (receipt["op_id"],)
+        )
+        assert row["status"] == "running" and row["run_id"]
+        assert len(native.runs) == 1
+        # Reopening must not replace an established conversation with an empty pending chat.
+        assert server.session_pending(session_id) == {"pending": False}
+    finally:
+        server._http.server_close()
