@@ -48,37 +48,18 @@ class Unavailable(BaseModel):
     retry_at: datetime
 
 
-# A failed inference-state write is retried this often until the next lease call.
-STATE_RETRY_S = 10
-
-
-async def record_state(update, *args, **kwargs) -> bool:
-    """Run an inference-state update off the event loop (its lock polls with ``time.sleep``);
-    whether it was written.
+async def record_state(update, *args, **kwargs) -> None:
+    """Run an inference-state update off the event loop (its lock polls with ``time.sleep``).
 
     A failed write (``OSError``, which includes the lock's ``LockTimeout``) is logged, never
     raised: the lease loop runs in the runtime's task group, so raising would stop the
-    workspace. The lease file and keys are installed regardless.
+    workspace. Only a refusal's bookkeeping goes through here; a new key is recorded in the
+    lease file alone, which ends a budget block without a state write.
     """
     try:
         await asyncio.to_thread(update, *args, **kwargs)
     except OSError as error:
         log.warning("Inference state not recorded: %s: %s", type(error).__name__, error)
-        return False
-    return True
-
-
-async def record_state_by(deadline: datetime, update, *args, **kwargs) -> None:
-    """:func:`record_state`, retried every :data:`STATE_RETRY_S` until written or ``deadline``.
-
-    A lost write matters: a lost ``lease_installed`` at the refill would keep a funded key
-    blocked until the next renewal, perhaps a day away. Only the write is retried; at
-    ``deadline`` the next lease call records the state afresh.
-    """
-    while not await record_state(update, *args, **kwargs):
-        if datetime.now(UTC) >= deadline:
-            return
-        await asyncio.sleep(STATE_RETRY_S)
 
 
 async def maintain(
@@ -117,8 +98,7 @@ async def maintain(
             if isinstance(result, Unavailable):
                 log.warning("Inference unavailable: %s", result.kind)
                 renew_at = min(result.retry_at, result.next_refill_at)
-                await record_state_by(
-                    renew_at,
+                await record_state(
                     state.lease_refused,
                     lease_file,
                     result.next_refill_at,
@@ -137,15 +117,13 @@ async def maintain(
                 # workspace blocked on a spent key resumes on time.
                 renew_at = min(result.renew_at, refill_at)
                 availability.expires_at = result.expires_at
-                pending = lease_file.with_suffix(".pending")
-                pending.write_text(result.expires_at.isoformat())
-                pending.replace(lease_file)
-                ready.set()
-                await record_state_by(
-                    renew_at,
+                # The lease file is essential (it is the gate and the record of the key), so a
+                # failed write raises, as the .env writes above do.
+                await asyncio.to_thread(
                     state.lease_installed,
                     lease_file,
                     result.expires_at,
                     result.key.get_secret_value(),
                 )
+                ready.set()
             await asyncio.sleep(max(2, (renew_at - datetime.now(UTC)).total_seconds()))

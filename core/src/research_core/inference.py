@@ -2,8 +2,20 @@
 
 Two files sit side by side in the folder of ``IDE_INFERENCE_LEASE_FILE``:
 
-* the *lease file* holds the current key's expiry as an ISO time. The image's lease loop
-  (``image/inference.py``) writes it whenever it installs a key.
+* the *lease file* is the one record of the installed key::
+
+      {"expires_at": "<ISO time>",
+       "key_id": "<sha256 prefix of the installed key>",
+       "key_changed_at": "<ISO time>"}
+
+  ``key_id`` fingerprints the key (the file never holds the key itself); ``key_changed_at`` is
+  when a key with a different fingerprint was installed, so the hook can ignore billing errors
+  from runs still finishing on the previous, spent key. The image's lease loop
+  (``image/inference.py``) is its only writer, through :func:`lease_installed`. The image
+  deletes the file at startup, so after a restart ``key_changed_at`` is the first install
+  time; a budget block still holds, because the state file survives and names the key. A
+  bare ISO time (the file's earlier form, still written by test fixtures) reads as an expiry
+  with no key known.
 * the *inference state* (``.inference-state``) is a small JSON object that says why model work
   is blocked and until when::
 
@@ -13,29 +25,29 @@ Two files sit side by side in the folder of ``IDE_INFERENCE_LEASE_FILE``:
        "last_error": {"session_id", "reason", "status_code", "at"} | null,
        "next_refill_at": "<ISO time>" | null,
        "outages": ["<ISO time>", ...],
-       "key_id": "<sha256 prefix of the installed key>" | null,
-       "key_changed_at": "<ISO time>" | null}
+       "blocked_key_id": "<sha256 prefix of the spent key>" | null}
 
   Three processes share it, which is why it is a file and not a store table: the Hermes
   plugin's ``api_request_error`` hook (``research_core.plugin.inference_hook``) records each
-  failed model call and sets the block; the image's lease loop records the next refill time,
-  sets ``budget_exhausted`` when the platform refuses a lease and clears it when a new key
-  arrives; and :func:`available` reads it before every run start. ``next_refill_at`` is the
-  lease loop's best knowledge of the next refill (for the hook's ``until``); ``outages`` holds
-  the times of recent outage-class errors, so the hook can count them across processes;
-  ``key_id`` fingerprints the installed key, so the lease loop can tell a new key from the
-  same key handed back again (it survives restarts, which rewrite the profiles' ``.env``);
-  ``key_changed_at`` is when a different key was last installed, so the hook can ignore
-  billing errors from runs still finishing on the previous, spent key.
+  failed model call and sets the block; the image's lease loop records the next refill time
+  when the platform refuses a lease, and sets ``budget_exhausted`` when it refuses for that
+  reason; and :func:`available` reads it before every run start. ``next_refill_at`` is the
+  refill time the platform last gave with a refusal (the hook's ``until`` when the lease file
+  cannot tell); ``outages`` holds the times of recent outage-class errors, so the hook can
+  count them across processes; ``blocked_key_id`` fingerprints the key that ran out.
 
-``budget_exhausted`` holds until the lease loop installs a different key; its ``until`` (the
-refill time) is only what the user is told. It does not lapse by the clock, because the gate
-would otherwise open in the seconds between the refill and the new key, runs on the spent key
-would fail, and the hook would block again until the following day. A dead lease loop still
-closes the gate, through the lease's expiry. ``provider_unavailable`` holds while ``until``
-is in the future and simply lapses; nobody clears it. A missing or
-malformed state file means "not blocked". Every write is a locked read-modify-write that
-replaces the file atomically (temp file, then rename).
+``budget_exhausted`` holds while the lease file's ``key_id`` equals ``blocked_key_id`` (two
+unknown keys count as equal, so a block with no key known still holds). Installing a different
+key therefore ends the block with no write to the state file: the lease file alone says the
+key changed, so no second write can be lost. The platform hands back the same key until it
+nears expiry, and a spent key stays spent until the refill, so the same key keeps the block.
+Its ``until`` (the refill time) is only what the user is told. It does not lapse by the clock,
+because the gate would otherwise open in the seconds between the refill and the new key, runs
+on the spent key would fail, and the hook would block again until the following day. A dead
+lease loop still closes the gate, through the lease's expiry. ``provider_unavailable`` holds
+while ``until`` is in the future and simply lapses; nobody clears it. A missing or malformed
+state file means "not blocked". Every state write is a locked read-modify-write that replaces
+the file atomically (temp file, then rename).
 
 Standard library only: the plugin imports this module inside Hermes's own interpreter, and
 the image imports it from the release's core source.
@@ -74,6 +86,15 @@ class ApiError:
 
 
 @dataclass(frozen=True)
+class InstalledLease:
+    """The lease file: the installed key's expiry, fingerprint and when it changed."""
+
+    expires_at: datetime
+    key_id: str | None = None
+    key_changed_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class InferenceState:
     blocked: Blocked | None = None
     until: datetime | None = None
@@ -81,24 +102,62 @@ class InferenceState:
     last_error: ApiError | None = None
     next_refill_at: datetime | None = None
     outages: tuple[datetime, ...] = field(default_factory=tuple)
-    key_id: str | None = None
-    key_changed_at: datetime | None = None
+    blocked_key_id: str | None = None
 
-    def blocking(self, now: datetime | None = None) -> bool:
-        """Whether this state stops model work at ``now``: a budget block until a new key, an
+    def blocking(self, now: datetime | None = None, *, installed_key_id: str | None) -> bool:
+        """Whether this state stops model work at ``now``: a budget block while the spent key
+        is still the installed one (``installed_key_id``, the lease file's ``key_id``), an
         outage block until ``until``."""
         if self.blocked == "budget_exhausted":
-            return True
+            return self.blocked_key_id == installed_key_id
         return (
             self.blocked is not None
             and self.until is not None
             and self.until > (now or datetime.now(UTC))
         )
 
-    def with_block(self, blocked: Blocked | None, until: datetime | None, now: datetime):
-        """This state with ``blocked``/``until`` set; ``since`` moves only when ``blocked`` does."""
-        since = self.since if blocked == self.blocked and self.since else now
-        return replace(self, blocked=blocked, until=until, since=since)
+    def with_block(
+        self,
+        blocked: Blocked | None,
+        until: datetime | None,
+        now: datetime,
+        blocked_key_id: str | None = None,
+    ):
+        """This state with ``blocked``/``until``/``blocked_key_id`` set; ``since`` moves only
+        when the block does."""
+        same = blocked == self.blocked and blocked_key_id == self.blocked_key_id
+        since = self.since if same and self.since else now
+        return replace(
+            self, blocked=blocked, until=until, since=since, blocked_key_id=blocked_key_id
+        )
+
+
+def read_lease(lease_file: Path | None) -> InstalledLease | None:
+    """The lease file, or ``None`` when it is missing or malformed.
+
+    A bare ISO time, the file's earlier form that test fixtures (and branches not yet on this
+    format) still write, reads as ``InstalledLease(expires_at)`` with no key known.
+    """
+    if lease_file is None:
+        return None
+    try:
+        text = lease_file.read_text()
+        try:
+            raw = json.loads(text)
+        except ValueError:
+            return InstalledLease(expires_at=_time(text.strip()))
+        return InstalledLease(
+            expires_at=_time(raw["expires_at"]),
+            key_id=raw.get("key_id"),
+            key_changed_at=_time(raw.get("key_changed_at")),
+        )
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
+def _installed_key_id(lease_file: Path | None) -> str | None:
+    lease = read_lease(lease_file)
+    return None if lease is None else lease.key_id
 
 
 def state_path(lease_file: Path) -> Path:
@@ -131,7 +190,7 @@ def update_state(
 def blocking_state(lease_file: Path | None, now: datetime | None = None) -> InferenceState | None:
     """The inference state if it blocks model work now, else ``None``."""
     state = read_state(lease_file)
-    return state if state.blocking(now) else None
+    return state if state.blocking(now, installed_key_id=_installed_key_id(lease_file)) else None
 
 
 def available(lease_file: Path | None, now: datetime | None = None) -> bool:
@@ -142,15 +201,19 @@ def available(lease_file: Path | None, now: datetime | None = None) -> bool:
     if lease_file is None:
         return True
     now = now or datetime.now(UTC)
-    try:
-        expires_at = datetime.fromisoformat(lease_file.read_text())
-    except (OSError, ValueError):
+    lease = read_lease(lease_file)
+    if lease is None:
         return False
-    return expires_at > now and not read_state(lease_file).blocking(now)
+    return lease.expires_at > now and not read_state(lease_file).blocking(
+        now, installed_key_id=lease.key_id
+    )
 
 
-def next_refill(state: InferenceState, now: datetime) -> datetime:
-    """When the budget refills next: the recorded time, else the next 00:00 UTC."""
+def next_refill(lease: InstalledLease | None, state: InferenceState, now: datetime) -> datetime:
+    """When the budget refills next: the lease's expiry minus the platform's grace, else the
+    refill time of the last refusal, else the next 00:00 UTC (whichever first is still ahead)."""
+    if lease is not None and lease.expires_at - RENEWAL_GRACE > now:
+        return lease.expires_at - RENEWAL_GRACE
     if state.next_refill_at is not None and state.next_refill_at > now:
         return state.next_refill_at
     return datetime.combine(
@@ -159,29 +222,42 @@ def next_refill(state: InferenceState, now: datetime) -> datetime:
 
 
 def key_id(key: str) -> str:
-    """A short fingerprint of a model key, so the state can tell keys apart without holding one."""
+    """A short fingerprint of a model key, so the files can tell keys apart without holding one."""
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 def lease_installed(
     lease_file: Path, expires_at: datetime, key: str, now: datetime | None = None
-) -> InferenceState:
-    """The lease loop installed a lease: record the refill time and the key's fingerprint.
+) -> InstalledLease:
+    """The lease loop installed a lease: write the lease file with the key's fingerprint.
 
-    A different key ends a budget block. The platform hands back the same key until it nears
-    expiry, and a spent key stays spent until the refill, so the same key changes nothing.
+    ``key_changed_at`` moves to ``now`` only when the fingerprint differs from the file's; the
+    same key handed back keeps it. The state file is not touched: a different ``key_id`` is
+    what ends a budget block (:meth:`InferenceState.blocking`). The lease loop is the file's
+    only writer, so the read-then-replace needs no lock; the replace is atomic, so readers see
+    the old lease or the new one.
     """
     now = now or datetime.now(UTC)
-
-    def change(state: InferenceState) -> InferenceState:
-        installed = key_id(key)
-        if state.key_id != installed:
-            state = replace(state, key_id=installed, key_changed_at=now)
-            if state.blocked == "budget_exhausted":
-                state = state.with_block(None, None, now)
-        return replace(state, next_refill_at=expires_at - RENEWAL_GRACE)
-
-    return update_state(lease_file, change)
+    installed = key_id(key)
+    previous = read_lease(lease_file)
+    if previous is not None and previous.key_id == installed:
+        changed_at = previous.key_changed_at
+    else:
+        changed_at = now
+    lease = InstalledLease(expires_at=expires_at, key_id=installed, key_changed_at=changed_at)
+    pending = lease_file.with_name(lease_file.name + ".pending")
+    pending.write_text(
+        json.dumps(
+            {
+                "expires_at": expires_at.isoformat(),
+                "key_id": installed,
+                "key_changed_at": None if changed_at is None else changed_at.isoformat(),
+            }
+        )
+        + "\n"
+    )
+    os.replace(pending, lease_file)
+    return lease
 
 
 def lease_refused(
@@ -191,13 +267,15 @@ def lease_refused(
     budget_exhausted: bool,
     now: datetime | None = None,
 ) -> InferenceState:
-    """The platform refused a lease: record the refill time; a spent budget blocks until it."""
+    """The platform refused a lease: record the refill time; a spent budget blocks the
+    installed key (the lease file's ``key_id``) until a different key arrives."""
     now = now or datetime.now(UTC)
+    spent_key_id = _installed_key_id(lease_file)
 
     def change(state: InferenceState) -> InferenceState:
         state = replace(state, next_refill_at=next_refill_at)
         if budget_exhausted:
-            state = state.with_block("budget_exhausted", next_refill_at, now)
+            state = state.with_block("budget_exhausted", next_refill_at, now, spent_key_id)
         return state
 
     return update_state(lease_file, change)
@@ -234,8 +312,7 @@ def _decode(raw: dict[str, Any]) -> InferenceState:
         ),
         next_refill_at=_time(raw.get("next_refill_at")),
         outages=tuple(_time(at) for at in raw.get("outages") or ()),
-        key_id=raw.get("key_id"),
-        key_changed_at=_time(raw.get("key_changed_at")),
+        blocked_key_id=raw.get("blocked_key_id"),
     )
 
 
@@ -252,6 +329,5 @@ def _encode(state: InferenceState) -> dict[str, Any]:
         else asdict(state.last_error) | {"at": state.last_error.at.isoformat()},
         "next_refill_at": iso(state.next_refill_at),
         "outages": [at.isoformat() for at in state.outages],
-        "key_id": state.key_id,
-        "key_changed_at": iso(state.key_changed_at),
+        "blocked_key_id": state.blocked_key_id,
     }

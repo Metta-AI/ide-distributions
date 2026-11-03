@@ -6,9 +6,10 @@ Hermes calls the hook after it classifies each failed model call, with the class
 The hook always records the call as ``last_error``, then:
 
 * on ``billing`` (402 credits, or a 403 "Key limit exceeded") it blocks model work as
-  ``budget_exhausted``, showing the next refill as ``until``. Only the lease loop clears that
-  block, when a new key arrives. Within :data:`KEY_CHANGE_GRACE` of a new key it does not
-  block: such errors come from runs still finishing on the previous, spent key.
+  ``budget_exhausted`` for the installed key (the lease file's ``key_id``), showing the next
+  refill as ``until``. The block ends when the lease loop installs a different key; nobody
+  writes to clear it. Within :data:`KEY_CHANGE_GRACE` of the lease's ``key_changed_at`` it
+  does not block: such errors come from runs still finishing on the previous, spent key.
 * after :data:`OUTAGE_COUNT` outage-class errors within :data:`OUTAGE_WINDOW` it blocks model
   work as ``provider_unavailable`` for :data:`OUTAGE_BLOCK`. Nobody clears that block; it lapses.
 
@@ -56,6 +57,8 @@ def record_api_error(
     """Record one failed model call in the inference state and set the block it implies."""
     now = now or datetime.now(UTC)
     billing = is_billing(reason, status_code, message)
+    lease = inference.read_lease(lease_file)
+    installed_key_id = None if lease is None else lease.key_id
 
     def change(state: inference.InferenceState) -> inference.InferenceState:
         state = replace(
@@ -68,16 +71,23 @@ def record_api_error(
             ),
         )
         if billing:
-            if state.key_changed_at is not None and now - state.key_changed_at < KEY_CHANGE_GRACE:
+            changed_at = None if lease is None else lease.key_changed_at
+            if changed_at is not None and now - changed_at < KEY_CHANGE_GRACE:
                 return state
-            return state.with_block("budget_exhausted", inference.next_refill(state, now), now)
+            return state.with_block(
+                "budget_exhausted",
+                inference.next_refill(lease, state, now),
+                now,
+                installed_key_id,
+            )
         if reason not in OUTAGE_REASONS:
             return state
         outages = tuple(at for at in state.outages if now - at < OUTAGE_WINDOW) + (now,)
         state = replace(state, outages=outages)
         # A budget block in force outranks an outage: the refill, not the provider, ends it.
         if len(outages) >= OUTAGE_COUNT and not (
-            state.blocked == "budget_exhausted" and state.blocking(now)
+            state.blocked == "budget_exhausted"
+            and state.blocking(now, installed_key_id=installed_key_id)
         ):
             state = state.with_block("provider_unavailable", now + OUTAGE_BLOCK, now)
         return state

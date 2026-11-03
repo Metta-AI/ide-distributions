@@ -24,6 +24,7 @@ REFILL = datetime(2026, 11, 3, 0, 0, tzinfo=UTC)
 
 
 def lease(tmp_path, expires_at: datetime | None = None):
+    """A bare-ISO lease file: an expiry with no key known (``read_lease`` accepts it)."""
     lease_file = tmp_path / ".inference-lease"
     expires_at = expires_at or datetime.now(UTC) + timedelta(hours=4)
     lease_file.write_text(expires_at.isoformat())
@@ -49,7 +50,7 @@ def test_state_round_trips(tmp_path):
             last_error=inference.ApiError("api_1", "overloaded", 503, NOW),
             next_refill_at=REFILL,
             outages=(NOW - timedelta(minutes=1), NOW),
-            key_id="abc",
+            blocked_key_id="abc",
         ),
     )
     assert inference.read_state(lease_file) == written
@@ -109,32 +110,88 @@ def test_available_still_needs_an_unexpired_lease(tmp_path):
     assert not inference.available(lease(tmp_path, datetime.now(UTC) - timedelta(seconds=1)))
 
 
-def test_only_a_new_key_clears_a_budget_block(tmp_path):
-    lease_file = lease(tmp_path)
-    expires = REFILL + inference.RENEWAL_GRACE
-    first = inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
-    assert first.next_refill_at == REFILL and first.blocked is None
-    assert first.key_changed_at == NOW
+def test_lease_file_records_the_installed_key(tmp_path):
+    lease_file = tmp_path / ".inference-lease"
+    expires = datetime.now(UTC) + timedelta(hours=4)
+    installed = inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
+    assert installed == inference.InstalledLease(expires, inference.key_id("sk-one"), NOW)
+    assert inference.read_lease(lease_file) == installed
+    assert "sk-one" not in lease_file.read_text()
+    assert not (tmp_path / ".inference-lease.pending").exists()
+    assert not inference.state_path(lease_file).exists()
+    assert inference.available(lease_file)
+
+
+def test_spent_key_stays_blocked_when_the_same_key_is_reinstalled(tmp_path):
+    lease_file = tmp_path / ".inference-lease"
+    expires = datetime.now(UTC) + timedelta(hours=4)
+    inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
+    block = block_budget(lease_file)
+    assert block.blocked_key_id == inference.key_id("sk-one")
+
+    # The platform hands back the same, spent key until it nears expiry: still blocked, and
+    # the key keeps its original change time.
+    again = inference.lease_installed(lease_file, expires, "sk-one", now=NOW + timedelta(hours=1))
+    assert again.key_changed_at == NOW
+    assert not inference.available(lease_file)
+    assert inference.blocking_state(lease_file).blocked == "budget_exhausted"
+
+
+def test_a_new_key_ends_a_budget_block_without_writing_the_state(tmp_path):
+    lease_file = tmp_path / ".inference-lease"
+    expires = datetime.now(UTC) + timedelta(hours=4)
+    inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
     block_budget(lease_file)
+    state_file = inference.state_path(lease_file)
+    before = (state_file.read_text(), state_file.stat().st_mtime_ns)
+    state_file.chmod(0o444)  # any write to the state would fail
 
-    # The platform hands back the same, spent key until it nears expiry: still blocked.
-    inference.lease_installed(lease_file, expires, "sk-one", now=NOW + timedelta(hours=1))
-    same = inference.read_state(lease_file)
-    assert same.blocked == "budget_exhausted" and same.key_changed_at == NOW
-
-    cleared = inference.lease_installed(lease_file, expires + timedelta(days=1), "sk-two")
-    assert cleared.blocked is None and cleared.until is None
-    assert cleared.key_changed_at > NOW
-    assert cleared.next_refill_at == REFILL + timedelta(days=1)
-    assert "sk-two" not in inference.state_path(lease_file).read_text()
+    new = inference.lease_installed(lease_file, expires + timedelta(days=1), "sk-two")
+    assert new.key_changed_at > NOW
+    assert inference.available(lease_file)
+    assert inference.blocking_state(lease_file) is None
+    assert (state_file.read_text(), state_file.stat().st_mtime_ns) == before
+    # The state still names the spent key; it no longer matches the installed one.
+    assert inference.read_state(lease_file).blocked_key_id == inference.key_id("sk-one")
 
 
-def test_next_refill_falls_back_to_midnight_utc():
-    assert inference.next_refill(inference.InferenceState(), NOW) == REFILL
+def test_bare_iso_lease_reads_as_an_expiry_with_no_key(tmp_path):
+    expires = datetime.now(UTC) + timedelta(hours=4)
+    lease_file = lease(tmp_path, expires)
+    assert inference.read_lease(lease_file) == inference.InstalledLease(expires)
+    assert inference.available(lease_file)
+
+    # A budget block with no key known holds while no key is known (None equals None) ...
+    assert block_budget(lease_file).blocked_key_id is None
+    assert not inference.available(lease_file)
+    # ... and ends once a key is installed.
+    installed = inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
+    assert installed.key_changed_at == NOW
+    assert inference.available(lease_file)
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["", "not a time", "[]", '{"key_id": "abc"}', '{"expires_at": "2099-01-01T00:00:00"}'],
+)
+def test_malformed_lease_is_unavailable(tmp_path, content):
+    lease_file = tmp_path / ".inference-lease"
+    lease_file.write_text(content)
+    assert inference.read_lease(lease_file) is None
+    assert not inference.available(lease_file)
+
+
+def test_next_refill_prefers_the_lease_then_the_refusal_then_midnight_utc():
+    empty = inference.InferenceState()
+    assert inference.next_refill(None, empty, NOW) == REFILL
     stale = inference.InferenceState(next_refill_at=NOW - timedelta(hours=1))
-    assert inference.next_refill(stale, NOW) == REFILL
+    assert inference.next_refill(None, stale, NOW) == REFILL
     known = inference.InferenceState(next_refill_at=NOW + timedelta(hours=1))
-    assert inference.next_refill(known, NOW) == NOW + timedelta(hours=1)
+    assert inference.next_refill(None, known, NOW) == NOW + timedelta(hours=1)
+    current = inference.InstalledLease(NOW + timedelta(hours=2) + inference.RENEWAL_GRACE)
+    assert inference.next_refill(current, known, NOW) == NOW + timedelta(hours=2)
+    expired = inference.InstalledLease(NOW)
+    assert inference.next_refill(expired, known, NOW) == NOW + timedelta(hours=1)
 
 
 # --- the gate in HermesRuns ------------------------------------------------------------------

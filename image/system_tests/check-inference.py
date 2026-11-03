@@ -13,12 +13,10 @@ from uuid import uuid4
 from dotenv import dotenv_values
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import inference as lease_loop  # noqa: E402
 from application import Operation, response  # noqa: E402
-from inference import Availability, maintain, record_state, record_state_by  # noqa: E402
+from inference import Availability, maintain, record_state  # noqa: E402
 
 from research_core import inference as state  # noqa: E402  (on the path through inference)
-from research_core.locks import LockTimeout  # noqa: E402
 from research_core.plugin.inference_hook import (  # noqa: E402
     KEY_CHANGE_GRACE,
     record_api_error,
@@ -65,10 +63,13 @@ async def main(tmp_path: Path):
     ready = asyncio.Event()
     done = asyncio.Event()
 
+    installed = None
+
     async def respond(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         request = await reader.readuntil(b"\r\n\r\n")
         assert request.startswith(b"PUT /v2/workspaces/proof/inference HTTP/1.1\r\n")
         assert b"Authorization: Bearer fixture" in request
+        nonlocal installed
         requests.append(time.monotonic())
         if len(requests) == 1:
             assert not ready.is_set() and not availability.available() and not marker.exists()
@@ -83,7 +84,8 @@ async def main(tmp_path: Path):
         elif len(requests) == 3:
             # The first lease is installed; now the key runs dry mid-run.
             assert availability.available()
-            assert state.read_state(marker).next_refill_at == refill
+            installed = state.read_lease(marker)
+            assert installed.key_id == state.key_id("fixture-key")
             # Later than the hook's grace after a key change, so the error counts.
             record_api_error(
                 marker,
@@ -93,10 +95,12 @@ async def main(tmp_path: Path):
                 now=datetime.now(UTC) + KEY_CHANGE_GRACE,
             )
             assert not availability.available()
-            # The platform hands back the same, spent key: that must not end the block.
+            # The platform hands back the same, spent key: that must not end the block, nor
+            # move the key's change time.
             status, headers, body = lease("fixture-key", expires)
         elif len(requests) == 4:
             assert state.read_state(marker).blocked == "budget_exhausted"
+            assert state.read_lease(marker).key_changed_at == installed.key_changed_at
             assert not availability.available()
             status, headers = "200 OK", ""
             body = json.dumps(
@@ -145,7 +149,7 @@ async def main(tmp_path: Path):
             assert requests[1] - requests[0] >= 1
             print(f"Inference retry interval: {requests[1] - requests[0]:.3f}s")
             assert availability.available()
-            assert marker.read_text() == expires.isoformat()
+            assert state.read_lease(marker).expires_at == expires
             for home in homes:
                 assert dotenv_values(home / ".env") == {
                     "PRESERVED": "original",
@@ -153,10 +157,11 @@ async def main(tmp_path: Path):
                 }
             async with asyncio.timeout(15):
                 await done.wait()
-                while state.read_state(marker).blocked is not None:
+                while not availability.available():
                     await asyncio.sleep(0.05)
-            assert availability.available()
-            assert state.read_state(marker).next_refill_at == refill + timedelta(days=1)
+            # The new key alone ended the block: the state still names the spent key.
+            assert state.read_lease(marker).key_id == state.key_id("fresh-key")
+            assert state.read_state(marker).blocked_key_id == state.key_id("fixture-key")
             for home in homes:
                 assert dotenv_values(home / ".env")["OPENROUTER_API_KEY"] == "fresh-key"
         finally:
@@ -168,48 +173,13 @@ async def unwritable_state(tmp_path: Path):
     """A state write that fails is logged, not raised: it must not stop the workspace."""
     (tmp_path / "a-file").write_text("")
     lease_file = tmp_path / "a-file" / "lease"
-    await record_state(state.lease_installed, lease_file, datetime.now(UTC), "fixture-key")
     await record_state(state.lease_refused, lease_file, datetime.now(UTC), budget_exhausted=True)
-
-
-async def retried_state(tmp_path: Path):
-    """A failed write at the refill is retried soon, not left until the next renewal: the
-    new key's write clears the budget block once the lock is free again."""
-    lease_file = tmp_path / "lease"
-    state.lease_installed(lease_file, datetime.now(UTC), "spent-key")
-    state.lease_refused(lease_file, datetime.now(UTC), budget_exhausted=True)
-    attempts = []
-
-    def flaky(*args):
-        attempts.append(time.monotonic())
-        if len(attempts) < 3:
-            raise LockTimeout("held")  # an OSError
-        return state.lease_installed(*args)
-
-    lease_loop.STATE_RETRY_S = 0.05
-    deadline = datetime.now(UTC) + timedelta(days=1)
-    async with asyncio.timeout(5):
-        await record_state_by(deadline, flaky, lease_file, deadline, "fresh-key")
-    assert len(attempts) == 3 and state.read_state(lease_file).blocked is None
-
-    # Past the deadline it gives up, leaving the write to the next lease call.
-    attempts.clear()
-    always = LockTimeout("held")
-
-    def failing(*args):
-        attempts.append(1)
-        raise always
-
-    await record_state_by(datetime.now(UTC), failing)
-    assert len(attempts) == 1
 
 
 with TemporaryDirectory() as directory:
     asyncio.run(main(Path(directory)))
 with TemporaryDirectory() as directory:
     asyncio.run(unwritable_state(Path(directory)))
-with TemporaryDirectory() as directory:
-    asyncio.run(retried_state(Path(directory)))
 print(
     "PASS inference retry follows server delay and publishes credentials before readiness;"
     " a spent key blocks until a new key arrives"

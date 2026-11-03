@@ -78,7 +78,8 @@ async def run(stack: AsyncExitStack) -> None:
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     lease_file = HOME / ".inference-lease"
     lease_file.unlink(missing_ok=True)
-    # The inference state beside it survives restarts: a budget block lasts until a new key.
+    # The inference state beside it survives restarts: a budget block names the spent key and
+    # lasts until the lease file names a different one.
     inference = Availability(lease_file)
     Path("/tmp/hermes-runtime").mkdir(exist_ok=True, mode=0o700)
     key_file = HOME / ".gateway-key"
