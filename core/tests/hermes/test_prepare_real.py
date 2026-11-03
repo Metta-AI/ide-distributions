@@ -207,7 +207,9 @@ print("PASS installed profile middleware: native payload and unchanged history")
 
 
 @pytest.mark.parametrize("existing_history", [False, True])
-def test_installed_agent_preserves_files_through_a_complete_turn(hermes_bin, host, existing_history):
+def test_installed_agent_preserves_files_through_a_complete_turn(
+    hermes_bin, host, existing_history
+):
     """Exercise native turn construction, provider preparation, middleware and history together."""
     prepare(hermes_bin, host, "orchestrator")
     script = """
@@ -292,7 +294,8 @@ finally:
     release(db)
 """
     result = run(
-        [hermes_python(hermes_bin), "-c", script, str(int(existing_history))], host.env("orchestrator")
+        [hermes_python(hermes_bin), "-c", script, str(int(existing_history))],
+        host.env("orchestrator"),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS complete pinned native turn" in result.stdout
