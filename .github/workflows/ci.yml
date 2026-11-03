@@ -56,6 +56,9 @@ jobs:
         run: echo "No change in this pull request affects core/ or the profiles; skipping."
       - uses: actions/checkout@v4
         if: env.RUN_TESTS == 'true'
+      - name: Install the hosted image's native PDF dependency
+        if: env.RUN_TESTS == 'true'
+        run: apt-get update && apt-get install -y --no-install-recommends poppler-utils
       - uses: astral-sh/setup-uv@v6
         if: env.RUN_TESTS == 'true'
         with:

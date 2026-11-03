@@ -1,6 +1,7 @@
 """Exercise the packaged public adapter against the running seam, without model credentials."""
 
 import asyncio
+import shutil
 import sys
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -15,6 +16,7 @@ from contract import Request  # noqa: E402
 
 
 async def main():
+    assert shutil.which("pdftoppm"), "The packaged native PDF attachment renderer is missing"
     inference = Availability()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam,
