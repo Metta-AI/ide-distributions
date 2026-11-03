@@ -47,6 +47,7 @@ class Lifecycle:
     def __init__(self, env: dict[str, str]):
         self.env = env
         self.sleep_task: asyncio.Task[int] | None = None
+        self.ownership = asyncio.Lock()
         self.last_busy = time.monotonic()
         self.owner_file = Path(env["HERMES_HOME"]) / ".lifecycle-owner"
         self.owner_epoch = int(self.owner_file.read_text()) if self.owner_file.exists() else 0
@@ -58,50 +59,53 @@ class Lifecycle:
         return await process.wait()
 
     async def status(self, request: ControlRequest, seam: httpx.AsyncClient) -> dict:
-        if request.owner_epoch < self.owner_epoch:
-            return {
-                "ready": False,
-                "ready_for_sleep": False,
-                "detail": "Lifecycle owner superseded",
-            }
-        if request.owner_epoch > self.owner_epoch and self.sleep_task is not None:
-            # Ownership transfers only after previously admitted local effects have settled.
-            # A disconnected caller must not cancel the runtime's accepted sleep operation.
-            await asyncio.shield(self.sleep_task)
+        async with self.ownership:
             if request.owner_epoch < self.owner_epoch:
                 return {
                     "ready": False,
                     "ready_for_sleep": False,
                     "detail": "Lifecycle owner superseded",
                 }
-        if request.owner_epoch != self.owner_epoch:
-            pending = self.owner_file.with_suffix(".pending")
-            pending.write_text(str(request.owner_epoch))
-            os.replace(pending, self.owner_file)
-            self.owner_epoch = request.owner_epoch
+            if request.owner_epoch > self.owner_epoch and self.sleep_task is not None:
+                # Ownership transfers only after previously admitted local effects have settled.
+                # A disconnected caller must not cancel the runtime's accepted sleep operation.
+                await asyncio.shield(self.sleep_task)
+                if request.owner_epoch < self.owner_epoch:
+                    return {
+                        "ready": False,
+                        "ready_for_sleep": False,
+                        "detail": "Lifecycle owner superseded",
+                    }
+            if request.owner_epoch != self.owner_epoch:
+                pending = self.owner_file.with_suffix(".pending")
+                pending.write_text(str(request.owner_epoch))
+                os.replace(pending, self.owner_file)
+                self.owner_epoch = request.owner_epoch
         response = await seam.get("/status")
         response.raise_for_status()
-        if request.owner_epoch != self.owner_epoch:
+        async with self.ownership:
+            if request.owner_epoch != self.owner_epoch:
+                return {
+                    "ready": False,
+                    "ready_for_sleep": False,
+                    "detail": "Lifecycle owner superseded",
+                }
+            activity = response.json()
+            if activity["has_work"]:
+                self.last_busy = time.monotonic()
+            automatic = time.monotonic() - self.last_busy >= 900
+            if (request.control == "sleep_request" or automatic) and (
+                self.sleep_task is None
+                or (self.sleep_task.done() and self.sleep_task.result() != 0)
+            ):
+                self.sleep_task = asyncio.create_task(self.prepare_sleep())
+            sleeping = self.sleep_task is not None
+            complete = sleeping and self.sleep_task.done()
             return {
-                "ready": False,
-                "ready_for_sleep": False,
-                "detail": "Lifecycle owner superseded",
+                "ready": True,
+                "ready_for_sleep": complete and self.sleep_task.result() == 0,
+                "detail": "Preparing for sleep" if sleeping and not complete else "",
             }
-        activity = response.json()
-        if activity["has_work"]:
-            self.last_busy = time.monotonic()
-        automatic = time.monotonic() - self.last_busy >= 900
-        if (request.control == "sleep_request" or automatic) and (
-            self.sleep_task is None or (self.sleep_task.done() and self.sleep_task.result() != 0)
-        ):
-            self.sleep_task = asyncio.create_task(self.prepare_sleep())
-        sleeping = self.sleep_task is not None
-        complete = sleeping and self.sleep_task.done()
-        return {
-            "ready": True,
-            "ready_for_sleep": complete and self.sleep_task.result() == 0,
-            "detail": "Preparing for sleep" if sleeping and not complete else "",
-        }
 
 
 async def reply(

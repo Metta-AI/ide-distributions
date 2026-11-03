@@ -34,7 +34,8 @@ not a valid owner. The envelope retains its existing `id` and `control` fields. 
 every API replica before releasing this enforcing image. The previous image accepts those UUID IDs unchanged, which
 permits this deployment order without a maintenance window.
 
-The adapter saves the highest accepted epoch in the orchestrator's retained home. It rejects stale controls before and
+The adapter saves the highest accepted epoch in the orchestrator's retained home.
+One async lock serializes owner transitions and effect admission, including retries of a failed sleep. It rejects stale controls before and
 after reading application status. A successor waits for an already-admitted sleep command to settle before its epoch is
 accepted; caller cancellation does not cancel that local command. The packaged ownership fault check delays an old sleep
 request across a successor's status reply and confirms the old request cannot pause the application.
