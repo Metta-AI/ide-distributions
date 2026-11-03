@@ -326,7 +326,8 @@ def test_message_content_migration_preserves_queued_delivery_and_untracked_write
         if number < 4:
             migrate._run_migration(conn, number, path)
     conn.execute(
-        "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,status,created_at)"
+        "INSERT INTO client_admissions"
+        "(op_id,kind,request,session_id,message,payload,status,created_at)"
         " VALUES ('op1','message',?,'chat1','hello','hello','queued','2026-01-01')",
         (json.dumps({"message": "hello", "context": {"contract_version": 1}}),),
     )

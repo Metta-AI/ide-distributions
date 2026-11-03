@@ -61,7 +61,7 @@ class OpenSession(Arguments):
 class Message(Arguments):
     session_id: str = Field(min_length=1, max_length=200)
     message: UserMessage
-    instructions: str | None = Field(default=None, max_length=16000)
+    instructions: str | None = Field(default=None, max_length=64000)
     context: dict[str, JsonValue]
 
 

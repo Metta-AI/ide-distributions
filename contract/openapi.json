@@ -442,7 +442,7 @@
           "instructions": {
             "anyOf": [
               {
-                "maxLength": 16000,
+                "maxLength": 64000,
                 "type": "string"
               },
               {
