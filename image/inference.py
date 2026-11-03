@@ -48,8 +48,13 @@ class Unavailable(BaseModel):
     retry_at: datetime
 
 
-async def record_state(update, *args, **kwargs) -> None:
-    """Run an inference-state update off the event loop (its lock polls with ``time.sleep``).
+# A failed inference-state write is retried this often until the next lease call.
+STATE_RETRY_S = 10
+
+
+async def record_state(update, *args, **kwargs) -> bool:
+    """Run an inference-state update off the event loop (its lock polls with ``time.sleep``);
+    whether it was written.
 
     A failed write (``OSError``, which includes the lock's ``LockTimeout``) is logged, never
     raised: the lease loop runs in the runtime's task group, so raising would stop the
@@ -59,6 +64,21 @@ async def record_state(update, *args, **kwargs) -> None:
         await asyncio.to_thread(update, *args, **kwargs)
     except OSError as error:
         log.warning("Inference state not recorded: %s: %s", type(error).__name__, error)
+        return False
+    return True
+
+
+async def record_state_by(deadline: datetime, update, *args, **kwargs) -> None:
+    """:func:`record_state`, retried every :data:`STATE_RETRY_S` until written or ``deadline``.
+
+    A lost write matters: a lost ``lease_installed`` at the refill would keep a funded key
+    blocked until the next renewal, perhaps a day away. Only the write is retried; at
+    ``deadline`` the next lease call records the state afresh.
+    """
+    while not await record_state(update, *args, **kwargs):
+        if datetime.now(UTC) >= deadline:
+            return
+        await asyncio.sleep(STATE_RETRY_S)
 
 
 async def maintain(
@@ -96,13 +116,14 @@ async def maintain(
             result = TypeAdapter(Lease | Unavailable).validate_json(response.content)
             if isinstance(result, Unavailable):
                 log.warning("Inference unavailable: %s", result.kind)
-                await record_state(
+                renew_at = min(result.retry_at, result.next_refill_at)
+                await record_state_by(
+                    renew_at,
                     state.lease_refused,
                     lease_file,
                     result.next_refill_at,
                     budget_exhausted=result.kind == "budget_exhausted",
                 )
-                renew_at = min(result.retry_at, result.next_refill_at)
             else:
                 for home in homes:
                     pending = home / ".env.inference-pending"
@@ -119,11 +140,12 @@ async def maintain(
                 pending = lease_file.with_suffix(".pending")
                 pending.write_text(result.expires_at.isoformat())
                 pending.replace(lease_file)
-                await record_state(
+                ready.set()
+                await record_state_by(
+                    renew_at,
                     state.lease_installed,
                     lease_file,
                     result.expires_at,
                     result.key.get_secret_value(),
                 )
-                ready.set()
             await asyncio.sleep(max(2, (renew_at - datetime.now(UTC)).total_seconds()))

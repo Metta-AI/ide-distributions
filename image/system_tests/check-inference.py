@@ -13,10 +13,12 @@ from uuid import uuid4
 from dotenv import dotenv_values
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import inference as lease_loop  # noqa: E402
 from application import Operation, response  # noqa: E402
-from inference import Availability, maintain, record_state  # noqa: E402
+from inference import Availability, maintain, record_state, record_state_by  # noqa: E402
 
 from research_core import inference as state  # noqa: E402  (on the path through inference)
+from research_core.locks import LockTimeout  # noqa: E402
 from research_core.plugin.inference_hook import (  # noqa: E402
     KEY_CHANGE_GRACE,
     record_api_error,
@@ -170,10 +172,44 @@ async def unwritable_state(tmp_path: Path):
     await record_state(state.lease_refused, lease_file, datetime.now(UTC), budget_exhausted=True)
 
 
+async def retried_state(tmp_path: Path):
+    """A failed write at the refill is retried soon, not left until the next renewal: the
+    new key's write clears the budget block once the lock is free again."""
+    lease_file = tmp_path / "lease"
+    state.lease_installed(lease_file, datetime.now(UTC), "spent-key")
+    state.lease_refused(lease_file, datetime.now(UTC), budget_exhausted=True)
+    attempts = []
+
+    def flaky(*args):
+        attempts.append(time.monotonic())
+        if len(attempts) < 3:
+            raise LockTimeout("held")  # an OSError
+        return state.lease_installed(*args)
+
+    lease_loop.STATE_RETRY_S = 0.05
+    deadline = datetime.now(UTC) + timedelta(days=1)
+    async with asyncio.timeout(5):
+        await record_state_by(deadline, flaky, lease_file, deadline, "fresh-key")
+    assert len(attempts) == 3 and state.read_state(lease_file).blocked is None
+
+    # Past the deadline it gives up, leaving the write to the next lease call.
+    attempts.clear()
+    always = LockTimeout("held")
+
+    def failing(*args):
+        attempts.append(1)
+        raise always
+
+    await record_state_by(datetime.now(UTC), failing)
+    assert len(attempts) == 1
+
+
 with TemporaryDirectory() as directory:
     asyncio.run(main(Path(directory)))
 with TemporaryDirectory() as directory:
     asyncio.run(unwritable_state(Path(directory)))
+with TemporaryDirectory() as directory:
+    asyncio.run(retried_state(Path(directory)))
 print(
     "PASS inference retry follows server delay and publishes credentials before readiness;"
     " a spent key blocks until a new key arrives"
