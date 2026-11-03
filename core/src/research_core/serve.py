@@ -49,7 +49,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from research_core import contract, inference, layout, profile_models
+from research_core import contract, inference, intake, layout, profile_models
 from research_core.prepare import Runner
 from research_core.profile_models import Catalog, ModelError, Profile
 from research_core.store import admissions, coworlds, sessions, settings, ui_state
@@ -296,14 +296,14 @@ class SeamServer:
             session_id = (
                 _text(body, "session_id") if "session_id" in body else hermes_api.mint_session_id()
             )
-            registration = admissions.OpenRegistration(
+            registration = intake.OpenRegistration(
                 profile=self.profile,
                 coworld_id=stores.coworld_id,
                 session_context=body.get("session_context"),
                 client_capabilities=body.get("capabilities"),
             )
             metadata = time.monotonic()
-            receipt = admissions.accept(
+            receipt = intake.accept(
                 stores.wstore,
                 actor,
                 op_id=op_id,
@@ -317,7 +317,7 @@ class SeamServer:
             session_id = receipt.session_id
             self._clients[session_id] = client
             completed = time.monotonic()
-            admissions.IntakeTiming(
+            intake.IntakeTiming(
                 **receipt.model_dump(),
                 operation="session.open",
                 op_id=op_id,
@@ -361,7 +361,7 @@ class SeamServer:
                 }
             )
             metadata = time.monotonic()
-            receipt = admissions.accept(
+            receipt = intake.accept(
                 stores.wstore,
                 actor,
                 op_id=op_id,
@@ -372,7 +372,7 @@ class SeamServer:
                 payload=payload,
             )
             completed = time.monotonic()
-            admissions.IntakeTiming(
+            intake.IntakeTiming(
                 **receipt.model_dump(),
                 operation="session.message",
                 op_id=op_id,

@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 
+from research_core import intake
 from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
 from research_core.store import coworlds, goals, notices, tasks, ui_state
@@ -131,7 +132,7 @@ def test_session_open_refuses_a_missing_client(seam):
 @pytest.mark.parametrize("stalled", ["prepare", "start", "create_session"])
 def test_intake_is_durable_while_execution_is_stalled(seam, monkeypatch, stalled, capsys):
     from research_core import attachments
-    from research_core.store.admissions import IntakeTiming
+    from research_core.intake import IntakeTiming
 
     entered, release = threading.Event(), threading.Event()
     owner = attachments if stalled == "prepare" else seam.hermes
@@ -914,7 +915,6 @@ def test_open_receipt_and_local_session_roll_back_together(seam, monkeypatch):
 def test_reopening_preserves_existing_execution_and_history(
     tmp_path, monkeypatch, opening_status, lost_reply
 ):
-    from research_core.store import admissions
     from research_core.watcher.hermes_api import RunsUnavailable
 
     ctx = make_ctx(tmp_path)
@@ -944,7 +944,7 @@ def test_reopening_preserves_existing_execution_and_history(
             }
         )
         asyncio.run(server.dispatch_messages())
-        admissions.accept(
+        intake.accept(
             ctx.wstore,
             HARNESS,
             op_id="reopening",
