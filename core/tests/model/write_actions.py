@@ -13,7 +13,7 @@ starts from a history holding one refused call and the refusal the tool returns 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
 has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
-other write. Left out, to keep a full run near $2.50:
+other write. Left out, to keep a full run near $1.60 (2026-11-02):
   - actions with the same shape as a covered one: task.propose, task.message and task.reject
     for the Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);

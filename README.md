@@ -63,7 +63,7 @@ CI runs the same inside the hosted Hermes image, and `play/` separately. A daily
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
 The model tool-call tests in `core/tests/model` call models through OpenRouter and spend real
-money (the full write-action measurement costs about $2.50 and takes about 45 minutes), so they
+money (the full write-action measurement costs about $1.60 and takes about 25 minutes), so they
 run only on request and never in CI. `IDE_HERMES_SRC` names a Hermes source tree, whose schema
 sanitizers shape the tool list as Hermes sends it:
 
