@@ -68,6 +68,35 @@ def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path):
     assert message.root["content"][1]["type"] == "file"
 
 
+def test_openai_audio_uses_native_transcription(hermes_bin, tmp_path):
+    home = tmp_path / "hermes"
+    home.mkdir()
+    (home / "config.yaml").write_text("attachments:\n  storage: workspace\n")
+    audio = Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "voice.wav"
+    message = UserMessage.model_validate(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": base64.b64encode(audio.read_bytes()).decode(),
+                        "format": "wav",
+                    },
+                }
+            ],
+        }
+    )
+    prepared = prepare(
+        message,
+        ws=layout.Workspace(tmp_path / "workspace", tmp_path / "env"),
+        env={**os.environ, "HERMES_HOME": str(home), "HERMES_REAL_HOME": str(home)},
+        hermes_bin=str(hermes_bin),
+    )
+    transcript = prepared.root["content"][-1]["text"].lower()
+    assert "hello world" in transcript and "secret number" in transcript, prepared.root
+
+
 def test_pinned_hermes_stages_and_reads_native_attachment(hermes_bin, tmp_path):
     home = tmp_path / "hermes"
     workspace = tmp_path / "workspace"

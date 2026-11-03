@@ -41,7 +41,7 @@ def test_no_tool_module_failed_to_import():
 
 
 def test_tool_counts_match_the_design():
-    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 18
+    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 17
     assert names("researcher") == RESEARCHER and len(RESEARCHER) == 14
     assert len(ORCHESTRATOR) <= catalog.TOOL_BUDGET
 
