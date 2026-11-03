@@ -110,3 +110,21 @@ def test_play_first_meeting_is_getting_to_know_each_other_not_game_talk():
     assert "Do not fetch the starter in the first meeting" in meeting
     assert "On your first turn" not in soul and "plainly what you are for here" not in soul
     assert "tone" in soul and "fresh_start" in soul and "`who_we_are`" not in soul
+
+
+def test_play_cares_first_decides_small_things_recovers_and_learns():
+    soul = (PROFILES["play"] / "SOUL.md").read_text()
+    for needle in (
+        "## Every conversation starts with them",
+        "Decide small things yourself",
+        "Getting stuck is yours to solve",
+        "## Getting better with them",
+        "do not ask them to choose",
+        "once, on the first message",
+        "at most twice",
+        "never covers changing or uploading",
+        "After any exchange where you learned something",
+        "do not record sensitive personal details",
+    ):
+        assert needle in soul, needle
+    assert soul.index("## Every conversation starts with them") < soul.index("## How the work goes")
