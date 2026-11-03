@@ -4,16 +4,18 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
-from typing import Literal
+from pathlib import Path
+from typing import Literal, Self
 from uuid import UUID
 
 import httpx
 from application import Operation
 from application import response as application_response
 from inference import Availability
-from pydantic import BaseModel, ConfigDict
+from pydantic import UUID8, BaseModel, ConfigDict, model_validator
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
@@ -22,8 +24,23 @@ log = logging.getLogger(__name__)
 
 class ControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    id: UUID
+    id: UUID8
     control: Literal["status", "sleep_request"]
+
+    @model_validator(mode="after")
+    def positive_epoch(self) -> Self:
+        if self.owner_epoch == 0:
+            raise ValueError("Lifecycle owner epoch must be positive")
+        return self
+
+    @property
+    def owner_epoch(self) -> int:
+        # UUIDv8's application bits carry xid8; version and variant bits are not part of the epoch.
+        return (
+            ((self.id.int >> 80) << 16)
+            | (((self.id.int >> 64) & 0xFFF) << 4)
+            | ((self.id.int >> 58) & 0xF)
+        )
 
 
 class Lifecycle:
@@ -31,6 +48,8 @@ class Lifecycle:
         self.env = env
         self.sleep_task: asyncio.Task[int] | None = None
         self.last_busy = time.monotonic()
+        self.owner_file = Path(env["HERMES_HOME"]) / ".lifecycle-owner"
+        self.owner_epoch = int(self.owner_file.read_text()) if self.owner_file.exists() else 0
 
     async def prepare_sleep(self) -> int:
         process = await asyncio.create_subprocess_exec(
@@ -39,8 +58,35 @@ class Lifecycle:
         return await process.wait()
 
     async def status(self, request: ControlRequest, seam: httpx.AsyncClient) -> dict:
+        if request.owner_epoch < self.owner_epoch:
+            return {
+                "ready": False,
+                "ready_for_sleep": False,
+                "detail": "Lifecycle owner superseded",
+            }
+        if request.owner_epoch > self.owner_epoch and self.sleep_task is not None:
+            # Ownership transfers only after previously admitted local effects have settled.
+            # A disconnected caller must not cancel the runtime's accepted sleep operation.
+            await asyncio.shield(self.sleep_task)
+            if request.owner_epoch < self.owner_epoch:
+                return {
+                    "ready": False,
+                    "ready_for_sleep": False,
+                    "detail": "Lifecycle owner superseded",
+                }
+        if request.owner_epoch != self.owner_epoch:
+            pending = self.owner_file.with_suffix(".pending")
+            pending.write_text(str(request.owner_epoch))
+            os.replace(pending, self.owner_file)
+            self.owner_epoch = request.owner_epoch
         response = await seam.get("/status")
         response.raise_for_status()
+        if request.owner_epoch != self.owner_epoch:
+            return {
+                "ready": False,
+                "ready_for_sleep": False,
+                "detail": "Lifecycle owner superseded",
+            }
         activity = response.json()
         if activity["has_work"]:
             self.last_busy = time.monotonic()

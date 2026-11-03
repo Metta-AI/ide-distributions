@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import sys
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -119,7 +120,10 @@ async def main():
                 platform_url=f"http://127.0.0.1:{port}",
                 workspace_id=str(uuid4()),
                 credential="proof",
-                env={"API_SERVER_KEY": "proof"},
+                env={
+                    "API_SERVER_KEY": "proof",
+                    "HERMES_HOME": tempfile.mkdtemp(prefix="transport-home-"),
+                },
                 inference=Availability(),
                 connected=connected,
             )

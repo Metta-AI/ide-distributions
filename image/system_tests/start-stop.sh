@@ -77,6 +77,10 @@ for cycle in $(seq 1 "$cycles"); do cat "$scratch/boot-$cycle.log"; done | docke
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
   --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-transport.py
 
+# A disconnected old lifecycle owner cannot pause the workspace after its successor is accepted.
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
+  --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-lifecycle-ownership.py
+
 # Lease acquisition follows the platform retry contract before declaring inference ready.
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
   --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-inference.py

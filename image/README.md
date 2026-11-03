@@ -27,6 +27,18 @@ connection. Explicit sleep starts the distribution command asynchronously; statu
 ready for sleep only after its successful exit. The image also initiates sleep after fifteen
 minutes without work. Restart calls wake with the retained filesystem.
 
+Lifecycle controls require a UUIDv8 request ID carrying the platform's ordered lifecycle-owner epoch. The unsigned
+64-bit epoch occupies the UUID's first 48 application bits, its next 12 bits after the version, and four bits after the
+variant. The remaining 58 bits identify the request. The runtime decodes and compares integer epochs; a random UUID is
+not a valid owner. The envelope retains its existing `id` and `control` fields. Deploy the platform's UUIDv8 emitter to
+every API replica before releasing this enforcing image. The previous image accepts those UUID IDs unchanged, which
+permits this deployment order without a maintenance window.
+
+The adapter saves the highest accepted epoch in the orchestrator's retained home. It rejects stale controls before and
+after reading application status. A successor waits for an already-admitted sleep command to settle before its epoch is
+accepted; caller cancellation does not cancel that local command. The packaged ownership fault check delays an old sleep
+request across a successor's status reply and confirms the old request cannot pause the application.
+
 The release dispatcher passes the distribution commit to Metta's generic build workflow.
 That workflow builds `image/Dockerfile`, runs `image/system_tests/start-stop.sh`, and publishes
 an immutable image digest. Hosting consumes that digest without inspecting profile internals.
