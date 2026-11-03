@@ -63,21 +63,29 @@ CI runs the same inside the hosted Hermes image, and `play/` separately. A daily
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
 The model tool-call tests in `core/tests/model` call models through OpenRouter and spend real
-money (the full write-action measurement took about $2.50 and 45 minutes), so they run only on
-request and never in CI:
+money (the full write-action measurement costs about $2.50 and takes about 45 minutes), so they
+run only on request and never in CI. `IDE_HERMES_SRC` names a Hermes source tree, whose schema
+sanitizers shape the tool list as Hermes sends it:
 
 ```bash
-OPENROUTER_API_KEY=... uv run pytest -m model core/tests/model/test_write_actions.py
+OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
+  uv run pytest -m model core/tests/model/test_write_actions.py
 ```
+
+An explicit `-m` replaces the default `-m 'not hermes and not model'` rather than adding to it,
+so `uv run pytest -m "not hermes"` with `OPENROUTER_API_KEY` exported runs these tests too and
+spends money.
 
 It sends one write action with required fields per case (claims, Goals, Tasks, experiments,
 directives, settings, notices), for both roles, offering the role's whole tool list as a Hermes
 session does, plus cases that start after a refused call. It runs Kimi K3.1 Pro, Kimi K3,
-GLM 5.3 and MiniMax M3, each on its shipped host pin and at least one other OpenRouter host,
-and ends with a table of first-try valid rates, prompt tokens and cost per model and host.
-`IDE_TOOL_CALL_MODELS`, `IDE_TOOL_CALL_HOSTS`, `IDE_TOOL_CALL_CASES`, `IDE_TOOL_CALL_REPEATS`
-and `IDE_TOOL_CALL_SCHEMAS` narrow or change a run; the module docstring describes them.
-`test_tool_call_format.py` sends one instruction per tool, on the shipped models and pins.
+GLM 5.3 and MiniMax M3 on two OpenRouter hosts each, and ends with a table of valid rates,
+prompt tokens and cost per model and host. `core/tests/model/write_actions.py` says which
+write actions are covered and how a call is judged. `IDE_TOOL_CALL_MODELS`,
+`IDE_TOOL_CALL_HOSTS`, `IDE_TOOL_CALL_CASES`, `IDE_TOOL_CALL_REPEATS` and
+`IDE_TOOL_CALL_SCHEMAS` narrow or change a run (see `test_write_actions.py`).
+`test_tool_call_format.py` sends one instruction per tool, on the shipped models and pins. The
+judging rules have offline tests that the default `pytest` runs.
 
 To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
 interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).
