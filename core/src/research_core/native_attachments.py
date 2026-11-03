@@ -45,14 +45,11 @@ def main() -> None:
                     + part["input_audio"]["data"],
                 }
             )
-            data_url = file["file_data"]
-            if not data_url.startswith("data:"):
-                data_url = "data:application/octet-stream;base64," + data_url
             staged = call(
                 "file.attach",
                 {
                     "session_id": session,
-                    "data_url": data_url,
+                    "data_url": file["file_data"],
                     "name": file["filename"],
                 },
             )
