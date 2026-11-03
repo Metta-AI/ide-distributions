@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.8@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347 AS uv
 FROM nousresearch/hermes-agent@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d
-RUN apt-get update && apt-get install -y --no-install-recommends --reinstall tini \
+RUN apt-get update && apt-get install -y --no-install-recommends --reinstall tini poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=moby/buildkit@sha256:0ffa2fcf6b8757c47d569b3ef0f03f9d5eb3b9ff5ce68d858f994f89b749da0c /usr/bin/buildctl /usr/local/bin/buildctl
