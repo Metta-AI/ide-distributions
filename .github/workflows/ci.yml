@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # The hosted Hermes runtime: its Python runs the plugin and prepare.py, exactly as hosting does.
-      image: nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+      image: nousresearch/hermes-agent@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d
       options: --user 0
     env:
       GIT_AUTHOR_NAME: IDE CI
@@ -91,7 +91,7 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     container:
-      image: nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+      image: nousresearch/hermes-agent@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d
       options: --user 0
     env:
       GIT_AUTHOR_NAME: IDE CI
