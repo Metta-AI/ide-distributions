@@ -58,6 +58,39 @@ assert not expanded.warnings, expanded
 assert marker in expanded.message, expanded
 read = json.loads(read_file_tool(str(target)))
 assert marker in json.dumps(read), read
+
+# Images and PDFs use the native vision queue, rather than document-shaped prompt text.
+png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1sAAAAASUVORK5CYII=")
+image = call("image.attach_bytes", {
+    "session_id": sid, "filename": "pixel.png",
+    "content_base64": base64.b64encode(png).decode(),
+})
+assert image["attached"] and image["count"] == 1, image
+assert Path(image["path"]).read_bytes() == png
+objects = [
+    b"<< /Type /Catalog /Pages 2 0 R >>",
+    b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents 4 0 R >>",
+    b"<< /Length 0 >>\nstream\n\nendstream",
+]
+pdf = bytearray(b"%PDF-1.4\n")
+offsets = [0]
+for number, obj in enumerate(objects, 1):
+    offsets.append(len(pdf))
+    pdf.extend(f"{number} 0 obj\n".encode() + obj + b"\nendobj\n")
+xref = len(pdf)
+pdf.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+for offset in offsets[1:]:
+    pdf.extend(f"{offset:010d} 00000 n \n".encode())
+pdf.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+document = call("pdf.attach", {
+    "session_id": sid, "filename": "one-page.pdf",
+    "content_base64": base64.b64encode(pdf).decode(),
+})
+assert document["attached"] and document["pages_attached"] == 1, document
+assert document["count"] == 2, document
+assert Path(document["pages"][0]["path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 assert call("session.close", {"session_id": sid})["closed"]
 resumed = call("session.resume", {"session_id": stored, "lazy": True})
 assert resumed["resumed"] == stored, resumed
