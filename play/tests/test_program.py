@@ -558,6 +558,7 @@ def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
     assert "games finished so far" in data["plain"]
 
 
+<<<<<<< HEAD
 def _league(cli):
     cli.rounds = [  # only the newest completed round is asked for (RoundPublic)
         {
@@ -671,3 +672,34 @@ def test_league_status_names_what_the_platform_could_not_answer(program, cli):
     cli.latest_replay = {"round": {}, "episode": {}}
     assert program.league_status(league=CHOSEN)["unavailable"] == ["latest_result"]
     assert run("league_status", {"league": CHOSEN, "top": 3}, program)["ok"] is True
+=======
+def test_name_keep_puts_the_name_in_the_cogents_own_play_record(program, monkeypatch):
+    sent = []
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def urlopen(request, timeout=None):
+        sent.append((request.method, request.full_url, json.loads(request.data), request.headers))
+        return Reply()
+
+    monkeypatch.setattr("play.program.urllib.request.urlopen", urlopen)
+    assert program.name_keep("  Orbi ") == {"name": "Orbi"}
+    ((method, url, body, headers),) = sent
+    assert method == "PUT"
+    assert url.endswith(f"/observatory/v2/cogents/{PLAYER}/c/play/name")
+    assert body == {"body": {"name": "Orbi"}}
+    assert headers["Authorization"] == "Bearer cga_fake"
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 61])
+def test_name_keep_refuses_a_bad_name_without_calling(program, monkeypatch, name):
+    monkeypatch.setattr("play.program.urllib.request.urlopen", lambda *a, **k: pytest.fail("called"))
+    with pytest.raises(PlayError) as error:
+        program.name_keep(name)
+    assert error.value.reason == "bad_arguments"
+>>>>>>> d5e9db2 (name_keep: silent call, behavior tests for the PUT and validation)
