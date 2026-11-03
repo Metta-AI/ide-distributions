@@ -156,8 +156,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 3
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert migrate.apply_migrations(conn, "workspace") == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 def test_migrations_apply_in_numeric_order_and_only_pending_ones(tmp_path, monkeypatch):
@@ -316,3 +316,31 @@ def test_workspace_one_active_coworld():
     columns = [r[1] for r in conn.execute("PRAGMA table_info(sessions)")]
     assert "coworld_id" in columns and "task_id" in columns
     assert conn.execute("PRAGMA foreign_key_list(sessions)").fetchall() == []
+
+
+def test_message_content_migration_preserves_queued_delivery_and_untracked_writes():
+    import json
+
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    for number, path in migrate.migration_files("workspace"):
+        if number < 4:
+            migrate._run_migration(conn, number, path)
+    conn.execute(
+        "INSERT INTO client_admissions"
+        "(op_id,kind,request,session_id,message,payload,status,created_at)"
+        " VALUES ('op1','message',?,'chat1','hello','hello','queued','2026-01-01')",
+        (json.dumps({"message": "hello", "context": {"contract_version": 1}}),),
+    )
+    untracked = conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall()
+    migrate.apply_migrations(conn, "workspace")
+    assert json.loads(conn.execute("SELECT payload FROM client_admissions").fetchone()[0]) == {
+        "input": "hello",
+        "instructions": None,
+        "context": {"contract_version": 1},
+    }
+    request = json.loads(conn.execute("SELECT request FROM client_admissions").fetchone()[0])
+    assert request["message"] == {
+        "role": "user",
+        "content": "hello",
+    }
+    assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked

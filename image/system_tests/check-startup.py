@@ -59,7 +59,10 @@ for boot_id, events in boots.items():
         assert all(e.role is None and e.timestamp >= boundary.timestamp for e in readiness), events
     assert [e.timestamp for e in events] == sorted(e.timestamp for e in events), events
     total = startup[-1].elapsed_seconds
-    assert total >= sum(e.elapsed_seconds for e in startup[1:-1]), events
+    durations = [e.elapsed_seconds for e in startup[1:-1] if e.outcome == "passed"]
+    # Each duration, including the total, is independently rounded to milliseconds.
+    rounding = 0.0005 * (len(durations) + 1)
+    assert total + rounding >= sum(durations), events
     print(f"PASS startup telemetry: boot={boot_id} events={len(events)} total={total}s")
 
     for event in events:

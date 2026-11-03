@@ -10,6 +10,7 @@ dependencies = []
 # Everything that talks to the Softmax platform or computes statistics runs in the workspace
 # environment (the repository root project), never inside Hermes.
 platform = [
+    "pydantic>=2,<3",
     "coworld>=0.1.66,<0.2",
     "softmax-cli>=0.26.40,<0.27",
     "PyYAML>=6",

@@ -72,7 +72,10 @@ async def main():
                 "name": "session.message",
                 "args": {
                     "session_id": session,
-                    "message": "contract proof",
+                    "message": {
+                        "role": "user",
+                        "content": "contract proof",
+                    },
                     "context": {},
                 },
             }

@@ -48,13 +48,10 @@ def _parse_time(text: str | None) -> datetime | None:
         return None
 
 
-def render_context_block(user_message: str) -> str | None:
-    """The validated context block as a short labelled rendering, or a one-line problem."""
-    parsed, error = contract.find_block(user_message or "")
-    if parsed is None and error is None:
+def render_context_block(parsed: dict) -> str | None:
+    """Render validated context from the durable admission, outside user message text."""
+    if not parsed:
         return None
-    if error:
-        return f"[client context] {error}; the message was handled without it."
     kept, problems = contract.validate_context(parsed)
     lines = []
     if kept.get("mode"):
@@ -219,7 +216,10 @@ def _away_summary(wstore: Any, coworld_store: Any, since: datetime, now: datetim
 
 def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
     def pre_llm_call(
-        session_id: str = "", user_message: str = "", is_first_turn: bool = False, **_: Any
+        session_id: str = "",
+        user_message: str = "",
+        is_first_turn: bool = False,
+        **_: Any,
     ) -> dict | None:
         if role != "orchestrator" or not session_id:
             return None
@@ -242,7 +242,17 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
                     kind="chat",
                 )
             parts = []
-            block = render_context_block(user_message)
+            import json
+
+            admission = ctx.wstore.one(
+                "SELECT payload FROM client_admissions WHERE session_id = ?"
+                " AND kind = 'message' AND dispatch_started = 1"
+                " AND status IN ('queued', 'running') ORDER BY rowid LIMIT 1",
+                (session_id,),
+            )
+            block = render_context_block(
+                json.loads(admission["payload"])["context"] if admission else {}
+            )
             if block:
                 parts.append(block)
             parts.append(
