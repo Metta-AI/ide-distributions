@@ -61,7 +61,7 @@ assert marker in json.dumps(read), read
 
 # Images and PDFs use the native vision queue, rather than document-shaped prompt text.
 png = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jX1sAAAAASUVORK5CYII=")
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
 image = call("image.attach_bytes", {
     "session_id": sid, "filename": "pixel.png",
     "content_base64": base64.b64encode(png).decode(),
