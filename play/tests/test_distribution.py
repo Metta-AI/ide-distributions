@@ -123,6 +123,10 @@ def test_play_cares_first_decides_small_things_recovers_and_learns():
         "once, on the first message",
         "at most twice",
         "never covers changing or uploading",
+        "Spending credits is never a small thing",
+        "before the first spend in a conversation",
+        "within the amount and scope they",
+        "Releasing always needs",
         "After any exchange where you learned something",
         "do not record sensitive personal details",
     ):
