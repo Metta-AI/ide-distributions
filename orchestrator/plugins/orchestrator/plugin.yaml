@@ -26,4 +26,5 @@ provides_tools:
 provides_hooks:
   - transform_tool_result
   - post_tool_call
+  - on_session_end
   - pre_llm_call

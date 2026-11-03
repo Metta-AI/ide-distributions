@@ -48,12 +48,18 @@ STEP_MODULES = frozenset(
 
 @dataclass(frozen=True)
 class Handler:
-    """How one event kind is handled: by a function (``handler``) or a model wake (``wake``)."""
+    """How one event kind is handled: by a function (``handler``) or a model wake (``wake``).
+
+    ``batch_by_kind`` (model wakes only): every pending event of the kind in one store starts a
+    single wake Session whose prompt lists them all, instead of one Session per subject; events
+    that arrive while it runs wait for the next batch (``wakes.py``).
+    """
 
     kind: str
     handler: str | None
     wake: str | None
     model: bool
+    batch_by_kind: bool = False
 
     @property
     def module_name(self) -> str | None:
@@ -71,10 +77,10 @@ class Handler:
         return getattr(module, self.function_name)
 
 
-def _wake(kind: str, wake: str) -> Handler:
+def _wake(kind: str, wake: str, *, batch_by_kind: bool = False) -> Handler:
     if wake not in WAKE_KINDS:
         raise ValueError(f"{kind}: not a wake kind: {wake!r}")
-    return Handler(kind=kind, handler=None, wake=wake, model=True)
+    return Handler(kind=kind, handler=None, wake=wake, model=True, batch_by_kind=batch_by_kind)
 
 
 def _function(kind: str, path: str) -> Handler:
@@ -111,7 +117,8 @@ HANDLERS: dict[str, Handler] = {
         _function("task.abandoned", "research_core.watcher.messages:handle_abandoned"),
         # A failed Task feeds the repair counter of its capability.
         _function("task.failed", "research_core.watcher.checks:handle_task_failed"),
-        _wake("champion.changed", "management"),
+        # One sync can change several leagues of a Coworld: one wake handles all of them.
+        _wake("champion.changed", "management", batch_by_kind=True),
         _wake("store.unmarked_write", "management"),
         _wake("store.schema_rebuilt", "management"),
         # A store a newer release wrote: the watcher paused the workspace and left it alone.

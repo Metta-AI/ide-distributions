@@ -89,6 +89,15 @@ USER_EMAIL = "fake-user@example.com"
 COWORLD_ID = "cow_fake"
 COWORLD_NAME = "fakegame"
 COWORLD_VERSION = "1"
+# Other Coworld versions the manifest answers for: an older fakegame version no league runs and
+# a Coworld no league runs. The one league runs COWORLD_ID.
+OLD_COWORLD_ID = "cow_fake_old"
+LEAGUELESS_COWORLD_ID = "cow_leagueless"
+COWORLD_VERSIONS = {
+    COWORLD_ID: (COWORLD_NAME, COWORLD_VERSION),
+    OLD_COWORLD_ID: (COWORLD_NAME, "0"),
+    LEAGUELESS_COWORLD_ID: ("leaguelessgame", "1"),
+}
 GAME_ID = "game_fake"
 LEAGUE_ID = "league_fake"
 LEAGUE_NAME = "Fake League"
@@ -527,6 +536,7 @@ class FakePlatform:
             name=LEAGUE_NAME,
             game_id=GAME_ID,
             coworld_id=COWORLD_ID,
+            coworld_name=COWORLD_NAME,
             participation_url=f"https://fake.invalid/participate?league_id={LEAGUE_ID}",
             forum_markdown_url=f"https://fake.invalid/v2/forums/{LEAGUE_ID}.md",
             wiki_markdown_url=f"https://fake.invalid/v2/wikis/{LEAGUE_ID}/pages.md",
@@ -1030,11 +1040,12 @@ class FakePlatform:
 
     # --- Coworld ----------------------------------------------------------------------------
 
-    def _manifest(self, state: dict) -> dict:
+    def _manifest(self, state: dict, coworld_id: str = COWORLD_ID) -> dict:
+        name, version = COWORLD_VERSIONS[coworld_id]
         return {
-            "id": COWORLD_ID,
-            "name": COWORLD_NAME,
-            "version": COWORLD_VERSION,
+            "id": coworld_id,
+            "name": name,
+            "version": version,
             "manifest": {
                 "game": {
                     "player_runtime": "game-hosted",
@@ -1047,9 +1058,11 @@ class FakePlatform:
         }
 
     def coworld_manifest(self, coworld_id: str) -> dict:
-        if coworld_id != COWORLD_ID:
+        if coworld_id not in COWORLD_VERSIONS:
             raise self._not_found(f"GET /v2/coworlds/{coworld_id}")
-        return self._operate("coworld_manifest", self._manifest, persist=False)
+        return self._operate(
+            "coworld_manifest", lambda state: self._manifest(state, coworld_id), persist=False
+        )
 
     # --- forum (one forum; the slug is accepted and ignored) --------------------------------
 

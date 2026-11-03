@@ -73,6 +73,14 @@ PROTECTED_KEYS: dict[str, Any] = {
     "plugins.enabled": ["<role>"],
     "platform_toolsets.api_server": ["hermes-api-server", "ide-<role>"],
     "known_plugin_toolsets.cron": ["ide-<role>"],
+    # Hermes's loop guard only warns on api_server; a wake that repeated one refused call 185
+    # times (2026-11-02). The hard stop (Hermes v0.21.6) halts after 5 failures of one tool,
+    # blocks after 5 identical failing calls (Hermes's default) and halts after 10 identical
+    # calls with identical results or 10 laps of an identical cycle, any tool but pollers;
+    # that last limit is raised from Hermes's 5 so polling a job with `terminal` is not stopped.
+    "tool_loop_guardrails.hard_stop_enabled": True,
+    "tool_loop_guardrails.hard_stop_after.same_tool_failure": 5,
+    "tool_loop_guardrails.hard_stop_after.idempotent_no_progress": 10,
 }
 
 # Orchestrator chats are long: compaction protects more of the head and tail and compacts less

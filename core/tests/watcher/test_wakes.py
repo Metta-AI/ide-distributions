@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from research_core.store import events, intents, notices, sessions
+from research_core.store import champion, events, intents, notices, sessions
 from research_core.store._common import parse_display_id
 from research_core.watcher import handlers, store_checks, wakes
 from research_core.watcher.handlers import Handler
@@ -256,3 +256,131 @@ def test_render_wake_cuts_a_huge_payload(tmp_path):
     [event] = [e for e in events.unhandled(ctx.store, {"store.unmarked_write"}) if e.seq == seq]
     text = wakes.render_wake("management", event, ctx)
     assert "payload cut here" in text and len(text) < wakes.PAYLOAD_CHARS + 4000
+
+
+# --- champion.changed: one wake per batch ------------------------------------------------------
+
+
+def change_champion(ctx, league_id: str, policy_version_id: str) -> int:
+    """What a champion sync records for one changed league: the row and its event."""
+    champion.sync(
+        ctx.store,
+        HARNESS,
+        league_id=league_id,
+        division_id="div_x",
+        membership_id=f"mem_{league_id}",
+        policy_version_id=policy_version_id,
+        state="champion",
+    )
+    return [e for e in events_of(ctx.store, "champion.changed") if e["subject"] == league_id][-1][
+        "seq"
+    ]
+
+
+def test_champion_changes_of_one_sync_start_one_wake(tmp_path):
+    ctx = make_ctx(tmp_path)
+    seqs = [change_champion(ctx, f"league_{name}", f"pv_{name}") for name in ("a", "b", "c")]
+
+    report = wakes.run(ctx)
+
+    [start] = starts(ctx)
+    run_id = run_id_of(ctx, start["session_id"])
+    assert report["started"] == [f"cow_fake:{seq}->{run_id}" for seq in seqs]
+    assert start["idempotency_key"] == f"event:cow_fake:{seqs[0]}:1"
+    for expected in ("champion.changed", "league_a", "league_b", "league_c", "pv_a", "pv_c"):
+        assert expected in start["text"], expected
+    assert start["text"].count('"subject"') == 3
+    session = sessions.read(ctx.wstore, start["session_id"])
+    assert session["kind"] == "wake" and session["event"] == "champion.changed"
+    assert [handled_row(ctx.store, seq)["session_id"] for seq in seqs] == [session["id"]] * 3
+
+    # A fourth change while the run is live waits for the next batch instead of joining.
+    fourth = change_champion(ctx, "league_d", "pv_d")
+    report = wakes.run(ctx)
+    assert len(starts(ctx)) == 1 and report["joined"] == []
+    assert report["waiting"] == [f"cow_fake:{seq}" for seq in [*seqs, fourth]]
+    assert handled_row(ctx.store, fourth) is None
+
+    ctx.hermes.complete(run_id, "told the user")
+    report = wakes.run(ctx)
+    assert report["acknowledged"] == [f"cow_fake:{seq}" for seq in seqs]
+    assert all(handled_row(ctx.store, seq)["handled_at"] for seq in seqs)
+    second = starts(ctx)[-1]
+    assert len(starts(ctx)) == 2 and second["session_id"] != start["session_id"]
+    assert "league_d" in second["text"] and "league_a" not in second["text"]
+
+    ctx.hermes.complete(run_id_of(ctx, second["session_id"]))
+    assert wakes.run(ctx)["acknowledged"] == [f"cow_fake:{fourth}"]
+    assert not wakes.has_queued_wakes(ctx)
+
+
+def test_champion_batch_retries_together_and_waits_out_a_busy_gateway(tmp_path):
+    ctx = make_ctx(tmp_path)
+    seqs = [change_champion(ctx, f"league_{name}", f"pv_{name}") for name in ("a", "b")]
+    wakes.run(ctx)
+    ctx.hermes.fail(run_id_of(ctx, starts(ctx)[-1]["session_id"]), "model error")
+    ctx.hermes.set_busy(True)
+
+    report = wakes.run(ctx)
+    assert report["run_failed"] == [f"cow_fake:{seq}" for seq in seqs]
+    assert report["busy"] == [f"cow_fake:{seq}" for seq in seqs]
+    session_id = handled_row(ctx.store, seqs[0])["session_id"]
+    assert handled_row(ctx.store, seqs[1])["session_id"] == session_id
+
+    ctx.hermes.set_busy(False)
+    report = wakes.run(ctx)
+    last = starts(ctx)[-1]
+    assert last["session_id"] == session_id
+    assert last["idempotency_key"] == f"event:cow_fake:{seqs[0]}:2"
+    assert [ref.split("->")[0] for ref in report["started"]] == [f"cow_fake:{s}" for s in seqs]
+
+
+def test_champion_batch_gives_up_like_a_single_wake(tmp_path):
+    ctx = make_ctx(tmp_path)  # recovery.max_attempts defaults to 2
+    seqs = [change_champion(ctx, f"league_{name}", f"pv_{name}") for name in ("a", "b")]
+    for _ in range(2):
+        wakes.run(ctx)
+        ctx.hermes.fail(run_id_of(ctx, starts(ctx)[-1]["session_id"]), "model error")
+
+    def champion_starts():
+        return [
+            s
+            for s in starts(ctx)
+            if sessions.read(ctx.wstore, s["session_id"])["event"] == "champion.changed"
+        ]
+
+    report = wakes.run(ctx)
+
+    assert report["gave_up"] == [f"cow_fake:{seq}" for seq in seqs]
+    assert len(champion_starts()) == 2
+    assert len(events_of(ctx.wstore, "wake.failed")) == 2  # each starts its own wake
+    assert wakes.run(ctx)["gave_up"] == [f"cow_fake:{seq}" for seq in seqs]
+    assert len(champion_starts()) == 2
+
+
+def test_other_kinds_keep_one_wake_per_subject(tmp_path):
+    ctx = make_ctx(tmp_path)
+    emit(ctx.store, "task.asked", "T-1", {})
+    emit(ctx.store, "task.asked", "T-2", {})
+    wakes.run(ctx)
+    assert len(starts(ctx)) == 2
+    assert not handlers.HANDLERS["task.asked"].batch_by_kind
+    assert handlers.HANDLERS["champion.changed"].batch_by_kind
+
+
+def test_render_batch_cuts_each_payload(tmp_path):
+    ctx = make_ctx(tmp_path)
+    huge = "pv_" + "x" * wakes.PAYLOAD_CHARS  # a payload over the cut on its own
+    for league in ("league_a", "league_b"):
+        emit(
+            ctx.store, "champion.changed", league, {"state": "champion", "policy_version_id": huge}
+        )
+    small = change_champion(ctx, "league_c", "pv_c")
+    batch = events.unhandled(ctx.store, {"champion.changed"})
+    assert batch[-1].seq == small
+
+    text = wakes.render_batch("management", batch, ctx)
+
+    assert "Event `champion.changed` on `league_a, league_b, league_c`" in text
+    assert text.count("payload cut here") == 2, "each large payload is cut on its own"
+    assert '"policy_version_id": "pv_c"' in text, "a small payload after them is whole"

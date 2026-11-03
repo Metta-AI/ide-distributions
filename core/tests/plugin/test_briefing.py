@@ -204,6 +204,9 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
     ctx.store.set_meta("checks_at", now_iso(lambda: NOW - timedelta(hours=2)))
     ctx.store.set_meta("credits", json.dumps({"balance": 120, "held": 10}))
     ctx.store.set_meta("stale_overrides", json.dumps(["task", "claim"]))
+    ctx.store.set_meta(
+        "league_versions", "The workspace is on g version 0 (cow_0); its leagues run 1"
+    )
     capabilities.mark(ctx.store, HARNESS, "upload", status="ok", output="")
     capabilities.report_failure(ctx.store, HARNESS, "build", output="boom", command="build.py")
     settings.update(ctx.wstore, HARNESS, "paused", True, cites="msg:2")
@@ -234,6 +237,7 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
     assert "Stale skill overrides: task, claim" in text
     assert "User identity: not provisioned" in text
     assert "Champion in league-1: V-1 (champion since 20" in text
+    assert "The workspace is on g version 0 (cow_0); its leagues run 1" in text
     assert "V-1 uploaded" in text
     assert "Autonomous submissions: open until 2026-10-30T00:00:00Z, at most 2" in text
     assert_no_store_path(text, tmp_path)

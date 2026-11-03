@@ -32,7 +32,13 @@ NOW_ISO = "2026-10-28T10:00:00+00:00"
 PV_ID = "11111111-1111-1111-1111-111111111111"
 PV2_ID = "22222222-2222-2222-2222-222222222222"
 
-GAME = {"id": "game_1", "name": "Fakegame", "coworld_id": "cow_1", "created_at": NOW}
+GAME = {
+    "id": "game_1",
+    "name": "Fakegame",
+    "coworld_id": "cow_1",
+    "coworld_name": "fakegame",
+    "created_at": NOW,
+}
 LEAGUE = {
     "id": "league_1",
     "name": "Fakegame Open",
@@ -606,7 +612,8 @@ def test_league_mapping_and_dict_reads(platform, server):
     assert server.calls[0].url.params["game_id"] == "game_1"
     league = leagues[0]
     assert league.id == "league_1" and league.game_id == "game_1"
-    assert league.coworld_id == "cow_1" and league.wiki_markdown_url is None
+    assert league.coworld_id == "cow_1" and league.coworld_name == "fakegame"
+    assert league.wiki_markdown_url is None
     assert league.forum_markdown_url == LEAGUE["forum_markdown_url"]
     assert platform.league("league_1") == league
 
