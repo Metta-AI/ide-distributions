@@ -62,6 +62,23 @@ HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes   # agai
 CI runs the same inside the hosted Hermes image, and `play/` separately. A daily workflow
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
+The model tool-call tests in `core/tests/model` call models through OpenRouter and spend real
+money (about $3 for the full write-action measurement), so they run only on request and never
+in CI:
+
+```bash
+OPENROUTER_API_KEY=... uv run pytest -m model core/tests/model/test_write_actions.py
+```
+
+It sends one write action with required fields per case (claims, Goals, Tasks, experiments,
+directives, settings, notices), for both roles, offering the role's whole tool list as a Hermes
+session does, plus cases that start after a refused call. It runs Kimi K3.1 Pro, Kimi K3,
+GLM 5.3 and MiniMax M3, each on its shipped host pin and at least one other OpenRouter host,
+and ends with a table of first-try valid rates, prompt tokens and cost per model and host.
+`IDE_TOOL_CALL_MODELS`, `IDE_TOOL_CALL_HOSTS`, `IDE_TOOL_CALL_CASES`, `IDE_TOOL_CALL_REPEATS`
+and `IDE_TOOL_CALL_SCHEMAS` narrow or change a run; the module docstring describes them.
+`test_tool_call_format.py` sends one instruction per tool, on the shipped models and pins.
+
 To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
 interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).
 

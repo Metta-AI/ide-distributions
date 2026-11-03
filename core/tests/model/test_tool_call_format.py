@@ -1,21 +1,19 @@
 """Tool-call format against the models in use (design C.4, amendment A7.2).
 
-Skipped without ``OPENROUTER_API_KEY``. For each role, each model its shipped ``config.yaml``
-names (the primary and the fallbacks) and each of the role's tools, ask for exactly one call from
-a one-line instruction and check that the returned arguments validate.
+Runs only with ``-m model`` and ``OPENROUTER_API_KEY``. For each role, each model its shipped
+``config.yaml`` names (the primary and the fallbacks) and each of the role's tools, ask for exactly
+one call from a one-line instruction and check that the returned arguments validate.
 """
 
-import json
 import os
-import urllib.request
 from pathlib import Path
 
 import pytest
 import yaml
 
-from research_core import prepare
 from research_core.tools import catalog
 from research_core.tools.base import validate_args
+from tests.model import harness
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -31,7 +29,6 @@ CASES = (
     if os.environ.get("IDE_TOOL_CALL_MODELS")
     else [(role, m) for role in ("orchestrator", "researcher") for m in shipped_models(role)]
 )
-KEY = os.environ.get("OPENROUTER_API_KEY")
 INSTRUCTIONS = {
     "goal": "Create a Goal titled 'Beat the house' with end state 'rank first' because I asked.",
     "task": "Read Task T-3.",
@@ -54,38 +51,26 @@ INSTRUCTIONS = {
 # A Researcher reads Goals; it cannot create one.
 ROLE_INSTRUCTIONS = {"researcher": {"goal": "Read Goal G-1."}}
 
-pytestmark = pytest.mark.skipif(not KEY, reason="OPENROUTER_API_KEY is not set")
+pytestmark = [
+    pytest.mark.model,
+    pytest.mark.skipif(not harness.KEY, reason="OPENROUTER_API_KEY is not set"),
+]
 
 
 def ask(model: str, schema: dict, instruction: str) -> dict:
-    body = json.dumps(
-        {
-            "model": model,
-            "messages": [{"role": "user", "content": instruction}],
-            "tools": [{"type": "function", "function": schema}],
-            # One tool per request, so "required" forces it; Kimi K3.1 Pro's endpoint does not
-            # support naming the function.
-            "tool_choice": "required",
-            # Hermes sends no temperature to Kimi (Moonshot accepts only its own); 0 elsewhere.
-            **({} if model.rsplit("/", 1)[-1].startswith("kimi") else {"temperature": 0}),
-            # The OpenRouter hosts the shipped config pins this model to, as production uses.
-            **(
-                {"provider": prepare.PROVIDER_ROUTING_MODELS[model]}
-                if model in prepare.PROVIDER_ROUTING_MODELS
-                else {}
-            ),
-        }
-    ).encode()
-    request = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=body,
-        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
+    reply = harness.complete(
+        model,
+        [{"role": "user", "content": instruction}],
+        [{"type": "function", "function": schema}],
+        # One tool per request, so "required" forces it; Kimi K3.1 Pro's endpoint does not
+        # support naming the function.
+        tool_choice="required",
+        # The OpenRouter hosts the shipped config pins this model to, as production uses.
+        provider=harness.provider_for(model, harness.SHIPPED),
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        payload = json.load(response)
-    calls = payload["choices"][0]["message"].get("tool_calls") or []
-    assert calls, payload
-    return json.loads(calls[0]["function"]["arguments"] or "{}")
+    assert reply.calls, reply
+    assert reply.calls[0].arguments is not None, reply.calls[0].raw
+    return reply.calls[0].arguments
 
 
 @pytest.mark.parametrize(("role", "model"), CASES)
