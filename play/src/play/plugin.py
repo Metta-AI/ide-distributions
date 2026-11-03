@@ -50,6 +50,25 @@ TOOLS = {
         },
         ["league"],
     ),
+    "league_status": (
+        (
+            "Read-only look at the live league, free of credits: the newest round and its state, "
+            "each division's top scores, this user's own rank and score, what changed since you "
+            "last looked, and their latest league game. Anything the platform could not answer is "
+            "listed under unavailable; say nothing about it."
+        ),
+        {
+            "league": {"type": "string", "description": "The league for this operation."},
+            "top": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 25,
+                "default": 10,
+                "description": "How many leaders to list per division.",
+            },
+        },
+        ["league"],
+    ),
     "program_show": (
         (
             "Show the program as it is now (or the starter, before the first change): its full "

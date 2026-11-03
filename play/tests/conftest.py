@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import subprocess
+import urllib.error
 import urllib.parse
 from pathlib import Path
 
@@ -72,6 +73,11 @@ class FakeCli:
         self.siblings: list[dict] = []  # versions of the same user's other players
         self.roster: list[dict] = []
         self.api_reads: list[str] = []
+        self.rounds: list[dict] = []
+        self.leagues_extra: dict = {}
+        self.divisions = [{"id": "div_1", "name": "Bronze", "level": 1, "member_count": 3}]
+        self.boards: dict[str, list[dict]] = {}
+        self.latest_replay: dict | None = None
         self.requests = 0
 
     def __call__(self, argv, input=None, cwd=None, **kwargs):
@@ -97,9 +103,26 @@ class FakeCli:
                         {
                             "game": {"coworld_id": "cow_gota"},
                             "commissioner_config": {"default_variant_id": "standard"},
+                            **self.leagues_extra,
                         }
                     )
                 )
+            case [
+                "coworld",
+                "rounds",
+                "--league",
+                _,
+                "--status",
+                "completed",
+                "--limit",
+                "1",
+                "--json",
+            ]:
+                return done(json.dumps({"entries": self.rounds, "next_cursor": None}))
+            case ["coworld", "results", target, "--json"]:
+                if target.startswith("league_"):
+                    return done(json.dumps(self.divisions))
+                return done(json.dumps(self.boards.get(target, [])))
             case ["coworld", "show", "cow_gota", "--json"]:
                 players = [
                     {"id": "image-player", "image": "ghcr.io/x"},
@@ -225,6 +248,12 @@ class FakeCli:
     def http_get(self, url: str, headers: dict[str, str]) -> str:
         assert headers["Authorization"] == "Bearer cga_fake"
         parsed = urllib.parse.urlsplit(url)
+        if parsed.path.endswith("/latest-replay"):
+            if self.latest_replay is None:
+                raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+            if self.latest_replay == "null":  # the platform's 200 with a null body: no game yet
+                return "null"
+            return json.dumps(self.latest_replay)
         assert parsed.path == "/api/observatory/stats/policy-versions", url
         query = dict(urllib.parse.parse_qsl(parsed.query))
         assert query["mine"] == "true"

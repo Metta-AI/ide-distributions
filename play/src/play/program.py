@@ -28,6 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -632,6 +633,196 @@ class Program:
         )
         journal.versions.append(entry)
         return entry
+
+    # --- live league (read-only) ----------------------------------------
+
+    def league_status(self, *, league: str, top: int = 10) -> dict:
+        """What the league looks like now, from the platform's public reads (no credits, no
+        writes): whether it is paused, its last finished round, each division's top ``top``
+        with scores, this player's own rank and score, what changed since the last look (a small
+        snapshot kept in the workspace) and this player's latest league game. A part the
+        platform does not answer is named in ``unavailable``."""
+        top = max(1, min(int(top), 25))
+        unavailable: list[str] = []
+        out: dict = {"league": league}
+        cli = self.client._cli
+
+        def attempt(part: str, read):
+            try:
+                return read()
+            except (SoftmaxCliError, KeyError, TypeError, ValueError, AttributeError):
+                unavailable.append(part)
+                return None
+
+        record = attempt("league", lambda: cli.run_json("coworld", ["leagues", league]))
+        if isinstance(record, dict):
+            out["name"] = record.get("name")
+            out["running"] = not (record.get("disabled_at") or record.get("rounds_paused_at"))
+
+        def last_round():
+            # Rounds of every division arrive newest created first, mostly pending ones that
+            # have not started, so ask for the newest finished round.
+            args = ["rounds", "--league", league, "--status", "completed", "--limit", "1"]
+            page = cli.run_json("coworld", args)
+            rows = page["entries"] if isinstance(page, dict) else page
+            if not rows:
+                return None
+            row = rows[0]
+            keep = ("id", "round_number", "status", "started_at", "completed_at")
+            found = {key: row[key] for key in keep if row.get(key) is not None}
+            division = row.get("division")
+            if isinstance(division, dict) and division.get("name"):
+                found["division"] = division["name"]
+            return found
+
+        round_now = attempt("round", last_round)
+        if round_now is not None:
+            out["last_finished_round"] = round_now
+        rows = attempt("leaderboard", lambda: self._standings(league))
+        mine: dict[str, dict] = {}
+        if rows is not None:
+            divisions: dict[str, dict] = {}
+            for row in rows:
+                division = divisions.setdefault(
+                    row["division_id"],
+                    {
+                        "id": row["division_id"],
+                        "name": row["division_name"],
+                        "level": row["level"],
+                        "size": 0,
+                        "top": [],
+                    },
+                )
+                division["size"] += 1
+                entry = {
+                    key: row.get(key)
+                    for key in ("rank", "player_name", "score", "score_label", "rounds_played")
+                }
+                if row.get("settling"):
+                    entry["settling"] = True
+                if len(division["top"]) < top:
+                    division["top"].append(entry)
+                if row["player_id"] == self.player:
+                    mine[row["division_id"]] = {**entry, "division": row["division_name"]}
+            out["divisions"] = list(divisions.values())
+            out["mine"] = list(mine.values())
+            out["changes"] = self._league_changes(league, round_now, mine)
+        latest = attempt("latest_result", lambda: self._latest_result(league))
+        if latest is not None:
+            out["latest_result"] = latest
+        if unavailable:
+            out["unavailable"] = unavailable
+        return out
+
+    def _standings(self, league: str) -> list[dict]:
+        """Every division's board: the ladder, then the boards read concurrently."""
+        cli = self.client._cli
+        ladder = cli.run_json("coworld", ["results", league])
+
+        def board(division: dict) -> list[dict]:
+            return cli.run_json("coworld", ["results", division["id"]]) or []
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            boards = list(pool.map(board, ladder))
+        rows = []
+        for division, entries in zip(ladder, boards, strict=True):
+            for index, entry in enumerate(entries, start=1):
+                rows.append(
+                    {
+                        "division_id": division["id"],
+                        "division_name": division.get("name"),
+                        "level": division.get("level"),
+                        "rank": entry["rank"] if entry.get("rank") is not None else index,
+                        "player_id": entry["player_id"],
+                        "player_name": entry.get("player_name"),
+                        "score": entry.get("score"),
+                        "score_label": entry.get("score_label"),
+                        "rounds_played": entry.get("rounds_played"),
+                        "settling": entry.get("settling"),
+                    }
+                )
+        return rows
+
+    def _latest_result(self, league: str) -> dict | None:
+        """This player's newest game in the league: ``{round, episode}`` as the platform
+        answers; None when there is no game yet (a 404) or nothing usable in the answer."""
+        try:
+            data = self.client.latest_league_result(self.player, league)
+        except SoftmaxCliError as error:
+            if "404" in str(error):
+                return None
+            raise
+        if data is None:  # the platform answers null when the player has no game yet
+            return None
+        if not isinstance(data, dict):
+            raise TypeError("latest result is not an object")
+        found: dict = {}
+        round_row, episode = data.get("round"), data.get("episode")
+        if isinstance(round_row, dict):
+            round_part = {
+                key: round_row[key]
+                for key in ("id", "round_number", "status", "completed_at")
+                if round_row.get(key) is not None
+            }
+            division = round_row.get("division")
+            if isinstance(division, dict) and division.get("name"):
+                round_part["division"] = division["name"]
+            if round_part:
+                found["round"] = round_part
+        if isinstance(episode, dict):
+            part = {
+                key: episode[key]
+                for key in ("episode_id", "status", "created_at", "replay_url", "error")
+                if episode.get(key) is not None
+            }
+            for entry in episode.get("participants") or []:
+                if isinstance(entry, dict) and entry.get("player_id") == self.player:
+                    part["your_entry"] = {
+                        k: v for k, v in entry.items() if isinstance(v, str | int | float | bool)
+                    }
+            if part:
+                found["episode"] = part
+        if not found:
+            raise ValueError("latest result has no usable field")
+        return found
+
+    def _league_changes(self, league: str, round_now: dict | None, mine: dict[str, dict]) -> dict:
+        """Compare with the snapshot of the last look, then keep this look. A snapshot of an
+        unexpected shape counts as no earlier look."""
+        path = self.root / "league_snapshot.json"
+        try:
+            snapshots = json.loads(path.read_text()) if path.is_file() else {}
+        except (ValueError, OSError):
+            snapshots = {}
+        if not isinstance(snapshots, dict):
+            snapshots = {}
+        before = snapshots.get(league)
+        round_id = (round_now or {}).get("id")
+        snapshots[league] = {"at": now(), "round": round_id, "mine": mine}
+        try:
+            write_text(path, json.dumps(snapshots, indent=2))
+        except OSError:
+            pass  # the look is still reported; only the comparison next time is lost
+        try:
+            seen = before["mine"]
+            moved = []
+            for division, current in mine.items():
+                old = seen.get(division)
+                if old is None or (old["rank"], old["score"]) != (
+                    current["rank"],
+                    current["score"],
+                ):
+                    moved.append({"division": current["division"], "now": current, "was": old})
+            for division, old in seen.items():
+                if division not in mine:
+                    moved.append({"division": old["division"], "now": None, "was": old})
+            return {
+                "since": before["at"],
+                "new_finished_round": round_id != before["round"],
+                "moved": moved,
+            }
+        except (KeyError, TypeError, AttributeError):
+            return {"since": None, "note": "first look at this league from here"}
 
     # --- practice -------------------------------------------------------
 

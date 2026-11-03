@@ -556,3 +556,118 @@ def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
     assert data["state"] not in ("completed", "failed", "cancelled")
     assert "summary" not in data
     assert "games finished so far" in data["plain"]
+
+
+def _league(cli):
+    cli.rounds = [  # only the newest completed round is asked for (RoundPublic)
+        {
+            "id": "rnd_9",
+            "round_number": 7,
+            "status": "completed",
+            "started_at": "2026-11-02T00:00:00Z",
+            "completed_at": "2026-11-02T00:10:00Z",
+            "created_at": "2026-11-01T23:59:00Z",
+            "division": {"id": "div_1", "name": "Bronze", "level": 1},
+        }
+    ]
+    cli.boards["div_1"] = [
+        {
+            "rank": 1,
+            "player_id": "ply_x",
+            "player_name": "ace",
+            "score": 9.5,
+            "rounds_played": 4,
+            "score_label": "MMR",
+            "settling": False,
+            "owner_name": "someone",
+        },
+        {
+            "rank": 2,
+            "player_id": PLAYER,
+            "player_name": "me",
+            "score": 7.0,
+            "rounds_played": 4,
+            "score_label": "MMR",
+            "settling": True,
+        },
+        {"rank": 3, "player_id": "ply_y", "player_name": "bo", "score": 3.0, "rounds_played": 4},
+    ]
+    cli.latest_replay = {
+        "round": {
+            "id": "rnd_9",
+            "round_number": 7,
+            "status": "completed",
+            "completed_at": "2026-11-02T00:10:00Z",
+            "division": {"name": "Bronze"},
+        },
+        "episode": {
+            "episode_id": "ep_1",
+            "status": "completed",
+            "replay_url": "https://r/1",
+            "created_at": "2026-11-02T00:05:00Z",
+            "participants": [{"player_id": "ply_x", "score": 1}, {"player_id": PLAYER, "score": 2}],
+        },
+    }
+
+
+def test_league_status_reads_the_live_league_and_what_changed(program, cli, env):
+    _league(cli)
+    cli.leagues_extra = {"name": "Generals FFA", "rounds_paused_at": None, "disabled_at": None}
+    first = program.league_status(league=CHOSEN, top=2)
+    assert first["last_finished_round"] == {
+        "id": "rnd_9",
+        "round_number": 7,
+        "status": "completed",
+        "started_at": "2026-11-02T00:00:00Z",
+        "completed_at": "2026-11-02T00:10:00Z",
+        "division": "Bronze",
+    }
+    assert first["name"] == "Generals FFA" and first["running"] is True
+    assert [e["player_name"] for e in first["divisions"][0]["top"]] == ["ace", "me"]
+    assert first["divisions"][0]["size"] == 3
+    assert first["mine"] == [
+        {
+            "rank": 2,
+            "player_name": "me",
+            "score": 7.0,
+            "score_label": "MMR",
+            "rounds_played": 4,
+            "settling": True,
+            "division": "Bronze",
+        }
+    ]
+    assert "owner_name" not in str(first)
+    assert first["changes"] == {"since": None, "note": "first look at this league from here"}
+    assert first["latest_result"]["round"]["id"] == "rnd_9"
+    assert first["latest_result"]["episode"]["your_entry"] == {"player_id": PLAYER, "score": 2}
+    assert first["latest_result"]["episode"]["replay_url"] == "https://r/1"
+    assert "unavailable" not in first
+    cli.boards["div_1"][1].update(rank=1, score=10.0)
+    cli.boards["div_1"][0].update(rank=2, score=9.5)
+    second = program.league_status(league=CHOSEN)
+    moved = second["changes"]["moved"]
+    assert moved[0]["was"]["rank"] == 2 and moved[0]["now"]["rank"] == 1
+    assert second["changes"]["new_finished_round"] is False and second["changes"]["since"]
+    assert program.league_status(league=CHOSEN)["changes"]["moved"] == []
+    assert not cli.mutations()
+
+
+def test_league_status_resets_a_snapshot_of_the_wrong_shape(program, cli, env):
+    _league(cli)
+    for bad in ("[1, 2]", json.dumps({CHOSEN: {"mine": 5}}), "not json"):
+        (workspace(env) / "league_snapshot.json").write_text(bad)
+        data = program.league_status(league=CHOSEN)
+        assert data["changes"]["since"] is None
+    assert program.league_status(league=CHOSEN)["changes"]["since"]
+
+
+def test_league_status_names_what_the_platform_could_not_answer(program, cli):
+    data = program.league_status(league=CHOSEN)  # no rounds, no games yet, nobody on the board
+    assert "last_finished_round" not in data and data["mine"] == []
+    assert "latest_result" not in data and "unavailable" not in data  # a 404 is "no game yet"
+    cli.latest_replay = "null"  # a 200 with a null body is also "no game yet"
+    data = program.league_status(league=CHOSEN)
+    assert "latest_result" not in data and "unavailable" not in data
+    cli.latest_replay = {"round": {}, "episode": {}}
+    assert program.league_status(league=CHOSEN)["unavailable"] == ["latest_result"]
+    assert run("league_status", {"league": CHOSEN, "top": 3}, program)["ok"] is True

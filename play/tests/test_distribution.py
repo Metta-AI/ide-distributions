@@ -125,13 +125,13 @@ def test_play_cares_first_decides_small_things_recovers_and_learns():
         "never covers changing or uploading",
         '"[page]"',
         "unless the user names another",
-        "never mention the \"[page]\" line itself",
+        'never mention the "[page]" line itself',
         "## Always a conversation",
         "picking up where you left off",
         "`league_status` (call it once",
         "Never invent any of it",
         "is the nod",
-        "no more lookups",
+        "again only if the",
         "except when you talk about what something costs",
         "sentence or two (what you are about to do",
         "open-ended, costly, or a judgment call",
@@ -146,3 +146,17 @@ def test_play_cares_first_decides_small_things_recovers_and_learns():
     ):
         assert needle in soul, needle
     assert soul.index("## Every conversation starts with them") < soul.index("## How the work goes")
+
+
+def test_play_reads_the_live_league_through_league_status_only():
+    soul = " ".join((PROFILES["play"] / "SOUL.md").read_text().split())
+    for needle in (
+        (
+            "`league_status` (call it once at the start of the conversation, and again only if the "
+            "user asks how it is going; it is read-only and free)"
+        ),
+        "If a source has nothing or is unavailable, say nothing about that item",
+        "Never invent any of it",
+    ):
+        assert needle in soul, needle
+    assert soul.count("league_status") == 2 - 1  # only in the conversation section

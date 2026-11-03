@@ -13,6 +13,7 @@ from .program import PlayError, Program
 
 OPERATIONS = (
     "starter_fetch",
+    "league_status",
     "program_show",
     "program_change",
     "program_edit",

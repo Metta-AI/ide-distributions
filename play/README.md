@@ -33,6 +33,7 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 | `program_show` | The program now (or the starter before the first change), its name, its last version and whether it changed since. |
 | `program_edit` | Applies `{find, replace}` edits (each `find` exactly once; `edit_not_found` / `edit_ambiguous` otherwise) to the program now or the starter, then runs the same check and write as `program_change`. |
 | `program_change` | Writes `program.bas` from a full new text after a static check (`src/play/basic.py`: size, closed blocks, bassy statements, and the selected game's countable limits). A problem writes nothing and returns `program_invalid` with each problem by line; names the starter never uses come back as warnings. Returns the diff. |
+| `league_status` | Read-only, free: the live league's newest round, each division's top scores, the user's own rank and score, what changed since the last look (a small `league_snapshot.json` in the workspace) and their latest league game. |
 | `program_versions` | Every uploaded version (what changed, practice summaries, released or not) and the diff of the program now against the last version or any version. |
 | `program_upload` | `coworld upload-policy --file program.bas --name <name> --title <change>`; returns "towerless v2". An unchanged file returns its existing version. |
 | `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". |
