@@ -48,7 +48,8 @@ class League:
     id: str
     name: str
     game_id: str | None = None
-    coworld_id: str | None = None
+    coworld_id: str | None = None  # the Coworld version the league runs
+    coworld_name: str | None = None  # the same in every version of the Coworld
     participation_url: str | None = None
     forum_markdown_url: str | None = None
     wiki_markdown_url: str | None = None

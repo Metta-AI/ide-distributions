@@ -22,7 +22,8 @@ Watcher bookkeeping read from ``meta`` (the watcher and the doctor write these k
   "<date>"}``, A7.8);
 - Coworld store: ``checks_at`` (ISO time of the last capability check), ``credits`` (JSON
   ``{"balance", "held"?, "next_refill"?}`` from that check), ``stale_overrides`` (JSON list of
-  skill names whose upstream changed, A7.3).
+  skill names whose upstream changed, A7.3), ``league_versions`` (one line from champion sync
+  when no league runs the Coworld or its leagues run another version than the workspace).
 """
 
 from __future__ import annotations
@@ -331,6 +332,9 @@ def _champion_and_versions(inputs: Inputs) -> Section:
         lines.append(f"Champion in {row['league_id']}: {version} ({row['state']}{since})")
     if not rows:
         lines.append("Champion: none recorded yet")
+    league_versions = inputs.store.get_meta("league_versions")
+    if league_versions:
+        lines.append(league_versions)
     recent = versions.list(inputs.store, limit=RECENT_VERSIONS)
     for record in recent:
         status = record.get("submission_status") or versions.submission_status(record)
