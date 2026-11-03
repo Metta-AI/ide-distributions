@@ -65,6 +65,13 @@ curator:
 auxiliary:
   background_review:
     enabled: false
+# Hermes's loop guard ends a turn after 5 failures of one tool. Hermes leaves the hard stop off
+# for api_server, which it treats as attended, but nobody watches a wake or a Task run; the
+# warnings keep Hermes's defaults. prepare.py keeps both keys (PROTECTED_KEYS).
+tool_loop_guardrails:
+  hard_stop_enabled: true
+  hard_stop_after:
+    same_tool_failure: 5
 # Kimi K3.1 Pro and K3 run only on Moonshot's own OpenRouter endpoint: third-party hosts
 # dropped tool-call arguments in long sessions. This is routing, not the model choice; it
 # applies while the profile runs that model (prepare.py PROVIDER_ROUTING_MODELS adds it to

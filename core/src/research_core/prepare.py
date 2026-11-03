@@ -73,6 +73,10 @@ PROTECTED_KEYS: dict[str, Any] = {
     "plugins.enabled": ["<role>"],
     "platform_toolsets.api_server": ["hermes-api-server", "ide-<role>"],
     "known_plugin_toolsets.cron": ["ide-<role>"],
+    # Hermes's loop guard only warns on api_server; a wake that repeated one refused call 185
+    # times (2026-11-02) is why the turn now ends after 5 failures of one tool.
+    "tool_loop_guardrails.hard_stop_enabled": True,
+    "tool_loop_guardrails.hard_stop_after.same_tool_failure": 5,
 }
 
 # Orchestrator chats are long: compaction protects more of the head and tail and compacts less

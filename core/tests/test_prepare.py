@@ -580,6 +580,47 @@ def test_the_owners_routing_wins_over_the_shipped_pins(homes, routing):
     assert "provider_routing.models" not in fake.config
 
 
+GUARDRAIL_KEYS = {
+    "tool_loop_guardrails.hard_stop_enabled": True,
+    "tool_loop_guardrails.hard_stop_after.same_tool_failure": 5,
+}
+
+
+@pytest.mark.parametrize("role", ["orchestrator", "researcher"])
+@pytest.mark.parametrize(
+    "existing",
+    [
+        {},  # a fresh profile
+        {  # an install from before the hard stop, with Hermes's defaults spelled out
+            "tool_loop_guardrails.hard_stop_enabled": False,
+            "tool_loop_guardrails.hard_stop_after.same_tool_failure": 8,
+            "tool_loop_guardrails.warn_after.same_tool_failure": 3,
+        },
+    ],
+)
+def test_prepare_turns_on_the_loop_guard_hard_stop(homes, role, existing):
+    profile, env = homes
+    fake = FakeHermes(existing)
+    run_prepare(fake, env, role=role)
+    for key, value in GUARDRAIL_KEYS.items():
+        assert fake.config[key] == value, key
+    assert fake.sets()["tool_loop_guardrails.hard_stop_enabled"] == "true"
+    assert fake.sets()["tool_loop_guardrails.hard_stop_after.same_tool_failure"] == "5"
+    if existing:
+        assert fake.config["tool_loop_guardrails.warn_after.same_tool_failure"] == 3, "kept"
+
+
+def test_shipped_configs_carry_the_loop_guard_hard_stop():
+    import yaml
+
+    for role in ("orchestrator", "researcher"):
+        shipped = yaml.safe_load((REPO / role / "config.yaml").read_text())
+        assert shipped["tool_loop_guardrails"] == {
+            "hard_stop_enabled": True,
+            "hard_stop_after": {"same_tool_failure": 5},
+        }
+
+
 def test_shipped_configs_carry_the_kimi_host_pins():
     import yaml
 
