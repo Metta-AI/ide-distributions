@@ -633,6 +633,99 @@ class Program:
         journal.versions.append(entry)
         return entry
 
+    # --- live league (read-only) ----------------------------------------
+
+    def league_status(self, *, league: str, top: int = 10) -> dict:
+        """What the league looks like now, from the platform's public reads (no credits, no
+        writes): the newest round, each division's top ``top`` with scores, this player's own
+        rank and score, and what changed since the last look (a small snapshot kept in the
+        workspace). A part the platform does not answer is named in ``unavailable``."""
+        unavailable: list[str] = []
+        out: dict = {"league": league}
+
+        def attempt(part: str, read):
+            try:
+                return read()
+            except (SoftmaxCliError, KeyError, TypeError, ValueError):
+                unavailable.append(part)
+                return None
+
+        record = attempt("league", lambda: self.client._cli.run_json("coworld", ["leagues", league]))
+        if isinstance(record, dict):
+            out["name"] = record.get("name") or record.get("title")
+            out["state"] = record.get("status") or record.get("state")
+
+        def newest_round():
+            page = self.client._cli.run_json("coworld", ["rounds", "--league", league, "--limit", "5"])
+            rows = page["entries"] if isinstance(page, dict) else page
+            keep = ("id", "round_number", "number", "status", "state", "start_time", "end_time")
+            if not rows:
+                return None
+            latest = max(rows, key=lambda r: r.get("start_time") or r.get("created_at") or "")
+            return {key: latest[key] for key in keep if latest.get(key) is not None}
+
+        round_now = attempt("round", newest_round)
+        if round_now is not None:
+            out["round"] = round_now
+        rows = attempt("leaderboard", lambda: self.client.standings(league))
+        mine: dict[str, dict] = {}
+        if rows is not None:
+            divisions: dict[str, dict] = {}
+            for row in rows:
+                division = divisions.setdefault(
+                    row["division_id"],
+                    {"id": row["division_id"], "name": row["division_name"], "level": row["level"]},
+                )
+                entry = {k: row[k] for k in ("rank", "player_name", "score", "rounds_played")}
+                division.setdefault("size", 0)
+                division["size"] += 1
+                if len(division.setdefault("top", [])) < top:
+                    division["top"].append(entry)
+                if row["player_id"] == self.player:
+                    mine[row["division_id"]] = {**entry, "division": row["division_name"]}
+            out["divisions"] = list(divisions.values())
+            out["mine"] = list(mine.values())
+            out["changes"] = self._league_changes(league, round_now, mine)
+        latest = attempt(
+            "latest_result", lambda: self.client.latest_league_result(self.player, league)
+        )
+        if isinstance(latest, dict) and latest:
+            out["latest_result"] = {
+                k: v for k, v in latest.items() if isinstance(v, str | int | float | bool)
+            }
+        if unavailable:
+            out["unavailable"] = unavailable
+        return out
+
+    def _league_changes(self, league: str, round_now: dict | None, mine: dict[str, dict]) -> dict:
+        """Compare with the snapshot of the last look, then keep this look."""
+        path = self.root / "league_snapshot.json"
+        try:
+            snapshots = json.loads(path.read_text()) if path.is_file() else {}
+        except ValueError:
+            snapshots = {}
+        before = snapshots.get(league)
+        now_at = now()
+        snapshots[league] = {"at": now_at, "round": (round_now or {}).get("id"), "mine": mine}
+        write_text(path, json.dumps(snapshots, indent=2))
+        if before is None:
+            return {"since": None, "note": "first look at this league from here"}
+        moved = []
+        for division, current in mine.items():
+            old = before["mine"].get(division)
+            if old is None:
+                moved.append({"division": current["division"], "now": current, "was": None})
+            elif (old["rank"], old["score"]) != (current["rank"], current["score"]):
+                moved.append({"division": current["division"], "now": current, "was": old})
+        for division, old in before["mine"].items():
+            if division not in mine:
+                moved.append({"division": old["division"], "now": None, "was": old})
+        return {
+            "since": before["at"],
+            "new_round": (round_now or {}).get("id") != before.get("round"),
+            "moved": moved,
+        }
+
     # --- practice -------------------------------------------------------
 
     def practice_request(

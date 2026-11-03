@@ -14,6 +14,7 @@ from play.limits import NAME_MAX, POLICY_NAME_MAX, SUFFIX_LENGTH
 DISTRIBUTION = Path(__file__).resolve().parents[1]
 PLAY_TOOLS = {
     "starter_fetch": (["league"], {"player", "league"}),
+    "league_status": (["league"], {"league", "top"}),
     "program_show": ([], {"program"}),
     "program_change": (["text", "change"], {"text", "change"}),
     "program_edit": (["edits", "change"], {"edits", "change"}),

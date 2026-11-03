@@ -146,3 +146,13 @@ def test_play_cares_first_decides_small_things_recovers_and_learns():
     ):
         assert needle in soul, needle
     assert soul.index("## Every conversation starts with them") < soul.index("## How the work goes")
+
+
+def test_play_reads_the_live_league_through_league_status_only():
+    soul = (PROFILES["play"] / "SOUL.md").read_text()
+    for needle in (
+        "call `league_status` with the selected league once at the start of a",
+        "read-only and costs no",
+        "say nothing about that part, and never guess",
+    ):
+        assert needle in soul.replace("\n", " ").replace("  ", " ") or needle in soul, needle

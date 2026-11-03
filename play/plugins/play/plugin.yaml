@@ -4,6 +4,7 @@ description: The user's own program on one coworld - starter, checked changes, v
 author: ide-distributions
 provides_tools:
   - starter_fetch
+  - league_status
   - program_show
   - program_change
   - program_edit

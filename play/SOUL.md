@@ -20,6 +20,10 @@ It returns the published rules, player protocol, variant and seat count. Follow 
 rules before editing: BASIC host functions and score meanings differ between games.
 An installed adapter never chooses a league for the user. Files and containers can both
 be accepted by one game; choose its BASIC starter for this workflow.
+To see the live league, call `league_status` with the selected league once at the start of a
+conversation and again when the user asks how things are going. It is read-only and costs no
+credits. Base everything you say about the league, ranks and recent results on what it returns;
+if it lists a part as unavailable, say nothing about that part, and never guess.
 
 ## Why you are here
 

@@ -72,6 +72,10 @@ class FakeCli:
         self.siblings: list[dict] = []  # versions of the same user's other players
         self.roster: list[dict] = []
         self.api_reads: list[str] = []
+        self.rounds: list[dict] = []
+        self.divisions = [{"id": "div_1", "name": "Bronze", "level": 1, "member_count": 3}]
+        self.boards: dict[str, list[dict]] = {}
+        self.latest_replay: dict | None = None
         self.requests = 0
 
     def __call__(self, argv, input=None, cwd=None, **kwargs):
@@ -100,6 +104,12 @@ class FakeCli:
                         }
                     )
                 )
+            case ["coworld", "rounds", "--league", _, "--limit", _, "--json"]:
+                return done(json.dumps({"entries": self.rounds, "next_cursor": None}))
+            case ["coworld", "results", target, "--json"]:
+                if target.startswith("league_"):
+                    return done(json.dumps(self.divisions))
+                return done(json.dumps(self.boards.get(target, [])))
             case ["coworld", "show", "cow_gota", "--json"]:
                 players = [
                     {"id": "image-player", "image": "ghcr.io/x"},
@@ -225,6 +235,10 @@ class FakeCli:
     def http_get(self, url: str, headers: dict[str, str]) -> str:
         assert headers["Authorization"] == "Bearer cga_fake"
         parsed = urllib.parse.urlsplit(url)
+        if parsed.path.endswith("/latest-replay"):
+            if self.latest_replay is None:
+                raise OSError("no replay")
+            return json.dumps(self.latest_replay)
         assert parsed.path == "/api/observatory/stats/policy-versions", url
         query = dict(urllib.parse.parse_qsl(parsed.query))
         assert query["mine"] == "true"

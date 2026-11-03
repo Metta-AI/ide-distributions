@@ -556,3 +556,41 @@ def test_practice_status_in_progress_after_wait_is_not_terminal(program, cli):
     assert data["state"] not in ("completed", "failed", "cancelled")
     assert "summary" not in data
     assert "games finished so far" in data["plain"]
+
+
+def test_league_status_reads_the_live_league_and_what_changed(program, cli, env):
+    cli.rounds = [
+        {"id": "rnd_1", "status": "completed", "start_time": "2026-11-01T00:00:00Z"},
+        {"id": "rnd_2", "status": "running", "start_time": "2026-11-02T00:00:00Z"},
+    ]
+    cli.boards["div_1"] = [
+        {"rank": 1, "player_id": "ply_x", "player_name": "ace", "score": 9.5, "rounds_played": 4},
+        {"rank": 2, "player_id": PLAYER, "player_name": "me", "score": 7.0, "rounds_played": 4},
+        {"rank": 3, "player_id": "ply_y", "player_name": "bo", "score": 3.0, "rounds_played": 4},
+    ]
+    cli.latest_replay = {"round_id": "rnd_1", "outcome": "won", "nested": {"a": 1}}
+    first = program.league_status(league=CHOSEN, top=2)
+    assert first["round"] == {"id": "rnd_2", "status": "running", "start_time": "2026-11-02T00:00:00Z"}
+    assert [e["player_name"] for e in first["divisions"][0]["top"]] == ["ace", "me"]
+    assert first["divisions"][0]["size"] == 3
+    assert first["mine"] == [
+        {"rank": 2, "player_name": "me", "score": 7.0, "rounds_played": 4, "division": "Bronze"}
+    ]
+    assert first["changes"] == {"since": None, "note": "first look at this league from here"}
+    assert first["latest_result"] == {"round_id": "rnd_1", "outcome": "won"}
+    assert "unavailable" not in first
+    cli.boards["div_1"][1].update(rank=1, score=10.0)
+    cli.boards["div_1"][0].update(rank=2, score=9.5)
+    second = program.league_status(league=CHOSEN)
+    moved = second["changes"]["moved"]
+    assert moved[0]["was"]["rank"] == 2 and moved[0]["now"]["rank"] == 1
+    assert second["changes"]["new_round"] is False and second["changes"]["since"]
+    assert program.league_status(league=CHOSEN)["changes"]["moved"] == []
+    assert not cli.mutations()
+
+
+def test_league_status_names_what_the_platform_could_not_answer(program, cli):
+    data = program.league_status(league=CHOSEN)  # no rounds, no replay, nobody on the board
+    assert "round" not in data and data["mine"] == []
+    assert data["unavailable"] == ["latest_result"]
+    assert run("league_status", {"league": CHOSEN, "top": 3}, program)["ok"] is True
