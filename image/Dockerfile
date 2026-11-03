@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.8@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347 AS uv
 FROM nousresearch/hermes-agent@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d
-RUN apt-get update && apt-get install -y --no-install-recommends --reinstall tini poppler-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends --reinstall tini poppler-utils ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=moby/buildkit@sha256:0ffa2fcf6b8757c47d569b3ef0f03f9d5eb3b9ff5ce68d858f994f89b749da0c /usr/bin/buildctl /usr/local/bin/buildctl
@@ -20,6 +20,9 @@ RUN uv sync --frozen --no-dev --compile-bytecode --project /opt/distribution \
 COPY orchestrator /opt/distribution/orchestrator
 COPY researcher /opt/distribution/researcher
 COPY image /opt/distribution/image
+RUN bash /opt/distribution/image/install-native-attachments.sh \
+    && chmod -R a+rX /opt/models/whisper-base \
+    && rm -rf /tmp/uv-cache
 COPY image/workspace-path.sh /etc/profile.d/workspace-path.sh
 COPY contract /opt/distribution/contract
 # Hosted workspaces use the built-in API transport. Keep other bundled plugins,
@@ -31,6 +34,7 @@ RUN mkdir /opt/workspace-plugins \
          fi; \
        done
 ENV HOME=/workspace/host \
+    IDE_STT_MODEL=/opt/models/whisper-base \
     HERMES_BUNDLED_PLUGINS=/opt/workspace-plugins \
     HERMES_HOME=/workspace/host \
     HERMES_REAL_HOME=/workspace/host \

@@ -3,6 +3,7 @@
 import asyncio
 import shutil
 import sys
+from importlib.metadata import version
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -17,6 +18,8 @@ from contract import Request  # noqa: E402
 
 async def main():
     assert shutil.which("pdftoppm"), "The packaged native PDF attachment renderer is missing"
+    assert version("faster-whisper") == "1.2.1"
+    assert Path("/opt/models/whisper-base/model.bin").is_file()
     inference = Availability()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam,

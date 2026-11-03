@@ -1,0 +1,2 @@
+# Hermes's supported local speech backend. Existing Hermes dependencies stay constrained.
+faster-whisper==1.2.1

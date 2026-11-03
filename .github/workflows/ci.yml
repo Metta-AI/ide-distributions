@@ -49,6 +49,7 @@ jobs:
       GIT_COMMITTER_EMAIL: ide-ci@example.invalid
       HERMES_BIN: /opt/hermes/.venv/bin/hermes
       HERMES_PYTHON: /opt/hermes/.venv/bin/python
+      IDE_STT_MODEL: /opt/models/whisper-base
       RUN_TESTS: ${{ github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.core == 'true' }}
     steps:
       - name: Skip when this change cannot affect the core
@@ -58,7 +59,7 @@ jobs:
         if: env.RUN_TESTS == 'true'
       - name: Install the hosted image's native PDF dependency
         if: env.RUN_TESTS == 'true'
-        run: apt-get update && apt-get install -y --no-install-recommends poppler-utils
+        run: apt-get update && apt-get install -y --no-install-recommends poppler-utils ffmpeg
       - uses: astral-sh/setup-uv@v6
         if: env.RUN_TESTS == 'true'
         with:
@@ -68,6 +69,9 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: uv sync --frozen
         if: env.RUN_TESTS == 'true'
+      - name: Install the hosted native attachment dependencies and model
+        if: env.RUN_TESTS == 'true'
+        run: bash image/install-native-attachments.sh
       - name: Lint
         if: env.RUN_TESTS == 'true'
         run: uv run ruff check .

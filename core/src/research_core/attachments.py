@@ -78,9 +78,13 @@ def prepare(
             parts.append(part)
     executable = Path(shutil.which(hermes_bin) or hermes_bin).absolute().parent / "python"
     result = subprocess.run(
-        [str(executable), str(Path(__file__).with_name("native_attachments.py"))],
+        [str(executable), "-I", str(Path(__file__).with_name("native_attachments.py"))],
         input=json.dumps(
-            {"workspace": str(ws.root), "message": {**message.root, "content": parts}}
+            {
+                "workspace": str(ws.root),
+                "message": {**message.root, "content": parts},
+                "audio_model": env.get("IDE_STT_MODEL"),
+            }
         ),
         env=env,
         text=True,
