@@ -583,6 +583,7 @@ def test_the_owners_routing_wins_over_the_shipped_pins(homes, routing):
 GUARDRAIL_KEYS = {
     "tool_loop_guardrails.hard_stop_enabled": True,
     "tool_loop_guardrails.hard_stop_after.same_tool_failure": 5,
+    "tool_loop_guardrails.hard_stop_after.idempotent_no_progress": 10,
 }
 
 
@@ -594,6 +595,7 @@ GUARDRAIL_KEYS = {
         {  # an install from before the hard stop, with Hermes's defaults spelled out
             "tool_loop_guardrails.hard_stop_enabled": False,
             "tool_loop_guardrails.hard_stop_after.same_tool_failure": 8,
+            "tool_loop_guardrails.hard_stop_after.idempotent_no_progress": 5,
             "tool_loop_guardrails.warn_after.same_tool_failure": 3,
         },
     ],
@@ -606,6 +608,7 @@ def test_prepare_turns_on_the_loop_guard_hard_stop(homes, role, existing):
         assert fake.config[key] == value, key
     assert fake.sets()["tool_loop_guardrails.hard_stop_enabled"] == "true"
     assert fake.sets()["tool_loop_guardrails.hard_stop_after.same_tool_failure"] == "5"
+    assert fake.sets()["tool_loop_guardrails.hard_stop_after.idempotent_no_progress"] == "10"
     if existing:
         assert fake.config["tool_loop_guardrails.warn_after.same_tool_failure"] == 3, "kept"
 
@@ -617,7 +620,7 @@ def test_shipped_configs_carry_the_loop_guard_hard_stop():
         shipped = yaml.safe_load((REPO / role / "config.yaml").read_text())
         assert shipped["tool_loop_guardrails"] == {
             "hard_stop_enabled": True,
-            "hard_stop_after": {"same_tool_failure": 5},
+            "hard_stop_after": {"same_tool_failure": 5, "idempotent_no_progress": 10},
         }
 
 
