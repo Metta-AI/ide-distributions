@@ -31,15 +31,25 @@ class InputImage(Content):
 
 
 class InputFile(Content):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {"required": [source], "properties": {source: {"type": "string"}}}
+                for source in ("file_data", "file_url", "file_id")
+            ],
+        },
+    )
     type: Literal["input_file"]
-    filename: str = Field(min_length=1, max_length=255)
+    filename: str | None = Field(default=None, min_length=1, max_length=255)
     file_data: str | None = None
     file_url: str | None = None
+    file_id: str | None = Field(default=None, pattern=r"^file-[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def one_source(self):
-        if (self.file_data is None) == (self.file_url is None):
-            raise ValueError("input_file requires exactly one of file_data or file_url")
+        if sum(source is not None for source in (self.file_data, self.file_url, self.file_id)) != 1:
+            raise ValueError("input_file requires exactly one of file_data, file_url or file_id")
         if self.file_url is not None and urlparse(self.file_url).scheme != "https":
             raise ValueError("file_url requires HTTPS")
         return self
@@ -54,7 +64,7 @@ class UserMessage(Content):
     def text(self) -> str:
         return "\n".join(part.text for part in self.content if isinstance(part, InputText))
 
-    def hermes_input(self, documents: Path) -> list[dict]:
+    def model_input(self, documents: Path) -> list[dict]:
         parts = []
         for part in self.content:
             if isinstance(part, InputText):
@@ -70,40 +80,53 @@ class UserMessage(Content):
                     }
                 )
             else:
-                source = part.file_data if part.file_data is not None else part.file_url
-                key = hashlib.sha256(source.encode()).hexdigest()
-                target = documents / "attachments" / key
-                if not target.is_file():
-                    if part.file_data is not None:
-                        if len(part.file_data) > 36 * 1024 * 1024:
-                            raise ValueError("input_file exceeds 25 MiB")
-                        data = base64.b64decode(part.file_data.split(",", 1)[-1], validate=True)
+                directory = documents / "attachments"
+                directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if part.file_id is not None:
+                    target = directory / part.file_id
+                    if not target.is_file():
+                        raise ValueError(f"Unknown workspace file_id: {part.file_id}")
+                else:
+                    source = part.file_data if part.file_data is not None else part.file_url
+                    key = hashlib.sha256(source.encode()).hexdigest()
+                    receipt = directory / (key + ".source")
+                    if receipt.is_file():
+                        target = directory / receipt.read_text()
+                        if not target.is_file():
+                            raise ValueError(
+                                "The saved attachment is missing; attach the file again"
+                            )
                     else:
-                        with urlopen(part.file_url, timeout=60) as response:
-                            data = response.read(25 * 1024 * 1024 + 1)
-                    if len(data) > 25 * 1024 * 1024:
-                        raise ValueError("input_file exceeds 25 MiB")
-                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    temporary = target.with_suffix(".pending")
-                    temporary.write_bytes(data)
-                    temporary.chmod(0o600)
-                    temporary.replace(target)
+                        if part.file_data is not None:
+                            if len(part.file_data) > 36 * 1024 * 1024:
+                                raise ValueError("input_file exceeds 25 MiB")
+                            data = base64.b64decode(part.file_data.split(",", 1)[-1], validate=True)
+                        else:
+                            with urlopen(part.file_url, timeout=60) as response:
+                                data = response.read(25 * 1024 * 1024 + 1)
+                        if len(data) > 25 * 1024 * 1024:
+                            raise ValueError("input_file exceeds 25 MiB")
+                        target = directory / ("file-" + hashlib.sha256(data).hexdigest())
+                        temporary = target.with_suffix(".pending")
+                        temporary.write_bytes(data)
+                        temporary.chmod(0o600)
+                        temporary.replace(target)
+                        staged_receipt = receipt.with_suffix(".pending")
+                        staged_receipt.write_text(target.name)
+                        staged_receipt.chmod(0o600)
+                        staged_receipt.replace(receipt)
+                with target.open("rb") as saved:
+                    if hashlib.file_digest(saved, "sha256").hexdigest() != target.name[5:]:
+                        raise ValueError("The saved attachment failed SHA-256 verification")
                 parts.append(
                     {
                         "type": "text",
                         "text": json.dumps(
                             {
-                                "filename": part.filename,
+                                "filename": part.filename or target.name,
                                 "workspace_file": str(target),
                             }
                         ),
                     }
                 )
         return [{"role": "user", "content": parts}]
-
-
-def transcript_key(content) -> str:
-    """Hermes collapses all-text content into a string; compare that native representation."""
-    if isinstance(content, list) and all(part["type"] == "text" for part in content):
-        content = "\n".join(part["text"] for part in content)
-    return json.dumps(content, sort_keys=True)

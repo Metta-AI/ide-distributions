@@ -108,13 +108,13 @@ async def response(
             payload = await result.aread()
             RESPONSES[operation.name].model_validate_json(payload)
             if isinstance(args, Messages):
-                projected = await seam.post(
-                    "/messages/project",
+                annotated = await seam.post(
+                    "/messages/context",
                     json={
                         "session_id": args.session_id,
                         "data": result.json()["data"],
                     },
                 )
-                yield projected
+                yield annotated
                 return
         yield result

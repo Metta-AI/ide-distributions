@@ -1,12 +1,15 @@
 """Agent-owned v1 application contract. Generate contract/openapi.json from these models."""
 
+import sys
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, create_model
 from pydantic.json_schema import models_json_schema
 
-from research_core.messages import UserMessage
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
+from research_core.messages import UserMessage  # noqa: E402
 
 VERSION = "2.0.0"
 
@@ -162,6 +165,7 @@ class SnapshotReply(Reply):
 
 
 class NativeMessage(Reply):
+    client_context: dict[str, JsonValue] | None = None
     id: int | str
     role: str
     content: JsonValue

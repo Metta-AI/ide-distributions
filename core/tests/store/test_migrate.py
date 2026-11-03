@@ -338,4 +338,9 @@ def test_message_content_migration_preserves_queued_delivery_and_untracked_write
         "instructions": None,
         "context": {"contract_version": 1},
     }
+    request = json.loads(conn.execute("SELECT request FROM client_admissions").fetchone()[0])
+    assert request["message"] == {
+        "role": "user",
+        "content": [{"type": "input_text", "text": "hello"}],
+    }
     assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked

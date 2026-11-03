@@ -351,9 +351,10 @@ class SeamServer:
                     "seq": stores.wstore.last_seq(),
                 }
             block, problems = self._context_block(stores, session_id, body.get("context"))
+            message.model_input(self.ws.root / "documents")  # Prepare files before admission.
             payload = json.dumps(
                 {
-                    "input": message.hermes_input(self.ws.root / "documents"),
+                    "input": [message.model_dump(mode="json", exclude_none=True)],
                     "context": block,
                     "instructions": body.get("instructions"),
                 }
@@ -479,33 +480,22 @@ class SeamServer:
                     if row["cancel_requested"]:
                         self.hermes.stop(run_id, profile=self.profile)
 
-    def project_messages(self, body: dict) -> dict:
-        """Restore the admitted OpenAI content when the pinned runtime adapted a file."""
-        from research_core.messages import transcript_key
-
+    def message_context(self, body: dict) -> dict:
+        """Join application metadata by native row identity, never by parsing message text."""
         session_id = _text(body, "session_id")
         with self.stores() as stores:
             self._require_session(stores, session_id)
-            originals = {}
-            for row in stores.wstore.q(
-                "SELECT request,payload FROM client_admissions"
-                " WHERE session_id = ? AND kind = 'message'",
-                (session_id,),
-            ):
-                native = json.loads(row["payload"])["input"]
-                original = json.loads(row["request"])["message"]
-                if isinstance(native, list):
-                    originals[transcript_key(native[0]["content"])] = original["content"]
+            contexts = {
+                row["native_message_id"]: json.loads(row["payload"])["context"]
+                for row in stores.wstore.q(
+                    "SELECT native_message_id,payload FROM client_admissions"
+                    " WHERE session_id=? AND native_message_id IS NOT NULL",
+                    (session_id,),
+                )
+            }
             return {
                 "data": [
-                    {
-                        **message,
-                        "content": originals.get(
-                            transcript_key(message["content"]), message["content"]
-                        ),
-                    }
-                    if message["role"] == "user"
-                    else message
+                    {**message, "client_context": contexts.get(message["id"])}
                     for message in body["data"]
                 ]
             }
@@ -841,7 +831,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/session-open": seam.session_open,
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
-            "/messages/project": seam.project_messages,
+            "/messages/context": seam.message_context,
             "/ui-action": seam.ui_action,
             "/store/apply": seam.store_apply,
             "/models": seam.set_model,

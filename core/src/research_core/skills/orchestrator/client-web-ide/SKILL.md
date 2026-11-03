@@ -56,9 +56,10 @@ as a `command`: follow its instruction for that message.
 
 ## Local files and attachments
 
-The IDE runs in the browser; the user's files are not mounted. An attachment arrives with a
-`sha256`, and `attachment_download {sha256}` stores it under the Coworld's
-`documents/attachments/`. A pasted local path cannot be read: ask for the file.
+The IDE runs in the browser; the user's files are not mounted. Attached files use OpenAI
+`input_file` content parts. The workspace prepares each file and supplies its local path;
+read that path with the file tools. Later messages can refer to the same file by `file_id`.
+A pasted path on the user's computer is not an attachment; ask for the file.
 
 ## Reactions and the agent profile
 

@@ -17,7 +17,7 @@ def test_pinned_hermes_accepts_adapted_content(hermes_bin, tmp_path):
             ],
         }
     )
-    content = message.hermes_input(tmp_path)[0]["content"]
+    content = message.model_input(tmp_path)[0]["content"]
     python = hermes_bin.parent / "python"
     script = """
 import json, sys

@@ -526,7 +526,7 @@ class FakeHermesRuns(HermesRuns):
                     part["text"]
                     for message in text
                     for part in message["content"]
-                    if part["type"] == "text"
+                    if part["type"] in ("text", "input_text")
                 )
             ),
             instructions=instructions,
@@ -535,7 +535,12 @@ class FakeHermesRuns(HermesRuns):
         self.runs[run.run_id] = run
         if idempotency_key is not None:
             self._idempotency[idempotency_key] = (fingerprint, run.run_id)
-        self.sessions.setdefault(session_id, []).append({"role": "user", "content": text})
+        self.sessions.setdefault(session_id, []).append(
+            {
+                "role": "user",
+                "content": text if isinstance(text, str) else text[-1]["content"],
+            }
+        )
         if self.script is not None:
             self.script(run)
         return run.run_id

@@ -10,8 +10,7 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_PROJECT_ENVIRONMENT=/opt/workspace-env \
     UV_CACHE_DIR=/tmp/uv-cache \
     UV_PYTHON=3.12 \
-    IDE_WORKSPACE_ENV=/opt/workspace-env \
-    PYTHONPATH=/opt/distribution/core/src
+    IDE_WORKSPACE_ENV=/opt/workspace-env
 # Runtime files are read-only; compile dependencies and editable source at build time.
 RUN uv sync --frozen --no-dev --compile-bytecode --project /opt/distribution \
     && /opt/workspace-env/bin/python -m compileall -q /opt/distribution/core \

@@ -26,9 +26,8 @@ ORCHESTRATOR = {
     "wiki_edit",
     "softmax_api",
     "github",
-    "attachment_download",
 }
-RESEARCHER = ORCHESTRATOR - {"ui", "submit", "github", "attachment_download"}
+RESEARCHER = ORCHESTRATOR - {"ui", "submit", "github"}
 INPROC = {"goal", "task", "directive", "claim", "settings", "ui"}
 
 
@@ -42,7 +41,7 @@ def test_no_tool_module_failed_to_import():
 
 
 def test_tool_counts_match_the_design():
-    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 18
+    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 17
     assert names("researcher") == RESEARCHER and len(RESEARCHER) == 14
     assert len(ORCHESTRATOR) <= catalog.TOOL_BUDGET
 
@@ -73,6 +72,7 @@ def test_in_process_imports_are_stdlib_only():
         "class Ctx:\n"
         "    def register_tool(self, **k): pass\n"
         "    def register_hook(self, *a, **k): pass\n"
+        "    def register_middleware(self, *a, **k): pass\n"
         "    def register_system_prompt_section(self, *a, **k): pass\n"
         "for role in ('orchestrator', 'researcher'):\n"
         "    research_core.plugin.register.make_register(role)(Ctx())\n"

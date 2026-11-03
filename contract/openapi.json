@@ -332,6 +332,38 @@
       },
       "InputFile": {
         "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "file_data": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file_data"
+            ]
+          },
+          {
+            "properties": {
+              "file_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file_url"
+            ]
+          },
+          {
+            "properties": {
+              "file_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file_id"
+            ]
+          }
+        ],
         "properties": {
           "file_data": {
             "anyOf": [
@@ -344,6 +376,19 @@
             ],
             "default": null,
             "title": "File Data"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "pattern": "^file-[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "File Id"
           },
           "file_url": {
             "anyOf": [
@@ -358,10 +403,18 @@
             "title": "File Url"
           },
           "filename": {
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Filename",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filename"
           },
           "type": {
             "const": "input_file",
@@ -370,8 +423,7 @@
           }
         },
         "required": [
-          "type",
-          "filename"
+          "type"
         ],
         "title": "InputFile",
         "type": "object"
@@ -595,6 +647,21 @@
       "NativeMessage": {
         "additionalProperties": true,
         "properties": {
+          "client_context": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Client Context"
+          },
           "content": {
             "$ref": "#/components/schemas/JsonValue"
           },

@@ -32,11 +32,11 @@ a notice will follow; do not hold the chat open waiting.
 
 ## Local files are not mounted
 
-coplay runs on the user's Mac; you run in the workspace. A path the user pastes is on their
-machine and you cannot read it. Ask them to attach the file: attachments arrive in the message
-with a `sha256`, and `attachment_download {sha256}` verifies and stores the file under the
-Coworld's `documents/attachments/`. Coaching handoffs (a recording plus notes) arrive the same
-way: download, read, and record what matters as claims with `transcript` or `doc` evidence.
+coplay runs on the user's Mac; you run in the workspace. Attached files use OpenAI
+`input_file` parts; the workspace saves them privately and supplies local paths for the file
+tools. Later messages can refer to the same file by `file_id`. Voice requests carry the user's
+transcription as text, with speech preferences in the separate turn context. Record evidence
+as claims with `transcript` or `doc` links when relevant.
 
 ## Library and notebook publishing
 

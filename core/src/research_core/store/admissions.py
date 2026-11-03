@@ -37,7 +37,7 @@ def read(store: Store, op_id: str, kind: str, request: dict) -> dict | None:
     row = store.one("SELECT * FROM client_admissions WHERE op_id = ?", (op_id,))
     if row is None:
         return None
-    if row["kind"] != kind or row["request"] != json.dumps(request, sort_keys=True):
+    if row["kind"] != kind or json.loads(row["request"]) != request:
         raise StoreError(["op_id was already used for different input"])
     return dict(row)
 
