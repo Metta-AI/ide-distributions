@@ -23,8 +23,11 @@ def test_completion_uses_parent_profile(hermes_bin, tmp_path):
 if __name__ == "__main__":
     import asyncio
 
-    from gateway.config import GatewayConfig
+    from gateway.config import GatewayConfig, Platform, PlatformConfig
+    from gateway.platforms.api_server import APIServerAdapter
     from gateway.run import GatewayRunner
+    from gateway.session import SessionSource
+    from gateway.session_identity import restore_identity
     from hermes_constants import get_hermes_home
     from hermes_state import SessionDB
 
@@ -38,6 +41,8 @@ if __name__ == "__main__":
         db.close()
 
     runner = GatewayRunner(config=GatewayConfig(multiplex_profiles=True))
+    api = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": "completion-test"}))
+    runner.adapters[Platform.API_SERVER] = api
 
     async def check():
         for profile in ("orchestrator", "researcher"):
@@ -53,6 +58,13 @@ if __name__ == "__main__":
                 verdict = await runner._classify_completion_target(session_id)
                 assert verdict == "deliver", (profile, verdict, str(get_hermes_home()))
                 assert get_hermes_home() == home / "profiles" / profile
+            source = SessionSource(
+                platform=Platform.API_SERVER, chat_id=session_id, chat_type="dm", profile=profile
+            )
+            identity = restore_identity(source, runner=runner, transport_profile="default")
+            assert runner._names_receiving_bot(source, identity)
+            transport = runner._resolve_injection_adapter("api_server", source)
+            assert transport is api, (profile, "shared API listener lost", identity)
         print("Both served-profile parents remain deliverable")
 
     try:
