@@ -348,7 +348,9 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
     if check is not None:
         check(args, problems)
         if problems:
-            return "invalid", f"record check: {'; '.join(problems)}"
+            # The structured fields show what went wrong; the prose ones only take up room.
+            shown = {k: v for k, v in args.items() if k not in ("summary", "body", "description")}
+            return "invalid", f"record check: {'; '.join(problems)}; sent {json.dumps(shown)[:250]}"
     return "valid", ""
 
 
