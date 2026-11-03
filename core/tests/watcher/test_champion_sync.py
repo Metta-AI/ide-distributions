@@ -6,7 +6,7 @@ import json
 
 from research_core.platform.fake import LEAGUE_ID
 from research_core.store import champion
-from research_core.watcher import champion_sync
+from research_core.watcher import champion_sync, wakes
 from tests.watcher._support import advance, events_of, make_ctx
 from tests.watcher._support_w3 import platform_with_faults
 
@@ -72,8 +72,28 @@ def test_platform_down_leaves_the_stamp_for_a_retry(tmp_path):
     assert ctx.store.get_meta("champion_synced_at") is None
 
 
-def test_leagues_of_prefers_the_coworld_s_own_leagues(tmp_path):
+def test_leagues_of_reads_only_the_active_coworld_s_leagues(tmp_path):
     ctx = make_ctx(tmp_path)
     assert [league.id for league in champion_sync.leagues_of(ctx)] == [LEAGUE_ID]
-    ctx.coworld = ctx.ws.coworld("cow_other")  # no league names it: every league is checked
-    assert [league.id for league in champion_sync.leagues_of(ctx)] == [LEAGUE_ID]
+    ctx.coworld = ctx.ws.coworld("cow_other")  # no league names it: nothing is checked
+    assert champion_sync.leagues_of(ctx) == []
+
+
+def test_champions_in_other_coworlds_leagues_start_no_wake(tmp_path):
+    # 2026-11-02: the active Coworld had no league, the sync read every league the Player was in
+    # and the first tick raised one champion.changed, so one wake Session, per league.
+    ctx = make_ctx(tmp_path)
+    platform_with_faults(ctx, "champion=pv_elsewhere")  # the Player's champion in cow_fake's league
+    ctx.coworld = ctx.ws.coworld("cow_other")  # the active Coworld has no league
+
+    report = champion_sync.run(ctx)
+    wake_report = wakes.run(ctx)
+
+    assert report == {"leagues": [], "changed": [], "nothing_to_sync": "the Coworld has no league"}
+    assert ctx.store.get_meta("champion_synced_at") is not None
+    assert events_of(ctx.store, "champion.changed") == []
+    assert champion.read(ctx.store, LEAGUE_ID) is None
+    assert wake_report["started"] == [] and ctx.hermes.calls == []
+    # The champion is real: the sync left it alone because its league belongs to cow_fake.
+    [crowned] = ctx.platform.memberships(mine=True, champions_only=True)
+    assert crowned.league_id == LEAGUE_ID

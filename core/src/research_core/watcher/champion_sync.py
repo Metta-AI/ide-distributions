@@ -2,8 +2,11 @@
 
 Every ten minutes (the Coworld store's meta ``champion_synced_at``) the step reads the
 Player's memberships for every league of the active Coworld: the leagues whose ``coworld_id``
-is the active id, or every league the platform lists when none names it (A4.9: not only the
-leagues the workspace submitted to). For each league:
+(the platform's ``game.coworld_id``) is the active id, not only the leagues the workspace
+submitted to (A4.9). Leagues of other Coworlds are never read, even where the Player has a
+membership: reading them made one sync raise a ``champion.changed`` for every such league
+(2026-11-02). A Coworld with no league has nothing to sync; the step reports that and reads
+no membership. For each league:
 
 * a membership flagged ``is_champion`` is the champion: state ``champion``;
 * otherwise the Player's newest membership stands for it with its platform status mapped onto
@@ -15,7 +18,8 @@ leagues the workspace submitted to). For each league:
 
 ``champion.sync`` writes the row and emits ``champion.changed`` only when the policy version or
 the state differs (a change made outside the workspace, or one the submit tool already
-recorded); the management wake on that event is the wake step's. A platform error leaves the
+recorded); the management wake on that event is the wake step's, which starts one Session for
+all pending changes (``batch_by_kind`` in ``handlers.py``). A platform error leaves the
 stamp alone so the next tick tries again.
 """
 
@@ -62,6 +66,8 @@ def sync(ctx: TickContext) -> dict[str, Any]:
     """Compare every league of the active Coworld with the platform; returns what changed."""
     platform = ctx.platform
     leagues = leagues_of(ctx)
+    if not leagues:
+        return {"leagues": [], "changed": [], "nothing_to_sync": "the Coworld has no league"}
     champions = {m.league_id: m for m in platform.memberships(mine=True, champions_only=True)}
     mine = platform.memberships(mine=True)
     report: dict[str, Any] = {"leagues": [league.id for league in leagues], "changed": []}
@@ -100,11 +106,9 @@ def sync(ctx: TickContext) -> dict[str, Any]:
 
 
 def leagues_of(ctx: TickContext) -> list[League]:
-    """The active Coworld's leagues: those naming its id, else every league the platform lists."""
-    leagues = ctx.platform.leagues()
+    """The active Coworld's leagues: those naming its id (none when no league names it)."""
     coworld_id = ctx.coworld.coworld_id if ctx.coworld is not None else None
-    own = [league for league in leagues if league.coworld_id == coworld_id]
-    return own or list(leagues)
+    return [league for league in ctx.platform.leagues() if league.coworld_id == coworld_id]
 
 
 def _representative(memberships: list[Membership], league_id: str) -> Membership | None:
