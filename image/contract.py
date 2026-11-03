@@ -1,6 +1,7 @@
 """Agent-owned v1 application contract. Generate contract/openapi.json from these models."""
 
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
@@ -191,6 +192,15 @@ class Failure(Reply):
     detail: JsonValue | None = None
 
 
+class InferenceUnavailable(Failure):
+    """503 to session.message while model work cannot start. ``reason`` and ``until`` come from
+    the inference state; both are null when the lease is merely missing (startup, renewal)."""
+
+    kind: Literal["inference_unavailable"] = "inference_unavailable"
+    reason: Literal["budget_exhausted", "provider_unavailable"] | None = None
+    until: datetime | None = None
+
+
 # These classes are both exported and used at the image's public boundary.
 REQUESTS = (
     SnapshotCommand,
@@ -223,7 +233,7 @@ Responses = create_model("Responses", **{name: (model, ...) for name, model in R
 
 def openapi() -> dict:
     """Schema-only OpenAPI document; the platform continues to own HTTP and authentication."""
-    models = (Request, Responses, RunEvent, Failure)
+    models = (Request, Responses, RunEvent, Failure, InferenceUnavailable)
     _, schema = models_json_schema(
         [(model, "validation") for model in models], ref_template="#/components/schemas/{model}"
     )

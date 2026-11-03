@@ -101,7 +101,8 @@ class RunsBusy(RunsError):
 
 
 class RunsUnavailable(RunsBusy):
-    """No gateway answered (connection refused, timeout) or it is draining (503).
+    """No gateway answered (connection refused, timeout), it is draining (503), or the inference
+    gate is closed (``code="inference_unavailable"``: no lease, or a block in the inference state).
 
     A special case of :class:`RunsBusy`: ``except RunsBusy`` covers both, and code that cares
     whether the gateway is reachable at all can catch this one first.
@@ -242,6 +243,19 @@ class HermesRuns:
             else None,
         )
 
+    def _require_inference(self) -> None:
+        """Raise :class:`RunsUnavailable` while the lease is missing or the inference state
+        blocks model work; callers defer as for a busy gateway."""
+        if inference.available(self.inference_lease_file):
+            return
+        blocking = inference.blocking_state(self.inference_lease_file)
+        detail = (
+            f"Inference blocked: {blocking.blocked} until {blocking.until.isoformat()}"
+            if blocking is not None and blocking.until is not None
+            else "Inference lease unavailable"
+        )
+        raise RunsUnavailable(detail, code="inference_unavailable")
+
     def key_for(self, profile: str) -> str:
         """The bearer key used for ``profile``: its own, else the default profile's."""
         return self.keys.get(profile) or self.keys.get(self.default_profile) or ""
@@ -259,11 +273,11 @@ class HermesRuns:
     ) -> str:
         """``POST /p/<profile>/v1/runs``; the run id (a replayed key gives the stored run's id).
 
-        Raises :class:`RunsBusy` (429), :class:`RunsUnavailable` (503 or no gateway),
+        Raises :class:`RunsBusy` (429), :class:`RunsUnavailable` (503, no gateway, or the
+        inference gate closed: no lease, or a block in the inference state),
         :class:`RunsAuthError` (401/403) and :class:`RunsConflict` (409).
         """
-        if not inference.available(self.inference_lease_file):
-            raise RunsUnavailable("Inference lease unavailable", code="inference_unavailable")
+        self._require_inference()
         body: dict[str, Any] = {"input": text, "session_id": session_id}
         if instructions is not None:
             body["instructions"] = instructions
@@ -434,7 +448,8 @@ class FakeHermesRuns(HermesRuns):
     ``stop`` answers ``stopping`` like the real gateway and the run reads ``cancelled`` from the
     next status call on. Every call is appended to ``calls`` as ``(method, kwargs)``; steers go
     to ``steered``; ``sessions`` holds each session's messages (user text at start and steer,
-    the assistant's output at completion).
+    the assistant's output at completion). With ``inference_lease_file`` set, ``start`` passes
+    the same inference gate as the real client.
     """
 
     def __init__(
@@ -442,9 +457,13 @@ class FakeHermesRuns(HermesRuns):
         *,
         script: Callable[[FakeRun], None] | None = None,
         default_profile: str = "orchestrator",
+        inference_lease_file: Path | None = None,
     ):
         super().__init__(
-            base_url="http://fake-hermes.invalid", keys={}, default_profile=default_profile
+            base_url="http://fake-hermes.invalid",
+            keys={},
+            default_profile=default_profile,
+            inference_lease_file=inference_lease_file,
         )
         self.script = script
         self.runs: dict[str, FakeRun] = {}
@@ -500,6 +519,7 @@ class FakeHermesRuns(HermesRuns):
                 },
             )
         )
+        self._require_inference()
         if self.busy:
             raise RunsBusy(
                 "HTTP 429 rate_limit_exceeded", route=f"POST /p/{profile}/v1/runs", status=429

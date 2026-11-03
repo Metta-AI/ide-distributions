@@ -521,6 +521,60 @@
         "title": "ImageURL",
         "type": "object"
       },
+      "InferenceUnavailable": {
+        "additionalProperties": true,
+        "description": "503 to session.message while model work cannot start. ``reason`` and ``until`` come from\nthe inference state; both are null when the lease is merely missing (startup, renewal).",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "const": "inference_unavailable",
+            "default": "inference_unavailable",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "budget_exhausted",
+                  "provider_unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Until"
+          }
+        },
+        "title": "InferenceUnavailable",
+        "type": "object"
+      },
       "InputAudio": {
         "properties": {
           "data": {
