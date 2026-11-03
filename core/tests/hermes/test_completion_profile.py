@@ -4,24 +4,24 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
+if __name__ != "__main__":
+    import pytest
 
-
-@pytest.mark.parametrize("profile", ["orchestrator", "researcher"])
-def test_completion_uses_parent_profile(hermes_bin, tmp_path, profile):
-    result = subprocess.run(
-        [str(hermes_bin.parent / "python"), str(Path(__file__).resolve()), profile],
-        env={
-            **os.environ,
-            "HERMES_HOME": str(tmp_path),
-            "HERMES_REAL_HOME": str(tmp_path),
-            "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
-        },
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    @pytest.mark.parametrize("profile", ["orchestrator", "researcher"])
+    def test_completion_uses_parent_profile(hermes_bin, tmp_path, profile):
+        result = subprocess.run(
+            [str(hermes_bin.parent / "python"), str(Path(__file__).resolve()), profile],
+            env={
+                **os.environ,
+                "HERMES_HOME": str(tmp_path),
+                "HERMES_REAL_HOME": str(tmp_path),
+                "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 if __name__ == "__main__":
