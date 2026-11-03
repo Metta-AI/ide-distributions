@@ -38,6 +38,10 @@ def make_register(role: Role) -> Callable[[Any], None]:
             )
         for hook_name, callback in make_hooks(role).items():
             ctx.register_hook(hook_name, callback)
+        from research_core.plugin.repeats import make_hooks as make_repeat_hooks
+
+        for hook_name, callback in make_repeat_hooks(role).items():
+            ctx.register_hook(hook_name, callback)
         from research_core.plugin.briefing import make_section as make_briefing_section
 
         ctx.register_system_prompt_section(
