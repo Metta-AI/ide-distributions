@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 import signal
@@ -255,6 +256,8 @@ async def run(stack: AsyncExitStack) -> None:
 
 
 async def main() -> None:
+    logging.basicConfig()
+    logging.getLogger("application").setLevel(logging.INFO)
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
