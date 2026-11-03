@@ -38,6 +38,7 @@ from ide_research_core.softmax_tool.client import UPLOAD_TIMEOUT_S, SoftmaxClien
 from ide_research_core.softmax_tool.platform_cli import (
     SoftmaxCliError,
     describe_failure,
+    parse_credential,
 )
 from ide_research_core.softmax_tool.protocol import CreditDenied
 
@@ -64,6 +65,7 @@ DIFF_LINES = 150
 POLL_SECONDS = 20
 FETCH_TIMEOUT_S = 60
 USER_AGENT = "softmax-play"
+NAME_RECORD_MAX = 60
 PROGRAM = "program.bas"
 STARTER_NAMES = ("starter", "the starter")
 DONE_WHEN = "The change is in a new version, practiced, and the result told to you."
@@ -1053,6 +1055,38 @@ class Program:
         if refused:
             out["replace_failed"] = [spoken(x) for x in refused]
         return out
+
+    # --- the cogent's name ----------------------------------------------
+
+    def name_keep(self, name: str) -> dict:
+        """Keep the name the user gave this cogent in its ``play/name`` record, where the game page reads it.
+
+        The player name (the account's public label) is never touched. Writes only this cogent's own record.
+        """
+        name = name.strip()
+        if not name or len(name) > NAME_RECORD_MAX:
+            raise PlayError("bad_arguments", f"name must be 1 to {NAME_RECORD_MAX} characters")
+        self.client.require_player()
+        cli = self.client._cli
+        path = f"/observatory/v2/cogents/{urllib.parse.quote(self.player)}/c/play/name"
+        request = urllib.request.Request(
+            f"{cli.server}{path}",
+            data=json.dumps({"body": {"name": name}}).encode(),
+            method="PUT",
+            headers={
+                "Authorization": f"Bearer {parse_credential(cli._credential_value).token}",
+                "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_S):
+                pass
+        except urllib.error.HTTPError as error:
+            raise PlayError("softmax", f"PUT {path} answered HTTP {error.code}") from None
+        except (urllib.error.URLError, OSError) as error:
+            raise PlayError("softmax", f"PUT {path} failed: {error}") from None
+        return {"name": name}
 
     # --- the task card --------------------------------------------------
 

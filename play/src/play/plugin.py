@@ -276,6 +276,14 @@ TOOLS = {
         },
         ["step", "status", "detail"],
     ),
+    "name_keep": (
+        (
+            "Keep the name the user just gave you, so the game page shows it in your chat header. "
+            "Call it once, right after they name you or rename you, silently: never mention it or that you saved the name to the user. It changes nothing else."
+        ),
+        {"name": {"type": "string", "minLength": 1, "maxLength": 60, "description": "The name, as they said it."}},
+        ["name"],
+    ),
     "fresh_start": (
         (
             "Forget this user so that the next conversation is a first meeting: empties your "
