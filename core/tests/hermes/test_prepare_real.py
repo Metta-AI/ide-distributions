@@ -206,11 +206,12 @@ print("PASS installed profile middleware: native payload and unchanged history")
     assert "PASS installed profile middleware" in result.stdout
 
 
-def test_installed_agent_preserves_files_through_a_complete_turn(hermes_bin, host):
+@pytest.mark.parametrize("existing_history", [False, True])
+def test_installed_agent_preserves_files_through_a_complete_turn(hermes_bin, host, existing_history):
     """Exercise native turn construction, provider preparation, middleware and history together."""
     prepare(hermes_bin, host, "orchestrator")
     script = """
-import json, threading
+import json, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from hermes_cli.plugins import has_middleware
@@ -243,33 +244,46 @@ thread.start()
 original = [{"type":"input_text","text":"Read the attached policy"},
     {"type":"input_file","filename":"policy.txt","file_data":"cG9saWN5"}]
 db = acquire()
+sid = "openai-message-proof-" + sys.argv[1]
+prior = []
+if sys.argv[1] == "1":
+    db.create_session(sid, "api_server", model="proof")
+    db.append_message(sid, "user", "A message from before the protocol upgrade")
+    db.append_message(sid, "assistant", "A saved answer from before the upgrade")
+    prior = [(m["id"], m["role"], m["content"]) for m in db.get_messages(sid)]
+initial = db.get_messages_as_conversation(sid, include_row_ids=True)
 agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
     base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
     enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
-    skip_memory=True, skip_background_review=True, session_id="openai-message-proof",
+    skip_memory=True, skip_background_review=True, session_id=sid,
     session_db=db, max_iterations=2)
 try:
-    result = agent.run_conversation(original)
+    result = agent.run_conversation(original, conversation_history=initial)
     assert result["final_response"] == "Attachment received", result
-    user = next(m for m in captured[-1]["messages"] if m["role"] == "user")
+    user = next(m for m in captured[-1]["messages"]
+        if m["role"] == "user" and isinstance(m["content"], list))
     assert all(p["type"] == "text" for p in user["content"]), user
     ref = json.loads(user["content"][1]["text"])
     assert Path(ref["workspace_file"]).read_bytes() == b"policy"
-    saved = db.get_messages("openai-message-proof")
-    assert next(m for m in saved if m["role"] == "user")["content"] == original, saved
-    resumed = db.get_messages_as_conversation("openai-message-proof", include_row_ids=True)
-    assert next(m for m in resumed if m["role"] == "user")["content"] == original
+    saved = db.get_messages(sid)
+    assert saved[len(prior)]["content"] == original, saved
+    assert [(m["id"], m["role"], m["content"]) for m in saved[:len(prior)]] == prior
+    resumed = db.get_messages_as_conversation(sid, include_row_ids=True)
+    assert resumed[len(prior)]["content"] == original
     agent2 = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
         base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
         enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
-        skip_memory=True, skip_background_review=True, session_id="openai-message-proof",
+        skip_memory=True, skip_background_review=True, session_id=sid,
         session_db=db, max_iterations=2)
     again = agent2.run_conversation(
         [{"type":"input_text", "text":"Continue from the saved file"}],
         conversation_history=resumed)
     assert again["final_response"] == "Attachment received", again
-    assert len(db.get_messages("openai-message-proof")) == 4
-    old = next(m for m in captured[-1]["messages"] if m["role"] == "user")
+    assert len(db.get_messages(sid)) == len(prior) + 4
+    assert [(m["id"], m["role"], m["content"])
+        for m in db.get_messages(sid)[:len(prior)]] == prior
+    old = next(m for m in captured[-1]["messages"]
+        if m["role"] == "user" and isinstance(m["content"], list))
     assert Path(json.loads(old["content"][1]["text"])["workspace_file"]).read_bytes() == b"policy"
     print("PASS complete pinned native turn and resume: provider input and canonical file history")
 finally:
@@ -277,6 +291,8 @@ finally:
     server.server_close()
     release(db)
 """
-    result = run([hermes_python(hermes_bin), "-c", script], host.env("orchestrator"))
+    result = run(
+        [hermes_python(hermes_bin), "-c", script, str(int(existing_history))], host.env("orchestrator")
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS complete pinned native turn" in result.stdout
