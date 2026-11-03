@@ -629,3 +629,29 @@ def test_metadata_uses_native_identity_for_identical_messages(seam, monkeypatch)
         "first",
         "second",
     ]
+
+
+def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
+    from uuid import uuid4
+
+    seam.client.open()
+    message = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Read this attachment"},
+            {"type": "file", "file": {"file_id": "unknown-file", "filename": "notes.txt"}},
+        ],
+    }
+    receipt = seam.client._post(
+        "/message",
+        {"op_id": str(uuid4()), "session_id": seam.client.session_id, "message": message},
+    )
+    failed = seam.client.wait_admission(receipt["op_id"])
+    assert failed["status"] == "failed"
+    assert failed["run_id"] is None
+    assert failed["error"] == "Unknown file ID"
+    assert failed["input"] == message
+    assert seam.starts() == 0
+    following = seam.say("Continue without the file")
+    assert following["run_id"]
+    assert seam.starts() == 1
