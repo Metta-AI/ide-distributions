@@ -42,6 +42,9 @@ Session opening and message intake perform only local validation and durable wri
 never acquire the execution lock. One serial dispatcher creates native sessions, prepares
 attachments and starts Hermes runs after intake. A newly accepted session has an empty
 transcript until its native session is ready.
+The open receipt and local session registration commit in one transaction. A temporary native
+opening failure stays queued with its original identity; a permanent failure also fails its
+queued messages. Neither stops the dispatcher from processing unrelated sessions.
 
 Each successful intake emits one `workspace_intake` JSON event to stderr, correlated by
 `op_id`, `session_id` and operation. Durations in milliseconds distinguish validation,

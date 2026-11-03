@@ -291,7 +291,15 @@ class SeamServer:
         validated = time.monotonic()
         with self.stores() as stores:
             opened = time.monotonic()
-            session_id = body.get("session_id") or hermes_api.mint_session_id()
+            session_id = (
+                _text(body, "session_id") if "session_id" in body else hermes_api.mint_session_id()
+            )
+            registration = admissions.OpenRegistration(
+                profile=self.profile,
+                coworld_id=stores.coworld_id,
+                session_context=body.get("session_context"),
+                client_capabilities=body.get("capabilities"),
+            )
             metadata = time.monotonic()
             receipt = admissions.accept(
                 stores.wstore,
@@ -302,24 +310,9 @@ class SeamServer:
                 session_id=session_id,
                 message="",
                 payload="",
+                registration=registration,
             )
             session_id = receipt.session_id
-            registering = time.monotonic()
-            try:
-                sessions.register(
-                    stores.wstore,
-                    actor,
-                    session_id=session_id,
-                    profile=self.profile,
-                    kind="chat",
-                    coworld_id=stores.coworld_id,
-                    session_context=body.get("session_context"),
-                    client_capabilities=body.get("capabilities"),
-                )
-            except StoreError as error:
-                raise Refused(
-                    HTTPStatus.BAD_REQUEST, "session-open refused", problems=error.problems
-                ) from None
             self._clients[session_id] = client
             completed = time.monotonic()
             admissions.IntakeTiming(
@@ -329,7 +322,6 @@ class SeamServer:
                 validation_ms=(validated - started) * 1000,
                 store_open_ms=(opened - validated) * 1000,
                 metadata_ms=(metadata - opened) * 1000,
-                registration_ms=(completed - registering) * 1000,
                 total_ms=(completed - started) * 1000,
             ).emit()
             return {
@@ -403,12 +395,31 @@ class SeamServer:
                 "SELECT op_id,session_id FROM client_admissions"
                 " WHERE kind='open' AND status='queued' ORDER BY rowid"
             ):
-                await asyncio.to_thread(
-                    self.hermes.create_session, opening["session_id"], profile=self.profile
+                (created,) = await asyncio.gather(
+                    asyncio.to_thread(
+                        self.hermes.create_session, opening["session_id"], profile=self.profile
+                    ),
+                    return_exceptions=True,
                 )
+                if isinstance(created, RunsError):
+                    with stores.wstore.tx(actor) as tx:
+                        tx.execute(
+                            "UPDATE client_admissions SET status=?,error=? WHERE op_id=?",
+                            (
+                                "queued" if created.retryable else "failed",
+                                str(created),
+                                opening["op_id"],
+                            ),
+                        )
+                        tx.event(
+                            "client.open_failed", opening["op_id"], {"retryable": created.retryable}
+                        )
+                    continue
+                if isinstance(created, BaseException):
+                    raise created
                 with stores.wstore.tx(actor) as tx:
                     tx.execute(
-                        "UPDATE client_admissions SET status='completed' WHERE op_id=?",
+                        "UPDATE client_admissions SET status='completed',error=NULL WHERE op_id=?",
                         (opening["op_id"],),
                     )
             reserved: set[str] = set()
@@ -422,6 +433,19 @@ class SeamServer:
                 if row["session_id"] in reserved:
                     continue
                 reserved.add(row["session_id"])
+                failed_open = stores.wstore.one(
+                    "SELECT error FROM client_admissions WHERE kind='open'"
+                    " AND session_id=? AND status='failed'",
+                    (row["session_id"],),
+                )
+                if failed_open is not None:
+                    with stores.wstore.tx(actor) as tx:
+                        tx.execute(
+                            "UPDATE client_admissions SET status='failed',error=? WHERE op_id=?",
+                            (failed_open["error"], row["op_id"]),
+                        )
+                        tx.event("client.finished", row["op_id"], {"status": "failed"})
+                    continue
                 with admissions.dispatch_lock(stores.wstore):
                     if row["run_id"]:
                         session = self._require_session(stores, row["session_id"])

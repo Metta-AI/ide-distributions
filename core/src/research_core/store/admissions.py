@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, NonNegativeFloat
 
+from research_core.store import sessions
 from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
@@ -39,6 +40,15 @@ class Admission:
     client_id: str | None
 
 
+class OpenRegistration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str
+    coworld_id: str | None
+    session_context: dict | None
+    client_capabilities: dict | list | None
+
+
 class Receipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -48,6 +58,7 @@ class Receipt(BaseModel):
     writer_wait_ms: NonNegativeFloat
     write_ms: NonNegativeFloat
     commit_ms: NonNegativeFloat
+    registration_ms: NonNegativeFloat = 0
 
 
 class IntakeTiming(Receipt):
@@ -57,7 +68,6 @@ class IntakeTiming(Receipt):
     validation_ms: NonNegativeFloat
     store_open_ms: NonNegativeFloat
     metadata_ms: NonNegativeFloat
-    registration_ms: NonNegativeFloat = 0
     total_ms: NonNegativeFloat
 
     def emit(self) -> None:
@@ -84,6 +94,7 @@ def accept(
     session_id: str,
     message: str,
     payload: str,
+    registration: OpenRegistration | None = None,
 ) -> Receipt:
     started = time.monotonic()
     with store.tx(actor) as tx:
@@ -106,6 +117,14 @@ def accept(
                 ),
             )
             tx.event("client.accepted", op_id, {"kind": kind, "session_id": session_id})
+        registering = time.monotonic()
+        if registration is not None:
+            sessions.register_in_transaction(
+                tx,
+                session_id=existing["session_id"] if existing is not None else session_id,
+                kind="chat",
+                **registration.model_dump(),
+            )
         written = time.monotonic()
     committed = time.monotonic()
     return Receipt(
@@ -113,8 +132,9 @@ def accept(
         run_id=existing["run_id"] if existing is not None else None,
         replayed=existing is not None,
         writer_wait_ms=(acquired - started) * 1000,
-        write_ms=(written - acquired) * 1000,
+        write_ms=(registering - acquired) * 1000,
         commit_ms=(committed - written) * 1000,
+        registration_ms=(written - registering) * 1000 if registration is not None else 0,
     )
 
 

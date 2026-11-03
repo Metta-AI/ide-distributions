@@ -7,6 +7,7 @@ and a fresh workspace with ``cow_fake`` active, and drives it through the
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import threading
@@ -780,3 +781,108 @@ def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
     following = seam.say("Continue without the file")
     assert following["run_id"]
     assert seam.starts() == 1
+
+
+@pytest.mark.parametrize("retryable", [False, True])
+def test_failed_native_open_does_not_block_other_sessions(tmp_path, monkeypatch, retryable):
+    from research_core.watcher.hermes_api import RunsError
+
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    server = SeamServer(ws=ctx.workspace, hermes=native)
+    original = native.create_session
+    failing = True
+
+    def create(session_id, **kwargs):
+        if session_id == "rejected" and failing:
+            raise RunsError("Native opening rejected", status=503 if retryable else 400)
+        return original(session_id, **kwargs)
+
+    monkeypatch.setattr(native, "create_session", create)
+    try:
+        for session_id in ("rejected", "healthy"):
+            server.session_open(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": session_id,
+                    "client": {"id": "failure-proof", "kind": "test"},
+                }
+            )
+            server.message(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": session_id,
+                    "message": {"role": "user", "content": "hello"},
+                }
+            )
+        asyncio.run(server.dispatch_messages())
+        rows = ctx.wstore.q(
+            "SELECT kind,session_id,status,error FROM client_admissions ORDER BY rowid"
+        )
+        rejected = [row for row in rows if row["session_id"] == "rejected"]
+        assert all(row["status"] == ("queued" if retryable else "failed") for row in rejected)
+        assert "Native opening rejected" in rejected[0]["error"]
+        assert "healthy" in native.sessions
+        assert any(row["session_id"] == "healthy" and row["status"] == "running" for row in rows)
+        # A later input cannot bypass a terminal rejection or change a retry's session ID.
+        server.message(
+            {
+                "op_id": str(uuid4()),
+                "session_id": "rejected",
+                "message": {"role": "user", "content": "later"},
+            }
+        )
+        failing = False
+        asyncio.run(server.dispatch_messages())
+        if retryable:
+            assert "rejected" in native.sessions
+        else:
+            assert "rejected" not in native.sessions
+            assert all(
+                row["status"] == "failed"
+                for row in ctx.wstore.q(
+                    "SELECT status FROM client_admissions WHERE session_id='rejected'"
+                )
+            )
+    finally:
+        server._http.server_close()
+
+
+@pytest.mark.parametrize(
+    "invalid", [{"session_context": []}, {"capabilities": 7}, {"session_id": 17}]
+)
+def test_invalid_open_metadata_is_not_admitted(seam, invalid):
+    op_id = str(uuid4())
+    with pytest.raises(SeamError) as info:
+        seam.client._post(
+            "/session-open",
+            {"op_id": op_id, "client": {"id": "bad-metadata", "kind": "test"}, **invalid},
+        )
+    assert info.value.status == 400
+    assert seam.wstore.one("SELECT op_id FROM client_admissions WHERE op_id=?", (op_id,)) is None
+
+
+def test_open_receipt_and_local_session_roll_back_together(seam, monkeypatch):
+    from research_core.store import sessions
+    from research_core.store.errors import StoreError
+
+    original = sessions.register_in_transaction
+
+    def interrupted(*args, **kwargs):
+        original(*args, **kwargs)
+        raise StoreError(["Injected failure after local registration"])
+
+    monkeypatch.setattr(sessions, "register_in_transaction", interrupted)
+    op_id = str(uuid4())
+    with pytest.raises(SeamError) as info:
+        seam.client._post(
+            "/session-open",
+            {
+                "op_id": op_id,
+                "session_id": "atomic-open",
+                "client": {"id": "atomic-proof", "kind": "test"},
+            },
+        )
+    assert info.value.status == 400
+    assert seam.wstore.one("SELECT op_id FROM client_admissions WHERE op_id=?", (op_id,)) is None
+    assert sessions.read(seam.wstore, "atomic-open") is None
