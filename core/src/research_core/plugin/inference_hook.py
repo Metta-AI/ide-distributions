@@ -6,8 +6,9 @@ Hermes calls the hook after it classifies each failed model call, with the class
 The hook always records the call as ``last_error``, then:
 
 * on ``billing`` (402 credits, or a 403 "Key limit exceeded") it blocks model work as
-  ``budget_exhausted`` until the next refill. Only the lease loop clears that block, when a
-  new key arrives.
+  ``budget_exhausted``, showing the next refill as ``until``. Only the lease loop clears that
+  block, when a new key arrives. Within :data:`KEY_CHANGE_GRACE` of a new key it does not
+  block: such errors come from runs still finishing on the previous, spent key.
 * after :data:`OUTAGE_COUNT` outage-class errors within :data:`OUTAGE_WINDOW` it blocks model
   work as ``provider_unavailable`` for :data:`OUTAGE_BLOCK`. Nobody clears that block; it lapses.
 
@@ -34,6 +35,7 @@ OUTAGE_REASONS = frozenset({"overloaded", "server_error", "timeout"})
 OUTAGE_COUNT = 3
 OUTAGE_WINDOW = timedelta(minutes=3)
 OUTAGE_BLOCK = timedelta(minutes=5)
+KEY_CHANGE_GRACE = timedelta(minutes=2)
 
 
 def is_billing(reason: str, status_code: int | None, message: str) -> bool:
@@ -66,6 +68,8 @@ def record_api_error(
             ),
         )
         if billing:
+            if state.key_changed_at is not None and now - state.key_changed_at < KEY_CHANGE_GRACE:
+                return state
             return state.with_block("budget_exhausted", inference.next_refill(state, now), now)
         if reason not in OUTAGE_REASONS:
             return state

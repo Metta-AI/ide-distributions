@@ -17,7 +17,10 @@ from application import Operation, response  # noqa: E402
 from inference import Availability, maintain  # noqa: E402
 
 from research_core import inference as state  # noqa: E402  (on the path through inference)
-from research_core.plugin.inference_hook import record_api_error  # noqa: E402
+from research_core.plugin.inference_hook import (  # noqa: E402
+    KEY_CHANGE_GRACE,
+    record_api_error,
+)
 
 
 def lease(key: str, expires: datetime) -> tuple[str, str, bytes]:
@@ -79,7 +82,14 @@ async def main(tmp_path: Path):
             # The first lease is installed; now the key runs dry mid-run.
             assert availability.available()
             assert state.read_state(marker).next_refill_at == refill
-            record_api_error(marker, session_id="api_proof", reason="billing", status_code=402)
+            # Later than the hook's grace after a key change, so the error counts.
+            record_api_error(
+                marker,
+                session_id="api_proof",
+                reason="billing",
+                status_code=402,
+                now=datetime.now(UTC) + KEY_CHANGE_GRACE,
+            )
             assert not availability.available()
             # The platform hands back the same, spent key: that must not end the block.
             status, headers, body = lease("fixture-key", expires)

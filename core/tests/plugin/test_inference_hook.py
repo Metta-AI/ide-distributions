@@ -31,7 +31,9 @@ def record(lease_file, reason, *, at=NOW, status_code=None, message="", session_
 
 
 def test_billing_blocks_until_the_recorded_refill(lease_file):
-    inference.lease_installed(lease_file, REFILL + inference.RENEWAL_GRACE, "sk-one", now=NOW)
+    inference.lease_installed(
+        lease_file, REFILL + inference.RENEWAL_GRACE, "sk-one", now=NOW - timedelta(hours=1)
+    )
     state = record(lease_file, "billing", status_code=402)
     assert state.blocked == "budget_exhausted" and state.until == REFILL and state.since == NOW
     assert state.last_error == inference.ApiError("api_1", "billing", 402, NOW)
@@ -40,6 +42,20 @@ def test_billing_blocks_until_the_recorded_refill(lease_file):
 
 def test_billing_without_a_known_refill_blocks_until_midnight_utc(lease_file):
     assert record(lease_file, "billing").until == REFILL
+
+
+def test_billing_soon_after_a_key_change_records_but_does_not_block(lease_file):
+    # Runs that started on the spent key can still fail just after the new key arrives.
+    inference.lease_installed(lease_file, REFILL + inference.RENEWAL_GRACE, "sk-new", now=NOW)
+    late = record(lease_file, "billing", at=NOW + timedelta(seconds=30), status_code=402)
+    assert late.blocked is None
+    assert late.last_error == inference.ApiError(
+        "api_1", "billing", 402, NOW + timedelta(seconds=30)
+    )
+
+    # After the grace period, billing on the new key blocks again.
+    spent = record(lease_file, "billing", at=NOW + timedelta(minutes=3), status_code=402)
+    assert spent.blocked == "budget_exhausted" and spent.until == REFILL
 
 
 def test_key_limit_403_counts_as_billing(lease_file):

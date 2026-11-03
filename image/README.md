@@ -65,11 +65,16 @@ of the optional model service, so an unavailable budget does not prevent stoppin
 A spent key is not an expired one, so the image also keeps the *inference state*,
 `.inference-state` beside the lease file (`core/src/research_core/inference.py`). The
 profiles' `api_request_error` hook sets `budget_exhausted` when Hermes classifies a model call
-as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), and `provider_unavailable` for
-five minutes after three outage errors within three minutes. The lease loop sets
-`budget_exhausted` when the platform refuses a lease for that reason, clears it only when it
-installs a different key, and renews no later than the refill (the lease's expiry minus the
-platform's ten-minute grace). While the state blocks, chat, wakes and Researchers start no
+as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), except within two minutes of a
+key change, when such errors come from runs still finishing on the previous key. It sets
+`provider_unavailable` for five minutes after three outage errors within three minutes. The
+lease loop sets `budget_exhausted` when the platform refuses a lease for that reason, clears
+it only when it installs a different key, and renews no later than the refill (the lease's
+expiry minus the platform's ten-minute grace). A budget block's `until` is the refill time
+shown to the user; the block itself holds until the new key arrives, so the gate does not
+open on the spent key in the seconds after the refill. An outage block lapses at its `until`.
+State writes run off the event loop, and a failed one is logged rather than stopping the
+workspace. While the state blocks, chat, wakes and Researchers start no
 runs, and `session.message` answers 503 with
 `{"kind": "inference_unavailable", "reason": "budget_exhausted", "until": "<ISO time>"}`
 (`InferenceUnavailable` in `image/contract.py`; `reason` and `until` are null when the lease

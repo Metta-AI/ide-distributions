@@ -76,13 +76,31 @@ def test_missing_or_malformed_state_is_not_blocked(tmp_path, content):
     assert inference.available(lease_file)
 
 
-def test_available_is_false_while_blocked_and_true_after_until(tmp_path):
+def test_budget_block_outlasts_the_refill_time_until_a_new_key(tmp_path):
     lease_file = lease(tmp_path, NOW + timedelta(days=1))
+    inference.lease_installed(lease_file, REFILL + inference.RENEWAL_GRACE, "sk-one", now=NOW)
     inference.lease_refused(lease_file, REFILL, budget_exhausted=True, now=NOW)
     assert not inference.available(lease_file, now=NOW)
-    assert inference.blocking_state(lease_file, now=NOW).blocked == "budget_exhausted"
-    assert inference.available(lease_file, now=REFILL + timedelta(seconds=1))
-    assert inference.blocking_state(lease_file, now=REFILL + timedelta(seconds=1)) is None
+    assert inference.blocking_state(lease_file, now=NOW).until == REFILL
+
+    # The refill time passes, but the spent key is still installed: the gate stays closed.
+    after_refill = REFILL + timedelta(seconds=30)
+    assert not inference.available(lease_file, now=after_refill)
+    assert inference.blocking_state(lease_file, now=after_refill).blocked == "budget_exhausted"
+
+    inference.lease_installed(lease_file, NOW + timedelta(days=2), "sk-two", now=after_refill)
+    assert inference.available(lease_file, now=after_refill)
+
+
+def test_outage_block_lapses_at_until(tmp_path):
+    lease_file = lease(tmp_path, NOW + timedelta(days=1))
+    until = NOW + timedelta(minutes=5)
+    inference.update_state(
+        lease_file, lambda state: state.with_block("provider_unavailable", until, NOW)
+    )
+    assert not inference.available(lease_file, now=NOW)
+    assert inference.available(lease_file, now=until + timedelta(seconds=1))
+    assert inference.blocking_state(lease_file, now=until + timedelta(seconds=1)) is None
 
 
 def test_available_still_needs_an_unexpired_lease(tmp_path):
@@ -96,14 +114,17 @@ def test_only_a_new_key_clears_a_budget_block(tmp_path):
     expires = REFILL + inference.RENEWAL_GRACE
     first = inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
     assert first.next_refill_at == REFILL and first.blocked is None
+    assert first.key_changed_at == NOW
     block_budget(lease_file)
 
     # The platform hands back the same, spent key until it nears expiry: still blocked.
-    inference.lease_installed(lease_file, expires, "sk-one", now=NOW)
-    assert inference.read_state(lease_file).blocked == "budget_exhausted"
+    inference.lease_installed(lease_file, expires, "sk-one", now=NOW + timedelta(hours=1))
+    same = inference.read_state(lease_file)
+    assert same.blocked == "budget_exhausted" and same.key_changed_at == NOW
 
     cleared = inference.lease_installed(lease_file, expires + timedelta(days=1), "sk-two")
     assert cleared.blocked is None and cleared.until is None
+    assert cleared.key_changed_at > NOW
     assert cleared.next_refill_at == REFILL + timedelta(days=1)
     assert "sk-two" not in inference.state_path(lease_file).read_text()
 

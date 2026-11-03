@@ -13,7 +13,8 @@ Two files sit side by side in the folder of ``IDE_INFERENCE_LEASE_FILE``:
        "last_error": {"session_id", "reason", "status_code", "at"} | null,
        "next_refill_at": "<ISO time>" | null,
        "outages": ["<ISO time>", ...],
-       "key_id": "<sha256 prefix of the installed key>" | null}
+       "key_id": "<sha256 prefix of the installed key>" | null,
+       "key_changed_at": "<ISO time>" | null}
 
   Three processes share it, which is why it is a file and not a store table: the Hermes
   plugin's ``api_request_error`` hook (``research_core.plugin.inference_hook``) records each
@@ -23,10 +24,16 @@ Two files sit side by side in the folder of ``IDE_INFERENCE_LEASE_FILE``:
   lease loop's best knowledge of the next refill (for the hook's ``until``); ``outages`` holds
   the times of recent outage-class errors, so the hook can count them across processes;
   ``key_id`` fingerprints the installed key, so the lease loop can tell a new key from the
-  same key handed back again (it survives restarts, which rewrite the profiles' ``.env``).
+  same key handed back again (it survives restarts, which rewrite the profiles' ``.env``);
+  ``key_changed_at`` is when a different key was last installed, so the hook can ignore
+  billing errors from runs still finishing on the previous, spent key.
 
-A block holds while ``blocked`` is set and ``until`` is in the future. Only the lease loop
-clears ``budget_exhausted``; ``provider_unavailable`` simply lapses at ``until``. A missing or
+``budget_exhausted`` holds until the lease loop installs a different key; its ``until`` (the
+refill time) is only what the user is told. It does not lapse by the clock, because the gate
+would otherwise open in the seconds between the refill and the new key, runs on the spent key
+would fail, and the hook would block again until the following day. A dead lease loop still
+closes the gate, through the lease's expiry. ``provider_unavailable`` holds while ``until``
+is in the future and simply lapses; nobody clears it. A missing or
 malformed state file means "not blocked". Every write is a locked read-modify-write that
 replaces the file atomically (temp file, then rename).
 
@@ -75,9 +82,13 @@ class InferenceState:
     next_refill_at: datetime | None = None
     outages: tuple[datetime, ...] = field(default_factory=tuple)
     key_id: str | None = None
+    key_changed_at: datetime | None = None
 
     def blocking(self, now: datetime | None = None) -> bool:
-        """Whether this state stops model work at ``now``."""
+        """Whether this state stops model work at ``now``: a budget block until a new key, an
+        outage block until ``until``."""
+        if self.blocked == "budget_exhausted":
+            return True
         return (
             self.blocked is not None
             and self.until is not None
@@ -164,9 +175,11 @@ def lease_installed(
 
     def change(state: InferenceState) -> InferenceState:
         installed = key_id(key)
-        if state.key_id != installed and state.blocked == "budget_exhausted":
-            state = state.with_block(None, None, now)
-        return replace(state, next_refill_at=expires_at - RENEWAL_GRACE, key_id=installed)
+        if state.key_id != installed:
+            state = replace(state, key_id=installed, key_changed_at=now)
+            if state.blocked == "budget_exhausted":
+                state = state.with_block(None, None, now)
+        return replace(state, next_refill_at=expires_at - RENEWAL_GRACE)
 
     return update_state(lease_file, change)
 
@@ -222,6 +235,7 @@ def _decode(raw: dict[str, Any]) -> InferenceState:
         next_refill_at=_time(raw.get("next_refill_at")),
         outages=tuple(_time(at) for at in raw.get("outages") or ()),
         key_id=raw.get("key_id"),
+        key_changed_at=_time(raw.get("key_changed_at")),
     )
 
 
@@ -239,4 +253,5 @@ def _encode(state: InferenceState) -> dict[str, Any]:
         "next_refill_at": iso(state.next_refill_at),
         "outages": [at.isoformat() for at in state.outages],
         "key_id": state.key_id,
+        "key_changed_at": iso(state.key_changed_at),
     }
