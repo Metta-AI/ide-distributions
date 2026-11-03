@@ -224,14 +224,28 @@ captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         captured.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        request = captured[-1]
+        if request["messages"][-1]["role"] == "tool":
+            assert "policy" in str(request["messages"][-1]["content"]), request
+            message = {"role":"assistant", "content":"Attachment received"}
+            finish = "stop"
+            delta = message
+        else:
+            assert any(t["function"]["name"] == "read_file" for t in request["tools"])
+            user = next(m for m in request["messages"]
+                if m["role"] == "user" and isinstance(m["content"], list))
+            path = json.loads(user["content"][1]["text"])["workspace_file"]
+            call = {"id":f"read-{len(captured)}", "type":"function",
+                "function":{"name":"read_file", "arguments":json.dumps({"path":path})}}
+            message = {"role":"assistant", "content":None, "tool_calls":[call]}
+            delta = {"role":"assistant", "tool_calls":[{"index":0, **call}]}
+            finish = "tool_calls"
         body = json.dumps({"id":"proof", "object":"chat.completion", "created":1,
-            "model":"proof", "choices":[{"index":0, "finish_reason":"stop",
-            "message":{"role":"assistant", "content":"Attachment received"}}],
+            "model":"proof", "choices":[{"index":0, "finish_reason":finish, "message":message}],
             "usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}).encode()
-        if captured[-1].get("stream"):
+        if request.get("stream"):
             chunk = {"id":"proof", "object":"chat.completion.chunk", "created":1,
-                "model":"proof", "choices":[{"index":0, "finish_reason":"stop",
-                "delta":{"role":"assistant", "content":"Attachment received"}}]}
+                "model":"proof", "choices":[{"index":0, "finish_reason":finish, "delta":delta}]}
             body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
         self.send_response(200)
         mime = "text/event-stream" if captured[-1].get("stream") else "application/json"
@@ -256,9 +270,9 @@ if sys.argv[1] == "1":
 initial = db.get_messages_as_conversation(sid, include_row_ids=True)
 agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
     base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
-    enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
+    enabled_toolsets=["file"], quiet_mode=True, skip_context_files=True,
     skip_memory=True, skip_background_review=True, session_id=sid,
-    session_db=db, max_iterations=2)
+    session_db=db, max_iterations=4)
 try:
     result = agent.run_conversation(original, conversation_history=initial)
     assert result["final_response"] == "Attachment received", result
@@ -274,14 +288,14 @@ try:
     assert resumed[len(prior)]["content"] == original
     agent2 = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
         base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
-        enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
+        enabled_toolsets=["file"], quiet_mode=True, skip_context_files=True,
         skip_memory=True, skip_background_review=True, session_id=sid,
-        session_db=db, max_iterations=2)
+        session_db=db, max_iterations=4)
     again = agent2.run_conversation(
         [{"type":"input_text", "text":"Continue from the saved file"}],
         conversation_history=resumed)
     assert again["final_response"] == "Attachment received", again
-    assert len(db.get_messages(sid)) == len(prior) + 4
+    assert len(db.get_messages(sid)) == len(prior) + 8
     assert [(m["id"], m["role"], m["content"])
         for m in db.get_messages(sid)[:len(prior)]] == prior
     old = next(m for m in captured[-1]["messages"]
