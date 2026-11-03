@@ -50,6 +50,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from research_core import contract, inference, layout, profile_models
+from research_core.messages import UserMessage
 from research_core.prepare import Runner
 from research_core.profile_models import Catalog, ModelError, Profile
 from research_core.store import admissions, coworlds, sessions, settings, ui_state
@@ -343,8 +344,6 @@ class SeamServer:
         """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
         started = time.monotonic()
         session_id = _text(body, "session_id")
-        from research_core.messages import UserMessage
-
         message = UserMessage.model_validate(body["message"])
         content = message.root["content"]
         text = (
@@ -466,7 +465,6 @@ class SeamServer:
                         from httpx import HTTPError
 
                         from research_core.attachments import AttachmentError, prepare
-                        from research_core.messages import UserMessage
                         from research_core.platform.errors import PlatformError
 
                         preparing = time.monotonic()

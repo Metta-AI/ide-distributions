@@ -91,6 +91,8 @@ async def main():
                 pending.append(waiting)
                 # Let the serial dispatcher enter its blocked native call.
                 await asyncio.sleep(0.6)
+                opening_state = await seam.get("/session-pending", params={"session_id": waiting})
+                assert opening_state.json() == {"pending": True}
             body = {
                 "op_id": str(uuid4()),
                 "session_id": waiting,
