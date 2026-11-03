@@ -8,8 +8,8 @@ uv pip list --python "$native_python" --format json |
   "$native_python" -c 'import json,sys;print("\n".join(p["name"]+"=="+p["version"] for p in json.load(sys.stdin)))' > "$constraints"
 uv pip install --python "$native_python" --constraint "$constraints" \
   --requirement "$(dirname "$0")/native-requirements.txt"
-uv pip check --python "$native_python"
 "$native_python" - <<'PY'
+from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download
 
 snapshot_download(
@@ -18,4 +18,5 @@ snapshot_download(
     local_dir="/opt/models/whisper-base",
     allow_patterns=["config.json", "model.bin", "tokenizer.json", "vocabulary.*"],
 )
+WhisperModel("/opt/models/whisper-base", device="cpu", compute_type="int8", local_files_only=True)
 PY
