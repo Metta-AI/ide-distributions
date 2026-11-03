@@ -28,18 +28,18 @@ if __name__ == "__main__":
     import asyncio
     import json
     import socket
+    import sqlite3
     import sys
     import threading
+    from contextlib import closing
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     import httpx
+    from gateway import run as native_gateway
     from gateway.config import GatewayConfig, Platform, PlatformConfig
-    from gateway.platforms.api_server import APIServerAdapter
-    from gateway.run import GatewayRunner
     from gateway.session_identity import identity_of
     from hermes_constants import get_hermes_home
     from tools.async_delegation import get_durable_delegation
-    from tools.process_registry import process_registry
 
     from research_core.watcher.hermes_api import HermesRuns
 
@@ -107,7 +107,12 @@ if __name__ == "__main__":
     provider_url = f"http://127.0.0.1:{provider.server_port}/v1"
     key = "8c839b96b55a4aeda5a0fdb8f1c9a262"
     config = {
-        "model": {"default": "proof", "provider": "openai", "base_url": provider_url},
+        "model": {
+            "default": "proof",
+            "provider": "openai",
+            "base_url": provider_url,
+            "api_mode": "chat_completions",
+        },
         "platform_toolsets": {"api_server": ["terminal", "delegation"]},
         "terminal": {"backend": "local", "cwd": str(home)},
         "approvals": {"mode": "off"},
@@ -123,15 +128,24 @@ if __name__ == "__main__":
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    runner = GatewayRunner(config=GatewayConfig(multiplex_profiles=True))
-    api = APIServerAdapter(
-        PlatformConfig(enabled=True, extra={"key": key, "host": "127.0.0.1", "port": port})
+    gateway_config = GatewayConfig(
+        multiplex_profiles=True,
+        platforms={
+            Platform.API_SERVER: PlatformConfig(
+                enabled=True, extra={"key": key, "host": "127.0.0.1", "port": port}
+            )
+        },
     )
-    api.gateway_runner = runner
-    runner.adapters[Platform.API_SERVER] = api
 
     async def check():
-        assert await api.connect(), "Native API listener did not start"
+        gateway_task = asyncio.create_task(native_gateway.start_gateway(gateway_config))
+        async with asyncio.timeout(60):
+            while True:
+                assert not gateway_task.done(), gateway_task.result()
+                runner = native_gateway._gateway_runner_ref()
+                if runner is not None and runner._running:
+                    break
+                await asyncio.sleep(0.1)
         sid = f"api_openai_completion_{profile}"
         runs = HermesRuns(base_url=f"http://127.0.0.1:{port}", keys={profile: key})
         try:
@@ -154,7 +168,26 @@ if __name__ == "__main__":
                         await asyncio.sleep(0.1)
                 assert status["status"] == "completed", status
                 assert status["output"] == "DELEGATION_WAITING", status
-            event = await asyncio.to_thread(process_registry.completion_queue.get, True, 30)
+                history = (await client.get(f"/api/sessions/{sid}/messages")).json()["data"]
+                dispatched = next(
+                    json.loads(message["content"])
+                    for message in history
+                    if message["role"] == "tool" and "delegation_id" in message["content"]
+                )
+                assert dispatched["mode"] == "background", dispatched
+            database = home / "profiles" / profile / "state.db"
+            async with asyncio.timeout(30):
+                while True:
+                    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as db:
+                        row = db.execute(
+                            "SELECT event_json,delivery_state FROM async_delegations"
+                            " WHERE delegation_id=? AND event_json IS NOT NULL",
+                            (dispatched["delegation_id"],),
+                        ).fetchone()
+                    if row is not None:
+                        break
+                    await asyncio.sleep(0.1)
+            event = json.loads(row[0])
             assert event["type"] == "async_delegation", event
             assert event["parent_session_id"] == sid, event
             async with runner._completion_event_scope(event):
@@ -169,6 +202,7 @@ if __name__ == "__main__":
                             "profile": profile,
                             "event": event,
                             "durable": durable,
+                            "persisted_delivery_state": row[1],
                             "source": vars(source) if source else None,
                             "identity": str(identity),
                             "ready": ready,
@@ -180,8 +214,8 @@ if __name__ == "__main__":
                 assert durable is not None, event
                 assert ready, (profile, "native completion delivery not ready", event)
         finally:
-            await api.disconnect()
-            runner.close_all_session_db_handles()
+            await runner.stop()
+            await gateway_task
             await asyncio.to_thread(provider.shutdown)
             provider.server_close()
 
