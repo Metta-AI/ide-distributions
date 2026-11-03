@@ -100,7 +100,7 @@ def main() -> None:
                 content.append({"type": "text", "text": transcript["transcript"]})
     finally:
         call("session.close", {"session_id": session})
-    sys.__stdout__.write(json.dumps({"role": "user", "content": content}))
+    sys.__stdout__.write(json.dumps({**request["message"], "content": content}))
 
 
 if __name__ == "__main__":

@@ -69,6 +69,8 @@ def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path):
 
 
 def test_openai_audio_uses_native_transcription(hermes_bin, tmp_path):
+    # Root CI must not silently install a missing package that a read-only hosted image lacks.
+    subprocess.run([str(hermes_bin.parent / "python"), "-c", "import faster_whisper"], check=True)
     home = tmp_path / "hermes"
     home.mkdir()
     (home / "config.yaml").write_text("attachments:\n  storage: workspace\n")

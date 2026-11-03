@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+from contextlib import closing
 from pathlib import Path
 
 import httpx
@@ -42,11 +43,11 @@ def prepare(
                 file_id = file.pop("file_id")
                 if not re.fullmatch(r"[0-9a-f]{64}", file_id):
                     raise AttachmentError("Unknown file ID")
-                client = platform.from_env(env, workspace=ws)
-                player = client.whoami("player").subject_id
-                artifact = Artifact.model_validate(
-                    client.request("GET", f"/v2/cogents/{player}/artifacts/{file_id}")
-                )
+                with closing(platform.from_env(env, workspace=ws)) as client:
+                    player = client.whoami("player").subject_id
+                    artifact = Artifact.model_validate(
+                        client.request("GET", f"/v2/cogents/{player}/artifacts/{file_id}")
+                    )
                 if not 0 <= artifact.size_bytes <= MAX_BYTES:
                     raise AttachmentError("Attachments must be at most 25 MiB")
                 if artifact.content_base64 is not None:
@@ -75,11 +76,11 @@ def prepare(
             parts.append({"type": "file", "file": file})
         else:
             parts.append(part)
-    executable = Path(shutil.which(hermes_bin) or hermes_bin).resolve().parent / "python"
+    executable = Path(shutil.which(hermes_bin) or hermes_bin).absolute().parent / "python"
     result = subprocess.run(
         [str(executable), str(Path(__file__).with_name("native_attachments.py"))],
         input=json.dumps(
-            {"workspace": str(ws.root), "message": {"role": "user", "content": parts}}
+            {"workspace": str(ws.root), "message": {**message.root, "content": parts}}
         ),
         env=env,
         text=True,
