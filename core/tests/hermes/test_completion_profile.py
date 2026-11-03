@@ -59,7 +59,10 @@ if __name__ == "__main__":
                 assert verdict == "deliver", (profile, verdict, str(get_hermes_home()))
                 assert get_hermes_home() == home / "profiles" / profile
                 source = SessionSource(
-                    platform=Platform.API_SERVER, chat_id=session_id, chat_type="dm", profile=profile
+                    platform=Platform.API_SERVER,
+                    chat_id=session_id,
+                    chat_type="dm",
+                    profile=profile,
                 )
                 identity = restore_identity(source, runner=runner, transport_profile="default")
                 assert runner._names_receiving_bot(source, identity)
