@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import subprocess
+import urllib.error
 import urllib.parse
 from pathlib import Path
 
@@ -73,6 +74,7 @@ class FakeCli:
         self.roster: list[dict] = []
         self.api_reads: list[str] = []
         self.rounds: list[dict] = []
+        self.leagues_extra: dict = {}
         self.divisions = [{"id": "div_1", "name": "Bronze", "level": 1, "member_count": 3}]
         self.boards: dict[str, list[dict]] = {}
         self.latest_replay: dict | None = None
@@ -101,10 +103,21 @@ class FakeCli:
                         {
                             "game": {"coworld_id": "cow_gota"},
                             "commissioner_config": {"default_variant_id": "standard"},
+                            **self.leagues_extra,
                         }
                     )
                 )
-            case ["coworld", "rounds", "--league", _, "--limit", _, "--json"]:
+            case [
+                "coworld",
+                "rounds",
+                "--league",
+                _,
+                "--status",
+                "completed",
+                "--limit",
+                "1",
+                "--json",
+            ]:
                 return done(json.dumps({"entries": self.rounds, "next_cursor": None}))
             case ["coworld", "results", target, "--json"]:
                 if target.startswith("league_"):
@@ -237,7 +250,7 @@ class FakeCli:
         parsed = urllib.parse.urlsplit(url)
         if parsed.path.endswith("/latest-replay"):
             if self.latest_replay is None:
-                raise OSError("no replay")
+                raise urllib.error.HTTPError(url, 404, "not found", {}, None)
             return json.dumps(self.latest_replay)
         assert parsed.path == "/api/observatory/stats/policy-versions", url
         query = dict(urllib.parse.parse_qsl(parsed.query))
