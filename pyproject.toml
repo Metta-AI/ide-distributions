@@ -17,8 +17,11 @@ dev = ["pytest>=8", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["core/tests"]
-markers = ["hermes: needs a real Hermes install (HERMES_BIN); skipped by default"]
-addopts = "-m 'not hermes'"
+markers = [
+  "hermes: needs a real Hermes install (HERMES_BIN); skipped by default",
+  "model: calls models through OpenRouter and spends money (OPENROUTER_API_KEY); skipped by default",
+]
+addopts = "-m 'not hermes and not model'"
 
 [tool.ruff]
 line-length = 100
