@@ -58,13 +58,13 @@ if __name__ == "__main__":
                 verdict = await runner._classify_completion_target(session_id)
                 assert verdict == "deliver", (profile, verdict, str(get_hermes_home()))
                 assert get_hermes_home() == home / "profiles" / profile
-            source = SessionSource(
-                platform=Platform.API_SERVER, chat_id=session_id, chat_type="dm", profile=profile
-            )
-            identity = restore_identity(source, runner=runner, transport_profile="default")
-            assert runner._names_receiving_bot(source, identity)
-            transport = runner._resolve_injection_adapter("api_server", source)
-            assert transport is api, (profile, "shared API listener lost", identity)
+                source = SessionSource(
+                    platform=Platform.API_SERVER, chat_id=session_id, chat_type="dm", profile=profile
+                )
+                identity = restore_identity(source, runner=runner, transport_profile="default")
+                assert runner._names_receiving_bot(source, identity)
+                transport = runner._resolve_injection_adapter("api_server", source)
+                assert transport is api, (profile, "shared API listener lost", identity)
         print("Both served-profile parents remain deliverable")
 
     try:
