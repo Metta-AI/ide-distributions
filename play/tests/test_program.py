@@ -665,6 +665,9 @@ def test_league_status_names_what_the_platform_could_not_answer(program, cli):
     data = program.league_status(league=CHOSEN)  # no rounds, no games yet, nobody on the board
     assert "last_finished_round" not in data and data["mine"] == []
     assert "latest_result" not in data and "unavailable" not in data  # a 404 is "no game yet"
+    cli.latest_replay = "null"  # a 200 with a null body is also "no game yet"
+    data = program.league_status(league=CHOSEN)
+    assert "latest_result" not in data and "unavailable" not in data
     cli.latest_replay = {"round": {}, "episode": {}}
     assert program.league_status(league=CHOSEN)["unavailable"] == ["latest_result"]
     assert run("league_status", {"league": CHOSEN, "top": 3}, program)["ok"] is True

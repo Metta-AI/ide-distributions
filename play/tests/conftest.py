@@ -251,6 +251,8 @@ class FakeCli:
         if parsed.path.endswith("/latest-replay"):
             if self.latest_replay is None:
                 raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+            if self.latest_replay == "null":  # the platform's 200 with a null body: no game yet
+                return "null"
             return json.dumps(self.latest_replay)
         assert parsed.path == "/api/observatory/stats/policy-versions", url
         query = dict(urllib.parse.parse_qsl(parsed.query))

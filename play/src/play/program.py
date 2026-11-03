@@ -752,6 +752,8 @@ class Program:
             if "404" in str(error):
                 return None
             raise
+        if data is None:  # the platform answers null when the player has no game yet
+            return None
         if not isinstance(data, dict):
             raise TypeError("latest result is not an object")
         found: dict = {}
