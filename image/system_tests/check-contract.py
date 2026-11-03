@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from application import Operation, response  # noqa: E402
@@ -20,6 +21,9 @@ async def main():
     assert shutil.which("pdftoppm"), "The packaged native PDF attachment renderer is missing"
     assert version("faster-whisper") == "1.2.1"
     assert Path("/opt/models/whisper-base/model.bin").is_file()
+    for role in ("orchestrator", "researcher"):
+        config = yaml.safe_load(Path(f"/workspace/host/profiles/{role}/config.yaml").read_text())
+        assert config["stt"]["local"]["model"] == "/opt/models/whisper-base"
     inference = Availability()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam,

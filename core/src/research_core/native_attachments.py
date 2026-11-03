@@ -94,7 +94,7 @@ def main() -> None:
             elif path.suffix.lower() in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}:
                 from tools.transcription_tools import transcribe_audio
 
-                transcript = transcribe_audio(str(path), model=request["audio_model"])
+                transcript = transcribe_audio(str(path))
                 if not transcript["success"]:
                     raise RuntimeError(transcript)
                 content.append({"type": "text", "text": transcript["transcript"]})

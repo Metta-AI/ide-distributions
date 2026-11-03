@@ -49,7 +49,6 @@ jobs:
       GIT_COMMITTER_EMAIL: ide-ci@example.invalid
       HERMES_BIN: /opt/hermes/.venv/bin/hermes
       HERMES_PYTHON: /opt/hermes/.venv/bin/python
-      IDE_STT_MODEL: /opt/models/whisper-base
       RUN_TESTS: ${{ github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.core == 'true' }}
     steps:
       - name: Skip when this change cannot affect the core

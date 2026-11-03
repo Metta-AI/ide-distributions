@@ -73,7 +73,9 @@ def test_openai_audio_uses_native_transcription(hermes_bin, tmp_path):
     subprocess.run([str(hermes_bin.parent / "python"), "-c", "import faster_whisper"], check=True)
     home = tmp_path / "hermes"
     home.mkdir()
-    (home / "config.yaml").write_text("attachments:\n  storage: workspace\n")
+    (home / "config.yaml").write_text(
+        "attachments:\n  storage: workspace\nstt:\n  local:\n    model: /opt/models/whisper-base\n"
+    )
     audio = Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "voice.wav"
     message = UserMessage.model_validate(
         {

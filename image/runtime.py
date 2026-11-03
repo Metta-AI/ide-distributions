@@ -166,6 +166,9 @@ async def run(stack: AsyncExitStack) -> None:
             env=profile_env,
         )
         report("profile_prepare", phase_started, role=role)
+        await command(
+            HERMES, "config", "set", "stt.local.model", "/opt/models/whisper-base", env=profile_env
+        )
 
     async def observe_ready(phase: str, ready: asyncio.Event) -> None:
         since = time.monotonic()

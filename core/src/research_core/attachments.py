@@ -83,7 +83,6 @@ def prepare(
             {
                 "workspace": str(ws.root),
                 "message": {**message.root, "content": parts},
-                "audio_model": env.get("IDE_STT_MODEL"),
             }
         ),
         env=env,

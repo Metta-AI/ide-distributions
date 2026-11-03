@@ -34,7 +34,6 @@ RUN mkdir /opt/workspace-plugins \
          fi; \
        done
 ENV HOME=/workspace/host \
-    IDE_STT_MODEL=/opt/models/whisper-base \
     HERMES_BUNDLED_PLUGINS=/opt/workspace-plugins \
     HERMES_HOME=/workspace/host \
     HERMES_REAL_HOME=/workspace/host \
