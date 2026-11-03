@@ -36,6 +36,12 @@ class Operation(BaseModel):
     args: dict[str, JsonValue]
 
 
+class PendingSession(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pending: bool
+
+
 @asynccontextmanager
 async def response(
     operation: Operation,
@@ -62,6 +68,14 @@ async def response(
     if isinstance(args, Message) and not inference.available():
         yield httpx.Response(503, json={"kind": "inference_unavailable"})
         return
+    if isinstance(args, Messages):
+        opening = await seam.get(
+            "/session-pending", params={"session_id": args.session_id}, timeout=10
+        )
+        opening.raise_for_status()
+        if PendingSession.model_validate_json(opening.content).pending:
+            yield httpx.Response(200, json={"data": []})
+            return
     client = gateway
     method = "GET"
     headers = {"Idempotency-Key": str(operation.op_id)}

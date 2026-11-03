@@ -47,8 +47,38 @@ def register(
     session_context: dict[str, Any] | None = None,
     client_capabilities: dict[str, Any] | list[Any] | None = None,
 ) -> dict[str, Any]:
+    with store.tx(actor) as tx:
+        return register_in_transaction(
+            tx,
+            session_id=session_id,
+            profile=profile,
+            kind=kind,
+            coworld_id=coworld_id,
+            task_id=task_id,
+            goal_id=goal_id,
+            event=event,
+            parent=parent,
+            session_context=session_context,
+            client_capabilities=client_capabilities,
+        )
+
+
+def register_in_transaction(
+    tx: Tx,
+    *,
+    session_id: str,
+    profile: str,
+    kind: str,
+    coworld_id: str | None = None,
+    task_id: int | None = None,
+    goal_id: int | None = None,
+    event: str | None = None,
+    parent: str | None = None,
+    session_context: dict[str, Any] | None = None,
+    client_capabilities: dict[str, Any] | list[Any] | None = None,
+) -> dict[str, Any]:
     """Upsert a Session; ``session.started`` on insert. The record carries ``created``."""
-    _require_workspace(store)
+    _require_workspace(tx.store)
     problems: list[str] = []
     require(problems, _is_text(session_id), "session_id is a non-empty string")
     require(problems, _is_text(profile), "profile is a non-empty string")
@@ -73,64 +103,63 @@ def register(
         raise StoreError(problems)
     context = None if session_context is None else json_field(session_context)
     capabilities = None if client_capabilities is None else json_field(client_capabilities)
-    with store.tx(actor) as tx:
-        created = tx.one("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) is None
-        if created:
-            tx.execute(
-                "INSERT INTO sessions(id, profile, kind, coworld_id, task_id, goal_id, event,"
-                " parent, started, last_seen, session_context, client_capabilities)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    session_id,
-                    profile,
-                    kind,
-                    coworld_id,
-                    task_id,
-                    goal_id,
-                    event,
-                    parent,
-                    tx.at,
-                    tx.at,
-                    context,
-                    capabilities,
-                ),
-            )
-            tx.event(
-                "session.started",
+    created = tx.one("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) is None
+    if created:
+        tx.execute(
+            "INSERT INTO sessions(id, profile, kind, coworld_id, task_id, goal_id, event,"
+            " parent, started, last_seen, session_context, client_capabilities)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
                 session_id,
-                {
-                    "profile": profile,
-                    "kind": kind,
-                    "coworld_id": coworld_id,
-                    "task_id": task_id,
-                    "goal_id": goal_id,
-                    "event": event,
-                    "parent": parent,
-                },
-            )
-        else:
-            tx.execute(
-                "UPDATE sessions SET profile = ?, kind = ?, coworld_id = COALESCE(?, coworld_id),"
-                " task_id = COALESCE(?, task_id), goal_id = COALESCE(?, goal_id),"
-                " event = COALESCE(?, event), parent = COALESCE(?, parent),"
-                " session_context = COALESCE(?, session_context),"
-                " client_capabilities = COALESCE(?, client_capabilities),"
-                " ended = NULL, last_seen = ? WHERE id = ?",
-                (
-                    profile,
-                    kind,
-                    coworld_id,
-                    task_id,
-                    goal_id,
-                    event,
-                    parent,
-                    context,
-                    capabilities,
-                    tx.at,
-                    session_id,
-                ),
-            )
-        return {**_record(tx, session_id), "created": created}
+                profile,
+                kind,
+                coworld_id,
+                task_id,
+                goal_id,
+                event,
+                parent,
+                tx.at,
+                tx.at,
+                context,
+                capabilities,
+            ),
+        )
+        tx.event(
+            "session.started",
+            session_id,
+            {
+                "profile": profile,
+                "kind": kind,
+                "coworld_id": coworld_id,
+                "task_id": task_id,
+                "goal_id": goal_id,
+                "event": event,
+                "parent": parent,
+            },
+        )
+    else:
+        tx.execute(
+            "UPDATE sessions SET profile = ?, kind = ?, coworld_id = COALESCE(?, coworld_id),"
+            " task_id = COALESCE(?, task_id), goal_id = COALESCE(?, goal_id),"
+            " event = COALESCE(?, event), parent = COALESCE(?, parent),"
+            " session_context = COALESCE(?, session_context),"
+            " client_capabilities = COALESCE(?, client_capabilities),"
+            " ended = NULL, last_seen = ? WHERE id = ?",
+            (
+                profile,
+                kind,
+                coworld_id,
+                task_id,
+                goal_id,
+                event,
+                parent,
+                context,
+                capabilities,
+                tx.at,
+                session_id,
+            ),
+        )
+    return {**_record(tx, session_id), "created": created}
 
 
 def set_run(

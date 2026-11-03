@@ -7,15 +7,20 @@ and a fresh workspace with ``cow_fake`` active, and drives it through the
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from uuid import uuid4
 
 import pytest
 
+from research_core import intake
 from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
 from research_core.store import coworlds, goals, notices, tasks, ui_state
@@ -89,7 +94,15 @@ def context_block(seam, run_id) -> dict:
 # --- session-open and message -------------------------------------------------------------
 
 
-def test_session_open_registers_a_chat_session_with_its_context(seam):
+def test_session_open_registers_a_chat_session_with_its_context(seam, monkeypatch):
+    created = threading.Event()
+    original = seam.hermes.create_session
+
+    def native_open(*args, **kwargs):
+        original(*args, **kwargs)
+        created.set()
+
+    monkeypatch.setattr(seam.hermes, "create_session", native_open)
     session_id = seam.client.open(
         client_id="ide-1",
         kind="ide",
@@ -105,6 +118,7 @@ def test_session_open_registers_a_chat_session_with_its_context(seam):
     assert row["coworld_id"] == COWORLD_ID
     assert row["session_context"] == {"mode": {"name": "research"}}
     assert row["client_capabilities"] == {"views": ["replay"], "panels": ["markdown"]}
+    assert created.wait(3)
     assert session_id in seam.hermes.sessions
     assert seam.hermes.session_messages(session_id, profile="orchestrator") == []
 
@@ -113,6 +127,119 @@ def test_session_open_refuses_a_missing_client(seam):
     with pytest.raises(SeamError) as info:
         seam.client._post("/session-open", {"capabilities": {}})
     assert info.value.status == 400 and "client" in info.value.body["error"]
+
+
+@pytest.mark.parametrize("stalled", ["prepare", "start", "create_session"])
+def test_intake_is_durable_while_execution_is_stalled(seam, monkeypatch, stalled, capsys):
+    from research_core import attachments
+    from research_core.intake import IntakeTiming
+
+    entered, release = threading.Event(), threading.Event()
+    owner = attachments if stalled == "prepare" else seam.hermes
+    original = getattr(owner, stalled)
+    calls = []
+
+    def held(*args, **kwargs):
+        calls.append(args)
+        entered.set()
+        assert release.wait(15), "Stalled execution was never released"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(owner, stalled, held)
+    with ThreadPoolExecutor(max_workers=6) as callers:
+        try:
+            if stalled == "create_session":
+                triggering = callers.submit(seam.client.open)
+            else:
+                seam.client.open()
+                triggering = callers.submit(seam.client.say, "Begin the stalled execution")
+            assert entered.wait(3)
+            started = time.monotonic()
+            opened = callers.submit(
+                seam.client._post,
+                "/session-open",
+                {"op_id": str(uuid4()), "client": {"id": "independent-intake", "kind": "test"}},
+            ).result(timeout=1)
+            body = {
+                "op_id": str(uuid4()),
+                "session_id": opened["session_id"],
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "file", "file": {"file_id": "a" * 64, "filename": "queued.txt"}}
+                    ],
+                },
+            }
+            retries = [callers.submit(seam.client._post, "/message", body) for _ in range(4)]
+            replies = [request.result(timeout=1) for request in retries]
+            assert time.monotonic() - started < 1
+            assert all(
+                reply["op_id"] == body["op_id"] and reply["run_id"] is None for reply in replies
+            )
+            # A separate connection proves committed bytes before execution is released.
+            with Store.open(seam.ctx.workspace.store_path, kind="workspace") as store:
+                rows = store.q(
+                    "SELECT request,status FROM client_admissions WHERE op_id=?", (body["op_id"],)
+                )
+                assert len(rows) == 1 and rows[0]["status"] == "queued"
+                assert json.loads(rows[0]["request"]) == body
+            assert not release.is_set()
+            assert len(calls) == 1, "Execution preparation must remain serial"
+        finally:
+            release.set()
+        triggering.result(timeout=3)
+    timings = [
+        IntakeTiming.model_validate_json(line)
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("{")
+    ]
+    measured = [event for event in timings if event.op_id == body["op_id"]]
+    assert len(measured) == 4 and sum(event.replayed for event in measured) == 3
+    assert all(event.total_ms < 1000 for event in measured)
+    assert all("queued.txt" not in event.model_dump_json() for event in timings)
+
+
+def test_new_session_history_and_dispatch_wait_for_native_open(seam, monkeypatch):
+    entered, release, started = threading.Event(), threading.Event(), threading.Event()
+    create = seam.hermes.create_session
+    start = seam.hermes.start
+
+    def held_open(*args, **kwargs):
+        entered.set()
+        assert release.wait(10)
+        return create(*args, **kwargs)
+
+    def checked_start(*args, **kwargs):
+        assert kwargs["session_id"] in seam.hermes.sessions
+        result = start(*args, **kwargs)
+        started.set()
+        return result
+
+    monkeypatch.setattr(seam.hermes, "create_session", held_open)
+    monkeypatch.setattr(seam.hermes, "start", checked_start)
+
+    try:
+        first = seam.client.open()
+        assert entered.wait(3)
+        # Accepted after the dispatcher's open-query snapshot: it must not run early.
+        second = seam.client.open()
+        seam.client._post(
+            "/message",
+            {
+                "op_id": str(uuid4()),
+                "session_id": second,
+                "message": {"role": "user", "content": "Wait for native creation"},
+            },
+        )
+        for session_id in (first, second):
+            with urllib.request.urlopen(
+                f"{seam.server.url}/session-pending?session_id={session_id}", timeout=1
+            ) as result:
+                assert json.load(result) == {"pending": True}
+        assert not started.is_set()
+    finally:
+        release.set()
+    assert started.wait(3)
 
 
 def test_message_stamps_client_coworld_and_version_into_the_block(seam, monkeypatch):
@@ -655,3 +782,196 @@ def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
     following = seam.say("Continue without the file")
     assert following["run_id"]
     assert seam.starts() == 1
+
+
+@pytest.mark.parametrize("retryable", [False, True])
+def test_failed_native_open_does_not_block_other_sessions(tmp_path, monkeypatch, retryable):
+    from research_core.watcher.hermes_api import RunsError
+
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    server = SeamServer(ws=ctx.workspace, hermes=native)
+    original = native.create_session
+    failing = True
+
+    def create(session_id, **kwargs):
+        if session_id == "rejected" and failing:
+            raise RunsError("Native opening rejected", status=503 if retryable else 400)
+        return original(session_id, **kwargs)
+
+    monkeypatch.setattr(native, "create_session", create)
+    try:
+        for session_id in ("rejected", "healthy"):
+            server.session_open(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": session_id,
+                    "client": {"id": "failure-proof", "kind": "test"},
+                }
+            )
+            server.message(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": session_id,
+                    "message": {"role": "user", "content": "hello"},
+                }
+            )
+        asyncio.run(server.dispatch_messages())
+        rows = ctx.wstore.q(
+            "SELECT kind,session_id,status,error FROM client_admissions ORDER BY rowid"
+        )
+        rejected = [row for row in rows if row["session_id"] == "rejected"]
+        assert all(row["status"] == ("queued" if retryable else "failed") for row in rejected)
+        assert "Native opening rejected" in rejected[0]["error"]
+        assert "healthy" in native.sessions
+        assert any(row["session_id"] == "healthy" and row["status"] == "running" for row in rows)
+        # A later input cannot bypass a terminal rejection or change a retry's session ID.
+        server.message(
+            {
+                "op_id": str(uuid4()),
+                "session_id": "rejected",
+                "message": {"role": "user", "content": "later"},
+            }
+        )
+        failing = False
+        asyncio.run(server.dispatch_messages())
+        if retryable:
+            assert "rejected" in native.sessions
+        else:
+            assert "rejected" not in native.sessions
+            assert all(
+                row["status"] == "failed"
+                for row in ctx.wstore.q(
+                    "SELECT status FROM client_admissions WHERE session_id='rejected'"
+                )
+            )
+            server.session_open(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": "rejected",
+                    "client": {"id": "recovered-proof", "kind": "test"},
+                }
+            )
+            recovered = server.message(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": "rejected",
+                    "message": {"role": "user", "content": "after successful reopening"},
+                }
+            )
+            asyncio.run(server.dispatch_messages())
+            assert (
+                ctx.wstore.one(
+                    "SELECT status FROM client_admissions WHERE op_id=?", (recovered["op_id"],)
+                )[0]
+                == "running"
+            )
+    finally:
+        server._http.server_close()
+
+
+@pytest.mark.parametrize(
+    "invalid", [{"session_context": []}, {"capabilities": 7}, {"session_id": 17}]
+)
+def test_invalid_open_metadata_is_not_admitted(seam, invalid):
+    op_id = str(uuid4())
+    with pytest.raises(SeamError) as info:
+        seam.client._post(
+            "/session-open",
+            {"op_id": op_id, "client": {"id": "bad-metadata", "kind": "test"}, **invalid},
+        )
+    assert info.value.status == 400
+    assert seam.wstore.one("SELECT op_id FROM client_admissions WHERE op_id=?", (op_id,)) is None
+
+
+def test_open_receipt_and_local_session_roll_back_together(seam, monkeypatch):
+    from research_core.store import sessions
+    from research_core.store.errors import StoreError
+
+    original = sessions.register_in_transaction
+
+    def interrupted(*args, **kwargs):
+        original(*args, **kwargs)
+        raise StoreError(["Injected failure after local registration"])
+
+    monkeypatch.setattr(sessions, "register_in_transaction", interrupted)
+    op_id = str(uuid4())
+    with pytest.raises(SeamError) as info:
+        seam.client._post(
+            "/session-open",
+            {
+                "op_id": op_id,
+                "session_id": "atomic-open",
+                "client": {"id": "atomic-proof", "kind": "test"},
+            },
+        )
+    assert info.value.status == 400
+    assert seam.wstore.one("SELECT op_id FROM client_admissions WHERE op_id=?", (op_id,)) is None
+    assert sessions.read(seam.wstore, "atomic-open") is None
+
+
+@pytest.mark.parametrize("opening_status", ["queued", "failed"])
+@pytest.mark.parametrize("lost_reply", [False, True])
+def test_reopening_preserves_existing_execution_and_history(
+    tmp_path, monkeypatch, opening_status, lost_reply
+):
+    from research_core.watcher.hermes_api import RunsUnavailable
+
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    server = SeamServer(ws=ctx.workspace, hermes=native)
+    start = native.start
+    lose_reply = lost_reply
+
+    def uncertain_start(*args, **kwargs):
+        nonlocal lose_reply
+        run_id = start(*args, **kwargs)
+        if lose_reply:
+            lose_reply = False
+            raise RunsUnavailable("Lost start response")
+        return run_id
+
+    monkeypatch.setattr(native, "start", uncertain_start)
+    try:
+        session_id = server.session_open(
+            {"op_id": str(uuid4()), "client": {"id": "existing-proof", "kind": "test"}}
+        )["session_id"]
+        receipt = server.message(
+            {
+                "op_id": str(uuid4()),
+                "session_id": session_id,
+                "message": {"role": "user", "content": "existing work"},
+            }
+        )
+        asyncio.run(server.dispatch_messages())
+        intake.accept(
+            ctx.wstore,
+            HARNESS,
+            op_id="reopening",
+            kind="open",
+            request={},
+            session_id=session_id,
+            message="",
+            payload="",
+        )
+        with ctx.wstore.tx(HARNESS) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET status=?,error='Opening refused'"
+                " WHERE op_id='reopening'",
+                (opening_status,),
+            )
+
+        def unavailable(*args, **kwargs):
+            raise RunsUnavailable("Gateway unavailable")
+
+        monkeypatch.setattr(native, "create_session", unavailable)
+        asyncio.run(server.dispatch_messages())
+        row = ctx.wstore.one(
+            "SELECT status,run_id FROM client_admissions WHERE op_id=?", (receipt["op_id"],)
+        )
+        assert row["status"] == "running" and row["run_id"]
+        assert len(native.runs) == 1
+        # Reopening must not replace an established conversation with an empty pending chat.
+        assert server.session_pending(session_id) == {"pending": False}
+    finally:
+        server._http.server_close()
