@@ -17,12 +17,29 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 BOTH = frozenset({"orchestrator", "researcher"})
 CLAIM = a.string("The claim, such as C-3.")
-EVIDENCE_TYPE = a.string(
-    "The evidence type: " + ", ".join(sorted(evidence_types.EVIDENCE_TYPES)) + "."
-)
-EVIDENCE_REF = a.string("The reference, in the type's format (code: <path>:<a>-<b>@<sha>).")
-STANCE = a.string("supports, contradicts or qualifies.", enum=list(claims.STANCES))
+# No enum: a mixin may register more evidence types (evidence_types.register_type).
+EVIDENCE_TYPE = a.string("The evidence type, such as code or claim.")
+EVIDENCE_REF = a.string("The reference, in the type's format (listed under evidence.ref).")
+STANCE = a.string("How the evidence bears on the claim.", enum=list(claims.STANCES))
 NOTE = a.string("What the evidence shows, in a few words.")
+EVIDENCE_LINK = a.obj(
+    "",
+    {
+        "type": EVIDENCE_TYPE,
+        "ref": a.string(
+            "The reference, in the type's format: "
+            + "; ".join(
+                f"{name} {kind.ref_format}"
+                for name, kind in sorted(evidence_types.EVIDENCE_TYPES.items())
+            )
+            + "."
+        ),
+        "stance": STANCE,
+        "note": NOTE,
+    },
+    required=("type", "ref", "stance"),
+)
+TAGS = a.strings("Keywords from the shared vocabulary, including the Goal's tags.")
 
 _EVIDENCE_SELECTOR = re.compile(r"^(?:[A-Z]-[0-9]+#)?(?:evidence-)?(?P<number>[1-9][0-9]*)$")
 
@@ -139,9 +156,8 @@ SPEC = tool(
     ToolSpec(
         name="claim",
         description=(
-            "Claims: short findings with typed evidence (code, doc, transcript, measurement, "
-            "experiment, version, replay, claim). Freshness, contested state and counts are "
-            "computed from the evidence. Retired claims stay findable. Returns the record."
+            "Claims: short findings backed by typed evidence links. Freshness, contested state "
+            "and counts are computed from the evidence; retired claims stay findable."
         ),
         handler=handle,
         roles=BOTH,
@@ -149,13 +165,12 @@ SPEC = tool(
         actions=(
             ActionSpec(
                 "search",
-                "Find claims by words (full text over summary, body and tags), optionally "
-                "narrowed to claims carrying every given tag; retired claims come last.",
+                "Find claims by words in their summary, body and tags; retired claims come last.",
                 {
                     "query": a.string("Words to search for."),
                     "tags": a.strings("Keep only claims carrying all of these tags."),
                     "include_retired": a.boolean(
-                        "Include superseded and refuted claims (default)."
+                        "Include superseded and refuted claims (default true)."
                     ),
                     "limit": a.integer("At most this many results (default 20)."),
                 },
@@ -169,20 +184,19 @@ SPEC = tool(
             ),
             ActionSpec(
                 "write",
-                "Record a finding: summary (<= 40 words), body (<= 500 words), tags and at "
-                "least one evidence link whose reference validates.",
+                "Record a new finding with at least one evidence link.",
                 {
                     "summary": a.string("The claim in one sentence of at most 40 words."),
                     "body": a.string(
                         "Detail, numbers, conditions and what would change our mind; at most "
                         "500 words."
                     ),
-                    "tags": a.strings("Keywords from the shared vocabulary, including Goals."),
-                    "evidence": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                        "description": "Links {type, ref, stance, note}; at least one.",
-                    },
+                    "tags": TAGS,
+                    "evidence": a.objects(
+                        "Evidence links, at least one; each reference must validate.",
+                        EVIDENCE_LINK,
+                        min_items=1,
+                    ),
                     "see_also": a.strings("Claims worth reading alongside, such as C-3."),
                 },
                 ("summary", "body", "tags", "evidence"),

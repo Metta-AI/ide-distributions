@@ -8,6 +8,11 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
+DIRECTIVE = a.string("The directive, such as D-2.")
+TEXT = a.string("The instruction, in the user's words.")
+SCOPE = a.string(
+    "'workspace' or a Goal such as G-3; add defaults to workspace, list without it shows all."
+)
 
 
 def normalise_scope(ctx: ToolContext, scope: str | None) -> str:
@@ -89,8 +94,8 @@ SPEC = tool(
                 "add",
                 "Record a standing instruction the user gave.",
                 {
-                    "text": a.string("The instruction, in the user's words."),
-                    "scope": a.string("'workspace' (default) or a Goal such as G-3."),
+                    "text": TEXT,
+                    "scope": SCOPE,
                     "source": a.string("Where the user said it: a message reference or quote."),
                 },
                 ("text", "source"),
@@ -99,18 +104,14 @@ SPEC = tool(
             ActionSpec(
                 "update",
                 "Change a directive's text or scope.",
-                {
-                    "directive": a.string("The directive, such as D-2."),
-                    "text": a.string("New text."),
-                    "scope": a.string("New scope: 'workspace' or a Goal."),
-                },
+                {"directive": DIRECTIVE, "text": TEXT, "scope": SCOPE},
                 ("directive",),
                 ORCHESTRATOR,
             ),
             ActionSpec(
                 "retire",
                 "Retire a directive the user withdrew.",
-                {"directive": a.string("The directive, such as D-2.")},
+                {"directive": DIRECTIVE},
                 ("directive",),
                 ORCHESTRATOR,
             ),
@@ -118,8 +119,8 @@ SPEC = tool(
                 "list",
                 "List active directives for the workspace and the active Coworld's Goals.",
                 {
-                    "scope": a.string("'workspace', a Goal such as G-3, or omit for all."),
-                    "status": a.string("active (default) or retired.", enum=["active", "retired"]),
+                    "scope": SCOPE,
+                    "status": a.string("Default active.", enum=["active", "retired"]),
                 },
             ),
         ),

@@ -84,7 +84,14 @@ it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
   `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
   pins the role sets (18 Orchestrator, 14 Researcher) and the executor table; run
-  `uv run python tools/build_prompts.py --write --manifests`.
+  `uv run python tools/build_prompts.py --write --manifests`. Describe the tool, every field
+  and every key, shortly: every request carries the whole list. Build field schemas with
+  `tools/_args.py`: an object field lists its keys (`obj`, `objects`; `free_object` only for
+  caller-defined keys such as a JSON body) and a field of several types uses `any_of`, because
+  Hermes's sanitizers turn a bare object into an empty one and an untyped field into a string.
+  In a multi-action tool a field shared by actions keeps one shape, and `ToolSpec.properties`
+  adds which actions require or take it; `core/tests/tools/test_tool_schemas.py` checks all
+  of this.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a

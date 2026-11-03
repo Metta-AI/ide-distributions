@@ -24,31 +24,50 @@ BOTH = frozenset({"orchestrator", "researcher"})
 
 TASK = a.string("The Task, such as T-3.")
 YES_NO = ["yes", "no"]
-# Flat convenience arguments of ``complete`` that stand for checklist entries of the same name.
-CHECKLIST_ARGS = (
-    "claims",
-    "experiment",
-    "versions",
-    "proposed_tasks",
-    "summary",
-    "submission_reason",
-    "capability",
-)
+EXPERIMENT = a.string("The Experiment the Task runs, such as X-2.")
+# Flat convenience arguments of ``complete`` that stand for checklist entries of the same name
+# (the keys of the Task types' checklists, task_types/*.md, besides commit and
+# submission_candidate, which are fields of their own).
+CHECKLIST_FIELDS = {
+    "claims": a.any_of(
+        'Claims recorded, such as ["C-3"], or "none: <reason>".', a.STRINGS, a.STRING
+    ),
+    "experiment": EXPERIMENT,
+    "versions": a.strings('Versions tested, such as ["V-4"].'),
+    "proposed_tasks": a.strings('An ideation Task\'s proposals, such as ["T-7"].'),
+    "summary": a.string("A maintenance Task's summary of the change."),
+    "submission_reason": a.string("Why a Version is or is not a submission candidate."),
+    "capability": a.string("The capability a repair Task restored."),
+}
+CHECKLIST_ARGS = tuple(CHECKLIST_FIELDS)
 
+FAILURE = a.obj(
+    "",
+    {
+        "what_failed": a.string("What failed."),
+        "next_step": a.string("What should happen next."),
+        "error": a.string("The error message, if any."),
+        "exit_code": a.integer("The exit code, if any."),
+        "tried": a.string("What was tried already."),
+    },
+    required=tasks.FAILURE_REQUIRED,
+    closed=True,
+)
+CITES = a.string(
+    "The user's message that asked for it; needed for a Task type that requires the user's "
+    "approval."
+)
 CREATE_PARAMS = {
     "goal": a.string("The Goal, such as G-3; only a maintenance Task may have none."),
-    "type": a.string("research, improvement, ideation or maintenance.", enum=list(TASK_TYPES)),
+    "type": a.string("The Task type.", enum=list(TASK_TYPES)),
     "title": a.string("Short name, for the agents."),
     "description": a.string("What to do and deliver, in Markdown."),
     "reasoning": a.string("Why, with references to the Goal, claims and Experiments."),
     "for_human": a.string("One plain sentence that clients show."),
-    "end_condition": a.string(
-        "How the Task ends: deliverable, steps or effort.",
-        enum=["deliverable", "steps", "effort"],
-    ),
+    "end_condition": a.string("How the Task ends.", enum=["deliverable", "steps", "effort"]),
     "end_detail": a.string("The detail of the end condition."),
-    "experiment": a.string("The Experiment an improvement Task runs, such as X-2."),
-    "priority": a.string("normal (default) or high.", enum=["normal", "high"]),
+    "experiment": EXPERIMENT,
+    "priority": a.string("Default normal.", enum=["normal", "high"]),
     "depends_on": a.strings('Tasks that must complete first, such as ["T-1"].'),
     "ideation_round": a.integer("Round number of an ideation Task."),
 }
@@ -264,8 +283,7 @@ SPEC = tool(
         name="task",
         description=(
             "Tasks: units of work under a Goal with a type checklist, a lease held by one "
-            "Researcher Session, waits and messages. Goals and Tasks are the plan. Returns the "
-            "updated record."
+            "Researcher Session, waits and messages. Goals and Tasks are the plan."
         ),
         handler=dispatch,
         roles=BOTH,
@@ -275,12 +293,7 @@ SPEC = tool(
                 "create",
                 "Create an accepted Task (stored as proposed when its type needs the user's "
                 "approval and no cites is given).",
-                {
-                    **CREATE_PARAMS,
-                    "cites": a.string(
-                        "The user's message that asked for it; lets a gated type through."
-                    ),
-                },
+                {**CREATE_PARAMS, "cites": CITES},
                 ("type", "title", "description"),
                 ORCHESTRATOR,
                 example_fields=("goal",),
@@ -295,12 +308,7 @@ SPEC = tool(
             ActionSpec(
                 "approve",
                 "Accept a proposed Task so the watcher can dispatch it.",
-                {
-                    "task": TASK,
-                    "cites": a.string(
-                        "The user's message that asked for it; required for a gated type."
-                    ),
-                },
+                {"task": TASK, "cites": CITES},
                 ("task",),
                 ORCHESTRATOR,
             ),
@@ -332,12 +340,7 @@ SPEC = tool(
             ActionSpec(
                 "abandon",
                 "Drop an open Task, held or not; a held run is stopped by the watcher.",
-                {
-                    "task": TASK,
-                    "failure": a.obj(
-                        "{what_failed, next_step, error?, exit_code?, tried?}: why it is dropped."
-                    ),
-                },
+                {"task": TASK, "failure": {**FAILURE, "description": "Why it is dropped."}},
                 ("task", "failure"),
                 ORCHESTRATOR,
             ),
@@ -348,7 +351,8 @@ SPEC = tool(
                     "task": TASK,
                     "accept": a.boolean("true to accept, false to reopen with the reason."),
                     "merge": a.string(
-                        "yes to merge the recorded commit, no to keep it.", enum=YES_NO
+                        "yes merges the commit the Task recorded, no leaves it unmerged.",
+                        enum=YES_NO,
                     ),
                     "reason": a.string("The verdict's reason."),
                 },
@@ -374,11 +378,14 @@ SPEC = tool(
                 "Record what the Task waits on, then end the run; the watcher resumes it.",
                 {
                     "task": TASK,
-                    "kind": a.string(", ".join(WAIT_KINDS) + ".", enum=list(WAIT_KINDS)),
+                    "kind": a.string("What kind of thing it waits on.", enum=list(WAIT_KINDS)),
                     "detail": a.string("What exactly it waits for."),
-                    "ref": {
-                        "description": "A pid, a request id or a list of request ids to watch."
-                    },
+                    "ref": a.any_of(
+                        "A pid, a request id or a list of request ids to watch.",
+                        a.STRING,
+                        a.INTEGER,
+                        a.STRINGS,
+                    ),
                 },
                 ("task", "kind", "detail"),
                 RESEARCHER,
@@ -395,32 +402,24 @@ SPEC = tool(
                 "Finish the Task with its type's checklist (succeeded) or a failure record.",
                 {
                     "task": TASK,
-                    "outcome": a.string(
-                        "succeeded (default) or failed.", enum=["succeeded", "failed"]
-                    ),
+                    "outcome": a.string("Default succeeded.", enum=["succeeded", "failed"]),
                     "checklist": a.obj(
-                        "The type's deliverables by key; flat arguments also count."
+                        "The type's deliverables by key; the flat fields of the same names "
+                        "count too and are simpler.",
+                        CHECKLIST_FIELDS,
                     ),
-                    "claims": {
-                        "anyOf": [a.STRINGS, a.STRING],
-                        "description": 'Claims recorded, such as ["C-3"], or "none: <reason>".',
-                    },
-                    "experiment": a.string("The Experiment run, such as X-2."),
-                    "versions": a.strings('Versions tested, such as ["V-4"].'),
-                    "proposed_tasks": a.strings('An ideation Task\'s proposals, such as ["T-7"].'),
-                    "summary": a.string("A maintenance Task's summary of the change."),
-                    "submission_reason": a.string("Why a Version is or is not a candidate."),
-                    "capability": a.string("The capability a repair Task restored."),
+                    **CHECKLIST_FIELDS,
                     "commit": a.string("The commit to merge; it must be on the Task branch."),
-                    "merge": a.string("yes to ask for a merge, no with merge_reason.", enum=YES_NO),
-                    "merge_reason": a.string("Why nothing is merged."),
                     "submission_candidate": a.string(
                         "Whether a tested Version should be submitted.", enum=YES_NO
                     ),
-                    "result": a.string("What came of the Task."),
-                    "failure": a.obj(
-                        "{what_failed, next_step, error?, exit_code?, tried?} for outcome failed."
+                    "merge": a.string(
+                        "yes asks to merge commit, no needs merge_reason; required when succeeded.",
+                        enum=YES_NO,
                     ),
+                    "merge_reason": a.string("Why nothing is merged."),
+                    "result": a.string("What came of the Task; required when succeeded."),
+                    "failure": {**FAILURE, "description": "Required when outcome is failed."},
                 },
                 ("task",),
                 RESEARCHER,
@@ -428,7 +427,7 @@ SPEC = tool(
             ActionSpec(
                 "release",
                 "Give the Task back unfinished.",
-                {"task": TASK, "reason": a.string("Why.")},
+                {"task": TASK, "reason": a.string("Why it is given back.")},
                 ("task", "reason"),
                 RESEARCHER,
             ),
@@ -453,10 +452,10 @@ SPEC = tool(
                 "list",
                 "List Tasks, filtered by status, Goal, type or holder.",
                 {
-                    "status": a.string(", ".join(TASK_STATUSES) + ".", enum=list(TASK_STATUSES)),
-                    "goal": a.string("The Goal, such as G-3."),
-                    "type": a.string("The Task type.", enum=list(TASK_TYPES)),
-                    "held_by": a.string("The holding session id."),
+                    "status": a.string("Only Tasks in this status.", enum=list(TASK_STATUSES)),
+                    "goal": a.string("Only this Goal's Tasks."),
+                    "type": a.string("Only Tasks of this type.", enum=list(TASK_TYPES)),
+                    "held_by": a.string("Only Tasks this session id holds."),
                 },
             ),
         ),

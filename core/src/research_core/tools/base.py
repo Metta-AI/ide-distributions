@@ -90,7 +90,12 @@ class ToolSpec:
         return None
 
     def properties(self, role: Role) -> dict[str, dict]:
-        """The flat parameter set a role sees: common params plus every action's inputs."""
+        """The flat parameter set a role sees: common params plus every action's inputs.
+
+        A field several actions take is one property, shaped as the first of them declares it
+        (the actions must agree on the shape; ``test_tool_schemas`` checks it). Its description
+        says which actions take it, see :func:`field_description`.
+        """
         properties: dict[str, dict] = {}
         if self.actions is not None:
             actions = self.actions_for(role)
@@ -99,25 +104,16 @@ class ToolSpec:
                 "enum": [action.name for action in actions],
                 "description": " ".join(f"{a.name}: {a.description}" for a in actions),
             }
+            takers: dict[str, list[ActionSpec]] = {}
             for action in actions:
-                for name, schema in action.params.items():
-                    properties.setdefault(name, schema)
+                for name in action.params:
+                    takers.setdefault(name, []).append(action)
+            for name, taking in takers.items():
+                schema = taking[0].params[name]
+                described = field_description(name, taking, len(actions))
+                properties[name] = {**schema, "description": described}
         for name, schema in self.params.items():
             properties.setdefault(name, schema)
-        # A JSON schema can only mark ``action`` as required when the other requirements depend
-        # on the action, and a model tends to send only the fields the schema marks required.
-        # So each field's description says which actions need it.
-        if self.actions is not None:
-            for name, schema in list(properties.items()):
-                needed = [
-                    action.name
-                    for action in self.actions
-                    if role in action.roles and name in action.required
-                ]
-                if needed:
-                    description = str(schema.get("description", "")).rstrip()
-                    suffix = f"Required for {', '.join(needed)}."
-                    properties[name] = {**schema, "description": f"{description} {suffix}".strip()}
         return properties
 
     def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
@@ -137,6 +133,43 @@ class ToolSpec:
         if required:
             parameters["required"] = required
         return {"name": self.name, "description": self.description, "parameters": parameters}
+
+
+def field_description(name: str, taking: list[ActionSpec], action_count: int) -> str:
+    """A multi-action tool's field description: what it is for each action, then which actions
+    require it and which take it optionally.
+
+    A JSON schema can only mark ``action`` as required when the other requirements depend on
+    the action, and a model tends to send only the fields the schema marks required, so the
+    description says it. Actions that describe the field differently each get their sentence,
+    the ones that require it first (``claim.tags`` is a write field before it is a search
+    filter). A field every action takes names only the actions that require it.
+    """
+    meanings: dict[str, list[ActionSpec]] = {}
+    for action in taking:
+        meanings.setdefault(str(action.params[name].get("description", "")).strip(), []).append(
+            action
+        )
+    ordered = sorted(
+        meanings.items(), key=lambda item: not any(name in a.required for a in item[1])
+    )
+    if len(ordered) == 1:
+        parts = [ordered[0][0]] if ordered[0][0] else []
+    else:
+        parts = [f"{', '.join(a.name for a in actions)}: {text}" for text, actions in ordered]
+    required = [a.name for a in taking if name in a.required]
+    optional = [a.name for a in taking if name not in a.required]
+    if len(taking) == action_count:
+        optional = []  # every action takes it: only the ones that need it are news
+    usage = []
+    if required:
+        usage.append(f"required for {', '.join(required)}")
+    if optional:
+        usage.append(f"optional for {', '.join(optional)}")
+    if usage:
+        line = "; ".join(usage)
+        parts.append(line[0].upper() + line[1:] + ".")
+    return " ".join(parts)
 
 
 def tool(spec: ToolSpec) -> ToolSpec:
@@ -308,14 +341,36 @@ def _placeholder(schema: dict) -> Any:
 
 
 def _is_structured(schema: dict) -> bool:
-    """An object, or a list of objects: its shape lives in prose, so no placeholder fits it."""
+    """An object, or a list of objects: a guessed placeholder would be refused again."""
     return "object" in (schema.get("type"), (schema.get("items") or {}).get("type"))
 
 
+def _shape(schema: dict) -> str:
+    """An object field's keys in short form, ``[{type, ref, stance, note?}]`` (``?``: optional)."""
+    if schema.get("type") == "array":
+        return f"[{_shape(schema.get('items') or {})}]"
+    properties = schema.get("properties") or {}
+    if not properties:
+        return "{...}"
+    required = set(schema.get("required") or ())
+    keys = []
+    for key, sub in properties.items():
+        nested = f": {_shape(sub)}" if _is_structured(sub) else ""
+        keys.append(f"{key}{'' if key in required else '?'}{nested}")
+    return "{" + ", ".join(keys) + "}"
+
+
 def _fields(schemas: Mapping[str, dict], names: list[str]) -> dict[str, str]:
-    return {
-        name: str(schemas[name].get("description", schemas[name].get("type", ""))) for name in names
-    }
+    """Each field's description; an object field's also names its keys, so a refusal (which
+    carries no schema) still shows the shape."""
+    out = {}
+    for name in names:
+        schema = schemas[name]
+        text = str(schema.get("description", schema.get("type", "")))
+        if _is_structured(schema):
+            text = f"{text} Shape: {_shape(schema)}".strip()
+        out[name] = text
+    return out
 
 
 def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:

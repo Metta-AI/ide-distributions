@@ -37,9 +37,7 @@ PLAYER_REFUSED_STATUSES = frozenset({401, 403, 404})
 LEAGUE_EPISODE_POLICIES = 10
 
 LEAGUE = a.string("The League id (league_...) or a platform URL carrying it.")
-IDENTITY = a.string(
-    "player (default) or user; the Researcher is Player only.", enum=["player", "user"]
-)
+IDENTITY = a.string("Default player; the Researcher is Player only.", enum=["player", "user"])
 
 
 def handle(call: ToolCall) -> dict:
@@ -503,11 +501,10 @@ SPEC = tool(
     ToolSpec(
         name="platform",
         description=(
-            "Read the Softmax platform: leagues, divisions, standings, a league's active policies "
-            "(exclude_player and exclude_user give the opponents), policy versions and files, a "
-            "Player's results, episodes and replays, credits, the champion, forum and wiki pages, "
-            "a Coworld's manifest. Reads only; writes have their own tools. A persistent platform "
-            "error makes a task Session wait on it."
+            "Read the Softmax platform: leagues, standings, policies, results, episodes and "
+            "replays, credits, the champion, the forum and wiki, a Coworld's manifest. Reads "
+            "only; writes have their own tools. A persistent platform error makes a task "
+            "Session wait on it."
         ),
         handler=handle,
         roles=BOTH,
@@ -574,7 +571,7 @@ SPEC = tool(
                 "Fetch an episode's replay into documents/replays/ once (pinned); gives the path.",
                 {
                     "episode": a.string("The episode id (ereq_...)."),
-                    "dest": a.string("Optional file or folder, absolute or under documents/."),
+                    "dest": a.string("A file or folder, absolute or under documents/."),
                 },
                 ("episode",),
             ),
@@ -587,7 +584,7 @@ SPEC = tool(
                 "List forum posts (the active Coworld's league forum by default).",
                 {
                     "slug": a.string("The forum slug."),
-                    "sort": a.string("hot (default) or new.", enum=["hot", "new"]),
+                    "sort": a.string("Default hot.", enum=["hot", "new"]),
                     "limit": a.integer("How many posts (default 20)."),
                 },
             ),

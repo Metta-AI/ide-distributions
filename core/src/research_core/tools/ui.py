@@ -165,9 +165,13 @@ SPEC = tool(
                 {
                     "panel": a.string("The panel's name."),
                     "kind": a.string("The content kind.", enum=PANEL_KINDS),
-                    "content": {
-                        "description": "The content, in the kind's shape (a path for file)."
-                    },
+                    "content": a.any_of(
+                        "The content, in the kind's shape: text (a path for file), an object "
+                        "(agent-context: {needs: [...]}) or a list.",
+                        a.STRING,
+                        a.free_object(""),
+                        {"type": "array", "items": {"anyOf": [a.STRING, a.free_object("")]}},
+                    ),
                 },
                 ("panel", "kind", "content"),
             ),
@@ -177,9 +181,7 @@ SPEC = tool(
                 {
                     "text": a.string("The notice itself, in plain language."),
                     "refs": a.strings("Records the notice is about, such as T-3."),
-                    "urgency": a.string(
-                        "low, normal (default) or high.", enum=list(notices.URGENCIES)
-                    ),
+                    "urgency": a.string("Default normal.", enum=list(notices.URGENCIES)),
                 },
                 ("text",),
             ),
