@@ -15,6 +15,7 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
+KEY = a.string("The setting, such as paused or max_researchers; read without it lists all.")
 
 NEXT = (
     "record a preference claim (claim.write tagged preference) when this reflects a user preference"
@@ -98,17 +99,20 @@ SPEC = tool(
             ActionSpec(
                 "read",
                 "Read one setting, or all of them with their types, defaults and scopes.",
-                {"key": a.string("The setting, such as paused; omit for all.")},
+                {"key": KEY},
             ),
             ActionSpec(
                 "update",
                 "Change a setting at the user's request; cites names the message that asked.",
                 {
-                    "key": a.string("The setting, such as max_researchers."),
-                    "value": {
-                        "description": "The new value in the setting's type; null clears a "
-                        "nullable setting."
-                    },
+                    "key": KEY,
+                    "value": a.any_of(
+                        "The new value in the setting's type; null clears a nullable setting.",
+                        a.BOOLEAN,
+                        {"type": "number"},
+                        a.STRING,
+                        a.STRINGS,
+                    ),
                     "cites": a.string("The user's message that asked for the change."),
                 },
                 ("key", "cites"),

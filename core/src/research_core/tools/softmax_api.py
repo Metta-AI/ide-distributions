@@ -87,12 +87,12 @@ SPEC = tool(
         roles=BOTH,
         executor="workspace",
         params={
-            "method": a.string("GET, HEAD, POST, PUT, PATCH or DELETE.", enum=list(METHODS)),
+            "method": a.string("The HTTP method.", enum=list(METHODS)),
             "path": a.string("The route, such as /v2/leagues (relative to /observatory)."),
-            "params": a.obj("Query parameters."),
-            "json": a.obj("A JSON body for POST, PUT or PATCH."),
+            "params": a.free_object("Query parameters, name to value."),
+            "json": a.free_object("A JSON body for POST, PUT or PATCH."),
             "identity": a.string(
-                "player (default) or user; the Researcher is Player only.",
+                "Default player; the Researcher is Player only.",
                 enum=["player", "user"],
             ),
         },

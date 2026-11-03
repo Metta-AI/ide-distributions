@@ -93,7 +93,7 @@ SPEC = tool(
                 "The revision you read (platform.wiki_read); omit to create a page."
             ),
             "note": a.string("A short edit note."),
-            "identity": a.string("player (default) or user.", enum=["player", "user"]),
+            "identity": a.string("Default player.", enum=["player", "user"]),
             "cites": a.string("The user's message that asked for this, if any."),
         },
         required=("wiki", "page", "title", "body"),

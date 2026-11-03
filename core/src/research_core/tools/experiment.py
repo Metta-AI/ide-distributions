@@ -56,6 +56,98 @@ from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec, tool
 
 EXPERIMENT = a.string("The Experiment, such as X-5.")
+
+HYPOTHESIS = a.obj(
+    "",
+    {
+        "statement": a.string("The hypothesis, in one sentence."),
+        "if_true": a.string("What we do if it holds."),
+        "if_false": a.string("What we do if it does not; must differ from if_true."),
+        "motivation": a.string("Why we think it might hold."),
+    },
+    closed=True,
+)
+METRIC = a.obj(
+    "",
+    {
+        "name": a.string("The metric, such as win_rate."),
+        "direction": a.string("Which way is better.", enum=list(experiments.METRIC_DIRECTIONS)),
+        "role": a.string("At least one metric is primary.", enum=list(experiments.METRIC_ROLES)),
+        "min_effect": {"type": "number", "description": "Primary: the smallest effect worth it."},
+        "tolerance": {"type": "number", "description": "Guardrail: how far it may drop."},
+    },
+    required=("name", "direction", "role"),
+    closed=True,
+)
+METHODS = a.obj(
+    "",
+    {
+        "baseline": a.string("The baseline Version, such as V-11."),
+        "candidate": a.string("The candidate Version; may stay empty until it is built."),
+        "procedure": a.string("How the runs are done."),
+        "metrics": a.objects("At least one, one of them primary.", METRIC, min_items=1),
+        "decision_rule": a.obj(
+            "How close decides the verdict.",
+            {
+                "text": a.string("The rule, in words."),
+                "n_min": a.integer("Paired seeds before deciding."),
+                "k": {
+                    "type": "number",
+                    "description": "A positive number; stored, unused by the rule.",
+                },
+            },
+            required=("text", "n_min"),
+            closed=True,
+        ),
+    },
+    closed=True,
+)
+MEASUREMENT = a.obj(
+    "",
+    {
+        "metric": a.string("A metric named in the methods."),
+        "baseline": {"type": "number", "description": "The baseline arm's value."},
+        "candidate": {"type": "number", "description": "The candidate arm's value."},
+        "n": a.integer("How many pairs."),
+        "effect": {"type": "number", "description": "candidate minus baseline."},
+    },
+    required=experiments.MEASUREMENT_KEYS,
+)
+RESULT_ROW = a.obj(
+    "",
+    {
+        "episode_id": a.string("Unique within the Experiment."),
+        "game_version": a.string("The game version played."),
+        "policy_version": a.string("The Version the run played, such as V-3."),
+        "seed": a.integer("The game seed."),
+        "seats": {"type": "array", "items": a.INTEGER, "description": "Seats played."},
+        "opponents": a.strings("Opponent policies."),
+        "metrics": {
+            "type": "object",
+            "description": "Metric name to number, for every metric in the methods.",
+            "properties": {},
+            "additionalProperties": {"type": "number"},
+        },
+        "status": a.string("Default completed.", enum=["completed", "failed"]),
+        "reason": a.string("Why it failed."),
+    },
+)
+RESULTS = {
+    **a.obj(
+        "The run's results; evaluation rows go under rows (xp.status writes them).",
+        {"rows": a.objects("Evaluation rows.", RESULT_ROW)},
+    ),
+    "additionalProperties": True,
+}
+# The design fields create takes and update replaces (a section or a list as a whole).
+DESIGN = {
+    "summary": a.string("What is being tested, in at most 40 words."),
+    "tags": a.strings("Keywords from the shared vocabulary; the lever is a tag."),
+    "hypothesis": {**HYPOTHESIS, "description": "start needs every part."},
+    "methods": {**METHODS, "description": "start needs all but candidate."},
+    "related_claims": a.strings("Claims it builds on, such as C-12."),
+    "related_experiments": a.strings("Experiments it follows, such as X-4."),
+}
 UPDATABLE = ("summary", "hypothesis", "methods", "tags", "related_claims", "related_experiments")
 NO_ROWS = "no evaluation rows recorded yet; run xp.status first or close with an explicit verdict"
 ROW_LIST_KEYS = ("seats", "opponents")
@@ -410,7 +502,7 @@ SPEC = tool(
             "Experiments: a comparison of Versions whose hypothesis and methods lock at start "
             "and end in a verdict. Runs are recorded as the platform accepts them; close "
             "applies the pre-registered decision rule to the stored rows, or records an "
-            "explicit verdict with its reason. Returns the updated record."
+            "explicit verdict with its reason."
         ),
         handler=handle,
         executor="workspace",
@@ -419,18 +511,9 @@ SPEC = tool(
                 "create",
                 "Propose an Experiment; the design may still change until start.",
                 {
-                    "summary": a.string("What is being tested, in at most 40 words."),
+                    **DESIGN,
                     "goal": a.string("The Goal it serves, such as G-3."),
                     "task": a.string("The Task that runs it, such as T-12."),
-                    "tags": a.strings("Keywords from the shared vocabulary; the lever is a tag."),
-                    "hypothesis": a.obj("{statement, if_true, if_false, motivation}."),
-                    "methods": a.obj(
-                        "{baseline, candidate, procedure, metrics, decision_rule}: Versions as "
-                        "V-<n>; metrics [{name, direction up|down, role primary|guardrail|"
-                        "performance, min_effect?, tolerance?}]; decision_rule {text, n_min, k?}."
-                    ),
-                    "related_claims": a.strings("Claims it builds on, such as C-12."),
-                    "related_experiments": a.strings("Experiments it follows, such as X-4."),
                 },
                 ("summary", "hypothesis", "methods"),
             ),
@@ -440,7 +523,7 @@ SPEC = tool(
                 {
                     "experiment": EXPERIMENT,
                     "section": a.string(
-                        "hypothesis, methods or results (the results section carries the runs).",
+                        "Only this section; results carries the runs.",
                         enum=list(experiments.SECTIONS),
                     ),
                 },
@@ -457,18 +540,9 @@ SPEC = tool(
             ),
             ActionSpec(
                 "update",
-                "Change a proposed Experiment's design; a section given replaces the stored one.",
-                {
-                    "experiment": EXPERIMENT,
-                    "summary": a.string("New summary."),
-                    "hypothesis": a.obj("New hypothesis (the whole section)."),
-                    "methods": a.obj("New methods (the whole section)."),
-                    "tags": a.strings("New tags (replaces the list)."),
-                    "related_claims": a.strings("New related Claims (replaces the list)."),
-                    "related_experiments": a.strings(
-                        "New related Experiments (replaces the list)."
-                    ),
-                },
+                "Change a proposed Experiment's design; each section or list given replaces the "
+                "stored one whole.",
+                {"experiment": EXPERIMENT, **DESIGN},
                 ("experiment",),
             ),
             ActionSpec(
@@ -497,10 +571,7 @@ SPEC = tool(
                     "run": a.integer("The run id from add_run."),
                     "state": a.string("The platform's state of the request."),
                     "episodes_completed": a.integer("Episodes finished so far."),
-                    "results": a.obj(
-                        "The run's results; evaluation rows go under results.rows (xp.status "
-                        "writes them)."
-                    ),
+                    "results": RESULTS,
                     "validity": a.string("valid, or 'invalid: <reason>'."),
                 },
                 ("run",),
@@ -515,19 +586,21 @@ SPEC = tool(
                         "An explicit verdict; omit to apply the decision rule to the rows.",
                         enum=list(experiments.VERDICTS),
                     ),
-                    "measurements": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                        "description": (
-                            "With an explicit verdict: [{metric, baseline, candidate, n, "
-                            "effect}] for every primary metric."
-                        ),
-                    },
+                    "measurements": a.objects(
+                        "Required with an explicit verdict: one for every primary metric.",
+                        MEASUREMENT,
+                        min_items=1,
+                    ),
                     "interpretation": a.string(
                         "What the result means; required with an explicit verdict."
                     ),
-                    "reason_codes": a.strings("The decision rule's codes, when known."),
-                    "reason": a.string("Why the verdict is given by hand (explicit path)."),
+                    "reason_codes": a.strings(
+                        "The decision rule's codes; with an explicit verdict, this or reason."
+                    ),
+                    "reason": a.string(
+                        "Why the verdict is given by hand; with an explicit verdict, this or "
+                        "reason_codes."
+                    ),
                 },
                 ("experiment",),
             ),

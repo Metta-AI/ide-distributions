@@ -10,6 +10,16 @@ ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
 
 GOAL = a.string("The Goal, such as G-3.")
+STATUS = a.string("The Goal's status.", enum=["active", "parked", "completed", "abandoned"])
+# What create takes and update replaces.
+FIELDS = {
+    "title": a.string("Short name of the outcome."),
+    "end_state": a.string("What must be true for the Goal to be complete."),
+    "reason": a.string("Why the Goal exists, usually quoting the user."),
+    "description": a.string("Detail, in Markdown."),
+    "judgement": a.string("How to judge the end state."),
+    "tags": a.strings("Keywords from the shared vocabulary."),
+}
 
 
 def handle(call: ToolCall) -> dict:
@@ -66,28 +76,17 @@ SPEC = tool(
             ActionSpec(
                 "create",
                 "Create a Goal from the user's request.",
-                {
-                    "title": a.string("Short name of the outcome."),
-                    "end_state": a.string("What must be true for the Goal to be complete."),
-                    "reason": a.string("Why the Goal exists, usually quoting the user."),
-                    "description": a.string("Detail, in Markdown."),
-                    "judgement": a.string("How to judge the end state."),
-                    "tags": a.strings("Keywords from the shared vocabulary."),
-                },
+                FIELDS,
                 ("title", "end_state", "reason"),
                 ORCHESTRATOR,
             ),
             ActionSpec(
                 "update",
-                "Change a Goal's fields, its 'where it stands' line or add an update for the user.",
+                "Change a Goal's fields (each given replaces the stored one; tags as a whole), "
+                "its 'where it stands' line, or add an update for the user.",
                 {
                     "goal": GOAL,
-                    "title": a.string("New title."),
-                    "end_state": a.string("New end state."),
-                    "reason": a.string("New reason."),
-                    "description": a.string("New description."),
-                    "judgement": a.string("New judgement instructions."),
-                    "tags": a.strings("New tags (replaces the list)."),
+                    **FIELDS,
                     "where_it_stands": a.string("One line on where the Goal stands now."),
                     "update_for_human": a.string("A plain-language update appended for the user."),
                 },
@@ -99,10 +98,7 @@ SPEC = tool(
                 "Park, resume, complete or abandon a Goal; every change needs a reason.",
                 {
                     "goal": GOAL,
-                    "status": a.string(
-                        "active, parked, completed or abandoned.",
-                        enum=["active", "parked", "completed", "abandoned"],
-                    ),
+                    "status": STATUS,
                     "status_reason": a.string("Why the status changes."),
                 },
                 ("goal", "status", "status_reason"),
@@ -114,7 +110,7 @@ SPEC = tool(
             ActionSpec(
                 "list",
                 "List Goals, optionally by status.",
-                {"status": a.string("Filter: active, parked, completed or abandoned.")},
+                {"status": {**STATUS, "description": "Only Goals in this status."}},
             ),
         ),
     )

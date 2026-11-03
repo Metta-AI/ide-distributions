@@ -362,7 +362,11 @@ SPEC = tool(
                     ),
                     "commit": a.string("Override the pinned source commit."),
                     "pending_request": a.obj(
-                        "{text, cites}: the user's request that setup carries out when done."
+                        "The user's request that setup carries out when done.",
+                        {
+                            "text": a.string("The request, in the user's words."),
+                            "cites": a.string("The user's message reference."),
+                        },
                     ),
                 },
                 ("coworld",),

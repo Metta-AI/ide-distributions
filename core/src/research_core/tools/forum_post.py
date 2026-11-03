@@ -89,7 +89,7 @@ SPEC = tool(
                 {
                     "title": a.string("The post title."),
                     "body": a.string("The post body, Markdown."),
-                    "identity": a.string("player (default) or user.", enum=["player", "user"]),
+                    "identity": a.string("Default player.", enum=["player", "user"]),
                     "cites": a.string("The user's message that asked for this, if any."),
                 },
                 ("title", "body"),
@@ -101,7 +101,7 @@ SPEC = tool(
                     "post_id": a.string("The post to comment on."),
                     "body": a.string("The comment, Markdown."),
                     "parent_id": a.string("The comment this replies to, if any."),
-                    "identity": a.string("player (default) or user.", enum=["player", "user"]),
+                    "identity": a.string("Default player.", enum=["player", "user"]),
                     "cites": a.string("The user's message that asked for this, if any."),
                 },
                 ("post_id", "body"),
