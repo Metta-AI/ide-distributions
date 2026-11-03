@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from research_core import layout
 from research_core.attachments import prepare
 from research_core.messages import UserMessage
@@ -34,7 +36,8 @@ def test_public_message_schema_matches_pinned_hermes(hermes_bin):
     assert native["schema"] == UserMessage.model_json_schema(), native
 
 
-def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path):
+@pytest.mark.parametrize("prefix", ["data:text/plain;base64,", ""])
+def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path, prefix):
     home = tmp_path / "hermes"
     home.mkdir()
     (home / "config.yaml").write_text("attachments:\n  storage: workspace\n")
@@ -49,8 +52,7 @@ def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path):
                     "type": "file",
                     "file": {
                         "filename": "notes with spaces.txt",
-                        "file_data": "data:text/plain;base64,"
-                        + base64.b64encode(b"retained-file-marker").decode(),
+                        "file_data": prefix + base64.b64encode(b"retained-file-marker").decode(),
                     },
                 },
             ],
@@ -112,6 +114,8 @@ import base64
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 from tui_gateway import server
 from agent.context_references import preprocess_context_references

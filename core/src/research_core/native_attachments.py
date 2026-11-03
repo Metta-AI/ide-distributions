@@ -44,11 +44,14 @@ def main() -> None:
                     + part["input_audio"]["data"],
                 }
             )
+            data_url = file["file_data"]
+            if not data_url.startswith("data:"):
+                data_url = "data:application/octet-stream;base64," + data_url
             staged = call(
                 "file.attach",
                 {
                     "session_id": session,
-                    "data_url": file["file_data"],
+                    "data_url": data_url,
                     "name": file["filename"],
                 },
             )
@@ -91,7 +94,16 @@ def main() -> None:
                         },
                     }
                 )
-            elif path.suffix.lower() in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}:
+            elif path.suffix.lower() in {
+                ".wav",
+                ".mp3",
+                ".m4a",
+                ".ogg",
+                ".opus",
+                ".m2a",
+                ".flac",
+                ".webm",
+            }:
                 from tools.transcription_tools import transcribe_audio
 
                 transcript = transcribe_audio(str(path))
