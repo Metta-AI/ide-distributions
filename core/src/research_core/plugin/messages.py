@@ -73,12 +73,32 @@ def adapt_request(*, request: dict, session_id: str = "", turn_id: str = "", **_
     return {"request": updated, "source": "research-core.openai-content"} if changed else None
 
 
-def record_native_message(*, session_id: str, conversation_history: list, **_) -> None:
+def record_native_message(
+    *, session_id: str, conversation_history: list, user_message: object = None, **_
+) -> None:
     """Bind application metadata to the native row ID supplied by the pinned observer hook."""
     from research_core import layout
     from research_core.plugin.executor import profile_env
     from research_core.store.actors import Actor
     from research_core.store.db import Store
+
+    current = next(
+        message for message in reversed(conversation_history) if message["role"] == "user"
+    )
+    native_id = current["_row_id"]
+    if isinstance(user_message, list):
+        from hermes_state_registry import acquire, release
+
+        from research_core.messages import UserMessage
+
+        UserMessage.model_validate({"role": "user", "content": user_message})
+        native = acquire()
+        try:
+            # The pinned agent's default projection drops non-native content parts.
+            # Its public row-addressed API preserves structured content without appending a row.
+            assert native.set_user_message_content(session_id, native_id, user_message) == 1
+        finally:
+            release(native)
 
     workspace = layout.from_env(profile_env())
     store = Store.open(workspace.store_path, kind="workspace")
@@ -90,10 +110,6 @@ def record_native_message(*, session_id: str, conversation_history: list, **_) -
         )
         if admission is None:
             return  # Background turns have no client admission.
-        current = next(
-            message for message in reversed(conversation_history) if message["role"] == "user"
-        )
-        native_id = current["_row_id"]
         with store.tx(Actor.harness()) as tx:
             tx.execute(
                 "UPDATE client_admissions SET native_message_id=? WHERE op_id=?"

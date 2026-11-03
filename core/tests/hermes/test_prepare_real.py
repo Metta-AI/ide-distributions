@@ -216,7 +216,7 @@ from pathlib import Path
 from hermes_cli.plugins import has_middleware
 assert has_middleware("llm_request")
 from run_agent import AIAgent
-from hermes_state import SessionDB
+from hermes_state_registry import acquire, release
 captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -242,7 +242,7 @@ thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 original = [{"type":"input_text","text":"Read the attached policy"},
     {"type":"input_file","filename":"policy.txt","file_data":"cG9saWN5"}]
-db = SessionDB(Path(__import__("os").environ["HERMES_HOME"]) / "message-proof.db")
+db = acquire()
 agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
     base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
     enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
@@ -261,7 +261,7 @@ try:
 finally:
     server.shutdown()
     server.server_close()
-    db.close()
+    release(db)
 """
     result = run([hermes_python(hermes_bin), "-c", script], host.env("orchestrator"))
     assert result.returncode == 0, result.stdout + result.stderr
