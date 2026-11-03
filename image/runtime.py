@@ -51,7 +51,6 @@ async def run(stack: AsyncExitStack) -> None:
     workspace_state = (
         "retained" if (HOME / "profiles/orchestrator/.softmax-prepared").exists() else "fresh"
     )
-    inference = Availability()
     bootstrap = Bootstrap.model_validate_json(Path("/run/workspace/bootstrap.json").read_text())
 
     def report(
@@ -79,6 +78,8 @@ async def run(stack: AsyncExitStack) -> None:
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     lease_file = HOME / ".inference-lease"
     lease_file.unlink(missing_ok=True)
+    # The inference state beside it survives restarts: a budget block lasts until a new key.
+    inference = Availability(lease_file)
     Path("/tmp/hermes-runtime").mkdir(exist_ok=True, mode=0o700)
     key_file = HOME / ".gateway-key"
     if not key_file.exists():

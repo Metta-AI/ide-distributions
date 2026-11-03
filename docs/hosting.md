@@ -70,6 +70,7 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 | `COGAMES_API_URL` | hosting | Softmax API server. |
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env` (Hermes strips the key from cron environments). **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
 | `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`contract/CONTRACT.md`, "Profile models"). |
+| `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the current key's expiry. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. Unset outside the image: always available. |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain

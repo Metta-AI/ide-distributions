@@ -17,6 +17,7 @@ from contract import (
     Cancel,
     Clarification,
     Events,
+    InferenceUnavailable,
     Message,
     Messages,
     OpenSession,
@@ -66,7 +67,12 @@ async def response(
     if isinstance(args, BaseException):
         raise args
     if isinstance(args, Message) and not inference.available():
-        yield httpx.Response(503, json={"kind": "inference_unavailable"})
+        blocking = inference.blocking()
+        refusal = InferenceUnavailable(
+            reason=blocking.blocked if blocking else None,
+            until=blocking.until if blocking else None,
+        )
+        yield httpx.Response(503, json=refusal.model_dump(mode="json", exclude={"detail"}))
         return
     if isinstance(args, Messages):
         opening = await seam.get(

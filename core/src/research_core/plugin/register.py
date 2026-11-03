@@ -43,6 +43,9 @@ def make_register(role: Role) -> Callable[[Any], None]:
             ctx.register_hook(hook_name, callback)
         for hook_name, callback in make_hooks(role).items():
             ctx.register_hook(hook_name, callback)
+        from research_core.plugin.inference_hook import make_api_request_error
+
+        ctx.register_hook("api_request_error", make_api_request_error())
         from research_core.plugin.briefing import make_section as make_briefing_section
 
         ctx.register_system_prompt_section(

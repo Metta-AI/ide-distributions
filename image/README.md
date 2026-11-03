@@ -62,6 +62,19 @@ variables. Deploy that platform endpoint before this image. Queued chat dispatch
 a valid inference lease, including after restart. Lifecycle readiness remains independent
 of the optional model service, so an unavailable budget does not prevent stopping a workspace.
 
+A spent key is not an expired one, so the image also keeps the *inference state*,
+`.inference-state` beside the lease file (`core/src/research_core/inference.py`). The
+profiles' `api_request_error` hook sets `budget_exhausted` when Hermes classifies a model call
+as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), and `provider_unavailable` for
+five minutes after three outage errors within three minutes. The lease loop sets
+`budget_exhausted` when the platform refuses a lease for that reason, clears it only when it
+installs a different key, and renews no later than the refill (the lease's expiry minus the
+platform's ten-minute grace). While the state blocks, chat, wakes and Researchers start no
+runs, and `session.message` answers 503 with
+`{"kind": "inference_unavailable", "reason": "budget_exhausted", "until": "<ISO time>"}`
+(`InferenceUnavailable` in `image/contract.py`; `reason` and `until` are null when the lease
+is only missing). Work resumes on its own once the state clears or lapses.
+
 ## Application contract
 
 `image/contract.py` owns the existing application's request, reply and run-event schemas.

@@ -58,6 +58,7 @@ def test_plugin_imports_are_stdlib_only():
         "import research_core.plugin.register, research_core.plugin.executor\n"
         "import research_core.plugin.advisory, research_core.plugin.rules\n"
         "import research_core.layout, research_core.tools.base\n"
+        "import research_core.inference, research_core.plugin.inference_hook\n"
         "third = sorted(m for m in sys.modules if m.split('.')[0] in "
         "{'yaml','numpy','coworld','softmax_client','softmax','httpx','pydantic','jsonschema'})\n"
         "assert not third, third\n"
