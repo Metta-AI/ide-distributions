@@ -1,12 +1,17 @@
 """Agent-owned v1 application contract. Generate contract/openapi.json from these models."""
 
+import sys
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, create_model
 from pydantic.json_schema import models_json_schema
 
-VERSION = "1.0.0"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
+from research_core.messages import UserMessage  # noqa: E402
+
+VERSION = "2.0.0"
 
 
 class Arguments(BaseModel):
@@ -33,15 +38,24 @@ class Events(Run):
 
 class Approval(Run):
     request_id: str
-    choice: Literal["once", "deny"]
+    choice: Literal["once", "deny", "session", "always"]
+    execution_generation: int | None = Field(default=None, ge=0)
+
+
+class Clarification(Run):
+    request_id: str
+    answer: str = Field(min_length=1, max_length=8000)
+    execution_generation: int | None = Field(default=None, ge=0)
 
 
 class Client(Arguments):
+    guide: str | None = Field(default=None, max_length=64)
     id: str = Field(min_length=1, max_length=80)
     kind: str = Field(min_length=1, max_length=40)
 
 
 class OpenSession(Arguments):
+    session_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,200}$")
     client: Client
     session_context: dict[str, JsonValue] | None = None
     capabilities: dict[str, JsonValue] | None = None
@@ -49,7 +63,8 @@ class OpenSession(Arguments):
 
 class Message(Arguments):
     session_id: str = Field(min_length=1, max_length=200)
-    message: str = Field(min_length=1, max_length=16000)
+    message: UserMessage
+    instructions: str | None = Field(default=None, max_length=64000)
     context: dict[str, JsonValue]
 
 
@@ -99,6 +114,10 @@ class ApproveCommand(Command[Literal["run.approve"], Approval]):
     pass
 
 
+class ClarifyCommand(Command[Literal["run.clarify"], Clarification]):
+    pass
+
+
 class Request(
     RootModel[
         Annotated[
@@ -110,7 +129,8 @@ class Request(
             | GetCommand
             | EventsCommand
             | StopCommand
-            | ApproveCommand,
+            | ApproveCommand
+            | ClarifyCommand,
             Field(discriminator="name"),
         ]
     ]
@@ -145,6 +165,7 @@ class SnapshotReply(Reply):
 
 
 class NativeMessage(Reply):
+    client_context: dict[str, JsonValue] | None = None
     id: int | str
     role: str
     content: JsonValue
@@ -181,6 +202,7 @@ REQUESTS = (
     EventsCommand,
     StopCommand,
     ApproveCommand,
+    ClarifyCommand,
 )
 NAMES = frozenset(model.model_fields["name"].annotation.__args__[0] for model in REQUESTS)
 RESPONSES = {
@@ -192,6 +214,7 @@ RESPONSES = {
     "run.get": RunReply,
     "run.stop": Reply,
     "run.approve": Reply,
+    "run.clarify": Reply,
 }
 
 

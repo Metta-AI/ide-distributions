@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "image"))
+sys.path.insert(0, str(ROOT / "core" / "src"))
 from contract import openapi  # noqa: E402
 
 parser = argparse.ArgumentParser(description=__doc__)

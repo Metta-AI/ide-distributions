@@ -31,13 +31,14 @@ class Admission:
     run_id: str | None
     error: str | None
     created_at: str
+    client_id: str | None
 
 
 def read(store: Store, op_id: str, kind: str, request: dict) -> dict | None:
     row = store.one("SELECT * FROM client_admissions WHERE op_id = ?", (op_id,))
     if row is None:
         return None
-    if row["kind"] != kind or row["request"] != json.dumps(request, sort_keys=True):
+    if row["kind"] != kind or json.loads(row["request"]) != request:
         raise StoreError(["op_id was already used for different input"])
     return dict(row)
 
@@ -76,7 +77,8 @@ def snapshot(store: Store) -> list[dict]:
     return [
         asdict(Admission(**dict(row)))
         for row in store.q(
-            "SELECT op_id,session_id,message,status,run_id,error,created_at"
+            "SELECT op_id,session_id,message,status,run_id,error,created_at,"
+            " json_extract(payload, '$.context.client.id') AS client_id"
             " FROM client_admissions WHERE kind = 'message' ORDER BY rowid"
         )
     ]

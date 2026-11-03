@@ -253,7 +253,7 @@ class HermesRuns:
         *,
         profile: str,
         session_id: str,
-        text: str,
+        text: str | list[dict],
         instructions: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
@@ -484,7 +484,7 @@ class FakeHermesRuns(HermesRuns):
         *,
         profile: str,
         session_id: str,
-        text: str,
+        text: str | list[dict],
         instructions: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
@@ -519,14 +519,19 @@ class FakeHermesRuns(HermesRuns):
             run_id=f"run_{secrets.token_hex(16)}",
             profile=profile,
             session_id=session_id,
-            input=text,
+            input=text if isinstance(text, str) else text[-1]["content"],
             instructions=instructions,
             idempotency_key=idempotency_key,
         )
         self.runs[run.run_id] = run
         if idempotency_key is not None:
             self._idempotency[idempotency_key] = (fingerprint, run.run_id)
-        self.sessions.setdefault(session_id, []).append({"role": "user", "content": text})
+        self.sessions.setdefault(session_id, []).append(
+            {
+                "role": "user",
+                "content": text if isinstance(text, str) else text[-1]["content"],
+            }
+        )
         if self.script is not None:
             self.script(run)
         return run.run_id

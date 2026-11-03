@@ -169,3 +169,78 @@ def test_the_kimi_pin_yields_exactly_where_hermes_applies_an_owner_entry(hermes_
         "MOONSHOTAI/KIMI-K3.1-PRO": [k3, k31],
         "kimi-k3": [k31],
     }
+
+
+@pytest.mark.parametrize("existing_history", [False, True])
+def test_installed_agent_text_chat_and_resume(hermes_bin, host, existing_history):
+    """Real pinned agent and persistence, with only the external model replaced by HTTP."""
+    prepare(hermes_bin, host, "orchestrator")
+    script = """
+import json, sys, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from hermes_cli.plugins import has_middleware
+from hermes_state_registry import acquire, release
+from run_agent import AIAgent
+assert not has_middleware("llm_request"), "Text chat must not need content middleware"
+captured = []
+class Provider(BaseHTTPRequestHandler):
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        captured.append(request)
+        message = {"role": "assistant", "content": "Chat received"}
+        choice = {"index": 0, "finish_reason": "stop", "message": message}
+        body = json.dumps({"id": "proof", "object": "chat.completion", "created": 1,
+            "model": "proof", "choices": [choice],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}).encode()
+        if request.get("stream"):
+            chunk = {"id": "proof", "object": "chat.completion.chunk", "created": 1,
+                "model": "proof", "choices": [
+                    {"index": 0, "finish_reason": "stop", "delta": message}]}
+            body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
+        self.send_response(200)
+        mime = "text/event-stream" if request.get("stream") else "application/json"
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args): pass
+server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+db = acquire()
+sid = "openai-text-proof-" + sys.argv[1]
+prior = []
+if sys.argv[1] == "1":
+    db.create_session(sid, "api_server", model="proof")
+    db.append_message(sid, "user", "A message from before the protocol upgrade")
+    db.append_message(sid, "assistant", "A saved answer from before the upgrade")
+    prior = [(m["id"], m["role"], m["content"]) for m in db.get_messages(sid)]
+try:
+    for text in ("Hello from the OpenAI message contract", "Continue this same chat"):
+        initial = db.get_messages_as_conversation(sid, include_row_ids=True)
+        agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
+            base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
+            enabled_toolsets=[], quiet_mode=True, skip_context_files=True,
+            skip_memory=True, skip_background_review=True, session_id=sid,
+            session_db=db, max_iterations=2)
+        result = agent.run_conversation(text, conversation_history=initial)
+        assert result["final_response"] == "Chat received", result
+        assert any(m["role"] == "user" and isinstance(m["content"], str)
+            and m["content"].startswith(text) for m in captured[-1]["messages"]), captured[-1]
+    saved = db.get_messages(sid)
+    assert [(m["id"], m["role"], m["content"]) for m in saved[:len(prior)]] == prior
+    assert [(m["role"], m["content"]) for m in saved[len(prior):]] == [
+        ("user", "Hello from the OpenAI message contract"), ("assistant", "Chat received"),
+        ("user", "Continue this same chat"), ("assistant", "Chat received"),
+    ], saved
+    print("PASS pinned native text chat and resume without content middleware or history rewrites")
+finally:
+    server.shutdown()
+    server.server_close()
+    release(db)
+"""
+    result = run(
+        [hermes_python(hermes_bin), "-c", script, str(int(existing_history))],
+        host.env("orchestrator"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS pinned native text chat and resume" in result.stdout

@@ -288,7 +288,11 @@ class SeamServer:
         op_id = str(UUID(_text(body, "op_id")))
         with self._deliver_lock, self.stores() as stores:
             receipt = admissions.read(stores.wstore, op_id, "open", body)
-            session_id = receipt["session_id"] if receipt else hermes_api.mint_session_id()
+            session_id = (
+                receipt["session_id"]
+                if receipt
+                else (body.get("session_id") or hermes_api.mint_session_id())
+            )
             if receipt is None:
                 admissions.accept(
                     stores.wstore,
@@ -328,7 +332,10 @@ class SeamServer:
     def message(self, body: dict) -> dict:
         """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
         session_id = _text(body, "session_id")
-        text = _text(body, "message")
+        from research_core.messages import UserMessage
+
+        message = UserMessage.model_validate(body["message"])
+        text = message.content
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
         with self._deliver_lock, self.stores() as stores:
@@ -344,9 +351,13 @@ class SeamServer:
                     "seq": stores.wstore.last_seq(),
                 }
             block, problems = self._context_block(stores, session_id, body.get("context"))
-            payload = text
-            if block is not None:
-                payload = f"{text}\n\n{contract.BLOCK_LABEL}\n{json.dumps(block, sort_keys=True)}"
+            payload = json.dumps(
+                {
+                    "input": [message.model_dump(mode="json", exclude_none=True)],
+                    "context": block,
+                    "instructions": body.get("instructions"),
+                }
+            )
             admissions.accept(
                 stores.wstore,
                 actor,
@@ -425,7 +436,8 @@ class SeamServer:
                             self.hermes.start,
                             profile=self.profile,
                             session_id=row["session_id"],
-                            text=row["payload"],
+                            text=json.loads(row["payload"])["input"],
+                            instructions=json.loads(row["payload"])["instructions"],
                             idempotency_key=row["op_id"],
                         ),
                         return_exceptions=True,
@@ -466,6 +478,25 @@ class SeamServer:
                         tx.event("client.started", row["op_id"], {"run_id": run_id})
                     if row["cancel_requested"]:
                         self.hermes.stop(run_id, profile=self.profile)
+
+    def message_context(self, body: dict) -> dict:
+        """Join application metadata by native row identity, never by parsing message text."""
+        session_id = _text(body, "session_id")
+        with self.stores() as stores:
+            contexts = {
+                row["native_message_id"]: json.loads(row["payload"])["context"]
+                for row in stores.wstore.q(
+                    "SELECT native_message_id,payload FROM client_admissions"
+                    " WHERE session_id=? AND native_message_id IS NOT NULL",
+                    (session_id,),
+                )
+            }
+            return {
+                "data": [
+                    {**message, "client_context": contexts.get(message["id"])}
+                    for message in body["data"]
+                ]
+            }
 
     def message_cancel(self, body: dict) -> dict:
         op_id = str(UUID(_text(body, "op_id")))
@@ -798,6 +829,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/session-open": seam.session_open,
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
+            "/messages/context": seam.message_context,
             "/ui-action": seam.ui_action,
             "/store/apply": seam.store_apply,
             "/models": seam.set_model,
@@ -846,6 +878,8 @@ class _Handler(BaseHTTPRequestHandler):
             error = _gateway_error(error)
         if isinstance(error, Refused):
             self._json(error.status, error.body, error.headers)
+        elif isinstance(error, ValueError):
+            self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error), "problems": []})
         elif isinstance(error, StoreError):
             body = {"ok": False, "error": str(error), "problems": list(error.problems)}
             self._json(HTTPStatus.BAD_REQUEST, body)

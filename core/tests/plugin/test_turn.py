@@ -22,12 +22,15 @@ def make_ctx(tmp_path, session_id="chat1", coworld=True):
 
 
 def test_context_block_bad_input_never_crashes():
-    assert turn.render_context_block("hello") is None
-    assert "not valid JSON" in turn.render_context_block("x\nContext v1:\n{nope")
+    assert turn.render_context_block({}) is None
     text = turn.render_context_block(
-        'go\nContext v1:\n{"contract_version": 1, '
-        '"mode": {"name": "research", "instruction": "brief"}, '
-        '"client_data": {"z": "' + "q" * 9000 + '"}, "bogus": 1, "on_screen": ["G-1"]}'
+        {
+            "contract_version": 1,
+            "mode": {"name": "research", "instruction": "brief"},
+            "client_data": {"z": "q" * 9000},
+            "bogus": 1,
+            "on_screen": ["G-1"],
+        }
     )
     assert "mode: research — brief" in text
     assert "on screen: G-1" in text
@@ -77,7 +80,7 @@ def test_pre_llm_call_only_for_orchestrator_chat_sessions(tmp_path, monkeypatch)
     hook = turn.make_pre_llm_call("orchestrator")
     assert hook(session_id="wake1", user_message="x", is_first_turn=True) is None
     result = hook(session_id="chat9", user_message="hello", is_first_turn=True)
-    assert result and "[active Coworld] cow_fake" in result["context"]
+    assert "[active Coworld] cow_fake" in result["context"]
     assert sessions.read(ctx.wstore, "chat9")["kind"] == "chat"
     assert turn.make_pre_llm_call("researcher")(session_id="chat9", user_message="x") is None
 

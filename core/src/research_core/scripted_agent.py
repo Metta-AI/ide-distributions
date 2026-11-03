@@ -32,7 +32,6 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from research_core import contract
 from research_core.platform.fake import COWORLD_ID, LEAGUE_ID
 from research_core.plugin import turn
 from research_core.store import coworlds
@@ -213,5 +212,5 @@ class ScriptedAgent:
 
 
 def message_text(run_input: str) -> str:
-    """The user's message without the context block the seam appends (``Context v1:``)."""
-    return run_input.split(f"\n\n{contract.BLOCK_LABEL}\n", 1)[0].strip()
+    """The user's text; client context is carried outside the message."""
+    return run_input.strip()

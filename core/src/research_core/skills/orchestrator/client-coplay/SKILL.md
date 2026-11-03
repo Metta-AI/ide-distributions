@@ -32,11 +32,9 @@ a notice will follow; do not hold the chat open waiting.
 
 ## Local files are not mounted
 
-coplay runs on the user's Mac; you run in the workspace. A path the user pastes is on their
-machine and you cannot read it. Ask them to attach the file: attachments arrive in the message
-with a `sha256`, and `attachment_download {sha256}` verifies and stores the file under the
-Coworld's `documents/attachments/`. Coaching handoffs (a recording plus notes) arrive the same
-way: download, read, and record what matters as claims with `transcript` or `doc` evidence.
+The user's local files are not mounted in the workspace. This chat currently supports text;
+file and image attachment ingestion is deferred. Do not claim to have received or read an
+attachment that is not available through the workspace's tools.
 
 ## Library and notebook publishing
 

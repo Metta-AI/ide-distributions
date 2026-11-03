@@ -322,7 +322,10 @@ def banner(
         {
             "session_id": sid,
             "op_id": str(uuid4()),
-            "message": "What is the state of the workspace?",
+            "message": {
+                "role": "user",
+                "content": "What is the state of the workspace?",
+            },
             "actor": "user:local",
             "context": {"contract_version": 1, "on_screen": []},
         }

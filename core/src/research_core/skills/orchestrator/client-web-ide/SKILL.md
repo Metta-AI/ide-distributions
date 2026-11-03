@@ -56,9 +56,9 @@ as a `command`: follow its instruction for that message.
 
 ## Local files and attachments
 
-The IDE runs in the browser; the user's files are not mounted. An attachment arrives with a
-`sha256`, and `attachment_download {sha256}` stores it under the Coworld's
-`documents/attachments/`. A pasted local path cannot be read: ask for the file.
+The user's local files are not mounted in the workspace. This chat currently supports text;
+file and image attachment ingestion is deferred. Do not claim to have received or read an
+attachment that is not available through the workspace's tools.
 
 ## Reactions and the agent profile
 
