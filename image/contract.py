@@ -11,7 +11,7 @@ from pydantic.json_schema import models_json_schema
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
 from research_core.messages import UserMessage  # noqa: E402
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 
 class Arguments(BaseModel):

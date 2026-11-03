@@ -25,9 +25,9 @@ Hermes distribution shell:
 
 ## Tools
 
-Eighteen tools, each with actions: `goal`, `task`, `directive`, `claim`, `experiment`,
+Seventeen tools, each with actions: `goal`, `task`, `directive`, `claim`, `experiment`,
 `version`, `upload`, `submit`, `settings`, `ui`, `workspace`, `xp`, `platform`, `forum_post`,
-`wiki_edit`, `softmax_api`, `github`, `attachment_download`. `SOUL.md` lists their actions; the
+`wiki_edit`, `softmax_api`, `github`. `SOUL.md` lists their actions; the
 `briefing` prompt section shows the state of the active Coworld at the start of every turn.
 
 ## Install

@@ -27,6 +27,7 @@ class Admission:
     op_id: str
     session_id: str
     message: str
+    input: dict
     status: Literal["queued", "running", "completed", "cancelled", "failed", "interrupted"]
     run_id: str | None
     error: str | None
@@ -75,9 +76,10 @@ def accept(
 
 def snapshot(store: Store) -> list[dict]:
     return [
-        asdict(Admission(**dict(row)))
+        asdict(Admission(**{**dict(row), "input": json.loads(row["input"])}))
         for row in store.q(
-            "SELECT op_id,session_id,message,status,run_id,error,created_at,"
+            "SELECT op_id,session_id,message,json_extract(request, '$.message') AS input,"
+            " status,run_id,error,created_at,"
             " json_extract(payload, '$.context.client.id') AS client_id"
             " FROM client_admissions WHERE kind = 'message' ORDER BY rowid"
         )

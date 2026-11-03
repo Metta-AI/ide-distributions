@@ -194,6 +194,9 @@ class FakePlatform:
         self._faults = parse_faults(env)
         self._clock = clock
 
+    def close(self) -> None:
+        """The fake opens files only for individual operations."""
+
     # --- state plumbing ---------------------------------------------------------------------
 
     @staticmethod

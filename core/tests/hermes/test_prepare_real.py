@@ -244,3 +244,96 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS pinned native text chat and resume" in result.stdout
+
+
+def test_installed_agent_reads_attachment_after_resume(hermes_bin, host):
+    """A real native read_file call, repeated after rebuilding the agent on retained history."""
+    import base64
+
+    from research_core import layout
+    from research_core.attachments import prepare as prepare_attachment
+    from research_core.messages import UserMessage
+
+    prepare(hermes_bin, host, "orchestrator")
+    message = prepare_attachment(
+        UserMessage.model_validate(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Read the attached notes."},
+                    {
+                        "type": "file",
+                        "file": {
+                            "filename": "retained-notes.txt",
+                            "file_data": "data:text/plain;base64,"
+                            + base64.b64encode(b"cedar-7381-native-read").decode(),
+                        },
+                    },
+                ],
+            }
+        ),
+        ws=layout.Workspace(host.workspace, host.workspace / "tools" / "venv"),
+        env=host.env("orchestrator"),
+        hermes_bin=str(hermes_bin),
+    )
+    target = next(host.workspace.rglob("retained-notes.txt"))
+    script = r"""
+import json, sys, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from hermes_state_registry import acquire, release
+from run_agent import AIAgent
+reads = []
+class Provider(BaseHTTPRequestHandler):
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if request["messages"][-1]["role"] == "tool":
+            assert "cedar-7381-native-read" in request["messages"][-1]["content"], request
+            reads.append(request["messages"][-1]["content"])
+            message = {"role": "assistant", "content": "Attachment read"}
+            reason = "stop"
+        else:
+            message = {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "read_"+str(len(reads)), "type": "function", "function": {
+                    "name": "read_file", "arguments": json.dumps({"path":sys.argv[1]})}}]}
+            reason = "tool_calls"
+        choice = {"index": 0, "finish_reason": reason, "message": message}
+        reply = {"id":"attachment-proof","object":"chat.completion","created":1,
+            "model":"proof","choices":[choice],"usage":{
+                "prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}
+        body = json.dumps(reply).encode()
+        if request.get("stream"):
+            if "tool_calls" in message:
+                message["tool_calls"][0]["index"] = 0
+            reply["object"] = "chat.completion.chunk"
+            reply["choices"] = [{"index":0,"finish_reason":reason,"delta":message}]
+            body = ("data: "+json.dumps(reply)+"\n\ndata: [DONE]\n\n").encode()
+        self.send_response(200)
+        mime = "text/event-stream" if request.get("stream") else "application/json"
+        self.send_header("Content-Type",mime)
+        self.send_header("Content-Length",str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+    def log_message(self,*args): pass
+server = ThreadingHTTPServer(("127.0.0.1",0),Provider)
+threading.Thread(target=server.serve_forever,daemon=True).start()
+db = acquire()
+try:
+    for content in (json.loads(sys.argv[2])["content"], "Read that same file again."):
+        agent = AIAgent(model="proof",provider="custom",api_mode="chat_completions",
+            base_url=f"http://127.0.0.1:{server.server_port}/v1",api_key="fixture",
+            enabled_toolsets=["file"],quiet_mode=True,skip_context_files=True,skip_memory=True,
+            skip_background_review=True,session_id="native-attachment-read-proof",session_db=db,max_iterations=3)
+        result = agent.run_conversation(content,
+            conversation_history=db.get_messages_as_conversation(
+            "native-attachment-read-proof",include_row_ids=True))
+        assert result["final_response"] == "Attachment read", result
+    assert len(reads) == 2, reads
+    print("PASS native file read before and after agent resume")
+finally:
+    server.shutdown();server.server_close();release(db)
+"""
+    result = run(
+        [hermes_python(hermes_bin), "-c", script, str(target), message.model_dump_json()],
+        host.env("orchestrator"),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS native file read before and after agent resume" in result.stdout
