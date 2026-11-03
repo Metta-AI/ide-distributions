@@ -18,6 +18,13 @@ HARNESS = Actor.harness()
 CLAIM_ARGS = {"action": "write", "text": "the champion is pv_1"}
 
 
+@pytest.fixture(autouse=True)
+def fresh_counts(monkeypatch):
+    """The hooks keep per-Session counts in module state; each test starts without any."""
+    monkeypatch.setattr(repeats, "_refusals", {})
+    monkeypatch.setattr(repeats, "_failures", {})
+
+
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path / "ws"))
@@ -116,13 +123,34 @@ def test_halt_writes_one_notice_naming_the_session_kind_and_tool(workspace):
         result='{"ok": false, "error": "x", "problems": ["x"]}',
         session_id="s-wake",
     )
+    for _ in range(9):  # terminal failures never halt in Hermes, so they never name the tool
+        hooks["transform_tool_result"](
+            tool_name="terminal", args={"command": "x"}, result="Exit code: 1", session_id="s-wake"
+        )
 
     hooks["on_session_end"](session_id="s-wake", turn_exit_reason="guardrail_halt", completed=True)
 
     [notice] = _notices(wstore)
-    assert "orchestrator's wake Session s-wake for champion.changed" in notice["text"]
-    assert "claim kept failing" in notice["text"]
+    assert notice["text"] == (
+        "Hermes's loop guard stopped the orchestrator's wake Session s-wake for champion.changed"
+        " after repeated calls (most failures: claim). Its work may be unfinished, and nothing"
+        " retries it."
+    )
     assert notice["urgency"] == "high"
+
+
+def test_halt_without_counted_failures_names_no_tool(workspace):
+    # An identical-call halt: the same terminal command with the same output, never failing.
+    wstore = Store.open(workspace.store_path, kind="workspace")
+    hooks = repeats.make_hooks("researcher")
+    for _ in range(10):
+        hooks["transform_tool_result"](
+            tool_name="terminal", args={"command": "x"}, result="Exit code: 1", session_id="s-r"
+        )
+    hooks["on_session_end"](session_id="s-r", turn_exit_reason="guardrail_halt")
+    [notice] = _notices(wstore)
+    assert "researcher's unregistered Session s-r after repeated calls." in notice["text"]
+    assert "most failures" not in notice["text"]
 
 
 def test_a_normal_end_writes_no_notice(workspace):

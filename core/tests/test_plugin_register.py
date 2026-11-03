@@ -37,6 +37,18 @@ def test_make_register_builds_a_callable_per_role():
             assert set(tool["schema"]) >= {"name", "description", "parameters"}
         assert {name for name, _ in ctx.hooks} >= {"transform_tool_result", "post_tool_call"}
         assert "ide-briefing" in {section_id for section_id, _, _ in ctx.sections}
+        assert "on_session_end" in {name for name, _ in ctx.hooks}
+
+
+def test_firmer_refusal_registers_before_the_advisory_note():
+    # Hermes keeps the first string a transform_tool_result hook returns.
+    ctx = FakeContext()
+    register.make_register("researcher")(ctx)
+    transforms = [cb for name, cb in ctx.hooks if name == "transform_tool_result"]
+    assert [cb.__module__ for cb in transforms] == [
+        "research_core.plugin.repeats",
+        "research_core.plugin.advisory",
+    ]
 
 
 def test_plugin_imports_are_stdlib_only():

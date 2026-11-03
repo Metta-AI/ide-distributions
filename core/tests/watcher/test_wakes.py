@@ -370,9 +370,17 @@ def test_other_kinds_keep_one_wake_per_subject(tmp_path):
 
 def test_render_batch_cuts_each_payload(tmp_path):
     ctx = make_ctx(tmp_path)
-    for subject in ("cow_fake", "cow_fake_2"):
-        emit(ctx.store, "store.unmarked_write", subject, {"rows": ["x" * 50] * 200})
-    batch = events.unhandled(ctx.store, {"store.unmarked_write"})
+    huge = "pv_" + "x" * wakes.PAYLOAD_CHARS  # a payload over the cut on its own
+    for league in ("league_a", "league_b"):
+        emit(
+            ctx.store, "champion.changed", league, {"state": "champion", "policy_version_id": huge}
+        )
+    small = change_champion(ctx, "league_c", "pv_c")
+    batch = events.unhandled(ctx.store, {"champion.changed"})
+    assert batch[-1].seq == small
+
     text = wakes.render_batch("management", batch, ctx)
-    assert text.count("payload cut here") == 2
-    assert "`cow_fake, cow_fake_2`" in text
+
+    assert "Event `champion.changed` on `league_a, league_b, league_c`" in text
+    assert text.count("payload cut here") == 2, "each large payload is cut on its own"
+    assert '"policy_version_id": "pv_c"' in text, "a small payload after them is whole"

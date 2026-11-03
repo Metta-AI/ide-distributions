@@ -1,8 +1,13 @@
 """Repeated failures inside one turn: a firmer refusal, and a notice when Hermes halts the turn.
 
 Hermes's loop guard (``tool_loop_guardrails``, hard stop on in the shipped configs) ends a turn
-after 5 failures of one tool with ``turn_exit_reason = "guardrail_halt"``. The runs API reports
-such a run ``completed``, and nobody reads a wake's final reply, so two hooks fill the gaps:
+with ``turn_exit_reason = "guardrail_halt"``. In Hermes v0.21.6 the hard stop halts after 5
+failures of one tool (``same_tool_failure``; never for the failure-tolerant tools below), blocks
+after 5 identical failing calls (Hermes's default ``exact_failure``), and halts after 10
+identical calls with identical results or 10 laps of an identical call cycle, for any tool but
+pollers (``idempotent_no_progress``, raised from Hermes's 5). So a halt does not always mean a
+tool failed. The runs API reports such a run ``completed``, and nobody reads a wake's final
+reply, so two hooks fill the gaps:
 
 * ``transform_tool_result``: the second time the same call (tool and arguments) is refused in a
   turn, its result is replaced by a short refusal that names what to supply and how to get out
@@ -10,7 +15,8 @@ such a run ``completed``, and nobody reads a wake's final reply, so two hooks fi
   once; repeating it only grows the history. The replacement is still a JSON refusal with an
   ``"error"`` key, so Hermes's guard keeps counting it as a failure.
 * ``on_session_end``: Hermes fires it at the end of every turn. On ``guardrail_halt`` it writes
-  a notice naming the Session, its kind and the tool that kept failing.
+  a notice naming the Session, its kind and the tool with the most failures this turn, if any
+  (failures of tools Hermes never halts on are not counted).
 
 Counts live in memory per Session and are dropped at the end of each turn, as Hermes resets its
 own counters each turn. Both hooks run inside Hermes: stdlib only, never raising.
@@ -34,6 +40,12 @@ from research_core.tools.catalog import Role
 log = logging.getLogger(__name__)
 
 HALT_REASON = "guardrail_halt"
+# Tools whose failures Hermes's same_tool_failure halt never counts (a red test run is normal
+# work). Copied from Hermes v0.21.6 agent/tool_guardrails.py FAILURE_TOLERANT_TOOL_NAMES: the
+# plugin cannot import Hermes.
+FAILURE_TOLERANT_TOOL_NAMES = frozenset(
+    {"terminal", "execute_code", "process_manage", "process", "browser_navigate", "web_extract"}
+)
 _REQUIRED = re.compile(r"^([\w.]+) is required\b")
 # How each role reports a problem it cannot fix itself.
 WAY_OUT: dict[str, str] = {
@@ -100,7 +112,8 @@ def make_hooks(role: Role) -> dict[str, Callable[..., Any]]:
                 if not failed:
                     _refusals.get(session_id, Counter()).pop(key, None)
                     return None
-                _failures.setdefault(session_id, Counter())[tool_name] += 1
+                if tool_name not in FAILURE_TOLERANT_TOOL_NAMES:
+                    _failures.setdefault(session_id, Counter())[tool_name] += 1
                 if refusal is None:
                     return None
                 refusals = _refusals.setdefault(session_id, Counter())
@@ -126,7 +139,8 @@ def make_hooks(role: Role) -> dict[str, Callable[..., Any]]:
 
 
 def write_halt_notice(role: Role, session_id: str, failures: Counter[str]) -> None:
-    """The notice for a turn Hermes's loop guard halted: the Session, its kind and the tool."""
+    """The notice for a turn Hermes's loop guard halted: the Session, its kind and the tool with
+    the most counted failures, if any (a halt on identical successful calls has none)."""
     from research_core.store import notices, sessions
     from research_core.tools.base import ToolContext
 
@@ -140,13 +154,13 @@ def write_halt_notice(role: Role, session_id: str, failures: Counter[str]) -> No
     if session and session.get("task_id"):
         about += f" on T-{session['task_id']}"
         refs.append(f"T-{session['task_id']}")
-    tool = failures.most_common(1)[0][0] if failures else "one tool"
+    most_failures = f" (most failures: {failures.most_common(1)[0][0]})" if failures else ""
     notices.add(
         ctx.wstore,
         ctx.actor,
         text=(
-            f"The {role}'s {about} stopped: {tool} kept failing, so Hermes's loop guard ended "
-            "the run. Its work may be unfinished, and nothing retries it."
+            f"Hermes's loop guard stopped the {role}'s {about} after repeated calls"
+            f"{most_failures}. Its work may be unfinished, and nothing retries it."
         ),
         refs=refs,
         urgency="high",
