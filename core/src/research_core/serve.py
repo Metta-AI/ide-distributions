@@ -197,32 +197,32 @@ class SeamServer:
         return f"http://{host}:{port}"
 
     def serve_forever(self) -> None:
-        with ThreadPoolExecutor(max_workers=1) as worker:
-            dispatch = worker.submit(asyncio.run, self.dispatch_forever())
-            dispatch.add_done_callback(lambda _: self._http.shutdown())
-            try:
-                self._http.serve_forever(poll_interval=0.2)
-            finally:
-                self.stopping.set()
-            dispatch.result()
+        with ownership(self.ws):
+            with Store.open(self.ws.store_path, kind="workspace") as store:
+                store.set_meta("coordinator_instance", self.coordinator.instance_id)
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                dispatch = worker.submit(asyncio.run, self.dispatch_forever())
+                dispatch.add_done_callback(lambda _: self._http.shutdown())
+                try:
+                    self._http.serve_forever(poll_interval=0.2)
+                finally:
+                    self.stopping.set()
+                dispatch.result()
 
     async def dispatch_forever(self) -> None:
-        with ownership(self.ws):
-            observer = asyncio.create_task(self.observe_forever())
-            workflow = asyncio.create_task(self.coordinate_forever())
-            try:
-                while not self.stopping.is_set():
-                    (result,) = await asyncio.gather(
-                        self.dispatch_messages(), return_exceptions=True
-                    )
-                    if isinstance(result, RunsError):
-                        log.warning("Admission unavailable: %s", result)
-                    elif isinstance(result, BaseException):
-                        raise result
-                    await asyncio.sleep(0.5)
-            finally:
-                self.stopping.set()
-                await asyncio.gather(observer, workflow)
+        observer = asyncio.create_task(self.observe_forever())
+        workflow = asyncio.create_task(self.coordinate_forever())
+        try:
+            while not self.stopping.is_set():
+                (result,) = await asyncio.gather(self.dispatch_messages(), return_exceptions=True)
+                if isinstance(result, RunsError):
+                    log.warning("Admission unavailable: %s", result)
+                elif isinstance(result, BaseException):
+                    raise result
+                await asyncio.to_thread(self.stopping.wait, 0.5)
+        finally:
+            self.stopping.set()
+            await asyncio.gather(observer, workflow)
 
     async def observe_forever(self) -> None:
         if not self.env.get("HERMES_HOME"):
@@ -322,6 +322,7 @@ class SeamServer:
                 "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
                 "sleep_started": wstore.get_meta("sleep_started"),
                 "blocked_executions": admissions.problems(wstore),
+                "coordinator_instance": wstore.get_meta("coordinator_instance"),
                 "restart_required": admissions.restart_required(wstore),
                 "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
             }

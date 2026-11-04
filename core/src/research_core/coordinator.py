@@ -13,7 +13,7 @@ import sys
 from contextlib import contextmanager
 from datetime import timedelta
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from research_core import layout
 from research_core.store import admissions, events, notices, sessions, settings, tasks
@@ -94,6 +94,7 @@ class Coordinator:
         self.ws = ws
         self.native = native
         self.runtime_id = runtime_id
+        self.instance_id = f"coordinator:{uuid4()}"
 
     def status(self, run_id: str, *, profile: str):
         return self.native.status(run_id, profile=profile)

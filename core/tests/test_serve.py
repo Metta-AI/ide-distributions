@@ -681,6 +681,7 @@ def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkey
         "paused_drained": False,
         "sleep_started": None,
         "blocked_executions": [],
+        "coordinator_instance": seam.server.coordinator.instance_id,
         "restart_required": False,
         "runtime_recovery_count": 0,
     }
@@ -1107,3 +1108,59 @@ def test_reopening_preserves_existing_execution_and_history(
         assert server.session_pending(session_id) == {"pending": False}
     finally:
         server._http.server_close()
+
+
+def test_owner_is_persisted_before_http_while_dispatch_startup_is_delayed(
+    tmp_path, monkeypatch, capsys
+):
+    from research_core.watcher import cli as watcher_cli
+
+    ctx = make_ctx(tmp_path)
+    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns(), env=dict(ctx.env))
+    ctx.wstore.set_meta("coordinator_instance", "retired-owner")
+    entered, release = threading.Event(), threading.Event()
+    dispatch = server.dispatch_forever
+
+    async def delayed_dispatch():
+        entered.set()
+        await asyncio.to_thread(release.wait)
+        await dispatch()
+
+    monkeypatch.setattr(server, "dispatch_forever", delayed_dispatch)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        result = ScriptedClient(server.url)._get("/status")
+        owner = server.coordinator.instance_id
+        assert result["coordinator_instance"] == owner
+        assert ctx.wstore.get_meta("coordinator_instance") == owner
+        monkeypatch.setenv("IDE_WORKSPACE", str(ctx.workspace.root))
+        assert watcher_cli.run_status(None) == 0
+        assert json.loads(capsys.readouterr().out)["coordinator_instance"] == owner
+    finally:
+        release.set()
+        server.shutdown()
+        thread.join(5)
+        ctx.store.close()
+        ctx.wstore.close()
+    assert not thread.is_alive()
+
+
+def test_contending_server_cannot_publish_owner_or_serve_http(tmp_path, monkeypatch):
+    from research_core.coordinator import ownership
+
+    ctx = make_ctx(tmp_path)
+    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns(), env=dict(ctx.env))
+    ctx.wstore.set_meta("coordinator_instance", "active-owner")
+    serving = threading.Event()
+    monkeypatch.setattr(server._http, "serve_forever", lambda **kwargs: serving.set())
+    try:
+        with ownership(ctx.workspace), pytest.raises(BlockingIOError):
+            server.serve_forever()
+        assert not serving.is_set()
+        assert ctx.wstore.get_meta("coordinator_instance") == "active-owner"
+    finally:
+        server._http.server_close()
+        ctx.store.close()
+        ctx.wstore.close()

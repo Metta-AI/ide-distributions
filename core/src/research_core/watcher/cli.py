@@ -110,6 +110,7 @@ def run_status(args: argparse.Namespace) -> int:
             "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
             "sleep_started": wstore.get_meta("sleep_started"),
             "blocked_executions": admissions.problems(wstore),
+            "coordinator_instance": wstore.get_meta("coordinator_instance"),
             "restart_required": admissions.restart_required(wstore),
             "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
         }
