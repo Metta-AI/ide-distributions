@@ -686,7 +686,6 @@ def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkey
         "coordinator_instance": seam.server.coordinator.instance_id,
         "restart_required": False,
         "runtime_recovery_count": 0,
-        "coordinator_instance": seam.server.coordinator.instance_id,
         "work": [],
     }
     seam.wstore.set_meta("heartbeat", now_iso())
