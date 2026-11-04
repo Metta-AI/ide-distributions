@@ -185,10 +185,13 @@ def test_installed_agent_text_chat_and_resume(hermes_bin, host, existing_history
     script = """
 import json, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from hermes_cli.plugins import has_middleware
 from hermes_state_registry import acquire, release
 from run_agent import AIAgent
-assert not has_middleware("llm_request"), "Text chat must not need content middleware"
+from hermes_cli.middleware import apply_llm_request_middleware
+request = {"model": "proof",
+    "messages": [{"role": "user", "content": "Unchanged native text"}], "max_tokens": 131072}
+bounded = apply_llm_request_middleware(request, provider="openrouter").payload
+assert bounded == {**request, "max_tokens": 16384}, bounded
 captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
