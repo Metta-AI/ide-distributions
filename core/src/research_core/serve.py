@@ -848,7 +848,7 @@ class SeamServer:
                 raise store_cli.Refusal(f"{op!r} is not an op store apply runs; allowed: {allowed}")
             op_args = store_cli.parse_op_args(json.dumps(args))
             with self.stores(body.get("coworld")) as stores:
-                kind = body.get("store") or store_cli.store_kind_for(op, op_args, stores)
+                kind = body.get("store") or store_cli.store_kind_for(op, op_args)
                 if kind not in store_cli.STORE_KINDS:
                     raise store_cli.Refusal(
                         f"store must be one of {', '.join(store_cli.STORE_KINDS)}"

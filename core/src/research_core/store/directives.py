@@ -4,6 +4,10 @@ A directive lives where its scope does: ``workspace`` rows in the workspace stor
 rows in that Goal's Coworld store (amendment A2.4), so each store's briefing lists what it
 owns. ``add`` and ``update`` take whichever store they are given and refuse a scope that
 belongs in the other one; a Goal scope must name an existing Goal.
+
+Each store numbers its own rows, so ids carry the store: ``W-<n>`` in the workspace store and
+``D-<n>`` in the Coworld store. An update cannot move a directive between stores, so its id never
+changes.
 """
 
 from __future__ import annotations
@@ -11,9 +15,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from research_core.store._common import display_id, fetch_row, require
+from research_core.store._common import display_id, fetch_row, parse_display_id, require
 from research_core.store.errors import StoreError
-from research_core.store.registry import DIRECTIVE, record_from_row
+from research_core.store.registry import DIRECTIVE, WORKSPACE_DIRECTIVE, record_from_row
 
 if TYPE_CHECKING:
     from research_core.store.actors import Actor
@@ -21,6 +25,28 @@ if TYPE_CHECKING:
 
 WORKSPACE_SCOPE = "workspace"
 _GOAL_SCOPE = re.compile(r"^goal:([1-9][0-9]*)$")
+_SPEC_BY_STORE = {"workspace": WORKSPACE_DIRECTIVE, "coworld": DIRECTIVE}
+_STORE_BY_RECORD_KIND = {spec.name: kind for kind, spec in _SPEC_BY_STORE.items()}
+
+
+def parse_reference(reference: object) -> tuple[str, int]:
+    """``"W-3"`` → ``("workspace", 3)`` and ``"D-3"`` → ``("coworld", 3)``. A bare number is
+    refused: it could name a directive in either store."""
+    record_kind, number = None, 0
+    if isinstance(reference, str):
+        try:
+            record_kind, number = parse_display_id(reference)
+        except ValueError:
+            pass
+    if record_kind not in _STORE_BY_RECORD_KIND:
+        raise StoreError(
+            [f"a directive id is W-<n> on the workspace or D-<n> on a Goal, not {reference!r}"]
+        )
+    return _STORE_BY_RECORD_KIND[record_kind], number
+
+
+def _shown(store: Store, directive_id: int) -> str:
+    return display_id(_SPEC_BY_STORE[store.kind].prefix, directive_id)
 
 
 def _is_text(value: object) -> bool:
@@ -66,7 +92,7 @@ def add(store: Store, actor: Actor, *, text: str, scope: str, source: str) -> di
             (text, scope, source, tx.at, str(actor)),
         )
         directive_id = cursor.lastrowid
-        tx.event("directive.added", display_id("D", directive_id), {"scope": scope})
+        tx.event("directive.added", _shown(store, directive_id), {"scope": scope})
     return read(store, directive_id)
 
 
@@ -80,8 +106,8 @@ def update(
 ) -> dict[str, Any]:
     """Change an active directive's text or scope; event ``directive.updated``."""
     with store.tx(actor) as tx:
-        row = fetch_row(store, "directives", directive_id, display=f"D-{directive_id}")
-        shown = display_id("D", row["id"])
+        shown = _shown(store, directive_id)
+        row = fetch_row(store, "directives", directive_id, display=shown)
         problems: list[str] = []
         require(
             problems, row["status"] == "active", f"{shown} is retired; add a new directive instead"
@@ -107,8 +133,8 @@ def update(
 def retire(store: Store, actor: Actor, directive_id: int) -> dict[str, Any]:
     """Retire an active directive (kept, never deleted); event ``directive.retired``."""
     with store.tx(actor) as tx:
-        row = fetch_row(store, "directives", directive_id, display=f"D-{directive_id}")
-        shown = display_id("D", row["id"])
+        shown = _shown(store, directive_id)
+        row = fetch_row(store, "directives", directive_id, display=shown)
         if row["status"] != "active":
             raise StoreError([f"{shown} is already retired"])
         tx.execute(
@@ -120,8 +146,8 @@ def retire(store: Store, actor: Actor, directive_id: int) -> dict[str, Any]:
 
 
 def read(store: Store, directive_id: int) -> dict[str, Any]:
-    row = fetch_row(store, "directives", directive_id, display=f"D-{directive_id}")
-    return record_from_row(DIRECTIVE, row)
+    row = fetch_row(store, "directives", directive_id, display=_shown(store, directive_id))
+    return record_from_row(_SPEC_BY_STORE[store.kind], row)
 
 
 def list(
@@ -137,4 +163,4 @@ def list(
         " ORDER BY id",
         (scope, scope, status, status),
     )
-    return [record_from_row(DIRECTIVE, row) for row in rows]
+    return [record_from_row(_SPEC_BY_STORE[store.kind], row) for row in rows]

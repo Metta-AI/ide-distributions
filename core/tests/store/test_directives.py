@@ -23,7 +23,7 @@ def test_add_a_workspace_directive_in_the_workspace_store(workspace_store, sessi
         source="session:api_1/msg_3",
     )
     assert directive == {
-        "id": "D-1",
+        "id": "W-1",
         "text": "Never submit on Fridays",
         "scope": "workspace",
         "source": "session:api_1/msg_3",
@@ -34,7 +34,7 @@ def test_add_a_workspace_directive_in_the_workspace_store(workspace_store, sessi
     }
     events = workspace_store.events_after(0)
     assert [(e.kind, e.subject, e.actor) for e in events] == [
-        ("directive.added", "D-1", str(session_actor))
+        ("directive.added", "W-1", str(session_actor))
     ]
     assert events[0].payload == {"scope": "workspace"}
     assert workspace_store.unmarked_changes() == []
@@ -106,16 +106,26 @@ def test_retire_once(workspace_store, harness, clock):
     assert retired["status"] == "retired"
     assert retired["retired"] == "2026-10-28T21:04:10.123456Z"
     event = workspace_store.events_after(1)[0]
-    assert event.kind == "directive.retired" and event.subject == "D-1"
+    assert event.kind == "directive.retired" and event.subject == "W-1"
     with pytest.raises(StoreError) as info:
         directives.retire(workspace_store, harness, 1)
-    assert info.value.problems == ["D-1 is already retired"]
+    assert info.value.problems == ["W-1 is already retired"]
     with pytest.raises(StoreError) as info:
         directives.update(workspace_store, harness, 1, text="again")
-    assert info.value.problems == ["D-1 is retired; add a new directive instead"]
+    assert info.value.problems == ["W-1 is retired; add a new directive instead"]
     assert workspace_store.last_seq() == 2
-    with pytest.raises(NotFound):
+    with pytest.raises(NotFound) as info:
         directives.retire(workspace_store, harness, 2)
+    assert info.value.problems == ["W-2 does not exist"]
+
+
+def test_a_reference_names_its_store_and_number():
+    assert directives.parse_reference("W-3") == ("workspace", 3)
+    assert directives.parse_reference("D-3") == ("coworld", 3)
+    for bad in ("3", 3, "G-3", "", None):
+        with pytest.raises(StoreError) as info:
+            directives.parse_reference(bad)
+        assert "W-<n>" in info.value.problems[0] and "D-<n>" in info.value.problems[0]
 
 
 def test_list_filters_by_scope_and_status(coworld_store, harness):

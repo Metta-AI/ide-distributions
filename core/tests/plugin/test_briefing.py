@@ -151,7 +151,7 @@ def test_a_directive_added_after_the_first_render_appears_in_the_next(tmp_path):
         coworld_id="cow_fake",
     )
     second = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
-    assert 'D-1 (workspace): "Never submit on a Friday"' in second
+    assert 'W-1 (workspace): "Never submit on a Friday"' in second
     assert 'D-1 (G-1): "Keep XP runs under 50 episodes"' in second
 
 

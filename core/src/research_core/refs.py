@@ -33,6 +33,7 @@ RECORD_PREFIXES: dict[str, str] = {
     "C": "claim",
     "X": "experiment",
     "D": "directive",
+    "W": "workspace_directive",
     "I": "intent",
     "N": "notice",
 }
