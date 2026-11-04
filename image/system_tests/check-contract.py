@@ -75,7 +75,7 @@ async def main():
             if process.name.isdigit()
             and (process / "cmdline").exists()
             and (process / "cmdline").read_bytes().rstrip(b"\0").split(b"\0")[-2:]
-            == [b"gateway", b"run"]
+            == [b"-m", b"gateway.run"]
         ]
         assert len(gateways) == 1, gateways
         os.kill(gateways[0], signal.SIGSTOP)

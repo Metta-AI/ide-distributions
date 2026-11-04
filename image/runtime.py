@@ -196,7 +196,7 @@ async def run(stack: AsyncExitStack) -> None:
         phase_started = time.monotonic()
         report("gateway_ready", phase_started, outcome="started")
         gateway = await stack.enter_async_context(
-            managed_process(HERMES, "gateway", "run", env=common)
+            managed_process(PYTHON, "-m", "gateway.run", env=common)
         )
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:8642", headers={"Authorization": f"Bearer {key}"}
