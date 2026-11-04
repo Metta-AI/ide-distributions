@@ -69,7 +69,19 @@ def run(capsys, *argv: str) -> tuple[int, dict]:
 
 
 def apply(capsys, op: str, args: dict, *extra: str, actor: str = USER) -> tuple[int, dict]:
-    return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+    if not op.startswith("tasks."):
+        return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+    from research_core.serve import SeamServer
+    from research_core.watcher.hermes_api import FakeHermesRuns
+
+    server = SeamServer(ws=layout.from_env(), hermes=FakeHermesRuns(), env={})
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
 
 
 # --- apply ----------------------------------------------------------------------------------

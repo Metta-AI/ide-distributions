@@ -73,7 +73,7 @@ Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables
 - `platform`: leagues, league, divisions, standings, active_policies, policy_versions, policy_file, results, episodes, episode, replay, credits, champion, forum_list, forum_read, forum_search, wiki_read, wiki_search, wiki_history, coworld
 - `settings`: read
 - `softmax_api` (inputs: method, path, params, json, identity)
-- `task`: propose, claim, wait, ask, complete, release, propose_submission, read, list
+- `task`: command, propose, claim, wait, ask, complete, release, propose_submission, read, list
 - `upload` (inputs: version, user_requested)
 - `version`: create, adopt, read, list
 - `wiki_edit` (inputs: wiki, page, title, body, base_revision_id, note, identity, cites)

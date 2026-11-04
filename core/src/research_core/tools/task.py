@@ -17,7 +17,8 @@ from research_core.coordinator import Coordinator
 from research_core.store import admissions, sessions, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
-from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec, tool
+from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec
+from research_core.transitions import durable_tool
 from research_core.watcher.context import workers
 
 ORCHESTRATOR = frozenset({"orchestrator"})
@@ -139,7 +140,7 @@ def handle_claim(call: ToolCall) -> dict:
         )
     with admissions.dispatch_lock(ctx.wstore):
         assignment = ctx.wstore.one(
-            "SELECT session_id FROM task_assignments WHERE coworld_id=? AND task_id=?",
+            "SELECT * FROM task_assignments WHERE coworld_id=? AND task_id=?",
             (coworld.coworld_id, n),
         )
         if assignment is None or assignment["session_id"] != session_id:
@@ -168,7 +169,7 @@ def handle_claim(call: ToolCall) -> dict:
             ctx.wstore,
             ctx.actor,
             session_id=session_id,
-            profile=ctx.env.get("HERMES_PROFILE_NAME") or ctx.env.get("IDE_ROLE") or ctx.role,
+            profile=assignment["profile"],
             kind="task",
             coworld_id=coworld.coworld_id,
             task_id=n,
@@ -276,7 +277,24 @@ def handle(call: ToolCall) -> dict:
     raise AssertionError(call.action)
 
 
-def dispatch(call: ToolCall) -> dict:
+def execute(call: ToolCall) -> dict:
+    if call.ctx.role == "researcher" and call.action in {
+        "complete",
+        "wait",
+        "ask",
+        "release",
+        "propose_submission",
+    }:
+        n = a.record_number(call.get("task"), "task", "task")
+        tasks.require_holder(call.ctx.store, n, call.ctx.actor)
+        assignment = call.ctx.wstore.one(
+            "SELECT a.*,execution.status FROM task_assignments a"
+            " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
+            " WHERE a.session_id=? AND a.task_id=?",
+            (call.ctx.hermes_session_id(), n),
+        )
+        if assignment is None or assignment["status"] not in {"queued", "running"}:
+            raise ToolError("This worker execution no longer has task transition authority")
     if call.action == "workers":
         return {"kind": "available_workers", "workers": workers(call.ctx.env)}
     if call.action == "assign":
@@ -300,9 +318,23 @@ def dispatch(call: ToolCall) -> dict:
     return handle(call)
 
 
+def dispatch(call: ToolCall) -> dict:
+    if call.action in {"read", "list", "workers", "command"}:
+        if call.action == "command":
+            from research_core.transitions import receipt
+
+            return receipt(call.ctx.store, call.get("command_id"))
+        return execute(call)
+    if call.ctx.coordinator_instance is not None:
+        return execute(call)
+    from research_core.transitions import submit
+
+    return submit(call)
+
+
 # --- the spec ---------------------------------------------------------------------------------
 
-SPEC = tool(
+SPEC = durable_tool(
     ToolSpec(
         name="task",
         description=(
@@ -313,6 +345,13 @@ SPEC = tool(
         roles=BOTH,
         executor="inproc",
         actions=(
+            ActionSpec(
+                "command",
+                "Read a pending transition's durable result.",
+                {"command_id": a.string("The command_id returned by a pending transition.")},
+                ("command_id",),
+                BOTH,
+            ),
             ActionSpec(
                 "workers",
                 "Inspect available research workers before choosing an assignment.",

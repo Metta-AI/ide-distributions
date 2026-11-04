@@ -256,8 +256,35 @@ def _directive_home(stores: Stores, directive_id: Any) -> str:
     return homes[0]
 
 
-def _call(op: str, kind: str, stores: Stores, actor: Actor, op_args: dict[str, Any]) -> Any:
+def _call(
+    op: str,
+    kind: str,
+    stores: Stores,
+    actor: Actor,
+    op_args: dict[str, Any],
+    *,
+    coordinator_instance: str | None = None,
+) -> Any:
     store = stores.by_kind(kind)
+    if op.startswith("tasks.") and coordinator_instance is None:
+        from uuid import uuid4
+
+        from research_core.tools.base import ToolContext
+        from research_core.transitions import request
+
+        ctx = ToolContext(
+            role="orchestrator",
+            actor=actor,
+            workspace=stores.ws,
+            env={"IDE_WORKSPACE": str(stores.ws.root)},
+        )
+        ctx.wstore, ctx.store = stores.wstore, store
+        args = dict(op_args)
+        operation_id = args.pop("operation_id", str(uuid4()))
+        result = request(ctx, "store", {"op": op, "args": args}, operation_id)
+        if not result.get("ok", True):
+            raise StoreError(result["problems"] if "problems" in result else [result["error"]])
+        return result["record"] if "record" in result else result
     if op == "workspace.coworld_switch":
         return _coworld_switch(actor, op_args)
     if op in ("workspace.pause", "workspace.resume"):

@@ -129,6 +129,8 @@ def work_reasons(ctx: TickContext) -> list[str]:
     The heartbeat records the list; ``scripts/activity.py`` hands it to the host."""
     reasons = [f"session:{sid}:running" for sid in dispatch.live_task_sessions(ctx)]
     if ctx.store is not None:
+        if ctx.store.one("SELECT 1 FROM transition_commands WHERE result IS NULL LIMIT 1"):
+            reasons.append("transition:queued")
         for task in tasks.list(ctx.store, status="in-progress"):
             kind = (task["waiting_on"] or {}).get("kind")
             if kind in RUNNING_WAIT_KINDS:

@@ -611,7 +611,7 @@ def test_store_apply_with_a_user_actor_approves_a_proposed_task(seam):
     assert result["record"]["status"] == "unclaimed"
     assert result["record"]["approved_by"] == "user:james"
     assert result["seq"] == seam.store.last_seq()
-    assert seam.store.events_after(result["seq"] - 1)[0].kind == "task.approved"
+    assert seam.store.events_after(result["seq"] - 1)[0].kind == "transition.applied"
 
 
 def test_store_apply_refuses_outside_the_allow_list_and_session_actors(seam):
@@ -686,6 +686,7 @@ def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkey
         "coordinator_instance": seam.server.coordinator.instance_id,
         "restart_required": False,
         "runtime_recovery_count": 0,
+        "pending_transitions": [],
         "work": [],
     }
     seam.wstore.set_meta("heartbeat", now_iso())

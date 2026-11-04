@@ -79,7 +79,7 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 - `settings`: read, update
 - `softmax_api` (inputs: method, path, params, json, identity)
 - `submit` (inputs: version, league, auto_champion, reason, user_requested, cites)
-- `task`: workers, assign, create, propose, approve, link, answer, message, abandon, review, reject, read, list
+- `task`: command, workers, assign, create, propose, approve, link, answer, message, abandon, review, reject, read, list
 - `ui`: show, panel_set, notify, ask
 - `upload` (inputs: version, user_requested)
 - `version`: create, adopt, read, list

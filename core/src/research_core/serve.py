@@ -62,7 +62,7 @@ from research_core.store import admissions, coworlds, sessions, settings, ui_sta
 from research_core.store import cli as store_cli
 from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
-from research_core.store.db import Store
+from research_core.store.db import Store, change_version, wait_for_change
 from research_core.store.errors import StoreError
 from research_core.tools.ui import WORKSPACE_CONVERSATION, pointer_token
 from research_core.watcher import context, hermes_api
@@ -225,7 +225,7 @@ class SeamServer:
                     log.warning("Admission unavailable: %s", result)
                 elif isinstance(result, BaseException):
                     raise result
-                await asyncio.to_thread(self.stopping.wait, 0.5)
+                await asyncio.to_thread(wait_for_change, change_version(), 0.5)
         finally:
             self.stopping.set()
             await asyncio.gather(observer, workflow)
@@ -245,17 +245,33 @@ class SeamServer:
         self.coordinator.reconcile()
 
     async def coordinate_forever(self) -> None:
-        if not self.env.get("HERMES_HOME"):
-            return
         while not self.stopping.is_set():
             (result,) = await asyncio.gather(
                 asyncio.to_thread(self.coordinate_once), return_exceptions=True
             )
             if isinstance(result, BaseException):
                 log.error("Coordinator workflow failed", exc_info=result)
-            await asyncio.to_thread(self.stopping.wait, 0.5)
+            await asyncio.to_thread(wait_for_change, change_version(), 0.5)
 
     def coordinate_once(self) -> None:
+        if not self.env.get("HERMES_HOME"):
+            from research_core import transitions
+
+            with self.stores() as stores:
+                ctx = context.TickContext(
+                    ws=self.ws,
+                    wstore=stores.wstore,
+                    store=None if stores.coworld_id is None else stores.store(),
+                    coworld=None
+                    if stores.coworld_id is None
+                    else self.ws.coworld(stores.coworld_id),
+                    hermes=self.coordinator,
+                    platform=None,
+                    env=self.env,
+                    now=datetime.now(UTC),
+                )
+                transitions.apply(ctx, self.coordinator.instance_id)
+            return
         ctx = context.build(self.env, hermes=self.coordinator)
         try:
             self.coordinator.advance(ctx)
@@ -330,6 +346,15 @@ class SeamServer:
                 "blocked_executions": admissions.problems(wstore),
                 "work": admissions.work_status(wstore, self.inference_lease_file),
                 "coordinator_instance": wstore.get_meta("coordinator_instance"),
+                "pending_transitions": []
+                if stores.coworld_id is None
+                else [
+                    dict(row)
+                    for row in stores.store().q(
+                        "SELECT id,tool,actor,owner_instance,deadline,attempts"
+                        " FROM transition_commands WHERE result IS NULL"
+                    )
+                ],
                 "restart_required": admissions.restart_required(wstore),
                 "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
             }
@@ -1112,7 +1137,7 @@ class _Handler(BaseHTTPRequestHandler):
                     if time.monotonic() - last_write >= KEEPALIVE_S:
                         self._write(": keepalive\n\n")
                         last_write = time.monotonic()
-                    seam.stopping.wait(TAIL_INTERVAL_S)
+                    wait_for_change(change_version(), TAIL_INTERVAL_S)
             except OSError:
                 return  # the client closed the connection
 

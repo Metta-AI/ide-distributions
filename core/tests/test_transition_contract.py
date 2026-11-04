@@ -6,10 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from research_core import transitions
 from research_core.coordinator import Coordinator
 from research_core.store import admissions, db, sessions, tasks
 from research_core.store.actors import Actor
 from research_core.store.errors import LeaseError, StoreError
+from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher.hermes_api import FakeHermesRuns
 from tests.test_coordinator_transitions import assigned
 from tests.watcher._support import coordinator, dispatch_inputs, make_ctx, set_setting
@@ -17,6 +19,104 @@ from tests.watcher._support import coordinator, dispatch_inputs, make_ctx, set_s
 
 class Crash(BaseException):
     pass
+
+
+def command(ctx, command_id="command-1"):
+    with ctx.store.tx(Actor.session("planner")) as tx:
+        tx.execute(
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
+            " VALUES (?, 'task', ?, 'orchestrator', 'session:planner', ?, '2099-01-01T00:00:00Z')",
+            (
+                command_id,
+                json.dumps(
+                    {
+                        "action": "create",
+                        "operation_id": "repair-1",
+                        "type": "maintenance",
+                        "title": "Repair",
+                        "description": "Repair it",
+                    }
+                ),
+                tx.at,
+            ),
+        )
+
+
+@pytest.mark.parametrize("cut", ["before_commit", "after_commit", "before_notification"])
+def test_domain_command_and_acknowledgment_survive_crash_cut(tmp_path, monkeypatch, cut):
+    ctx = make_ctx(tmp_path)
+    command(ctx)
+    original = db.Tx.__exit__
+    fired = False
+
+    def commit(tx, *args):
+        nonlocal fired
+        applies = tx.store.one(
+            "SELECT 1 FROM events WHERE kind='transition.applied' AND seq>?", (tx._start_event,)
+        )
+        if not applies or fired:
+            return original(tx, *args)
+        fired = True
+        if cut == "before_commit":
+            original(tx, Crash, Crash(), None)
+            raise Crash()
+        if cut == "before_notification":
+            # COMMIT precedes notify_all; its exception must never roll back a committed write.
+            with monkeypatch.context() as patch:
+                patch.setattr(db._changes, "notify_all", lambda: (_ for _ in ()).throw(Crash()))
+                return original(tx, *args)
+        original(tx, *args)
+        raise Crash()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db.Tx, "__exit__", commit)
+        with pytest.raises(Crash):
+            transitions.apply(ctx, "coordinator:before-crash")
+    transitions.apply(ctx, "coordinator:replacement")
+    transitions.apply(ctx, "coordinator:replacement")  # duplicated wakeup
+    assert ctx.store.one("SELECT count(*) FROM tasks")[0] == 1
+    result = transitions.receipt(ctx.store, "command-1")
+    assert result["ok"] and result["record"]["id"] == "T-1"
+    assert ctx.store.one("SELECT count(*) FROM events WHERE kind='task.created'")[0] == 1
+    assert ctx.store.unmarked_changes() == []
+
+
+def test_real_tool_handoff_reaches_coordinator_and_returns_durable_result(tmp_path):
+    ctx = make_ctx(tmp_path)
+    version = db.change_version()
+
+    def invoke():
+        tool_ctx = ToolContext.from_env(
+            "orchestrator",
+            {**ctx.env, "IDE_WORKSPACE": str(ctx.ws.root), "IDE_SESSION_ID": "planner"},
+        )
+        try:
+            return json.loads(
+                run_tool(
+                    "task",
+                    {
+                        "action": "create",
+                        "operation_id": "repair-1",
+                        "type": "maintenance",
+                        "title": "Repair",
+                        "description": "Repair it",
+                    },
+                    tool_ctx,
+                )
+            )
+        finally:
+            tool_ctx.store.close()
+            tool_ctx.wstore.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(invoke)
+        db.wait_for_change(version, 5)
+        transitions.apply(ctx, "coordinator:integration")
+        result = future.result(timeout=5)
+    assert result["ok"] and result["record"]["id"] == "T-1"
+    assert invoke() == result  # Caller retries the same operation after losing its reply.
+    [row] = ctx.store.q("SELECT * FROM transition_commands")
+    assert row["owner_instance"] == "coordinator:integration" and row["completed_at"]
 
 
 def test_late_acceptance_receipt_cannot_revive_completed_attempt(tmp_path):
@@ -68,7 +168,7 @@ def test_retry_transfer_replays_exact_successor_and_fences_old_worker(tmp_path, 
     def commit(tx, *args):
         if tx.store.kind == "coworld" and tx.store.one(
             "SELECT 1 FROM events WHERE kind='task.attempt_transferred' AND seq>?",
-            (0,),
+            (tx._start_event,),
         ):
             if cut == "before_commit":
                 original(tx, Crash, Crash(), None)
@@ -165,6 +265,87 @@ def test_live_event_guidance_is_rerouted_when_parent_finishes_before_delivery(tm
     old = ctx.wstore.one("SELECT * FROM client_admissions WHERE native_key=?", (result["key"],))
     assert old["disposition"] == "delivery rerouted" and old["successor_id"]
     assert len(ctx.hermes.runs) == 2
+
+
+def test_queued_claim_preserves_worker_profile_under_orchestrator_environment(tmp_path):
+    from research_core import gitops
+
+    ctx = make_ctx(tmp_path)
+    gitops.init_repo(ctx.coworld.code)
+    row = assigned(ctx)
+    ctx.env = {"HERMES_PROFILE_NAME": "orchestrator", "IDE_ROLE": "orchestrator"}
+    with ctx.store.tx(Actor.session(row["session_id"])) as tx:
+        tx.execute(
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
+            " VALUES ('claim','task',?,'researcher',?,?,'2099-01-01T00:00:00Z')",
+            (
+                json.dumps({"action": "claim", "task": "T-1", "operation_id": "claim"}),
+                str(Actor.session(row["session_id"])),
+                tx.at,
+            ),
+        )
+    transitions.apply(ctx, "coordinator:test")
+    assert transitions.receipt(ctx.store, "claim")["ok"]
+    assert sessions.read(ctx.wstore, row["session_id"])["profile"] == "researcher"
+
+
+@pytest.mark.parametrize("action", ["assign", "release"])
+def test_workspace_effect_survives_lost_cross_store_acknowledgment(tmp_path, monkeypatch, action):
+    ctx = make_ctx(tmp_path)
+    owner = coordinator(ctx)
+    if action == "assign":
+        from tests.watcher._support import make_task
+
+        task = make_task(ctx, type="maintenance")
+        args = {
+            "action": "assign",
+            "task": "T-1",
+            "task_updated": task["updated"],
+            "profile": "researcher",
+            "assignment_id": "stable",
+            "operation_id": "stable",
+            "context": "Repair",
+            "rationale": "Fit",
+        }
+        actor = Actor.session("planner")
+        role = "orchestrator"
+    else:
+        row = assigned(ctx)
+        args = {"action": "release", "task": "T-1", "reason": "Done", "operation_id": "release"}
+        actor, role = Actor.session(row["session_id"]), "researcher"
+    with ctx.store.tx(actor) as tx:
+        tx.execute(
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
+            " VALUES ('cross-store','task',?,?,?,?,'2099-01-01T00:00:00Z')",
+            (json.dumps(args), role, str(actor), tx.at),
+        )
+    original = db.Tx.__exit__
+
+    def commit(tx, *exc):
+        if (
+            tx.store.kind == "workspace"
+            and tx.store.one("SELECT 1 FROM transition_effects WHERE command_id='cross-store'")
+            and tx.store.one("SELECT 1 FROM events WHERE seq>?", (tx._start_event,))
+        ):
+            original(tx, *exc)
+            raise Crash()
+        return original(tx, *exc)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db.Tx, "__exit__", commit)
+        with pytest.raises(Crash):
+            transitions.apply(ctx, "coordinator:original")
+    if action == "release":
+        for _ in range(3):
+            owner.finish_assignments(ctx.wstore)
+        assert not ctx.wstore.q("SELECT * FROM task_assignments")
+    with ctx.store.tx(Actor.harness()) as tx:
+        tx.execute("UPDATE transition_commands SET attempts=3,deadline='2000-01-01T00:00:00Z'")
+    transitions.apply(ctx, "coordinator:replacement")
+    result = transitions.receipt(ctx.store, "cross-store")
+    assert result["ok"]
+    assert result["kind"] == ("reserved" if action == "assign" else "release_pending")
+    assert ctx.store.one("SELECT attempts FROM transition_commands")[0] == 4
 
 
 def test_admitted_start_is_not_replayed_into_a_different_private_runtime(tmp_path):

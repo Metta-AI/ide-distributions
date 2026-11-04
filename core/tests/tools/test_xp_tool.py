@@ -65,7 +65,9 @@ def run(ctx_factory, workspace_env):
 
     def call(tool, args, *, role="orchestrator", session_id="s1", faults=""):
         env = dict(workspace_env, IDE_SESSION_ID=session_id, IDE_FAKE_FAULTS=faults)
-        return json.loads(run_tool(tool, args, ToolContext.from_env(role, env)))
+        ctx = ToolContext.from_env(role, env)
+        ctx.coordinator_instance = "coordinator:unit"
+        return json.loads(run_tool(tool, args, ctx))
 
     return call
 

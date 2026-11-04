@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import threading
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -16,16 +17,25 @@ from research_core.store.errors import StoreError
 Origin = Literal[
     "client", "answer", "assignment", "continuation", "planning", "wake", "watcher", "migration"
 ]
+_held_locks = threading.local()
 
 
 @contextmanager
 def dispatch_lock(store: Store):
     """Serialize the start/receipt boundary with the separate sleep command."""
-    with (store.path.parent / "client-dispatch.lock").open("a") as lock:
+    path = store.path.parent / "client-dispatch.lock"
+    if not hasattr(_held_locks, "paths"):
+        _held_locks.paths = set()
+    if path in _held_locks.paths:
+        yield
+        return
+    with path.open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        _held_locks.paths.add(path)
         try:
             yield
         finally:
+            _held_locks.paths.remove(path)
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 

@@ -30,9 +30,10 @@ from typing import TYPE_CHECKING, Any
 
 from research_core import gitops, mixin
 from research_core.platform.errors import PlatformError
-from research_core.store import capabilities, champion, settings
+from research_core.store import champion, settings
 from research_core.store._common import display_id, parse_iso
 from research_core.tools.base import ToolContext
+from research_core.transitions import report_capability
 
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.platform.protocol import Membership, Platform, Submission
@@ -291,9 +292,8 @@ def check_shortfall(ctx: ToolContext, vid: str, commit: str) -> str | None:
             f" (log {result.log_path})"
         )
     if result.exit_code != 0:
-        capabilities.report_failure(
-            ctx.store,
-            ctx.actor,
+        report_capability(
+            ctx,
             "check",
             output=_log_text(result.log_path),
             command=result.command,

@@ -48,10 +48,11 @@ from research_core.platform import xp as xp_module
 from research_core.platform.errors import CreditsRefused, PlatformError
 from research_core.platform.protocol import Credits, Platform, XpRequest, with_retries
 from research_core.stats.ingest import rows_from_evaluate_output
-from research_core.store import capabilities, experiments, intents, settings, versions
+from research_core.store import experiments, intents, settings, versions
 from research_core.store._common import parse_display_id
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
+from research_core.transitions import report_capability
 
 BOTH = frozenset({"orchestrator", "researcher"})
 ARMS = ("candidate", "baseline")
@@ -527,8 +528,8 @@ def _finish_evaluate(
     results = dict(run.get("results") or {})
     results["evaluate"] = {"log": str(result.log_path), "exit_code": result.exit_code}
     if not result.ok:
-        capabilities.report_failure(
-            ctx.store, ctx.actor, "evaluate", output=result.output_tail, command=result.command
+        report_capability(
+            ctx, "evaluate", output=result.output_tail, command=result.command
         )
         _store_rows(ctx, run, results, f"invalid: evaluate failed (exit {result.exit_code})")
         return None
@@ -540,9 +541,8 @@ def _finish_evaluate(
             request_id=run["platform_request_id"],
         )
     except ValueError as error:
-        capabilities.report_failure(
-            ctx.store,
-            ctx.actor,
+        report_capability(
+            ctx,
             "evaluate",
             output=f"{result.output_tail}\n\n{error}",
             command=result.command,

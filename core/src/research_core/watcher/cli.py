@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from research_core import layout
-from research_core.store import admissions, settings
+from research_core.store import admissions, coworlds, settings
 from research_core.store._common import parse_iso
 from research_core.store.db import Store
 from research_core.watcher import context, drain
@@ -110,9 +110,20 @@ def run_status(args: argparse.Namespace) -> int:
                 if "IDE_INFERENCE_LEASE_FILE" in os.environ
                 else None,
             ),
+            "pending_transitions": [],
             "restart_required": admissions.restart_required(wstore),
             "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
         }
+        active = coworlds.active(wstore)
+        if active is not None:
+            with Store.open(ws.coworld(active["coworld_id"]).store_path, kind="coworld") as store:
+                payload["pending_transitions"] = [
+                    dict(row)
+                    for row in store.q(
+                        "SELECT id,tool,actor,owner_instance,deadline,attempts"
+                        " FROM transition_commands WHERE result IS NULL"
+                    )
+                ]
     print(json.dumps(payload))
     return 0
 

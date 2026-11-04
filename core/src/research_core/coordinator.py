@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from research_core import layout
+from research_core import layout, transitions
 from research_core.store import admissions, events, notices, sessions, settings, tasks
 from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
@@ -1478,6 +1478,7 @@ class Coordinator:
 
     def advance(self, ctx: TickContext) -> dict:
         """One explicit workflow owner. Observation only supplies facts to this state machine."""
+        transitions.apply(ctx, self.instance_id)
         report = {"store_checks": store_checks.run(ctx)}
         paused = store_checks.pause_state(ctx)
         self.reconcile_inputs(ctx.wstore)
@@ -1681,6 +1682,16 @@ class Coordinator:
                         context,
                     ),
                 )
+                transitions.record_effect(
+                    tx,
+                    ctx.env,
+                    {
+                        "kind": "reserved",
+                        "op_id": op_id,
+                        "session_id": session_id,
+                        "profile": profile,
+                    },
+                )
                 tx.event(
                     "task.assigned",
                     task["id"],
@@ -1725,6 +1736,15 @@ class Coordinator:
                         ).isoformat(),
                         assignment["op_id"],
                     ),
+                )
+                transitions.record_effect(
+                    tx,
+                    ctx.env,
+                    {
+                        "kind": "release_pending",
+                        "record": tasks.read(ctx.store, task_id),
+                        "reason": "The coordinator stops the run before releasing task ownership",
+                    },
                 )
                 tx.event(
                     "task.release_requested",

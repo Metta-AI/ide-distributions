@@ -27,6 +27,7 @@ from research_core.platform.errors import PlatformError
 from research_core.platform.protocol import Identity, with_retries
 from research_core.store.errors import StoreError
 from research_core.tools.base import ToolContext, ToolError
+from research_core.transitions import report_capability
 
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.store.db import Store
@@ -67,14 +68,11 @@ def tool_error(
 
 def report_login_failure(ctx: ToolContext, identity: str, error: PlatformError) -> dict | None:
     """Mark ``login:<identity>`` broken (A4.1); None when no Coworld store is active."""
-    from research_core.store import capabilities
 
     store = _coworld_store(ctx)
     if store is None:
         return None
-    report = capabilities.report_failure(
-        store, ctx.actor, f"login:{identity}", output=error.detail, command="whoami"
-    )
+    report = report_capability(ctx, f"login:{identity}", output=error.detail, command="whoami")
     return {"capability": report["name"], "maintenance_task": _task_id(report)}
 
 
@@ -103,20 +101,31 @@ def _wait_on_platform(ctx: ToolContext, route: str, error: PlatformError) -> dic
     task_id = _held_task_id(ctx)
     if task_id is None:
         return {"waiting": False}
-    try:
-        from research_core.store import tasks
-    except ImportError:
-        return {"waiting": False, "wait_skipped": "store.tasks is not available yet"}
     status = error.status if error.status is not None else "unreachable"
     try:
-        tasks.wait(
-            ctx.store,
-            ctx.actor,
-            task_id,
-            kind="platform",
-            detail=f"{route} {status}",
-            ref=error.request_id,
+        from uuid import uuid4
+
+        from research_core.tools import task
+        from research_core.tools.base import ToolCall
+
+        result = task.dispatch(
+            ToolCall(
+                spec=task.SPEC,
+                ctx=ctx,
+                action="wait",
+                args={
+                    "action": "wait",
+                    "task": str(task_id),
+                    "kind": "platform",
+                    "detail": f"{route} {status}",
+                    "ref": error.request_id,
+                    "operation_id": f"platform:{error.request_id or uuid4()}",
+                },
+            )
         )
+        if result.get("kind") == "transition_pending":
+            return {"waiting": False, "transition": result}
+
     except StoreError as problem:
         return {"waiting": False, "wait_skipped": "; ".join(problem.problems) or str(problem)}
     return {"waiting": True, "task": f"T-{task_id}"}

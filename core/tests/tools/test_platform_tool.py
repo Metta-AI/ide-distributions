@@ -400,6 +400,10 @@ def test_platform_down_puts_the_held_task_on_wait(call, ctx_factory, workspace_e
         coworld_id=fake.COWORLD_ID, task_id=1,
     )  # fmt: skip
 
+    from research_core.coordinator import Coordinator
+
+    sessions.set_run(ctx.wstore, holder, "s-task", "r1")
+    Coordinator.adopt_existing_workers(ctx.workspace, ctx.wstore)
     workspace_env["IDE_FAKE_FAULTS"] = "platform=down"
     result = call("platform", {"action": "credits"}, role="researcher", session_id="s-task")
     assert result["ok"] is False

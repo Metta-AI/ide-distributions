@@ -206,7 +206,11 @@ def test_claim_from_a_second_session_is_refused(call, goal, code_repo):
 def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
     call("task", task_args())
     no_session = json.loads(
-        run_tool("task", {"action": "claim", "task": "T-1"}, ctx_factory("researcher", ""))
+        run_tool(
+            "task",
+            {"action": "claim", "task": "T-1", "operation_id": "no-session"},
+            ctx_factory("researcher", ""),
+        )
     )
     assert no_session["ok"] is False and "session" in no_session["error"]
     no_repo = claim(call)
