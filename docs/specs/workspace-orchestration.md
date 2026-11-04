@@ -45,8 +45,9 @@ execution identity. If the target ends first, advancement consumes a durable rer
 
 `task_assignments.current_attempt_id` identifies the authoritative execution. Release examines
 that pointer and every outstanding execution obligation for the task, rather than the latest
-message. Old worker sessions retain their old lease epochs. Task transition commands from a
-superseded or terminal execution are refused.
+message. Old worker sessions retain their old lease epochs. New task transition requests from a
+superseded or terminal execution are refused. Reports already accepted for the current attempt
+retain their authority after worker exit until the coordinator records their disposition.
 
 Commands require caller-stable `operation_id` values. Repeating an ID returns its durable result;
 a changed payload is refused. Native tool schemas require the ID for every command action.
