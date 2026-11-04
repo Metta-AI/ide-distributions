@@ -202,7 +202,10 @@ class SeamServer:
                 store.set_meta("coordinator_instance", self.coordinator.instance_id)
             with ThreadPoolExecutor(max_workers=1) as worker:
                 dispatch = worker.submit(asyncio.run, self.dispatch_forever())
-                dispatch.add_done_callback(lambda _: self._http.shutdown())
+                # A completed Future invokes callbacks inline, before the HTTP loop starts.
+                dispatch.add_done_callback(
+                    lambda _: threading.Thread(target=self._http.shutdown, daemon=True).start()
+                )
                 try:
                     self._http.serve_forever(poll_interval=0.2)
                 finally:

@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -1164,3 +1166,56 @@ def test_contending_server_cannot_publish_owner_or_serve_http(tmp_path, monkeypa
         server._http.server_close()
         ctx.store.close()
         ctx.wstore.close()
+
+
+def test_dispatch_failure_before_callback_registration_exits_and_releases_owner(tmp_path):
+    # Bound the whole process: the regression blocks before the HTTP loop can start.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from concurrent.futures import ThreadPoolExecutor, wait
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from research_core import serve
+from research_core.coordinator import ownership
+from research_core.layout import Workspace
+from research_core.watcher.hermes_api import FakeHermesRuns
+
+class CompletedExecutor(ThreadPoolExecutor):
+    def submit(self, *args, **kwargs):
+        future = super().submit(*args, **kwargs)
+        wait([future], timeout=2)
+        assert future.done()
+        return future
+
+async def failed_dispatch():
+    raise RuntimeError("immediate dispatcher failure")
+
+root = Path(sys.argv[1])
+ws = Workspace(root=root, venv=root / "tools/venv")
+ws.ensure_dirs()
+server = serve.SeamServer(ws=ws, hermes=FakeHermesRuns(), env={})
+with (
+    patch.object(serve, "ThreadPoolExecutor", CompletedExecutor),
+    patch.object(server, "dispatch_forever", failed_dispatch),
+    pytest.raises(RuntimeError, match="immediate dispatcher failure"),
+):
+    server.serve_forever()
+server._http.server_close()
+with ownership(ws):
+    print("dispatcher error propagated; owner released")
+""",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "dispatcher error propagated; owner released" in result.stdout
