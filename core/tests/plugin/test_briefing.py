@@ -107,6 +107,33 @@ def assert_no_store_path(text, tmp_path):
     assert str(tmp_path) not in text
 
 
+def test_a_preference_kept_as_a_workspace_directive_shows_with_or_without_a_coworld(tmp_path):
+    ctx = make_ctx(tmp_path, coworld=False)
+    directives.add(
+        ctx.wstore, HARNESS, text="Keep your replies short", scope="workspace", source="msg:1"
+    )
+    expected = 'W-1 (workspace): "Keep your replies short"'
+    assert expected in briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
+
+    coworlds.register(ctx.wstore, HARNESS, "cow_fake", folder="cow_fake")
+    coworlds.activate(ctx.wstore, HARNESS, "cow_fake")
+    ctx.workspace.coworld("cow_fake").ensure_dirs()
+    assert expected in briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
+
+
+def test_the_briefing_does_not_ask_for_preference_claims(tmp_path):
+    ctx = make_ctx(tmp_path)
+    text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
+    assert "preference" not in text.lower()
+
+
+def test_existing_preference_claims_still_show(tmp_path):
+    ctx = make_ctx(tmp_path)
+    make_claim(ctx.store, 1, ["preference"])
+    text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
+    assert "C-1: Finding 1" in text
+
+
 def test_overflow_cuts_the_lowest_priority_list_first_and_keeps_the_budget(tmp_path):
     ctx = make_ctx(tmp_path)
     for n in range(1, 51):

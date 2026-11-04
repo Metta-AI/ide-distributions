@@ -36,7 +36,7 @@ def test_update_lands_in_the_store_the_scope_names(call, ctx_factory):
     assert paused["ok"] is True
     assert paused["record"]["value"] is True and paused["record"]["previous"] is False
     assert paused["record"]["scope"] == "workspace"
-    assert "preference claim" in paused["next"]
+    assert "next" not in paused
 
     mode = call(
         "settings",

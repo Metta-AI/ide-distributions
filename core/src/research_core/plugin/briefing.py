@@ -3,7 +3,7 @@
 A computed status summary in every Session's system prompt, rendered once per session and
 again after compaction: the workspace status, the last capability check and what is broken,
 the active directives, the champion and recent Versions, this Session's Task, the active Goals,
-the user's preference claims and recent claims tagged with active Goals. Every item is one
+any older preference claims (A3.10) and recent claims tagged with active Goals. Every item is one
 line with references, so the agent reads the record it needs with the record tools.
 
 Budget: at most 3,600 characters on the Orchestrator (its two sections share Hermes's
@@ -452,10 +452,10 @@ def _preference_claims(inputs: Inputs) -> Section:
         limit=PREFERENCE_CLAIMS_LOADED,
     )
     if not found:
-        return Section(lines=["User preferences: none recorded (tag a claim preference)"])
+        return Section()
     entries = [f"{c['id']}: {_clip(c['summary'], SUMMARY_CHARS)}" for c in found]
     return Section(
-        lines=["User preferences (claims tagged preference):"],
+        lines=["Earlier user preferences (older claims; new preferences are directives):"],
         entries=entries,
         more="search with claim.search",
         total=_count_tagged(inputs.store, ["preference"]),

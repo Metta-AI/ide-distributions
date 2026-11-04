@@ -116,6 +116,14 @@ and task it changes. Implementers read this file with their entry.
 - A3.9 The platform tool wrapper (entry 4) sets `waiting_on: platform` for a task Session when a
   `PlatformError` escapes `with_retries`: `tasks.wait(kind="platform", detail=f"{route} {status}",
   ref=request_id)`, and the result carries route, status and request id.
+- A3.10 **Preferences are directives** (added 2026-11-04; replaces "user-preference claims" in
+  design §9 and entry 3): a user's preference becomes a directive, on the workspace unless it
+  concerns one Goal, or a setting when a setting key covers it. Claims live in one Coworld's
+  store and need evidence, so a preference claim did not follow the user between Coworlds.
+  `settings.update` no longer suggests writing a preference claim. The briefing still lists
+  claims tagged `preference` that already exist, below Goals, and omits the item when there are
+  none; it can be removed once no workspace has any. Directives rank above Goals in the briefing,
+  so many long preferences would push Goal information out.
 
 ## Platform (entry 4)
 
