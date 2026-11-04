@@ -37,6 +37,7 @@ COWORLD_TABLES = {
 }
 
 WORKSPACE_TABLES = {
+    "task_assignments",
     "client_admissions",
     "meta",
     "events",
@@ -156,8 +157,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 4
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert migrate.apply_migrations(conn, "workspace") == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
 def test_migrations_apply_in_numeric_order_and_only_pending_ones(tmp_path, monkeypatch):
