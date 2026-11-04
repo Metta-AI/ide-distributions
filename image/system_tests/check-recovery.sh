@@ -65,5 +65,10 @@ assert len(events) == 1, events
 assert events[0].completed_recoveries == 0, events
 print("PASS recovery telemetry: one request, durable recovery count=1")
 ' < "$scratch/recovery.log"
+# Exercise the new command path in the normal running image, after lifecycle proof.
+docker exec -e HERMES_HOME=/workspace/host/profiles/researcher "$name" \
+  /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-transitions.py \
+  > "$scratch/transition-commands.json"
+cat "$scratch/transition-commands.json"
 docker stop --time 30 "$name" >/dev/null
 docker rm "$name" >/dev/null
