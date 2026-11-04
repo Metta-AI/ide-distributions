@@ -48,10 +48,18 @@ with Store.open(ws.store_path, kind="workspace") as store:
     coworld = ws.coworld("transition-proof")
     coworld.ensure_dirs()
     coworlds.register(store, actor, coworld.coworld_id, folder=coworld.folder_name)
-    coworlds.activate(store, actor, coworld.coworld_id)
 
 opened = post(
-    "/session-open", {"op_id": str(uuid4()), "client": {"id": "packaged-proof", "kind": "test"}}
+    "/session-open",
+    {
+        "op_id": str(uuid4()),
+        "client": {"id": "packaged-proof", "kind": "test"},
+        "session_context": {
+            "contract_version": 1,
+            "scope": "coworld",
+            "coworld": coworld.coworld_id,
+        },
+    },
 )
 session_id = opened["session_id"]
 os.environ["IDE_SESSION_ID"] = session_id
@@ -85,6 +93,7 @@ approved = post(
     {
         "actor": str(actor),
         "op": "tasks.approve",
+        "coworld": coworld.coworld_id,
         "args": {"task_id": record["id"], "operation_id": "approve-proof"},
     },
 )

@@ -36,6 +36,7 @@ class Scenario:
         self.env = {
             "IDE_WORKSPACE": str(tmp_path / "ws"),
             "IDE_PLATFORM": "fake",
+            "IDE_COWORLD_ID": COWORLD_ID,
             "IDE_RESEARCHER_PROFILES": "researcher",
             "SOFTMAX_PLAYER_ID": "ply_test",
         }
@@ -49,7 +50,9 @@ class Scenario:
         self.server = SeamServer(ws=self.ws, hermes=self.hermes)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.client = ScriptedClient(self.server.url)
-        self.session_id = self.client.open("scripted", "web-ide")
+        self.session_id = self.client.open(
+            "scripted", "web-ide", session_context={"contract_version": 1, "coworld": COWORLD_ID}
+        )
 
     def tick(self) -> dict:
         self.observed_at += timedelta(seconds=60)
@@ -110,8 +113,8 @@ def test_acceptance_submit_starter(scenario):
 
     # The Coworld is active, the request reached the user as a notice, and the submission
     # event cites the user's message.
-    assert coworlds.active(ctx.wstore)["coworld_id"] == COWORLD_ID
-    texts = [n["text"] for n in notices.unread(ctx.wstore, limit=20)]
+    assert coworlds.active(ctx.wstore) is None
+    texts = [n["text"] for n in notices.unread(ctx.wstore, limit=20, coworld_id=COWORLD_ID)]
     assert any("Submitted V-1" in t for t in texts), texts
     submitted = [
         json.loads(row["payload"])
@@ -136,7 +139,7 @@ def test_notice_opens_next_turn(scenario):
     rendered = scenario.agent.rendered[reply["run_id"]]
     assert "[notices since your last turn]" in rendered
     assert "Submitted V-1" in rendered
-    assert "[active Coworld] cow_fake" in rendered
+    assert "[session Coworld] cow_fake" in rendered
     # Read once: the next turn does not repeat it.
     again = scenario.client.say("anything else?", wait=True)
     assert "Submitted V-1" not in scenario.agent.rendered[again["run_id"]]

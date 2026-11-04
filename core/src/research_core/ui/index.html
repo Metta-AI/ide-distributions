@@ -438,6 +438,10 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   const RUN_POLL_MS = 500;
   const EVENT_CAP = 300;
   const WORKSPACE = "workspace";
+  const selected = new URLSearchParams(location.search);
+  const scope = {scope: selected.get("coworld") ? "coworld" : "workspace", coworld: selected.get("coworld"), league: selected.get("league")};
+  const sharedConversation = scope.coworld ? `coworld:${scope.coworld}` : WORKSPACE;
+  const visibleConversation = (id) => id === state.session || id === sharedConversation;
   // Which snapshot table each Records tab shows, with its columns. "store" is where the rows
   // come from (the registry: Goals, Tasks, Versions, Claims and Experiments live in the Coworld
   // store; Directives and settings in both).
@@ -534,7 +538,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   function renderHealth() {
     const h = state.health || {}, s = state.status || {};
     setText("h-profile", esc(h.profile || "…"));
-    setText("h-coworld", h.coworld ? linkify(h.coworld) : '<em class="muted">none active</em>');
+    setText("h-coworld", scope.coworld ? linkify(scope.coworld) : '<em class="muted">workspace session</em>');
     setText("h-contract", h.contract_version ? `v${esc(h.contract_version)}` : "…");
     if (s.heartbeat) {
       const age = s.heartbeat_age_s;
@@ -555,6 +559,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   async function openSession() {
     const reply = await api("POST", "/session-open", {
       client: {id: "ui", kind: "web-ide"},
+      session_context: {contract_version: 1, ...scope},
       actor: ACTOR,
       capabilities: {ui: ["ask", "show", "panel_set", "notify"], panels: ["markdown"], reactions: true},
     });
@@ -564,7 +569,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   }
 
   function buildContext() {
-    const context = {contract_version: 1};
+    const context = {contract_version: 1, ...scope};
     const mode = $("ctx-mode").value.trim(), instruction = $("ctx-instruction").value.trim();
     if (mode) { context.mode = {name: mode}; if (instruction) context.mode.instruction = instruction; }
     const onScreen = $("ctx-on-screen").value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20);
@@ -675,7 +680,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   function openStream(store, after) {
     // The browser reconnects on its own and sends Last-Event-ID with the last `id:` it saw,
     // so a dropped connection resumes where it stopped; `after` only matters for the first open.
-    const source = new EventSource(`/stream?store=${encodeURIComponent(store)}&after=${after}`);
+    const source = new EventSource(`/stream?store=${encodeURIComponent(store)}&after=${after}${store === "coworld" ? "&coworld=" + encodeURIComponent(scope.coworld) : ""}`);
     state.streams[store] = source;
     state.streamState[store] = "connecting";
     source.onopen = () => { state.streamState[store] = "open"; renderHealth(); };
@@ -764,13 +769,13 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
 
   function renderNotices() {
     const list = $("notices");
-    const items = [...state.notices.values()].sort((a, b) => (a.at < b.at ? 1 : -1));
+    const items = [...state.notices.values()].filter(n => (n.coworld_id || null) === scope.coworld).sort((a, b) => (a.at < b.at ? 1 : -1));
     if (!items.length) { list.innerHTML = '<li class="empty"><em>No notices yet.</em></li>'; return; }
     list.innerHTML = items.map((n) => `<li data-id="${esc(n.id)}"><div class="row"><span class="mono muted">${esc(n.id)}</span>${chip(n.urgency)}<span class="muted">${fmtTime(n.at || n.created)}</span>${(n.refs || []).length ? `<span class="muted">about ${(n.refs || []).map(linkify).join(", ")}</span>` : ""}</div><p>${linkify(n.text)}</p></li>`).join("");
   }
 
   function renderUiState() {
-    const docs = Object.entries(state.docs);
+    const docs = Object.entries(state.docs).filter(([id]) => visibleConversation(id));
     // Now showing: the newest `show` of any conversation.
     const shows = docs.filter(([, d]) => d.show).map(([c, d]) => ({conversation: c, ...d.show})).sort((a, b) => (a.at < b.at ? 1 : -1));
     if (shows.length) {
@@ -822,7 +827,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
 
   async function loadSnapshot(store) {
     try {
-      const snapshot = await api("GET", `/snapshot?store=${encodeURIComponent(store)}`);
+      const snapshot = await api("GET", `/snapshot?store=${encodeURIComponent(store)}${store === "coworld" ? "&coworld=" + encodeURIComponent(scope.coworld) : ""}`);
       state.snapshots[store] = snapshot;
       state.seen[store] = snapshot.seq;
       if (store === "coworld") state.coworldMissing = false;
@@ -885,7 +890,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       return `<div role="tabpanel" id="panel-${t.key}" aria-labelledby="tab-${t.key}" ${t.key === state.tab ? "" : "hidden"}><div class="scroll-x"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div></div>`;
     }).join("");
     const note = $("records-note");
-    if (state.coworldMissing) note.textContent = "No active Coworld yet: Goals, Tasks, Versions, Claims and Experiments appear once one is set up. Ask the Orchestrator to submit the starter.";
+    if (state.coworldMissing) note.textContent = "This is a workspace session. Open this desk with ?coworld=<id> to work on a particular game.";
     else if (state.snapshots.coworld) note.textContent = `Coworld ${state.snapshots.coworld.coworld_id} at seq ${state.snapshots.coworld.seq}; workspace at seq ${state.snapshots.workspace ? state.snapshots.workspace.seq : "?"}. Refreshed when a record event arrives.`;
     else note.textContent = "Loading the snapshots…";
     renderSettingKeys();
@@ -965,7 +970,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     try {
       const args = form.args();
       if (op.startsWith("tasks.")) args.operation_id = crypto.randomUUID();
-      let reply = await api("POST", "/store/apply", {actor: ACTOR, op, args});
+      let reply = await api("POST", "/store/apply", {actor: ACTOR, op, args, coworld: scope.coworld});
       if (reply.status === "pending") {
         let command = reply.command;
         acceptedCommand = command;
@@ -1061,7 +1066,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     try { await openSession(); } catch (error) { showError(`session-open failed: ${error.message}`); setText("session-id", '<span class="err-text">none</span>'); }
     await pollHealth();
     await loadSnapshot(WORKSPACE);
-    if (state.health && state.health.coworld) await loadSnapshot("coworld");
+    if (scope.coworld) await loadSnapshot("coworld");
     else { state.coworldMissing = true; renderRecords(); }
     setInterval(pollHealth, STATUS_POLL_MS);
   })();

@@ -30,6 +30,8 @@ def run_switch(args: argparse.Namespace) -> int:
     from research_core.tools.base import ToolError
 
     ctx = _context()
+    if not ctx.hermes_session_id():
+        ctx.env = {**ctx.env, "IDE_COWORLD_ID": args.coworld_id}
     try:
         result = coworld_setup.switch(
             ctx, args.coworld_id, cites=args.cites, source=args.source, commit=args.commit
@@ -51,17 +53,17 @@ def run_setup_status(args: argparse.Namespace) -> int:
 
 def add_parser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
-        "coworld", help="Switch the active Coworld or report where its setup stands"
+        "coworld", help="Set up a named Coworld or report this session's setup"
     )
     commands = parser.add_subparsers(dest="coworld_command", metavar="<subcommand>")
     switch = commands.add_parser(
         "switch",
-        help="Register and activate a Coworld; fetch its source and emit coworld.setup_needed",
+        help="Set up this session's Coworld; a bare CLI explicitly selects the named Coworld",
     )
     switch.add_argument("coworld_id", help="The platform Coworld id, such as cow_fake")
     switch.add_argument("--cites", default=None, help="The user's message reference")
     switch.add_argument("--source", default=None, help="Override the manifest's source URL")
     switch.add_argument("--commit", default=None, help="Override the pinned source commit")
     switch.set_defaults(run=run_switch)
-    status = commands.add_parser("setup-status", help="The active Coworld's setup status as JSON")
+    status = commands.add_parser("setup-status", help="This session's Coworld setup status as JSON")
     status.set_defaults(run=run_setup_status)

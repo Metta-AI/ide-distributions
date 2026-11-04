@@ -36,7 +36,11 @@ class Pod:
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.env = {"IDE_WORKSPACE": str(root), "IDE_PLATFORM": "fake"}
+        self.env = {
+            "IDE_WORKSPACE": str(root),
+            "IDE_PLATFORM": "fake",
+            "IDE_COWORLD_ID": COWORLD_ID,
+        }
         self.contexts: list[ToolContext] = []
 
     def ctx(self, role: str = "orchestrator", session_id: str = "s1") -> ToolContext:
@@ -92,7 +96,13 @@ def publish_from_task_worktree(pod: Pod) -> tuple[dict, str, Path]:
         ctx.store, HARNESS, type="maintenance", title="Tune patience", description="Raise it."
     )
     sessions.register(
-        ctx.wstore, HARNESS, session_id="s2", profile="researcher", kind="task", task_id=1
+        ctx.wstore,
+        HARNESS,
+        session_id="s2",
+        profile="researcher",
+        kind="task",
+        task_id=1,
+        coworld_id=COWORLD_ID,
     )
     tasks.claim(
         ctx.store,

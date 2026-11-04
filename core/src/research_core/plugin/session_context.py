@@ -32,6 +32,24 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
         )
     else:
         parts.append("No session context was declared; the client did not say what it shows.")
+    coworld = ctx.coworld_or_none()
+    if coworld is not None:
+        parts.append(
+            f"Work only in {coworld.code}. "
+            f"This session belongs to {coworld.coworld_id}; do not change its Coworld."
+        )
+        parts.append(
+            "In the native terminal, scope store commands explicitly: "
+            f"research store snapshot --store coworld --coworld {coworld.coworld_id}. "
+            "Custom research tools already carry this session's binding."
+        )
+        skills = sorted((coworld.mixin / "skills").glob("*/SKILL.md"))
+        skills.extend(sorted((coworld.code / ".agents" / "skills").glob("*/SKILL.md")))
+        if skills:
+            parts.append(
+                "Read the relevant game skill directly before using it:\n"
+                + "\n".join(str(path) for path in skills)
+            )
     if session and session.get("client_capabilities"):
         parts.append(
             "Attached clients can show: "
@@ -50,8 +68,6 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
 
 def make_section(role: str):
     def section(info: Any = None, **_: Any) -> str:
-        if role != "orchestrator":
-            return ""
         try:
             from research_core.plugin.executor import profile_env
             from research_core.tools.base import ToolContext

@@ -43,7 +43,8 @@ class Workspace:
 
 @pytest.fixture
 def workspace(tmp_path, monkeypatch) -> Workspace:
-    """A workspace at ``tmp_path`` with ``cow-x`` registered and active; both stores open."""
+    """A workspace with an explicitly selected CLI Coworld; both stores open."""
+    monkeypatch.setenv("IDE_COWORLD_ID", COWORLD_ID)
     monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
     ws = layout.from_env()
     wstore = Store.open(ws.store_path, kind="workspace")
@@ -358,7 +359,7 @@ def test_apply_without_an_active_coworld_says_so(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
     code, out = apply(capsys, "goals.update", {"goal_id": 1, "title": "x"})
     assert code == 1
-    assert "no active Coworld" in out["problems"][0]
+    assert "no session Coworld" in out["problems"][0]
     # Workspace-scoped ops still work without one.
     code, out = apply(capsys, "workspace.pause", {"cites": "ui:action:1"})
     assert code == 0, out
@@ -904,7 +905,7 @@ def test_events_without_an_active_coworld_names_the_fix(tmp_path, monkeypatch, c
     monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
     code, out = run(capsys, "events", "--after", "0")
     assert code == 1
-    assert "no active Coworld" in out["error"] and "--store workspace" in out["error"]
+    assert "no session Coworld" in out["error"] and "--coworld" in out["error"]
 
 
 def test_pending_user_edit_is_not_reported_as_applied(workspace, capsys, monkeypatch):

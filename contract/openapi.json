@@ -837,10 +837,14 @@
           "session_id": {
             "title": "Session Id",
             "type": "string"
+          },
+          "session_scope": {
+            "$ref": "#/components/schemas/SessionScope"
           }
         },
         "required": [
-          "session_id"
+          "session_id",
+          "session_scope"
         ],
         "title": "OpenReply",
         "type": "object"
@@ -1083,9 +1087,65 @@
         "title": "RunReply",
         "type": "object"
       },
+      "SessionScope": {
+        "additionalProperties": true,
+        "properties": {
+          "coworld": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coworld"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "scope": {
+            "enum": [
+              "workspace",
+              "coworld"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "coworld",
+          "league"
+        ],
+        "title": "SessionScope",
+        "type": "object"
+      },
       "Snapshot": {
         "additionalProperties": false,
         "properties": {
+          "coworld": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Coworld"
+          },
           "store": {
             "enum": [
               "workspace",
@@ -1140,6 +1200,11 @@
             "title": "Seq",
             "type": "integer"
           },
+          "session_scope_version": {
+            "const": 1,
+            "title": "Session Scope Version",
+            "type": "integer"
+          },
           "store": {
             "enum": [
               "workspace",
@@ -1150,6 +1215,7 @@
           }
         },
         "required": [
+          "session_scope_version",
           "store",
           "seq",
           "records"
@@ -1190,7 +1256,7 @@
   },
   "info": {
     "title": "IDE agent application contract",
-    "version": "2.1.0"
+    "version": "2.2.0"
   },
   "openapi": "3.1.0",
   "paths": {}

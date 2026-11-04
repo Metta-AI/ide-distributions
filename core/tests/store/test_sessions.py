@@ -66,7 +66,14 @@ def test_register_inserts_and_emits_session_started(workspace_store, harness):
 
 
 def test_register_again_updates_without_a_second_event(workspace_store, harness, clock):
-    sessions.register(workspace_store, harness, session_id=SID, profile="orchestrator", kind="chat")
+    sessions.register(
+        workspace_store,
+        harness,
+        session_id=SID,
+        profile="orchestrator",
+        kind="chat",
+        coworld_id="cow_x",
+    )
     sessions.end(workspace_store, harness, SID)
     clock.advance(60)
     record = sessions.register(

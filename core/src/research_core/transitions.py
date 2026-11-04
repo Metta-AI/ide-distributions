@@ -229,6 +229,7 @@ def apply(ctx, instance_id: str) -> None:
                 **ctx.env,
                 "IDE_SESSION_ID": actor.id if actor.is_session else "",
                 "IDE_ACTOR": str(actor),
+                "IDE_COWORLD_ID": ctx.coworld.coworld_id,
                 "IDE_TRANSITION_ID": command["id"],
                 "IDE_TRANSITION_ATTEMPT_ID": command["issuer_attempt_id"] or "",
             },

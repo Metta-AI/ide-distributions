@@ -211,7 +211,7 @@ def test_repair_failing_twice_raises_a_notice(tmp_path):
 
     checks.handle_repair_failed_twice(ctx, event, ctx.store)
 
-    [notice] = notices.unread(ctx.wstore)
+    [notice] = notices.unread(ctx.wstore, coworld_id="cow_fake")
     assert "check capability has failed twice" in notice["text"]
     assert notice["refs"] == [event.payload["task"]] and notice["urgency"] == "high"
 

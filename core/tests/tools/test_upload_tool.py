@@ -84,7 +84,7 @@ def test_upload_lost_answer_is_recovered_by_lookup_without_the_artifact(lab):
     done = intents.read(lab.store, 1)
     assert done["state"] == "done" and done["result"]["reconciled"] is True
     assert done["attempt"] == 1 and done["request"]["file_hash"] == digest
-    assert notices.unread(lab.wstore) == []
+    assert notices.unread(lab.wstore, coworld_id="cow_fake") == []
 
 
 @pytest.mark.parametrize(
@@ -107,12 +107,12 @@ def test_upload_lookup_failure_leaves_the_upload_unresolved(lab, monkeypatch, fa
     assert lab.platform().snapshot()["counts"]["upload"] == 1
     assert intents.read(lab.store, 1)["state"] == "pending"
     assert lab.read("V-1")["record"]["uploaded"] is None
-    (notice,) = notices.unread(lab.wstore)
+    (notice,) = notices.unread(lab.wstore, coworld_id="cow_fake")
     assert notice["refs"] == ["V-1"] and notice["urgency"] == "high"
     assert "V-1 upload is unresolved (I-1)" in notice["text"]
     # The same answer again does not repeat the notice.
     lab.run("upload", {"version": "V-1"}, faults=fault)
-    assert len(notices.unread(lab.wstore)) == 1
+    assert len(notices.unread(lab.wstore, coworld_id="cow_fake")) == 1
 
 
 def test_upload_definitive_no_match_sends_again_and_records_the_attempt(lab):
@@ -128,7 +128,7 @@ def test_upload_definitive_no_match_sends_again_and_records_the_attempt(lab):
     assert done["state"] == "done" and done["attempt"] == 2
     assert done["result"]["failures"] == [{"lookup": "not_found"}]
     assert done["request"]["file_hash"] == digest
-    assert notices.unread(lab.wstore) == []
+    assert notices.unread(lab.wstore, coworld_id="cow_fake") == []
 
 
 def test_upload_second_no_match_is_unresolved_until_the_user_asks(lab):
@@ -145,7 +145,7 @@ def test_upload_second_no_match_is_unresolved_until_the_user_asks(lab):
     assert blocked["context"]["unresolved"] is True
     assert lab.platform().snapshot()["counts"]["upload"] == 2
     assert intents.read(lab.store, 1)["attempt"] == 2
-    (notice,) = notices.unread(lab.wstore)
+    (notice,) = notices.unread(lab.wstore, coworld_id="cow_fake")
     assert notice["refs"] == ["V-1"]
 
     asked = lab.run("upload", {"version": "V-1", "user_requested": True}, faults="lookup=not_found")
@@ -164,7 +164,7 @@ def test_upload_user_requested_sends_again_even_when_the_lookup_is_down(lab):
     assert lab.platform().snapshot()["counts"]["upload"] == 2
     done = intents.read(lab.store, 1)
     assert done["state"] == "done" and done["result"]["failures"] == [{"user_requested": True}]
-    assert notices.unread(lab.wstore) == []
+    assert notices.unread(lab.wstore, coworld_id="cow_fake") == []
 
 
 def test_upload_done_intent_the_platform_no_longer_shows_is_unresolved(lab):
@@ -185,7 +185,7 @@ def test_upload_done_intent_the_platform_no_longer_shows_is_unresolved(lab):
     assert lab.platform().snapshot()["counts"]["upload"] == 1
     assert intents.read(lab.store, 1)["state"] == "done"
     assert lab.read("V-2")["record"]["uploaded"] is None
-    (notice,) = notices.unread(lab.wstore)
+    (notice,) = notices.unread(lab.wstore, coworld_id="cow_fake")
     assert notice["refs"] == ["V-2"]
 
 
@@ -262,12 +262,26 @@ def test_upload_notice_only_from_a_wake(lab):
     lab.create("One")
     commit_policy(lab.code, 3, 6, "Patience 6")
     lab.create("Two")
-    sessions.register(lab.wstore, HARNESS, session_id="w1", profile="orchestrator", kind="wake")
-    sessions.register(lab.wstore, HARNESS, session_id="c1", profile="orchestrator", kind="chat")
+    sessions.register(
+        lab.wstore,
+        HARNESS,
+        coworld_id="cow_fake",
+        session_id="w1",
+        profile="orchestrator",
+        kind="wake",
+    )
+    sessions.register(
+        lab.wstore,
+        HARNESS,
+        coworld_id="cow_fake",
+        session_id="c1",
+        profile="orchestrator",
+        kind="chat",
+    )
     lab.upload("V-1", session_id="c1")
-    assert notices.unread(lab.wstore) == []
+    assert notices.unread(lab.wstore, coworld_id="cow_fake") == []
     lab.upload("V-2", session_id="w1")
-    (notice,) = notices.unread(lab.wstore)
+    (notice,) = notices.unread(lab.wstore, coworld_id="cow_fake")
     assert notice["text"] == "Uploaded V-2 as cow_fake-main:v2" and notice["refs"] == ["V-2"]
 
 

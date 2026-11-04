@@ -191,6 +191,8 @@ class ToolContext:
         return cls(role=role, actor=Actor.from_env(env), workspace=layout.from_env(env), env=env)
 
     def hermes_session_id(self) -> str:
+        if self.actor.is_session:
+            return self.actor.id
         return self.env.get("IDE_SESSION_ID") or self.env.get("HERMES_SESSION_ID") or ""
 
     @cached_property
@@ -200,14 +202,18 @@ class ToolContext:
         return Store.open(self.workspace.store_path, kind="workspace")
 
     def coworld(self) -> Coworld:
-        from research_core.store import coworlds
+        from research_core.store import sessions
 
-        active = coworlds.active(self.wstore)
-        if active is None:
+        session_id = self.hermes_session_id()
+        session = sessions.read(self.wstore, session_id) if session_id else None
+        coworld_id = (
+            session["coworld_id"] if session is not None else self.env.get("IDE_COWORLD_ID")
+        )
+        if not coworld_id:
             raise ToolError(
-                "no active Coworld; the Orchestrator selects one with workspace.coworld_switch"
+                "this session has no Coworld; open a session with session_context.coworld"
             )
-        return self.workspace.coworld(active["coworld_id"])
+        return self.workspace.coworld(coworld_id)
 
     def coworld_or_none(self) -> Coworld | None:
         try:

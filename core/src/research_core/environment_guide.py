@@ -67,13 +67,10 @@ def render(ctx: ToolContext) -> str:
 def _where_you_are(root: Path, coworld) -> list[str]:
     lines = ["## Where you are", "", f"- Workspace root: `{root}` (shared by every profile)."]
     if coworld is None:
-        lines.append(
-            "- No Coworld is active yet. The Orchestrator selects one with "
-            "`workspace.coworld_switch`; its folder then appears under the workspace root."
-        )
+        lines.append("- This session has no Coworld. Open a new session for the selected game.")
     else:
         lines += [
-            f"- Active Coworld: `{coworld.coworld_id}`, folder `{coworld.root}`:",
+            f"- Session Coworld: `{coworld.coworld_id}`, folder `{coworld.root}`:",
             "  - `code/`: the policy repository (git; `main` holds the policy and `mixin/`).",
             "  - `source/`: the Coworld's public repository at the release-pinned commit.",
             "  - `worktrees/task-<n>/` and `worktrees/orch-<n>/`: one worktree per piece of work.",
@@ -121,7 +118,7 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
             "`worktrees/`, and `source/` (a clone; re-fetched by setup)."
         )
     else:
-        lines.append("- Writable: the active Coworld's `code/`, `documents/` and `worktrees/`.")
+        lines.append("- Writable: the session Coworld's `code/`, `documents/` and `worktrees/`.")
     lines += [
         f"- Read-only: the profile source checkout `{checkout or '(unknown)'}` (plugin, store "
         "library and schema, tools, prompts, cron definitions). Report a bug there instead of "

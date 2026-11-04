@@ -174,7 +174,13 @@ def test_version_create_in_the_researchers_worktree(lab):
     )
     researcher = Actor.session("s2")
     sessions.register(
-        lab.wstore, HARNESS, session_id="s2", profile="researcher", kind="task", task_id=1
+        lab.wstore,
+        HARNESS,
+        coworld_id="cow_fake",
+        session_id="s2",
+        profile="researcher",
+        kind="task",
+        task_id=1,
     )
     tasks.claim(
         lab.store, researcher, task["id"], run_id=None, worktree=str(worktree), branch="task/1"

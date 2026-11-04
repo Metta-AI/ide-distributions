@@ -34,7 +34,6 @@ from pathlib import Path
 
 from research_core.platform.fake import COWORLD_ID, LEAGUE_ID
 from research_core.plugin import turn
-from research_core.store import coworlds
 from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher.hermes_api import FakeHermesRuns, FakeRun
 
@@ -148,8 +147,8 @@ class ScriptedAgent:
             )
             done.append("sent a notice")
         if "goal" in lower:
-            if coworlds.active(ctx.wstore) is None:
-                done.append("created no Goal: no Coworld is active yet")
+            if ctx.coworld_or_none() is None:
+                done.append("created no Goal: this session has no Coworld")
             else:
                 goal = self.call(
                     ctx,

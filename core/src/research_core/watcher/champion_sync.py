@@ -179,7 +179,9 @@ def _report_versions(ctx: TickContext, active: dict[str, Any], leagues: list[Lea
 
 
 def _notice(ctx: TickContext, text: str) -> None:
-    notices.add(ctx.wstore, ctx.actor, text=text)
+    notices.add(
+        ctx.wstore, ctx.actor, text=text, coworld_id=ctx.coworld.coworld_id if ctx.coworld else None
+    )
 
 
 def _league_label(ctx: TickContext, coworld_id: str) -> str:

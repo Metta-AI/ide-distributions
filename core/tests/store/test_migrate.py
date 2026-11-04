@@ -159,8 +159,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 7
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert migrate.apply_migrations(conn, "workspace") == 8
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
 
 
 def test_migrations_apply_in_numeric_order_and_only_pending_ones(tmp_path, monkeypatch):

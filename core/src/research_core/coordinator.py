@@ -776,6 +776,7 @@ class Coordinator:
                         "recovery.failed",
                         "workspace",
                         {
+                            "coworld_id": ctx.coworld.coworld_id,
                             "stage": "planning",
                             "reason": "Planner ended without assigning; retry limit reached",
                         },
@@ -960,6 +961,7 @@ class Coordinator:
                     "wake.failed",
                     f"{label}:{event.seq}",
                     {
+                        "coworld_id": ctx.coworld.coworld_id if ctx.coworld else None,
                         "store": label,
                         "seq": event.seq,
                         "kind": event.kind,
@@ -973,6 +975,7 @@ class Coordinator:
         notices.add(
             ctx.wstore,
             ctx.actor,
+            coworld_id=ctx.coworld.coworld_id if ctx.coworld else None,
             text=(
                 f"The coordinator could not complete the {handler.wake} wake "
                 f"for {event.kind} ({event.subject}) after {max_attempts} attempt(s)"
@@ -1483,6 +1486,7 @@ class Coordinator:
             "recovery.failed",
             task["id"],
             {
+                "coworld_id": session["coworld_id"],
                 "task": task["id"],
                 "session": session["id"],
                 "reason": failure["what_failed"],
@@ -1509,14 +1513,17 @@ class Coordinator:
             ctx.set_meta("paused_drained", "0")
             # These are explicit domain operations, not an import-by-name event bus.
             # Their polling cadence is independent from missed-native-outcome recovery.
-            due = ctx.meta("coordinator_workflow_at")
+            workflow_key = (
+                f"coordinator_workflow_at:{ctx.coworld.coworld_id if ctx.coworld else 'workspace'}"
+            )
+            due = ctx.meta(workflow_key)
             if due is None or ctx.now - parse_iso(due) >= timedelta(seconds=60):
                 report["champion_sync"] = champion_sync.run(ctx)
                 report["waits"] = waits.run(ctx)
                 report["merge"] = merge.run(ctx)
                 report["goals"] = goals.run(ctx)
                 report["checks"] = checks.run(ctx)
-                ctx.set_meta("coordinator_workflow_at", ctx.now.isoformat())
+                ctx.set_meta(workflow_key, ctx.now.isoformat())
             report["messages"] = self.deliver_worker_messages(ctx)
             report["dispatch"] = self.plan_assignments(ctx)
             report["wakes"] = self.advance_events(ctx)
@@ -1535,6 +1542,14 @@ class Coordinator:
         for label, store in labelled_stores(ctx):
             batches: dict[str, list[Event]] = {}
             for event in events.unhandled(store, set(HANDLERS)):
+                if store is ctx.wstore:
+                    event_coworld = event.payload.get("coworld_id")
+                    if event.kind == "coworld.setup_needed":
+                        event_coworld = event.subject
+                    if event_coworld is not None and event_coworld != (
+                        ctx.coworld.coworld_id if ctx.coworld else None
+                    ):
+                        continue
                 handler = HANDLERS[event.kind]
                 ref = f"{label}:{event.seq}"
                 if handler.batch_by_kind:

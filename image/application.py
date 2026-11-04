@@ -89,7 +89,7 @@ async def response(
     body = None
     match args:
         case Snapshot():
-            client, path, params = seam, "/snapshot", {"store": args.store}
+            client, path, params = seam, "/snapshot", args.model_dump(exclude_none=True)
         case OpenSession() | Message():
             client = seam
             path = "/session-open" if isinstance(args, OpenSession) else "/message"

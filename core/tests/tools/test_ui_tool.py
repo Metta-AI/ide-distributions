@@ -17,7 +17,12 @@ def register_session(ctx_factory):
     def register(session_id, kind):
         ctx = ctx_factory()
         return sessions.register(
-            ctx.wstore, Actor.harness(), session_id=session_id, profile="orchestrator", kind=kind
+            ctx.wstore,
+            Actor.harness(),
+            coworld_id="cow_fake",
+            session_id=session_id,
+            profile="orchestrator",
+            kind=kind,
         )
 
     return register
@@ -44,7 +49,7 @@ def test_show_writes_under_the_chat_session(call, ctx_factory, register_session)
 def test_wake_and_unregistered_sessions_write_under_workspace(call, ctx_factory, register_session):
     register_session("w1", "wake")
     waked = call("ui", {"action": "show", "ref": "G-1"}, session_id="w1")
-    assert waked["conversation"] == "workspace"
+    assert waked["conversation"] == "coworld:cow_fake"
     unknown = call("ui", {"action": "show", "ref": "G-2"}, session_id="nobody")
     assert unknown["conversation"] == "workspace"
     assert doc(ctx_factory, "workspace")["show"]["ref"] == "G-2"

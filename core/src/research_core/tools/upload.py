@@ -194,8 +194,18 @@ def unresolved(
         f"{vid} upload is unresolved ({intent['id']}): {why}. Nothing was sent; ask for the"
         " upload again or wait for the platform."
     )
-    if all(existing["text"] != notice for existing in notices.unread(ctx.wstore)):
-        notices.add(ctx.wstore, ctx.actor, text=notice, refs=[vid], urgency="high")
+    if all(
+        existing["text"] != notice
+        for existing in notices.unread(ctx.wstore, coworld_id=ctx.coworld().coworld_id)
+    ):
+        notices.add(
+            ctx.wstore,
+            ctx.actor,
+            coworld_id=ctx.coworld().coworld_id,
+            text=notice,
+            refs=[vid],
+            urgency="high",
+        )
     inputs = json.dumps(intent.get("request"), sort_keys=True)
     return ToolError(
         f"{vid} upload is unresolved: {why}. Nothing was sent. The saved upload inputs of"
@@ -289,6 +299,7 @@ def notify_wake(ctx: ToolContext, record: dict[str, Any], found: PolicyVersion) 
     notices.add(
         ctx.wstore,
         ctx.actor,
+        coworld_id=ctx.coworld().coworld_id,
         text=f"Uploaded {record['id']} as {found.label}",
         refs=[record["id"]],
     )

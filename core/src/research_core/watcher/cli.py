@@ -112,16 +112,19 @@ def run_status(args: argparse.Namespace) -> int:
             "restart_required": admissions.restart_required(wstore),
             "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
         }
-        active = coworlds.active(wstore)
-        if active is not None:
-            with Store.open(ws.coworld(active["coworld_id"]).store_path, kind="coworld") as store:
-                payload["pending_transitions"] = [
-                    dict(row)
-                    for row in store.q(
-                        "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
-                        " FROM transition_commands WHERE result IS NULL"
-                    )
-                ]
+        for registered in coworlds.list(wstore):
+            with Store.open(
+                ws.coworld(registered["coworld_id"]).store_path, kind="coworld"
+            ) as store:
+                payload["pending_transitions"].extend(
+                    [
+                        {"coworld_id": registered["coworld_id"], **dict(row)}
+                        for row in store.q(
+                            "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
+                            " FROM transition_commands WHERE result IS NULL"
+                        )
+                    ]
+                )
     print(json.dumps(payload))
     return 0
 

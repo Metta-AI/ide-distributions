@@ -12,7 +12,7 @@ from pydantic.json_schema import models_json_schema
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
 from research_core.messages import UserMessage  # noqa: E402
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 
 class Arguments(BaseModel):
@@ -21,6 +21,7 @@ class Arguments(BaseModel):
 
 class Snapshot(Arguments):
     store: Literal["workspace", "coworld"]
+    coworld: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class Messages(Arguments):
@@ -145,8 +146,15 @@ class Reply(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class SessionScope(Reply):
+    scope: Literal["workspace", "coworld"]
+    coworld: str | None
+    league: str | None
+
+
 class OpenReply(Reply):
     session_id: str
+    session_scope: SessionScope
 
 
 class MessageReply(Reply):
@@ -160,6 +168,7 @@ class CancelReply(Reply):
 
 
 class SnapshotReply(Reply):
+    session_scope_version: Literal[1]
     store: Literal["workspace", "coworld"]
     seq: int
     records: dict[str, JsonValue]

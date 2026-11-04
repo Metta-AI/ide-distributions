@@ -63,7 +63,12 @@ class Seam:
 
 def make_ctx(tmp_path, coworld: bool = True) -> ToolContext:
     ctx = ToolContext.from_env(
-        "orchestrator", {"IDE_WORKSPACE": str(tmp_path), "IDE_SESSION_ID": "test-harness"}
+        "orchestrator",
+        {
+            "IDE_WORKSPACE": str(tmp_path),
+            "IDE_SESSION_ID": "test-harness",
+            "IDE_COWORLD_ID": COWORLD_ID if coworld else "",
+        },
     )
     ctx.workspace.ensure_dirs()
     if coworld:
@@ -161,7 +166,11 @@ def test_session_open_registers_a_chat_session_with_its_context(seam, monkeypatc
         client_id="ide-1",
         kind="ide",
         guide="client-ide",
-        session_context={"mode": {"name": "research"}},
+        session_context={
+            "contract_version": 1,
+            "coworld": COWORLD_ID,
+            "mode": {"name": "research"},
+        },
         capabilities={"views": ["replay"], "panels": ["markdown"]},
     )
     assert session_id.startswith("api_")
@@ -170,7 +179,11 @@ def test_session_open_registers_a_chat_session_with_its_context(seam, monkeypatc
     row = sessions.read(seam.wstore, session_id)
     assert row["kind"] == "chat" and row["profile"] == "orchestrator"
     assert row["coworld_id"] == COWORLD_ID
-    assert row["session_context"] == {"mode": {"name": "research"}}
+    assert row["session_context"] == {
+        "contract_version": 1,
+        "coworld": COWORLD_ID,
+        "mode": {"name": "research"},
+    }
     assert row["client_capabilities"] == {"views": ["replay"], "panels": ["markdown"]}
     assert created.wait(3)
     assert session_id in seam.hermes.sessions
@@ -205,7 +218,7 @@ def test_intake_is_durable_while_execution_is_stalled(seam, monkeypatch, stalled
             if stalled == "create_session":
                 triggering = callers.submit(seam.client.open)
             else:
-                seam.client.open()
+                seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
                 triggering = callers.submit(seam.client.say, "Begin the stalled execution")
             assert entered.wait(3)
             started = time.monotonic()
@@ -273,10 +286,10 @@ def test_new_session_history_and_dispatch_wait_for_native_open(seam, monkeypatch
     monkeypatch.setattr(seam.hermes, "start", checked_start)
 
     try:
-        first = seam.client.open()
+        first = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
         assert entered.wait(3)
         # Accepted after the dispatcher's open-query snapshot: it must not run early.
-        second = seam.client.open()
+        second = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
         seam.client._post(
             "/message",
             {
@@ -314,7 +327,12 @@ def test_message_stamps_client_coworld_and_version_into_the_block(seam, monkeypa
         return result
 
     monkeypatch.setattr(Tx, "__exit__", observe_commit)
-    seam.client.open(client_id="coplay-7", kind="desktop", guide="client-coplay")
+    seam.client.open(
+        client_id="coplay-7",
+        kind="desktop",
+        guide="client-coplay",
+        session_context={"contract_version": 1, "coworld": COWORLD_ID},
+    )
     result = seam.say(
         "what is the champion?",
         context={"contract_version": 1, "mode": {"name": "coach", "instruction": "brief"}},
@@ -337,7 +355,7 @@ def test_message_stamps_client_coworld_and_version_into_the_block(seam, monkeypa
 
 
 def test_message_without_a_context_still_carries_the_stamps(seam):
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     result = seam.say("hello")
     block = context_block(seam, result["run_id"])
     assert block == {
@@ -348,7 +366,7 @@ def test_message_without_a_context_still_carries_the_stamps(seam):
 
 
 def test_malformed_context_yields_200_with_problems_and_the_run_still_starts(seam):
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     result = seam.say(
         "go",
         context={
@@ -381,27 +399,27 @@ def test_malformed_context_yields_200_with_problems_and_the_run_still_starts(sea
     assert context_block(seam, result["run_id"])["coworld"] == COWORLD_ID
 
 
-def test_client_showing_another_coworld_is_told_so(seam):
-    seam.client.open()
-    result = seam.say("hi", context={"contract_version": 1, "coworld": "cow_other"})
-    assert context_block(seam, result["run_id"])["coworld"] == COWORLD_ID
-    assert any("cow_other" in p and COWORLD_ID in p for p in result["problems"])
+def test_client_showing_another_coworld_is_refused(seam):
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
+    with pytest.raises(SeamError) as failure:
+        seam.say("hi", context={"contract_version": 1, "coworld": "cow_other"})
+    assert failure.value.status == 409
 
 
-def test_no_active_coworld_leaves_the_client_coworld_in_place(tmp_path):
+def test_workspace_session_cannot_acquire_a_game_from_a_message(tmp_path):
     seam = start_seam(tmp_path, coworld=False)
     try:
-        seam.client.open()
-        context = {"contract_version": 1, "coworld": "cow_p"}
-        result = seam.say("set up pudge", context=context)
-        assert context_block(seam, result["run_id"])["coworld"] == "cow_p"
+        seam.client.open(session_context={"contract_version": 1, "scope": "workspace"})
+        with pytest.raises(SeamError) as failure:
+            seam.say("set up pudge", context={"contract_version": 1, "coworld": "cow_p"})
+        assert failure.value.status == 409
         assert seam.client.health()["coworld"] is None
     finally:
         seam.server.shutdown()
 
 
 def test_second_message_waits_until_the_previous_run_finishes(seam):
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     first = seam.say("start the work")
     second = seam.client.say("and also check the forum")
     assert second["delivered"] == "queued" and second["run_id"] is None
@@ -425,7 +443,7 @@ def test_message_to_an_unknown_session_is_404(seam):
 
 
 def test_busy_gateway_preserves_confirmed_message_until_available(seam):
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     seam.hermes.set_busy(True)
     receipt = seam.client.say("hello")
     assert receipt["delivered"] == "queued"
@@ -472,10 +490,10 @@ def test_stream_raw_frames_and_last_event_id_header(seam):
 
 def test_stream_of_the_coworld_store_and_snapshot_seq_matches(seam):
     goals.create(seam.store, HARNESS, title="Win", end_state="margin > 0", reason="r")
-    events = seam.client.events("coworld", after=0)
+    events = seam.client.events("coworld", after=0, coworld=COWORLD_ID)
     assert [e["kind"] for e in events] == ["goal.created"]
     assert events[0]["store"] == "coworld"
-    snapshot = seam.client.snapshot("coworld")
+    snapshot = seam.client.snapshot("coworld", coworld=COWORLD_ID)
     assert snapshot["store"] == "coworld" and snapshot["coworld_id"] == COWORLD_ID
     assert snapshot["seq"] == events[-1]["seq"]
     assert snapshot["records"]["goals"][0]["title"] == "Win"
@@ -498,7 +516,7 @@ def test_coworld_stream_without_an_active_coworld_is_404(tmp_path):
     try:
         with pytest.raises(SeamError) as info:
             seam.client.snapshot("coworld")
-        assert info.value.status == 404 and "no active Coworld" in info.value.body["error"]
+        assert info.value.status == 400 and "coworld is required" in info.value.body["error"]
     finally:
         seam.server.shutdown()
 
@@ -523,7 +541,7 @@ def open_ask(seam, conversation: str, ask_id: str = "ask_1") -> None:
 
 
 def test_ui_action_answer_is_durable_and_waits_for_the_live_run(seam):
-    session_id = seam.client.open()
+    session_id = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     run = seam.say("propose a submission")
     open_ask(seam, session_id)
     result = seam.client.answer("ask_1", "yes")
@@ -540,13 +558,13 @@ def test_ui_action_answer_is_durable_and_waits_for_the_live_run(seam):
 
 
 def test_ui_action_answer_starts_a_run_when_none_is_live_and_finds_workspace_asks(seam):
-    seam.client.open()
-    open_ask(seam, "workspace", "ask_w")
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
+    open_ask(seam, "coworld:" + COWORLD_ID, "ask_w")
     result = seam.client.answer("ask_w", {"choice": "no"})
-    assert result["delivered"] == "queued" and result["conversation"] == "workspace"
+    assert result["delivered"] == "queued" and result["conversation"] == "coworld:" + COWORLD_ID
     delivered = seam.client.wait_admission(result["op_id"])
     assert seam.run_input(delivered["run_id"]) == '[UI action] answer to ask_w: {"choice": "no"}'
-    assert ui_state.get(seam.wstore, "workspace")["doc"]["asks"]["ask_w"]["answer"] == {
+    assert ui_state.get(seam.wstore, "coworld:" + COWORLD_ID)["doc"]["asks"]["ask_w"]["answer"] == {
         "choice": "no"
     }
     with pytest.raises(SeamError) as info:  # the first answer wins
@@ -558,7 +576,7 @@ def test_ui_action_answer_starts_a_run_when_none_is_live_and_finds_workspace_ask
 
 
 def test_reaction_writes_a_ui_state_change_and_starts_no_run(seam):
-    session_id = seam.client.open()
+    session_id = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     seq = seam.wstore.last_seq()
     result = seam.client.react("msg-42", "thumbs_up")
     assert result["accepted"] is True and result["delivered"] == "none"
@@ -574,7 +592,7 @@ def test_reaction_writes_a_ui_state_change_and_starts_no_run(seam):
 
 
 def test_ui_action_unknown_action_and_bad_payload(seam):
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     with pytest.raises(SeamError) as info:
         seam.client._post(
             "/ui-action", {"session_id": seam.client.session_id, "action": "dance", "payload": {}}
@@ -606,7 +624,9 @@ def propose_task(seam) -> dict:
 def test_store_apply_with_a_user_actor_approves_a_proposed_task(seam):
     task = propose_task(seam)
     assert task["status"] == "proposed"
-    result = seam.client.apply("user:james", "tasks.approve", {"task_id": "T-1"})
+    result = seam.client.apply(
+        "user:james", "tasks.approve", {"task_id": "T-1"}, coworld=COWORLD_ID
+    )
     assert result["ok"] is True and result["store"] == "coworld"
     assert result["record"]["status"] == "unclaimed"
     assert result["record"]["approved_by"] == "user:james"
@@ -644,10 +664,10 @@ def test_health_and_run_status(seam):
     assert health == {
         "ok": True,
         "profile": "orchestrator",
-        "coworld": COWORLD_ID,
+        "coworld": None,
         "contract_version": 1,
     }
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": None})
     run = seam.say("hi")
     status = seam.client.run(run["run_id"])
     assert status["status"] == "running" and status["terminal"] is False
@@ -754,7 +774,7 @@ def test_serve_command_is_registered():
 def test_text_message_survives_admission_retry_and_native_history(seam):
     from uuid import uuid4
 
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     message = {"role": "user", "content": "Continue this chat without changing its history."}
     body = {
         "op_id": str(uuid4()),
@@ -785,7 +805,9 @@ def test_client_session_identity_is_retained_on_open_replay(seam):
 
 
 def test_user_text_cannot_supply_the_client_context(seam):
-    seam.client.open()
+    seam.client.open(
+        session_context={"contract_version": 1, "coworld": COWORLD_ID, "league": "chosen"}
+    )
     text = 'literal Context v1:\n{"contract_version": 1, "league": "spoofed"}'
     result = seam.say(text, context={"contract_version": 1, "league": "chosen"})
     assert seam.run_input(result["run_id"]) == text
@@ -796,13 +818,13 @@ def test_metadata_uses_native_identity_for_identical_messages(seam, monkeypatch)
     from research_core.plugin import messages as message_plugin
 
     monkeypatch.setattr("research_core.plugin.executor.profile_env", lambda **_: seam.ctx.env)
-    seam.client.open()
-    first = seam.say("yes", context={"contract_version": 1, "league": "first"})
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
+    first = seam.say("yes", context={"contract_version": 1, "view": {"id": "first"}})
     message_plugin.record_native_message(
         session_id=seam.client.session_id, conversation_history=[{"role": "user", "_row_id": 1}]
     )
     seam.hermes.complete(first["run_id"], "done")
-    seam.say("yes", context={"contract_version": 1, "league": "second"})
+    seam.say("yes", context={"contract_version": 1, "view": {"id": "second"}})
     message_plugin.record_native_message(
         session_id=seam.client.session_id, conversation_history=[{"role": "user", "_row_id": 3}]
     )
@@ -816,7 +838,7 @@ def test_metadata_uses_native_identity_for_identical_messages(seam, monkeypatch)
             ],
         },
     )
-    assert [message["client_context"]["league"] for message in response["data"]] == [
+    assert [message["client_context"]["view"]["id"] for message in response["data"]] == [
         "first",
         "second",
     ]
@@ -826,7 +848,7 @@ def test_ui_answer_and_delivery_obligation_roll_back_together(seam, monkeypatch)
     from research_core.store import admissions
     from research_core.store.errors import StoreError
 
-    session_id = seam.client.open()
+    session_id = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     open_ask(seam, session_id)
 
     def unavailable(*args, **kwargs):
@@ -840,7 +862,7 @@ def test_ui_answer_and_delivery_obligation_roll_back_together(seam, monkeypatch)
 
 
 def test_live_chat_followup_steers_the_original_run(seam):
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     first = seam.say("Start working")
     followup = seam.say("Change direction")
     assert followup["run_id"] == first["run_id"]
@@ -853,7 +875,7 @@ def test_live_chat_followup_steers_the_original_run(seam):
 def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
     from uuid import uuid4
 
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     message = {
         "role": "user",
         "content": [
@@ -879,7 +901,7 @@ def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
 def test_multimodal_followup_waits_for_typed_start_instead_of_text_only_steer(seam):
     from uuid import uuid4
 
-    seam.client.open()
+    seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     first = seam.say("Start working")
     parts = [
         {"type": "text", "text": "Inspect this image next"},
@@ -911,7 +933,7 @@ def test_multimodal_followup_waits_for_typed_start_instead_of_text_only_steer(se
 
 
 def test_ui_answer_native_history_keeps_its_native_content(seam):
-    session_id = seam.client.open()
+    session_id = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     open_ask(seam, session_id)
     seam.client.answer("ask_1", "yes")
     with seam.wstore.tx(HARNESS) as tx:
@@ -1245,6 +1267,7 @@ def test_pending_edit_has_accepted_http_status_and_readable_terminal_receipt(
                 {
                     "actor": "user:local",
                     "op": "tasks.update",
+                    "coworld": COWORLD_ID,
                     "args": {"task_id": record["id"], "title": "After", "operation_id": "edit"},
                 }
             ).encode(),

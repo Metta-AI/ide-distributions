@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Metta-AI/ide-distributions/contract/context.schema.json",
   "title": "Turn context",
-  "description": "The typed context block a client sends with each message (design A.3, A.4). Every field but contract_version is optional. The bridge stamps client and coworld. Unknown fields are dropped; oversize values are refused with a clear error, never truncated.",
+  "description": "The typed context block a client sends with each message (design A.3, A.4). Every field but contract_version is optional. The bridge stamps client and the session-bound coworld. Unknown fields are dropped; oversize values are refused with a clear error, never truncated.",
   "contract_version": 1,
   "type": "object",
   "additionalProperties": false,
@@ -18,10 +18,11 @@
         "guide": {"type": "string", "maxLength": 64, "description": "The client guide skill to load, such as client-coplay."}
       }
     },
-    "coworld": {"type": "string", "maxLength": 120, "description": "The Coworld the client shows; stamped by the bridge with the active one."},
+    "scope": {"type": "string", "enum": ["workspace", "coworld"], "description": "Workspace assistant or a session bound to one Coworld."},
+    "coworld": {"type": ["string", "null"], "maxLength": 120, "description": "The Coworld bound at session open; conflicting per-turn Coworlds are refused."},
     "mode": {"$ref": "#/$defs/instruction"},
     "command": {"$ref": "#/$defs/instruction"},
-    "league": {"type": "string", "maxLength": 120},
+    "league": {"type": ["string", "null"], "maxLength": 120},
     "policy": {
       "type": "object",
       "additionalProperties": false,
