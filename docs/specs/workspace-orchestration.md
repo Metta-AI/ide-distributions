@@ -66,6 +66,10 @@ worker profile. All paths acquire the admission lock before the Coworld writer.
 Only unplanned worker endings spend `recovery.max_attempts`. This includes a completed native
 run that left an actionable task unfinished. Successful waits and planned pause/resume cycles
 do not spend that budget. Exhaustion records an ordinary failed task and stops retrying.
+Definitively rejected task guidance has a separate delivery count under the same configured
+limit. It receives immutable successor identities, including guidance without source-message
+IDs. Exhaustion records a visible failed-delivery disposition and retains its message reservations;
+uncertain delivery is never retried. A nonfailure reroute does not spend a failure attempt.
 
 Inference exhaustion is an intentional wait. It retains the queued identity without freezing a
 native admission or spending recovery attempts. The runtime lease owner resolves a spent-key
