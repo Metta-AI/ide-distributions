@@ -1,0 +1,1290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Triage: the $10-in-27-minutes incident and its three Asana tasks</title>
+<!--
+  Ink & Print design/plan document template (Softmax house style).
+
+  HOW TO USE (renderer subagent):
+  - Replace the contents of the article element (id "doc") with the real document.
+    The placeholder content below doubles as a component style guide — copy the
+    markup patterns (masthead, TOC, section, figure, table, callout, code,
+    citation) and delete what you don't use.
+  - Do NOT modify the two DC-COMMENTS blocks (styles, and markup + script). They
+    are the tested commenting system; copy them verbatim. The one thing you may fill
+    is the CONTENT of <script id="dc-preload" type="application/json">: a
+    dc-comments/1 `comments` array, each comment optionally carrying
+    `replies: [{author, text, created}]`, so the reader sees their comments and
+    the agent's replies together in the sidebar.
+  - Copy the DOC-NAV script (right after the article element) verbatim too. It opens
+    collapsed sections when a link points into them.
+  - Every h2 section is a fold: <section id="x"><details class="fold" open>
+    <summary><h2>…</h2></summary> … </details></section>. Appendix sections
+    carry class="appendix" (check_doc.py leaves them out of the word count) and use
+    <details class="fold"> without `open`, so they start collapsed.
+  - Open questions are numbered (id="oq-N"), each with Context / Options /
+    Recommendation labels (span.oq-label), and linked both ways with the body
+    markers <sup class="oq-ref" id="oq-N-from-<slug>">.
+  - Theme: Ink & Print by default; <html data-theme="cozy"> switches to the
+    cozy token set. Draw figure SVGs in the active theme's colors.
+  - The body describes the current design only. Settled decisions go in the
+    Decision Record appendix. Change logs do not go in the document at all.
+  - Keep the doc self-contained: inline SVG for figures, no JS deps beyond this
+    file. Google Fonts is the only permitted external fetch.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Merriweather+Sans:wght@400;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap" rel="stylesheet">
+<style>
+  /* ============ Ink & Print tokens ============ */
+  :root {
+    --bg: #fffdf4;            /* cream paper */
+    --surface: #fffaf0;
+    --surface-alt: #f8f6ef;
+    --fg: #111827;            /* warm near-black — never pure #000 */
+    --fg-subtle: #555555;
+    --fg-muted: #999999;
+    --ink-navy: #1a3875;
+    --ink-sage: #6e8050;
+    --ink-terracotta: #b36e4e;
+    --ink-gold: #d4a853;
+    --accent: #859ebe;
+    --accent-soft: #eef2f7;
+    --cta: #0e2758;
+    --cta-foreground: #fffdf4;
+    --border: #e4dac8;
+    --border-strong: #d4c9b5;
+    --border-subtle: #f0ebe1;
+    --serif: 'Merriweather', Georgia, serif;
+    --sans: 'Merriweather Sans', 'Helvetica Neue', sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  /* ============ Cozy theme (opt-in: <html data-theme="cozy">) ============
+     Warmer paper, brown-black ink, moss and honey accents, soft serif type,
+     sentence-case headings, rounded corners. Same components, same layout. */
+  :root[data-theme="cozy"] {
+    --bg: #fbf4e6;
+    --surface: #fdf8ee;
+    --surface-alt: #f4ead8;
+    --fg: #2e241c;
+    --fg-subtle: #6b5a4a;
+    --fg-muted: #a08f7c;
+    --ink-navy: #3d5a3a;        /* moss: headings and links */
+    --ink-sage: #6f8a4f;
+    --ink-terracotta: #b0603c;
+    --ink-gold: #d39b3a;        /* honey */
+    --accent: #b9a27a;
+    --accent-soft: #f1e8d3;
+    --cta: #4a3626;
+    --cta-foreground: #fdf8ee;
+    --border: #e6d7bd;
+    --border-strong: #d6c19d;
+    --border-subtle: #efe4cf;
+    --serif: 'Fraunces', Georgia, serif;
+    --sans: 'Literata', Georgia, serif;
+  }
+  :root[data-theme="cozy"] body { font-size: 16px; line-height: 1.75; }
+  :root[data-theme="cozy"] h2 {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  :root[data-theme="cozy"] header.masthead h1 { font-weight: 700; }
+  :root[data-theme="cozy"] .callout,
+  :root[data-theme="cozy"] pre,
+  :root[data-theme="cozy"] code { border-radius: 8px; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ============ Page grid: reading column + comment rail ============ */
+  .dc-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 0;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  article#doc {
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+    min-width: 0;
+  }
+
+  /* ============ Typography ============ */
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+  }
+  header.masthead { border-bottom: 2px solid var(--border-strong); padding-bottom: 20px; margin-bottom: 32px; }
+  header.masthead h1 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 8px 0 10px;
+  }
+  header.masthead .context { color: var(--fg-subtle); font-size: 13.5px; margin: 0; }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-navy);
+    margin: 48px 0 12px;
+  }
+  h3 { font-family: var(--serif); font-weight: 700; font-size: 16.5px; margin: 32px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--ink-navy); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--cta); }
+  strong { font-weight: 700; }
+  ul, ol { padding-left: 24px; margin: 0 0 14px; }
+  li { margin-bottom: 4px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* Key-points opener: every section starts with scannable bullets */
+  .key-points {
+    list-style: none;
+    padding: 0 0 0 2px;
+    margin: 0 0 18px;
+  }
+  .key-points li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+  .key-points li::before { content: '—'; position: absolute; left: 0; color: var(--ink-gold); font-weight: 700; }
+
+  /* ============ TOC ============ */
+  nav.toc { margin: 28px 0 8px; }
+  nav.toc ol { list-style: none; padding: 0; column-count: 2; column-gap: 40px; margin: 10px 0 0; }
+  nav.toc li { margin-bottom: 5px; break-inside: avoid; }
+  nav.toc a { text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
+  nav.toc .toc-num { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); margin-right: 8px; }
+
+  /* ============ Tables ============ */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 18px 0 22px;
+    font-size: 13.5px;
+  }
+  th {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    text-align: left;
+    padding: 6px 12px 6px 0;
+    border-bottom: 2px solid var(--border-strong);
+  }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; font-feature-settings: 'tnum' 1; }
+
+  /* ============ Figures ============ */
+  figure { margin: 24px 0 28px; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+  figcaption .fig-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    color: var(--ink-navy);
+    margin-right: 8px;
+  }
+
+  /* ============ Code & citations ============ */
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 16px 0 20px;
+  }
+  pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+  .cite {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg-subtle);
+    background: var(--surface-alt);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  /* Superscript source references — body prose never carries raw file paths.
+     Full citation lives in the title (hover) and in the numbered Sources list. */
+  sup.ref { line-height: 0; }
+  sup.ref a {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-navy);
+    text-decoration: none;
+    padding: 0 1px;
+  }
+  sup.ref a:hover { text-decoration: underline; }
+  ol.sources { margin: 12px 0; padding-left: 30px; }
+  ol.sources li {
+    font-size: 13px;
+    padding: 2px 0;
+  }
+  ol.sources li::marker {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--ink-navy);
+  }
+  ol.sources li:target { background: var(--accent-soft); }
+
+  /* ============ Callouts ============ */
+  .callout { padding: 12px 16px; margin: 18px 0; font-size: 13.5px; border-radius: 3px; }
+  .callout .callout-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .callout-info { background: var(--accent-soft); }
+  .callout-info .callout-label { color: var(--ink-navy); }
+  .callout-warn { background: rgba(179, 110, 78, 0.08); border-left: 3px solid var(--ink-terracotta); }
+  .callout-warn .callout-label { color: var(--ink-terracotta); }
+  .callout-open { background: rgba(212, 168, 83, 0.10); }
+  .callout-open .callout-label { color: #8a6a1f; }
+
+  /* ============ Collapsible sections (native <details class="fold">) ============
+     Every h2 section and every appendix is a fold; long h3 subsections may be.
+     The heading sits inside <summary>, so its text stays part of the document
+     for comment anchoring. */
+  details.fold > summary { list-style: none; cursor: pointer; }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold > summary > h2,
+  details.fold > summary > h3 { display: flex; align-items: baseline; gap: 10px; }
+  details.fold > summary > h2::before,
+  details.fold > summary > h3::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--fg-muted);
+    border-bottom: 1.5px solid var(--fg-muted);
+    transform: translateY(-2px) rotate(-45deg);
+    transition: transform 120ms ease-out;
+  }
+  details.fold[open] > summary > h2::before,
+  details.fold[open] > summary > h3::before { transform: translateY(-4px) rotate(45deg); }
+  details.fold > summary:hover > h2,
+  details.fold > summary:hover > h3 { color: var(--cta); }
+  details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .fold-controls { margin: 10px 0 0; font-size: 12px; color: var(--fg-muted); }
+  .fold-controls button {
+    font: inherit;
+    color: var(--ink-navy);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline dotted var(--border-strong);
+    text-underline-offset: 3px;
+  }
+  .appendix-label { color: var(--fg-muted); }
+
+  /* ============ Open questions: two-way links ============
+     In the body, a gold "Q1" marker sits where a section depends on an
+     unresolved question; the question's entry links back to each marker. */
+  sup.oq-ref { line-height: 0; }
+  sup.oq-ref a {
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 700;
+    color: #8a6a1f;
+    background: rgba(212, 168, 83, 0.16);
+    border-radius: 999px;
+    padding: 1px 5px;
+    margin-left: 2px;
+    text-decoration: none;
+  }
+  sup.oq-ref a:hover { background: rgba(212, 168, 83, 0.32); }
+  ol.open-questions { padding-left: 0; list-style: none; counter-reset: oq; }
+  ol.open-questions > li {
+    counter-increment: oq;
+    position: relative;
+    padding: 10px 0 10px 40px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  ol.open-questions > li::before {
+    content: 'Q' counter(oq);
+    position: absolute;
+    left: 0;
+    top: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #8a6a1f;
+  }
+  ol.open-questions p { margin: 0 0 6px; }
+  .oq-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    margin-right: 6px;
+  }
+  .oq-from { font-size: 12.5px; color: var(--fg-subtle); }
+  ol.open-questions > li:target,
+  sup.oq-ref:target a,
+  .oq-anchor:target { background: rgba(212, 168, 83, 0.28); }
+
+  /* Decision record — Decision Record appendix only. The body states the
+     current design; it never carries labeled decision callouts. */
+  .decision { border-top: 1px solid var(--border); padding: 14px 0 4px; margin: 14px 0; }
+  .decision .decision-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-sage); }
+  .decision p { margin-top: 6px; }
+
+  blockquote {
+    margin: 16px 0 20px;
+    padding: 2px 0 2px 16px;
+    border-left: 2px solid var(--border-strong);
+    color: var(--fg-subtle);
+    font-family: var(--serif);
+    font-size: 14px;
+  }
+  td, .cite, ol.sources li { overflow-wrap: anywhere; }
+  .cite { white-space: normal; }
+
+  @media (max-width: 1100px) {
+    .dc-page { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    article#doc { padding: 32px 16px 96px; }
+    header.masthead h1 { font-size: 26px; }
+    nav.toc ol { column-count: 1; }
+    table { display: block; overflow-x: auto; }
+  }
+  @media print {
+    #dc-sidebar, #dc-fab, #dc-toggle { display: none !important; }
+    .dc-page { grid-template-columns: 1fr; }
+  }
+
+  /* ================================================================
+     DC-COMMENTS BEGIN — styles (copy verbatim; do not modify)
+     ================================================================ */
+  ::highlight(dc-hl) { background: rgba(212, 168, 83, 0.28); }
+  ::highlight(dc-hl-active) { background: rgba(212, 168, 83, 0.6); }
+
+  #dc-fab {
+    position: absolute;
+    z-index: 40;
+    display: none;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--cta-foreground);
+    background: var(--cta);
+    border: 1px solid #0a1c42;
+    border-radius: 3px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #dc-fab:hover { background: var(--ink-navy); }
+
+  #dc-sidebar {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    padding: 24px 20px 60px;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  #dc-sidebar h2.dc-title {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+    margin: 0 0 4px;
+  }
+  .dc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 18px; }
+  .dc-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .dc-btn:hover { background: var(--surface-alt); }
+  .dc-btn:focus-visible, #dc-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dc-empty { color: var(--fg-muted); font-style: italic; }
+  .dc-item { border-top: 1px solid var(--border-subtle); padding: 12px 0; cursor: pointer; }
+  .dc-item.dc-resolved { opacity: 0.5; }
+  .dc-quote {
+    border-left: 2px solid var(--ink-gold);
+    padding-left: 8px;
+    color: var(--fg-subtle);
+    font-style: italic;
+    font-size: 12px;
+    margin-bottom: 6px;
+    overflow-wrap: break-word;
+  }
+  .dc-orphan-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-terracotta);
+    background: rgba(179, 110, 78, 0.12);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .dc-text { white-space: pre-wrap; overflow-wrap: break-word; }
+  .dc-item textarea {
+    width: 100%;
+    min-height: 64px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 6px 8px;
+    resize: vertical;
+  }
+  .dc-item textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dc-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--fg-muted); }
+  .dc-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .dc-meta .dc-del { margin-left: auto; color: var(--ink-terracotta); background: none; border: none; font-size: 11px; cursor: pointer; padding: 0; }
+  .dc-meta .dc-del:hover { text-decoration: underline; }
+  #dc-status { font-size: 11px; color: var(--ink-sage); min-height: 16px; margin-top: 8px; }
+
+  #dc-toggle { display: none; }
+  @media (max-width: 1100px) {
+    #dc-sidebar {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 320px;
+      max-width: 90vw;
+      transform: translateX(100%);
+      transition: transform 200ms ease-out;
+      z-index: 50;
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+    }
+    #dc-sidebar.dc-open { transform: translateX(0); }
+    #dc-toggle {
+      display: block;
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 51;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--cta-foreground);
+      background: var(--cta);
+      border: 1px solid #0a1c42;
+      border-radius: 999px;
+      padding: 9px 15px;
+      cursor: pointer;
+    }
+  }
+  /* replies rendered under a comment (from the comment's `replies` array) */
+  .dc-replies { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
+  .dc-reply-author { font-family: var(--sans); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-navy); }
+  .dc-reply-text { font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; margin-top: 2px; }
+  .dc-reply-text a { color: var(--ink-navy); word-break: break-all; }
+  /* ============ DC-COMMENTS END — styles ============ */
+</style>
+</head>
+<body>
+<div class="dc-page">
+<article id="doc">
+
+  <header class="masthead">
+    <span class="eyebrow">Research Report · November 2, 2026 · Triage briefing for James</span>
+    <h1>Triage: the $10-in-27-minutes incident and its three Asana tasks</h1>
+    <p class="context">This briefing for James Boggs covers JAME-176 (runaway tool-call loop), JAME-175 (dispatcher error classes) and JAME-174 (budget-aware research serve). As of ide-distributions <code>2a224d2d</code>, metta <code>5a41cd9aa2</code> and Hermes v0.21.6 source. All times are PST.</p>
+  </header>
+
+  <section id="summary">
+    <h2>Executive Summary</h2>
+    <p>The workspace's $10 key ran out in 27 minutes. The user's chat did not loop: it made 2 valid <code>claim</code> calls and cost about $1.00. About half the money, roughly $5.00, went to <strong>14 Orchestrator wake Sessions</strong>, all created in the same second. The Orchestrator is the research-lead agent that the user chats with, and a wake Session is a background run that the watcher starts to handle one event. The watcher's first champion sync read every league on the platform, because no league matched the active Coworld's version id<sup class="ref"><a href="#src-1" title="core/src/research_core/watcher/champion_sync.py:102-107">1</a></sup>. The workspace was on Generals version 0.6.3. Generals has three leagues, but they follow the Coworld's canonical version, and each version has its own id. It reported 14 champions from other Coworlds (other games on the platform) as changes and started one wake per league. Each wake tried to record a claim, the model kept dropping the claim's <code>summary</code> and <code>tags</code>, and the loop guard of Hermes (the agent runtime) only warned. One wake sent identical arguments 185 times. The setup wake, which is ordinary work, cost about $3.20, and the Researcher about $0.90. All 14 wake events are acknowledged, so unpausing workspace <code>58bda2da</code> starts nothing again.</p>
+    <p>The single budgeted key did its job as a hard cap. What all three tasks miss is a record of <em>why</em> model work cannot run now. Each run start goes through one gate, <code>inference.available()</code><sup class="ref"><a href="#src-2" title="core/src/research_core/watcher/hermes_api.py:265">2</a></sup>, and that gate checks only the expiry of the key. We recommend this order. First, sync champions for the active Coworld only, merge champion wakes, and turn on the Hermes hard stop with a notice when it fires. Then add one shared record of why model work is blocked, written from Hermes's own error classes and read by the gate, the dispatcher and the IDE. Claims stay in the wake prompt. Making them reliable on mid-tier models is its own task, together with tool-call tests across several models. <a href="#order">Section 6</a> tells how each ticket changes. <strong>Not examined:</strong> the Datadog logs, the transcript of the Researcher Session (its cost is estimated as a remainder), and the Hermes build inside the image.</p>
+  </section>
+
+  <nav class="toc">
+    <span class="eyebrow">Contents</span>
+    <ol>
+      <li><span class="toc-num">1</span><a href="#what-happened">What actually happened</a></li>
+      <li><span class="toc-num">2</span><a href="#shared">Shared concerns across the three tasks</a></li>
+      <li><span class="toc-num">3</span><a href="#jame-176">JAME-176: find and stop the runaway tool-call loop</a></li>
+      <li><span class="toc-num">4</span><a href="#jame-175">JAME-175: teach the dispatcher what provider errors mean</a></li>
+      <li><span class="toc-num">5</span><a href="#jame-174">JAME-174: make research serve aware of the budget</a></li>
+      <li><span class="toc-num">6</span><a href="#order">Recommended order and ticket changes</a></li>
+      <li><span class="toc-num">7</span><a href="#open-questions">Open questions</a></li>
+      <li><span class="toc-num">A</span><a href="#appendix-sessions">Appendix A · Per-Session evidence and spend</a></li>
+      <li><span class="toc-num">B</span><a href="#appendix-mechanisms">Appendix B · Hermes and platform mechanisms referenced</a></li>
+      <li><span class="toc-num">C</span><a href="#sources">Appendix C · Sources</a></li>
+    </ol>
+    <p class="fold-controls"><button type="button" data-fold="open">Expand all</button> · <button type="button" data-fold="close">Collapse all</button></p>
+  </nav>
+
+  <section id="what-happened">
+    <details class="fold" open>
+      <summary><h2>1 · What actually happened</h2></summary>
+      <ul class="key-points">
+        <li><strong>The chat Session did not loop.</strong> The chat Session <code>api_1793654344_5866fc18</code> made 2 <code>claim</code> calls, both <code>action=query</code>, and cost about $1.00.</li>
+        <li><strong>The trigger was the first champion sync of the watcher</strong> at 1:31:54 PM. It emitted 14 <code>champion.changed</code> events, one for each league, all for leagues in other Coworlds.</li>
+        <li><strong>Each event started its own Orchestrator wake Session.</strong> 9 wakes started work at once, and 5 started about two minutes later. That agrees with the limit of 10 concurrent runs in the Hermes gateway.</li>
+        <li><strong>The wakes made 357 <code>claim</code> calls</strong>, and 348 of them were writes. The tool refused 345 writes because <code>summary</code>, <code>tags</code> or both were missing. 3 writes succeeded.</li>
+        <li><strong>One wake made 193 <code>claim</code> calls</strong>, and 185 of them had identical arguments. That wake alone cost about $3.00.</li>
+        <li><strong>The money split roughly in thirds.</strong> The champion wakes cost about $5.00, the setup wake about $3.20, and chat and Researcher about $1.90 together (<a href="#appendix-sessions">Appendix A</a>).</li>
+        <li><strong>The key ran out at 1:46 PM.</strong> The user's next three messages failed with "HTTP 403: Key limit exceeded".</li>
+      </ul>
+
+      <div class="callout callout-info">
+        <span class="callout-label">Terms used in this report</span>
+        A <em>Coworld</em> is one game on the Softmax platform, and a <em>league</em> is a competition inside a Coworld. One Coworld can have several leagues. A <em>Player</em> is the user's platform identity. The <em>champion</em> of a league is the policy version that represents that Player in the league. The <em>Orchestrator</em> is the research-lead agent profile that the user chats with. A <em>Researcher</em> is a worker profile that does one Task in the background, and <em>Flint</em> is the free model that Researchers use by default. The <em>watcher</em> is the periodic job of the Orchestrator. It syncs platform state and starts wake Sessions. The <em>lease</em> is the time-limited OpenRouter key, with a dollar limit, that the platform gives to a workspace. The workspace records the expiry of the lease in a file named <code>.inference-lease</code>.
+      </div>
+
+      <p>The task statements built their story from Datadog logs<sup class="ref"><a href="#src-3" title="Asana JAME-174, JAME-175, JAME-176">3</a></sup>. Those logs cut tool arguments short, and they do not name the Session. The ops route <code>session.messages</code> gives the stored Hermes messages with full arguments<sup class="ref"><a href="#src-4" title="Workspace 58bda2da transcripts (ops session.messages), snapshot (ops workspace.snapshot) and run records (ops run.get), read November 2, 2026">4</a></sup>. The <code>workspace.snapshot</code> route lists each Session with the event that triggered it, and <code>run.get</code> gives the status and token usage of each run. The OpenRouter activity report for the key gives the exact dollars for each model<sup class="ref"><a href="#src-5" title="OpenRouter activity report for the workspace key, November 2, 2026 (UTC)">5</a></sup>. Together, they show three causes, one on top of the other.</p>
+
+      <p><strong>Many runs from one event.</strong> <code>leagues_of</code> returns the leagues whose Coworld is the active one, "else every league the platform lists"<sup class="ref"><a href="#src-1" title="core/src/research_core/watcher/champion_sync.py:102-107">1</a></sup>. The design rule that it implements, A4.9, says "every league of the active Coworld's game"<sup class="ref"><a href="#src-6" title="docs/plans/ide-profile-refactor/08-amendments.md:150-151">6</a></sup>. The fallback goes further than the rule. The platform lists 501 leagues, and none of them carries the workspace's version id<sup class="ref"><a href="#src-7" title="Softmax platform GET /v2/leagues, read November 2, 2026">7</a></sup>. Generals does have three leagues (Build 1v1, FFA and Classic 1v1). A league runs its Coworld's canonical version unless an admin locks it, and every version of a Coworld has its own id. The workspace was on generals-competition 0.6.3, and the match compared exact version ids, so it found nothing. Thus the step pulled in all 14 leagues where the Player has a membership. <code>champion.sync</code> treats a league with no stored row as a change<sup class="ref"><a href="#src-8" title="core/src/research_core/store/champion.py:64-66">8</a></sup> and emits <code>champion.changed</code><sup class="ref"><a href="#src-8" title="core/src/research_core/store/champion.py:100-118">8</a></sup>, which starts a model wake<sup class="ref"><a href="#src-9" title="core/src/research_core/watcher/handlers.py:114">9</a></sup>.</p>
+      <p>The watcher joins repeated events into one Session only when they share a kind <em>and</em> a subject<sup class="ref"><a href="#src-10" title="core/src/research_core/watcher/wakes.py:22-25">10</a></sup>. The subject is the league id, and thus 14 leagues gave 14 Sessions. Only the gateway held them back. The Hermes setting <code>gateway.api_server.max_concurrent_runs</code> has a default of 10<sup class="ref"><a href="#src-11" title="Hermes v0.21.6 hermes_cli/config_defaults.py:2236">11</a></sup>.</p>
+
+      <p><strong>Dropped arguments.</strong> The wake prompt tells the model to "record a claim about the new champion"<sup class="ref"><a href="#src-12" title="core/src/research_core/watcher/wakes/management.md:31">12</a></sup>. The model sent <code>body</code>, <code>evidence</code>, <code>see_also</code>, <code>stance</code>, <code>status</code> and <code>superseded_by</code>, but not <code>summary</code> or <code>tags</code>. Several of those fields belong to other <code>claim</code> actions. The schema of the <code>claim</code> tool requires only <code>action</code>. "Required for write" is only in the description text, and no provider can enforce that. Replays from earlier the same day showed the pattern. On the default routing of OpenRouter, Kimi K3 dropped required arguments in 3 of 3 tries. On the endpoint of Moonshot (the maker of Kimi), it dropped them in 0 of 3. In this incident, every Kimi call went to third-party hosts (Wafer, Relace, Modal and others), never to Moonshot.</p>
+
+      <p><strong>Nothing stopped it.</strong> Each refusal is JSON with an <code>"error"</code> key<sup class="ref"><a href="#src-13" title="core/src/research_core/plugin/executor.py:65-66">13</a></sup>. Thus the Hermes loop guard counted each one as a failure and attached a warning, and the model ignored the warnings. Hermes turns on its hard stop only for platforms that it treats as unattended. The IDE runs on the <code>api_server</code> platform, and that platform is on the attended list<sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:85,93-97,121-129">14</a></sup>. Each wake ended only when its model gave up.</p>
+
+      <p><strong>The model settings at the time.</strong> The workspace used <code>moonshotai/kimi-k3</code> with no host pin. PR #137 (clearer refusals, merged 3:05 PM) and PR #138 (Kimi K3.1 Pro as the default, and the two Kimi models pinned to the Moonshot endpoint<sup class="ref"><a href="#src-15" title="orchestrator/config.yaml:72-83">15</a></sup>, merged 3:35 PM) both landed after the incident. PR #118 made the model a profile setting that the workspace setup code never changes<sup class="ref"><a href="#src-16" title="core/src/research_core/prepare.py">16</a></sup>. As a result, existing workspaces keep <code>kimi-k3</code>, now pinned, until the user changes it. These changes reduce the trigger, but none of them caps a loop.</p>
+
+      <figure>
+<svg id="fig-1" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" style="max-width: 268.391px; background-color: transparent;" viewBox="0 0 268.390625 857.2000122070312" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#fig-1{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;fill:#111827;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#fig-1 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#fig-1 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#fig-1 .error-icon{fill:#fffaf0;}#fig-1 .error-text{fill:#111827;stroke:#111827;}#fig-1 .edge-thickness-normal{stroke-width:1px;}#fig-1 .edge-thickness-thick{stroke-width:3.5px;}#fig-1 .edge-pattern-solid{stroke-dasharray:0;}#fig-1 .edge-thickness-invisible{stroke-width:0;fill:none;}#fig-1 .edge-pattern-dashed{stroke-dasharray:3;}#fig-1 .edge-pattern-dotted{stroke-dasharray:2;}#fig-1 .marker{fill:#859ebe;stroke:#859ebe;}#fig-1 .marker.cross{stroke:#859ebe;}#fig-1 svg{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;}#fig-1 p{margin:0;}#fig-1 .label{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#111827;}#fig-1 .cluster-label text{fill:#1a3875;}#fig-1 .cluster-label span{color:#1a3875;}#fig-1 .cluster-label span p{background-color:transparent;}#fig-1 .label text,#fig-1 span{fill:#111827;color:#111827;}#fig-1 .node rect,#fig-1 .node circle,#fig-1 .node ellipse,#fig-1 .node polygon,#fig-1 .node path{fill:#f8f6ef;stroke:#d4c9b5;stroke-width:1px;}#fig-1 .rough-node .label text,#fig-1 .node .label text,#fig-1 .image-shape .label,#fig-1 .icon-shape .label{text-anchor:middle;}#fig-1 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#fig-1 .rough-node .label,#fig-1 .node .label,#fig-1 .image-shape .label,#fig-1 .icon-shape .label{text-align:center;}#fig-1 .node.clickable{cursor:pointer;}#fig-1 .root .anchor path{fill:#859ebe!important;stroke-width:0;stroke:#859ebe;}#fig-1 .arrowheadPath{fill:#00020b;}#fig-1 .edgePaths .path{stroke:#859ebe;stroke-width:1px;}#fig-1 .flowchart-link{stroke:#859ebe;fill:none;}#fig-1 .edgeLabel{background-color:#fffdf4;text-align:center;}#fig-1 .edgeLabel p{background-color:#fffdf4;}#fig-1 .edgeLabel rect{opacity:0.5;background-color:#fffdf4;fill:#fffdf4;}#fig-1 .labelBkg{background-color:rgba(255, 253, 244, 0.5);}#fig-1 .cluster rect{fill:#fffaf0;stroke:#e4dac8;stroke-width:1px;}#fig-1 .cluster text{fill:#1a3875;}#fig-1 .cluster span{color:#1a3875;}#fig-1 .node .collapsed-indicator{fill:#e4dac8;stroke:none;opacity:0.6;}#fig-1 .node .collapsed-separator{stroke:#e4dac8;stroke-width:0.75px;}#fig-1 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;background:#fffaf0;border:1px solid #e4dac8;border-radius:2px;pointer-events:none;z-index:100;}#fig-1 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#111827;}#fig-1 rect.text{fill:none;stroke-width:0;}#fig-1 .icon-shape,#fig-1 .image-shape{background-color:#fffdf4;text-align:center;}#fig-1 .icon-shape p,#fig-1 .image-shape p{background-color:#fffdf4;padding:2px;}#fig-1 .icon-shape .label rect,#fig-1 .image-shape .label rect{opacity:0.5;background-color:#fffdf4;fill:#fffdf4;}#fig-1 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#fig-1 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#fig-1 .node .neo-node{stroke:#d4c9b5;}#fig-1 [data-look="neo"].node rect,#fig-1 [data-look="neo"].cluster rect,#fig-1 [data-look="neo"].node polygon{stroke:url(#fig-1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-1 [data-look="neo"].swimlane.cluster rect{filter:none;}#fig-1 [data-look="neo"].node path{stroke:url(#fig-1-gradient);stroke-width:1px;}#fig-1 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-1 [data-look="neo"].node .neo-line path{stroke:#d4c9b5;filter:none;}#fig-1 [data-look="neo"].node circle{stroke:url(#fig-1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-1 [data-look="neo"].node circle .state-start{fill:#000000;}#fig-1 [data-look="neo"].icon-shape .icon{fill:url(#fig-1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-1 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#fig-1-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-1 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="fig-1_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="fig-1_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"/></marker><marker id="fig-1_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"/></marker><g class="root"><g class="clusters"/><g class="edgePaths"><path d="M134.195,69.4L134.195,73.567C134.195,77.733,134.195,86.067,134.195,93.733C134.195,101.4,134.195,108.4,134.195,111.9L134.195,115.4" id="fig-1-L_A_B_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_A_B_0" data-points="W3sieCI6MTM0LjE5NTMxMjUsInkiOjY5LjQwMDAwMTUyNTg3ODl9LHsieCI6MTM0LjE5NTMxMjUsInkiOjk0LjQwMDAwMTUyNTg3ODl9LHsieCI6MTM0LjE5NTMxMjUsInkiOjExOS40MDAwMDE1MjU4Nzg5fV0=" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M134.195,180.8L134.195,184.967C134.195,189.133,134.195,197.467,134.195,205.133C134.195,212.8,134.195,219.8,134.195,223.3L134.195,226.8" id="fig-1-L_B_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_B_C_0" data-points="W3sieCI6MTM0LjE5NTMxMjUsInkiOjE4MC44MDAwMDMwNTE3NTc4fSx7IngiOjEzNC4xOTUzMTI1LCJ5IjoyMDUuODAwMDAzMDUxNzU3OH0seyJ4IjoxMzQuMTk1MzEyNSwieSI6MjMwLjgwMDAwMzA1MTc1Nzh9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M134.195,292.2L134.195,296.367C134.195,300.533,134.195,308.867,134.195,316.533C134.195,324.2,134.195,331.2,134.195,334.7L134.195,338.2" id="fig-1-L_C_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_D_0" data-points="W3sieCI6MTM0LjE5NTMxMjUsInkiOjI5Mi4yMDAwMDQ1Nzc2MzY3fSx7IngiOjEzNC4xOTUzMTI1LCJ5IjozMTcuMjAwMDA0NTc3NjM2N30seyJ4IjoxMzQuMTk1MzEyNSwieSI6MzQyLjIwMDAwNDU3NzYzNjd9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M134.195,403.6L134.195,407.767C134.195,411.933,134.195,420.267,134.195,427.933C134.195,435.6,134.195,442.6,134.195,446.1L134.195,449.6" id="fig-1-L_D_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_D_E_0" data-points="W3sieCI6MTM0LjE5NTMxMjUsInkiOjQwMy42MDAwMDYxMDM1MTU2fSx7IngiOjEzNC4xOTUzMTI1LCJ5Ijo0MjguNjAwMDA2MTAzNTE1Nn0seyJ4IjoxMzQuMTk1MzEyNSwieSI6NDUzLjYwMDAwNjEwMzUxNTZ9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M128.684,515L127.936,519.167C127.188,523.333,125.691,531.667,125.574,539.344C125.456,547.021,126.716,554.042,127.347,557.552L127.977,561.063" id="fig-1-L_E_F_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_E_F_0" data-points="W3sieCI6MTI4LjY4MzY0Mjc3OTYzNTEsInkiOjUxNS4wMDAwMDc2MjkzOTQ1fSx7IngiOjEyNC4xOTUzMTI1LCJ5Ijo1NDAuMDAwMDA3NjI5Mzk0NX0seyJ4IjoxMjguNjgzNjQyNzc5NjM1MSwieSI6NTY1LjAwMDAwNzYyOTM5NDV9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M139.707,565L140.455,560.833C141.203,556.667,142.699,548.333,142.817,540.656C142.935,532.979,141.674,525.958,141.044,522.448L140.414,518.937" id="fig-1-L_F_E_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_F_E_0" data-points="W3sieCI6MTM5LjcwNjk4MjIyMDM2NDksInkiOjU2NS4wMDAwMDc2MjkzOTQ1fSx7IngiOjE0NC4xOTUzMTI1LCJ5Ijo1NDAuMDAwMDA3NjI5Mzk0NX0seyJ4IjoxMzkuNzA2OTgyMjIwMzY0OSwieSI6NTE1LjAwMDAwNzYyOTM5NDV9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M134.195,626.4L134.195,630.567C134.195,634.733,134.195,643.067,134.195,650.733C134.195,658.4,134.195,665.4,134.195,668.9L134.195,672.4" id="fig-1-L_F_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_F_G_0" data-points="W3sieCI6MTM0LjE5NTMxMjUsInkiOjYyNi40MDAwMDkxNTUyNzM0fSx7IngiOjEzNC4xOTUzMTI1LCJ5Ijo2NTEuNDAwMDA5MTU1MjczNH0seyJ4IjoxMzQuMTk1MzEyNSwieSI6Njc2LjQwMDAwOTE1NTI3MzR9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/><path d="M134.195,737.8L134.195,741.967C134.195,746.133,134.195,754.467,134.195,762.133C134.195,769.8,134.195,776.8,134.195,780.3L134.195,783.8" id="fig-1-L_G_H_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_G_H_0" data-points="W3sieCI6MTM0LjE5NTMxMjUsInkiOjczNy44MDAwMTA2ODExNTIzfSx7IngiOjEzNC4xOTUzMTI1LCJ5Ijo3NjIuODAwMDEwNjgxMTUyM30seyJ4IjoxMzQuMTk1MzEyNSwieSI6Nzg3LjgwMDAxMDY4MTE1MjN9XQ==" data-look="classic" marker-end="url(#fig-1_flowchart-v2-pointEnd)"/></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" data-id="L_A_B_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_B_C_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_C_D_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_D_E_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_E_F_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_F_E_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_F_G_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_G_H_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g></g><g class="nodes"><g class="node default" id="fig-1-flowchart-A-0" data-look="classic" transform="translate(134.1953125, 38.70000076293945)"><rect class="basic label-container" style="" x="-126.1953125" y="-30.700000762939453" width="252.390625" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">1:31:54</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> first</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> champion</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> sync</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">(active</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> Coworld</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> has</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> no</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> league)</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-B-1" data-look="classic" transform="translate(134.1953125, 150.10000228881836)"><rect class="basic label-container" style="" x="-122.4765625" y="-30.700000762939453" width="244.953125" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">14</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> champion.changed</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> events</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">(other</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> Coworlds'</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> leagues)</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-C-3" data-look="classic" transform="translate(134.1953125, 261.50000381469727)"><rect class="basic label-container" style="" x="-86.40625" y="-30.700000762939453" width="172.8125" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">14</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> wake</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> Sessions</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">(one</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> per</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> league)</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-D-5" data-look="classic" transform="translate(134.1953125, 372.9000053405762)"><rect class="basic label-container" style="" x="-109.6328125" y="-30.700000762939453" width="219.265625" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">gateway</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> runs</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> 9</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> now,</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">5</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> about</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> two</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> minutes</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> later</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-E-7" data-look="classic" transform="translate(134.1953125, 484.3000068664551)"><rect class="basic label-container" style="" x="-101.171875" y="-30.700000762939453" width="202.34375" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">each</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> wake:</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> claim</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> write</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">without</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> summary/tags</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-F-9" data-look="classic" transform="translate(134.1953125, 595.700008392334)"><rect class="basic label-container" style="" x="-104.421875" y="-30.700000762939453" width="208.84375" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">refused;</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> Hermes</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> warns;</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">model</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> retries</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-G-13" data-look="classic" transform="translate(134.1953125, 707.1000099182129)"><rect class="basic label-container" style="" x="-113.1328125" y="-30.700000762939453" width="226.265625" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">1:41</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> OpenRouter</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> 402</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">fallback</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> GLM</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> on</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> same</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> key</tspan></tspan></text></g></g></g><g class="node default" id="fig-1-flowchart-H-15" data-look="classic" transform="translate(134.1953125, 818.5000114440918)"><rect class="basic label-container" style="" x="-88.09375" y="-30.700000762939453" width="176.1875" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">1:46</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> 403</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> key</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> limit</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">user</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> messages</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> fail</tspan></tspan></text></g></g></g></g></g></g><defs><filter id="fig-1-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><defs><filter id="fig-1-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><linearGradient id="fig-1-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#d4c9b5" stop-opacity="1"/><stop offset="100%" stop-color="#d4c9b5" stop-opacity="1"/></linearGradient></svg>
+        <figcaption><span class="fig-label">Figure 1</span>How one sync became 345 refused writes. Nothing in the system ends the loop between the refused write and the retry. Each wake stopped only when its model gave up, the worst after 193 <code>claim</code> calls.</figcaption>
+      </figure>
+    </details>
+  </section>
+
+  <section id="shared">
+    <details class="fold" open>
+      <summary><h2>2 · Shared concerns across the three tasks</h2></summary>
+      <ul class="key-points">
+        <li><strong>One budgeted key is the cap, by design, and it held.</strong> Chat, wake Sessions, Researchers and the fallback model all draw on one $10 OpenRouter key. Without that limit, this incident would have cost much more.</li>
+        <li><strong>Nothing says why work stopped.</strong> When the key is spent, each consumer fails with a raw provider error. Nothing tells "budget spent until 4 PM" apart from an outage or a bad request.</li>
+        <li><strong>Each run start already goes through one gate.</strong> <code>HermesRuns.start</code> refuses a run when <code>inference.available()</code> is false<sup class="ref"><a href="#src-2" title="core/src/research_core/watcher/hermes_api.py:265-266">2</a></sup>. This is true for chat, wakes and Researchers. Thus a change to <code>inference.available()</code> covers all of them.</li>
+        <li><strong><code>inference.available()</code> knows one fact.</strong> It checks that the lease file exists and that its expiry is in the future<sup class="ref"><a href="#src-17" title="core/src/research_core/inference.py:7-10">17</a></sup>.</li>
+        <li><strong>Hermes already classifies provider errors.</strong> Hermes puts each failed model call into a <code>FailoverReason</code> class, for example <code>billing</code>, <code>rate_limit</code>, <code>overloaded</code> or <code>context_overflow</code><sup class="ref"><a href="#src-18" title="Hermes v0.21.6 agent/error_classifier.py:34-66">18</a></sup>. A 403 "Key limit exceeded" goes into <code>billing</code>. Plugins receive the class through the <code>api_request_error</code> hook<sup class="ref"><a href="#src-19" title="Hermes v0.21.6 agent/api_request_hooks.py:163-200">19</a></sup>.</li>
+      </ul>
+
+      <p>Tasks 2 and 3 each propose a part of the same thing. Task 3 (JAME-174) proposes a marker next to <code>.inference-lease</code>. Task 2 (JAME-175) proposes an error class stored on each chat admission. An admission is the <code>client_admissions</code> row that the dispatcher keeps for each user message. Task 1 (JAME-176) proposes spend-rate alarms that pause the workspace. One small JSON file next to the lease file, <code>.inference-state</code>, serves all three better. The file says why model work is blocked and until when. It is a file, not a store table, because three separate processes use it: the Hermes plugin, the lease loop in the image, and <code>research_core</code>. From here on, this report calls it the <em>inference state</em>.</p>
+
+      <p><strong>Who writes it.</strong></p>
+      <ol>
+        <li>The profile plugin registers an <code>api_request_error</code> hook. The plugin already registers hooks<sup class="ref"><a href="#src-20" title="core/src/research_core/plugin/register.py:36-37">20</a></sup>. On <code>billing</code>, the hook writes <code>budget_exhausted</code>. After repeated <code>overloaded</code> or <code>server_error</code> results, it writes <code>provider_unavailable</code> with a retry time a few minutes later. It also records the last class against the run of the Session, so that the dispatcher can read it.</li>
+        <li>The lease loop in the image<sup class="ref"><a href="#src-21" title="image/inference.py">21</a></sup> writes the next refill time next to the lease file. It also writes <code>budget_exhausted</code> itself when the platform refuses a lease because the budget is spent.</li>
+      </ol>
+      <p><strong>Who clears it.</strong> Only the lease loop clears <code>budget_exhausted</code>, when it installs a new key. A new key is the only thing that ends a budget block. Nobody clears <code>provider_unavailable</code>; it lapses at its retry time.</p>
+      <p><strong>Who retries.</strong> Nothing calls the model to test whether it works again. Each consumer checks the gate before it starts work, and waits while the gate is closed. The dispatcher holds a chat message as <code>waiting</code> and resumes it when the gate opens (<a href="#jame-175">Section 4</a>). The watcher leaves wake events unclaimed while the gate is closed, so no attempt counts against <code>recovery.max_attempts</code><sup class="ref"><a href="#src-10" title="core/src/research_core/watcher/wakes.py:12-17">10</a></sup>. Researcher dispatch skips its tick. The task statements miss the last two, because task 3 talks only about chat messages.</p>
+
+      <figure>
+<svg id="fig-2" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" style="max-width: 1277.22px; background-color: transparent;" viewBox="0 0 1277.21875 277.1000061035156" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#fig-2{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;fill:#111827;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#fig-2 .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#fig-2 .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#fig-2 .error-icon{fill:#fffaf0;}#fig-2 .error-text{fill:#111827;stroke:#111827;}#fig-2 .edge-thickness-normal{stroke-width:1px;}#fig-2 .edge-thickness-thick{stroke-width:3.5px;}#fig-2 .edge-pattern-solid{stroke-dasharray:0;}#fig-2 .edge-thickness-invisible{stroke-width:0;fill:none;}#fig-2 .edge-pattern-dashed{stroke-dasharray:3;}#fig-2 .edge-pattern-dotted{stroke-dasharray:2;}#fig-2 .marker{fill:#859ebe;stroke:#859ebe;}#fig-2 .marker.cross{stroke:#859ebe;}#fig-2 svg{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;}#fig-2 p{margin:0;}#fig-2 .label{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#111827;}#fig-2 .cluster-label text{fill:#1a3875;}#fig-2 .cluster-label span{color:#1a3875;}#fig-2 .cluster-label span p{background-color:transparent;}#fig-2 .label text,#fig-2 span{fill:#111827;color:#111827;}#fig-2 .node rect,#fig-2 .node circle,#fig-2 .node ellipse,#fig-2 .node polygon,#fig-2 .node path{fill:#f8f6ef;stroke:#d4c9b5;stroke-width:1px;}#fig-2 .rough-node .label text,#fig-2 .node .label text,#fig-2 .image-shape .label,#fig-2 .icon-shape .label{text-anchor:middle;}#fig-2 .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#fig-2 .rough-node .label,#fig-2 .node .label,#fig-2 .image-shape .label,#fig-2 .icon-shape .label{text-align:center;}#fig-2 .node.clickable{cursor:pointer;}#fig-2 .root .anchor path{fill:#859ebe!important;stroke-width:0;stroke:#859ebe;}#fig-2 .arrowheadPath{fill:#00020b;}#fig-2 .edgePaths .path{stroke:#859ebe;stroke-width:1px;}#fig-2 .flowchart-link{stroke:#859ebe;fill:none;}#fig-2 .edgeLabel{background-color:#fffdf4;text-align:center;}#fig-2 .edgeLabel p{background-color:#fffdf4;}#fig-2 .edgeLabel rect{opacity:0.5;background-color:#fffdf4;fill:#fffdf4;}#fig-2 .labelBkg{background-color:rgba(255, 253, 244, 0.5);}#fig-2 .cluster rect{fill:#fffaf0;stroke:#e4dac8;stroke-width:1px;}#fig-2 .cluster text{fill:#1a3875;}#fig-2 .cluster span{color:#1a3875;}#fig-2 .node .collapsed-indicator{fill:#e4dac8;stroke:none;opacity:0.6;}#fig-2 .node .collapsed-separator{stroke:#e4dac8;stroke-width:0.75px;}#fig-2 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;background:#fffaf0;border:1px solid #e4dac8;border-radius:2px;pointer-events:none;z-index:100;}#fig-2 .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#111827;}#fig-2 rect.text{fill:none;stroke-width:0;}#fig-2 .icon-shape,#fig-2 .image-shape{background-color:#fffdf4;text-align:center;}#fig-2 .icon-shape p,#fig-2 .image-shape p{background-color:#fffdf4;padding:2px;}#fig-2 .icon-shape .label rect,#fig-2 .image-shape .label rect{opacity:0.5;background-color:#fffdf4;fill:#fffdf4;}#fig-2 .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#fig-2 .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#fig-2 .node .neo-node{stroke:#d4c9b5;}#fig-2 [data-look="neo"].node rect,#fig-2 [data-look="neo"].cluster rect,#fig-2 [data-look="neo"].node polygon{stroke:url(#fig-2-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-2 [data-look="neo"].swimlane.cluster rect{filter:none;}#fig-2 [data-look="neo"].node path{stroke:url(#fig-2-gradient);stroke-width:1px;}#fig-2 [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-2 [data-look="neo"].node .neo-line path{stroke:#d4c9b5;filter:none;}#fig-2 [data-look="neo"].node circle{stroke:url(#fig-2-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-2 [data-look="neo"].node circle .state-start{fill:#000000;}#fig-2 [data-look="neo"].icon-shape .icon{fill:url(#fig-2-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-2 [data-look="neo"].icon-shape .icon-neo path{stroke:url(#fig-2-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#fig-2 :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style><g><marker id="fig-2_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="fig-2_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"/></marker><marker id="fig-2_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"/></marker><g class="root"><g class="clusters"/><g class="edgePaths"><path d="M229.813,86.7L233.979,86.7C238.146,86.7,246.479,86.7,254.447,86.7C262.414,86.7,270.016,86.7,273.816,86.7L277.617,86.7" id="fig-2-L_H_P_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_H_P_0" data-points="W3sieCI6MjI5LjgxMjUsInkiOjg2LjcwMDAwMDc2MjkzOTQ1fSx7IngiOjI1NC44MTI1LCJ5Ijo4Ni43MDAwMDA3NjI5Mzk0NX0seyJ4IjoyODEuNjE3MTg3NSwieSI6ODYuNzAwMDAwNzYyOTM5NDV9XQ==" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/><path d="M457.289,86.7L461.757,86.7C466.224,86.7,475.159,86.7,486.113,89.333C497.067,91.965,510.039,97.23,516.526,99.863L523.012,102.496" id="fig-2-L_P_S_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_P_S_0" data-points="W3sieCI6NDU3LjI4OTA2MjUsInkiOjg2LjcwMDAwMDc2MjkzOTQ1fSx7IngiOjQ4NC4wOTM3NSwieSI6ODYuNzAwMDAwNzYyOTM5NDV9LHsieCI6NTI2LjcxODY1MDQ2Mzk2ODUsInkiOjEwNH1d" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/><path d="M459.094,190.4L463.26,190.4C467.427,190.4,475.76,190.4,488.171,186.517C500.581,182.635,517.069,174.87,525.313,170.987L533.557,167.104" id="fig-2-L_L_S_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_L_S_0" data-points="W3sieCI6NDU5LjA5Mzc1LCJ5IjoxOTAuNDAwMDAxNTI1ODc4OX0seyJ4Ijo0ODQuMDkzNzUsInkiOjE5MC40MDAwMDE1MjU4Nzg5fSx7IngiOjUzNy4xNzUyNjg1NzI3NDcxLCJ5IjoxNjUuNDAwMDAxNTI1ODc4OX1d" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/><path d="M640.18,104L653.587,93.117C666.995,82.233,693.81,60.467,715.919,49.583C738.029,38.7,755.432,38.7,764.134,38.7L772.836,38.7" id="fig-2-L_S_G_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_S_G_0" data-points="W3sieCI6NjQwLjE3OTczNzI2ODAxNTcsInkiOjEwNH0seyJ4Ijo3MjAuNjI1LCJ5IjozOC43MDAwMDA3NjI5Mzk0NX0seyJ4Ijo3NzYuODM1OTM3NSwieSI6MzguNzAwMDAwNzYyOTM5NDV9XQ==" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/><path d="M959.992,38.7L969.361,38.7C978.729,38.7,997.466,38.7,1010.335,38.7C1023.203,38.7,1030.203,38.7,1033.703,38.7L1037.203,38.7" id="fig-2-L_G_R_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_G_R_0" data-points="W3sieCI6OTU5Ljk5MjE4NzUsInkiOjM4LjcwMDAwMDc2MjkzOTQ1fSx7IngiOjEwMTYuMjAzMTI1LCJ5IjozOC43MDAwMDA3NjI5Mzk0NX0seyJ4IjoxMDQxLjIwMzEyNSwieSI6MzguNzAwMDAwNzYyOTM5NDV9XQ==" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/><path d="M695.625,134.7L699.792,134.7C703.958,134.7,712.292,134.7,720.943,134.7C729.594,134.7,738.563,134.7,743.047,134.7L747.531,134.7" id="fig-2-L_S_D_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_S_D_0" data-points="W3sieCI6Njk1LjYyNSwieSI6MTM0LjcwMDAwMDc2MjkzOTQ1fSx7IngiOjcyMC42MjUsInkiOjEzNC43MDAwMDA3NjI5Mzk0NX0seyJ4Ijo3NTEuNTMxMjUsInkiOjEzNC43MDAwMDA3NjI5Mzk0NX1d" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/><path d="M637.371,165.4L651.247,177.567C665.123,189.733,692.874,214.067,710.249,226.233C727.625,238.4,734.625,238.4,738.125,238.4L741.625,238.4" id="fig-2-L_S_U_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_S_U_0" data-points="W3sieCI6NjM3LjM3MTQ3NDgxNjk0NjksInkiOjE2NS40MDAwMDE1MjU4Nzg5fSx7IngiOjcyMC42MjUsInkiOjIzOC40MDAwMDE1MjU4Nzg5fSx7IngiOjc0NS42MjUsInkiOjIzOC40MDAwMDE1MjU4Nzg5fV0=" data-look="classic" marker-end="url(#fig-2_flowchart-v2-pointEnd)"/></g><g class="edgeLabels"><g class="edgeLabel"><g class="label" data-id="L_H_P_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_P_S_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_L_S_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_S_G_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_G_R_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_S_D_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g><g class="edgeLabel"><g class="label" data-id="L_S_U_0" transform="translate(0, 0)"><text y="-10.1" text-anchor="middle"><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle"/></text></g></g><g><rect class="background" style="stroke: none"/></g></g><g class="nodes"><g class="node default" id="fig-2-flowchart-H-0" data-look="classic" transform="translate(118.90625, 86.70000076293945)"><rect class="basic label-container" style="" x="-110.90625" y="-30.700000762939453" width="221.8125" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">Hermes</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> api_request_error</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">(reason</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> =</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> billing,</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> ...)</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-P-1" data-look="classic" transform="translate(369.453125, 86.70000076293945)"><rect class="basic label-container" style="" x="-87.8359375" y="-22.999999523162842" width="175.671875" height="45.999999046325684"/><g class="label" style="" transform="translate(0, -7.999999523162842)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">profile</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> plugin</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> hook</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-S-3" data-look="classic" transform="translate(602.359375, 134.70000076293945)"><rect class="basic label-container" style="" x="-93.265625" y="-30.700000762939453" width="186.53125" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">inference</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> state</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">(.inference-state</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> file)</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-L-4" data-look="classic" transform="translate(369.453125, 190.4000015258789)"><rect class="basic label-container" style="" x="-89.640625" y="-30.700000762939453" width="179.28125" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">image/inference.py</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">refill</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> time,</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> new</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> key</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-G-7" data-look="classic" transform="translate(868.4140625, 38.70000076293945)"><rect class="basic label-container" style="" x="-91.578125" y="-22.999999523162842" width="183.15625" height="45.999999046325684"/><g class="label" style="" transform="translate(0, -7.999999523162842)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">inference.available()</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-R-9" data-look="classic" transform="translate(1155.2109375, 38.70000076293945)"><rect class="basic label-container" style="" x="-114.0078125" y="-30.700000762939453" width="228.015625" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">HermesRuns.start</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">(chat,</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> wakes,</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> Researchers)</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-D-11" data-look="classic" transform="translate(868.4140625, 134.70000076293945)"><rect class="basic label-container" style="" x="-116.8828125" y="-22.999999523162842" width="233.765625" height="45.999999046325684"/><g class="label" style="" transform="translate(0, -7.999999523162842)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">dispatcher:</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> admission</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> class</tspan></tspan></text></g></g></g><g class="node default" id="fig-2-flowchart-U-13" data-look="classic" transform="translate(868.4140625, 238.4000015258789)"><rect class="basic label-container" style="" x="-122.7890625" y="-30.700000762939453" width="245.578125" height="61.400001525878906"/><g class="label" style="" transform="translate(0, -15.700000762939453)"><rect/><g><rect class="background" style="stroke: none"/><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">503</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> reason</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> +</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> admission</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> class</tspan></tspan><tspan class="text-outer-tspan row" x="0" y="1em" dy="1.1em"><tspan font-style="normal" class="text-inner-tspan" font-weight="normal">→</tspan><tspan font-style="normal" class="text-inner-tspan" font-weight="normal"> /ide-next</tspan></tspan></text></g></g></g></g></g></g><defs><filter id="fig-2-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><defs><filter id="fig-2-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><linearGradient id="fig-2-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#d4c9b5" stop-opacity="1"/><stop offset="100%" stop-color="#d4c9b5" stop-opacity="1"/></linearGradient></svg>
+        <figcaption><span class="fig-label">Figure 2</span>The proposed inference state. Each fact has one writer. Each run start already goes through the gate that reads it, and the IDE reads the reason from the same place.</figcaption>
+      </figure>
+    </details>
+  </section>
+
+  <section id="jame-176">
+    <details class="fold" open>
+      <summary><h2>3 · JAME-176: find and stop the runaway tool-call loop</h2></summary>
+      <ul class="key-points">
+        <li><strong>The cause is known.</strong> A champion sync that read every league started 14 runs, the model dropped required arguments, and the loop guard only gave warnings. The transcripts answer the four questions of the task (below).</li>
+        <li><strong>Sync only the active Coworld.</strong> Remove the "every league" fallback in <code>leagues_of</code>, and match leagues by Coworld name, not by version id, because a workspace can be on an older version than its leagues. When no league runs the Coworld, there is nothing to sync, and the Orchestrator gets a notice. In this incident, that removes all 14 wakes, about $5.00.</li>
+        <li><strong>Merge champion wakes by kind.</strong> Coworlds do have several leagues: Cogs vs Clips has 3, and Sugarscape, webDiplomacy and Crewrift have 2 each. Thus one sync can still raise several changes, and one wake should handle them together.</li>
+        <li><strong>Warn, then stop.</strong> Hermes already warns after 2 identical failures or 3 failures of one tool. Turn on its hard stop, and post a notice when it fires. A halted run ends <code>completed</code>, so the watcher does not retry it.</li>
+        <li><strong>Keep the claim in the wake prompt, and make claims reliable.</strong> The fix belongs in the tool schema and in tests against mid-tier models, not in avoiding claims.</li>
+        <li><strong>Defer</strong> the spend-rate alarm and the limit on parallel calls. The wakes never made more than 2 tool calls in one model message. The many concurrent Sessions multiplied the cost, not parallel calls.</li>
+      </ul>
+
+      <h3>Answers to "What to find out"</h3>
+      <ol>
+        <li><em>Arguments.</em> The model omitted <code>summary</code> and <code>tags</code> completely. It did not nest or rename them. In their place, it sent fields of other <code>claim</code> actions (<a href="#appendix-sessions">Appendix A</a>).</li>
+        <li><em>Which Sessions.</em> The calls came from 14 Orchestrator wake Sessions for <code>champion.changed</code>, and 6 calls came from the setup wake. They did not come from the chat Session or from delegated subagents. The Researcher Session (1:35 to 1:43 PM) cost about $0.90. The ops route does not serve its transcript, so its calls are not counted.</li>
+        <li><em>Model or schema.</em> Both. The host dropped arguments, as the earlier replays show. The schema allows it. <code>claim</code> is one tool with six actions, its only required field is <code>action</code>, and the fields of <code>write</code>, <code>search</code> and <code>retire</code> sit next to each other. The description of <code>tags</code> even says first that it is a search filter ("Keep only claims carrying all of these tags"), and only after that "Required for write". PR #137 now refuses fields that belong to other actions and shows an example.</li>
+        <li><em>League selection in <code>Context v1</code>.</em> <code>Context v1</code> is the context block that the IDE adds to each chat message. This report did not check the league selection. The <code>platform.active_policies</code> refusals came from the chat Session. That question is separate from the spend, and it needs its own small check.</li>
+      </ol>
+
+      <h3>What to change, in order of value per effort</h3>
+      <ol>
+        <li><em>Champion sync reads the active Coworld only.</em> <code>leagues_of</code> returns only the leagues whose <code>game.coworld_id</code> is the active Coworld<sup class="ref"><a href="#src-22" title="core/src/research_core/platform/real.py:807-816">22</a></sup>. When there are none, the sync step records that it has nothing to sync. The first sync of a workspace still emits <code>champion.changed</code> for each league of the active Coworld, because the user should hear who represents them there. The 14 rows already in the Generals store stay. They are a correct record of those leagues, and the sync does not read them.</li>
+        <li><em>Hard stop, with a notice.</em> Add <code>tool_loop_guardrails: {hard_stop_enabled: true, hard_stop_after: {same_tool_failure: 5}}</code> to the Orchestrator profile config<sup class="ref"><a href="#src-15" title="orchestrator/config.yaml">15</a></sup> and the Researcher profile config<sup class="ref"><a href="#src-23" title="researcher/config.yaml">23</a></sup>. Add the keys to <code>PROTECTED_KEYS</code> in the workspace setup code<sup class="ref"><a href="#src-16" title="core/src/research_core/prepare.py:60">16</a></sup>, so that existing installs of both profiles get them. The warnings stay at the Hermes defaults (2 identical failures, 3 failures of one tool). A halt at 5 failures instead of 8 costs little: of 348 claim writes, 3 succeeded, so a model that fails 5 times in a row is not about to recover. A halt ends the turn with the Hermes explanation as the final reply<sup class="ref"><a href="#src-24" title="Hermes v0.21.6 agent/turn_tool_round.py:175-189">24</a></sup>, and the run status is <code>completed</code><sup class="ref"><a href="#src-25" title="Hermes v0.21.6 agent/turn_finalizer.py:579-590">25</a></sup><sup class="ref"><a href="#src-26" title="Hermes v0.21.6 gateway/platforms/api_server_runs.py:180-191">26</a></sup>. The watcher acknowledges the event and does not retry it. But nobody reads the final reply of a wake. Thus add an <code>on_session_end</code> hook to the plugin. When <code>turn_exit_reason</code> is <code>guardrail_halt</code><sup class="ref"><a href="#src-27" title="Hermes v0.21.6 hermes_cli/hooks.py:127-131">27</a></sup>, the hook writes a notice that names the Session and the tool. The counters reset at each turn<sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:314">14</a></sup>, so the user's next message starts clean.</li>
+        <li><em>A firmer refusal on repeats.</em> The plugin already has a <code>transform_tool_result</code> hook<sup class="ref"><a href="#src-28" title="core/src/research_core/plugin/advisory.py:70-84">28</a></sup>. Hermes uses the first string that such a hook returns as the tool result<sup class="ref"><a href="#src-29" title="Hermes v0.21.6 model_tools.py:848-865">29</a></sup>. When the same refusal comes back a second time in one Session, replace its text with a short message: this exact call was refused N times; supply the named fields, or report the problem with <code>ui.notify</code> and end the run. This gives the model a way out before the halt, and it keeps refused results short in the history.</li>
+        <li><em>One wake for all champion changes.</em> Today the join key is <code>(kind, subject)</code>. Give each wake handler an option to batch by kind, and turn it on for <code>champion.changed</code> only. All pending events of that kind start one Session. Its prompt lists each change, and the end of that Session acknowledges all of them. Events of that kind that arrive while the Session runs wait for the next batch. They do not join the live Session, because a joined event is acknowledged although the running model never saw it. The same option is how any other event kind gets "no concurrent wakes"<sup class="oq-ref" id="oq-7-from-jame-176"><a href="#oq-7" title="Open question 7 — Which other event kinds should join wakes by kind alone?">Q7</a></sup>.</li>
+        <li><em>Scenario test.</em> <code>FakePlatform</code><sup class="ref"><a href="#src-30" title="core/src/research_core/platform/fake.py:177">30</a></sup> starts with champions in leagues of other Coworlds and none in the active Coworld. Make sure that the first tick emits no <code>champion.changed</code>. Then change three leagues of the active Coworld, and make sure that one wake carries all three. With <code>FakeHermesRuns</code><sup class="ref"><a href="#src-2" title="core/src/research_core/watcher/hermes_api.py:429">2</a></sup> and a scripted model that drops <code>summary</code>, make sure that the run halts and ends <code>completed</code>, that its events are acknowledged, and that a notice is written.</li>
+      </ol>
+
+      <p><strong>Claims stay, and they must work.</strong> The wake prompt keeps "record a claim about the new champion". Two pieces of work make claims reliable, and both are outside this ticket:</p>
+      <ul>
+        <li><em>Tool schema.</em> Each multi-action tool has the same weakness as <code>claim</code>: the required fields for each action exist only in descriptions. The Orchestrator has 13 multi-action tools out of 18, and the Researcher has 11 out of 14. If write actions become separate tools, or one tool gets a schema for each action, providers can enforce the required fields. The cost is a longer tool list. That decision has its own Asana task.</li>
+        <li><em>Tool-call tests across mid-tier models.</em> <code>core/tests/model/test_tool_call_format.py</code> already sends one instruction for each tool to each configured model through OpenRouter. It is skipped without a key, so it stays out of CI. Extend it in three ways. Add a case for each write action with required fields (today the <code>claim</code> case is a search). Pin the provider host, so the same model is tested on different hosts. Add a case where the history already holds one refused call. Then print the first-try valid rate for each model, host and action. This gives the evidence for the schema decision. A variant through a real Hermes gateway can follow if the direct test passes but Sessions still fail.</li>
+      </ul>
+
+      <p><strong>Removing failed calls from the history.</strong> Hermes has no plugin hook that edits the conversation history during a run. A context-engine plugin can do it. Its <code>select_context()</code> may replace the list of messages sent on each request, and the saved transcript does not change<sup class="ref"><a href="#src-31" title="Hermes v0.21.6 agent/context_engine.py:121-141">31</a></sup>. It could drop refused calls and their results, and leave one note in their place. The cost is real. The context-engine slot is exclusive, so the plugin would have to subclass the built-in Hermes <code>ContextCompressor</code><sup class="ref"><a href="#src-32" title="Hermes v0.21.6 agent/context_compressor.py:2177">32</a></sup>, which is not a stable API. Removing messages from the middle also breaks the prompt cache, and cached input costs about a tenth of the full price. Decide after the multi-model tests show whether it helps models recover<sup class="oq-ref" id="oq-6-from-jame-176"><a href="#oq-6" title="Open question 6 — Does removing refused calls from the history help mid-tier models recover?">Q6</a></sup>.</p>
+
+      <p>The other ideas of the task come later. A per-run limit of our own on identical refusals would duplicate the Hermes hard stop. The spend-rate alarm belongs on top of the inference state. It can read usage from the Hermes <code>post_api_request</code> hook.</p>
+    </details>
+  </section>
+
+  <section id="jame-175">
+    <details class="fold" open>
+      <summary><h2>4 · JAME-175: teach the dispatcher what provider errors mean</h2></summary>
+      <ul class="key-points">
+        <li><strong>The dispatcher classifies only errors at run start.</strong> On 429, <code>gateway_draining</code> or <code>inference_unavailable</code>, it puts the message back in the queue. Each other start error becomes <code>queued</code> or <code>failed</code>, as its <code>retryable</code> flag tells<sup class="ref"><a href="#src-33" title="core/src/research_core/serve.py:433-455">33</a></sup>.</li>
+        <li><strong>A run that fails partway stores text, not a class.</strong> The dispatcher copies the <code>error</code> string of the run onto the admission and marks the admission <code>failed</code><sup class="ref"><a href="#src-33" title="core/src/research_core/serve.py:384-398">33</a></sup>.</li>
+        <li><strong>Use the Hermes classes, not text matching.</strong> Read the class that the plugin hook recorded for the run (<a href="#shared">Section 2</a>). Use the text only when the hook recorded no class.</li>
+        <li><strong>A failure in the middle of a run should not leave the original message queued.</strong> The failed run already made tool calls and wrote records. A replay of the original text would repeat that work and put the user's message in the Session two times. Instead, resume with a continuation prompt after the wait.</li>
+        <li><strong>Model fallback cannot help on a billing error.</strong> The GLM fallback uses the same OpenRouter key<sup class="ref"><a href="#src-15" title="orchestrator/config.yaml:84-86">15</a></sup>. Thus, after a 402, it can only spend the last cents.</li>
+      </ul>
+
+      <h3>Error classes and the response to each</h3>
+      <table>
+        <thead>
+          <tr><th>Class (Hermes reason)</th><th>Example in this incident</th><th>Dispatcher response</th><th>User sees</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Budget exhausted (<code>billing</code>)</td><td>402 "requires more credits", 403 "Key limit exceeded"</td><td>Hold, then resume after the refill</td><td>"Out of budget until 4:00 PM"</td></tr>
+          <tr><td>Rate limit (<code>rate_limit</code>, <code>upstream_rate_limit</code>)</td><td>none</td><td>Back off and retry. Hermes retries first</td><td>"Busy, retrying"</td></tr>
+          <tr><td>Provider down (<code>overloaded</code>, <code>server_error</code>, <code>timeout</code>)</td><td>none</td><td>Retry later. Set the inference state after repeats</td><td>"Model provider down, retrying"</td></tr>
+          <tr><td>Too large (<code>context_overflow</code>, <code>payload_too_large</code>)</td><td>none</td><td>Fail. Hermes already compresses before it gives up</td><td>"Conversation too long; start a new one"</td></tr>
+          <tr><td>Auth or config (<code>auth_permanent</code>, <code>model_not_found</code>)</td><td>none</td><td>Fail and alert the operator</td><td>"Workspace misconfigured"</td></tr>
+          <tr><td>Model stuck (loop-guard halt)</td><td>185 identical refusals</td><td>Nothing. The run ends <code>completed</code>, with the Hermes explanation as its reply</td><td>The explanation, as the agent's answer</td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>Mid-run failures.</strong> Today an admission has one of these statuses: <code>queued</code>, <code>running</code>, <code>completed</code>, <code>failed</code>, <code>cancelled</code> or <code>interrupted</code>. This change adds one status, <code>waiting</code>, for an admission whose run failed with a budget or provider class. When the inference state clears, the dispatcher starts a run with a continuation prompt, not the original text. The admission rows of the incident show that such a prompt already comes to the dispatcher as a user message: "Continue my interrupted request from its saved progress. Inspect existing action receipts…". Its source is not in this repository or in the metta workspaces folder. Thus it probably comes from the IDE front end (unverified). The result keeps the user's request alive and does not repeat its side effects.</p>
+
+      <p><strong>The 402.</strong> The task text says the following, and this report did not check it against the OpenRouter documentation. OpenRouter reserves up to 131,072 output tokens for each request. It refuses the request when the remaining credit cannot pay for that worst case. If this is true, the key looks empty before the $10 is spent, and the fallback model on the same key hits the same wall. A lower output cap would make the last dollar usable. A quick search of the Hermes config defaults found no setting for it<sup class="oq-ref" id="oq-2-from-jame-175"><a href="#oq-2" title="Open question 2 — Which Hermes setting caps a request&#x27;s output tokens for OpenRouter models, and what cap suits these profiles?">Q2</a></sup>.</p>
+    </details>
+  </section>
+
+  <section id="jame-174">
+    <details class="fold" open>
+      <summary><h2>5 · JAME-174: make research serve aware of the budget</h2></summary>
+      <ul class="key-points">
+        <li><strong>The gate checks only expiry.</strong> This is true both in <code>research_core</code><sup class="ref"><a href="#src-17" title="core/src/research_core/inference.py:7-10">17</a></sup> and in the image<sup class="ref"><a href="#src-34" title="image/application.py:57-59">34</a></sup>. A key that is spent but not expired leaves the workspace "available".</li>
+        <li><strong>Early renewal will not work as the task writes it.</strong> The lease endpoint of the platform gives back the same key while that key is more than the grace period from expiry and is not disabled<sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py:100-104">35</a></sup>. The endpoint never compares the spend of the key with its limit.</li>
+        <li><strong>Early renewal is also not necessary.</strong> When the platform mints a key, the limit of the key is the whole account balance<sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py:176-188">35</a></sup>. The balance goes up only at the daily refill<sup class="ref"><a href="#src-36" title="metta workspaces/observatory/platform/packages/core/src/observatory_core/hermes/budget.py:11-12">36</a></sup>. Thus a spent key means a spent account until the refill. Keys expire at the refill plus a grace period, so the scheduled renewal already brings a new key at that time.</li>
+        <li><strong>The useful part is the state and the gate.</strong> Record <code>budget_exhausted</code> with the refill time, and keep new and queued work waiting. Answer <code>503 inference_unavailable</code> with that time, and clear the state when a new key arrives.</li>
+        <li><strong>The remaining credit is easy to read.</strong> The key-info endpoint of OpenRouter, called with the key itself, reports usage and the remaining limit. The lease loop could read it to give a warning before the key reaches its limit.</li>
+      </ul>
+
+      <p><strong>What the change looks like.</strong> It is the inference state from <a href="#shared">Section 2</a>, applied to the budget:</p>
+      <ol>
+        <li>The lease code in the image writes the next refill time next to the lease file. It gets that time from <code>next_refill_at</code> in a refusal. If no refusal gives it, the time is the <code>expires_at</code> of the lease minus the 10-minute grace period.</li>
+        <li>The plugin's <code>api_request_error</code> hook writes <code>budget_exhausted</code>, with that refill time, on <code>billing</code>.</li>
+        <li><code>inference.available()</code> returns false while <code>budget_exhausted</code> is set. Then the dispatcher, the watcher's wakes and Researcher dispatch all wait.</li>
+        <li>The image's web app answers <code>503 inference_unavailable</code> with the reason and the refill time. Thus <code>/ide-next</code> can show "out of budget until 4:00 PM".</li>
+        <li>The lease code in the image clears the state when it installs a new key. It also schedules its next renewal no later than the refill time. Thus the workspace resumes on time, even if the platform's <code>renew_at</code> is later.</li>
+        <li>Optional: read the remaining credit at each renewal and every few minutes, and show "about $1 left" as a warning.</li>
+      </ol>
+
+      <p><strong>Scope across repositories.</strong> None of this needs a change in metta. If you later want the platform to refuse a spent key early, <code>lease()</code> would compare the usage of the current key with its limit. That is a small change in the metta lease code<sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py">35</a></sup>. But it gains nothing until the platform can add money during the day.</p>
+
+      <p><strong>Test.</strong> Use <code>FakeHermesRuns</code> and fail one run with a <code>billing</code> class. Make sure that the admission becomes <code>waiting</code> with a reason. Make sure that new messages get 503 with the refill time. Make sure that a new lease clears the state and starts a continuation run.</p>
+    </details>
+  </section>
+
+  <section id="order">
+    <details class="fold" open>
+      <summary><h2>6 · Recommended order and ticket changes</h2></summary>
+      <ul class="key-points">
+        <li><strong>First, one change:</strong> champion sync for the active Coworld only, champion wakes merged by kind, the hard stop with its notice, and the firmer repeated refusal (JAME-176).</li>
+        <li><strong>Second:</strong> the inference state and the gate change (JAME-174).</li>
+        <li><strong>Third:</strong> dispatcher classes and continuation resume (JAME-175), on top of that state.</li>
+        <li><strong>At the same time:</strong> the tool-call tests across several models, and then the tool-schema decision that they inform.</li>
+        <li><strong>You can unpause workspace <code>58bda2da</code> at any time.</strong> All 14 champion wakes ended <code>completed</code>, so their events are acknowledged, and all 14 leagues now have stored champion rows.</li>
+      </ul>
+
+      <p>The first change alone would have removed about $5.00 of the $10.02, because none of the 14 wakes would have started. The rest is a normal first session: setup about $3.20, chat about $1.00 and a Researcher about $0.90. That is about half of a day's budget in 27 minutes, which is worth watching separately (see the later items).</p>
+
+      <h3>Ticket by ticket</h3>
+      <ul>
+        <li><strong>JAME-176:</strong> <em>rescope.</em> The "What to find out" section closes with the answers in this report. The new scope: champion sync reads the active Coworld only, champion wakes merge by kind, the hard stop halts at 5 failures of one tool with a notice, repeated refusals become firmer, and the scenario test. Drop the custom per-run limit, because the Hermes hard stop replaces it. Move the spend-rate alarm to later. The tool-schema question has its own task, "Decide whether to split multi-action research tools so required arguments are enforced". The multi-model tool-call tests also need a ticket.</li>
+        <li><strong>JAME-174:</strong> <em>keep, with edits.</em> Replace "renew early after exhaustion" with "renew no later than the refill time". Extend the scope from chat messages to each run start (wakes and Researchers). The shared gate gives this at no cost. Note that this ticket builds the inference state that JAME-175 uses again.</li>
+        <li><strong>JAME-175:</strong> <em>keep, with edits.</em> Use the Hermes <code>FailoverReason</code> through the plugin hook, not text matching. Change "leave the message queued" to "hold it as <code>waiting</code> and resume with a continuation prompt". Treat the output-token cap as an open question<sup class="oq-ref" id="oq-2-from-tickets"><a href="#oq-2" title="Open question 2 — Which Hermes setting caps a request&#x27;s output tokens for OpenRouter models, and what cap suits these profiles?">Q2</a></sup>, not as a fix.</li>
+      </ul>
+
+      <h3>Later items and what would bring them forward</h3>
+      <ul>
+        <li><em>Spend-rate alarm:</em> bring it forward if a loop that the hard stop does not catch ever spends more than a few dollars. An example is a loop that varies its tools.</li>
+        <li><em>Setup-wake cost:</em> bring it forward if new workspaces usually spend more than a third of the daily budget on setup. This setup wake sent 18.7M input tokens, because each call resent a growing history.</li>
+        <li><em>Removing failed calls from the history:</em> bring it forward if the multi-model tests show that models recover better with a cleaner history<sup class="oq-ref" id="oq-6-from-later"><a href="#oq-6" title="Open question 6 — Does removing refused calls from the history help mid-tier models recover?">Q6</a></sup>.</li>
+        <li><em>Output-token cap:</em> bring it forward when the answer to Q2<sup class="oq-ref" id="oq-2-from-later"><a href="#oq-2" title="Open question 2 — Which Hermes setting caps a request&#x27;s output tokens for OpenRouter models, and what cap suits these profiles?">Q2</a></sup> finds the setting.</li>
+        <li><em><code>Context v1</code> league check:</em> this check is independent of spend, so you can do it at any time.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="open-questions">
+    <details class="fold" open>
+      <summary><h2>7 · Open questions</h2></summary>
+      <ul class="key-points">
+        <li><strong>None of these questions blocks the first change.</strong></li>
+      </ul>
+      <ol class="open-questions">
+        <li id="oq-2">
+          <p><strong>Q2. Which Hermes setting caps the output tokens of a request for OpenRouter models, and what cap suits these profiles?</strong></p>
+          <p><span class="oq-label">Context</span> A quick search found no such setting. The answer decides whether a config change can repair the 402.</p>
+          <p class="oq-from">Raised in <a href="#oq-2-from-jame-175">§4 JAME-175 (The 402)</a>, <a href="#oq-2-from-tickets">§6 Ticket by ticket</a>, <a href="#oq-2-from-later">§6 Later items</a></p>
+        </li>
+        <li id="oq-6">
+          <p><strong>Q6. Does removing refused calls from the history help mid-tier models recover?</strong></p>
+          <p><span class="oq-label">Context</span> The multi-model tool-call tests can measure it. Run the same scripted failures with and without a cleaned history. The answer decides whether a context-engine plugin is worth its cost.</p>
+          <p class="oq-from">Raised in <a href="#oq-6-from-jame-176">§3 Removing failed calls from the history</a>, <a href="#oq-6-from-later">§6 Later items</a></p>
+        </li>
+        <li id="oq-7">
+          <p><strong>Q7. Which other event kinds should join wakes by kind alone?</strong></p>
+          <p><span class="oq-label">Context</span> The candidates are <code>store.unmarked_write</code> and <code>store.schema_rebuilt</code>, which can arrive for many subjects at once. The answer sets the option for each handler when JAME-176 adds it.</p>
+          <p class="oq-from">Raised in <a href="#oq-7-from-jame-176">§3 What to change (One wake for all champion changes)</a></p>
+        </li>
+      </ol>
+    </details>
+  </section>
+
+  <section id="appendix-sessions" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix A ·</span> Per-Session evidence and spend</h2></summary>
+      <p>All times are PST, November 2, 2026.</p>
+      <p><strong>Spend.</strong> The OpenRouter activity report for the workspace key on November 2 (UTC day, which contains the whole incident) gives $10.02 over 689 requests. Kimi K3 cost $8.95 (39.0M prompt tokens, 244k completion tokens), and GLM-5.3 cost $1.07 (11.8M prompt, 30k completion). The token counts for each run come from <code>run.get</code>. The dollars for each Session are estimates: prompt tokens at $0.133 per million plus output tokens at $12 per million. This blended rate gives the total of the key. The first chat run was cancelled and reports no usage, so its tokens are estimated from the size of the transcript. The Researcher's runs are not available through <code>run.get</code>, so its share is the remainder. Each figure is accurate to about ±25%.</p>
+      <table>
+        <thead>
+          <tr><th>Session(s)</th><th class="num">Input tokens</th><th class="num">Output tokens</th><th>Model at run end</th><th class="num">Approx. cost</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Setup wake <code>api_1793654399_205f0ef4</code></td><td class="num">18.7M</td><td class="num">57k</td><td>GLM-5.3</td><td class="num">$3.20</td></tr>
+          <tr><td>Looping wake <code>api_1793655115_7ad6a2cd</code></td><td class="num">15.8M</td><td class="num">72k</td><td>GLM-5.3</td><td class="num">$3.00</td></tr>
+          <tr><td>Other 13 champion wakes</td><td class="num">7.6M</td><td class="num">86k</td><td>Kimi K3</td><td class="num">$2.00</td></tr>
+          <tr><td>Chat <code>api_1793654344_5866fc18</code></td><td class="num">about 4.4M</td><td class="num">about 32k</td><td>Kimi K3</td><td class="num">$1.00</td></tr>
+          <tr><td>Researcher <code>api_1793655357_23576335</code></td><td class="num">about 4.2M</td><td class="num">about 27k</td><td>not available</td><td class="num">$0.90</td></tr>
+          <tr><td><strong>Key total (OpenRouter)</strong></td><td class="num"><strong>50.8M</strong></td><td class="num"><strong>273k</strong></td><td></td><td class="num"><strong>$10.02</strong></td></tr>
+        </tbody>
+      </table>
+      <p>"Model at run end" is the model that served the last call of the run. The two GLM runs started on Kimi K3 and moved to the GLM fallback after the 402. No Flint calls appear for the key, so the Researcher ran on its Kimi K3 fallback. All 14 champion wakes and the setup wake ended <code>completed</code>. The last three chat runs ended <code>failed</code> on the key limit.</p>
+      <p><strong>Calls.</strong> The counts come from <code>session.messages</code> for each Session. "Refused" counts each tool result that starts with <code>{"ok": false</code>, for any tool. "Active" is the time from the first stored message to the last. Thus it shows when a run actually started work, not when its Session row was created. All 14 champion rows were created at 1:31:54–55.</p>
+      <table>
+        <thead>
+          <tr><th>Session</th><th>Kind</th><th>Active</th><th class="num">Messages</th><th class="num">Refused</th><th class="num"><code>claim</code> calls</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>api_1793654344_5866fc18</code></td><td>chat</td><td>1:19–1:50</td><td class="num">152</td><td class="num">not counted</td><td class="num">2 (query)</td></tr>
+          <tr><td><code>api_1793654399_205f0ef4</code></td><td>wake, setup</td><td>1:19–1:45</td><td class="num">286</td><td class="num">9</td><td class="num">6</td></tr>
+          <tr><td><code>api_1793655115_7ad6a2cd</code></td><td>wake, champion</td><td>1:34–1:45</td><td class="num">400</td><td class="num">195</td><td class="num">193</td></tr>
+          <tr><td><code>api_1793655114_32572b57</code></td><td>wake, champion</td><td>1:31–1:36</td><td class="num">50</td><td class="num">19</td><td class="num">20</td></tr>
+          <tr><td><code>api_1793655115_60d00204</code></td><td>wake, champion</td><td>1:33–1:35</td><td class="num">45</td><td class="num">19</td><td class="num">19</td></tr>
+          <tr><td><code>api_1793655115_fbc6ecc4</code></td><td>wake, champion</td><td>1:31–1:33</td><td class="num">49</td><td class="num">19</td><td class="num">19</td></tr>
+          <tr><td><code>api_1793655114_ad1504f6</code></td><td>wake, champion</td><td>1:31–1:33</td><td class="num">43</td><td class="num">14</td><td class="num">15</td></tr>
+          <tr><td><code>api_1793655115_a7bcb7b4</code></td><td>wake, champion</td><td>1:33–1:37</td><td class="num">41</td><td class="num">14</td><td class="num">7</td></tr>
+          <tr><td><code>api_1793655115_b4129acc</code></td><td>wake, champion</td><td>1:33–1:35</td><td class="num">37</td><td class="num">12</td><td class="num">13</td></tr>
+          <tr><td><code>api_1793655114_cfd88d93</code></td><td>wake, champion</td><td>1:31–1:32</td><td class="num">35</td><td class="num">11</td><td class="num">12</td></tr>
+          <tr><td><code>api_1793655115_4e181355</code></td><td>wake, champion</td><td>1:31–1:36</td><td class="num">37</td><td class="num">11</td><td class="num">11</td></tr>
+          <tr><td><code>api_1793655115_63c163f8</code></td><td>wake, champion</td><td>1:33–1:34</td><td class="num">27</td><td class="num">10</td><td class="num">10</td></tr>
+          <tr><td><code>api_1793655115_6d8cdf9c</code></td><td>wake, champion</td><td>1:31–1:33</td><td class="num">31</td><td class="num">12</td><td class="num">8</td></tr>
+          <tr><td><code>api_1793655114_b231083e</code></td><td>wake, champion</td><td>1:31–1:32</td><td class="num">25</td><td class="num">9</td><td class="num">9</td></tr>
+          <tr><td><code>api_1793655114_95d13f70</code></td><td>wake, champion</td><td>1:31–1:35</td><td class="num">34</td><td class="num">7</td><td class="num">8</td></tr>
+          <tr><td><code>api_1793655114_9a6d102f</code></td><td>wake, champion</td><td>1:31–1:32</td><td class="num">21</td><td class="num">7</td><td class="num">7</td></tr>
+          <tr><td><strong>All wakes</strong></td><td></td><td></td><td class="num"><strong>1,161</strong></td><td class="num"><strong>368</strong></td><td class="num"><strong>357</strong></td></tr>
+        </tbody>
+      </table>
+      <p>Of the 357 <code>claim</code> calls in wakes, 348 were writes. Of the 368 refusals, 335 read "summary is required for write; tags is required for write", and 10 read "tags is required for write". That gives 345 refused writes in total. Another 10 were <code>ui</code> refusals, "text is required for notify". 7 were <code>task</code> refusals, "type is required for create; title is required for create". 6 were other errors. The most frequent <code>claim</code> call of the looping Session carried <code>action, body, evidence, see_also, stance, status, superseded_by</code>. But <code>claim write</code> itself takes <code>summary, body, tags, evidence, see_also</code><sup class="ref"><a href="#src-37" title="core/src/research_core/tools/claim.py:41-51">37</a></sup>. 13 of the 14 champion wakes still told the user about their change with <code>ui.notify</code>. Most of those notices add that the claim write failed.</p>
+      <p>Refusals per minute across all wakes: 1:32 56, 1:33 16, 1:34 69, 1:35 39, 1:36 42, 1:37 24, 1:38 23, 1:39 22, 1:40 15, 1:41 16, 1:42 20, 1:43 14, 1:44 10, 1:45 2.</p>
+      <p>The three failed admissions (1:46:44, 1:47:00 and 1:50:57 PM) all carry "HTTP 403: Key limit exceeded (total limit) … $10.02 of $10.00 used; does not reset."</p>
+    </details>
+  </section>
+
+  <section id="appendix-mechanisms" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix B ·</span> Hermes and platform mechanisms referenced</h2></summary>
+      <ul>
+        <li><strong>Loop guard</strong><sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py">14</a></sup>. Defaults: <code>warnings_enabled</code> true, <code>hard_stop_enabled</code> false, <code>non_interactive_hard_stop_enabled</code> true. Limits: <code>exact_failure_warn_after</code> 2, <code>exact_failure_block_after</code> 5, <code>same_tool_failure_warn_after</code> 3, <code>same_tool_failure_halt_after</code> 8<sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:121-129">14</a></sup>. The nested config form <code>hard_stop_after: {same_tool_failure: N}</code> sets the halt<sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:70-77">14</a></sup>. The non-interactive switch applies only to platforms outside <code>{"cli","tui","desktop","acp","subagent","api_server"}</code><sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:85,93-97">14</a></sup>. A result counts as a failure when its first 500 characters contain the quoted key <code>"error"</code> or <code>"failed"</code>, or when it starts with <code>Error</code>. The guard's own refusals are exempt<sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:218-242">14</a></sup>. The block after 5 identical failures resets when a successful write lands between them. The halt for one tool does not reset. The counters reset at each turn<sup class="ref"><a href="#src-14" title="Hermes v0.21.6 agent/tool_guardrails.py:314">14</a></sup>.</li>
+        <li><strong>What a halt produces.</strong> The tool round ends the turn with <code>turn_exit_reason = "guardrail_halt"</code> and adds the guard's explanation as the final assistant message<sup class="ref"><a href="#src-24" title="Hermes v0.21.6 agent/turn_tool_round.py:175-189">24</a></sup>. <code>guardrail_halt</code> is not a failing exit reason, so the turn counts as completed<sup class="ref"><a href="#src-25" title="Hermes v0.21.6 agent/turn_finalizer.py:579-590">25</a></sup>, and the runs API reports <code>completed</code><sup class="ref"><a href="#src-26" title="Hermes v0.21.6 gateway/platforms/api_server_runs.py:180-191">26</a></sup>. The <code>on_session_end</code> hook receives <code>turn_exit_reason</code><sup class="ref"><a href="#src-27" title="Hermes v0.21.6 hermes_cli/hooks.py:127-131">27</a></sup>.</li>
+        <li><strong>Plugin hooks used here.</strong> <code>transform_tool_result</code> can replace the result of a tool before it goes into the history. The first string returned wins<sup class="ref"><a href="#src-29" title="Hermes v0.21.6 model_tools.py:848-865">29</a></sup>. <code>api_request_error</code> receives <code>session_id</code>, <code>model</code>, <code>provider</code>, <code>status_code</code>, <code>retryable</code>, <code>reason</code>, <code>error {type, message}</code> and the request payload<sup class="ref"><a href="#src-19" title="Hermes v0.21.6 agent/api_request_hooks.py:163-200">19</a></sup>. No hook edits the history.</li>
+        <li><strong>Context engines.</strong> <code>context.engine</code> has a default of <code>compressor</code><sup class="ref"><a href="#src-11" title="Hermes v0.21.6 hermes_cli/config_defaults.py:1296-1300">11</a></sup>. The <code>select_context()</code> method of an engine runs on each provider request. It can replace the list of request messages, and the saved transcript does not change<sup class="ref"><a href="#src-31" title="Hermes v0.21.6 agent/context_engine.py:121-141">31</a></sup>.</li>
+        <li><strong>Error classes</strong><sup class="ref"><a href="#src-18" title="Hermes v0.21.6 agent/error_classifier.py:34-66">18</a></sup>. <code>billing</code> is "402 or confirmed credit exhaustion". The other classes include <code>rate_limit</code>, <code>upstream_rate_limit</code>, <code>overloaded</code>, <code>server_error</code>, <code>timeout</code>, <code>context_overflow</code>, <code>payload_too_large</code>, <code>auth</code>, <code>auth_permanent</code> and <code>model_not_found</code>.</li>
+        <li><strong>Gateway concurrency.</strong> <code>gateway.api_server.max_concurrent_runs</code> has a default of 10<sup class="ref"><a href="#src-11" title="Hermes v0.21.6 hermes_cli/config_defaults.py:2236">11</a></sup>. Above that number, the runs API answers 429, and the watcher retries at its next tick.</li>
+        <li><strong>Leagues on the platform.</strong> <code>GET /v2/leagues</code> lists 501 leagues. Each league carries its Coworld as <code>game.coworld_id</code>, which <code>_league</code> reads<sup class="ref"><a href="#src-22" title="core/src/research_core/platform/real.py:807-816">22</a></sup>. None carries the workspace's version id, generals-competition 0.6.3 (<code>cow_2660da8b…</code>)<sup class="ref"><a href="#src-7" title="Softmax platform GET /v2/leagues, read November 2, 2026">7</a></sup>. The three Generals leagues carry the canonical version's id. On November 3 that was 0.7.3, the seventh version since 0.6.3.</li>
+        <li><strong>Platform lease</strong><sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py">35</a></sup>. It gives back the current key while <code>expires_at</code> is more than the grace period away and the key is not disabled<sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py:100-104">35</a></sup>. When the balance is spent, it answers <code>budget_exhausted</code>, with <code>retry_at</code> set to the next refill<sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py:166-174">35</a></sup>. It mints keys whose limit is the balance and whose expiry is the next refill plus the grace period<sup class="ref"><a href="#src-35" title="metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py:176-188">35</a></sup>. The allowance is $10 each day, with a cap of $50<sup class="ref"><a href="#src-36" title="metta workspaces/observatory/platform/packages/core/src/observatory_core/hermes/budget.py:11-12">36</a></sup>.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="sources" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix C ·</span> Sources</h2></summary>
+      <p>One entry for each cited source, in first-citation order. Paths without a prefix are in ide-distributions.</p>
+      <ol class="sources">
+        <li id="src-1"><span class="cite">core/src/research_core/watcher/champion_sync.py:102-107</span></li>
+        <li id="src-2"><span class="cite">core/src/research_core/watcher/hermes_api.py:265-266,429</span></li>
+        <li id="src-3"><span class="cite">Asana JAME-174, JAME-175, JAME-176</span></li>
+        <li id="src-4"><span class="cite">Workspace <code>58bda2da</code> transcripts (ops <code>session.messages</code>), snapshot (ops <code>workspace.snapshot</code>) and run records (ops <code>run.get</code>), read November 2, 2026</span></li>
+        <li id="src-5"><span class="cite">OpenRouter activity report for the workspace key, November 2, 2026 (UTC)</span></li>
+        <li id="src-6"><span class="cite">docs/plans/ide-profile-refactor/08-amendments.md:150-151</span></li>
+        <li id="src-7"><span class="cite">Softmax platform <code>GET /v2/leagues</code>, read November 2, 2026</span></li>
+        <li id="src-8"><span class="cite">core/src/research_core/store/champion.py:64-66,100-118</span></li>
+        <li id="src-9"><span class="cite">core/src/research_core/watcher/handlers.py:114</span></li>
+        <li id="src-10"><span class="cite">core/src/research_core/watcher/wakes.py:12-25</span></li>
+        <li id="src-11"><span class="cite">Hermes v0.21.6 hermes_cli/config_defaults.py:1296-1300,2236</span></li>
+        <li id="src-12"><span class="cite">core/src/research_core/watcher/wakes/management.md:31</span></li>
+        <li id="src-13"><span class="cite">core/src/research_core/plugin/executor.py:65-66</span></li>
+        <li id="src-14"><span class="cite">Hermes v0.21.6 agent/tool_guardrails.py:70-129,218-242,314</span></li>
+        <li id="src-15"><span class="cite">orchestrator/config.yaml:72-86</span></li>
+        <li id="src-16"><span class="cite">core/src/research_core/prepare.py:60</span></li>
+        <li id="src-17"><span class="cite">core/src/research_core/inference.py:7-10</span></li>
+        <li id="src-18"><span class="cite">Hermes v0.21.6 agent/error_classifier.py:34-66</span></li>
+        <li id="src-19"><span class="cite">Hermes v0.21.6 agent/api_request_hooks.py:163-200</span></li>
+        <li id="src-20"><span class="cite">core/src/research_core/plugin/register.py:36-37</span></li>
+        <li id="src-21"><span class="cite">image/inference.py:71-89</span></li>
+        <li id="src-22"><span class="cite">core/src/research_core/platform/real.py:807-816</span></li>
+        <li id="src-23"><span class="cite">researcher/config.yaml:66-71</span></li>
+        <li id="src-24"><span class="cite">Hermes v0.21.6 agent/turn_tool_round.py:175-189</span></li>
+        <li id="src-25"><span class="cite">Hermes v0.21.6 agent/turn_finalizer.py:579-590</span></li>
+        <li id="src-26"><span class="cite">Hermes v0.21.6 gateway/platforms/api_server_runs.py:180-191</span></li>
+        <li id="src-27"><span class="cite">Hermes v0.21.6 hermes_cli/hooks.py:127-131</span></li>
+        <li id="src-28"><span class="cite">core/src/research_core/plugin/advisory.py:70-84</span></li>
+        <li id="src-29"><span class="cite">Hermes v0.21.6 model_tools.py:848-865</span></li>
+        <li id="src-30"><span class="cite">core/src/research_core/platform/fake.py:177</span></li>
+        <li id="src-31"><span class="cite">Hermes v0.21.6 agent/context_engine.py:121-141</span></li>
+        <li id="src-32"><span class="cite">Hermes v0.21.6 agent/context_compressor.py:2177</span></li>
+        <li id="src-33"><span class="cite">core/src/research_core/serve.py:384-398,433-455</span></li>
+        <li id="src-34"><span class="cite">image/application.py:57-59</span></li>
+        <li id="src-35"><span class="cite">metta workspaces/observatory/platform/api/src/observatory_api/clients/hermes/inference.py:100-104,166-188</span></li>
+        <li id="src-36"><span class="cite">metta workspaces/observatory/platform/packages/core/src/observatory_core/hermes/budget.py:11-12</span></li>
+        <li id="src-37"><span class="cite">core/src/research_core/tools/claim.py:41-51</span></li>
+      </ol>
+    </details>
+  </section>
+
+</article>
+
+<!-- ============ DOC-NAV: folds + in-page links (keep; outside DC-COMMENTS) ============
+     Opens any closed fold that contains a link target (TOC, citation, open-question
+     markers, back-links, URL hash), wires Expand/Collapse all, and opens every
+     fold for printing. -->
+<script>
+(() => {
+  'use strict';
+  const doc = document.getElementById('doc');
+  const folds = () => doc.querySelectorAll('details.fold');
+  function reveal(el) {
+    const own = el.querySelector(':scope > details.fold'); // a TOC link targets the <section> around a fold
+    if (own) own.open = true;
+    for (let n = el; n && n !== doc; n = n.parentElement) {
+      if (n.tagName === 'DETAILS') n.open = true;
+    }
+  }
+  function targetOf(hash) {
+    return hash && hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  }
+  // Runs before the browser's own jump, so the target is visible when it scrolls.
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) { const t = targetOf(a.getAttribute('href')); if (t) reveal(t); }
+  });
+  function revealHash() {
+    const t = targetOf(location.hash);
+    if (t) { reveal(t); t.scrollIntoView(); }
+  }
+  window.addEventListener('hashchange', revealHash);
+  revealHash();
+  doc.querySelectorAll('[data-fold]').forEach(b => b.addEventListener('click', () => {
+    const open = b.dataset.fold === 'open';
+    folds().forEach(d => { d.open = open; });
+  }));
+  window.addEventListener('beforeprint', () => folds().forEach(d => { d.open = true; }));
+  // Lets the comment sidebar reveal a comment that sits inside a closed fold.
+  window.dcReveal = reveal;
+})();
+</script>
+
+<!-- ================================================================
+     DC-COMMENTS BEGIN — markup + script (copy verbatim; do not modify)
+     ================================================================ -->
+<aside id="dc-sidebar" aria-label="Comments">
+  <h2 class="dc-title">Comments <span id="dc-count"></span></h2>
+  <div class="dc-actions">
+    <button class="dc-btn" id="dc-export">Export JSON</button>
+    <button class="dc-btn" id="dc-copy">Copy JSON</button>
+    <button class="dc-btn" id="dc-import">Import…</button>
+    <input type="file" id="dc-file" accept=".json,application/json" hidden>
+  </div>
+  <div id="dc-status" role="status"></div>
+  <div id="dc-list"><p class="dc-empty">No comments yet. Select text in the document to add one.</p></div>
+</aside>
+<button id="dc-fab" type="button">+ Comment</button>
+<button id="dc-toggle" type="button">Comments</button>
+<!-- Preload slot: a renderer may put a dc-comments/1 `comments` array here (each comment optionally carrying `replies`). Merged by id into the stored comments on load. Leave empty otherwise. -->
+<script id="dc-preload" type="application/json"></script>
+
+<script>
+(() => {
+  'use strict';
+  const FORMAT = 'dc-comments/1';
+  const CTX = 32; // prefix/suffix context length, chars
+  const doc = document.getElementById('doc');
+  const fab = document.getElementById('dc-fab');
+  const listEl = document.getElementById('dc-list');
+  const countEl = document.getElementById('dc-count');
+  const statusEl = document.getElementById('dc-status');
+  const sidebar = document.getElementById('dc-sidebar');
+  const storeKey = 'dc:' + location.pathname; // per file, so a new draft starts clean
+
+  let comments = []; // {id, exact, prefix, suffix, text, created, resolved}
+  let ranges = new Map(); // id -> Range (null if orphaned)
+  let seq = 0;
+
+  // ---- text indexing: one global string over #doc's text nodes ----
+  function docText() {
+    const r = document.createRange();
+    r.selectNodeContents(doc);
+    return r.toString();
+  }
+  function globalOffset(container, offset) {
+    const r = document.createRange();
+    r.setStart(doc, 0);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  }
+  function offsetsToRange(start, end) {
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    let pos = 0, range = document.createRange(), haveStart = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode, len = node.data.length;
+      if (!haveStart && pos + len >= start) {
+        range.setStart(node, start - pos);
+        haveStart = true;
+      }
+      if (haveStart && pos + len >= end) {
+        range.setEnd(node, end - pos);
+        return range;
+      }
+      pos += len;
+    }
+    return null;
+  }
+
+  // ---- anchoring: TextQuoteSelector-style exact + prefix/suffix ----
+  function selectorFromRange(range) {
+    const text = docText();
+    const start = globalOffset(range.startContainer, range.startOffset);
+    const end = globalOffset(range.endContainer, range.endOffset);
+    return {
+      exact: text.slice(start, end),
+      prefix: text.slice(Math.max(0, start - CTX), start),
+      suffix: text.slice(end, end + CTX),
+    };
+  }
+  function locate(c) {
+    const text = docText();
+    let i = text.indexOf(c.prefix + c.exact + c.suffix);
+    if (i >= 0) return offsetsToRange(i + c.prefix.length, i + c.prefix.length + c.exact.length);
+    i = text.indexOf(c.exact);
+    if (i >= 0) return offsetsToRange(i, i + c.exact.length);
+    return null;
+  }
+  function reanchorAll() {
+    ranges = new Map(comments.map(c => [c.id, locate(c)]));
+    paint();
+  }
+
+  // ---- painting via CSS Custom Highlight API ----
+  const hl = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  const hlActive = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  if (hl) { CSS.highlights.set('dc-hl', hl); CSS.highlights.set('dc-hl-active', hlActive); }
+  function paint(activeId) {
+    if (!hl) return;
+    hl.clear(); hlActive.clear();
+    for (const [id, r] of ranges) {
+      if (!r) continue;
+      (id === activeId ? hlActive : hl).add(r);
+    }
+  }
+
+  // ---- persistence (best-effort; file:// storage varies by browser) ----
+  function save() {
+    try { localStorage.setItem(storeKey, JSON.stringify(comments)); } catch (e) { /* unavailable on some file:// setups */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      if (raw) comments = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- sidebar rendering ----
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ''; }, 2500);
+  }
+  function sortedComments() {
+    const pos = c => {
+      const r = ranges.get(c.id);
+      return r ? globalOffset(r.startContainer, r.startOffset) : Infinity; // orphans last
+    };
+    return [...comments].sort((a, b) => pos(a) - pos(b));
+  }
+  function render(editingId) {
+    countEl.textContent = comments.length ? '(' + comments.length + ')' : '';
+    listEl.textContent = '';
+    if (!comments.length) {
+      const p = document.createElement('p');
+      p.className = 'dc-empty';
+      p.textContent = 'No comments yet. Select text in the document to add one.';
+      listEl.appendChild(p);
+      return;
+    }
+    for (const c of sortedComments()) {
+      const item = document.createElement('div');
+      item.className = 'dc-item' + (c.resolved ? ' dc-resolved' : '');
+      item.dataset.id = c.id;
+
+      const quote = document.createElement('div');
+      quote.className = 'dc-quote';
+      quote.textContent = c.exact.length > 90 ? c.exact.slice(0, 90) + '…' : c.exact;
+      if (!ranges.get(c.id)) {
+        const tag = document.createElement('span');
+        tag.className = 'dc-orphan-tag';
+        tag.textContent = 'orphaned';
+        quote.appendChild(tag);
+      }
+      item.appendChild(quote);
+
+      if (c.id === editingId) {
+        const ta = document.createElement('textarea');
+        ta.value = c.text;
+        ta.placeholder = 'Write a comment… (⌘/Ctrl+Enter to save, Esc to cancel)';
+        ta.addEventListener('keydown', e => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
+          if (e.key === 'Escape') cancel();
+        });
+        ta.addEventListener('click', e => e.stopPropagation());
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'dc-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.style.marginTop = '6px';
+        saveBtn.addEventListener('click', e => { e.stopPropagation(); commit(); });
+        function commit() {
+          c.text = ta.value.trim();
+          if (!c.text) return cancel();
+          save(); render();
+        }
+        function cancel() {
+          if (!c.text) { comments = comments.filter(x => x.id !== c.id); ranges.delete(c.id); paint(); }
+          save(); render();
+        }
+        item.appendChild(ta);
+        item.appendChild(saveBtn);
+        listEl.appendChild(item);
+        requestAnimationFrame(() => ta.focus());
+        continue;
+      }
+
+      const text = document.createElement('div');
+      text.className = 'dc-text';
+      text.textContent = c.text;
+      item.appendChild(text);
+
+      if (Array.isArray(c.replies) && c.replies.length) {
+        const box = document.createElement('div');
+        box.className = 'dc-replies';
+        for (const r of c.replies) {
+          const who = document.createElement('div');
+          who.className = 'dc-reply-author';
+          who.textContent = 'Reply from ' + (r.author || 'agent') + (r.created ? ' · ' + String(r.created).slice(0, 10) : '');
+          const body = document.createElement('div');
+          body.className = 'dc-reply-text';
+          for (const part of String(r.text || '').split(/(https?:\/\/[^\s)]+)/g)) {
+            if (/^https?:\/\//.test(part)) {
+              const a = document.createElement('a');
+              a.href = part; a.target = '_blank'; a.rel = 'noopener';
+              a.textContent = part;
+              a.addEventListener('click', e => e.stopPropagation());
+              body.appendChild(a);
+            } else body.appendChild(document.createTextNode(part));
+          }
+          box.append(who, body);
+        }
+        item.appendChild(box);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'dc-meta';
+      const when = document.createElement('span');
+      when.textContent = c.created.slice(0, 10);
+      const resolved = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!c.resolved;
+      cb.addEventListener('click', e => e.stopPropagation());
+      cb.addEventListener('change', () => { c.resolved = cb.checked; save(); render(); });
+      resolved.append(cb, 'resolved');
+      const del = document.createElement('button');
+      del.className = 'dc-del';
+      del.textContent = 'delete';
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        comments = comments.filter(x => x.id !== c.id);
+        ranges.delete(c.id);
+        paint(); save(); render();
+      });
+      meta.append(when, resolved, del);
+      item.appendChild(meta);
+
+      item.addEventListener('click', () => {
+        const r = ranges.get(c.id);
+        if (!r) return flash('Anchor not found in this version of the document.');
+        if (window.dcReveal) window.dcReveal(r.startContainer.parentElement); // open a closed fold first
+        const rect = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + rect.top - 160, behavior: 'smooth' });
+        paint(c.id);
+        setTimeout(() => paint(), 2000);
+      });
+      // double-click text to edit
+      text.addEventListener('dblclick', e => { e.stopPropagation(); render(c.id); });
+      listEl.appendChild(item);
+    }
+  }
+
+  // ---- selection -> floating Comment button ----
+  document.addEventListener('mouseup', e => {
+    if (fab.contains(e.target)) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { fab.style.display = 'none'; return; }
+      const range = sel.getRangeAt(0);
+      if (!doc.contains(range.commonAncestorContainer) || !range.toString().trim()) {
+        fab.style.display = 'none';
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      fab.style.display = 'block';
+      fab.style.left = Math.min(rect.right + 8 + window.scrollX, window.scrollX + document.documentElement.clientWidth - 120) + 'px';
+      fab.style.top = (rect.top + window.scrollY - 4) + 'px';
+      fab.dataset.pending = '1';
+    }, 0);
+  });
+  fab.addEventListener('click', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const c = Object.assign({ id: 'c' + Date.now().toString(36) + (seq++), text: '', created: new Date().toISOString(), resolved: false }, selectorFromRange(range));
+    comments.push(c);
+    ranges.set(c.id, range.cloneRange());
+    paint(c.id);
+    sel.removeAllRanges();
+    fab.style.display = 'none';
+    sidebar.classList.add('dc-open');
+    render(c.id);
+  });
+
+  // ---- export / import ----
+  function payload() {
+    return JSON.stringify({
+      format: FORMAT,
+      doc: document.title,
+      exported: new Date().toISOString(),
+      comments: comments,
+    }, null, 2);
+  }
+  document.getElementById('dc-export').addEventListener('click', () => {
+    const blob = new Blob([payload()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (document.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'doc') + '.comments.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash('Downloaded.');
+  });
+  document.getElementById('dc-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(payload()); flash('Copied to clipboard.'); }
+    catch (e) { flash('Clipboard blocked — use Export instead.'); }
+  });
+  document.getElementById('dc-import').addEventListener('click', () => document.getElementById('dc-file').click());
+  document.getElementById('dc-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(raw => {
+      const data = JSON.parse(raw);
+      if (data.format !== FORMAT || !Array.isArray(data.comments)) { flash('Not a dc-comments file.'); return; }
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of data.comments) byId.set(c.id, c);
+      comments = [...byId.values()];
+      reanchorAll(); save(); render();
+      flash('Imported ' + data.comments.length + ' comment(s).');
+    }).catch(() => flash('Could not parse that file.'));
+    e.target.value = '';
+  });
+
+  document.getElementById('dc-toggle').addEventListener('click', () => sidebar.classList.toggle('dc-open'));
+
+  // ---- init ----
+  load();
+  // Merge the renderer's preloaded comments (with replies) by id: a stored
+  // comment keeps its own text/resolved state and takes the preloaded replies.
+  try {
+    const pre = document.getElementById('dc-preload');
+    const preloaded = pre && pre.textContent.trim() ? JSON.parse(pre.textContent) : [];
+    if (Array.isArray(preloaded) && preloaded.length) {
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of preloaded) {
+        const existing = byId.get(c.id);
+        if (existing) { if (c.replies) existing.replies = c.replies; }
+        else byId.set(c.id, c);
+      }
+      comments = [...byId.values()];
+      save();
+    }
+  } catch (e) { /* malformed preload: ignore */ }
+  reanchorAll();
+  render();
+})();
+</script>
+<!-- ============ DC-COMMENTS END ============ -->
+</div>
+</body>
+</html>
